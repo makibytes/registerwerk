@@ -1,0 +1,27 @@
+# Kong OIDC plugin configuration fragment for self-managed Keycloak IdP
+# Use when running Keycloak instead of Entra ID
+
+plugins:
+  - name: openid-connect
+    route: api-protected
+    config:
+      issuer: "http://keycloak:8080/realms/registerwerk"
+      client_id: "${KEYCLOAK_CLIENT_ID}"
+      client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+      auth_methods:
+        - bearer
+        - session
+      scopes:
+        - openid
+        - profile
+        - email
+        - roles
+      upstream_headers_claims:
+        - entity_id
+        - roles
+      upstream_headers_names:
+        - X-Entity-Id
+        - X-Entity-Roles
+      consumer_claim: sub
+      consumer_by:
+        - username

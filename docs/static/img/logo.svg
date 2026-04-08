@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" width="120" height="40" role="img" aria-label="eWpG Registry">
+  <!-- Chain links representing blockchain registry -->
+  <g fill="none" stroke="#1a3a5c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left link -->
+    <rect x="4" y="12" width="20" height="16" rx="8" stroke="#1a3a5c" fill="none"/>
+    <!-- Right link (overlapping) -->
+    <rect x="18" y="12" width="20" height="16" rx="8" stroke="#4fc3f7" fill="none"/>
+  </g>
+  <!-- Registry wordmark -->
+  <text x="46" y="25" font-family="'Inter', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a3a5c" letter-spacing="-0.3">eWpG</text>
+  <text x="46" y="35" font-family="'Inter', system-ui, sans-serif" font-size="8" font-weight="400" fill="#4fc3f7" letter-spacing="1.5">REGISTRY</text>
+</svg>

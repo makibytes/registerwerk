@@ -1,0 +1,12 @@
+plugins:
+  - name: rate-limiting
+    service: registerwerk-backend
+    config:
+      minute: 300
+      hour: 10000
+      day: 100000
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+      error_code: 429
+      error_message: "API rate limit exceeded"

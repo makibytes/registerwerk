@@ -1,0 +1,20 @@
+{
+  "name": "registerwerk-subgraph",
+  "version": "0.1.0",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build":   "graph build",
+    "deploy:mainnet":      "graph deploy --node http://localhost:8020 makibytes/ethereum-mainnet  --network mainnet",
+    "deploy:sepolia":      "graph deploy --node http://localhost:8020 makibytes/ethereum-sepolia   --network sepolia",
+    "deploy:polygon":      "graph deploy --node http://localhost:8020 makibytes/polygon-mainnet    --network polygon",
+    "deploy:polygon-amoy": "graph deploy --node http://localhost:8020 makibytes/polygon-amoy       --network polygon-amoy",
+    "deploy:base":         "graph deploy --node http://localhost:8020 makibytes/base-mainnet       --network base",
+    "deploy:base-sepolia": "graph deploy --node http://localhost:8020 makibytes/base-sepolia       --network base-sepolia"
+  },
+  "dependencies": {
+    "@graphprotocol/graph-ts": "^0.35.1"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.81.0"
+  }
+}

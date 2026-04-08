@@ -1,0 +1,111 @@
+specVersion: 1.0.0
+description: Registerwerk — indexes all token deployments and transfers across EVM chains
+repository: https://github.com/makibytes/registerwerk
+
+schema:
+  file: ./schema.graphql
+
+# ── Data Sources (static) ────────────────────────────────────────────────────
+# The AssetTokenFactory is the only static data source.
+# Every TokenDeployed event spawns a new dynamic data source via templates below.
+dataSources:
+  - kind: ethereum
+    name: AssetTokenFactory
+    # Override `network` per deployment:  graph deploy --network mainnet / sepolia / polygon / …
+    network: mainnet
+    source:
+      # Set at deploy-time via graph-cli --deploy-key or environment substitution in the deploy script
+      address: "0x0000000000000000000000000000000000000000"
+      abi: AssetTokenFactory
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/factory.ts
+      entities:
+        - Token
+      abis:
+        - name: AssetTokenFactory
+          file: ./abis/AssetTokenFactory.json
+      eventHandlers:
+        - event: TokenDeployed(indexed bytes32,indexed uint8,indexed address)
+          handler: handleTokenDeployed
+
+# ── Templates (dynamic) ──────────────────────────────────────────────────────
+# These are instantiated by handleTokenDeployed for each newly deployed contract.
+# No manual intervention required — every token is auto-indexed.
+templates:
+  - kind: ethereum
+    name: EwpgERC20
+    network: mainnet
+    source:
+      abi: EwpgERC20
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/erc20.ts
+      entities:
+        - Transfer
+        - WhitelistChange
+      abis:
+        - name: EwpgERC20
+          file: ./abis/EwpgERC20.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransfer
+        - event: Whitelisted(indexed address)
+          handler: handleWhitelisted
+        - event: RemovedFromWhitelist(indexed address)
+          handler: handleRemovedFromWhitelist
+
+  - kind: ethereum
+    name: EwpgERC721
+    network: mainnet
+    source:
+      abi: EwpgERC721
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/erc721.ts
+      entities:
+        - Transfer
+        - WhitelistChange
+      abis:
+        - name: EwpgERC721
+          file: ./abis/EwpgERC721.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,indexed uint256)
+          handler: handleTransfer
+        - event: Whitelisted(indexed address)
+          handler: handleWhitelisted
+        - event: RemovedFromWhitelist(indexed address)
+          handler: handleRemovedFromWhitelist
+
+  - kind: ethereum
+    name: EwpgERC1155
+    network: mainnet
+    source:
+      abi: EwpgERC1155
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/erc1155.ts
+      entities:
+        - Transfer
+        - WhitelistChange
+      abis:
+        - name: EwpgERC1155
+          file: ./abis/EwpgERC1155.json
+      eventHandlers:
+        - event: TransferSingle(indexed address,indexed address,indexed address,uint256,uint256)
+          handler: handleTransferSingle
+        - event: TransferBatch(indexed address,indexed address,indexed address,uint256[],uint256[])
+          handler: handleTransferBatch
+        - event: Whitelisted(indexed address)
+          handler: handleWhitelisted
+        - event: RemovedFromWhitelist(indexed address)
+          handler: handleRemovedFromWhitelist

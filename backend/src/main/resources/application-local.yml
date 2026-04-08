@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/registerwerk
+    username: registerwerk
+    password: changeme
+
+  jpa:
+    show-sql: true
+
+  mail:
+    host: localhost
+    port: 1025
+
+logging:
+  level:
+    com.registerwerk: DEBUG
+    org.web3j: DEBUG

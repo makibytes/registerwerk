@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KYC Approved — Registerwerk</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .header { background: #15803d; color: #ffffff; padding: 32px 40px; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .badge { display: inline-block; background: #dcfce7; color: #15803d; font-weight: bold; padding: 6px 16px; border-radius: 20px; font-size: 14px; margin-bottom: 16px; }
+        .body { padding: 32px 40px; color: #333333; line-height: 1.6; }
+        .body p { margin: 0 0 16px 0; }
+        .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+        .detail-label { color: #666; font-size: 13px; }
+        .detail-value { font-weight: bold; font-size: 13px; }
+        .footer { background: #f4f6f8; padding: 20px 40px; color: #888; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>KYC Verification Approved</h1>
+    </div>
+    <div class="body">
+        <span class="badge">&#10003; APPROVED</span>
+        <p>Dear <strong th:text="${entityName}">Entity Name</strong>,</p>
+        <p>
+            We are pleased to inform you that your KYC (Know Your Customer) verification
+            has been successfully approved by the Registerwerk compliance team.
+        </p>
+        <p>Your organisation is now fully verified and authorised to issue and manage electronic
+           securities on the registry.</p>
+
+        <div style="background:#f9fafb; border-radius:6px; padding:16px; margin:24px 0;">
+            <div class="detail-row">
+                <span class="detail-label">Entity</span>
+                <span class="detail-value" th:text="${entityName}">Entity Name</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">KYC Status</span>
+                <span class="detail-value" style="color:#15803d;">Approved</span>
+            </div>
+            <div class="detail-row" th:if="${expiryDate}">
+                <span class="detail-label">Valid Until</span>
+                <span class="detail-value" th:text="${expiryDate}">2027-04-06</span>
+            </div>
+        </div>
+
+        <p>You will be notified before your KYC approval expires to allow timely renewal.</p>
+        <p>Kind regards,<br/>The Registerwerk Compliance Team</p>
+    </div>
+    <div class="footer">
+        This notification was sent because your KYC documents were reviewed and approved.
+        Please retain this email for your records.
+    </div>
+</div>
+</body>
+</html>

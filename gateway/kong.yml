@@ -1,0 +1,129 @@
+_format_version: "3.0"
+_transform: true
+
+# ─── Services ──────────────────────────────────────────────────────────────────
+services:
+  - name: registerwerk-backend
+    url: http://backend:8080
+    connect_timeout: 10000
+    read_timeout: 60000
+    write_timeout: 60000
+    retries: 3
+
+    routes:
+      # Public endpoints — no auth required
+      - name: api-public
+        paths:
+          - /api/v1/public
+          - /api/v1/onboarding/token-info
+        strip_path: false
+        methods: [GET, POST]
+
+      # OpenAPI docs — no auth
+      - name: api-docs
+        paths:
+          - /swagger-ui.html
+          - /api-docs
+          - /actuator/health
+        strip_path: false
+
+      # Protected API — all other endpoints
+      - name: api-protected
+        paths:
+          - /api/v1
+        strip_path: false
+        methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+
+# ─── Plugins ───────────────────────────────────────────────────────────────────
+plugins:
+  # OIDC — Microsoft Entra ID (primary IdP)
+  - name: openid-connect
+    service: registerwerk-backend
+    route: api-protected
+    config:
+      issuer: ${ENTRA_ISSUER}
+      client_id: ${ENTRA_CLIENT_ID}
+      client_secret: ${ENTRA_CLIENT_SECRET}
+      auth_methods:
+        - bearer
+        - session
+      # Forward entity_id and roles claims to upstream as headers
+      upstream_headers_claims:
+        - entity_id
+        - roles
+      upstream_headers_names:
+        - X-Entity-Id
+        - X-Entity-Roles
+      # Map authenticated user sub to a Kong consumer
+      consumer_claim: sub
+      consumer_by:
+        - username
+
+  # Response caching for GET requests
+  - name: proxy-cache
+    service: registerwerk-backend
+    config:
+      response_code:
+        - 200
+        - 301
+      request_method:
+        - GET
+        - HEAD
+      content_type:
+        - application/json
+        - application/json; charset=utf-8
+      cache_ttl: 30
+      strategy: memory
+      cache_control: false
+
+  # Rate limiting per consumer
+  - name: rate-limiting
+    service: registerwerk-backend
+    config:
+      minute: 300
+      hour: 10000
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # CORS
+  - name: cors
+    service: registerwerk-backend
+    config:
+      origins:
+        - ${OPERATOR_FRONTEND_URL}
+        - ${CUSTOMER_FRONTEND_URL}
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - X-Requested-With
+      exposed_headers:
+        - X-Total-Count
+      credentials: true
+      max_age: 3600
+
+  # Request size limiting (max 20 MB for document uploads)
+  - name: request-size-limiting
+    service: registerwerk-backend
+    config:
+      allowed_payload_size: 20
+      size_unit: megabytes
+
+  # Security headers
+  - name: response-transformer
+    service: registerwerk-backend
+    config:
+      add:
+        headers:
+          - "X-Content-Type-Options:nosniff"
+          - "X-Frame-Options:DENY"
+          - "X-XSS-Protection:1; mode=block"
+          - "Strict-Transport-Security:max-age=31536000; includeSubDomains"

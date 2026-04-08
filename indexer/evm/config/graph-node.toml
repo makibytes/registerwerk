@@ -1,0 +1,76 @@
+# graph-node configuration file
+# Environment variable substitution is NOT supported here — use the docker-compose
+# environment section for secrets.  This file contains structural config.
+
+[store]
+[store.primary]
+connection = "postgresql://graph-node:${GRAPH_DB_PASSWORD}@graph-db:5432/graph-node"
+weight = 1
+pool_size = 10
+
+[chains]
+ingestor = "registerwerk-graph-node-1"
+
+# ── To add a new EVM chain, add a block here and set the RPC in docker-compose ──
+
+[chains.mainnet]
+shard = "primary"
+protocol = "ethereum"
+polling_interval = 1000
+[[chains.mainnet.provider]]
+label = "mainnet-primary"
+url = "${ETH_MAINNET_RPC}"
+features = ["archive", "traces"]
+
+[chains.sepolia]
+shard = "primary"
+protocol = "ethereum"
+[[chains.sepolia.provider]]
+label = "sepolia-primary"
+url = "${ETH_SEPOLIA_RPC}"
+features = ["archive"]
+
+[chains.polygon]
+shard = "primary"
+protocol = "ethereum"
+[[chains.polygon.provider]]
+label = "polygon-primary"
+url = "${POLYGON_MAINNET_RPC}"
+features = ["archive"]
+
+[chains.polygon-amoy]
+shard = "primary"
+protocol = "ethereum"
+[[chains.polygon-amoy.provider]]
+label = "polygon-amoy-primary"
+url = "${POLYGON_AMOY_RPC}"
+features = ["archive"]
+
+[chains.base]
+shard = "primary"
+protocol = "ethereum"
+[[chains.base.provider]]
+label = "base-primary"
+url = "${BASE_MAINNET_RPC}"
+features = ["archive"]
+
+[chains.base-sepolia]
+shard = "primary"
+protocol = "ethereum"
+[[chains.base-sepolia.provider]]
+label = "base-sepolia-primary"
+url = "${BASE_SEPOLIA_RPC}"
+features = ["archive"]
+
+# Example: add Arbitrum One (just copy this block and set ARBITRUM_RPC in docker-compose)
+# [chains.arbitrum-one]
+# shard = "primary"
+# protocol = "ethereum"
+# [[chains.arbitrum-one.provider]]
+# label = "arbitrum-primary"
+# url = "${ARBITRUM_RPC}"
+# features = ["archive"]
+
+[deployment]
+[[deployment.rule]]
+indexers = ["registerwerk-graph-node-1"]

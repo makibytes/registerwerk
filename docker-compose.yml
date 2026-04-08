@@ -1,0 +1,154 @@
+version: "3.9"
+
+services:
+  # ─── Application Database ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: registerwerk
+      POSTGRES_USER: registerwerk
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registerwerk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── Backend ───────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/registerwerk
+      DB_USER: registerwerk
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI}
+      ETH_MAINNET_RPC: ${ETH_MAINNET_RPC}
+      ETH_SEPOLIA_RPC: ${ETH_SEPOLIA_RPC}
+      POLYGON_MAINNET_RPC: ${POLYGON_MAINNET_RPC}
+      POLYGON_AMOY_RPC: ${POLYGON_AMOY_RPC}
+      BASE_MAINNET_RPC: ${BASE_MAINNET_RPC}
+      BASE_SEPOLIA_RPC: ${BASE_SEPOLIA_RPC}
+      SOLANA_MAINNET_RPC: ${SOLANA_MAINNET_RPC}
+      SOLANA_DEVNET_RPC: ${SOLANA_DEVNET_RPC}
+      REGISTRY_WALLET_PRIVATE_KEY: ${REGISTRY_WALLET_PRIVATE_KEY}
+      S3_BUCKET: ${S3_BUCKET:-registerwerk-documents}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: ${S3_REGION:-eu-central-1}
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      CUSTOMER_FRONTEND_URL: ${CUSTOMER_FRONTEND_URL:-http://localhost:4201}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  # ─── Operator Frontend ────────────────────────────────────────────────────
+  frontend-operator:
+    build:
+      context: ./frontend-operator
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "4200:80"
+
+  # ─── Customer Frontend ─────────────────────────────────────────────────────
+  frontend-customer:
+    build:
+      context: ./frontend-customer
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "4201:80"
+
+  # ─── Kong Database ─────────────────────────────────────────────────────────
+  kong-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kong
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: ${KONG_DB_PASSWORD:-changeme}
+    volumes:
+      - kongdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kong"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kong-migrations:
+    image: kong:3.8
+    command: kong migrations bootstrap
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: ${KONG_DB_PASSWORD:-changeme}
+      KONG_PG_DATABASE: kong
+    depends_on:
+      kong-db:
+        condition: service_healthy
+    restart: on-failure
+
+  kong:
+    image: kong:3.8
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: ${KONG_DB_PASSWORD:-changeme}
+      KONG_PG_DATABASE: kong
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001, 0.0.0.0:8444 ssl"
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+    depends_on:
+      kong-db:
+        condition: service_healthy
+      kong-migrations:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  konga:
+    image: pantsel/konga:latest
+    environment:
+      NODE_ENV: production
+      DB_ADAPTER: postgres
+      DB_HOST: kong-db
+      DB_PORT: 5432
+      DB_DATABASE: konga
+      DB_USER: kong
+      DB_PASSWORD: ${KONG_DB_PASSWORD:-changeme}
+    depends_on:
+      kong:
+        condition: service_healthy
+    ports:
+      - "1337:1337"
+
+volumes:
+  pgdata:
+  kongdata:

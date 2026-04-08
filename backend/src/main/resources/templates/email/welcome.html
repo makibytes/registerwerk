@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to the Registerwerk</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .header { background: #1a3a5c; color: #ffffff; padding: 32px 40px; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .body { padding: 32px 40px; color: #333333; line-height: 1.6; }
+        .body p { margin: 0 0 16px 0; }
+        .cta-button { display: inline-block; background: #2563eb; color: #ffffff; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; margin: 8px 8px 8px 0; }
+        .footer { background: #f4f6f8; padding: 20px 40px; color: #888; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Welcome to the Registerwerk</h1>
+    </div>
+    <div class="body">
+        <p>Dear <strong th:text="${entityName}">Entity Name</strong>,</p>
+        <p>
+            Your organisation has been successfully onboarded to the <strong>Registerwerk</strong>.
+            You can now log in to the registry portal and access the full suite of features for issuing and managing
+            electronic securities under German law (eWpG).
+        </p>
+        <p>
+            <a th:href="${frontendUrl}" class="cta-button">Open Registry Portal</a>
+            <a th:href="${apiDocsUrl}" class="cta-button" style="background:#4b5563;">API Documentation</a>
+        </p>
+        <p>If you have any questions, please contact your registry administrator.</p>
+        <p>Kind regards,<br/>The Registerwerk Team</p>
+    </div>
+    <div class="footer">
+        This email was sent to you because your organisation was registered in the Registerwerk.
+        If you believe this was in error, please contact support.
+    </div>
+</div>
+</body>
+</html>

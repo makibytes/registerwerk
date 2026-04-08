@@ -1,0 +1,28 @@
+# Yellowstone gRPC proxy configuration
+# Reference: https://github.com/rpcpool/yellowstone-grpc/blob/master/yellowstone-grpc-geyser/config.json
+
+[grpc]
+address = "0.0.0.0:10000"
+# Optional mTLS — omit for internal Docker network use
+# tls_cert = "/certs/server.crt"
+# tls_key  = "/certs/server.key"
+
+[grpc.channel_capacity]
+# Channel buffer before backpressure kicks in
+default = 250000
+slots    = 250000
+accounts = 250000
+transactions = 250000
+blocks   = 250000
+blocks_meta = 250000
+entry    = 250000
+
+# Filter: only stream SPL Token program transactions
+# The backend dynamically adds mint addresses it cares about
+[grpc.filters.accounts]
+# Allow the backend to subscribe to specific accounts (SPL mint addresses)
+
+[grpc.filters.transactions]
+# SPL Token program v1 + v2
+vote = false
+failed = false

@@ -1,0 +1,31 @@
+# Kong OIDC plugin configuration fragment for Microsoft Entra ID
+# Apply to the protected route via deck: deck sync
+
+plugins:
+  - name: openid-connect
+    route: api-protected
+    config:
+      issuer: "https://login.microsoftonline.com/${AZURE_TENANT_ID}/v2.0"
+      client_id: "${ENTRA_CLIENT_ID}"
+      client_secret: "${ENTRA_CLIENT_SECRET}"
+      auth_methods:
+        - bearer
+        - session
+      scopes:
+        - openid
+        - profile
+        - email
+      # Claims to extract and forward to the backend
+      upstream_headers_claims:
+        - entity_id     # custom claim injected by Entra app registration
+        - roles
+      upstream_headers_names:
+        - X-Entity-Id
+        - X-Entity-Roles
+      consumer_claim: sub
+      consumer_by:
+        - username
+      # Session settings
+      session_cookie_name: registerwerk_session
+      session_cookie_secure: true
+      session_cookie_same_site: Lax

@@ -1,0 +1,33 @@
+version: "3.9"
+
+# Yellowstone Dragon's Mouth — gRPC Geyser proxy for Solana.
+# Connects to a Yellowstone-enabled Solana RPC (Triton, Helius, or self-hosted validator)
+# and streams account updates + transactions in real time.
+#
+# The backend subscribes to this service via gRPC and processes SPL token transfers.
+# For resilience, the backend also runs a polling job that uses `getSignaturesForAddress`
+# to backfill any gaps when the gRPC stream was disconnected.
+
+services:
+
+  # ── Yellowstone gRPC proxy ─────────────────────────────────────────────────
+  # Source: https://github.com/rpcpool/yellowstone-grpc
+  yellowstone-grpc:
+    image: ghcr.io/rpcpool/yellowstone-grpc:v2.2.0+solana.1.18.26
+    environment:
+      # Point to a Yellowstone-enabled Solana validator / RPC
+      GRPC_ENDPOINT: ${YELLOWSTONE_UPSTREAM_ENDPOINT:-https://mainnet.helius-rpc.com/?api-key=changeme}
+      GRPC_X_TOKEN: ${YELLOWSTONE_X_TOKEN:-}
+    ports:
+      - "10000:10000"    # gRPC endpoint (backend connects here)
+    volumes:
+      - ./config/yellowstone.toml:/app/config.toml:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "grpc_health_probe -addr=:10000 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  {}

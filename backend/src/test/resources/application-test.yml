@@ -1,0 +1,44 @@
+spring:
+  datasource:
+    # overridden at runtime by @DynamicPropertySource in integration tests
+    url: jdbc:postgresql://localhost:5432/registerwerk_test
+    username: registerwerk
+    password: changeme
+
+  flyway:
+    enabled: true
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9000
+
+  mail:
+    host: localhost
+    port: 3025
+
+registerwerk:
+  chains:
+    ethereum:
+      testnet:
+        # overridden at runtime by @DynamicPropertySource to point at anvil
+        rpc-url: http://localhost:8545
+        chain-id: 31337
+  wallet:
+    private-key: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+  documents:
+    max-inline-bytes: 5242880
+    s3:
+      bucket: test-bucket
+      endpoint: http://localhost:4566
+      access-key: test
+      secret-key: test
+      region: us-east-1
+  onboarding:
+    token-ttl-hours: 1
+    frontend-url: http://localhost:4201
+
+logging:
+  level:
+    com.registerwerk: DEBUG

@@ -1,0 +1,100 @@
+version: "3.9"
+
+# The Graph — self-hosted graph-node for all EVM chains.
+# One graph-node instance can serve multiple networks simultaneously.
+# Add a new chain: set ETHEREUM_RPC / POLYGON_RPC / etc. and re-deploy the subgraph.
+
+services:
+
+  # ── IPFS — stores subgraph deployments ────────────────────────────────────
+  ipfs:
+    image: ipfs/kubo:v0.28.0
+    ports:
+      - "5001:5001"
+    volumes:
+      - ipfsdata:/data/ipfs
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL for graph-node ──────────────────────────────────────────────
+  graph-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: graph-node
+      POSTGRES_USER: graph-node
+      POSTGRES_PASSWORD: ${GRAPH_DB_PASSWORD:-changeme}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - graphdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graph-node"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command:
+      - "postgres"
+      - "-cshared_preload_libraries=pg_stat_statements"
+      - "-cmax_connections=200"
+
+  # ── graph-node ─────────────────────────────────────────────────────────────
+  graph-node:
+    image: graphprotocol/graph-node:v0.35.1
+    depends_on:
+      graph-db:
+        condition: service_healthy
+      ipfs:
+        condition: service_healthy
+    environment:
+      postgres_host: graph-db
+      postgres_user: graph-node
+      postgres_pass: ${GRAPH_DB_PASSWORD:-changeme}
+      postgres_db: graph-node
+      ipfs: "ipfs:5001"
+      GRAPH_LOG: info
+      GRAPH_NODE_ID: registerwerk-graph-node-1
+
+      # ── Chain RPC endpoints — add new chains here ──────────────────────────
+      # Format: ethereum = "<network-name>:<rpc-url>"
+      # Multiple chains are separated by comma
+      # The network-name must match the `network` field in subgraph.yaml
+      ethereum: >-
+        mainnet:${ETH_MAINNET_RPC},
+        sepolia:${ETH_SEPOLIA_RPC},
+        polygon:${POLYGON_MAINNET_RPC},
+        polygon-amoy:${POLYGON_AMOY_RPC},
+        base:${BASE_MAINNET_RPC},
+        base-sepolia:${BASE_SEPOLIA_RPC}
+
+      # Uncomment to add Arbitrum or any other EVM chain:
+      # ,arbitrum-one:${ARBITRUM_RPC}
+      # ,optimism:${OPTIMISM_RPC}
+      # ,avalanche:${AVAX_RPC}
+
+      # Performance tuning
+      GRAPH_ETHEREUM_MAX_BLOCK_RANGE_SIZE: "1000"
+      GRAPH_ETHEREUM_TARGET_TRIGGERS_PER_BLOCK_RANGE: "100"
+      GRAPH_STORE_CONNECTION_POOL_SIZE: "10"
+      GRAPH_ALLOW_NON_DETERMINISTIC_FULLTEXT_SEARCH: "false"
+
+      # Resilience: retry on RPC failures
+      ETHEREUM_POLLING_INTERVAL: "1000"
+      GRAPH_ETHEREUM_JSON_RPC_TIMEOUT: "60s"
+      GRAPH_ETHEREUM_REQUEST_RETRIES: "10"
+
+      # Admin API (used by backend to trigger subgraph redeployments)
+      GRAPH_GRAPHQL_MAX_COMPLEXITY: "1000"
+    ports:
+      - "8020:8020"   # admin / management JSON-RPC
+      - "8000:8000"   # GraphQL HTTP (queries)
+      - "8001:8001"   # GraphQL WebSocket (subscriptions)
+      - "8030:8030"   # index-node status
+      - "8040:8040"   # metrics
+    volumes:
+      - ./config/graph-node.toml:/etc/graph-node/config.toml:ro
+
+volumes:
+  ipfsdata:
+  graphdata:

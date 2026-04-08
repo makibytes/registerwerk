@@ -1,0 +1,74 @@
+import { Injectable, inject } from '@angular/core';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../../environments/environment';
+import {
+  Asset,
+  AssetDeployment,
+  AssetHolder,
+  PageResponse,
+  AssetFilterParams,
+} from '../models';
+
+@Injectable({ providedIn: 'root' })
+export class AssetService {
+  private readonly http = inject(HttpClient);
+  private readonly base = `${environment.apiUrl}/assets`;
+
+  getAssets(params: AssetFilterParams = {}): Observable<PageResponse<Asset>> {
+    let httpParams = new HttpParams();
+    if (params.status) httpParams = httpParams.set('status', params.status);
+    if (params.tokenStandard) httpParams = httpParams.set('tokenStandard', params.tokenStandard);
+    if (params.issuerId) httpParams = httpParams.set('issuerId', params.issuerId);
+    if (params.search) httpParams = httpParams.set('search', params.search);
+    if (params.page != null) httpParams = httpParams.set('page', params.page.toString());
+    if (params.size != null) httpParams = httpParams.set('size', params.size.toString());
+    if (params.sort) httpParams = httpParams.set('sort', params.sort);
+
+    return this.http.get<PageResponse<Asset>>(this.base, { params: httpParams });
+  }
+
+  getAsset(id: string): Observable<Asset> {
+    return this.http.get<Asset>(`${this.base}/${id}`);
+  }
+
+  createAsset(body: Partial<Asset>): Observable<Asset> {
+    return this.http.post<Asset>(this.base, body);
+  }
+
+  updateAsset(id: string, body: Partial<Asset>): Observable<Asset> {
+    return this.http.put<Asset>(`${this.base}/${id}`, body);
+  }
+
+  approveAsset(id: string): Observable<Asset> {
+    return this.http.post<Asset>(`${this.base}/${id}/approve`, {});
+  }
+
+  issueAsset(id: string): Observable<Asset> {
+    return this.http.post<Asset>(`${this.base}/${id}/issue`, {});
+  }
+
+  suspendAsset(id: string): Observable<Asset> {
+    return this.http.post<Asset>(`${this.base}/${id}/suspend`, {});
+  }
+
+  redeemAsset(id: string): Observable<Asset> {
+    return this.http.post<Asset>(`${this.base}/${id}/redeem`, {});
+  }
+
+  getDeployments(assetId: string): Observable<AssetDeployment[]> {
+    return this.http.get<AssetDeployment[]>(`${this.base}/${assetId}/deployments`);
+  }
+
+  getHolders(assetId: string): Observable<AssetHolder[]> {
+    return this.http.get<AssetHolder[]>(`${this.base}/${assetId}/holders`);
+  }
+
+  mint(assetId: string, body: { toAddress: string; amount: number }): Observable<unknown> {
+    return this.http.post(`${this.base}/${assetId}/mint`, body);
+  }
+
+  burn(assetId: string, body: { fromAddress: string; amount: number }): Observable<unknown> {
+    return this.http.post(`${this.base}/${assetId}/burn`, body);
+  }
+}

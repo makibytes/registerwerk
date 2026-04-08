@@ -1,0 +1,61 @@
+"""
+Represents a deployed eWpG asset token contract.
+Created automatically when AssetTokenFactory emits TokenDeployed.
+"""
+type Token @entity(immutable: false) {
+  id: ID!                        # contract address (lowercase)
+  assetId: Bytes!                # bytes32 asset ID from the registry DB
+  tokenType: Int!                # 0=ERC20, 1=ERC721, 2=ERC1155
+  deployedAtBlock: BigInt!
+  deployedAtTimestamp: BigInt!
+  deployedByTx: Bytes!
+  totalTransfers: BigInt!
+  totalMints: BigInt!
+  totalBurns: BigInt!
+  transfers: [Transfer!]! @derivedFrom(field: "token")
+  whitelistChanges: [WhitelistChange!]! @derivedFrom(field: "token")
+}
+
+"""
+A single Transfer / Mint / Burn event. Mint: from == address(0). Burn: to == address(0).
+"""
+type Transfer @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  tokenType: Int!                # duplicated for efficient filtering without joins
+  from: Bytes!
+  to: Bytes!
+  tokenId: BigInt               # ERC-721 / ERC-1155 token id (null for ERC-20)
+  amount: BigInt                # ERC-20 / ERC-1155 amount (null for pure ERC-721)
+  eventType: String!             # 'MINT' | 'TRANSFER' | 'BURN'
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"""
+Whitelist add / remove events.
+"""
+type WhitelistChange @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  account: Bytes!
+  added: Boolean!                # true = whitelisted, false = removed
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+"""
+Aggregate holder position per token. Updated on every Transfer.
+Deleted when balance reaches zero.
+"""
+type HolderBalance @entity(immutable: false) {
+  id: ID!                        # {tokenAddress}-{holderAddress}
+  token: Token!
+  holder: Bytes!
+  balance: BigInt!               # current balance (ERC-20 / ERC-1155 amount, or 1 for ERC-721)
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
