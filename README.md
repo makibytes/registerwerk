@@ -105,9 +105,9 @@ registerwerk/
 │       └── web/              REST controllers, DTOs, MapStruct mappers
 ├── contracts/                Foundry smart contracts
 │   └── src/
-│       ├── tokens/           EwpgERC20, ERC721, ERC1155 (+ ERC3643 stub)
+│       ├── tokens/           EwpgERC20, ERC721, ERC1155, ERC3643 (T-REX)
 │       ├── compliance/       EwpgCompliance, WhitelistRegistry, MintController
-│       ├── confidential/     Zama fhEVM stubs (TODO)
+│       ├── confidential/     ConfidentialERC20, ConfidentialERC3643 (Zama fhEVM)
 │       └── factory/          AssetTokenFactory (CREATE2)
 ├── gateway/                  Kong declarative config + plugins
 ├── frontend-operator/        Angular 18 — registry operator UI
@@ -131,9 +131,9 @@ registerwerk/
 | ERC-20 | Fully implemented |
 | ERC-721 | Fully implemented |
 | ERC-1155 | Fully implemented |
-| ERC-3643 (T-Rex) | Stub — TODO |
-| Confidential ERC-20 (Zama) | Stub — TODO |
-| Confidential ERC-3643 | Stub — TODO |
+| ERC-3643 (T-REX) | Fully implemented |
+| Confidential ERC-20 (Zama fhEVM) | Fully implemented |
+| Confidential ERC-3643 (Zama fhEVM) | Fully implemented |
 | SPL (Solana) | Implemented via Solanaj |
 
 ### Supported Chains
@@ -143,6 +143,8 @@ registerwerk/
 | Ethereum | chain-id 1 | Sepolia (11155111) |
 | Polygon | chain-id 137 | Amoy (80002) |
 | Base | chain-id 8453 | Base Sepolia (84532) |
+| Fhenix | chain-id 21888 | Helium (8008135) |
+| Inco | chain-id 9090 | Rivest (21097) |
 | Solana | mainnet-beta | devnet |
 
 ### Roles
@@ -174,15 +176,7 @@ Flyway migrations run automatically on startup. Scripts in `backend/src/main/res
 
 | Version | Description |
 |---|---|
-| V1 | Legal entities + name history |
-| V2 | KYC documents (split-table design) |
-| V3 | Onboarding tokens |
-| V4 | Assets + deployments |
-| V5 | Asset holders |
-| V6 | Mint control rules |
-| V7 | Audit log (monthly range-partitioned) |
-| V8 | Public data + ISIN indexes |
-| V9 | Entity merge records |
+| V1 | Initial schema — legal entities, KYC, onboarding tokens, assets and deployments, holders, mint control, partitioned audit log, entity merges, chain registry (incl. Fhenix/Inco), token transfer history, indexer state, ONCHAINID, ERC-3643 (T-REX) suites and identity registry mirror |
 
 ## Smart Contract Deployment
 

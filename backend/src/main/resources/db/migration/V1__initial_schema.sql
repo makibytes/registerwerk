@@ -1,0 +1,464 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Initial schema (v1) — squashed from prior development migrations.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- ── Legal entities ──────────────────────────────────────────────────────────
+CREATE TABLE legal_entity (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_number        VARCHAR(30) NOT NULL UNIQUE,
+    type                 VARCHAR(20) NOT NULL,
+    status               VARCHAR(30) NOT NULL DEFAULT 'PENDING_ONBOARDING',
+    current_name         VARCHAR(500) NOT NULL,
+    lei_code             VARCHAR(20),
+    registration_number  VARCHAR(100),
+    registration_country VARCHAR(2),
+    incorporation_date   DATE,
+    kyc_status           VARCHAR(20) NOT NULL DEFAULT 'NOT_STARTED',
+    kyc_expiry_date      DATE,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by           UUID,
+    CONSTRAINT chk_entity_type   CHECK (type IN ('ISSUER','INVESTOR','AUDITOR')),
+    CONSTRAINT chk_entity_status CHECK (status IN ('PENDING_ONBOARDING','ACTIVE','SUSPENDED','DISSOLVED')),
+    CONSTRAINT chk_kyc_status    CHECK (kyc_status IN ('NOT_STARTED','IN_PROGRESS','APPROVED','REJECTED','EXPIRED'))
+);
+
+CREATE INDEX idx_legal_entity_type   ON legal_entity (type);
+CREATE INDEX idx_legal_entity_status ON legal_entity (status);
+CREATE INDEX idx_legal_entity_lei    ON legal_entity (lei_code) WHERE lei_code IS NOT NULL;
+
+-- ── Name / M&A history ──────────────────────────────────────────────────────
+CREATE TABLE entity_name_history (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    legal_entity_id   UUID NOT NULL REFERENCES legal_entity(id),
+    previous_name     VARCHAR(500) NOT NULL,
+    new_name          VARCHAR(500) NOT NULL,
+    change_type       VARCHAR(30) NOT NULL,
+    related_entity_id UUID REFERENCES legal_entity(id),
+    effective_date    DATE NOT NULL,
+    notes             TEXT,
+    recorded_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    recorded_by       UUID,
+    CONSTRAINT chk_name_change_type CHECK (
+        change_type IN ('RENAME','MERGER_ABSORBED','MERGER_SURVIVOR','ACQUISITION')
+    )
+);
+
+CREATE INDEX idx_name_history_entity ON entity_name_history (legal_entity_id);
+
+-- ── Entity merge records ────────────────────────────────────────────────────
+CREATE TABLE entity_merge_record (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    target_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    merge_type       VARCHAR(20) NOT NULL DEFAULT 'ABSORPTION',
+    effective_date   DATE NOT NULL,
+    notes            TEXT,
+    recorded_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    recorded_by      UUID,
+    CONSTRAINT chk_merge_type CHECK (merge_type IN ('ABSORPTION','CONSOLIDATION')),
+    CONSTRAINT chk_no_self_merge CHECK (source_entity_id != target_entity_id)
+);
+
+CREATE INDEX idx_merge_source ON entity_merge_record (source_entity_id);
+CREATE INDEX idx_merge_target ON entity_merge_record (target_entity_id);
+
+-- ── KYC documents ───────────────────────────────────────────────────────────
+CREATE TABLE kyc_document (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    legal_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    document_type   VARCHAR(30) NOT NULL,
+    mime_type       VARCHAR(100) NOT NULL,
+    file_name       VARCHAR(500) NOT NULL,
+    storage_ref     VARCHAR(1000) NOT NULL,
+    content_hash    VARCHAR(64) NOT NULL,
+    size_bytes      BIGINT NOT NULL,
+    uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    uploaded_by     UUID,
+    expires_at      DATE,
+    deleted_at      TIMESTAMPTZ,
+    CONSTRAINT chk_doc_type CHECK (
+        document_type IN (
+            'PASSPORT','COMMERCIAL_REGISTER','ANNUAL_REPORT',
+            'OWNERSHIP_CHART','AML_QUESTIONNAIRE','OTHER'
+        )
+    ),
+    CONSTRAINT chk_mime CHECK (
+        mime_type IN (
+            'application/pdf','image/jpeg','image/png',
+            'image/tiff','application/xml','text/xml',
+            'application/octet-stream'
+        )
+    )
+);
+
+CREATE INDEX idx_kyc_doc_entity ON kyc_document (legal_entity_id);
+CREATE INDEX idx_kyc_doc_type   ON kyc_document (legal_entity_id, document_type);
+
+CREATE TABLE kyc_document_content (
+    id      UUID PRIMARY KEY REFERENCES kyc_document(id) ON DELETE CASCADE,
+    content BYTEA NOT NULL
+);
+
+-- ── Onboarding tokens ───────────────────────────────────────────────────────
+CREATE TABLE onboarding_token (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    legal_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    token_hash      VARCHAR(128) NOT NULL,
+    issued_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at      TIMESTAMPTZ NOT NULL,
+    used_at         TIMESTAMPTZ,
+    issued_by       UUID
+);
+
+CREATE UNIQUE INDEX idx_onboarding_token_active
+    ON onboarding_token (legal_entity_id)
+    WHERE used_at IS NULL;
+
+CREATE INDEX idx_onboarding_token_hash ON onboarding_token (token_hash);
+
+-- ── Assets ──────────────────────────────────────────────────────────────────
+CREATE TABLE asset (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_number     VARCHAR(30) NOT NULL UNIQUE,
+    issuer_id        UUID NOT NULL REFERENCES legal_entity(id),
+    name             VARCHAR(500) NOT NULL,
+    isin             VARCHAR(12),
+    token_standard   VARCHAR(20) NOT NULL,
+    onchain_level    VARCHAR(10) NOT NULL DEFAULT 'NONE',
+    status           VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+    termsheet_doc_id UUID REFERENCES kyc_document(id),
+    public_data      JSONB,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_token_standard CHECK (
+        token_standard IN ('ERC20','ERC721','ERC1155','ERC3643','CONF_ERC20','CONF_ERC3643','SPL')
+    ),
+    CONSTRAINT chk_onchain_level CHECK (onchain_level IN ('NONE','SIMPLE','CONTROL')),
+    CONSTRAINT chk_asset_status  CHECK (
+        status IN ('DRAFT','PENDING_APPROVAL','APPROVED','ISSUED','SUSPENDED','REDEEMED')
+    )
+);
+
+CREATE UNIQUE INDEX idx_asset_isin       ON asset (isin) WHERE isin IS NOT NULL;
+CREATE INDEX        idx_asset_isin_btree ON asset (isin) WHERE isin IS NOT NULL;
+CREATE INDEX        idx_asset_issuer     ON asset (issuer_id);
+CREATE INDEX        idx_asset_status     ON asset (status);
+CREATE INDEX        idx_asset_public_data ON asset USING GIN (public_data) WHERE public_data IS NOT NULL;
+
+-- ── On-chain deployments ────────────────────────────────────────────────────
+CREATE TABLE asset_deployment (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id           UUID NOT NULL REFERENCES asset(id),
+    chain              VARCHAR(20) NOT NULL,
+    network            VARCHAR(10) NOT NULL,
+    contract_address   VARCHAR(66),
+    deployed_at        TIMESTAMPTZ,
+    deployed_by_tx     VARCHAR(66),
+    deployment_status  VARCHAR(10) NOT NULL DEFAULT 'PENDING',
+    CONSTRAINT chk_chain   CHECK (chain IN ('ETHEREUM','POLYGON','BASE','SOLANA')),
+    CONSTRAINT chk_network CHECK (network IN ('MAINNET','TESTNET')),
+    CONSTRAINT chk_dep_status CHECK (deployment_status IN ('PENDING','CONFIRMED','FAILED'))
+);
+
+CREATE UNIQUE INDEX idx_deployment_address
+    ON asset_deployment (chain, network, contract_address)
+    WHERE contract_address IS NOT NULL;
+
+CREATE INDEX idx_deployment_asset ON asset_deployment (asset_id);
+
+-- ── Asset holders ───────────────────────────────────────────────────────────
+CREATE TABLE asset_holder (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id          UUID NOT NULL REFERENCES asset(id),
+    investor_id       UUID NOT NULL REFERENCES legal_entity(id),
+    wallet_address    VARCHAR(66) NOT NULL,
+    whitelisted       BOOLEAN NOT NULL DEFAULT false,
+    whitelist_tx_hash VARCHAR(66),
+    nominal_amount    NUMERIC(38, 18) NOT NULL DEFAULT 0,
+    acquisition_date  DATE,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_holder_wallet ON asset_holder (asset_id, wallet_address);
+CREATE INDEX        idx_holder_investor ON asset_holder (investor_id);
+CREATE INDEX        idx_holder_asset    ON asset_holder (asset_id);
+
+-- ── Mint control rules ──────────────────────────────────────────────────────
+CREATE TABLE mint_control_rule (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_deployment_id  UUID NOT NULL REFERENCES asset_deployment(id),
+    target_address       VARCHAR(66) NOT NULL,
+    rule_type            VARCHAR(30) NOT NULL,
+    max_amount           NUMERIC(38, 18),
+    active               BOOLEAN NOT NULL DEFAULT true,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by           UUID,
+    CONSTRAINT chk_rule_type CHECK (
+        rule_type IN ('MINT_ALLOWANCE','AUTO_APPROVE_TRANSFER','AUTO_APPROVE_BURN')
+    )
+);
+
+CREATE INDEX idx_mint_rule_deployment ON mint_control_rule (asset_deployment_id);
+CREATE INDEX idx_mint_rule_target     ON mint_control_rule (target_address);
+
+-- ── Audit log (partitioned) ─────────────────────────────────────────────────
+CREATE TABLE audit_event (
+    id           UUID NOT NULL DEFAULT gen_random_uuid(),
+    event_type   VARCHAR(100) NOT NULL,
+    subject_type VARCHAR(50) NOT NULL,
+    subject_id   UUID NOT NULL,
+    actor_id     UUID,
+    actor_role   VARCHAR(30),
+    payload      JSONB,
+    occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+) PARTITION BY RANGE (occurred_at);
+
+CREATE TABLE audit_event_2026_04
+    PARTITION OF audit_event
+    FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
+
+CREATE TABLE audit_event_2026_05
+    PARTITION OF audit_event
+    FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
+
+CREATE TABLE audit_event_default
+    PARTITION OF audit_event DEFAULT;
+
+CREATE INDEX idx_audit_subject    ON audit_event (subject_type, subject_id);
+CREATE INDEX idx_audit_actor      ON audit_event (actor_id) WHERE actor_id IS NOT NULL;
+CREATE INDEX idx_audit_event_type ON audit_event (event_type);
+CREATE INDEX idx_audit_payload    ON audit_event USING GIN (payload);
+
+-- ── Chain registry ──────────────────────────────────────────────────────────
+CREATE TABLE chain_config (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    identifier          VARCHAR(50)  NOT NULL UNIQUE,
+    display_name        VARCHAR(100) NOT NULL,
+    chain_type          VARCHAR(10)  NOT NULL,
+    network_type        VARCHAR(10)  NOT NULL,
+    chain_id            BIGINT,
+    rpc_url             VARCHAR(500) NOT NULL,
+    ws_url              VARCHAR(500),
+    fallback_rpc_urls   TEXT,                            -- comma-separated
+    block_explorer_url  VARCHAR(200),
+    graph_node_url      VARCHAR(300),
+    graph_subgraph_name VARCHAR(100),
+    enabled             BOOLEAN      NOT NULL DEFAULT true,
+    created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT chk_chain_type   CHECK (chain_type   IN ('EVM', 'SOLANA')),
+    CONSTRAINT chk_network_type CHECK (network_type IN ('MAINNET', 'TESTNET'))
+);
+
+CREATE INDEX idx_chain_config_type    ON chain_config (chain_type, network_type);
+CREATE INDEX idx_chain_config_enabled ON chain_config (enabled);
+
+-- Seed: pre-configure the chains from the original spec
+INSERT INTO chain_config (identifier, display_name, chain_type, network_type, chain_id,
+                          rpc_url, ws_url, block_explorer_url,
+                          graph_node_url, graph_subgraph_name) VALUES
+
+-- Ethereum
+('ETHEREUM_MAINNET', 'Ethereum Mainnet', 'EVM', 'MAINNET', 1,
+ 'https://mainnet.infura.io/v3/changeme', 'wss://mainnet.infura.io/ws/v3/changeme', 'https://etherscan.io',
+ 'http://graph-node:8000/subgraphs/name', 'registerwerk/ethereum-mainnet'),
+
+('ETHEREUM_SEPOLIA', 'Ethereum Sepolia', 'EVM', 'TESTNET', 11155111,
+ 'https://sepolia.infura.io/v3/changeme', 'wss://sepolia.infura.io/ws/v3/changeme', 'https://sepolia.etherscan.io',
+ 'http://graph-node:8000/subgraphs/name', 'registerwerk/ethereum-sepolia'),
+
+-- Polygon
+('POLYGON_MAINNET', 'Polygon Mainnet', 'EVM', 'MAINNET', 137,
+ 'https://polygon-mainnet.infura.io/v3/changeme', 'wss://polygon-mainnet.infura.io/ws/v3/changeme', 'https://polygonscan.com',
+ 'http://graph-node:8000/subgraphs/name', 'registerwerk/polygon-mainnet'),
+
+('POLYGON_AMOY', 'Polygon Amoy Testnet', 'EVM', 'TESTNET', 80002,
+ 'https://polygon-amoy.infura.io/v3/changeme', 'wss://polygon-amoy.infura.io/ws/v3/changeme', 'https://amoy.polygonscan.com',
+ 'http://graph-node:8000/subgraphs/name', 'registerwerk/polygon-amoy'),
+
+-- Base
+('BASE_MAINNET', 'Base Mainnet', 'EVM', 'MAINNET', 8453,
+ 'https://mainnet.base.org', 'wss://mainnet.base.org', 'https://basescan.org',
+ 'http://graph-node:8000/subgraphs/name', 'registerwerk/base-mainnet'),
+
+('BASE_SEPOLIA', 'Base Sepolia Testnet', 'EVM', 'TESTNET', 84532,
+ 'https://sepolia.base.org', 'wss://sepolia.base.org', 'https://sepolia.basescan.org',
+ 'http://graph-node:8000/subgraphs/name', 'registerwerk/base-sepolia'),
+
+-- Solana
+('SOLANA_MAINNET', 'Solana Mainnet Beta', 'SOLANA', 'MAINNET', NULL,
+ 'https://api.mainnet-beta.solana.com', 'wss://api.mainnet-beta.solana.com', 'https://solscan.io',
+ NULL, NULL),
+
+('SOLANA_DEVNET', 'Solana Devnet', 'SOLANA', 'TESTNET', NULL,
+ 'https://api.devnet.solana.com', 'wss://api.devnet.solana.com', 'https://solscan.io',
+ NULL, NULL),
+
+-- Fhenix — FHE L2 on Ethereum
+('FHENIX_MAINNET', 'Fhenix Mainnet', 'EVM', 'MAINNET', 21888,
+ 'https://api.fhenix.zone:7747', 'wss://api.fhenix.zone:7748', 'https://explorer.fhenix.zone',
+ NULL, NULL),
+
+('FHENIX_HELIUM', 'Fhenix Helium Testnet', 'EVM', 'TESTNET', 8008135,
+ 'https://api.helium.fhenix.zone:7747', 'wss://api.helium.fhenix.zone:7748', 'https://explorer.helium.fhenix.zone',
+ NULL, NULL),
+
+-- Inco — Confidentiality-as-a-Service
+('INCO_MAINNET', 'Inco Mainnet', 'EVM', 'MAINNET', 9090,
+ 'https://mainnet.inco.org', 'wss://mainnet.inco.org', 'https://explorer.inco.org',
+ NULL, NULL),
+
+('INCO_RIVEST', 'Inco Rivest Testnet', 'EVM', 'TESTNET', 21097,
+ 'https://validator.rivest.inco.org', 'wss://validator.rivest.inco.org', 'https://explorer.rivest.inco.org',
+ NULL, NULL);
+
+-- ── Token transfer history ──────────────────────────────────────────────────
+CREATE TABLE token_transfer (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id         UUID        REFERENCES asset(id),
+    deployment_id    UUID        REFERENCES asset_deployment(id),
+    chain_config_id  UUID        NOT NULL REFERENCES chain_config(id),
+    contract_address VARCHAR(66) NOT NULL,
+    from_address     VARCHAR(66) NOT NULL,
+    to_address       VARCHAR(66) NOT NULL,
+    token_id         NUMERIC,
+    amount           NUMERIC(38, 18),
+    event_type       VARCHAR(10) NOT NULL,
+    tx_hash          VARCHAR(66) NOT NULL,
+    block_number     BIGINT      NOT NULL,
+    log_index        INT,
+    slot             BIGINT,
+    occurred_at      TIMESTAMPTZ NOT NULL,
+    explorer_tx_url  VARCHAR(600),
+    raw_data         JSONB,
+    CONSTRAINT chk_event_type CHECK (event_type IN ('MINT', 'TRANSFER', 'BURN')),
+    CONSTRAINT uq_transfer_evm    UNIQUE NULLS NOT DISTINCT (chain_config_id, tx_hash, log_index),
+    CONSTRAINT uq_transfer_solana UNIQUE NULLS NOT DISTINCT (chain_config_id, tx_hash, slot)
+);
+
+CREATE INDEX idx_transfer_asset       ON token_transfer (asset_id);
+CREATE INDEX idx_transfer_deployment  ON token_transfer (deployment_id);
+CREATE INDEX idx_transfer_chain       ON token_transfer (chain_config_id, block_number DESC);
+CREATE INDEX idx_transfer_contract    ON token_transfer (contract_address, occurred_at DESC);
+CREATE INDEX idx_transfer_from        ON token_transfer (from_address);
+CREATE INDEX idx_transfer_to          ON token_transfer (to_address);
+CREATE INDEX idx_transfer_event_type  ON token_transfer (event_type);
+
+-- ── Indexer state ───────────────────────────────────────────────────────────
+CREATE TABLE indexer_state (
+    id                       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_config_id          UUID        NOT NULL REFERENCES chain_config(id),
+    indexer_type             VARCHAR(30) NOT NULL,
+    last_synced_block        BIGINT,
+    last_synced_signature    VARCHAR(100),
+    last_synced_at           TIMESTAMPTZ,
+    last_error               TEXT,
+    consecutive_errors       INT         NOT NULL DEFAULT 0,
+    status                   VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_indexer_state UNIQUE (chain_config_id, indexer_type),
+    CONSTRAINT chk_indexer_type CHECK (indexer_type IN ('GRAPH_NODE', 'SOLANA_GEYSER', 'SOLANA_POLL')),
+    CONSTRAINT chk_indexer_status CHECK (status IN ('ACTIVE', 'PAUSED', 'ERROR'))
+);
+
+CREATE INDEX idx_indexer_state_chain  ON indexer_state (chain_config_id);
+CREATE INDEX idx_indexer_state_status ON indexer_state (status);
+
+-- ── ONCHAINID ───────────────────────────────────────────────────────────────
+CREATE TABLE onchain_identity (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    legal_entity_id  UUID        NOT NULL REFERENCES legal_entity(id),
+    chain_config_id  UUID        NOT NULL REFERENCES chain_config(id),
+    identity_address VARCHAR(66) NOT NULL,
+    deployed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deployed_by_tx   VARCHAR(66),
+    UNIQUE (legal_entity_id, chain_config_id)
+);
+
+CREATE INDEX idx_onchain_identity_entity ON onchain_identity (legal_entity_id);
+CREATE INDEX idx_onchain_identity_chain  ON onchain_identity (chain_config_id);
+
+CREATE TABLE onchain_claim (
+    id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    onchain_identity_id UUID        NOT NULL REFERENCES onchain_identity(id),
+    topic               BIGINT      NOT NULL,
+    topic_label         VARCHAR(50),
+    issuer_address      VARCHAR(66) NOT NULL,
+    claim_id            VARCHAR(66),
+    issued_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at          TIMESTAMPTZ,
+    revoked_at          TIMESTAMPTZ,
+    tx_hash             VARCHAR(66),
+    claim_data          TEXT,   -- hex-encoded ABI-encoded claim data
+    claim_signature     TEXT    -- hex-encoded ECDSA signature
+);
+
+CREATE INDEX idx_claim_identity ON onchain_claim (onchain_identity_id);
+CREATE INDEX idx_claim_topic    ON onchain_claim (topic);
+
+-- ── ERC-3643 (T-REX) suite ──────────────────────────────────────────────────
+CREATE TABLE erc3643_suite (
+    id                         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_deployment_id        UUID        NOT NULL UNIQUE REFERENCES asset_deployment(id),
+    token_address              VARCHAR(66),
+    identity_registry_address  VARCHAR(66),
+    identity_registry_storage  VARCHAR(66),
+    compliance_address         VARCHAR(66),
+    claim_topics_registry      VARCHAR(66),
+    trusted_issuers_registry   VARCHAR(66),
+    factory_tx_hash            VARCHAR(66),
+    is_confidential            BOOLEAN     NOT NULL DEFAULT false,  -- Zama fhEVM variant
+    created_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE erc3643_compliance_module (
+    id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    suite_id           UUID        NOT NULL REFERENCES erc3643_suite(id),
+    module_address     VARCHAR(66) NOT NULL,
+    module_type        VARCHAR(50) NOT NULL,
+    parameters         JSONB,
+    max_investors      INTEGER,
+    max_balance        NUMERIC(38,0),
+    transfer_cooldown  INTEGER,
+    blocked_countries  SMALLINT[],
+    added_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    removed_at         TIMESTAMPTZ
+);
+
+CREATE TABLE erc3643_trusted_issuer (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    suite_id         UUID        NOT NULL REFERENCES erc3643_suite(id),
+    issuer_address   VARCHAR(66) NOT NULL,
+    claim_topics     BIGINT[]    NOT NULL DEFAULT '{}',
+    legal_entity_id  UUID        REFERENCES legal_entity(id),
+    added_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    removed_at       TIMESTAMPTZ
+);
+
+CREATE TABLE erc3643_claim_topic (
+    id        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    suite_id  UUID        NOT NULL REFERENCES erc3643_suite(id),
+    topic     BIGINT      NOT NULL,
+    label     VARCHAR(50),
+    UNIQUE (suite_id, topic)
+);
+
+-- ── ERC-3643 identity registry mirror ───────────────────────────────────────
+CREATE TABLE erc3643_identity_registry (
+    id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    suite_id             UUID        NOT NULL REFERENCES erc3643_suite(id),
+    wallet_address       VARCHAR(66) NOT NULL,
+    onchain_identity_id  UUID        NOT NULL REFERENCES onchain_identity(id),
+    country_code         SMALLINT,
+    registered_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    registered_by_tx     VARCHAR(66),
+    removed_at           TIMESTAMPTZ,
+    UNIQUE (suite_id, wallet_address)
+);
+
+CREATE INDEX idx_erc3643_ir_suite    ON erc3643_identity_registry (suite_id);
+CREATE INDEX idx_erc3643_ir_identity ON erc3643_identity_registry (onchain_identity_id);
