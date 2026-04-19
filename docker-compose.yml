@@ -1,9 +1,7 @@
-version: "3.9"
-
 services:
   # ─── Application Database ──────────────────────────────────────────────────
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_DB: registerwerk
       POSTGRES_USER: registerwerk
@@ -23,6 +21,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/registerwerk
       DB_USER: registerwerk
@@ -58,6 +57,7 @@ services:
     build:
       context: ./frontend-operator
       dockerfile: Dockerfile
+      network: host
     depends_on:
       backend:
         condition: service_started
@@ -69,6 +69,7 @@ services:
     build:
       context: ./frontend-customer
       dockerfile: Dockerfile
+      network: host
     depends_on:
       backend:
         condition: service_started
@@ -76,26 +77,12 @@ services:
       - "4201:80"
 
   # ─── Kong Database ─────────────────────────────────────────────────────────
-  kong-db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: kong
-      POSTGRES_USER: kong
-      POSTGRES_PASSWORD: ${KONG_DB_PASSWORD:-changeme}
-    volumes:
-      - kongdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kong"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   kong-migrations:
     image: kong:3.8
     command: kong migrations bootstrap
     environment:
       KONG_DATABASE: postgres
-      KONG_PG_HOST: kong-db
+      KONG_PG_HOST: postgres
       KONG_PG_USER: kong
       KONG_PG_PASSWORD: ${KONG_DB_PASSWORD:-changeme}
       KONG_PG_DATABASE: kong
@@ -108,7 +95,7 @@ services:
     image: kong:3.8
     environment:
       KONG_DATABASE: postgres
-      KONG_PG_HOST: kong-db
+      KONG_PG_HOST: postgres
       KONG_PG_USER: kong
       KONG_PG_PASSWORD: ${KONG_DB_PASSWORD:-changeme}
       KONG_PG_DATABASE: kong
@@ -138,7 +125,7 @@ services:
     environment:
       NODE_ENV: production
       DB_ADAPTER: postgres
-      DB_HOST: kong-db
+      DB_HOST: postgres
       DB_PORT: 5432
       DB_DATABASE: konga
       DB_USER: kong
