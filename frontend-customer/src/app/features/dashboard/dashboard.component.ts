@@ -12,7 +12,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { AuthService } from '../../core/auth/auth.service';
 import { IssuanceService } from '../../core/api/issuance.service';
 import { InvestmentService } from '../../core/api/investment.service';
-import { Asset, AssetHolder } from '../../core/models';
+import { Asset, InvestmentRecord } from '../../core/models';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
 
 @Component({
@@ -245,7 +245,7 @@ export class DashboardComponent implements OnInit {
   totalHoldings = 0;
   whitelistedCount = 0;
   totalNominal = 0;
-  recentHoldings: AssetHolder[] = [];
+  recentHoldings: InvestmentRecord[] = [];
 
   ngOnInit(): void {
     this.userName = this.auth.getUserName();

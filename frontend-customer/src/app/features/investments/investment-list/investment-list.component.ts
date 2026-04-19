@@ -1,31 +1,61 @@
-import { Component, OnInit, inject } from '@angular/core';
+import {
+  AfterViewInit,
+  Component,
+  OnInit,
+  ViewChild,
+  inject,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { MatTableModule } from '@angular/material/table';
+import { MatTableModule, MatTableDataSource } from '@angular/material/table';
+import { MatSortModule, MatSort } from '@angular/material/sort';
+import { MatPaginatorModule, MatPaginator } from '@angular/material/paginator';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCardModule } from '@angular/material/card';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatSelectModule } from '@angular/material/select';
+import { MatInputModule } from '@angular/material/input';
+import { MatChipsModule } from '@angular/material/chips';
 import { InvestmentService } from '../../../core/api/investment.service';
-import { AssetHolder } from '../../../core/models';
+import { InvestmentRecord, TokenStandard } from '../../../core/models';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { DonutChartComponent, DonutSlice } from '../../../shared/components/donut-chart/donut-chart.component';
+import { BarChartComponent, BarItem } from '../../../shared/components/bar-chart/bar-chart.component';
+
+interface Filters {
+  search: string;
+  tokenStandard: TokenStandard | null;
+  whitelisted: 'all' | 'yes' | 'no';
+  fromDate: string;
+  toDate: string;
+}
 
 @Component({
   selector: 'app-investment-list',
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     RouterLink,
     MatTableModule,
+    MatSortModule,
+    MatPaginatorModule,
     MatButtonModule,
     MatIconModule,
     MatCardModule,
     MatProgressSpinnerModule,
-    MatPaginatorModule,
     MatTooltipModule,
+    MatFormFieldModule,
+    MatSelectModule,
+    MatInputModule,
+    MatChipsModule,
     StatusBadgeComponent,
+    DonutChartComponent,
+    BarChartComponent,
   ],
   template: `
     <div class="page-container">
@@ -37,60 +67,194 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
       } @else {
 
-        <!-- Summary bar -->
-        <div class="summary-bar">
-          <div class="summary-item">
-            <span class="summary-value">{{ totalElements }}</span>
-            <span class="summary-label">Holdings</span>
+        <!-- ── KPI Summary ─────────────────────────────────────────────────── -->
+        <div class="kpi-bar">
+          <div class="kpi-item">
+            <span class="kpi-value">€ {{ totalNominal | number:'1.0-0' }}</span>
+            <span class="kpi-label">Total Invested</span>
           </div>
-          <div class="summary-item">
-            <span class="summary-value">{{ whitelistedCount }}</span>
-            <span class="summary-label">Whitelisted</span>
+          <div class="kpi-divider"></div>
+          <div class="kpi-item">
+            <span class="kpi-value">{{ allRecords.length }}</span>
+            <span class="kpi-label">Holdings</span>
           </div>
-          <div class="summary-item">
-            <span class="summary-value">€ {{ totalNominal | number:'1.0-0' }}</span>
-            <span class="summary-label">Total Nominal</span>
+          <div class="kpi-divider"></div>
+          <div class="kpi-item">
+            <span class="kpi-value">{{ whitelistedCount }}</span>
+            <span class="kpi-label">Whitelisted</span>
+          </div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-item">
+            <span class="kpi-value">{{ uniqueAssets }}</span>
+            <span class="kpi-label">Unique Assets</span>
+          </div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-item">
+            <span class="kpi-value">{{ uniqueStandards }}</span>
+            <span class="kpi-label">Token Standards</span>
           </div>
         </div>
 
+        <!-- ── Analytics Charts ───────────────────────────────────────────── -->
+        @if (allRecords.length > 0) {
+          <div class="charts-row">
+            <mat-card class="chart-card">
+              <mat-card-header>
+                <mat-card-title>Portfolio by Token Standard</mat-card-title>
+                <mat-card-subtitle>Nominal value distribution</mat-card-subtitle>
+              </mat-card-header>
+              <mat-card-content>
+                <app-donut-chart
+                  [slices]="standardSlices"
+                  centerLabel="Total"
+                  [centerValue]="'€' + totalNominalShort">
+                </app-donut-chart>
+              </mat-card-content>
+            </mat-card>
+
+            <mat-card class="chart-card">
+              <mat-card-header>
+                <mat-card-title>Top Holdings</mat-card-title>
+                <mat-card-subtitle>By nominal amount</mat-card-subtitle>
+              </mat-card-header>
+              <mat-card-content>
+                <app-bar-chart
+                  [items]="topHoldingsBars"
+                  valueFormat="currency">
+                </app-bar-chart>
+              </mat-card-content>
+            </mat-card>
+          </div>
+        }
+
+        <!-- ── Filters ────────────────────────────────────────────────────── -->
+        <mat-card class="filter-card">
+          <mat-card-content>
+            <div class="filter-row">
+              <mat-form-field appearance="outline" class="filter-field filter-search">
+                <mat-label>Search asset</mat-label>
+                <mat-icon matPrefix>search</mat-icon>
+                <input matInput [(ngModel)]="filters.search" (ngModelChange)="applyFilters()" placeholder="Asset name or ISIN…">
+                @if (filters.search) {
+                  <button matSuffix mat-icon-button (click)="filters.search=''; applyFilters()">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                }
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="filter-field">
+                <mat-label>Token Standard</mat-label>
+                <mat-select [(ngModel)]="filters.tokenStandard" (ngModelChange)="applyFilters()">
+                  <mat-option [value]="null">All</mat-option>
+                  @for (s of standardOptions; track s) {
+                    <mat-option [value]="s">{{ s }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="filter-field">
+                <mat-label>Whitelisted</mat-label>
+                <mat-select [(ngModel)]="filters.whitelisted" (ngModelChange)="applyFilters()">
+                  <mat-option value="all">All</mat-option>
+                  <mat-option value="yes">Yes</mat-option>
+                  <mat-option value="no">No</mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="filter-field filter-date">
+                <mat-label>From date</mat-label>
+                <input matInput type="date" [(ngModel)]="filters.fromDate" (ngModelChange)="applyFilters()">
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="filter-field filter-date">
+                <mat-label>To date</mat-label>
+                <input matInput type="date" [(ngModel)]="filters.toDate" (ngModelChange)="applyFilters()">
+              </mat-form-field>
+
+              <button mat-stroked-button (click)="resetFilters()" [disabled]="!hasActiveFilters">
+                <mat-icon>filter_list_off</mat-icon>
+                Reset
+              </button>
+            </div>
+
+            @if (dataSource.filteredData.length !== allRecords.length) {
+              <div class="filter-hint">
+                Showing {{ dataSource.filteredData.length }} of {{ allRecords.length }} holdings
+              </div>
+            }
+          </mat-card-content>
+        </mat-card>
+
+        <!-- ── Table ──────────────────────────────────────────────────────── -->
         <mat-card>
-          <table mat-table [dataSource]="holdings" class="mat-elevation-z0">
+          <table mat-table [dataSource]="dataSource" matSort class="mat-elevation-z0">
 
-            <!-- Asset Name -->
             <ng-container matColumnDef="assetName">
-              <th mat-header-cell *matHeaderCellDef>Asset</th>
-              <td mat-cell *matCellDef="let h">{{ h.assetName ?? h.assetId }}</td>
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Asset</th>
+              <td mat-cell *matCellDef="let r">
+                <div class="asset-cell">
+                  <span class="asset-name">{{ r.assetName ?? r.assetId }}</span>
+                  @if (r.isin) {
+                    <span class="asset-isin">{{ r.isin }}</span>
+                  }
+                </div>
+              </td>
             </ng-container>
 
-            <!-- Nominal Amount -->
+            <ng-container matColumnDef="tokenStandard">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Standard</th>
+              <td mat-cell *matCellDef="let r">
+                @if (r.tokenStandard) {
+                  <mat-chip [style.background]="standardColor(r.tokenStandard)" style="color:#fff; font-size:11px">
+                    {{ r.tokenStandard }}
+                  </mat-chip>
+                } @else { — }
+              </td>
+            </ng-container>
+
             <ng-container matColumnDef="nominalAmount">
-              <th mat-header-cell *matHeaderCellDef>Nominal Amount</th>
-              <td mat-cell *matCellDef="let h">{{ h.nominalAmount | number:'1.0-2' }}</td>
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Nominal Amount</th>
+              <td mat-cell *matCellDef="let r" class="amount-cell">
+                {{ r.nominalAmount | number:'1.0-2' }}
+              </td>
             </ng-container>
 
-            <!-- Wallet -->
+            <ng-container matColumnDef="acquisitionDate">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Acquired</th>
+              <td mat-cell *matCellDef="let r">
+                {{ r.acquisitionDate ? (r.acquisitionDate | date:'mediumDate') : '—' }}
+              </td>
+            </ng-container>
+
             <ng-container matColumnDef="walletAddress">
-              <th mat-header-cell *matHeaderCellDef>Wallet Address</th>
-              <td mat-cell *matCellDef="let h">
-                <code [matTooltip]="h.walletAddress">
-                  {{ h.walletAddress | slice:0:18 }}…
+              <th mat-header-cell *matHeaderCellDef>Wallet</th>
+              <td mat-cell *matCellDef="let r">
+                <code [matTooltip]="r.walletAddress" class="address-code">
+                  {{ r.walletAddress | slice:0:10 }}…{{ r.walletAddress | slice:-6 }}
                 </code>
               </td>
             </ng-container>
 
-            <!-- Whitelisted -->
             <ng-container matColumnDef="whitelisted">
-              <th mat-header-cell *matHeaderCellDef>Whitelisted</th>
-              <td mat-cell *matCellDef="let h">
-                <app-status-badge [status]="h.whitelisted ? 'WHITELISTED' : 'NOT_WHITELISTED'"></app-status-badge>
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Whitelisted</th>
+              <td mat-cell *matCellDef="let r">
+                <app-status-badge [status]="r.whitelisted ? 'WHITELISTED' : 'NOT_WHITELISTED'"></app-status-badge>
               </td>
             </ng-container>
 
-            <!-- Actions -->
+            <ng-container matColumnDef="assetStatus">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Asset Status</th>
+              <td mat-cell *matCellDef="let r">
+                @if (r.assetStatus) {
+                  <app-status-badge [status]="r.assetStatus"></app-status-badge>
+                } @else { — }
+              </td>
+            </ng-container>
+
             <ng-container matColumnDef="actions">
               <th mat-header-cell *matHeaderCellDef></th>
-              <td mat-cell *matCellDef="let h" class="actions-cell">
-                <a mat-icon-button [routerLink]="['/investments', h.id]" matTooltip="View details">
+              <td mat-cell *matCellDef="let r" class="actions-cell">
+                <a mat-icon-button [routerLink]="['/investments', r.id]" matTooltip="View details">
                   <mat-icon>arrow_forward</mat-icon>
                 </a>
               </td>
@@ -101,74 +265,249 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
 
             <tr class="mat-row" *matNoDataRow>
               <td class="mat-cell empty-row" [attr.colspan]="displayedColumns.length">
-                No investments found.
+                No investments match the current filters.
               </td>
             </tr>
           </table>
 
           <mat-paginator
-            [length]="totalElements"
-            [pageSize]="pageSize"
-            [pageIndex]="pageIndex"
             [pageSizeOptions]="[10, 25, 50]"
-            (page)="onPage($event)"
+            [pageSize]="25"
+            showFirstLastButtons
           ></mat-paginator>
         </mat-card>
+
       }
     </div>
   `,
   styles: [`
-    .summary-bar {
+    /* KPI bar */
+    .kpi-bar {
       display: flex;
-      gap: 32px;
-      margin-bottom: 24px;
+      align-items: center;
+      gap: 0;
       background: white;
-      padding: 16px 24px;
       border-radius: 8px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      padding: 20px 28px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
     }
-    .summary-item { display: flex; flex-direction: column; }
-    .summary-value { font-size: 28px; font-weight: 700; color: #00695c; }
-    .summary-label { font-size: 12px; color: #78909c; margin-top: 2px; }
-    code { font-family: monospace; font-size: 12px; background: #f5f5f5; padding: 2px 4px; border-radius: 3px; cursor: help; }
+    .kpi-item { display: flex; flex-direction: column; align-items: center; min-width: 100px; }
+    .kpi-value { font-size: 26px; font-weight: 700; color: #006064; }
+    .kpi-label { font-size: 11px; color: #78909c; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .kpi-divider { width: 1px; height: 40px; background: #e0e0e0; flex-shrink: 0; }
+
+    /* Charts */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 768px) {
+      .charts-row { grid-template-columns: 1fr; }
+    }
+    .chart-card mat-card-content { padding-top: 8px; }
+
+    /* Filters */
+    .filter-card { margin-bottom: 16px; }
+    .filter-card mat-card-content { padding: 12px !important; }
+    .filter-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .filter-field { min-width: 140px; }
+    .filter-search { min-width: 200px; flex: 1; }
+    .filter-date { min-width: 150px; }
+    .filter-hint { font-size: 12px; color: #78909c; margin-top: 4px; }
+
+    /* Table */
+    .asset-cell { display: flex; flex-direction: column; }
+    .asset-name { font-size: 14px; color: #37474f; }
+    .asset-isin { font-size: 11px; color: #90a4ae; }
+    .amount-cell { font-weight: 600; color: #37474f; }
+    .address-code {
+      font-family: monospace;
+      font-size: 12px;
+      background: #f5f5f5;
+      padding: 2px 4px;
+      border-radius: 3px;
+      cursor: help;
+    }
     .empty-row { text-align: center; padding: 32px; color: #78909c; }
-  `]
+  `],
 })
-export class InvestmentListComponent implements OnInit {
+export class InvestmentListComponent implements OnInit, AfterViewInit {
   private readonly investmentService = inject(InvestmentService);
 
-  holdings: AssetHolder[] = [];
+  @ViewChild(MatSort) sort!: MatSort;
+  @ViewChild(MatPaginator) paginator!: MatPaginator;
+
+  allRecords: InvestmentRecord[] = [];
+  dataSource = new MatTableDataSource<InvestmentRecord>();
   loading = true;
-  totalElements = 0;
-  pageSize = 25;
-  pageIndex = 0;
 
-  whitelistedCount = 0;
-  totalNominal = 0;
+  filters: Filters = {
+    search: '',
+    tokenStandard: null,
+    whitelisted: 'all',
+    fromDate: '',
+    toDate: '',
+  };
 
-  readonly displayedColumns = ['assetName', 'nominalAmount', 'walletAddress', 'whitelisted', 'actions'];
+  readonly displayedColumns = [
+    'assetName', 'tokenStandard', 'nominalAmount', 'acquisitionDate',
+    'walletAddress', 'whitelisted', 'assetStatus', 'actions',
+  ];
+
+  readonly standardOptions: TokenStandard[] = [
+    'ERC20', 'ERC721', 'ERC1155', 'ERC1400', 'ERC3643', 'CONF_ERC20', 'CONF_ERC3643', 'SPL',
+  ];
+
+  private readonly standardColors: Record<string, string> = {
+    ERC20: '#1565c0',
+    ERC721: '#6a1b9a',
+    ERC1155: '#f57c00',
+    ERC1400: '#00838f',
+    ERC3643: '#00695c',
+    CONF_ERC20: '#e65100',
+    CONF_ERC3643: '#880e4f',
+    SPL: '#558b2f',
+  };
+
+  // ── Computed analytics ─────────────────────────────────────────────────────
+
+  get totalNominal(): number {
+    return this.allRecords.reduce((s, r) => s + r.nominalAmount, 0);
+  }
+
+  get totalNominalShort(): string {
+    const v = this.totalNominal;
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
+    return String(Math.round(v));
+  }
+
+  get whitelistedCount(): number {
+    return this.allRecords.filter(r => r.whitelisted).length;
+  }
+
+  get uniqueAssets(): number {
+    return new Set(this.allRecords.map(r => r.assetId)).size;
+  }
+
+  get uniqueStandards(): number {
+    return new Set(this.allRecords.filter(r => r.tokenStandard).map(r => r.tokenStandard)).size;
+  }
+
+  get standardSlices(): DonutSlice[] {
+    const byStandard = new Map<string, number>();
+    for (const r of this.allRecords) {
+      const key = r.tokenStandard ?? 'Unknown';
+      byStandard.set(key, (byStandard.get(key) ?? 0) + r.nominalAmount);
+    }
+    return Array.from(byStandard.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value]) => ({
+        label,
+        value,
+        color: this.standardColors[label] ?? '#90a4ae',
+      }));
+  }
+
+  get topHoldingsBars(): BarItem[] {
+    return [...this.allRecords]
+      .sort((a, b) => b.nominalAmount - a.nominalAmount)
+      .slice(0, 7)
+      .map(r => ({
+        label: r.assetName ?? r.assetNumber ?? r.assetId.slice(0, 8),
+        subtitle: r.tokenStandard ?? undefined,
+        value: r.nominalAmount,
+        color: this.standardColors[r.tokenStandard ?? ''] ?? '#00695c',
+      }));
+  }
+
+  get hasActiveFilters(): boolean {
+    return !!(
+      this.filters.search ||
+      this.filters.tokenStandard ||
+      this.filters.whitelisted !== 'all' ||
+      this.filters.fromDate ||
+      this.filters.toDate
+    );
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   ngOnInit(): void {
-    this.load();
+    this.investmentService
+      .getMyInvestments({ page: 0, size: 200, sort: 'acquisitionDate,desc' })
+      .subscribe({
+        next: (res) => {
+          this.allRecords = res.content;
+          this.dataSource.data = res.content;
+          this.dataSource.filterPredicate = this.buildFilterPredicate();
+          this.loading = false;
+        },
+        error: () => (this.loading = false),
+      });
   }
 
-  onPage(event: PageEvent): void {
-    this.pageIndex = event.pageIndex;
-    this.pageSize  = event.pageSize;
-    this.load();
+  ngAfterViewInit(): void {
+    this.dataSource.sort = this.sort;
+    this.dataSource.paginator = this.paginator;
+    this.dataSource.sortingDataAccessor = (item, column) => {
+      switch (column) {
+        case 'assetName':        return item.assetName ?? '';
+        case 'tokenStandard':    return item.tokenStandard ?? '';
+        case 'nominalAmount':    return item.nominalAmount;
+        case 'acquisitionDate':  return item.acquisitionDate ?? '';
+        case 'whitelisted':      return item.whitelisted ? 1 : 0;
+        case 'assetStatus':      return item.assetStatus ?? '';
+        default:                 return '';
+      }
+    };
   }
 
-  private load(): void {
-    this.loading = true;
-    this.investmentService.getMyInvestments({ page: this.pageIndex, size: this.pageSize }).subscribe({
-      next: (res) => {
-        this.holdings      = res.content;
-        this.totalElements = res.totalElements;
-        this.whitelistedCount = res.content.filter(h => h.whitelisted).length;
-        this.totalNominal     = res.content.reduce((s, h) => s + h.nominalAmount, 0);
-        this.loading = false;
-      },
-      error: () => (this.loading = false),
-    });
+  applyFilters(): void {
+    // Trigger MatTableDataSource filterPredicate by changing the filter string
+    this.dataSource.filter = JSON.stringify(this.filters);
+  }
+
+  resetFilters(): void {
+    this.filters = { search: '', tokenStandard: null, whitelisted: 'all', fromDate: '', toDate: '' };
+    this.dataSource.filter = '';
+  }
+
+  standardColor(std: string): string {
+    return this.standardColors[std] ?? '#90a4ae';
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  private buildFilterPredicate() {
+    return (record: InvestmentRecord, filter: string): boolean => {
+      if (!filter) return true;
+      let f: Filters;
+      try { f = JSON.parse(filter) as Filters; } catch { return true; }
+
+      if (f.search) {
+        const q = f.search.toLowerCase();
+        const nameMatch = record.assetName?.toLowerCase().includes(q) ?? false;
+        const isinMatch = record.isin?.toLowerCase().includes(q) ?? false;
+        if (!nameMatch && !isinMatch) return false;
+      }
+      if (f.tokenStandard && record.tokenStandard !== f.tokenStandard) return false;
+      if (f.whitelisted === 'yes' && !record.whitelisted) return false;
+      if (f.whitelisted === 'no' && record.whitelisted) return false;
+      if (f.fromDate && record.acquisitionDate && record.acquisitionDate < f.fromDate) return false;
+      if (f.toDate && record.acquisitionDate && record.acquisitionDate > f.toDate) return false;
+
+      return true;
+    };
   }
 }

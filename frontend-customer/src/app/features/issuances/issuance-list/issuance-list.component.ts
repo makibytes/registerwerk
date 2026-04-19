@@ -1,21 +1,39 @@
-import { Component, OnInit, inject } from '@angular/core';
+import {
+  AfterViewInit,
+  Component,
+  OnInit,
+  ViewChild,
+  inject,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { MatTableModule } from '@angular/material/table';
+import { MatTableModule, MatTableDataSource } from '@angular/material/table';
+import { MatSortModule, MatSort } from '@angular/material/sort';
+import { MatPaginatorModule, MatPaginator } from '@angular/material/paginator';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
+import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { IssuanceService } from '../../../core/api/issuance.service';
-import { Asset, AssetStatus } from '../../../core/models';
+import { Asset, AssetStatus, TokenStandard } from '../../../core/models';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { ChainNamePipe } from '../../../shared/pipes/chain-name.pipe';
+import { DonutChartComponent, DonutSlice } from '../../../shared/components/donut-chart/donut-chart.component';
+import { BarChartComponent, BarItem } from '../../../shared/components/bar-chart/bar-chart.component';
+
+interface IssuanceFilters {
+  search: string;
+  status: AssetStatus | null;
+  tokenStandard: TokenStandard | null;
+  fromDate: string;
+  toDate: string;
+}
 
 @Component({
   selector: 'app-issuance-list',
@@ -25,17 +43,21 @@ import { ChainNamePipe } from '../../../shared/pipes/chain-name.pipe';
     RouterLink,
     FormsModule,
     MatTableModule,
+    MatSortModule,
+    MatPaginatorModule,
     MatButtonModule,
     MatIconModule,
     MatFormFieldModule,
     MatSelectModule,
+    MatInputModule,
     MatProgressSpinnerModule,
     MatCardModule,
     MatChipsModule,
     MatTooltipModule,
-    MatPaginatorModule,
     StatusBadgeComponent,
     ChainNamePipe,
+    DonutChartComponent,
+    BarChartComponent,
   ],
   template: `
     <div class="page-container">
@@ -47,72 +69,180 @@ import { ChainNamePipe } from '../../../shared/pipes/chain-name.pipe';
         </a>
       </div>
 
-      <!-- Filters -->
-      <mat-card class="filter-card">
-        <mat-card-content>
-          <mat-form-field appearance="outline" style="width:200px">
-            <mat-label>Filter by Status</mat-label>
-            <mat-select [(ngModel)]="filterStatus" (ngModelChange)="applyFilter()">
-              <mat-option [value]="null">All Statuses</mat-option>
-              @for (s of statusOptions; track s.value) {
-                <mat-option [value]="s.value">{{ s.label }}</mat-option>
-              }
-            </mat-select>
-          </mat-form-field>
-        </mat-card-content>
-      </mat-card>
-
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
       } @else {
-        <mat-card>
-          <table mat-table [dataSource]="issuances" class="mat-elevation-z0">
 
-            <!-- Asset Number -->
+        <!-- ── KPI bar ────────────────────────────────────────────────────── -->
+        <div class="kpi-bar">
+          <div class="kpi-item">
+            <span class="kpi-value">{{ allIssuances.length }}</span>
+            <span class="kpi-label">Total</span>
+          </div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-item">
+            <span class="kpi-value issued">{{ countByStatus('ISSUED') }}</span>
+            <span class="kpi-label">Issued</span>
+          </div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-item">
+            <span class="kpi-value pending">{{ countByStatus('PENDING_APPROVAL') }}</span>
+            <span class="kpi-label">Pending Approval</span>
+          </div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-item">
+            <span class="kpi-value draft">{{ countByStatus('DRAFT') }}</span>
+            <span class="kpi-label">Draft</span>
+          </div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-item">
+            <span class="kpi-value">{{ uniqueStandards }}</span>
+            <span class="kpi-label">Token Standards</span>
+          </div>
+        </div>
+
+        <!-- ── Analytics Charts ───────────────────────────────────────────── -->
+        @if (allIssuances.length > 0) {
+          <div class="charts-row">
+            <mat-card class="chart-card">
+              <mat-card-header>
+                <mat-card-title>Issuances by Token Standard</mat-card-title>
+                <mat-card-subtitle>Asset count per standard</mat-card-subtitle>
+              </mat-card-header>
+              <mat-card-content>
+                <app-donut-chart
+                  [slices]="standardSlices"
+                  centerLabel="Assets"
+                  [centerValue]="allIssuances.length.toString()">
+                </app-donut-chart>
+              </mat-card-content>
+            </mat-card>
+
+            <mat-card class="chart-card">
+              <mat-card-header>
+                <mat-card-title>Issuances by Status</mat-card-title>
+                <mat-card-subtitle>Asset count per lifecycle status</mat-card-subtitle>
+              </mat-card-header>
+              <mat-card-content>
+                <app-bar-chart
+                  [items]="statusBars"
+                  valueFormat="number">
+                </app-bar-chart>
+              </mat-card-content>
+            </mat-card>
+          </div>
+        }
+
+        <!-- ── Filters ────────────────────────────────────────────────────── -->
+        <mat-card class="filter-card">
+          <mat-card-content>
+            <div class="filter-row">
+              <mat-form-field appearance="outline" class="filter-field filter-search">
+                <mat-label>Search</mat-label>
+                <mat-icon matPrefix>search</mat-icon>
+                <input matInput [(ngModel)]="filters.search" (ngModelChange)="applyFilters()" placeholder="Name or ISIN…">
+                @if (filters.search) {
+                  <button matSuffix mat-icon-button (click)="filters.search=''; applyFilters()">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                }
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="filter-field">
+                <mat-label>Status</mat-label>
+                <mat-select [(ngModel)]="filters.status" (ngModelChange)="applyFilters()">
+                  <mat-option [value]="null">All Statuses</mat-option>
+                  @for (s of statusOptions; track s.value) {
+                    <mat-option [value]="s.value">{{ s.label }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="filter-field">
+                <mat-label>Token Standard</mat-label>
+                <mat-select [(ngModel)]="filters.tokenStandard" (ngModelChange)="applyFilters()">
+                  <mat-option [value]="null">All</mat-option>
+                  @for (s of standardOptions; track s) {
+                    <mat-option [value]="s">{{ s }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="filter-field filter-date">
+                <mat-label>From date</mat-label>
+                <input matInput type="date" [(ngModel)]="filters.fromDate" (ngModelChange)="applyFilters()">
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="filter-field filter-date">
+                <mat-label>To date</mat-label>
+                <input matInput type="date" [(ngModel)]="filters.toDate" (ngModelChange)="applyFilters()">
+              </mat-form-field>
+
+              <button mat-stroked-button (click)="resetFilters()" [disabled]="!hasActiveFilters">
+                <mat-icon>filter_list_off</mat-icon>
+                Reset
+              </button>
+            </div>
+
+            @if (dataSource.filteredData.length !== allIssuances.length) {
+              <div class="filter-hint">
+                Showing {{ dataSource.filteredData.length }} of {{ allIssuances.length }} issuances
+              </div>
+            }
+          </mat-card-content>
+        </mat-card>
+
+        <!-- ── Table ──────────────────────────────────────────────────────── -->
+        <mat-card>
+          <table mat-table [dataSource]="dataSource" matSort class="mat-elevation-z0">
+
             <ng-container matColumnDef="assetNumber">
-              <th mat-header-cell *matHeaderCellDef>Number</th>
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Number</th>
               <td mat-cell *matCellDef="let row">
                 <code>{{ row.assetNumber }}</code>
               </td>
             </ng-container>
 
-            <!-- Name -->
             <ng-container matColumnDef="name">
-              <th mat-header-cell *matHeaderCellDef>Name</th>
-              <td mat-cell *matCellDef="let row">{{ row.name }}</td>
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Name</th>
+              <td mat-cell *matCellDef="let row">
+                <div class="asset-cell">
+                  <span class="asset-name">{{ row.name }}</span>
+                  @if (row.isin) {
+                    <span class="asset-isin">{{ row.isin }}</span>
+                  }
+                </div>
+              </td>
             </ng-container>
 
-            <!-- ISIN -->
-            <ng-container matColumnDef="isin">
-              <th mat-header-cell *matHeaderCellDef>ISIN</th>
-              <td mat-cell *matCellDef="let row">{{ row.isin ?? '—' }}</td>
-            </ng-container>
-
-            <!-- Token Standard -->
             <ng-container matColumnDef="tokenStandard">
-              <th mat-header-cell *matHeaderCellDef>Standard</th>
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Standard</th>
               <td mat-cell *matCellDef="let row">
                 @if (row.tokenStandard) {
-                  <mat-chip>{{ row.tokenStandard }}</mat-chip>
+                  <mat-chip [style.background]="standardColor(row.tokenStandard)" style="color:#fff; font-size:11px">
+                    {{ row.tokenStandard }}
+                  </mat-chip>
                 } @else { — }
               </td>
             </ng-container>
 
-            <!-- Status -->
             <ng-container matColumnDef="status">
-              <th mat-header-cell *matHeaderCellDef>Status</th>
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Status</th>
               <td mat-cell *matCellDef="let row">
                 <app-status-badge [status]="row.status"></app-status-badge>
               </td>
             </ng-container>
 
-            <!-- Chain -->
             <ng-container matColumnDef="chain">
-              <th mat-header-cell *matHeaderCellDef>Chain</th>
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Chain</th>
               <td mat-cell *matCellDef="let row">{{ row.chain | chainName }}</td>
             </ng-container>
 
-            <!-- Actions -->
+            <ng-container matColumnDef="createdAt">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Created</th>
+              <td mat-cell *matCellDef="let row">{{ row.createdAt | date:'mediumDate' }}</td>
+            </ng-container>
+
             <ng-container matColumnDef="actions">
               <th mat-header-cell *matHeaderCellDef></th>
               <td mat-cell *matCellDef="let row" class="actions-cell">
@@ -125,43 +255,102 @@ import { ChainNamePipe } from '../../../shared/pipes/chain-name.pipe';
             <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
             <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
 
-            <!-- Empty state -->
             <tr class="mat-row" *matNoDataRow>
               <td class="mat-cell empty-row" [attr.colspan]="displayedColumns.length">
-                No issuances found.
-                <a routerLink="/issuances/new">Create your first issuance.</a>
+                No issuances match the current filters.
+                @if (!hasActiveFilters) {
+                  <a routerLink="/issuances/new">Create your first issuance.</a>
+                }
               </td>
             </tr>
           </table>
 
           <mat-paginator
-            [length]="totalElements"
-            [pageSize]="pageSize"
-            [pageIndex]="pageIndex"
             [pageSizeOptions]="[10, 25, 50]"
-            (page)="onPage($event)"
+            [pageSize]="25"
+            showFirstLastButtons
           ></mat-paginator>
         </mat-card>
+
       }
     </div>
   `,
   styles: [`
+    /* KPI bar */
+    .kpi-bar {
+      display: flex;
+      align-items: center;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      padding: 20px 28px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .kpi-item { display: flex; flex-direction: column; align-items: center; min-width: 90px; }
+    .kpi-value { font-size: 26px; font-weight: 700; color: #006064; }
+    .kpi-value.issued { color: #00695c; }
+    .kpi-value.pending { color: #f57c00; }
+    .kpi-value.draft { color: #78909c; }
+    .kpi-label { font-size: 11px; color: #78909c; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .kpi-divider { width: 1px; height: 40px; background: #e0e0e0; flex-shrink: 0; }
+
+    /* Charts */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 768px) {
+      .charts-row { grid-template-columns: 1fr; }
+    }
+    .chart-card mat-card-content { padding-top: 8px; }
+
+    /* Filters */
     .filter-card { margin-bottom: 16px; }
     .filter-card mat-card-content { padding: 12px !important; }
+    .filter-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .filter-field { min-width: 140px; }
+    .filter-search { min-width: 200px; flex: 1; }
+    .filter-date { min-width: 150px; }
+    .filter-hint { font-size: 12px; color: #78909c; margin-top: 4px; }
+
+    /* Table */
+    .asset-cell { display: flex; flex-direction: column; }
+    .asset-name { font-size: 14px; color: #37474f; }
+    .asset-isin { font-size: 11px; color: #90a4ae; }
+    code { font-family: monospace; font-size: 12px; background: #f5f5f5; padding: 2px 4px; border-radius: 3px; }
     .empty-row { text-align: center; padding: 32px; color: #78909c; }
-  `]
+  `],
 })
-export class IssuanceListComponent implements OnInit {
+export class IssuanceListComponent implements OnInit, AfterViewInit {
   private readonly issuanceService = inject(IssuanceService);
 
-  issuances: Asset[] = [];
-  loading = true;
-  totalElements = 0;
-  pageSize = 25;
-  pageIndex = 0;
-  filterStatus: AssetStatus | null = null;
+  @ViewChild(MatSort) sort!: MatSort;
+  @ViewChild(MatPaginator) paginator!: MatPaginator;
 
-  readonly displayedColumns = ['assetNumber', 'name', 'isin', 'tokenStandard', 'status', 'chain', 'actions'];
+  allIssuances: Asset[] = [];
+  dataSource = new MatTableDataSource<Asset>();
+  loading = true;
+
+  filters: IssuanceFilters = {
+    search: '',
+    status: null,
+    tokenStandard: null,
+    fromDate: '',
+    toDate: '',
+  };
+
+  readonly displayedColumns = [
+    'assetNumber', 'name', 'tokenStandard', 'status', 'chain', 'createdAt', 'actions',
+  ];
 
   readonly statusOptions: { value: AssetStatus; label: string }[] = [
     { value: 'DRAFT',            label: 'Draft' },
@@ -172,36 +361,142 @@ export class IssuanceListComponent implements OnInit {
     { value: 'REVOKED',          label: 'Revoked' },
   ];
 
+  readonly standardOptions: TokenStandard[] = [
+    'ERC20', 'ERC721', 'ERC1155', 'ERC1400', 'ERC3643', 'CONF_ERC20', 'CONF_ERC3643', 'SPL',
+  ];
+
+  private readonly standardColors: Record<string, string> = {
+    ERC20: '#1565c0',
+    ERC721: '#6a1b9a',
+    ERC1155: '#f57c00',
+    ERC1400: '#00838f',
+    ERC3643: '#00695c',
+    CONF_ERC20: '#e65100',
+    CONF_ERC3643: '#880e4f',
+    SPL: '#558b2f',
+  };
+
+  private readonly statusColors: Record<string, string> = {
+    DRAFT: '#78909c',
+    PENDING_APPROVAL: '#f57c00',
+    APPROVED: '#0288d1',
+    ISSUED: '#2e7d32',
+    REJECTED: '#c62828',
+    REVOKED: '#6d4c41',
+  };
+
+  // ── Computed analytics ─────────────────────────────────────────────────────
+
+  countByStatus(status: AssetStatus): number {
+    return this.allIssuances.filter(a => a.status === status).length;
+  }
+
+  get uniqueStandards(): number {
+    return new Set(this.allIssuances.filter(a => a.tokenStandard).map(a => a.tokenStandard)).size;
+  }
+
+  get standardSlices(): DonutSlice[] {
+    const counts = new Map<string, number>();
+    for (const a of this.allIssuances) {
+      const key = a.tokenStandard ?? 'Unknown';
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value]) => ({
+        label,
+        value,
+        color: this.standardColors[label] ?? '#90a4ae',
+      }));
+  }
+
+  get statusBars(): BarItem[] {
+    return this.statusOptions
+      .map(opt => ({
+        label: opt.label,
+        value: this.countByStatus(opt.value),
+        color: this.statusColors[opt.value] ?? '#90a4ae',
+      }))
+      .filter(b => b.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }
+
+  get hasActiveFilters(): boolean {
+    return !!(
+      this.filters.search ||
+      this.filters.status ||
+      this.filters.tokenStandard ||
+      this.filters.fromDate ||
+      this.filters.toDate
+    );
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
+
   ngOnInit(): void {
-    this.load();
-  }
-
-  applyFilter(): void {
-    this.pageIndex = 0;
-    this.load();
-  }
-
-  onPage(event: PageEvent): void {
-    this.pageIndex = event.pageIndex;
-    this.pageSize  = event.pageSize;
-    this.load();
-  }
-
-  private load(): void {
-    this.loading = true;
-    const params: Record<string, string | number> = {
-      page: this.pageIndex,
-      size: this.pageSize,
-    };
-    if (this.filterStatus) params['status'] = this.filterStatus;
-
-    this.issuanceService.getIssuances(params).subscribe({
+    this.issuanceService.getIssuances({ page: 0, size: 200, sort: 'createdAt,desc' }).subscribe({
       next: (res) => {
-        this.issuances = res.content;
-        this.totalElements = res.totalElements;
+        this.allIssuances = res.content;
+        this.dataSource.data = res.content;
+        this.dataSource.filterPredicate = this.buildFilterPredicate();
         this.loading = false;
       },
       error: () => (this.loading = false),
     });
+  }
+
+  ngAfterViewInit(): void {
+    this.dataSource.sort = this.sort;
+    this.dataSource.paginator = this.paginator;
+    this.dataSource.sortingDataAccessor = (item, column) => {
+      switch (column) {
+        case 'assetNumber':   return item.assetNumber;
+        case 'name':          return item.name;
+        case 'tokenStandard': return item.tokenStandard ?? '';
+        case 'status':        return item.status;
+        case 'chain':         return item.chain ?? '';
+        case 'createdAt':     return item.createdAt;
+        default:              return '';
+      }
+    };
+  }
+
+  applyFilters(): void {
+    this.dataSource.filter = JSON.stringify(this.filters);
+  }
+
+  resetFilters(): void {
+    this.filters = { search: '', status: null, tokenStandard: null, fromDate: '', toDate: '' };
+    this.dataSource.filter = '';
+  }
+
+  standardColor(std: string): string {
+    return this.standardColors[std] ?? '#90a4ae';
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  private buildFilterPredicate() {
+    return (asset: Asset, filter: string): boolean => {
+      if (!filter) return true;
+      let f: IssuanceFilters;
+      try { f = JSON.parse(filter) as IssuanceFilters; } catch { return true; }
+
+      if (f.search) {
+        const q = f.search.toLowerCase();
+        const nameMatch = asset.name.toLowerCase().includes(q);
+        const isinMatch = asset.isin?.toLowerCase().includes(q) ?? false;
+        const numMatch  = asset.assetNumber.toLowerCase().includes(q);
+        if (!nameMatch && !isinMatch && !numMatch) return false;
+      }
+      if (f.status && asset.status !== f.status) return false;
+      if (f.tokenStandard && asset.tokenStandard !== f.tokenStandard) return false;
+
+      const dateStr = asset.createdAt?.slice(0, 10) ?? '';
+      if (f.fromDate && dateStr && dateStr < f.fromDate) return false;
+      if (f.toDate   && dateStr && dateStr > f.toDate)   return false;
+
+      return true;
+    };
   }
 }

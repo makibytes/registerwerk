@@ -2,20 +2,20 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { AssetHolder, PageParams, PageResponse } from '../models';
+import { InvestmentRecord, PageParams, PageResponse } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class InvestmentService {
   private readonly http = inject(HttpClient);
   private readonly base = `${environment.apiUrl}/investments`;
 
-  getMyInvestments(params?: PageParams): Observable<PageResponse<AssetHolder>> {
+  getMyInvestments(params?: PageParams): Observable<PageResponse<InvestmentRecord>> {
     const httpParams = this.buildParams(params);
-    return this.http.get<PageResponse<AssetHolder>>(this.base, { params: httpParams });
+    return this.http.get<PageResponse<InvestmentRecord>>(this.base, { params: httpParams });
   }
 
-  getInvestment(holderId: string): Observable<AssetHolder> {
-    return this.http.get<AssetHolder>(`${this.base}/${holderId}`);
+  getInvestment(holderId: string): Observable<InvestmentRecord> {
+    return this.http.get<InvestmentRecord>(`${this.base}/${holderId}`);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

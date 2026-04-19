@@ -52,3 +52,6 @@ contracts/.forge-cache/
 # OS
 Thumbs.db
 .DS_Store
+
+/.claude
+/.vscode

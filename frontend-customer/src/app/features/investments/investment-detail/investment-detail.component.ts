@@ -1,7 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { forkJoin } from 'rxjs';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -9,10 +8,11 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatTableModule } from '@angular/material/table';
 import { MatChipsModule } from '@angular/material/chips';
+import { forkJoin } from 'rxjs';
 import { InvestmentService } from '../../../core/api/investment.service';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { Erc3643Service, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
-import { Asset, AssetDeployment, AssetHolder } from '../../../core/models';
+import { AssetDeployment, InvestmentRecord } from '../../../core/models';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
 
@@ -41,19 +41,19 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
 
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
-      } @else if (holding) {
+      } @else if (record) {
 
-        <!-- ── Holding header ───────────────────────────────────────────── -->
+        <!-- ── Header ──────────────────────────────────────────────────────── -->
         <mat-card class="header-card">
           <mat-card-content>
             <div class="holding-header">
               <div>
-                <h1>{{ asset?.name ?? holding.assetId }}</h1>
-                @if (asset?.isin) {
-                  <span class="isin">ISIN: {{ asset!.isin }}</span>
+                <h1>{{ record.assetName ?? record.assetId }}</h1>
+                @if (record.isin) {
+                  <span class="isin">ISIN: {{ record.isin }}</span>
                 }
               </div>
-              <app-status-badge [status]="holding.whitelisted ? 'WHITELISTED' : 'NOT_WHITELISTED'"></app-status-badge>
+              <app-status-badge [status]="record.whitelisted ? 'WHITELISTED' : 'NOT_WHITELISTED'"></app-status-badge>
             </div>
 
             <mat-divider style="margin: 16px 0"></mat-divider>
@@ -61,39 +61,45 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
             <div class="detail-grid">
               <div class="detail-item">
                 <span class="detail-label">Nominal Amount</span>
-                <span class="detail-value large">{{ holding.nominalAmount | number:'1.0-2' }}</span>
+                <span class="detail-value large">{{ record.nominalAmount | number:'1.0-2' }}</span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">Wallet Address</span>
-                <code class="detail-value">{{ holding.walletAddress }}</code>
+                <code class="detail-value">{{ record.walletAddress }}</code>
               </div>
               <div class="detail-item">
-                <span class="detail-label">Whitelisted At</span>
+                <span class="detail-label">Acquisition Date</span>
                 <span class="detail-value">
-                  {{ holding.whitelistedAt ? (holding.whitelistedAt | date:'medium') : '—' }}
+                  {{ record.acquisitionDate ? (record.acquisitionDate | date:'mediumDate') : '—' }}
                 </span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">Holding Since</span>
-                <span class="detail-value">{{ holding.createdAt | date:'mediumDate' }}</span>
+                <span class="detail-value">{{ record.createdAt | date:'mediumDate' }}</span>
               </div>
-              @if (asset?.tokenStandard) {
+              @if (record.tokenStandard) {
                 <div class="detail-item">
                   <span class="detail-label">Token Standard</span>
-                  <span class="detail-value"><mat-chip>{{ asset!.tokenStandard }}</mat-chip></span>
+                  <span class="detail-value"><mat-chip>{{ record.tokenStandard }}</mat-chip></span>
                 </div>
               }
-              @if (asset?.chain) {
+              @if (record.assetStatus) {
                 <div class="detail-item">
-                  <span class="detail-label">Chain</span>
-                  <app-chain-icon [chain]="asset!.chain!"></app-chain-icon>
+                  <span class="detail-label">Asset Status</span>
+                  <app-status-badge [status]="record.assetStatus"></app-status-badge>
+                </div>
+              }
+              @if (record.assetNumber) {
+                <div class="detail-item">
+                  <span class="detail-label">Asset Number</span>
+                  <code class="detail-value">{{ record.assetNumber }}</code>
                 </div>
               }
             </div>
           </mat-card-content>
         </mat-card>
 
-        <!-- ── ERC-3643 Identity Status ────────────────────────────────── -->
+        <!-- ── ERC-3643 Identity Status ────────────────────────────────────── -->
         @if (isErc3643) {
           <mat-card class="section-card identity-card">
             <mat-card-header>
@@ -114,7 +120,6 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
                   </div>
                 </div>
                 <div class="claim-status-grid">
-                  <!-- KYC claim (topic 1) -->
                   <div class="claim-item" [class.claim-ok]="identityEntry.verified" [class.claim-fail]="!identityEntry.verified">
                     <mat-icon>{{ identityEntry.verified ? 'verified' : 'gpp_bad' }}</mat-icon>
                     <div>
@@ -138,7 +143,7 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
           </mat-card>
         }
 
-        <!-- ── Chain Deployments ─────────────────────────────────────────── -->
+        <!-- ── Chain Deployments ───────────────────────────────────────────── -->
         @if (deployments.length > 0) {
           <mat-card class="section-card">
             <mat-card-header>
@@ -190,7 +195,6 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
     .detail-value { font-size: 15px; color: #37474f; }
     .detail-value.large { font-size: 28px; font-weight: 700; color: #00695c; }
     code { font-family: monospace; font-size: 12px; background: #f5f5f5; padding: 2px 4px; border-radius: 3px; word-break: break-all; }
-    /* Identity / claim status */
     .identity-card { border-left: 4px solid #5e35b1; }
     .identity-icon { vertical-align: middle; margin-right: 6px; color: #5e35b1; }
     .identity-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
@@ -206,7 +210,7 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
     .claim-item.claim-fail mat-icon { color: #e53935; }
     .claim-label { display: block; font-size: 12px; color: #546e7a; font-weight: 500; }
     .claim-status { display: block; font-size: 14px; color: #37474f; }
-  `]
+  `],
 })
 export class InvestmentDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
@@ -214,8 +218,7 @@ export class InvestmentDetailComponent implements OnInit {
   private readonly issuanceService = inject(IssuanceService);
   private readonly erc3643Service = inject(Erc3643Service);
 
-  holding: AssetHolder | null = null;
-  asset: Asset | null = null;
+  record: InvestmentRecord | null = null;
   deployments: AssetDeployment[] = [];
   loading = true;
   identityLoading = false;
@@ -224,26 +227,20 @@ export class InvestmentDetailComponent implements OnInit {
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status'];
 
   get isErc3643(): boolean {
-    return this.asset?.tokenStandard === 'ERC3643' || this.asset?.tokenStandard === 'CONF_ERC3643';
+    return this.record?.tokenStandard === 'ERC3643' || this.record?.tokenStandard === 'CONF_ERC3643';
   }
 
   ngOnInit(): void {
     const holderId = this.route.snapshot.paramMap.get('holderId')!;
-
     this.investmentService.getInvestment(holderId).subscribe({
-      next: (holding) => {
-        this.holding = holding;
-        forkJoin({
-          asset: this.issuanceService.getIssuance(holding.assetId),
-          deployments: this.issuanceService.getDeployments(holding.assetId),
-        }).subscribe({
-          next: ({ asset, deployments }) => {
-            this.asset = asset;
+      next: (rec) => {
+        this.record = rec;
+        this.issuanceService.getDeployments(rec.assetId).subscribe({
+          next: (deployments) => {
             this.deployments = deployments;
             this.loading = false;
-            const erc3643 = asset.tokenStandard === 'ERC3643' || asset.tokenStandard === 'CONF_ERC3643';
-            if (erc3643 && deployments.length > 0 && holding.walletAddress) {
-              this.loadIdentityStatus(asset.id, deployments[0].id, holding.walletAddress);
+            if (this.isErc3643 && deployments.length > 0 && rec.walletAddress) {
+              this.loadIdentityStatus(rec.assetId, deployments[0].id, rec.walletAddress);
             }
           },
           error: () => (this.loading = false),

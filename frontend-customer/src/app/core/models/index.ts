@@ -126,6 +126,24 @@ export interface IssuanceWizardData {
 
 // ─── Investment-specific Models ───────────────────────────────────────────────
 
+export interface InvestmentRecord {
+  id: string;
+  assetId: string;
+  assetNumber: string | null;
+  assetName: string | null;
+  isin: string | null;
+  tokenStandard: TokenStandard | null;
+  assetStatus: AssetStatus | null;
+  investorId: string;
+  walletAddress: string;
+  whitelisted: boolean;
+  whitelistTxHash: string | null;
+  nominalAmount: number;
+  acquisitionDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface InvestmentSummary {
   assetId: string;
   assetName: string;

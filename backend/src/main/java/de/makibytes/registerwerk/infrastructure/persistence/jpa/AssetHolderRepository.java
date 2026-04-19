@@ -15,5 +15,7 @@ public interface AssetHolderRepository extends JpaRepository<AssetHolder, UUID> 
 
     List<AssetHolder> findByInvestorId(UUID investorId);
 
+    Page<AssetHolder> findByInvestorId(UUID investorId, Pageable pageable);
+
     Optional<AssetHolder> findByAssetIdAndWalletAddress(UUID assetId, String walletAddress);
 }
