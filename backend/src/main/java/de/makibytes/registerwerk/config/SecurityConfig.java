@@ -20,6 +20,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -38,16 +40,18 @@ public class SecurityConfig {
     /**
      * Provides a JwtDecoder from the configured OIDC issuer URI, or falls back to an HS256
      * dev decoder when no issuer is configured (e.g. in local Docker Compose without OIDC).
-     * The dev key is logged at startup so developers can mint test tokens via jwt.io.
+     * The dev key comes from {@link RegisterwerkAuthProperties#getDevSecret()} and is logged
+     * at startup so developers can mint test tokens via jwt.io.
      */
     @Bean
     public JwtDecoder jwtDecoder(
-            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri) {
+            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri,
+            RegisterwerkAuthProperties props) {
         if (issuerUri != null && !issuerUri.isBlank()) {
             log.info("Configuring JWT decoder from issuer: {}", issuerUri);
             return JwtDecoders.fromIssuerLocation(issuerUri);
         }
-        String devSecret = "registerwerk-dev-jwt-secret-change-in-production!!";
+        String devSecret = props.getDevSecret();
         log.warn("JWT_ISSUER_URI not set — using HS256 dev decoder. " +
                  "Mint test tokens at jwt.io with algorithm HS256 and secret: {}", devSecret);
         SecretKey key = new SecretKeySpec(devSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
@@ -77,6 +81,11 @@ public class SecurityConfig {
             );
 
         return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
     }
 
     @Bean

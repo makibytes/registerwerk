@@ -13,7 +13,7 @@ import { AuthService } from './auth.service';
 import { environment } from '../../../environments/environment';
 
 interface LoginResponse {
-  access_token: string;
+  token: string;
 }
 
 @Component({
@@ -179,13 +179,13 @@ export class LoginComponent {
     this.errorMessage = '';
 
     this.http
-      .post<LoginResponse>(`${environment.apiUrl}/auth/login`, {
+      .post<LoginResponse>(`${environment.apiUrl}/public/auth/login`, {
         email: this.email,
         password: this.password,
       })
       .subscribe({
         next: (res) => {
-          this.auth.setToken(res.access_token);
+          this.auth.setToken(res.token);
           this.router.navigate(['/dashboard']);
         },
         error: () => {

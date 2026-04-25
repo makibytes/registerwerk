@@ -1,6 +1,7 @@
 export const environment = {
   production: true,
   apiUrl: '/api/v1',
+  entraEnabled: false,
   msalConfig: {
     auth: {
       clientId: 'YOUR_CLIENT_ID',

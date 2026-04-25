@@ -31,7 +31,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${JWT_ISSUER_URI:https://login.microsoftonline.com/common/v2.0}
+          issuer-uri: ${JWT_ISSUER_URI:}
 
   mail:
     host: ${MAIL_HOST:localhost}
@@ -148,3 +148,10 @@ registerwerk:
     frontend-url: ${CUSTOMER_FRONTEND_URL:http://localhost:4201}
   mail:
     from: ${MAIL_USERNAME:noreply@registerwerk.example.com}
+  auth:
+    entra-enabled: ${ENTRA_ENABLED:false}
+    dev-secret: ${JWT_DEV_SECRET:registerwerk-dev-jwt-secret-change-in-production!!}
+    token-ttl-seconds: 28800
+    default-admin:
+      email: ${DEFAULT_ADMIN_EMAIL:}
+      password: ${DEFAULT_ADMIN_PASSWORD:}

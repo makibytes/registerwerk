@@ -1,10 +1,20 @@
 import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, tap, map } from 'rxjs';
+import { environment } from '../../../environments/environment';
 
 const TOKEN_KEY = 'registerwerk_operator_token';
 const ENTITY_ID_KEY = 'registerwerk_operator_entity_id';
 const TOKEN_TTL_SECONDS = 8 * 60 * 60;
+
+interface LoginApiResponse {
+  token: string;
+  tokenType: string;
+  userId: string;
+  roles: string[];
+  expiresAt: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -12,7 +22,10 @@ export class AuthService {
     this._hasValidToken()
   );
 
-  constructor(private readonly router: Router) {}
+  constructor(
+    private readonly router: Router,
+    private readonly http: HttpClient
+  ) {}
 
   isAuthenticated(): Observable<boolean> {
     return this._isAuthenticated$.asObservable();
@@ -22,9 +35,30 @@ export class AuthService {
     return this._isAuthenticated$.getValue();
   }
 
+  /**
+   * Authenticates against the backend's /public/auth/login endpoint.
+   * Stores the returned JWT and entityId in localStorage.
+   */
+  loginWithCredentials(email: string, password: string): Observable<void> {
+    return this.http
+      .post<LoginApiResponse>(`${environment.apiUrl}/public/auth/login`, { email, password })
+      .pipe(
+        tap(res => {
+          localStorage.setItem(TOKEN_KEY, res.token);
+          const payload = this._decodeJwtPayload(res.token);
+          const entityId = (payload?.['entityId'] as string) ?? res.userId;
+          localStorage.setItem(ENTITY_ID_KEY, entityId);
+          this._isAuthenticated$.next(true);
+        }),
+        map(() => void 0)
+      );
+  }
+
+  /**
+   * Stub Microsoft login — calls the MSAL OAuth2 flow once IdP is fully wired.
+   * TODO: replace stub with MSAL once IdP is wired
+   */
   login(): void {
-    // In a real implementation, this would initiate the MSAL OAuth2 flow.
-    // For now, we simulate a successful login by writing a stub token.
     const issuedAt = Math.floor(Date.now() / 1000);
     const stubToken = btoa(JSON.stringify({
       sub: 'operator-1',
@@ -60,11 +94,35 @@ export class AuthService {
       return false;
     }
     try {
-      const payload = JSON.parse(atob(token)) as { exp?: number };
+      const payload = this._parseTokenPayload(token);
       const now = Math.floor(Date.now() / 1000);
-      return typeof payload.exp === 'number' && payload.exp > now;
+      return typeof payload?.['exp'] === 'number' && (payload['exp'] as number) > now;
     } catch {
       return false;
+    }
+  }
+
+  /** Decodes the payload of a real JWT (header.payload.signature). */
+  private _decodeJwtPayload(token: string): Record<string, unknown> | null {
+    return this._parseTokenPayload(token);
+  }
+
+  /**
+   * Handles both real JWTs (three base64url segments) and the legacy stub format
+   * (a single base64 blob) so the Entra stub branch keeps working.
+   */
+  private _parseTokenPayload(token: string): Record<string, unknown> | null {
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        // Real JWT: decode middle segment with URL-safe base64
+        const json = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+        return JSON.parse(json) as Record<string, unknown>;
+      }
+      // Legacy stub: single base64 blob
+      return JSON.parse(atob(token)) as Record<string, unknown>;
+    } catch {
+      return null;
     }
   }
 }

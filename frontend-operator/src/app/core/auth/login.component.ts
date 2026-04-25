@@ -1,13 +1,29 @@
 import { Component } from '@angular/core';
+import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AuthService } from './auth.service';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [MatButtonModule, MatCardModule, MatIconModule],
+  imports: [
+    ReactiveFormsModule,
+    MatButtonModule,
+    MatCardModule,
+    MatFormFieldModule,
+    MatIconModule,
+    MatInputModule,
+    MatProgressSpinnerModule,
+    MatSnackBarModule,
+  ],
   styles: [`
     .login-container {
       min-height: 100vh;
@@ -61,6 +77,17 @@ import { AuthService } from './auth.service';
       margin-right: 8px;
       vertical-align: middle;
     }
+
+    .form-field {
+      width: 100%;
+      margin-bottom: 8px;
+    }
+
+    .spinner-wrapper {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
   `],
   template: `
     <div class="login-container">
@@ -72,21 +99,60 @@ import { AuthService } from './auth.service';
         </div>
 
         <mat-card-content>
-          <button
-            mat-raised-button
-            color="primary"
-            class="login-btn"
-            (click)="login()"
-          >
-            <svg class="ms-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23 23">
-              <path fill="#f3f3f3" d="M0 0h23v23H0z"/>
-              <path fill="#f35325" d="M1 1h10v10H1z"/>
-              <path fill="#81bc06" d="M12 1h10v10H12z"/>
-              <path fill="#05a6f0" d="M1 12h10v10H1z"/>
-              <path fill="#ffba08" d="M12 12h10v10H12z"/>
-            </svg>
-            Login with Microsoft
-          </button>
+          @if (entraEnabled) {
+            <button
+              mat-raised-button
+              color="primary"
+              class="login-btn"
+              (click)="loginWithMicrosoft()"
+            >
+              <svg class="ms-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23 23">
+                <path fill="#f3f3f3" d="M0 0h23v23H0z"/>
+                <path fill="#f35325" d="M1 1h10v10H1z"/>
+                <path fill="#81bc06" d="M12 1h10v10H12z"/>
+                <path fill="#05a6f0" d="M1 12h10v10H1z"/>
+                <path fill="#ffba08" d="M12 12h10v10H12z"/>
+              </svg>
+              Login with Microsoft
+            </button>
+          } @else {
+            <form [formGroup]="loginForm" (ngSubmit)="loginWithCredentials()">
+              <mat-form-field class="form-field" appearance="outline">
+                <mat-label>Email</mat-label>
+                <input matInput type="email" formControlName="email" autocomplete="email" />
+                @if (loginForm.get('email')?.hasError('required')) {
+                  <mat-error>Email is required</mat-error>
+                } @else if (loginForm.get('email')?.hasError('email')) {
+                  <mat-error>Enter a valid email address</mat-error>
+                }
+              </mat-form-field>
+
+              <mat-form-field class="form-field" appearance="outline">
+                <mat-label>Password</mat-label>
+                <input matInput type="password" formControlName="password" autocomplete="current-password" />
+                @if (loginForm.get('password')?.hasError('required')) {
+                  <mat-error>Password is required</mat-error>
+                }
+              </mat-form-field>
+
+              <button
+                mat-raised-button
+                color="primary"
+                class="login-btn"
+                type="submit"
+                [disabled]="loading"
+              >
+                @if (loading) {
+                  <span class="spinner-wrapper">
+                    <mat-spinner diameter="20" />
+                    Signing in…
+                  </span>
+                } @else {
+                  Sign in
+                }
+              </button>
+            </form>
+          }
         </mat-card-content>
 
         <mat-card-footer style="padding: 16px 0 0; color: rgba(0,0,0,0.38); font-size: 12px;">
@@ -97,9 +163,42 @@ import { AuthService } from './auth.service';
   `,
 })
 export class LoginComponent {
-  constructor(private readonly authService: AuthService) {}
+  readonly entraEnabled = environment.entraEnabled;
+  readonly loginForm: FormGroup;
+  loading = false;
 
-  login(): void {
+  constructor(
+    private readonly authService: AuthService,
+    private readonly router: Router,
+    private readonly snackBar: MatSnackBar,
+    fb: FormBuilder,
+  ) {
+    this.loginForm = fb.group({
+      email: ['', [Validators.required, Validators.email]],
+      password: ['', Validators.required],
+    });
+  }
+
+  loginWithMicrosoft(): void {
     this.authService.login();
+  }
+
+  loginWithCredentials(): void {
+    if (this.loginForm.invalid) {
+      return;
+    }
+    this.loading = true;
+    const { email, password } = this.loginForm.value as { email: string; password: string };
+    this.authService.loginWithCredentials(email, password).subscribe({
+      next: () => {
+        this.loading = false;
+        this.router.navigate(['/dashboard']);
+      },
+      error: (err: { error?: { message?: string } }) => {
+        this.loading = false;
+        const message = err?.error?.message ?? 'Login failed. Please try again.';
+        this.snackBar.open(message, 'Dismiss', { duration: 5000 });
+      },
+    });
   }
 }

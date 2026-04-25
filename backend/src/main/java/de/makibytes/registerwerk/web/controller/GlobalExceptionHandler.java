@@ -1,7 +1,9 @@
 package de.makibytes.registerwerk.web.controller;
 
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
+import de.makibytes.registerwerk.application.exception.InvalidCredentialsException;
 import de.makibytes.registerwerk.application.exception.InvalidStateTransitionException;
+import de.makibytes.registerwerk.application.exception.LoginDisabledException;
 import de.makibytes.registerwerk.web.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -27,6 +29,16 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(EntityNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(EntityNotFoundException ex, HttpServletRequest request) {
+        return buildResponse(HttpStatus.NOT_FOUND, ex.getMessage(), request.getRequestURI());
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException ex, HttpServletRequest request) {
+        return buildResponse(HttpStatus.UNAUTHORIZED, ex.getMessage(), request.getRequestURI());
+    }
+
+    @ExceptionHandler(LoginDisabledException.class)
+    public ResponseEntity<ErrorResponse> handleLoginDisabled(LoginDisabledException ex, HttpServletRequest request) {
         return buildResponse(HttpStatus.NOT_FOUND, ex.getMessage(), request.getRequestURI());
     }
 

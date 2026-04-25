@@ -18,11 +18,22 @@ All configuration is done via environment variables. Copy `.env.example` to `.en
 | `DB_USER` | `ewpg` | Database user |
 | `DB_PASSWORD` | — | **Required** |
 
-## Authentication (OAuth2)
+## Authentication
+
+### Built-in admin (no-IdP mode)
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENTRA_ENABLED` | `false` | `false` → username/password form in operator FE; `true` → Microsoft button |
+| `DEFAULT_ADMIN_EMAIL` | — | Email of the seeded admin user (built-in mode only) |
+| `DEFAULT_ADMIN_PASSWORD` | — | Plaintext password hashed with BCrypt on startup; rotate by changing and restarting |
+| `JWT_DEV_SECRET` | built-in | HS256 signing key used in dev/demo mode; leave unset for local, override in staging |
+
+### OAuth2 / OIDC (production)
 
 | Variable | Description |
 |---|---|
-| `JWT_ISSUER_URI` | OIDC issuer URL (e.g. `https://login.microsoftonline.com/<tenant>/v2.0`) |
+| `JWT_ISSUER_URI` | OIDC issuer URL — leave blank for HS256 dev mode; set for production (e.g. `https://login.microsoftonline.com/<tenant>/v2.0`) |
 | `JWT_AUDIENCE` | Expected audience claim value |
 
 ## Blockchain RPCs
