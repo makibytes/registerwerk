@@ -29,6 +29,7 @@ public interface ChainConfigMapper {
     @Mapping(target = "updatedAt",       ignore = true)
     @Mapping(target = "enabled",         constant = "true")
     @Mapping(target = "fallbackRpcUrls", ignore = true)
+    @Mapping(target = "fallbackRpcUrlList", ignore = true)
     @Mapping(target = "chainType",
              expression = "java(ChainConfig.ChainType.valueOf(request.chainType().toUpperCase()))")
     @Mapping(target = "networkType",

@@ -44,9 +44,7 @@ public class PublicController {
     @GetMapping("/assets/by-address/{contractAddress}")
     public ResponseEntity<Map<String, Object>> getByContractAddress(@PathVariable String contractAddress) {
         AssetDeployment deployment = assetDeploymentRepository
-            .findAll().stream()
-            .filter(d -> contractAddress.equalsIgnoreCase(d.getContractAddress()))
-            .findFirst()
+            .findFirstByContractAddressIgnoreCase(contractAddress)
             .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", "contractAddress", contractAddress));
 
         Asset asset = assetRepository.findById(deployment.getAssetId())

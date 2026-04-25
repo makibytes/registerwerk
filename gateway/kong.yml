@@ -16,6 +16,7 @@ services:
         paths:
           - /api/v1/public
           - /api/v1/onboarding/token-info
+          - /api/v1/onboarding/complete
         strip_path: false
         methods: [GET, POST]
 

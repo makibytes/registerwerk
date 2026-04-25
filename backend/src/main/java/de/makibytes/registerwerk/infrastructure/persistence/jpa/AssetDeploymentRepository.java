@@ -17,4 +17,6 @@ public interface AssetDeploymentRepository extends JpaRepository<AssetDeployment
 
     Optional<AssetDeployment> findByChainAndNetworkAndContractAddress(
         Chain chain, Network network, String contractAddress);
+
+    Optional<AssetDeployment> findFirstByContractAddressIgnoreCase(String contractAddress);
 }

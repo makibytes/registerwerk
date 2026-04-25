@@ -216,7 +216,7 @@ export class IssuanceWizardComponent {
   readonly detailsForm = this.fb.group({
     name:         ['', Validators.required],
     isin:         ['', [Validators.pattern(/^[A-Z0-9]{12}$/)]],
-    onchainLevel: ['LEVEL_1' as OnchainLevel, Validators.required],
+    onchainLevel: ['SIMPLE' as OnchainLevel, Validators.required],
   });
 
   readonly chainForm = this.fb.group({
@@ -228,10 +228,9 @@ export class IssuanceWizardComponent {
   // ── Select options ─────────────────────────────────────────────────────────
 
   readonly onchainLevels: { value: OnchainLevel; label: string }[] = [
-    { value: 'LEVEL_0', label: 'Level 0 — Off-chain record only' },
-    { value: 'LEVEL_1', label: 'Level 1 — Hash anchoring' },
-    { value: 'LEVEL_2', label: 'Level 2 — Token representation' },
-    { value: 'LEVEL_3', label: 'Level 3 — Fully on-chain' },
+    { value: 'NONE', label: 'None — Off-chain record only' },
+    { value: 'SIMPLE', label: 'Simple — Tokenized primary-market issuance' },
+    { value: 'CONTROL', label: 'Control — On-chain control and approvals' },
   ];
 
   readonly chains: { value: Chain; label: string }[] = [
@@ -244,21 +243,18 @@ export class IssuanceWizardComponent {
   private readonly standardsByChain: Record<Chain, { value: TokenStandard; label: string }[]> = {
     ETHEREUM: [
       { value: 'ERC20',        label: 'ERC-20' },
-      { value: 'ERC1400',      label: 'ERC-1400 (Security Token)' },
       { value: 'ERC3643',      label: 'ERC-3643 (T-REX)' },
       { value: 'CONF_ERC20',   label: 'Confidential ERC-20 (ERC-7984, Zama fhEVM)' },
       { value: 'CONF_ERC3643', label: 'Confidential ERC-3643 (Zama fhEVM + T-REX)' },
     ],
     POLYGON: [
       { value: 'ERC20',        label: 'ERC-20' },
-      { value: 'ERC1400',      label: 'ERC-1400 (Security Token)' },
       { value: 'ERC3643',      label: 'ERC-3643 (T-REX)' },
       { value: 'CONF_ERC20',   label: 'Confidential ERC-20 (ERC-7984, Zama fhEVM)' },
       { value: 'CONF_ERC3643', label: 'Confidential ERC-3643 (Zama fhEVM + T-REX)' },
     ],
     BASE: [
       { value: 'ERC20',        label: 'ERC-20' },
-      { value: 'ERC1400',      label: 'ERC-1400 (Security Token)' },
       { value: 'CONF_ERC20',   label: 'Confidential ERC-20 (ERC-7984, Zama fhEVM)' },
     ],
     SOLANA: [

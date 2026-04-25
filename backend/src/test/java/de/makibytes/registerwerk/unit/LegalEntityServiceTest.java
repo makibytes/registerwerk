@@ -55,7 +55,7 @@ class LegalEntityServiceTest {
         LegalEntity entity = new LegalEntity();
         entity.setId(UUID.randomUUID());
         entity.setCurrentName("Acme GmbH");
-        entity.setType(EntityType.COMPANY);
+        entity.setType(EntityType.ISSUER);
         entity.setStatus(EntityStatus.PENDING_ONBOARDING);
         return entity;
     }

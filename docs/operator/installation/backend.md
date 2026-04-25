@@ -27,21 +27,7 @@ backend/src/main/resources/db/migration/
 Current schema versions:
 | Version | Description |
 |---|---|
-| V1 | Legal entities and name history |
-| V2 | KYC documents (split metadata / BYTEA) |
-| V3 | Onboarding tokens |
-| V4 | Assets and deployments |
-| V5 | Asset holders |
-| V6 | Mint control rules |
-| V7 | Audit log (range-partitioned) |
-| V8 | JSONB indexes on public_data |
-| V9 | Entity merge records |
-| V10 | Dynamic chain config |
-| V11 | Token transfers |
-| V12 | Indexer state cursors |
-| V13 | ONCHAINID and claims |
-| V14 | ERC-3643 T-REX suite tables |
-| V15 | Fhenix and Inco chains |
+| V1 | Consolidated initial schema covering legal entities, KYC, onboarding tokens, assets, deployments, holders, audit log, chain config, token transfers, indexer state cursors, ONCHAINID and claims, ERC-3643 T-REX suite tables, Fhenix and Inco chains, and related tables |
 
 ## Health and monitoring
 

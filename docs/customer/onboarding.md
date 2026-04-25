@@ -29,11 +29,11 @@ Admin activates your account — you can start working
 
 The registry operator creates an entity (company or individual) on your behalf. You will receive an email from the registry with the subject **"Your eWpG Registry Invitation"** containing:
 
-- A one-time **onboarding token** (valid for 72 hours)
+- A one-time **onboarding token** (valid for 48 hours)
 - A link to the customer portal
 
 :::warning Token expiry
-The onboarding token expires after 72 hours. If it has expired, contact the registry operator to request a new one. Do not share the token — it grants full setup access to your account.
+The onboarding token expires after 48 hours. If it has expired, contact the registry operator to request a new one. Do not share the token — it grants full setup access to your account.
 :::
 
 ## Step 2 — Redeem the token

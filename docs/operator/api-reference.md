@@ -197,3 +197,4 @@ http://localhost:8080/swagger-ui.html
 | `GET` | `/api/v1/public/assets/by-address/{address}` | Lookup token |
 | `GET` | `/api/v1/public/chains` | List active chains |
 | `GET` | `/api/v1/onboarding/token-info/{token}` | Validate onboarding token |
+| `POST` | `/api/v1/onboarding/complete` | Complete onboarding with token |

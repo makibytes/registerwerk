@@ -36,6 +36,10 @@ npm-debug.log
 yarn-error.log
 .npm/
 
+# Docusaurus build cache
+docs/.docusaurus/
+docs/build/
+
 # Environment / secrets
 .env
 .env.local
@@ -55,3 +59,4 @@ Thumbs.db
 
 /.claude
 /.vscode
+

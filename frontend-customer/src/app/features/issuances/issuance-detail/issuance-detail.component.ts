@@ -367,8 +367,8 @@ export class IssuanceDetailComponent implements OnInit {
       PENDING_APPROVAL: 1,
       APPROVED: 2,
       ISSUED: 3,
-      REJECTED: 1,
-      REVOKED: 3,
+      SUSPENDED: 3,
+      REDEEMED: 4,
     };
     return map[this.asset.status] ?? 0;
   }

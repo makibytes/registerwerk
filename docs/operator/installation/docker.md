@@ -25,7 +25,6 @@ The root `docker-compose.yml` defines all services:
 services:
   postgres:         # Application database
   backend:          # Spring Boot 4 API
-  kong-db:          # Kong's own PostgreSQL
   kong-migrations:  # Runs once to migrate Kong DB
   kong:             # API gateway
   konga:            # Kong Admin UI
@@ -34,15 +33,16 @@ services:
 ### Starting services
 
 ```bash
-# First time (or after schema changes)
-docker compose up -d postgres kong-db
-sleep 5
-docker compose run --rm kong-migrations
-docker compose up -d
-
-# Subsequent starts
 docker compose up -d
 ```
+
+On the first start of a fresh `pgdata` volume, Postgres runs the init scripts in `docker/postgres/init/` and creates:
+
+- `registerwerk` owned by `${DB_USER}` with `${DB_PASSWORD}`
+- `kong` owned by `${KONG_DB_USER}` with `${KONG_DB_PASSWORD}`
+- `konga` owned by `${KONGA_DB_USER}` with `${KONGA_DB_PASSWORD}`
+
+If `pgdata` already exists, those init scripts do not run again.
 
 ### Logs
 

@@ -10,6 +10,7 @@ import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepos
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.OnboardingTokenRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,22 +35,25 @@ public class OnboardingService {
 
     private static final Logger log = LoggerFactory.getLogger(OnboardingService.class);
     private static final int TOKEN_BYTES = 36; // 36 random bytes → 48-char Base64URL token
-    private static final long TOKEN_TTL_DAYS = 7;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final OnboardingTokenRepository onboardingTokenRepository;
     private final LegalEntityRepository legalEntityRepository;
     private final WelcomeEmailService welcomeEmailService;
     private final OnboardingEmailService onboardingEmailService;
+    private final long tokenTtlHours;
 
     public OnboardingService(
             OnboardingTokenRepository onboardingTokenRepository,
             LegalEntityRepository legalEntityRepository,
             WelcomeEmailService welcomeEmailService,
-            OnboardingEmailService onboardingEmailService) {
+            OnboardingEmailService onboardingEmailService,
+            @Value("${registerwerk.onboarding.token-ttl-hours:48}") long tokenTtlHours) {
         this.onboardingTokenRepository = onboardingTokenRepository;
         this.legalEntityRepository = legalEntityRepository;
         this.welcomeEmailService = welcomeEmailService;
         this.onboardingEmailService = onboardingEmailService;
+        this.tokenTtlHours = tokenTtlHours;
     }
 
     /**
@@ -72,13 +76,13 @@ public class OnboardingService {
             });
 
         byte[] randomBytes = new byte[TOKEN_BYTES];
-        new SecureRandom().nextBytes(randomBytes);
+        SECURE_RANDOM.nextBytes(randomBytes);
         String cleartext = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
 
         OnboardingToken token = new OnboardingToken();
         token.setLegalEntityId(entityId);
         token.setTokenHash(sha256Hex(cleartext));
-        token.setExpiresAt(Instant.now().plus(TOKEN_TTL_DAYS, ChronoUnit.DAYS));
+        token.setExpiresAt(Instant.now().plus(tokenTtlHours, ChronoUnit.HOURS));
         token.setIssuedBy(issuedBy);
         onboardingTokenRepository.save(token);
 

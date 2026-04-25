@@ -2,7 +2,7 @@ import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AssetStatus } from '../../../core/models';
 
-type BadgeStatus = AssetStatus | 'WHITELISTED' | 'NOT_WHITELISTED' | 'PENDING' | 'DEPLOYED' | 'FAILED';
+type BadgeStatus = AssetStatus | 'WHITELISTED' | 'NOT_WHITELISTED' | 'PENDING' | 'CONFIRMED' | 'FAILED' | 'REJECTED';
 
 @Component({
   selector: 'app-status-badge',
@@ -27,13 +27,14 @@ export class StatusBadgeComponent {
       PENDING_APPROVAL: 'Pending Approval',
       APPROVED: 'Approved',
       ISSUED: 'Issued',
-      REJECTED: 'Rejected',
-      REVOKED: 'Revoked',
+      SUSPENDED: 'Suspended',
+      REDEEMED: 'Redeemed',
       WHITELISTED: 'Whitelisted',
       NOT_WHITELISTED: 'Not Whitelisted',
       PENDING: 'Pending',
-      DEPLOYED: 'Deployed',
+      CONFIRMED: 'Confirmed',
       FAILED: 'Failed',
+      REJECTED: 'Rejected',
     };
     return labels[this.status] ?? this.status;
   }

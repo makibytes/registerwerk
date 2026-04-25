@@ -5,16 +5,15 @@ export type AssetStatus =
   | 'PENDING_APPROVAL'
   | 'APPROVED'
   | 'ISSUED'
-  | 'REJECTED'
-  | 'REVOKED';
+  | 'SUSPENDED'
+  | 'REDEEMED';
 
-export type OnchainLevel = 'LEVEL_0' | 'LEVEL_1' | 'LEVEL_2' | 'LEVEL_3';
+export type OnchainLevel = 'NONE' | 'SIMPLE' | 'CONTROL';
 
 export type TokenStandard =
   | 'ERC20'
   | 'ERC721'
   | 'ERC1155'
-  | 'ERC1400'
   | 'ERC3643'
   | 'CONF_ERC20'
   | 'CONF_ERC3643'
@@ -24,7 +23,7 @@ export type Chain = 'ETHEREUM' | 'POLYGON' | 'BASE' | 'SOLANA';
 
 export type Network = 'MAINNET' | 'TESTNET';
 
-export type DeploymentStatus = 'PENDING' | 'DEPLOYED' | 'FAILED';
+export type DeploymentStatus = 'PENDING' | 'CONFIRMED' | 'FAILED';
 
 export type KycStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 

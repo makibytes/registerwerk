@@ -27,7 +27,8 @@ cp .env.example .env
 Open `.env` and fill in at minimum:
 
 ```dotenv
-DB_PASSWORD=changeme
+DB_PASSWORD=registerwerk
+KONG_DB_PASSWORD=kong
 JWT_ISSUER_URI=https://login.microsoftonline.com/<tenant>/v2.0
 ETH_SEPOLIA_RPC=https://rpc.sepolia.org
 ```
@@ -35,10 +36,7 @@ ETH_SEPOLIA_RPC=https://rpc.sepolia.org
 ## 2 — Start infrastructure
 
 ```bash
-docker compose up -d postgres kong-db
-# wait ~5 seconds for postgres to be ready
-docker compose up -d kong-migrations
-docker compose up -d kong konga backend
+docker compose up -d
 ```
 
 ## 3 — Verify health

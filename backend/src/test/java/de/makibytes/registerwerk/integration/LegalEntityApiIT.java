@@ -9,7 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
@@ -20,6 +20,7 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -49,11 +50,18 @@ class LegalEntityApiIT {
     @Autowired
     private TestRestTemplate restTemplate;
 
+    @LocalServerPort
+    private int port;
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private String url(String path) {
+        return "http://localhost:" + port + path;
+    }
 
     private EntityCreateRequest buildCreateRequest(String name) {
         return new EntityCreateRequest(
-            EntityType.COMPANY,
+            EntityType.ISSUER,
             name,
             "CHE-123.456.789",
             "CH",
@@ -64,7 +72,7 @@ class LegalEntityApiIT {
 
     private ResponseEntity<EntityResponse> createEntity(String name) {
         return restTemplate.postForEntity(
-            "/api/v1/entities",
+            url("/api/v1/entities"),
             buildCreateRequest(name),
             EntityResponse.class
         );
@@ -93,7 +101,7 @@ class LegalEntityApiIT {
         UUID randomId = UUID.randomUUID();
 
         ResponseEntity<String> response = restTemplate.getForEntity(
-            "/api/v1/entities/{id}", String.class, randomId);
+            url("/api/v1/entities/{id}"), String.class, randomId);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -106,7 +114,7 @@ class LegalEntityApiIT {
         createEntity("Entity Beta AG");
 
         ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-            "/api/v1/entities?size=10&page=0",
+            url("/api/v1/entities?size=10&page=0"),
             HttpMethod.GET,
             null,
             new ParameterizedTypeReference<>() {}
@@ -131,7 +139,7 @@ class LegalEntityApiIT {
             "Updated Name AG", "213800XXXXXXXXXXXXXX", null, "DE", null);
 
         ResponseEntity<EntityResponse> updated = restTemplate.exchange(
-            "/api/v1/entities/{id}",
+            url("/api/v1/entities/{id}"),
             HttpMethod.PATCH,
             new HttpEntity<>(updateRequest),
             EntityResponse.class,
@@ -153,7 +161,7 @@ class LegalEntityApiIT {
         UUID id = created.getBody().id();
 
         ResponseEntity<Void> suspendResponse = restTemplate.exchange(
-            "/api/v1/entities/{id}/suspend",
+            url("/api/v1/entities/{id}/suspend"),
             HttpMethod.POST,
             null,
             Void.class,
@@ -163,7 +171,7 @@ class LegalEntityApiIT {
         assertThat(suspendResponse.getStatusCode()).isIn(HttpStatus.NO_CONTENT, HttpStatus.OK);
 
         ResponseEntity<EntityResponse> getResponse = restTemplate.getForEntity(
-            "/api/v1/entities/{id}", EntityResponse.class, id);
+            url("/api/v1/entities/{id}"), EntityResponse.class, id);
         assertThat(getResponse.getBody()).isNotNull();
         assertThat(getResponse.getBody().status().name()).isEqualTo("SUSPENDED");
     }

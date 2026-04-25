@@ -7,9 +7,8 @@ import de.makibytes.registerwerk.web.dto.EntityResponse;
 import de.makibytes.registerwerk.web.dto.KycDocumentResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
@@ -24,6 +23,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -52,14 +53,21 @@ class KycDocumentApiIT {
     @Autowired
     private TestRestTemplate restTemplate;
 
+    @LocalServerPort
+    private int port;
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private String url(String path) {
+        return "http://localhost:" + port + path;
+    }
 
     /** Creates a legal entity and returns its ID. */
     private UUID createEntityAndGetId(String name) {
         EntityCreateRequest req = new EntityCreateRequest(
-            EntityType.COMPANY, name, null, "CH", null, null);
+            EntityType.ISSUER, name, null, "CH", null, null);
         ResponseEntity<EntityResponse> response = restTemplate.postForEntity(
-            "/api/v1/entities", req, EntityResponse.class);
+            url("/api/v1/entities"), req, EntityResponse.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         return response.getBody().id();
     }
@@ -80,7 +88,7 @@ class KycDocumentApiIT {
         body.add("documentType", "PASSPORT");
 
         return restTemplate.exchange(
-            "/api/v1/entities/{entityId}/kyc/documents",
+            url("/api/v1/entities/{entityId}/kyc/documents"),
             HttpMethod.POST,
             new HttpEntity<>(body, headers),
             KycDocumentResponse.class,
@@ -131,7 +139,7 @@ class KycDocumentApiIT {
         filePartHeaders.setContentType(MediaType.APPLICATION_PDF);
 
         ResponseEntity<KycDocumentResponse> uploadResp = restTemplate.exchange(
-            "/api/v1/entities/{entityId}/kyc/documents",
+            url("/api/v1/entities/{entityId}/kyc/documents"),
             HttpMethod.POST,
             new HttpEntity<>(form, headers),
             KycDocumentResponse.class,
@@ -141,7 +149,7 @@ class KycDocumentApiIT {
         UUID docId = uploadResp.getBody().id();
 
         ResponseEntity<byte[]> downloadResp = restTemplate.exchange(
-            "/api/v1/entities/{entityId}/kyc/documents/{docId}",
+            url("/api/v1/entities/{entityId}/kyc/documents/{docId}"),
             HttpMethod.GET,
             null,
             byte[].class,
@@ -164,7 +172,7 @@ class KycDocumentApiIT {
         UUID docId = uploadResp.getBody().id();
 
         ResponseEntity<Void> deleteResp = restTemplate.exchange(
-            "/api/v1/entities/{entityId}/kyc/documents/{docId}",
+            url("/api/v1/entities/{entityId}/kyc/documents/{docId}"),
             HttpMethod.DELETE,
             null,
             Void.class,

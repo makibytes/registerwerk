@@ -11,13 +11,11 @@ Kong 3.8 acts as the single entry point for all API traffic. It handles authenti
 ## Starting Kong
 
 ```bash
-# Start Kong + its database
-docker compose up -d kong-db
-docker compose run --rm kong-migrations
-
 # Start Kong and Konga
 docker compose up -d kong konga
 ```
+
+The root compose file uses the shared `postgres` service for Kong as well. On first start, Postgres init scripts create separate `kong` and `konga` databases and users before `kong-migrations` runs.
 
 ## Declarative configuration
 

@@ -357,19 +357,18 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
     { value: 'PENDING_APPROVAL', label: 'Pending Approval' },
     { value: 'APPROVED',         label: 'Approved' },
     { value: 'ISSUED',           label: 'Issued' },
-    { value: 'REJECTED',         label: 'Rejected' },
-    { value: 'REVOKED',          label: 'Revoked' },
+    { value: 'SUSPENDED',        label: 'Suspended' },
+    { value: 'REDEEMED',         label: 'Redeemed' },
   ];
 
   readonly standardOptions: TokenStandard[] = [
-    'ERC20', 'ERC721', 'ERC1155', 'ERC1400', 'ERC3643', 'CONF_ERC20', 'CONF_ERC3643', 'SPL',
+    'ERC20', 'ERC721', 'ERC1155', 'ERC3643', 'CONF_ERC20', 'CONF_ERC3643', 'SPL',
   ];
 
   private readonly standardColors: Record<string, string> = {
     ERC20: '#1565c0',
     ERC721: '#6a1b9a',
     ERC1155: '#f57c00',
-    ERC1400: '#00838f',
     ERC3643: '#00695c',
     CONF_ERC20: '#e65100',
     CONF_ERC3643: '#880e4f',
@@ -381,8 +380,8 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
     PENDING_APPROVAL: '#f57c00',
     APPROVED: '#0288d1',
     ISSUED: '#2e7d32',
-    REJECTED: '#c62828',
-    REVOKED: '#6d4c41',
+    SUSPENDED: '#c62828',
+    REDEEMED: '#6d4c41',
   };
 
   // ── Computed analytics ─────────────────────────────────────────────────────

@@ -69,4 +69,4 @@ Documents smaller than 5 MB are stored inline as BYTEA in PostgreSQL. Documents 
 | Variable | Description |
 |---|---|
 | `CUSTOMER_FRONTEND_URL` | Base URL of the customer frontend (for email links) |
-| `ONBOARDING_TOKEN_TTL_HOURS` | Token expiry (default 48) |
+| `REGISTERWERK_ONBOARDING_TOKEN_TTL_HOURS` | Token expiry (default 48) |

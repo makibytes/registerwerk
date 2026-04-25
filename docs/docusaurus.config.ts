@@ -8,7 +8,11 @@ const config: Config = {
   url: 'https://docs.registerwerk.io',
   baseUrl: '/',
   onBrokenLinks: 'throw',
-  onBrokenMarkdownLinks: 'warn',
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
   i18n: {
     defaultLocale: 'en',
     locales: ['en', 'de'],
@@ -26,6 +30,21 @@ const config: Config = {
     ],
   ],
   plugins: [
+    function disableWebpackBarPlugin() {
+      return {
+        name: 'disable-webpackbar',
+        configureWebpack(config: {plugins?: unknown[]}) {
+          return {
+            plugins: (config.plugins ?? []).filter(plugin =>
+              plugin != null && (plugin as {constructor?: {name?: string}}).constructor?.name !== 'WebpackBarPlugin'
+            ),
+            mergeStrategy: {
+              plugins: 'replace' as const,
+            },
+          };
+        },
+      };
+    },
     [
       '@docusaurus/plugin-content-docs',
       {
@@ -50,7 +69,7 @@ const config: Config = {
   themeConfig: {
     navbar: {
       title: 'Registerwerk',
-      logo: {alt: 'Registerwerk', src: 'img/logo.svg'},
+      logo: {alt: 'Registerwerk', src: 'img/logo.svg', href: '/operator/getting-started'},
       items: [
         {to: '/customer/intro', label: 'For Customers', position: 'left'},
         {to: '/operator/getting-started', label: 'For Operators', position: 'left'},

@@ -9,11 +9,11 @@ import de.makibytes.registerwerk.domain.enums.EntityStatus;
 import de.makibytes.registerwerk.domain.enums.EntityType;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.OnboardingTokenRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -47,8 +47,18 @@ class OnboardingServiceTest {
     @Mock
     private OnboardingEmailService onboardingEmailService;
 
-    @InjectMocks
     private OnboardingService onboardingService;
+
+    @BeforeEach
+    void setUp() {
+        onboardingService = new OnboardingService(
+            onboardingTokenRepository,
+            legalEntityRepository,
+            welcomeEmailService,
+            onboardingEmailService,
+            48
+        );
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -56,7 +66,7 @@ class OnboardingServiceTest {
         LegalEntity entity = new LegalEntity();
         entity.setId(UUID.randomUUID());
         entity.setCurrentName("Test Corp AG");
-        entity.setType(EntityType.COMPANY);
+        entity.setType(EntityType.ISSUER);
         entity.setStatus(EntityStatus.PENDING_ONBOARDING);
         return entity;
     }
@@ -101,7 +111,7 @@ class OnboardingServiceTest {
     }
 
     @Test
-    @DisplayName("generateToken should set expiry more than 6 days in the future")
+    @DisplayName("generateToken should set expiry about 48 hours in the future")
     void generateToken_shouldSetExpiryInFuture() {
         LegalEntity entity = buildEntity();
         when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
@@ -115,7 +125,10 @@ class OnboardingServiceTest {
         verify(onboardingTokenRepository).save(captor.capture());
 
         Instant expiresAt = captor.getValue().getExpiresAt();
-        assertThat(expiresAt).isAfter(Instant.now().plus(6, ChronoUnit.DAYS));
+        Instant now = Instant.now();
+        assertThat(expiresAt)
+            .isAfter(now.plus(47, ChronoUnit.HOURS))
+            .isBefore(now.plus(49, ChronoUnit.HOURS));
     }
 
     // ── validateToken ─────────────────────────────────────────────────────────

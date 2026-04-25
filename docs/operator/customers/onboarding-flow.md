@@ -52,7 +52,7 @@ Fill in the entity form:
 
 Click **Create Entity**. The system:
 1. Creates the entity record in the database
-2. Generates a one-time onboarding token (valid for 72 hours by default, configurable via `ONBOARDING_TOKEN_TTL_HOURS`)
+2. Generates a one-time onboarding token (valid for 48 hours by default, configurable via `registerwerk.onboarding.token-ttl-hours`)
 3. Sends the invitation email to the contact address
 
 ## Step 2 — Monitor token redemption

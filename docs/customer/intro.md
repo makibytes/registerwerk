@@ -2,8 +2,7 @@
 id: intro
 title: Welcome to the eWpG Registry
 sidebar_label: Introduction
-slug: /customer/intro
----
+--- 
 
 # Welcome to the eWpG Registry
 
