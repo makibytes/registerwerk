@@ -2,10 +2,6 @@ import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
-import { MatCardModule } from '@angular/material/card';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
-import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { HttpClient } from '@angular/common/http';
@@ -19,148 +15,298 @@ interface LoginResponse {
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    RouterLink,
-    MatCardModule,
-    MatFormFieldModule,
-    MatInputModule,
-    MatButtonModule,
-    MatIconModule,
-    MatProgressSpinnerModule,
-  ],
-  template: `
-    <div class="login-page">
-      <mat-card class="login-card">
-        <mat-card-header>
-          <div class="login-logo">
-            <mat-icon class="logo-icon">account_balance</mat-icon>
-          </div>
-          <mat-card-title>Registerwerk</mat-card-title>
-          <mat-card-subtitle>Customer Portal</mat-card-subtitle>
-        </mat-card-header>
+  imports: [CommonModule, FormsModule, RouterLink, MatIconModule, MatProgressSpinnerModule],
+  styles: [`
+    .page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0F1A2E;
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+    }
 
-        <mat-card-content>
-          <form (ngSubmit)="onSubmit()" #loginForm="ngForm">
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Email</mat-label>
+    /* Subtle mesh gradient background */
+    .page::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 15% 80%, rgba(13,148,136,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 60% at 85% 20%, rgba(45,212,191,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 80% 40% at 50% 50%, rgba(15,26,46,0.8) 0%, transparent 100%);
+      pointer-events: none;
+    }
+
+    /* Dot grid overlay */
+    .page::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+    }
+
+    .card {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 420px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      padding: 40px;
+      backdrop-filter: blur(20px);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.04),
+        0 24px 64px rgba(0,0,0,0.5),
+        0 4px 16px rgba(0,0,0,0.3);
+    }
+
+    .card-header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .logo-mark {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #2DD4BF 0%, #0D9488 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+      box-shadow: 0 8px 20px rgba(13,148,136,0.3);
+
+      mat-icon {
+        font-size: 26px;
+        width: 26px;
+        height: 26px;
+        color: white;
+      }
+    }
+
+    .card-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: #FFFFFF;
+      margin: 0 0 6px;
+      letter-spacing: -0.4px;
+    }
+
+    .card-subtitle {
+      font-size: 13px;
+      color: rgba(255,255,255,0.4);
+      margin: 0;
+    }
+
+    /* Custom form fields */
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .field-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.5);
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    .field-input {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 9px;
+      padding: 11px 14px;
+      font-family: 'Manrope', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: #FFFFFF;
+      outline: none;
+      transition: border-color 0.15s ease, background 0.15s ease;
+
+      &::placeholder { color: rgba(255,255,255,0.2); }
+
+      &:focus {
+        border-color: rgba(45,212,191,0.5);
+        background: rgba(45,212,191,0.04);
+      }
+    }
+
+    .password-wrap {
+      position: relative;
+
+      .field-input { padding-right: 44px; }
+
+      .toggle-btn {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px;
+        color: rgba(255,255,255,0.3);
+        display: flex;
+        align-items: center;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+
+        &:hover { color: rgba(255,255,255,0.6); }
+      }
+    }
+
+    .error-msg {
+      background: rgba(190,18,60,0.12);
+      border: 1px solid rgba(190,18,60,0.2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #FDA4AF;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+      }
+    }
+
+    .submit-btn {
+      width: 100%;
+      height: 46px;
+      background: linear-gradient(135deg, #2DD4BF 0%, #0D9488 100%);
+      color: #FFFFFF;
+      border: none;
+      border-radius: 9px;
+      font-family: 'Manrope', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.1px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 2px 12px rgba(13,148,136,0.3);
+      transition: box-shadow 0.15s ease, opacity 0.15s ease;
+
+      &:hover { box-shadow: 0 4px 18px rgba(13,148,136,0.45); }
+      &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+    }
+
+    .card-footer {
+      margin-top: 24px;
+      text-align: center;
+    }
+
+    .onboarding-link {
+      font-size: 13px;
+      color: rgba(255,255,255,0.35);
+
+      a {
+        color: #2DD4BF;
+        text-decoration: none;
+        font-weight: 600;
+
+        &:hover { text-decoration: underline; }
+      }
+    }
+  `],
+  template: `
+    <div class="page">
+      <div class="card">
+        <div class="card-header">
+          <div class="logo-mark">
+            <mat-icon>account_balance</mat-icon>
+          </div>
+          <h1 class="card-title">Welcome back</h1>
+          <p class="card-subtitle">Sign in to the Registerwerk Customer Portal</p>
+        </div>
+
+        <form (ngSubmit)="onSubmit()">
+          <div class="field-group">
+            <div>
+              <label class="field-label" for="email">Email address</label>
               <input
-                matInput
+                id="email"
+                class="field-input"
                 type="email"
-                name="email"
                 [(ngModel)]="email"
+                name="email"
                 required
                 autocomplete="email"
-                placeholder="your@company.com"
+                placeholder="you@company.com"
               />
-              <mat-icon matSuffix>email</mat-icon>
-            </mat-form-field>
+            </div>
 
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Password</mat-label>
-              <input
-                matInput
-                [type]="hidePassword ? 'password' : 'text'"
-                name="password"
-                [(ngModel)]="password"
-                required
-                autocomplete="current-password"
-              />
-              <button
-                mat-icon-button
-                matSuffix
-                type="button"
-                (click)="hidePassword = !hidePassword"
-                [attr.aria-label]="'Toggle password visibility'"
-              >
-                <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
-              </button>
-            </mat-form-field>
+            <div>
+              <label class="field-label" for="password">Password</label>
+              <div class="password-wrap">
+                <input
+                  id="password"
+                  class="field-input"
+                  [type]="hidePassword ? 'password' : 'text'"
+                  [(ngModel)]="password"
+                  name="password"
+                  required
+                  autocomplete="current-password"
+                  placeholder="••••••••"
+                />
+                <button type="button" class="toggle-btn" (click)="hidePassword = !hidePassword" [attr.aria-label]="'Toggle password'">
+                  <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
+                </button>
+              </div>
+            </div>
+          </div>
 
-            @if (errorMessage) {
-              <p class="error-message">{{ errorMessage }}</p>
+          @if (errorMessage) {
+            <div class="error-msg">
+              <mat-icon>error_outline</mat-icon>
+              {{ errorMessage }}
+            </div>
+          }
+
+          <button class="submit-btn" type="submit" [disabled]="loading || !email || !password">
+            @if (loading) {
+              <mat-spinner diameter="18" />
+              Signing in…
+            } @else {
+              Sign in
             }
+          </button>
+        </form>
 
-            <button
-              mat-raised-button
-              color="primary"
-              type="submit"
-              class="full-width login-btn"
-              [disabled]="loading || loginForm.invalid"
-            >
-              @if (loading) {
-                <mat-spinner diameter="20"></mat-spinner>
-              } @else {
-                Sign In
-              }
-            </button>
-          </form>
-        </mat-card-content>
-
-        <mat-card-actions>
-          <p class="hint-text">
-            New to the platform?
-            <a routerLink="/onboarding">Set up your account</a>
+        <div class="card-footer">
+          <p class="onboarding-link">
+            New here? <a routerLink="/onboarding">Set up your account</a>
           </p>
-        </mat-card-actions>
-      </mat-card>
+        </div>
+      </div>
     </div>
   `,
-  styles: [`
-    .login-page {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      background: linear-gradient(135deg, #1a237e 0%, #00695c 100%);
-    }
-    .login-card {
-      width: 400px;
-      padding: 16px;
-    }
-    mat-card-header {
-      flex-direction: column;
-      align-items: center;
-      padding-bottom: 16px;
-    }
-    .login-logo {
-      width: 64px;
-      height: 64px;
-      border-radius: 50%;
-      background: #00695c;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 12px;
-    }
-    .logo-icon {
-      font-size: 36px;
-      width: 36px;
-      height: 36px;
-      color: white;
-    }
-    mat-card-title {
-      font-size: 22px !important;
-    }
-    .full-width { width: 100%; }
-    .login-btn {
-      margin-top: 8px;
-      height: 44px;
-    }
-    .error-message {
-      color: #c62828;
-      font-size: 13px;
-      margin: 4px 0 8px;
-    }
-    .hint-text {
-      text-align: center;
-      font-size: 13px;
-      color: #757575;
-      width: 100%;
-      margin: 8px 0 0;
-    }
-  `]
 })
 export class LoginComponent {
   private readonly http = inject(HttpClient);
@@ -190,7 +336,7 @@ export class LoginComponent {
         },
         error: () => {
           this.loading = false;
-          this.errorMessage = 'Invalid credentials. Please try again.';
+          this.errorMessage = 'Invalid credentials. Please check your email and password.';
         },
       });
   }

@@ -1,72 +1,142 @@
 @use '@angular/material' as mat;
 
-// Customer app theme — cyan primary to visually distinguish from operator app
-$customer-theme: mat.define-theme((
-  color: (
-    theme-type: light,
-    primary: mat.$cyan-palette,
-  ),
-  typography: (
-    brand-family: 'Roboto',
-  ),
-  density: (
-    scale: 0,
-  )
+// ── Angular Material M3 Themes ────────────────────────────────────────────────
+
+$light: mat.define-theme((
+  color: (theme-type: light, primary: mat.$cyan-palette),
+  typography: (brand-family: 'Manrope', plain-family: 'Manrope'),
+  density: (scale: 0),
+));
+
+$dark: mat.define-theme((
+  color: (theme-type: dark, primary: mat.$cyan-palette),
+  typography: (brand-family: 'Manrope', plain-family: 'Manrope'),
+  density: (scale: 0),
 ));
 
 @include mat.core();
 
-html {
-  @include mat.all-component-themes($customer-theme);
+html { @include mat.all-component-themes($light); }
+
+@media (prefers-color-scheme: dark) {
+  html { @include mat.all-component-colors($dark); }
 }
 
-html, body {
-  height: 100%;
-  margin: 0;
-  font-family: Roboto, "Helvetica Neue", sans-serif;
-  background-color: #f5f5f5;
+// ── Design Tokens ─────────────────────────────────────────────────────────────
+
+:root {
+  // Surfaces
+  --rw-bg:              #F2F5FA;
+  --rw-surface:         #FFFFFF;
+  --rw-surface-raised:  #FFFFFF;
+
+  // Borders
+  --rw-border:          #E0E6EF;
+  --rw-border-subtle:   #EDF1F7;
+
+  // Text
+  --rw-text-primary:    #0F1A2E;
+  --rw-text-secondary:  #475569;
+  --rw-text-muted:      #94A3B8;
+
+  // Elevation
+  --rw-shadow-xs:  0 1px 2px rgba(15,26,46,0.05);
+  --rw-shadow-sm:  0 1px 3px rgba(15,26,46,0.08), 0 1px 2px rgba(15,26,46,0.04);
+  --rw-shadow:     0 2px 6px rgba(15,26,46,0.08), 0 1px 3px rgba(15,26,46,0.04);
+  --rw-shadow-md:  0 4px 12px rgba(15,26,46,0.1), 0 2px 4px rgba(15,26,46,0.05);
+
+  // Nav bar
+  --rw-nav-bg:          #111827;
+  --rw-nav-border:      rgba(255,255,255,0.06);
+  --rw-nav-fg:          rgba(255,255,255,0.6);
+  --rw-nav-fg-active:   #FFFFFF;
+  --rw-nav-active-bg:   rgba(255,255,255,0.1);
+  --rw-nav-hover-bg:    rgba(255,255,255,0.06);
+  --rw-nav-accent:      #2DD4BF;  // teal-400
+
+  // Brand
+  --rw-accent:          #0D9488;  // teal-600
+  --rw-accent-light:    #CCFBF1;
+  --rw-accent-subtle:   rgba(13,148,136,0.08);
+
+  // Status badges
+  --rw-draft-bg:     #EFF6FF; --rw-draft-fg:    #1D4ED8;
+  --rw-pending-bg:   #FFFBEB; --rw-pending-fg:  #92400E;
+  --rw-approved-bg:  #ECFDF5; --rw-approved-fg: #065F46;
+  --rw-issued-bg:    #F0FDFA; --rw-issued-fg:   #0F766E;
+  --rw-rejected-bg:  #FFF1F2; --rw-rejected-fg: #BE123C;
+  --rw-revoked-bg:   #FAF5FF; --rw-revoked-fg:  #6D28D9;
+
+  // Chain chips
+  --rw-chain-eth-bg:      #EEF2FF; --rw-chain-eth-fg:     #4338CA;
+  --rw-chain-polygon-bg:  #FAF5FF; --rw-chain-polygon-fg: #7C3AED;
+  --rw-chain-base-bg:     #EFF6FF; --rw-chain-base-fg:    #1D4ED8;
+  --rw-chain-solana-bg:   #F0FDFA; --rw-chain-solana-fg:  #0F766E;
+
+  // Radius
+  --rw-radius-sm: 4px;
+  --rw-radius:    8px;
+  --rw-radius-md: 10px;
+  --rw-radius-lg: 14px;
 }
 
-// Lifecycle status colors
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.3px;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --rw-bg:              #0D1117;
+    --rw-surface:         #161B22;
+    --rw-surface-raised:  #21262D;
 
-  &.status-draft        { background: #e3f2fd; color: #1565c0; }
-  &.status-pending      { background: #fff8e1; color: #f57f17; }
-  &.status-approved     { background: #e8f5e9; color: #2e7d32; }
-  &.status-issued       { background: #e0f2f1; color: #00695c; }
-  &.status-rejected     { background: #fce4ec; color: #c62828; }
-  &.status-revoked      { background: #f3e5f5; color: #6a1b9a; }
-  &.status-whitelisted  { background: #e8f5e9; color: #2e7d32; }
-  &.status-not-whitelisted { background: #fafafa; color: #757575; }
+    --rw-border:          #30363D;
+    --rw-border-subtle:   #21262D;
+
+    --rw-text-primary:    #E6EDF3;
+    --rw-text-secondary:  #8B949E;
+    --rw-text-muted:      #484F58;
+
+    --rw-shadow-xs:  0 1px 2px rgba(0,0,0,0.25);
+    --rw-shadow-sm:  0 1px 3px rgba(0,0,0,0.35);
+    --rw-shadow:     0 2px 6px rgba(0,0,0,0.4);
+    --rw-shadow-md:  0 4px 12px rgba(0,0,0,0.45);
+
+    --rw-nav-bg:          #0D1117;
+    --rw-nav-border:      rgba(255,255,255,0.08);
+    --rw-nav-fg:          rgba(255,255,255,0.45);
+    --rw-nav-active-bg:   rgba(255,255,255,0.08);
+    --rw-nav-hover-bg:    rgba(255,255,255,0.04);
+
+    --rw-draft-bg:     rgba(29,78,216,0.15);    --rw-draft-fg:    #93C5FD;
+    --rw-pending-bg:   rgba(146,64,14,0.15);    --rw-pending-fg:  #FCD34D;
+    --rw-approved-bg:  rgba(6,95,70,0.15);      --rw-approved-fg: #6EE7B7;
+    --rw-issued-bg:    rgba(15,118,110,0.15);   --rw-issued-fg:   #5EEAD4;
+    --rw-rejected-bg:  rgba(190,18,60,0.15);    --rw-rejected-fg: #FDA4AF;
+    --rw-revoked-bg:   rgba(109,40,217,0.15);   --rw-revoked-fg:  #C4B5FD;
+
+    --rw-chain-eth-bg:      rgba(67,56,202,0.15); --rw-chain-eth-fg:     #A5B4FC;
+    --rw-chain-polygon-bg:  rgba(124,58,237,0.15); --rw-chain-polygon-fg: #C4B5FD;
+    --rw-chain-base-bg:     rgba(29,78,216,0.15);  --rw-chain-base-fg:    #93C5FD;
+    --rw-chain-solana-bg:   rgba(15,118,110,0.15); --rw-chain-solana-fg:  #5EEAD4;
+  }
 }
 
-// Chain color chips
-.chain-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
+// ── Base ───────────────────────────────────────────────────────────────────────
 
-  &.chain-ethereum  { background: #e8eaf6; color: #3949ab; }
-  &.chain-polygon   { background: #f3e5f5; color: #7b1fa2; }
-  &.chain-base      { background: #e3f2fd; color: #1976d2; }
-  &.chain-solana    { background: #e8f5e9; color: #2e7d32; }
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  font-family: 'Manrope', 'Helvetica Neue', sans-serif;
+  background: var(--rw-bg);
+  color: var(--rw-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-// Page layout helpers
+// ── Layout Utilities ───────────────────────────────────────────────────────────
+
 .page-container {
-  padding: 24px;
-  max-width: 1200px;
+  padding: 28px 32px;
+  max-width: 1280px;
   margin: 0 auto;
 }
 
@@ -78,12 +148,21 @@ html, body {
 
   h1 {
     margin: 0;
-    font-size: 24px;
-    font-weight: 500;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    color: var(--rw-text-primary);
   }
 }
 
-// Card grid
+.content-card {
+  background: var(--rw-surface);
+  border-radius: var(--rw-radius-md);
+  padding: 24px;
+  border: 1px solid var(--rw-border);
+  box-shadow: var(--rw-shadow-xs);
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -94,35 +173,96 @@ html, body {
 .stat-card {
   mat-card-content {
     .stat-value {
-      font-size: 36px;
-      font-weight: 700;
-      color: #37474f;
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      color: var(--rw-text-primary);
     }
     .stat-label {
-      font-size: 13px;
-      color: #78909c;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--rw-text-muted);
       margin-top: 4px;
     }
   }
 }
 
-// Lifecycle timeline
-.lifecycle-stepper {
-  margin: 24px 0;
-}
+.actions-cell { white-space: nowrap; }
 
-// Table helpers
-.mat-mdc-table {
-  width: 100%;
-}
-
-.actions-cell {
-  white-space: nowrap;
-}
-
-// Loading spinner overlay
 .loading-overlay {
   display: flex;
   justify-content: center;
-  padding: 48px;
+  padding: 60px;
 }
+
+.spacer { flex: 1; }
+
+.text-muted {
+  color: var(--rw-text-muted);
+  font-size: 13px;
+}
+
+// ── Material Table Overrides ───────────────────────────────────────────────────
+
+.mat-mdc-table { background: transparent !important; }
+
+.mat-mdc-row:hover .mat-mdc-cell { background: var(--rw-border-subtle); }
+
+.mat-mdc-cell, .mat-mdc-header-cell {
+  border-bottom-color: var(--rw-border) !important;
+  color: var(--rw-text-primary);
+}
+
+.mat-mdc-header-cell {
+  color: var(--rw-text-muted) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+// ── Status Badges ─────────────────────────────────────────────────────────────
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+
+  &.status-draft        { background: var(--rw-draft-bg);    color: var(--rw-draft-fg); }
+  &.status-pending      { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-approved     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-issued       { background: var(--rw-issued-bg);   color: var(--rw-issued-fg); }
+  &.status-rejected     { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
+  &.status-revoked      { background: var(--rw-revoked-bg);  color: var(--rw-revoked-fg); }
+  &.status-whitelisted  { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-not-whitelisted { background: var(--rw-border-subtle); color: var(--rw-text-muted); }
+}
+
+// ── Chain Chips ───────────────────────────────────────────────────────────────
+
+.chain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+
+  &.chain-ethereum { background: var(--rw-chain-eth-bg);     color: var(--rw-chain-eth-fg); }
+  &.chain-polygon  { background: var(--rw-chain-polygon-bg); color: var(--rw-chain-polygon-fg); }
+  &.chain-base     { background: var(--rw-chain-base-bg);    color: var(--rw-chain-base-fg); }
+  &.chain-solana   { background: var(--rw-chain-solana-bg);  color: var(--rw-chain-solana-fg); }
+}
+
+// ── Lifecycle Stepper ─────────────────────────────────────────────────────────
+
+.lifecycle-stepper { margin: 24px 0; }

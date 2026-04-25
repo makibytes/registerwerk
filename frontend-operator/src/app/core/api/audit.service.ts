@@ -7,7 +7,7 @@ import { AuditEvent, AuditFilterParams, PageResponse } from '../models';
 @Injectable({ providedIn: 'root' })
 export class AuditService {
   private readonly http = inject(HttpClient);
-  private readonly base = `${environment.apiUrl}/audit`;
+  private readonly base = `${environment.apiUrl}/audit/events`;
 
   searchEvents(params: AuditFilterParams = {}): Observable<PageResponse<AuditEvent>> {
     let httpParams = new HttpParams();

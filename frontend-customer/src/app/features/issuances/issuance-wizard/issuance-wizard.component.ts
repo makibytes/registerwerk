@@ -178,8 +178,10 @@ import { Chain, Network, OnchainLevel, TokenStandard } from '../../../core/model
                     @if (submitting) {
                       <mat-spinner diameter="18"></mat-spinner>
                     } @else {
-                      <mat-icon>send</mat-icon>
-                      Create Issuance
+                      <ng-container>
+                        <mat-icon>send</mat-icon>
+                        Create Issuance
+                      </ng-container>
                     }
                   </button>
                 </div>

@@ -115,8 +115,10 @@ import { CompanyService } from '../../../core/api/company.service';
             >
               @if (saving) { <mat-spinner diameter="18"></mat-spinner> }
               @else {
-                <mat-icon>save</mat-icon>
-                Save Settings
+                <ng-container>
+                  <mat-icon>save</mat-icon>
+                  Save Settings
+                </ng-container>
               }
             </button>
           </mat-card-actions>

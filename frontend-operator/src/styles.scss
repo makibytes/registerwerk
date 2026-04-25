@@ -1,38 +1,140 @@
 @use '@angular/material' as mat;
 
-$theme: mat.define-theme((
-  color: (
-    theme-type: light,
-    primary: mat.$violet-palette,
-  ),
-  typography: (
-    brand-family: 'Roboto',
-  ),
-  density: (
-    scale: 0,
-  )
+// ── Angular Material M3 Themes ────────────────────────────────────────────────
+
+$light: mat.define-theme((
+  color: (theme-type: light, primary: mat.$azure-palette),
+  typography: (brand-family: 'Manrope', plain-family: 'Manrope'),
+  density: (scale: 0),
+));
+
+$dark: mat.define-theme((
+  color: (theme-type: dark, primary: mat.$azure-palette),
+  typography: (brand-family: 'Manrope', plain-family: 'Manrope'),
+  density: (scale: 0),
 ));
 
 @include mat.core();
 
-html {
-  @include mat.all-component-themes($theme);
+html { @include mat.all-component-themes($light); }
+
+@media (prefers-color-scheme: dark) {
+  html { @include mat.all-component-colors($dark); }
 }
 
-* {
-  box-sizing: border-box;
+// ── Design Tokens ─────────────────────────────────────────────────────────────
+
+:root {
+  // Surfaces
+  --rw-bg:              #EEF1F8;
+  --rw-surface:         #FFFFFF;
+  --rw-surface-raised:  #FFFFFF;
+
+  // Borders
+  --rw-border:          #DDE1EB;
+  --rw-border-subtle:   #EDF0F5;
+
+  // Text
+  --rw-text-primary:    #0D1526;
+  --rw-text-secondary:  #4A5568;
+  --rw-text-muted:      #8C98AE;
+
+  // Elevation
+  --rw-shadow-xs:  0 1px 2px rgba(13,21,38,0.05);
+  --rw-shadow-sm:  0 1px 3px rgba(13,21,38,0.08), 0 1px 2px rgba(13,21,38,0.05);
+  --rw-shadow:     0 2px 6px rgba(13,21,38,0.08), 0 1px 3px rgba(13,21,38,0.05);
+  --rw-shadow-md:  0 4px 12px rgba(13,21,38,0.1), 0 2px 4px rgba(13,21,38,0.06);
+
+  // Sidebar — always dark regardless of color-scheme
+  --rw-sidebar-bg:             #07091A;
+  --rw-sidebar-border:         rgba(255,255,255,0.05);
+  --rw-sidebar-fg:             rgba(255,255,255,0.45);
+  --rw-sidebar-fg-hover:       rgba(255,255,255,0.82);
+  --rw-sidebar-fg-active:      #FCD34D;
+  --rw-sidebar-hover-bg:       rgba(255,255,255,0.05);
+  --rw-sidebar-active-bg:      rgba(252,211,77,0.1);
+  --rw-sidebar-icon:           rgba(255,255,255,0.35);
+  --rw-sidebar-icon-active:    #FCD34D;
+  --rw-sidebar-brand-bg:       rgba(255,255,255,0.03);
+
+  // Accent
+  --rw-accent:         #F59E0B;
+  --rw-accent-subtle:  rgba(245,158,11,0.1);
+
+  // Status badges
+  --rw-draft-bg:     #EFF6FF; --rw-draft-fg:    #1D4ED8;
+  --rw-pending-bg:   #FFFBEB; --rw-pending-fg:  #92400E;
+  --rw-approved-bg:  #ECFDF5; --rw-approved-fg: #065F46;
+  --rw-issued-bg:    #F0FDF4; --rw-issued-fg:   #15803D;
+  --rw-rejected-bg:  #FFF1F2; --rw-rejected-fg: #BE123C;
+  --rw-revoked-bg:   #FAF5FF; --rw-revoked-fg:  #6D28D9;
+
+  // Radius
+  --rw-radius-sm: 4px;
+  --rw-radius:    8px;
+  --rw-radius-md: 10px;
+  --rw-radius-lg: 14px;
+
+  // Toolbar
+  --rw-toolbar-bg:      #FFFFFF;
+  --rw-toolbar-border:  #DDE1EB;
+  --rw-toolbar-fg:      #0D1526;
 }
 
-html,
+@media (prefers-color-scheme: dark) {
+  :root {
+    --rw-bg:              #0D1117;
+    --rw-surface:         #161B22;
+    --rw-surface-raised:  #21262D;
+
+    --rw-border:          #30363D;
+    --rw-border-subtle:   #21262D;
+
+    --rw-text-primary:    #E6EDF3;
+    --rw-text-secondary:  #8B949E;
+    --rw-text-muted:      #484F58;
+
+    --rw-shadow-xs:  0 1px 2px rgba(0,0,0,0.25);
+    --rw-shadow-sm:  0 1px 3px rgba(0,0,0,0.35);
+    --rw-shadow:     0 2px 6px rgba(0,0,0,0.4);
+    --rw-shadow-md:  0 4px 12px rgba(0,0,0,0.45);
+
+    --rw-sidebar-bg:          #04050E;
+    --rw-sidebar-border:      rgba(255,255,255,0.04);
+    --rw-sidebar-fg:          rgba(255,255,255,0.35);
+    --rw-sidebar-fg-hover:    rgba(255,255,255,0.75);
+    --rw-sidebar-hover-bg:    rgba(255,255,255,0.04);
+    --rw-sidebar-active-bg:   rgba(252,211,77,0.08);
+    --rw-sidebar-brand-bg:    rgba(255,255,255,0.02);
+
+    --rw-draft-bg:     rgba(29,78,216,0.15);    --rw-draft-fg:    #93C5FD;
+    --rw-pending-bg:   rgba(146,64,14,0.15);    --rw-pending-fg:  #FCD34D;
+    --rw-approved-bg:  rgba(6,95,70,0.15);      --rw-approved-fg: #6EE7B7;
+    --rw-issued-bg:    rgba(21,128,61,0.15);    --rw-issued-fg:   #86EFAC;
+    --rw-rejected-bg:  rgba(190,18,60,0.15);    --rw-rejected-fg: #FDA4AF;
+    --rw-revoked-bg:   rgba(109,40,217,0.15);   --rw-revoked-fg:  #C4B5FD;
+
+    --rw-toolbar-bg:      #161B22;
+    --rw-toolbar-border:  #30363D;
+    --rw-toolbar-fg:      #E6EDF3;
+  }
+}
+
+// ── Base ───────────────────────────────────────────────────────────────────────
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
 body {
-  height: 100%;
+  font-family: 'Manrope', 'Helvetica Neue', sans-serif;
+  background: var(--rw-bg);
+  color: var(--rw-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-body {
-  margin: 0;
-  font-family: Roboto, 'Helvetica Neue', sans-serif;
-  background-color: #f5f5f5;
-}
+// ── Layout Utilities ───────────────────────────────────────────────────────────
 
 .page-header {
   display: flex;
@@ -42,43 +144,41 @@ body {
 
   h1 {
     margin: 0;
-    font-size: 24px;
-    font-weight: 500;
-    color: rgba(0, 0, 0, 0.87);
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    color: var(--rw-text-primary);
   }
 }
 
 .content-card {
-  background: white;
-  border-radius: 8px;
+  background: var(--rw-surface);
+  border-radius: var(--rw-radius-md);
   padding: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--rw-border);
+  box-shadow: var(--rw-shadow-xs);
 }
 
 .filter-row {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
   margin-bottom: 20px;
   flex-wrap: wrap;
 }
 
-.full-width-table {
-  width: 100%;
-}
+.full-width-table { width: 100%; }
 
 .actions-cell {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
-.spacer {
-  flex: 1 1 auto;
-}
+.spacer { flex: 1 1 auto; }
 
 .text-muted {
-  color: rgba(0, 0, 0, 0.54);
-  font-size: 14px;
+  color: var(--rw-text-muted);
+  font-size: 13px;
 }
 
 .mat-column-actions {
@@ -87,24 +187,70 @@ body {
 }
 
 .token-display {
-  background: #f5f5f5;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  padding: 16px;
-  font-family: monospace;
-  font-size: 14px;
+  background: var(--rw-bg);
+  border: 1px solid var(--rw-border);
+  border-radius: var(--rw-radius);
+  padding: 14px 16px;
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 12px;
   word-break: break-all;
-  position: relative;
+  color: var(--rw-text-secondary);
+  line-height: 1.6;
 }
 
 .warning-banner {
-  background: #fff3e0;
-  border-left: 4px solid #ff9800;
-  padding: 12px 16px;
-  border-radius: 0 4px 4px 0;
+  background: rgba(245,158,11,0.07);
+  border-left: 3px solid var(--rw-accent);
+  padding: 11px 16px;
+  border-radius: 0 var(--rw-radius) var(--rw-radius) 0;
   margin-bottom: 16px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: #e65100;
+  gap: 10px;
+  color: var(--rw-accent);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+// ── Material Table Overrides ───────────────────────────────────────────────────
+
+.mat-mdc-table { background: transparent !important; }
+
+.mat-mdc-row:hover .mat-mdc-cell { background: var(--rw-border-subtle); }
+
+.mat-mdc-header-row { background: transparent; }
+
+.mat-mdc-cell, .mat-mdc-header-cell {
+  border-bottom-color: var(--rw-border) !important;
+  color: var(--rw-text-primary);
+}
+
+.mat-mdc-header-cell {
+  color: var(--rw-text-muted) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+// ── Status Badges ─────────────────────────────────────────────────────────────
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+
+  &.status-draft        { background: var(--rw-draft-bg);    color: var(--rw-draft-fg); }
+  &.status-pending      { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-approved     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-issued       { background: var(--rw-issued-bg);   color: var(--rw-issued-fg); }
+  &.status-rejected     { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
+  &.status-revoked      { background: var(--rw-revoked-bg);  color: var(--rw-revoked-fg); }
+  &.status-whitelisted  { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-not-whitelisted { background: var(--rw-border-subtle); color: var(--rw-text-muted); }
 }

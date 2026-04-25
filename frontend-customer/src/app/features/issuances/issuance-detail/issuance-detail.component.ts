@@ -88,8 +88,10 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
                 >
                   @if (actionLoading) { <mat-spinner diameter="18"></mat-spinner> }
                   @else {
-                    <mat-icon>send</mat-icon>
-                    Submit for Approval
+                    <ng-container>
+                      <mat-icon>send</mat-icon>
+                      Submit for Approval
+                    </ng-container>
                   }
                 </button>
               }
@@ -102,8 +104,10 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
                 >
                   @if (actionLoading) { <mat-spinner diameter="18"></mat-spinner> }
                   @else {
-                    <mat-icon>rocket_launch</mat-icon>
-                    Deploy to Chain
+                    <ng-container>
+                      <mat-icon>rocket_launch</mat-icon>
+                      Deploy to Chain
+                    </ng-container>
                   }
                 </button>
               }

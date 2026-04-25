@@ -1,7 +1,6 @@
 import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule, RouterLink, RouterLinkActive } from '@angular/router';
-import { MatToolbarModule } from '@angular/material/toolbar';
+import { RouterLink, RouterLinkActive } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
@@ -20,50 +19,55 @@ interface NavLink {
   standalone: true,
   imports: [
     CommonModule,
-    RouterModule,
     RouterLink,
     RouterLinkActive,
-    MatToolbarModule,
     MatButtonModule,
     MatIconModule,
     MatMenuModule,
     MatDividerModule,
   ],
   template: `
-    <mat-toolbar color="primary" class="app-toolbar">
-      <!-- Brand -->
-      <a routerLink="/dashboard" class="brand">
-        <mat-icon class="brand-icon">account_balance</mat-icon>
-        <span class="brand-name">Registerwerk</span>
-        <span class="brand-sub">Customer Portal</span>
+    <header class="nav-bar">
+      <a routerLink="/dashboard" class="brand" aria-label="Registerwerk Home">
+        <div class="brand-icon">
+          <mat-icon>account_balance</mat-icon>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">Registerwerk</span>
+          <span class="brand-sub">Customer Portal</span>
+        </div>
       </a>
 
-      <span class="spacer"></span>
+      <div class="divider-v"></div>
 
-      <!-- Navigation links -->
       <nav class="nav-links" aria-label="Main navigation">
         @for (link of visibleLinks; track link.route) {
           <a
-            mat-button
-            [routerLink]="link.route"
-            routerLinkActive="active-link"
             class="nav-link"
+            [routerLink]="link.route"
+            routerLinkActive="active"
           >
             <mat-icon>{{ link.icon }}</mat-icon>
-            {{ link.label }}
+            <span>{{ link.label }}</span>
           </a>
         }
       </nav>
 
-      <!-- User menu -->
-      <button mat-icon-button [matMenuTriggerFor]="userMenu" aria-label="User menu">
-        <mat-icon>account_circle</mat-icon>
+      <div class="spacer"></div>
+
+      <button class="user-btn" mat-button [matMenuTriggerFor]="userMenu" aria-label="User menu">
+        <div class="avatar">{{ (userName || userEmail || 'U')[0].toUpperCase() }}</div>
+        <span class="user-label">{{ userName || userEmail || 'User' }}</span>
+        <mat-icon class="chevron">expand_more</mat-icon>
       </button>
 
-      <mat-menu #userMenu="matMenu">
-        <div class="user-info" mat-menu-item disabled>
-          <mat-icon>person</mat-icon>
-          <span>{{ userName || userEmail || 'User' }}</span>
+      <mat-menu #userMenu="matMenu" class="user-menu-panel">
+        <div class="menu-user-info" mat-menu-item disabled>
+          <div class="menu-avatar">{{ (userName || userEmail || 'U')[0].toUpperCase() }}</div>
+          <div>
+            <div class="menu-user-name">{{ userName || 'User' }}</div>
+            <div class="menu-user-email">{{ userEmail }}</div>
+          </div>
         </div>
         <mat-divider></mat-divider>
         <button mat-menu-item (click)="logout()">
@@ -71,54 +75,198 @@ interface NavLink {
           <span>Sign out</span>
         </button>
       </mat-menu>
-    </mat-toolbar>
+    </header>
   `,
   styles: [`
-    .app-toolbar {
+    .nav-bar {
+      display: flex;
+      align-items: center;
+      height: 56px;
+      padding: 0 20px;
+      background: var(--rw-nav-bg);
+      border-bottom: 1px solid var(--rw-nav-border);
       position: sticky;
       top: 0;
       z-index: 100;
-      box-shadow: 0 2px 4px rgba(0,0,0,.2);
+      gap: 4px;
     }
+
     .brand {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       text-decoration: none;
-      color: inherit;
+      flex-shrink: 0;
+      margin-right: 4px;
     }
-    .brand-icon { font-size: 28px; width: 28px; height: 28px; }
-    .brand-name { font-size: 18px; font-weight: 600; }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #2DD4BF 0%, #0D9488 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        color: #FFFFFF;
+      }
+    }
+
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #FFFFFF;
+      letter-spacing: -0.2px;
+      line-height: 1.2;
+    }
+
     .brand-sub {
-      font-size: 11px;
-      opacity: 0.7;
-      background: rgba(255,255,255,0.15);
-      padding: 2px 6px;
-      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--rw-nav-fg);
+      letter-spacing: 0.5px;
     }
-    .spacer { flex: 1; }
+
+    .divider-v {
+      width: 1px;
+      height: 20px;
+      background: var(--rw-nav-border);
+      margin: 0 12px;
+      flex-shrink: 0;
+    }
+
     .nav-links {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 2px;
     }
+
     .nav-link {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 4px;
-      color: rgba(255,255,255,0.85) !important;
-    }
-    .nav-link.active-link {
-      color: white !important;
-      background: rgba(255,255,255,0.15) !important;
-    }
-    .user-info {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 7px;
+      text-decoration: none;
+      color: var(--rw-nav-fg);
       font-size: 13px;
-      color: #444;
+      font-weight: 500;
+      transition: background 0.15s ease, color 0.15s ease;
+      letter-spacing: 0.1px;
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+      }
+
+      &:hover {
+        background: var(--rw-nav-hover-bg);
+        color: rgba(255,255,255,0.9);
+
+        mat-icon { opacity: 0.9; }
+      }
+
+      &.active {
+        background: var(--rw-nav-active-bg);
+        color: var(--rw-nav-fg-active);
+
+        mat-icon { opacity: 1; color: var(--rw-nav-accent); }
+      }
+    }
+
+    .spacer { flex: 1; }
+
+    .user-btn {
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      padding: 4px 8px 4px 6px !important;
+      border-radius: 8px !important;
+      color: var(--rw-nav-fg) !important;
+      height: auto !important;
+      transition: background 0.15s ease !important;
+
+      &:hover { background: var(--rw-nav-hover-bg) !important; }
+    }
+
+    .avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2DD4BF 0%, #0D9488 100%);
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .user-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.75);
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chevron {
+      font-size: 18px !important;
+      width: 18px !important;
+      height: 18px !important;
+      opacity: 0.5;
+    }
+
+    .menu-user-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px !important;
+      cursor: default;
+      pointer-events: none;
+      opacity: 1 !important;
+    }
+
+    .menu-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2DD4BF 0%, #0D9488 100%);
+      color: white;
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .menu-user-name {
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+
+    .menu-user-email {
+      font-size: 11px;
+      color: #94A3B8;
+      line-height: 1.3;
     }
   `]
 })
@@ -130,11 +278,11 @@ export class NavComponent implements OnInit {
   visibleLinks: NavLink[] = [];
 
   private readonly allLinks: NavLink[] = [
-    { label: 'Dashboard',       route: '/dashboard',     icon: 'dashboard',  roles: [] },
-    { label: 'My Issuances',    route: '/issuances',     icon: 'description', roles: ['ISSUER', 'REGISTRY_ADMIN'] },
-    { label: 'My Investments',  route: '/investments',   icon: 'savings',    roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
-    { label: 'Company Admin',   route: '/company-admin', icon: 'manage_accounts', roles: ['COMPANY_ADMIN'] },
-    { label: 'KYC Documents',   route: '/kyc',           icon: 'verified_user', roles: [] },
+    { label: 'Dashboard',      route: '/dashboard',     icon: 'grid_view',       roles: [] },
+    { label: 'Issuances',      route: '/issuances',     icon: 'description',     roles: ['ISSUER', 'REGISTRY_ADMIN'] },
+    { label: 'Investments',    route: '/investments',   icon: 'savings',         roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
+    { label: 'Company Admin',  route: '/company-admin', icon: 'manage_accounts', roles: ['COMPANY_ADMIN'] },
+    { label: 'KYC',            route: '/kyc',           icon: 'verified_user',   roles: [] },
   ];
 
   ngOnInit(): void {
@@ -145,7 +293,5 @@ export class NavComponent implements OnInit {
     );
   }
 
-  logout(): void {
-    this.auth.logout();
-  }
+  logout(): void { this.auth.logout(); }
 }
