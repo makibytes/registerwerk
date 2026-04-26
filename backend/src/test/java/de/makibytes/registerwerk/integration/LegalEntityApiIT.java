@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.integration;
 
-import de.makibytes.registerwerk.config.TestSecurityConfig;
 import de.makibytes.registerwerk.domain.enums.EntityType;
 import de.makibytes.registerwerk.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.web.dto.EntityResponse;
@@ -9,15 +8,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -27,24 +27,36 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.Map;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureTestRestTemplate
 @Testcontainers
 @ActiveProfiles("test")
-@Import(TestSecurityConfig.class)
 @DisplayName("LegalEntity API integration tests")
 class LegalEntityApiIT {
+
+    private static final String TEST_JWT_SECRET = "integration-test-jwt-secret-32-bytes!!";
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
 
     @DynamicPropertySource
+    @SuppressWarnings("unused")
     static void overrideProps(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> "");
+        registry.add("registerwerk.auth.dev-secret", () -> TEST_JWT_SECRET);
     }
 
     @Autowired
@@ -71,17 +83,50 @@ class LegalEntityApiIT {
     }
 
     private ResponseEntity<EntityResponse> createEntity(String name) {
-        return restTemplate.postForEntity(
+        return restTemplate.exchange(
             url("/api/v1/entities"),
-            buildCreateRequest(name),
-            EntityResponse.class
-        );
+            HttpMethod.POST,
+            new HttpEntity<>(buildCreateRequest(name), authHeaders()),
+            EntityResponse.class);
+    }
+
+    private HttpHeaders authHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(signedJwt());
+        return headers;
+    }
+
+    private String signedJwt() {
+        try {
+            String header = base64Url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
+            long iat = Instant.now().getEpochSecond();
+            long exp = iat + 3600;
+            String payload = base64Url("{"
+                + "\"sub\":\"00000000-0000-0000-0000-000000000001\","
+                + "\"roles\":[\"REGISTRY_ADMIN\"],"
+                + "\"iat\":" + iat + ","
+                + "\"exp\":" + exp
+                + "}");
+            String signingInput = header + "." + payload;
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(TEST_JWT_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            String signature = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(mac.doFinal(signingInput.getBytes(StandardCharsets.UTF_8)));
+            return signingInput + "." + signature;
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private String base64Url(String json) {
+        return Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(json.getBytes(StandardCharsets.UTF_8));
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
 
     @Test
-    @WithMockUser(roles = "REGISTRY_ADMIN")
     @DisplayName("POST /api/v1/entities should return 201 and the created entity")
     void createEntity_shouldReturn201AndEntity() {
         ResponseEntity<EntityResponse> response = createEntity("Helvetica Fintech AG");
@@ -95,19 +140,21 @@ class LegalEntityApiIT {
     }
 
     @Test
-    @WithMockUser(roles = "REGISTRY_ADMIN")
     @DisplayName("GET /api/v1/entities/{id} should return 404 when entity does not exist")
     void getEntity_shouldReturn404WhenNotFound() {
         UUID randomId = UUID.randomUUID();
 
-        ResponseEntity<String> response = restTemplate.getForEntity(
-            url("/api/v1/entities/{id}"), String.class, randomId);
+        ResponseEntity<String> response = restTemplate.exchange(
+            url("/api/v1/entities/{id}"),
+            HttpMethod.GET,
+            new HttpEntity<>(authHeaders()),
+            String.class,
+            randomId);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test
-    @WithMockUser(roles = "REGISTRY_ADMIN")
     @DisplayName("GET /api/v1/entities should return paginated results")
     void listEntities_shouldReturnPaginatedResults() {
         createEntity("Entity Alpha GmbH");
@@ -116,7 +163,7 @@ class LegalEntityApiIT {
         ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
             url("/api/v1/entities?size=10&page=0"),
             HttpMethod.GET,
-            null,
+            new HttpEntity<>(authHeaders()),
             new ParameterizedTypeReference<>() {}
         );
 
@@ -128,7 +175,6 @@ class LegalEntityApiIT {
     }
 
     @Test
-    @WithMockUser(roles = "REGISTRY_ADMIN")
     @DisplayName("PATCH /api/v1/entities/{id} should return 200 with updated fields")
     void updateEntity_shouldReturn200WithUpdatedFields() {
         ResponseEntity<EntityResponse> created = createEntity("Original Name GmbH");
@@ -141,7 +187,7 @@ class LegalEntityApiIT {
         ResponseEntity<EntityResponse> updated = restTemplate.exchange(
             url("/api/v1/entities/{id}"),
             HttpMethod.PATCH,
-            new HttpEntity<>(updateRequest),
+            new HttpEntity<>(updateRequest, authHeaders()),
             EntityResponse.class,
             id
         );
@@ -153,7 +199,6 @@ class LegalEntityApiIT {
     }
 
     @Test
-    @WithMockUser(roles = "REGISTRY_ADMIN")
     @DisplayName("POST /api/v1/entities/{id}/suspend should return 200 and entity with SUSPENDED status")
     void suspendEntity_shouldReturn200AndChangedStatus() {
         ResponseEntity<EntityResponse> created = createEntity("Suspendable Corp AG");
@@ -163,15 +208,19 @@ class LegalEntityApiIT {
         ResponseEntity<Void> suspendResponse = restTemplate.exchange(
             url("/api/v1/entities/{id}/suspend"),
             HttpMethod.POST,
-            null,
+            new HttpEntity<>(authHeaders()),
             Void.class,
             id
         );
 
         assertThat(suspendResponse.getStatusCode()).isIn(HttpStatus.NO_CONTENT, HttpStatus.OK);
 
-        ResponseEntity<EntityResponse> getResponse = restTemplate.getForEntity(
-            url("/api/v1/entities/{id}"), EntityResponse.class, id);
+        ResponseEntity<EntityResponse> getResponse = restTemplate.exchange(
+            url("/api/v1/entities/{id}"),
+            HttpMethod.GET,
+            new HttpEntity<>(authHeaders()),
+            EntityResponse.class,
+            id);
         assertThat(getResponse.getBody()).isNotNull();
         assertThat(getResponse.getBody().status().name()).isEqualTo("SUSPENDED");
     }

@@ -1,0 +1,540 @@
+
+> registerwerk-customer@0.1.0 build
+> ng build
+
+❯ Building...
+✔ Building...
+Application bundle generation failed. [1.362 seconds] - 2026-04-26T11:53:12.266Z
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mNG8107: NG8107: The left side of this optional chain operation does not include 'null' or 'undefined' in its type, therefore the '?.' operator can be replaced with the '.' operator. Find more at https://v21.angular.dev/extended-diagnostics/NG8107[0m [1m[35m[plugin angular-compiler][0m
+
+    src/app/features/issuances/issuance-detail/issuance-detail.component.ts:289:56:
+[37m      289 │                 @if (complianceStatus.blockedCountries?.[32mlength[37m) {
+          ╵                                                         [32m~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mNG8107: NG8107: The left side of this optional chain operation does not include 'null' or 'undefined' in its type, therefore the '?.' operator can be replaced with the '.' operator. Find more at https://v21.angular.dev/extended-diagnostics/NG8107[0m [1m[35m[plugin angular-compiler][0m
+
+    src/app/features/issuances/issuance-detail/issuance-detail.component.ts:296:45:
+[37m      296 │               @if (complianceStatus.modules?.[32mlength[37m) {
+          ╵                                              [32m~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mNG8107: NG8107: The left side of this optional chain operation does not include 'null' or 'undefined' in its type, therefore the '?.' operator can be replaced with the '.' operator. Find more at https://v21.angular.dev/extended-diagnostics/NG8107[0m [1m[35m[plugin angular-compiler][0m
+
+    src/app/features/issuances/issuance-detail/issuance-detail.component.ts:386:24:
+[37m      386 │             @if (asset?.[32mstatus[37m === 'ISSUED' && deployments.length...
+          ╵                         [32m~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mNG8107: NG8107: The left side of this optional chain operation does not include 'null' or 'undefined' in its type, therefore the '?.' operator can be replaced with the '.' operator. Find more at https://v21.angular.dev/extended-diagnostics/NG8107[0m [1m[35m[plugin angular-compiler][0m
+
+    src/app/features/issuances/issuance-detail/issuance-detail.component.ts:412:28:
+[37m      412 │                 @if (asset?.[32mstatus[37m !== 'ISSUED') {
+          ╵                             [32m~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/core' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:1:33:
+[37m      1 │ import { Component, Input } from [32m'@angular/core'[37m;
+        ╵                                  [32m~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/common' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:2:29:
+[37m      2 │ import { CommonModule } from [32m'@angular/common'[37m;
+        ╵                              [32m~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/card' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:3:30:
+[37m      3 │ import { MatCardModule } from [32m'@angular/material/card'[37m;
+        ╵                               [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/icon' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:4:30:
+[37m      4 │ import { MatIconModule } from [32m'@angular/material/icon'[37m;
+        ╵                               [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/divider' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:5:33:
+[37m      5 │ import { MatDividerModule } from [32m'@angular/material/divider'[37m;
+        ╵                                  [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/common' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:6:41:
+[37m      6 │ import { DecimalPipe, PercentPipe } from [32m'@angular/common'[37m;
+        ╵                                          [32m~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2354: This syntax requires an imported helper but module 'tslib' cannot be found.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:18:0:
+[37m      18 │ [32m@Component({[37m
+         ╵ [32m~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:22:4:
+[37m      22 │     [32mCommonModule[37m,
+         ╵     [32m~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:22:4:
+[37m      22 │     [32mCommonModule[37m,
+         ╵     [32m~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:23:4:
+[37m      23 │     [32mMatCardModule[37m,
+         ╵     [32m~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:23:4:
+[37m      23 │     [32mMatCardModule[37m,
+         ╵     [32m~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:24:4:
+[37m      24 │     [32mMatIconModule[37m,
+         ╵     [32m~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:24:4:
+[37m      24 │     [32mMatIconModule[37m,
+         ╵     [32m~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:25:4:
+[37m      25 │     [32mMatDividerModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:25:4:
+[37m      25 │     [32mMatDividerModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:26:4:
+[37m      26 │     [32mDecimalPipe[37m,
+         ╵     [32m~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:26:4:
+[37m      26 │     [32mDecimalPipe[37m,
+         ╵     [32m~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:27:4:
+[37m      27 │     [32mPercentPipe[37m,
+         ╵     [32m~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-distribution/holder-distribution.component.ts:27:4:
+[37m      27 │     [32mPercentPipe[37m,
+         ╵     [32m~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/core' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:1:55:
+[37m      1 │ ...rt { Component, Input, Output, EventEmitter } from [32m'@angular/core'[37m;
+        ╵                                                       [32m~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/common' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:2:29:
+[37m      2 │ import { CommonModule } from [32m'@angular/common'[37m;
+        ╵                              [32m~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/table' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:3:31:
+[37m      3 │ import { MatTableModule } from [32m'@angular/material/table'[37m;
+        ╵                                [32m~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/button' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:4:32:
+[37m      4 │ import { MatButtonModule } from [32m'@angular/material/button'[37m;
+        ╵                                 [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/icon' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:5:30:
+[37m      5 │ import { MatIconModule } from [32m'@angular/material/icon'[37m;
+        ╵                               [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/progress-spinner' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:6:41:
+[37m      6 │ ...tProgressSpinnerModule } from [32m'@angular/material/progress-spinner'[37m;
+        ╵                                  [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/tooltip' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:7:33:
+[37m      7 │ import { MatTooltipModule } from [32m'@angular/material/tooltip'[37m;
+        ╵                                  [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/chips' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:8:31:
+[37m      8 │ import { MatChipsModule } from [32m'@angular/material/chips'[37m;
+        ╵                                [32m~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/common' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:9:28:
+[37m      9 │ import { DecimalPipe } from [32m'@angular/common'[37m;
+        ╵                             [32m~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2354: This syntax requires an imported helper but module 'tslib' cannot be found.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:29:0:
+[37m      29 │ [32m@Component({[37m
+         ╵ [32m~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:33:4:
+[37m      33 │     [32mCommonModule[37m,
+         ╵     [32m~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:33:4:
+[37m      33 │     [32mCommonModule[37m,
+         ╵     [32m~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:34:4:
+[37m      34 │     [32mMatTableModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:34:4:
+[37m      34 │     [32mMatTableModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:35:4:
+[37m      35 │     [32mMatButtonModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:35:4:
+[37m      35 │     [32mMatButtonModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:36:4:
+[37m      36 │     [32mMatIconModule[37m,
+         ╵     [32m~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:36:4:
+[37m      36 │     [32mMatIconModule[37m,
+         ╵     [32m~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:37:4:
+[37m      37 │     [32mMatProgressSpinnerModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:37:4:
+[37m      37 │     [32mMatProgressSpinnerModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:38:4:
+[37m      38 │     [32mMatTooltipModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:38:4:
+[37m      38 │     [32mMatTooltipModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:39:4:
+[37m      39 │     [32mMatChipsModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:39:4:
+[37m      39 │     [32mMatChipsModule[37m,
+         ╵     [32m~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG1010: 'imports' must be an array of components, directives, pipes, or NgModules.
+  Value could not be determined statically.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:40:4:
+[37m      40 │     [32mDecimalPipe[37m,
+         ╵     [32m~~~~~~~~~~~[0m
+
+  Unknown reference.
+
+    ../frontend-shared/projects/ui/src/lib/holder-table/holder-table.component.ts:40:4:
+[37m      40 │     [32mDecimalPipe[37m,
+         ╵     [32m~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/core' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:1:55:
+[37m      1 │ ...rt { Component, Input, Output, EventEmitter } from [32m'@angular/core'[37m;
+        ╵                                                       [32m~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/common' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:2:29:
+[37m      2 │ import { CommonModule } from [32m'@angular/common'[37m;
+        ╵                              [32m~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/forms' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:3:72:
+[37m      3 │ ...FormGroup, ReactiveFormsModule, Validators } from [32m'@angular/forms'[37m;
+        ╵                                                      [32m~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/card' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:4:30:
+[37m      4 │ import { MatCardModule } from [32m'@angular/material/card'[37m;
+        ╵                               [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/form-field' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:5:35:
+[37m      5 │ import { MatFormFieldModule } from [32m'@angular/material/form-field'[37m;
+        ╵                                    [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/input' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:6:31:
+[37m      6 │ import { MatInputModule } from [32m'@angular/material/input'[37m;
+        ╵                                [32m~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/select' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:7:32:
+[37m      7 │ import { MatSelectModule } from [32m'@angular/material/select'[37m;
+        ╵                                 [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/button' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:8:32:
+[37m      8 │ import { MatButtonModule } from [32m'@angular/material/button'[37m;
+        ╵                                 [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/icon' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:9:30:
+[37m      9 │ import { MatIconModule } from [32m'@angular/material/icon'[37m;
+        ╵                               [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/tabs' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:10:30:
+[37m      10 │ import { MatTabsModule } from [32m'@angular/material/tabs'[37m;
+         ╵                               [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/divider' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:11:33:
+[37m      11 │ import { MatDividerModule } from [32m'@angular/material/divider'[37m;
+         ╵                                  [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/chips' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:12:31:
+[37m      12 │ import { MatChipsModule } from [32m'@angular/material/chips'[37m;
+         ╵                                [32m~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/tooltip' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:13:33:
+[37m      13 │ import { MatTooltipModule } from [32m'@angular/material/tooltip'[37m;
+         ╵                                  [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/progress-spinner' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:14:41:
+[37m      14 │ ...ProgressSpinnerModule } from [32m'@angular/material/progress-spinner'[37m;
+         ╵                                 [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/common' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:15:28:
+[37m      15 │ import { DecimalPipe } from [32m'@angular/common'[37m;
+         ╵                             [32m~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2354: This syntax requires an imported helper but module 'tslib' cannot be found.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:28:0:
+[37m      28 │ [32m@Component({[37m
+         ╵ [32m~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG2003: No suitable injection token for parameter 'fb' of class 'TokenAdminPanelComponent'.
+  Consider using the @Inject decorator to specify an injection token.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:539:22:
+[37m      539 │   constructor(private [32mfb[37m: FormBuilder) {
+          ╵                       [32m~~[0m
+
+  This type does not have a value, so it cannot be used as injection token.
+
+    ../frontend-shared/projects/ui/src/lib/token-admin/token-admin-panel.component.ts:539:26:
+[37m      539 │   constructor(private fb: [32mFormBuilder[37m) {
+          ╵                           [32m~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/core' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:1:33:
+[37m      1 │ import { Component, Input } from [32m'@angular/core'[37m;
+        ╵                                  [32m~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/common' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:2:29:
+[37m      2 │ import { CommonModule } from [32m'@angular/common'[37m;
+        ╵                              [32m~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/button' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:3:32:
+[37m      3 │ import { MatButtonModule } from [32m'@angular/material/button'[37m;
+        ╵                                 [32m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/icon' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:4:30:
+[37m      4 │ import { MatIconModule } from [32m'@angular/material/icon'[37m;
+        ╵                               [32m~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/tooltip' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:5:33:
+[37m      5 │ import { MatTooltipModule } from [32m'@angular/material/tooltip'[37m;
+        ╵                                  [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2307: Cannot find module '@angular/material/snack-bar' or its corresponding type declarations.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:6:47:
+[37m      6 │ ...atSnackBar, MatSnackBarModule } from [32m'@angular/material/snack-bar'[37m;
+        ╵                                         [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mTS2354: This syntax requires an imported helper but module 'tslib' cannot be found.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:14:0:
+[37m      14 │ [32m@Component({[37m
+         ╵ [32m~~~~~~~~~~~~[0m
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mNG2003: No suitable injection token for parameter 'snackBar' of class 'WalletAddressComponent'.
+  Consider using the @Inject decorator to specify an injection token.[0m [1m[35m[plugin angular-compiler][0m
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:90:22:
+[37m      90 │   constructor(private [32msnackBar[37m: MatSnackBar) {}
+         ╵                       [32m~~~~~~~~[0m
+
+  This type does not have a value, so it cannot be used as injection token.
+
+    ../frontend-shared/projects/ui/src/lib/wallet-address/wallet-address.component.ts:90:32:
+[37m      90 │   constructor(private snackBar: [32mMatSnackBar[37m) {}
+         ╵                                 [32m~~~~~~~~~~~[0m
+
+

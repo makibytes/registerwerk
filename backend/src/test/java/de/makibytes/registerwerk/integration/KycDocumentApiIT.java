@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.integration;
 
-import de.makibytes.registerwerk.config.TestSecurityConfig;
 import de.makibytes.registerwerk.domain.enums.EntityType;
 import de.makibytes.registerwerk.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.web.dto.EntityResponse;
@@ -8,9 +7,9 @@ import de.makibytes.registerwerk.web.dto.KycDocumentResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -18,7 +17,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -29,25 +27,37 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.Base64;
 import java.util.UUID;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureTestRestTemplate
 @Testcontainers
 @ActiveProfiles("test")
-@Import(TestSecurityConfig.class)
 @DisplayName("KYC Document API integration tests")
 class KycDocumentApiIT {
+
+    private static final String TEST_JWT_SECRET = "integration-test-jwt-secret-32-bytes!!";
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
 
     @DynamicPropertySource
+    @SuppressWarnings("unused")
     static void overrideProps(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> "");
+        registry.add("registerwerk.auth.dev-secret", () -> TEST_JWT_SECRET);
     }
 
     @Autowired
@@ -66,10 +76,46 @@ class KycDocumentApiIT {
     private UUID createEntityAndGetId(String name) {
         EntityCreateRequest req = new EntityCreateRequest(
             EntityType.ISSUER, name, null, "CH", null, null);
-        ResponseEntity<EntityResponse> response = restTemplate.postForEntity(
-            url("/api/v1/entities"), req, EntityResponse.class);
+        ResponseEntity<EntityResponse> response = restTemplate.exchange(
+            url("/api/v1/entities"),
+            HttpMethod.POST,
+            new HttpEntity<>(req, authHeaders()),
+            EntityResponse.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         return response.getBody().id();
+    }
+
+    private HttpHeaders authHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(signedJwt());
+        return headers;
+    }
+
+    private String signedJwt() {
+        try {
+            String header = base64Url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
+            long iat = Instant.now().getEpochSecond();
+            long exp = iat + 3600;
+            String payload = base64Url("{"
+                + "\"sub\":\"00000000-0000-0000-0000-000000000001\","
+                + "\"roles\":[\"REGISTRY_ADMIN\"],"
+                + "\"iat\":" + iat + ","
+                + "\"exp\":" + exp
+                + "}");
+            String signingInput = header + "." + payload;
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(TEST_JWT_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            String signature = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(mac.doFinal(signingInput.getBytes(StandardCharsets.UTF_8)));
+            return signingInput + "." + signature;
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private String base64Url(String json) {
+        return Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(json.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -90,16 +136,22 @@ class KycDocumentApiIT {
         return restTemplate.exchange(
             url("/api/v1/entities/{entityId}/kyc/documents"),
             HttpMethod.POST,
-            new HttpEntity<>(body, headers),
+            new HttpEntity<>(body, mergeHeaders(headers)),
             KycDocumentResponse.class,
             entityId
         );
     }
 
+    private HttpHeaders mergeHeaders(HttpHeaders base) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.putAll(base);
+        headers.setBearerAuth(signedJwt());
+        return headers;
+    }
+
     // ── Tests ─────────────────────────────────────────────────────────────────
 
     @Test
-    @WithMockUser(roles = "REGISTRY_ADMIN")
     @DisplayName("POST /api/v1/entities/{entityId}/kyc/documents should return 201 and document metadata")
     void uploadDocument_shouldReturn201AndDocumentMetadata() {
         UUID entityId = createEntityAndGetId("Document Upload Corp AG");
@@ -117,7 +169,6 @@ class KycDocumentApiIT {
     }
 
     @Test
-    @WithMockUser(roles = "REGISTRY_ADMIN")
     @DisplayName("GET /api/v1/entities/{entityId}/kyc/documents/{docId} should return 200 with correct content type")
     void downloadDocument_shouldReturn200WithCorrectContentType() {
         UUID entityId = createEntityAndGetId("Download Test GmbH");
@@ -141,7 +192,7 @@ class KycDocumentApiIT {
         ResponseEntity<KycDocumentResponse> uploadResp = restTemplate.exchange(
             url("/api/v1/entities/{entityId}/kyc/documents"),
             HttpMethod.POST,
-            new HttpEntity<>(form, headers),
+            new HttpEntity<>(form, mergeHeaders(headers)),
             KycDocumentResponse.class,
             entityId
         );
@@ -151,7 +202,7 @@ class KycDocumentApiIT {
         ResponseEntity<byte[]> downloadResp = restTemplate.exchange(
             url("/api/v1/entities/{entityId}/kyc/documents/{docId}"),
             HttpMethod.GET,
-            null,
+            new HttpEntity<>(authHeaders()),
             byte[].class,
             entityId, docId
         );
@@ -161,7 +212,6 @@ class KycDocumentApiIT {
     }
 
     @Test
-    @WithMockUser(roles = "REGISTRY_ADMIN")
     @DisplayName("DELETE /api/v1/entities/{entityId}/kyc/documents/{docId} should return 204")
     void softDeleteDocument_shouldReturn204() {
         UUID entityId = createEntityAndGetId("Delete Document GmbH");
@@ -174,7 +224,7 @@ class KycDocumentApiIT {
         ResponseEntity<Void> deleteResp = restTemplate.exchange(
             url("/api/v1/entities/{entityId}/kyc/documents/{docId}"),
             HttpMethod.DELETE,
-            null,
+            new HttpEntity<>(authHeaders()),
             Void.class,
             entityId, docId
         );

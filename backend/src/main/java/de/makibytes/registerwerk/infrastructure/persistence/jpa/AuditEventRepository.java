@@ -26,8 +26,8 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
             where e.event_type = 'KYC_JURISDICTION_APPROVED'
               and e.payload ->> 'overrideApplied' = 'true'
               and (:jurisdiction is null or e.payload ->> 'jurisdiction' = :jurisdiction)
-              and (:fromTs is null or e.occurred_at >= :fromTs)
-              and (:toTs is null or e.occurred_at <= :toTs)
+              and (cast(:fromTs as timestamptz) is null or e.occurred_at >= cast(:fromTs as timestamptz))
+              and (cast(:toTs as timestamptz) is null or e.occurred_at <= cast(:toTs as timestamptz))
             order by e.occurred_at desc
             """,
         countQuery = """
@@ -36,8 +36,8 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
             where e.event_type = 'KYC_JURISDICTION_APPROVED'
               and e.payload ->> 'overrideApplied' = 'true'
               and (:jurisdiction is null or e.payload ->> 'jurisdiction' = :jurisdiction)
-              and (:fromTs is null or e.occurred_at >= :fromTs)
-              and (:toTs is null or e.occurred_at <= :toTs)
+              and (cast(:fromTs as timestamptz) is null or e.occurred_at >= cast(:fromTs as timestamptz))
+              and (cast(:toTs as timestamptz) is null or e.occurred_at <= cast(:toTs as timestamptz))
             """,
         nativeQuery = true
     )

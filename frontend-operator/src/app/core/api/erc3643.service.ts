@@ -111,31 +111,59 @@ export class Erc3643Service {
     return this.http.get<ClaimTopic[]>(`${this.suiteUrl(assetId, deploymentId)}/claim-topics`);
   }
 
-  freezeAddress(assetId: string, deploymentId: string, address: string): Observable<void> {
-    return this.http.post<void>(`${this.suiteUrl(assetId, deploymentId)}/freeze`, { address });
+  freezeAddress(assetId: string, deploymentId: string, address: string): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/freeze`, { address });
   }
 
-  unfreezeAddress(assetId: string, deploymentId: string, address: string): Observable<void> {
-    return this.http.post<void>(`${this.suiteUrl(assetId, deploymentId)}/unfreeze`, { address });
+  unfreezeAddress(assetId: string, deploymentId: string, address: string): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unfreeze`, { address });
   }
 
-  pause(assetId: string, deploymentId: string): Observable<void> {
-    return this.http.post<void>(`${this.suiteUrl(assetId, deploymentId)}/pause`, {});
+  pause(assetId: string, deploymentId: string): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/pause`, {});
   }
 
-  unpause(assetId: string, deploymentId: string): Observable<void> {
-    return this.http.post<void>(`${this.suiteUrl(assetId, deploymentId)}/unpause`, {});
+  unpause(assetId: string, deploymentId: string): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unpause`, {});
   }
 
   forcedTransfer(assetId: string, deploymentId: string, body: {
     from: string; to: string; amount: string; reason?: string;
-  }): Observable<void> {
-    return this.http.post<void>(`${this.suiteUrl(assetId, deploymentId)}/forced-transfer`, body);
+  }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/forced-transfer`, body);
+  }
+
+  forcedApprove(assetId: string, deploymentId: string, body: {
+    owner: string; spender: string; amount: string; reason?: string;
+  }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/forced-approve`, body);
   }
 
   forceBurn(assetId: string, deploymentId: string, body: {
     from: string; amount: string; legalBasis?: string;
-  }): Observable<void> {
-    return this.http.post<void>(`${this.suiteUrl(assetId, deploymentId)}/force-burn`, body);
+  }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/force-burn`, body);
+  }
+
+  freezePartial(assetId: string, deploymentId: string, body: { address: string; amount: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/freeze-partial`, body);
+  }
+
+  unfreezePartial(assetId: string, deploymentId: string, body: { address: string; amount: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unfreeze-partial`, body);
+  }
+
+  batchForcedTransfer(assetId: string, deploymentId: string, body: {
+    froms: string[]; tos: string[]; amounts: string[];
+  }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/batch-forced-transfer`, body);
+  }
+
+  batchMint(assetId: string, deploymentId: string, body: { addresses: string[]; amounts: string[] }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/batch-mint`, body);
+  }
+
+  batchBurn(assetId: string, deploymentId: string, body: { addresses: string[]; amounts: string[] }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/batch-burn`, body);
   }
 }

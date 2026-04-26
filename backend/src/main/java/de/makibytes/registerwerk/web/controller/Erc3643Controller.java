@@ -1,5 +1,25 @@
 package de.makibytes.registerwerk.web.controller;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import de.makibytes.registerwerk.application.erc3643.Erc3643LifecycleService;
 import de.makibytes.registerwerk.application.erc3643.IdentityRegistryService;
 import de.makibytes.registerwerk.domain.erc3643.Erc3643ClaimTopic;
@@ -10,6 +30,8 @@ import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643ClaimTopi
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643TrustedIssuerRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.OnchainIdentityRepository;
+import de.makibytes.registerwerk.web.dto.admin.FreezePartialRequest;
+import de.makibytes.registerwerk.web.dto.blockchain.TxSubmissionResponse;
 import de.makibytes.registerwerk.web.dto.erc3643.AddClaimTopicRequest;
 import de.makibytes.registerwerk.web.dto.erc3643.AddTrustedIssuerRequest;
 import de.makibytes.registerwerk.web.dto.erc3643.ComplianceStatusResponse;
@@ -17,19 +39,6 @@ import de.makibytes.registerwerk.web.dto.erc3643.Erc3643SuiteResponse;
 import de.makibytes.registerwerk.web.dto.erc3643.IdentityRegistryEntryResponse;
 import de.makibytes.registerwerk.web.dto.erc3643.RegisterInvestorRequest;
 import jakarta.validation.Valid;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.*;
-
-import java.math.BigDecimal;
-import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 /**
  * REST controller for ERC-3643 (T-REX) suite management operations scoped to a specific asset.
@@ -261,127 +270,154 @@ public class Erc3643Controller {
 
     // ── Agent operations ──────────────────────────────────────────────────────
 
-    /**
-     * Executes a forced token transfer (agent-only regulatory operation).
-     */
     @PostMapping("/{deploymentId}/forced-transfer")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> forcedTransfer(
-            @PathVariable UUID assetId,
-            @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body,
-            Authentication auth) {
-        log.info("POST forced-transfer on deploymentId={} by actor={}", deploymentId,
-            auth != null ? auth.getName() : "unknown");
+    public ResponseEntity<TxSubmissionResponse> forcedTransfer(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody Map<String, String> body, Authentication auth) {
+        log.info("POST forced-transfer on deploymentId={} by actor={}", deploymentId, actorName(auth));
         UUID suiteId = resolveSuiteId(deploymentId);
-        String from = body.get("from");
-        String to = body.get("to");
-        BigDecimal amount = new BigDecimal(body.get("amount"));
-        String reason = body.getOrDefault("reason", "");
-        lifecycleService.forcedTransfer(suiteId, from, to, amount, reason);
-        return ResponseEntity.accepted().build();
+        UUID txId = lifecycleService.forcedTransfer(suiteId, body.get("from"), body.get("to"),
+                new BigDecimal(body.get("amount")), body.getOrDefault("reason", ""));
+        return accepted(txId);
     }
 
-    /**
-     * Freezes an investor address on the token contract (agent-only).
-     * Legal basis: AWG §17 (sanctions); GwG §40 (AML freeze); MiCAR Art. 36.
-     */
+    @PostMapping("/{deploymentId}/forced-approve")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<TxSubmissionResponse> forcedApprove(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody Map<String, String> body, Authentication auth) {
+        log.info("POST forced-approve on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID txId = lifecycleService.forcedApprove(suiteId, body.get("owner"), body.get("spender"),
+                new BigDecimal(body.get("amount")), body.getOrDefault("reason", ""));
+        return accepted(txId);
+    }
+
     @PostMapping("/{deploymentId}/freeze")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> freezeAddress(
-            @PathVariable UUID assetId,
-            @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body,
-            Authentication auth) {
-        log.info("POST freeze on deploymentId={} by actor={}", deploymentId,
-            auth != null ? auth.getName() : "unknown");
-        UUID suiteId = resolveSuiteId(deploymentId);
-        String address = body.get("address");
-        lifecycleService.freezeAddress(suiteId, address);
-        return ResponseEntity.accepted().build();
+    public ResponseEntity<TxSubmissionResponse> freezeAddress(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody Map<String, String> body, Authentication auth) {
+        log.info("POST freeze on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        return accepted(lifecycleService.freezeAddress(resolveSuiteId(deploymentId), body.get("address")));
     }
 
-    /**
-     * Unfreezes a previously frozen investor address.
-     */
     @PostMapping("/{deploymentId}/unfreeze")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> unfreezeAddress(
-            @PathVariable UUID assetId,
-            @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body,
-            Authentication auth) {
-        log.info("POST unfreeze on deploymentId={} by actor={}", deploymentId,
-            auth != null ? auth.getName() : "unknown");
-        UUID suiteId = resolveSuiteId(deploymentId);
-        String address = body.get("address");
-        lifecycleService.unfreezeAddress(suiteId, address);
-        return ResponseEntity.accepted().build();
+    public ResponseEntity<TxSubmissionResponse> unfreezeAddress(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody Map<String, String> body, Authentication auth) {
+        log.info("POST unfreeze on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        return accepted(lifecycleService.unfreezeAddress(resolveSuiteId(deploymentId), body.get("address")));
     }
 
-    /**
-     * Suspends all transfers on the T-REX token contract.
-     * Legal basis: MiCAR Art. 36, 84; eWpG §24.
-     */
+    @PostMapping("/{deploymentId}/freeze-partial")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<TxSubmissionResponse> freezePartialTokens(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody @Valid FreezePartialRequest request, Authentication auth) {
+        log.info("POST freeze-partial address={} amount={} on deploymentId={} by actor={}",
+                request.address(), request.amount(), deploymentId, actorName(auth));
+        return accepted(lifecycleService.freezePartialTokens(
+                resolveSuiteId(deploymentId), request.address(), request.amount()));
+    }
+
+    @PostMapping("/{deploymentId}/unfreeze-partial")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<TxSubmissionResponse> unfreezePartialTokens(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody @Valid FreezePartialRequest request, Authentication auth) {
+        log.info("POST unfreeze-partial address={} amount={} on deploymentId={} by actor={}",
+                request.address(), request.amount(), deploymentId, actorName(auth));
+        return accepted(lifecycleService.unfreezePartialTokens(
+                resolveSuiteId(deploymentId), request.address(), request.amount()));
+    }
+
     @PostMapping("/{deploymentId}/pause")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> pause(
-            @PathVariable UUID assetId,
-            @PathVariable UUID deploymentId,
-            Authentication auth) {
-        log.info("POST pause on deploymentId={} by actor={}", deploymentId,
-            auth != null ? auth.getName() : "unknown");
-        UUID suiteId = resolveSuiteId(deploymentId);
-        lifecycleService.pause(suiteId);
-        return ResponseEntity.accepted().build();
+    public ResponseEntity<TxSubmissionResponse> pause(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId, Authentication auth) {
+        log.info("POST pause on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        return accepted(lifecycleService.pause(resolveSuiteId(deploymentId)));
     }
 
-    /**
-     * Resumes transfers on the T-REX token contract.
-     */
     @PostMapping("/{deploymentId}/unpause")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> unpause(
-            @PathVariable UUID assetId,
-            @PathVariable UUID deploymentId,
-            Authentication auth) {
-        log.info("POST unpause on deploymentId={} by actor={}", deploymentId,
-            auth != null ? auth.getName() : "unknown");
-        UUID suiteId = resolveSuiteId(deploymentId);
-        lifecycleService.unpause(suiteId);
-        return ResponseEntity.accepted().build();
+    public ResponseEntity<TxSubmissionResponse> unpause(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId, Authentication auth) {
+        log.info("POST unpause on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        return accepted(lifecycleService.unpause(resolveSuiteId(deploymentId)));
     }
 
-    /**
-     * Burns tokens from an investor address (eWpG §26 Einziehung / compulsory cancellation).
-     * Legal basis: eWpG §26 Einziehung; MiCAR Art. 94.
-     */
     @PostMapping("/{deploymentId}/force-burn")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> forceBurn(
-            @PathVariable UUID assetId,
-            @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body,
-            Authentication auth) {
-        log.info("POST force-burn on deploymentId={} by actor={}", deploymentId,
-            auth != null ? auth.getName() : "unknown");
+    public ResponseEntity<TxSubmissionResponse> forceBurn(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody Map<String, String> body, Authentication auth) {
+        log.info("POST force-burn on deploymentId={} by actor={}", deploymentId, actorName(auth));
         UUID suiteId = resolveSuiteId(deploymentId);
-        String from = body.get("from");
-        java.math.BigDecimal amount = new java.math.BigDecimal(body.get("amount"));
-        String legalBasis = body.getOrDefault("legalBasis", "");
-        lifecycleService.forceBurn(suiteId, from, amount, legalBasis);
-        return ResponseEntity.accepted().build();
+        UUID txId = lifecycleService.forceBurn(suiteId, body.get("from"),
+                new BigDecimal(body.get("amount")), body.getOrDefault("legalBasis", ""));
+        return accepted(txId);
+    }
+
+    @PostMapping("/{deploymentId}/batch-forced-transfer")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<TxSubmissionResponse> batchForcedTransfer(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody Map<String, Object> body, Authentication auth) {
+        log.info("POST batch-forced-transfer on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        @SuppressWarnings("unchecked")
+        List<String> froms = (List<String>) body.get("froms");
+        @SuppressWarnings("unchecked")
+        List<String> tos = (List<String>) body.get("tos");
+        @SuppressWarnings("unchecked")
+        List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
+                .stream().map(BigDecimal::new).toList();
+        return accepted(lifecycleService.batchForcedTransfer(resolveSuiteId(deploymentId), froms, tos, amounts));
+    }
+
+    @PostMapping("/{deploymentId}/batch-mint")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<TxSubmissionResponse> batchMint(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody Map<String, Object> body, Authentication auth) {
+        log.info("POST batch-mint on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        @SuppressWarnings("unchecked")
+        List<String> addresses = (List<String>) body.get("addresses");
+        @SuppressWarnings("unchecked")
+        List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
+                .stream().map(BigDecimal::new).toList();
+        return accepted(lifecycleService.batchMint(resolveSuiteId(deploymentId), addresses, amounts));
+    }
+
+    @PostMapping("/{deploymentId}/batch-burn")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<TxSubmissionResponse> batchBurn(
+            @PathVariable UUID assetId, @PathVariable UUID deploymentId,
+            @RequestBody Map<String, Object> body, Authentication auth) {
+        log.info("POST batch-burn on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        @SuppressWarnings("unchecked")
+        List<String> addresses = (List<String>) body.get("addresses");
+        @SuppressWarnings("unchecked")
+        List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
+                .stream().map(BigDecimal::new).toList();
+        return accepted(lifecycleService.batchBurn(resolveSuiteId(deploymentId), addresses, amounts));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /**
-     * Resolves the suite ID from the asset deployment ID.
-     * The {@link Erc3643LifecycleService#getSuiteDetails(UUID)} call will throw
-     * {@code EntityNotFoundException} if no suite exists for the deployment.
-     */
     private UUID resolveSuiteId(UUID deploymentId) {
         return lifecycleService.getSuiteDetails(deploymentId).getId();
+    }
+
+    private static ResponseEntity<TxSubmissionResponse> accepted(UUID txId) {
+        return ResponseEntity.accepted().body(new TxSubmissionResponse(txId));
+    }
+
+    private static String actorName(Authentication auth) {
+        return auth != null ? auth.getName() : "unknown";
     }
 
     private TrustedIssuerResponse toTrustedIssuerResponse(Erc3643TrustedIssuer issuer) {

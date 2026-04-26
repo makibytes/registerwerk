@@ -1,4 +1,7 @@
 spring:
+  main:
+    allow-bean-definition-overriding: true
+
   datasource:
     # overridden at runtime by @DynamicPropertySource in integration tests
     url: jdbc:postgresql://localhost:5432/registerwerk_test
@@ -12,7 +15,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:9000
+          issuer-uri: ""
 
   mail:
     host: localhost

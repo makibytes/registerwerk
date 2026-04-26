@@ -1,8 +1,9 @@
 package de.makibytes.registerwerk.application.asset;
 
-import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
-import de.makibytes.registerwerk.domain.asset.AssetHolder;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetHolderRepository;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -10,9 +11,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.util.UUID;
+import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
+import de.makibytes.registerwerk.domain.asset.AssetHolder;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetHolderRepository;
 
 /**
  * Manages asset holder records (investor positions).
@@ -63,5 +64,10 @@ public class HolderService {
     public AssetHolder getHolder(UUID holderId) {
         return assetHolderRepository.findById(holderId)
             .orElseThrow(() -> new EntityNotFoundException("AssetHolder", holderId));
+    }
+
+    @Transactional(readOnly = true)
+    public java.util.Optional<AssetHolder> findByAssetIdAndWalletAddress(UUID assetId, String walletAddress) {
+        return assetHolderRepository.findByAssetIdAndWalletAddress(assetId, walletAddress);
     }
 }

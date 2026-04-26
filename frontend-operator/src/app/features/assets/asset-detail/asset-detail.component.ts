@@ -30,6 +30,7 @@ import { ChainNamePipe } from '../../../shared/pipes/chain-name.pipe';
 import { RegisterInvestorDialogComponent, RegisterInvestorData } from './register-investor-dialog.component';
 import { AddIssuerDialogComponent, AddIssuerData } from './add-issuer-dialog.component';
 import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-topic-dialog.component';
+import { TransactionService, TxRecord } from '../../../core/api/transaction.service';
 
 @Component({
   selector: 'app-asset-detail',
@@ -707,6 +708,35 @@ import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-top
                     </button>
                   </div>
                 </div>
+                <!-- Forced Approve -->
+                <div class="mint-form">
+                  <p style="font-size:12px;color:rgba(0,0,0,0.54);margin:0 0 4px">Forced Approve (Regulatory Override)</p>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Owner Address</mat-label>
+                    <input matInput [(ngModel)]="forceApproveOwner" placeholder="0x..." />
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Spender Address</mat-label>
+                    <input matInput [(ngModel)]="forceApproveSpender" placeholder="0x..." />
+                  </mat-form-field>
+                  <div class="form-row">
+                    <mat-form-field appearance="outline">
+                      <mat-label>Amount / Value</mat-label>
+                      <input matInput [(ngModel)]="forceApproveAmount" placeholder="0" />
+                    </mat-form-field>
+                    <mat-form-field appearance="outline">
+                      <mat-label>Legal Basis / Reason</mat-label>
+                      <input matInput [(ngModel)]="forceApproveReason" placeholder="BaFin order" />
+                    </mat-form-field>
+                  </div>
+                  <div>
+                    <button mat-raised-button color="warn"
+                            [disabled]="!forceApproveOwner || !forceApproveSpender || !forceApproveAmount"
+                            (click)="executeForceApprove()">
+                      <mat-icon>verified</mat-icon> Execute Forced Approve
+                    </button>
+                  </div>
+                </div>
                 <!-- Force Burn -->
                 <div class="mint-form">
                   <p style="font-size:12px;color:rgba(0,0,0,0.54);margin:0 0 4px">Force Burn (eWpG §26 / MiCAR Art. 94)</p>
@@ -787,6 +817,53 @@ import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-top
               }
             </div>
           </mat-tab>
+
+          <!-- Transactions tab — always shown for ERC-3643 assets -->
+          <mat-tab label="Transactions">
+            <div class="tab-content">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <strong>Blockchain Transactions</strong>
+                <button mat-stroked-button (click)="loadTxHistory()">
+                  <mat-icon>refresh</mat-icon> Refresh
+                </button>
+              </div>
+              @if (txHistoryLoading) {
+                <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
+              } @else if (txHistory.length === 0) {
+                <p style="text-align:center;padding:24px;color:rgba(0,0,0,0.54)">No transactions yet.</p>
+              } @else {
+                <table mat-table [dataSource]="txHistory" class="full-width-table">
+                  <ng-container matColumnDef="method">
+                    <th mat-header-cell *matHeaderCellDef>Method</th>
+                    <td mat-cell *matCellDef="let tx"><code style="font-size:11px">{{ tx.methodName }}</code></td>
+                  </ng-container>
+                  <ng-container matColumnDef="status">
+                    <th mat-header-cell *matHeaderCellDef>Status</th>
+                    <td mat-cell *matCellDef="let tx">
+                      <span [style.color]="tx.status === 'SUCCESS' ? 'green' : tx.status === 'PENDING' ? 'orange' : 'red'"
+                            style="font-weight:600;font-size:12px">
+                        {{ tx.status }}
+                      </span>
+                    </td>
+                  </ng-container>
+                  <ng-container matColumnDef="actor">
+                    <th mat-header-cell *matHeaderCellDef>Actor</th>
+                    <td mat-cell *matCellDef="let tx">{{ tx.actorName || '—' }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="created">
+                    <th mat-header-cell *matHeaderCellDef>Submitted</th>
+                    <td mat-cell *matCellDef="let tx">{{ tx.createdAt | date:'short' }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="block">
+                    <th mat-header-cell *matHeaderCellDef>Block</th>
+                    <td mat-cell *matCellDef="let tx">{{ tx.blockNumber ?? '—' }}</td>
+                  </ng-container>
+                  <tr mat-header-row *matHeaderRowDef="txColumns"></tr>
+                  <tr mat-row *matRowDef="let row; columns: txColumns;"></tr>
+                </table>
+              }
+            </div>
+          </mat-tab>
         }
       </mat-tab-group>
     } @else {
@@ -800,6 +877,7 @@ export class AssetDetailComponent implements OnInit {
   private readonly assetService = inject(AssetService);
   private readonly erc3643Service = inject(Erc3643Service);
   private readonly mintControlService = inject(MintControlService);
+  private readonly txService = inject(TransactionService);
   private readonly router = inject(Router);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
@@ -869,6 +947,10 @@ export class AssetDetailComponent implements OnInit {
   forceTo = '';
   forceAmount = '';
   forceReason = '';
+  forceApproveOwner = '';
+  forceApproveSpender = '';
+  forceApproveAmount = '';
+  forceApproveReason = '';
   forceBurnFrom = '';
   forceBurnAmount = '';
   forceBurnLegalBasis = '';
@@ -1085,13 +1167,29 @@ export class AssetDetailComponent implements OnInit {
       });
   }
 
+  // ── Transaction history ───────────────────────────────────────────────────
+
+  txHistory: TxRecord[] = [];
+  txHistoryLoading = false;
+  readonly txColumns = ['method', 'status', 'actor', 'created', 'block'];
+
+  loadTxHistory(): void {
+    const depId = this.primaryDeploymentId;
+    if (!depId) return;
+    this.txHistoryLoading = true;
+    this.txService.listTransactions(depId).subscribe({
+      next: (page) => { this.txHistory = page.content; this.txHistoryLoading = false; },
+      error: () => { this.txHistoryLoading = false; },
+    });
+  }
+
   // ── Regulatory admin actions ──────────────────────────────────────────────
 
   pauseToken(): void {
     const depId = this.primaryDeploymentId;
     if (!depId || !confirm('Pause all token transfers?')) return;
     this.erc3643Service.pause(this.id, depId).subscribe({
-      next: () => this.snackBar.open('Token transfers paused.', 'OK', { duration: 3000 }),
+      next: (r) => this.txService.track(r.txId, 'Pause token'),
     });
   }
 
@@ -1099,29 +1197,25 @@ export class AssetDetailComponent implements OnInit {
     const depId = this.primaryDeploymentId;
     if (!depId) return;
     this.erc3643Service.unpause(this.id, depId).subscribe({
-      next: () => this.snackBar.open('Token transfers resumed.', 'OK', { duration: 3000 }),
+      next: (r) => this.txService.track(r.txId, 'Unpause token'),
     });
   }
 
   freezeAddr(): void {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.freezeAddress) return;
-    this.erc3643Service.freezeAddress(this.id, depId, this.freezeAddress).subscribe({
-      next: () => {
-        this.snackBar.open(`Address ${this.freezeAddress} frozen.`, 'OK', { duration: 3000 });
-        this.freezeAddress = '';
-      },
+    const addr = this.freezeAddress;
+    this.erc3643Service.freezeAddress(this.id, depId, addr).subscribe({
+      next: (r) => { this.txService.track(r.txId, `Freeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; },
     });
   }
 
   unfreezeAddr(): void {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.freezeAddress) return;
-    this.erc3643Service.unfreezeAddress(this.id, depId, this.freezeAddress).subscribe({
-      next: () => {
-        this.snackBar.open(`Address ${this.freezeAddress} unfrozen.`, 'OK', { duration: 3000 });
-        this.freezeAddress = '';
-      },
+    const addr = this.freezeAddress;
+    this.erc3643Service.unfreezeAddress(this.id, depId, addr).subscribe({
+      next: (r) => { this.txService.track(r.txId, `Unfreeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; },
     });
   }
 
@@ -1133,10 +1227,27 @@ export class AssetDetailComponent implements OnInit {
       from: this.forceFrom, to: this.forceTo,
       amount: this.forceAmount, reason: this.forceReason,
     }).subscribe({
-      next: () => {
-        this.snackBar.open('Forced transfer initiated.', 'OK', { duration: 3000 });
+      next: (r) => {
+        this.txService.track(r.txId, 'Forced transfer');
         this.forceFrom = ''; this.forceTo = ''; this.forceAmount = ''; this.forceReason = '';
-        this.loadHolders();
+      },
+    });
+  }
+
+  executeForceApprove(): void {
+    const depId = this.primaryDeploymentId;
+    if (!depId || !this.forceApproveOwner || !this.forceApproveSpender || !this.forceApproveAmount) return;
+    if (!confirm(`Execute forced approve of ${this.forceApproveAmount} from ${this.forceApproveOwner} to ${this.forceApproveSpender}?`)) return;
+    this.erc3643Service.forcedApprove(this.id, depId, {
+      owner: this.forceApproveOwner,
+      spender: this.forceApproveSpender,
+      amount: this.forceApproveAmount,
+      reason: this.forceApproveReason,
+    }).subscribe({
+      next: (r) => {
+        this.txService.track(r.txId, 'Forced approve');
+        this.forceApproveOwner = ''; this.forceApproveSpender = '';
+        this.forceApproveAmount = ''; this.forceApproveReason = '';
       },
     });
   }
@@ -1148,10 +1259,9 @@ export class AssetDetailComponent implements OnInit {
     this.erc3643Service.forceBurn(this.id, depId, {
       from: this.forceBurnFrom, amount: this.forceBurnAmount, legalBasis: this.forceBurnLegalBasis,
     }).subscribe({
-      next: () => {
-        this.snackBar.open('Force burn initiated.', 'OK', { duration: 3000 });
+      next: (r) => {
+        this.txService.track(r.txId, 'Force burn');
         this.forceBurnFrom = ''; this.forceBurnAmount = ''; this.forceBurnLegalBasis = '';
-        this.loadHolders();
       },
     });
   }

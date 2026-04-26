@@ -76,6 +76,24 @@ contract EwpgERC20 is ERC20, Ownable, EwpgCompliance, EwpgDocumentManagement {
         emit ForcedTransfer(from, to, amount, legalBasis);
     }
 
+    // ── Forced approve — regulatory override ──────────────────────────────────
+
+    /// @notice Sets the allowance of `spender` over `owner`'s tokens, bypassing owner consent.
+    ///         To be used exclusively for BaFin / court orders requiring regulatory approval override.
+    /// @param owner      Token owner whose allowance is being overridden.
+    /// @param spender    Address receiving the allowance.
+    /// @param amount     Allowance amount in smallest unit.
+    /// @param legalBasis Reference to legal authority (e.g. "BaFin Az. 2025-002").
+    function forcedApprove(
+        address owner,
+        address spender,
+        uint256 amount,
+        string calldata legalBasis
+    ) external override onlyRegistry {
+        _approve(owner, spender, amount);
+        emit ForcedApprove(owner, spender, amount, legalBasis);
+    }
+
     // ── Forced burn — eWpG §26 Einziehung ────────────────────────────────────
 
     /// @notice Burns tokens from `from` regardless of whitelist, freeze, or pause.

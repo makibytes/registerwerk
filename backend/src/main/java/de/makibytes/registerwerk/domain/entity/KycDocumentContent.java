@@ -1,7 +1,11 @@
 package de.makibytes.registerwerk.domain.entity;
 
-import jakarta.persistence.*;
 import java.util.UUID;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
 /** Stores the binary content of inline KYC documents (≤ 5 MB).
  *  Kept in a separate table so metadata queries on {@link KycDocument} never load blobs. */
@@ -12,7 +16,7 @@ public class KycDocumentContent {
     @Id
     private UUID id;  // same UUID as the owning KycDocument
 
-    @Lob
+    // Explicit BYTEA mapping avoids OID/LOB handling mismatches on newer Hibernate/PostgreSQL combos.
     @Column(nullable = false, columnDefinition = "BYTEA")
     private byte[] content;
 

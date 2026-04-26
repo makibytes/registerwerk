@@ -2,15 +2,14 @@ package de.makibytes.registerwerk.config;
 
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Test-only security configuration that disables JWT validation.
@@ -18,19 +17,14 @@ import java.util.Map;
  * to bypass the production OAuth2 resource-server setup.
  */
 @TestConfiguration
-@EnableWebSecurity
 public class TestSecurityConfig {
 
     /**
-     * Replaces the production SecurityFilterChain with one that:
-     * <ul>
-     *   <li>disables CSRF (stateless test calls)</li>
-     *   <li>permits every request so that {@code @WithMockUser} role-based tests work
-     *       without a real JWT</li>
-     * </ul>
+     * Override the production chain in integration tests so HTTP calls can rely
+     * on endpoint behavior without full JWT wiring.
      */
-    @Bean
-    public SecurityFilterChain testSecurityFilterChain(HttpSecurity http) throws Exception {
+    @Bean(name = "securityFilterChain")
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
@@ -43,6 +37,7 @@ public class TestSecurityConfig {
      * are satisfied when an actual JWT bearer is sent.
      */
     @Bean
+    @Primary
     public JwtDecoder testJwtDecoder() {
         return token -> Jwt.withTokenValue(token)
             .header("alg", "none")

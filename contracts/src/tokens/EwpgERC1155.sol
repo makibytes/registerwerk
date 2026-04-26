@@ -129,6 +129,26 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         }
     }
 
+    // ── Forced approve — regulatory override ──────────────────────────────────
+
+    /// @notice Sets operator approval for `operator` over all of `owner`'s tokens,
+    ///         bypassing owner consent. ERC-1155 has no per-token allowances; this
+    ///         grants or revokes full operator status.
+    ///         value > 0 = grant; value == 0 = revoke.
+    /// @param owner      Token owner whose operator approval is being overridden.
+    /// @param operator   Address receiving operator approval.
+    /// @param value      > 0 = approve; 0 = revoke.
+    /// @param legalBasis Reference to legal authority (e.g. "BaFin Az. 2025-002").
+    function forcedApprove(
+        address owner,
+        address operator,
+        uint256 value,
+        string calldata legalBasis
+    ) external override onlyRegistry {
+        _setApprovalForAll(owner, operator, value > 0);
+        emit ForcedApprove(owner, operator, value, legalBasis);
+    }
+
     // ── Forced burn — eWpG §26 Einziehung ────────────────────────────────────
 
     /// @notice Burns `value` units (of id 0) from `from`, bypassing all compliance checks.

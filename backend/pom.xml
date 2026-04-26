@@ -28,6 +28,12 @@
     <jacoco.version>0.8.13</jacoco.version>
     <greenmail.version>2.1.2</greenmail.version>
     <awssdk.version>2.29.48</awssdk.version>
+    <!--
+      Testcontainers requires a sufficiently new Docker API.
+      Force a safe floor for test JVMs so host-level API pinning (e.g. 1.32)
+      does not break integration tests.
+    -->
+    <docker.api.test.version>1.54</docker.api.test.version>
   </properties>
 
   <dependencies>
@@ -153,6 +159,11 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-restclient</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.security</groupId>
       <artifactId>spring-security-test</artifactId>
       <scope>test</scope>
@@ -197,6 +208,30 @@
               <version>${mapstruct.version}</version>
             </path>
           </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+
+      <!--
+        Keep Docker API version compatible for tests. Testcontainers' docker-java
+        client reads the JVM system property "api.version".
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <api.version>${docker.api.test.version}</api.version>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <api.version>${docker.api.test.version}</api.version>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
 

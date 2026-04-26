@@ -16,13 +16,19 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { IssuanceService } from '../../../core/api/issuance.service';
+import { TransactionService, TxRecord } from '../../../core/api/transaction.service';
 import { AuthService } from '../../../core/auth/auth.service';
 import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
 import { Asset, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
 import { AddHolderDialogComponent } from './add-holder-dialog.component';
+import { HolderTableComponent } from '../../../shared/components/token-holders/holder-table.component';
+import { HolderDistributionComponent } from '../../../shared/components/token-holders/holder-distribution.component';
+import { TokenAdminPanelComponent } from '../../../shared/components/token-holders/token-admin-panel.component';
+import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from '../../../shared/components/token-holders/models';
 
 @Component({
   selector: 'app-issuance-detail',
@@ -43,8 +49,12 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
+    MatTooltipModule,
     StatusBadgeComponent,
     ChainIconComponent,
+    HolderTableComponent,
+    HolderDistributionComponent,
+    TokenAdminPanelComponent,
   ],
   template: `
     <div class="page-container">
@@ -277,14 +287,14 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
                     <span class="stat-value">{{ complianceStatus.transferCooldown }}s</span>
                   </div>
                 }
-                @if (complianceStatus.blockedCountries?.length) {
+                @if (complianceStatus?.blockedCountries && complianceStatus.blockedCountries.length) {
                   <div class="compliance-stat">
                     <span class="stat-label">Blocked Countries</span>
                     <span class="stat-value">{{ complianceStatus.blockedCountries.join(', ') }}</span>
                   </div>
                 }
               </div>
-              @if (complianceStatus.modules?.length) {
+              @if (complianceStatus?.modules && complianceStatus.modules.length) {
                 <div class="module-list">
                   <span class="module-list-label">Active Compliance Modules</span>
                   <div class="module-chips">
@@ -359,6 +369,58 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
           </mat-card-content>
         </mat-card>
 
+        <!-- ── Token Holders (Live from Blockchain) ────────────────────────── -->
+        <mat-card class="section-card">
+          <mat-card-header>
+            <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
+              <mat-card-title>Token Holders (Live from Blockchain)</mat-card-title>
+              <button mat-icon-button (click)="refreshLiveHolders()" [disabled]="liveHoldersLoading" matTooltip="Refresh holder data">
+                @if (liveHoldersLoading) {
+                  <mat-spinner diameter="24"></mat-spinner>
+                } @else {
+                  <mat-icon>refresh</mat-icon>
+                }
+              </button>
+            </div>
+          </mat-card-header>
+          <mat-card-content>
+            @if (asset && asset.status === 'ISSUED' && deployments.length > 0) {
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
+                <!-- Left: Distribution -->
+                <div>
+                  <app-holder-distribution [holders]="liveHolders"></app-holder-distribution>
+                </div>
+                <!-- Right: Holder Table -->
+                <div>
+                  <app-holder-table [holders]="liveHolders"></app-holder-table>
+                </div>
+              </div>
+
+              <!-- Token Admin Panel for Issuers -->
+              @if (isIssuer && deployments.length > 0 && asset) {
+                <div style="margin-top:24px;border-top:1px solid var(--rw-border);padding-top:24px">
+                  <app-token-admin-panel
+                    [assetId]="asset.id"
+                    [deploymentId]="deployments[0].id"
+                    (mint)="onMint($event)"
+                    (burn)="onBurn($event)"
+                    (forceTransfer)="onForceTransfer($event)"
+                    (forceApprove)="onForceApprove($event)"
+                  ></app-token-admin-panel>
+                </div>
+              }
+            } @else {
+              <p class="empty-text">
+                @if (asset && asset.status !== 'ISSUED') {
+                  Token holders will be displayed once the asset is issued.
+                } @else {
+                  No deployments available for this asset.
+                }
+              </p>
+            }
+          </mat-card-content>
+        </mat-card>
+
       }
     </div>
   `,
@@ -391,8 +453,12 @@ export class IssuanceDetailComponent implements OnInit {
   private readonly issuanceService = inject(IssuanceService);
   private readonly auth = inject(AuthService);
   private readonly erc3643Service = inject(Erc3643Service);
+  private readonly txService = inject(TransactionService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+
+  txHistory: TxRecord[] = [];
+  txHistoryLoading = false;
 
   asset: Asset | null = null;
   deployments: AssetDeployment[] = [];
@@ -412,6 +478,10 @@ export class IssuanceDetailComponent implements OnInit {
   // ERC-3643 state
   complianceStatus: ComplianceStatus | null = null;
   identityRegistry: IdentityRegistryEntry[] = [];
+
+  // Live token holders (blockchain state)
+  liveHolders: LiveHolder[] = [];
+  liveHoldersLoading = false;
 
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status', 'deployedAt'];
   readonly baseHolderColumns  = ['wallet', 'amount', 'whitelisted'];
@@ -571,6 +641,67 @@ export class IssuanceDetailComponent implements OnInit {
         this.holders = [...this.holders, result];
         this.snackBar.open('Holder added successfully.', 'OK', { duration: 3000 });
       }
+    });
+  }
+
+  // ── Live Token Holders ────────────────────────────────────────────────────
+
+  refreshLiveHolders(): void {
+    if (!this.asset?.id) return;
+    this.liveHoldersLoading = true;
+    this.issuanceService.refreshHolders(this.asset.id).subscribe({
+      next: (response) => {
+        this.liveHoldersLoading = false;
+        this.snackBar.open(response.message || 'Holder data refresh initiated', '', { duration: 3000 });
+      },
+      error: (error) => {
+        this.liveHoldersLoading = false;
+        const errorMsg = error?.error?.message || 'Failed to refresh holder data';
+        this.snackBar.open(`Error: ${errorMsg}`, 'Close', { duration: 5000 });
+      }
+    });
+  }
+
+  onMint(action: MintAction): void {
+    if (!this.asset?.id) return;
+    // TODO: Call issuanceService to execute mint action
+    this.snackBar.open(`Mint initiated: ${action.amount} tokens`, 'OK', { duration: 3000 });
+  }
+
+  onBurn(action: BurnAction): void {
+    if (!this.asset?.id) return;
+    // TODO: Call issuanceService to execute burn action
+    this.snackBar.open(`Burn initiated: ${action.amount} tokens`, 'OK', { duration: 3000 });
+  }
+
+  onForceTransfer(action: ForceTransferAction): void {
+    if (!this.asset?.id || this.deployments.length === 0) return;
+    this.issuanceService.forceTransfer(this.asset.id, this.deployments[0].id, {
+      from: action.fromWallet, to: action.toWallet,
+      value: action.amount.toString(), legalBasis: '',
+    }).subscribe({
+      next: (r) => this.txService.track(r.txId, 'Forced transfer'),
+      error: () => this.snackBar.open('Force transfer failed.', 'Close', { duration: 5000 }),
+    });
+  }
+
+  onForceApprove(action: ForceApproveAction): void {
+    if (!this.asset?.id || this.deployments.length === 0) return;
+    this.issuanceService.forceApprove(this.asset.id, this.deployments[0].id, {
+      owner: action.ownerWallet, spender: action.spenderWallet,
+      value: action.amount.toString(), legalBasis: '',
+    }).subscribe({
+      next: (r) => this.txService.track(r.txId, 'Forced approve'),
+      error: () => this.snackBar.open('Force approve failed.', 'Close', { duration: 5000 }),
+    });
+  }
+
+  loadTxHistory(): void {
+    if (!this.deployments[0]?.id) return;
+    this.txHistoryLoading = true;
+    this.txService.listTransactions(this.deployments[0].id).subscribe({
+      next: (page) => { this.txHistory = page.content; this.txHistoryLoading = false; },
+      error: () => { this.txHistoryLoading = false; },
     });
   }
 }

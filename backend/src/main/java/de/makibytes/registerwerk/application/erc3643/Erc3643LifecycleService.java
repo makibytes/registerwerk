@@ -1,20 +1,11 @@
 package de.makibytes.registerwerk.application.erc3643;
 
-import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
-import de.makibytes.registerwerk.application.blockchain.ChainDescriptor;
-import de.makibytes.registerwerk.application.blockchain.EvmContractService;
-import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
-import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
-import de.makibytes.registerwerk.domain.asset.AssetDeployment;
-import de.makibytes.registerwerk.domain.erc3643.Erc3643ClaimTopic;
-import de.makibytes.registerwerk.domain.erc3643.Erc3643ComplianceModule;
-import de.makibytes.registerwerk.domain.erc3643.Erc3643Suite;
-import de.makibytes.registerwerk.domain.erc3643.Erc3643TrustedIssuer;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643ClaimTopicRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643ComplianceModuleRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643SuiteRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643TrustedIssuerRepository;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -27,13 +18,24 @@ import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
 
+import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
+import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
+import de.makibytes.registerwerk.application.blockchain.BlockchainTransactionService;
+import de.makibytes.registerwerk.application.blockchain.ChainDescriptor;
+import de.makibytes.registerwerk.application.blockchain.EvmContractService;
+import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
+import de.makibytes.registerwerk.domain.asset.AssetDeployment;
+import de.makibytes.registerwerk.domain.erc3643.Erc3643ClaimTopic;
+import de.makibytes.registerwerk.domain.erc3643.Erc3643ComplianceModule;
+import de.makibytes.registerwerk.domain.erc3643.Erc3643Suite;
+import de.makibytes.registerwerk.domain.erc3643.Erc3643TrustedIssuer;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643ClaimTopicRepository;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643ComplianceModuleRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643IdentityRegistryRepository;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643SuiteRepository;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643TrustedIssuerRepository;
 import de.makibytes.registerwerk.web.dto.erc3643.ComplianceStatusResponse;
-import java.math.BigDecimal;
-import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 /**
  * Manages ERC-3643 token lifecycle operations beyond initial suite deployment.
@@ -64,6 +66,7 @@ public class Erc3643LifecycleService {
     private final AuditEventPublisher auditPublisher;
     private final EvmContractService evmContractService;
     private final BlockchainClientRegistry blockchainClientRegistry;
+    private final BlockchainTransactionService txService;
 
     public Erc3643LifecycleService(
             Erc3643SuiteRepository suiteRepository,
@@ -74,7 +77,8 @@ public class Erc3643LifecycleService {
             AssetDeploymentRepository deploymentRepository,
             AuditEventPublisher auditPublisher,
             EvmContractService evmContractService,
-            BlockchainClientRegistry blockchainClientRegistry) {
+            BlockchainClientRegistry blockchainClientRegistry,
+            BlockchainTransactionService txService) {
         this.suiteRepository = suiteRepository;
         this.complianceModuleRepository = complianceModuleRepository;
         this.trustedIssuerRepository = trustedIssuerRepository;
@@ -84,10 +88,15 @@ public class Erc3643LifecycleService {
         this.auditPublisher = auditPublisher;
         this.evmContractService = evmContractService;
         this.blockchainClientRegistry = blockchainClientRegistry;
+        this.txService = txService;
     }
 
     // ── Shared on-chain helpers ────────────────────────────────────────────────
 
+    /**
+     * Sends a non-tracked transaction to a suite contract (for management operations like
+     * adding compliance modules, trusted issuers, claim topics). Uses synchronous send.
+     */
     private void sendToSuite(Erc3643Suite suite, String contractAddress, Function fn) {
         if (contractAddress == null || contractAddress.isBlank()
                 || contractAddress.startsWith("0x-PENDING")) {
@@ -95,18 +104,36 @@ public class Erc3643LifecycleService {
                     suite.getId(), fn.getName());
             return;
         }
-        try {
-            AssetDeployment dep = deploymentRepository.findById(suite.getAssetDeploymentId())
-                    .orElseThrow(() -> new EntityNotFoundException("AssetDeployment",
-                            suite.getAssetDeploymentId()));
-            ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-            Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-            Credentials creds = evmContractService.credentials();
-            evmContractService.send(web3j, creds, contractAddress, fn);
-        } catch (Exception e) {
-            throw new RuntimeException("On-chain call " + fn.getName() + " failed on suite="
-                    + suite.getId() + ": " + e.getMessage(), e);
+        AssetDeployment dep = deploymentRepository.findById(suite.getAssetDeploymentId())
+                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment",
+                        suite.getAssetDeploymentId()));
+        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
+        org.web3j.protocol.Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
+        org.web3j.crypto.Credentials creds = evmContractService.credentials();
+        evmContractService.send(web3j, creds, contractAddress, fn);
+    }
+
+    /**
+     * Submits a transaction to a suite contract asynchronously and returns a tracking UUID.
+     * Returns null if the contract address is not yet set.
+     */
+    private UUID submitToSuite(Erc3643Suite suite, String contractAddress, Function fn,
+                               Map<String, Object> params) {
+        if (contractAddress == null || contractAddress.isBlank()
+                || contractAddress.startsWith("0x-PENDING")) {
+            log.warn("Contract address not yet set on suite={}; skipping on-chain call to {}",
+                    suite.getId(), fn.getName());
+            return null;
         }
+        AssetDeployment dep = deploymentRepository.findById(suite.getAssetDeploymentId())
+                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment",
+                        suite.getAssetDeploymentId()));
+        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
+        Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
+        Credentials creds = evmContractService.credentials();
+        String txHash = evmContractService.submit(web3j, creds, contractAddress, fn);
+        return txService.record(txHash, fn.getName(), dep.getId(), dep.getAssetId(),
+                dep.getChain().name(), dep.getNetwork().name(), contractAddress, params);
     }
 
     /**
@@ -340,172 +367,150 @@ public class Erc3643LifecycleService {
      * @param amount  token amount to transfer (in token decimals)
      * @param reason  textual reason for the forced transfer (logged in audit)
      */
-    public void forcedTransfer(UUID suiteId, String from, String to, BigDecimal amount, String reason) {
-        log.info(
-            "Forced transfer on suite={}: from={} to={} amount={} reason={}",
-            suiteId, from, to, amount, reason);
-
+    public UUID forcedTransfer(UUID suiteId, String from, String to, BigDecimal amount, String reason) {
+        log.info("Forced transfer on suite={}: from={} to={} amount={}", suiteId, from, to, amount);
         Erc3643Suite suite = requireSuite(suiteId);
-
-        // IToken.forcedTransfer(address _from, address _to, uint256 _amount)
-        Function fnForcedTransfer = new Function(
-                "forcedTransfer",
-                List.of(
-                        new Address(from),
-                        new Address(to),
-                        new Uint256(amount.toBigIntegerExact())
-                ),
-                List.of()
-        );
-        sendToSuite(suite, suite.getTokenAddress(), fnForcedTransfer);
-
-        auditPublisher.publish(
-            "FORCED_TRANSFER",
-            "Erc3643Suite",
-            suiteId,
-            null,
-            "REGISTRY_ADMIN",
-            Map.of("from", from, "to", to, "amount", amount.toPlainString(), "reason", reason));
+        Function fn = new Function(forcedTransferMethodName(),
+                List.of(new Address(from), new Address(to), new Uint256(amount.toBigIntegerExact())),
+                List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("from", from, "to", to, "amount", amount.toPlainString(), "reason", reason));
     }
 
     /**
-     * Freezes an investor's address, preventing them from sending or receiving tokens.
-     *
-     * <p>Used when an investor fails re-KYC or is subject to a regulatory freeze.
-     * Requires the AGENT role.
-     *
-     * @param suiteId ID of the ERC-3643 suite
-     * @param address EVM wallet address to freeze
+     * Not supported for ERC-3643 tokens.
+     * The T-REX standard enforces compliance via IdentityRegistry and ModularCompliance,
+     * not through ERC-20 allowance overrides.
      */
-    public void freezeAddress(UUID suiteId, String address) {
+    public UUID forcedApprove(UUID suiteId, String owner, String spender, BigDecimal amount, String reason) {
+        throw new UnsupportedOperationException(
+            "ERC-3643 (T-REX) does not define a forcedApprove agent operation. "
+            + "The T-REX standard enforces compliance via IdentityRegistry and ModularCompliance "
+            + "contracts, not through ERC-20 allowance overrides.");
+    }
+
+    public UUID freezeAddress(UUID suiteId, String address) {
         log.info("Freezing address={} on suite={}", address, suiteId);
-
         Erc3643Suite suite = requireSuite(suiteId);
-
-        // IToken.setAddressFrozen(address _userAddress, bool _freeze)
-        Function fnFreeze = new Function(
-                "setAddressFrozen",
-                List.of(new Address(address), new Bool(true)),
-                List.of()
-        );
-        sendToSuite(suite, suite.getTokenAddress(), fnFreeze);
-
-        auditPublisher.publish(
-            "ADDRESS_FROZEN",
-            "Erc3643Suite",
-            suiteId,
-            null,
-            "REGISTRY_ADMIN",
-            Map.of("address", address));
+        Function fn = new Function("setAddressFrozen",
+                List.of(new Address(address), new Bool(true)), List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn, Map.of("address", address));
     }
 
-    /**
-     * Unfreezes a previously frozen investor address.
-     *
-     * @param suiteId ID of the ERC-3643 suite
-     * @param address EVM wallet address to unfreeze
-     */
-    public void unfreezeAddress(UUID suiteId, String address) {
+    public UUID unfreezeAddress(UUID suiteId, String address) {
         log.info("Unfreezing address={} on suite={}", address, suiteId);
-
         Erc3643Suite suite = requireSuite(suiteId);
-
-        // IToken.setAddressFrozen(address _userAddress, bool _freeze)
-        Function fnUnfreeze = new Function(
-                "setAddressFrozen",
-                List.of(new Address(address), new Bool(false)),
-                List.of()
-        );
-        sendToSuite(suite, suite.getTokenAddress(), fnUnfreeze);
-
-        auditPublisher.publish(
-            "ADDRESS_UNFROZEN",
-            "Erc3643Suite",
-            suiteId,
-            null,
-            "REGISTRY_ADMIN",
-            Map.of("address", address));
+        Function fn = new Function("setAddressFrozen",
+                List.of(new Address(address), new Bool(false)), List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn, Map.of("address", address));
     }
 
     /**
-     * Suspends all transfers on the T-REX token contract.
-     *
-     * <p>Legal basis: MiCAR Art. 36, 84; eWpG §24. T-REX IToken.pause() requires the
-     * caller to hold the AGENT role on the token contract.
-     *
-     * @param suiteId ID of the ERC-3643 suite
+     * Freezes a partial amount of tokens for an investor (T-REX agent operation).
+     * The frozen tokens cannot be transferred even though the address is not fully frozen.
      */
-    public void pause(UUID suiteId) {
+    public UUID freezePartialTokens(UUID suiteId, String address, BigDecimal amount) {
+        log.info("Freeze partial tokens={} for address={} on suite={}", amount, address, suiteId);
+        Erc3643Suite suite = requireSuite(suiteId);
+        Function fn = new Function("freezePartialTokens",
+                List.of(new Address(address), new Uint256(amount.toBigIntegerExact())), List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("address", address, "amount", amount.toPlainString()));
+    }
+
+    /**
+     * Unfreezes a partial amount of previously frozen tokens for an investor.
+     */
+    public UUID unfreezePartialTokens(UUID suiteId, String address, BigDecimal amount) {
+        log.info("Unfreeze partial tokens={} for address={} on suite={}", amount, address, suiteId);
+        Erc3643Suite suite = requireSuite(suiteId);
+        Function fn = new Function("unfreezePartialTokens",
+                List.of(new Address(address), new Uint256(amount.toBigIntegerExact())), List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("address", address, "amount", amount.toPlainString()));
+    }
+
+    public UUID pause(UUID suiteId) {
         log.info("Pausing ERC-3643 token on suite={}", suiteId);
-
         Erc3643Suite suite = requireSuite(suiteId);
-
-        // IToken.pause()
         Function fn = new Function("pause", List.of(), List.of());
-        sendToSuite(suite, suite.getTokenAddress(), fn);
-
-        auditPublisher.publish(
-            "TOKEN_PAUSED",
-            "Erc3643Suite",
-            suiteId,
-            null,
-            "REGISTRY_ADMIN",
-            Map.of("tokenAddress", suite.getTokenAddress() != null ? suite.getTokenAddress() : ""));
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("tokenAddress", suite.getTokenAddress() != null ? suite.getTokenAddress() : ""));
     }
 
-    /**
-     * Resumes transfers on the T-REX token contract.
-     *
-     * @param suiteId ID of the ERC-3643 suite
-     */
-    public void unpause(UUID suiteId) {
+    public UUID unpause(UUID suiteId) {
         log.info("Unpausing ERC-3643 token on suite={}", suiteId);
-
         Erc3643Suite suite = requireSuite(suiteId);
-
-        // IToken.unpause()
         Function fn = new Function("unpause", List.of(), List.of());
-        sendToSuite(suite, suite.getTokenAddress(), fn);
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("tokenAddress", suite.getTokenAddress() != null ? suite.getTokenAddress() : ""));
+    }
 
-        auditPublisher.publish(
-            "TOKEN_UNPAUSED",
-            "Erc3643Suite",
-            suiteId,
-            null,
-            "REGISTRY_ADMIN",
-            Map.of("tokenAddress", suite.getTokenAddress() != null ? suite.getTokenAddress() : ""));
+    public UUID forceBurn(UUID suiteId, String from, java.math.BigDecimal amount, String legalBasis) {
+        log.info("forceBurn from={} amount={} on suite={}", from, amount, suiteId);
+        Erc3643Suite suite = requireSuite(suiteId);
+        Function fn = new Function("burn",
+                List.of(new Address(from), new Uint256(amount.toBigIntegerExact())), List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("from", from, "amount", amount.toPlainString(), "legalBasis", legalBasis));
     }
 
     /**
-     * Burns tokens from an address, bypassing compliance.
+     * Batch forced transfer — T-REX agent operation for transferring from multiple holders at once.
      *
-     * <p>Legal basis: eWpG §26 Einziehung. T-REX IToken.burn() is an agent-only call.
-     *
-     * @param suiteId    ID of the ERC-3643 suite
-     * @param from       Investor address whose tokens are cancelled
-     * @param amount     Token amount to burn
-     * @param legalBasis Reference to the BaFin Einziehungsverfügung
+     * @param suiteId IDs of the ERC-3643 suite
+     * @param froms   list of source addresses (same length as {@code tos} and {@code amounts})
+     * @param tos     list of destination addresses
+     * @param amounts list of transfer amounts in token decimals
      */
-    public void forceBurn(UUID suiteId, String from, java.math.BigDecimal amount, String legalBasis) {
-        log.info("forceBurn from={} amount={} on suite={} legalBasis={}", from, amount, suiteId, legalBasis);
-
+    public UUID batchForcedTransfer(UUID suiteId, List<String> froms, List<String> tos,
+                                    List<BigDecimal> amounts) {
+        log.info("batchForcedTransfer {} entries on suite={}", froms.size(), suiteId);
         Erc3643Suite suite = requireSuite(suiteId);
+        Function fn = new Function("batchForcedTransfer",
+                List.of(
+                        new DynamicArray<>(Address.class, froms.stream().map(Address::new).toList()),
+                        new DynamicArray<>(Address.class, tos.stream().map(Address::new).toList()),
+                        new DynamicArray<>(Uint256.class,
+                                amounts.stream().map(a -> new Uint256(a.toBigIntegerExact())).toList())
+                ),
+                List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("count", froms.size(), "froms", froms, "tos", tos));
+    }
 
-        // IToken.burn(address _userAddress, uint256 _amount)
-        Function fn = new Function(
-                "burn",
-                List.of(new Address(from), new Uint256(amount.toBigIntegerExact())),
-                List.of()
-        );
-        sendToSuite(suite, suite.getTokenAddress(), fn);
+    /**
+     * Batch mint — T-REX agent operation for minting tokens to multiple addresses at once.
+     */
+    public UUID batchMint(UUID suiteId, List<String> toAddresses, List<BigDecimal> amounts) {
+        log.info("batchMint {} entries on suite={}", toAddresses.size(), suiteId);
+        Erc3643Suite suite = requireSuite(suiteId);
+        Function fn = new Function("batchMint",
+                List.of(
+                        new DynamicArray<>(Address.class, toAddresses.stream().map(Address::new).toList()),
+                        new DynamicArray<>(Uint256.class,
+                                amounts.stream().map(a -> new Uint256(a.toBigIntegerExact())).toList())
+                ),
+                List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("count", toAddresses.size(), "addresses", toAddresses));
+    }
 
-        auditPublisher.publish(
-            "FORCE_BURN",
-            "Erc3643Suite",
-            suiteId,
-            null,
-            "REGISTRY_ADMIN",
-            Map.of("from", from, "amount", amount.toPlainString(), "legalBasis", legalBasis));
+    /**
+     * Batch burn — T-REX agent operation for burning tokens from multiple addresses at once.
+     */
+    public UUID batchBurn(UUID suiteId, List<String> userAddresses, List<BigDecimal> amounts) {
+        log.info("batchBurn {} entries on suite={}", userAddresses.size(), suiteId);
+        Erc3643Suite suite = requireSuite(suiteId);
+        Function fn = new Function("batchBurn",
+                List.of(
+                        new DynamicArray<>(Address.class, userAddresses.stream().map(Address::new).toList()),
+                        new DynamicArray<>(Uint256.class,
+                                amounts.stream().map(a -> new Uint256(a.toBigIntegerExact())).toList())
+                ),
+                List.of());
+        return submitToSuite(suite, suite.getTokenAddress(), fn,
+                Map.of("count", userAddresses.size(), "addresses", userAddresses));
     }
 
     /**
@@ -564,5 +569,10 @@ public class Erc3643LifecycleService {
     private Erc3643Suite requireSuite(UUID suiteId) {
         return suiteRepository.findById(suiteId)
             .orElseThrow(() -> new EntityNotFoundException("Erc3643Suite", suiteId));
+    }
+
+    private static String forcedTransferMethodName() {
+        // T-REX IToken.forcedTransfer(address _from, address _to, uint256 _amount)
+        return "forcedTransfer";
     }
 }

@@ -158,3 +158,10 @@ registerwerk:
     default-admin:
       email: ${DEFAULT_ADMIN_EMAIL:}
       password: ${DEFAULT_ADMIN_PASSWORD:}
+  sync:
+    # Auto-refresh interval in minutes for holder data sync from blockchain (0 = disabled)
+    auto-refresh-interval-minutes: ${SYNC_INTERVAL_MINUTES:15}
+    # Maximum number of issuances to sync per scheduler run
+    batch-size: ${SYNC_BATCH_SIZE:50}
+    # Enable verbose logging for sync operations
+    log-sync-operations: ${SYNC_LOG_OPERATIONS:false}

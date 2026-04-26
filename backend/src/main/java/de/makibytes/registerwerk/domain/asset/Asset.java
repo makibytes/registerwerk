@@ -1,17 +1,27 @@
 package de.makibytes.registerwerk.domain.asset;
 
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
 import de.makibytes.registerwerk.domain.enums.Jurisdiction;
 import de.makibytes.registerwerk.domain.enums.OnchainLevel;
 import de.makibytes.registerwerk.domain.enums.TokenStandard;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-import java.time.Instant;
-import java.util.Map;
-import java.util.UUID;
 
 @Entity
 @Table(name = "asset")
@@ -62,6 +72,9 @@ public class Asset {
     @Column(name = "public_data", columnDefinition = "jsonb")
     private Map<String, Object> publicData;
 
+    @Column(name = "last_holder_sync_time")
+    private Instant lastHolderSyncTime;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -107,6 +120,9 @@ public class Asset {
 
     public Map<String, Object> getPublicData() { return publicData; }
     public void setPublicData(Map<String, Object> publicData) { this.publicData = publicData; }
+
+    public Instant getLastHolderSyncTime() { return lastHolderSyncTime; }
+    public void setLastHolderSyncTime(Instant lastHolderSyncTime) { this.lastHolderSyncTime = lastHolderSyncTime; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

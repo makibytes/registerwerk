@@ -58,6 +58,7 @@ public class EvmContractService {
     private final BlockchainClientRegistry clientRegistry;
     private final ChainConfigRepository chainConfigRepository;
 
+    private volatile Credentials cachedCredentials;
     public EvmContractService(BlockchainClientRegistry clientRegistry,
                                ChainConfigRepository chainConfigRepository) {
         this.clientRegistry = clientRegistry;
@@ -76,7 +77,14 @@ public class EvmContractService {
             throw new IllegalStateException(
                     "registerwerk.wallet.private-key is not configured; cannot sign transactions");
         }
-        return Credentials.create(privateKeyHex);
+        if (cachedCredentials == null) {
+            synchronized (this) {
+                if (cachedCredentials == null) {
+                    cachedCredentials = Credentials.create(privateKeyHex);
+                }
+            }
+        }
+        return cachedCredentials;
     }
 
     // ── Client helpers ────────────────────────────────────────────────────────
@@ -100,6 +108,49 @@ public class EvmContractService {
     }
 
     // ── Transaction sending ───────────────────────────────────────────────────
+
+    /**
+     * Encodes {@code function}, submits a signed raw transaction to {@code contractAddress},
+     * and returns the transaction hash immediately <em>without</em> waiting for a receipt.
+     *
+     * <p>Use this for fire-and-track admin operations. The caller should persist a
+     * {@link de.makibytes.registerwerk.domain.blockchain.BlockchainTransaction} record and let
+     * {@link de.makibytes.registerwerk.application.blockchain.BlockchainTransactionService}
+     * poll for the receipt asynchronously.
+     *
+     * @return EVM transaction hash (0x-prefixed, 66 characters)
+     */
+    public String submit(Web3j web3j, Credentials creds, String contractAddress, Function function) {
+        return submit(web3j, creds, contractAddress, FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+    }
+
+    /**
+     * Submits a raw ABI-encoded call to {@code contractAddress} and returns the transaction hash.
+     */
+    public String submit(Web3j web3j, Credentials creds, String contractAddress,
+                         String encodedData, BigInteger gasLimit) {
+        try {
+            BigInteger gasPrice = gasPrice(web3j);
+            BigInteger nonce = nonce(web3j, creds.getAddress());
+
+            RawTransaction tx = RawTransaction.createTransaction(
+                    nonce, gasPrice, gasLimit, contractAddress, encodedData);
+
+            byte[] signed = TransactionEncoder.signMessage(tx, creds);
+            EthSendTransaction sent = web3j
+                    .ethSendRawTransaction(Numeric.toHexString(signed))
+                    .send();
+
+            if (sent.hasError()) {
+                throw new RuntimeException("Transaction submission error: " + sent.getError().getMessage());
+            }
+            return sent.getTransactionHash();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("EVM transaction submit error: " + e.getMessage(), e);
+        }
+    }
 
     /**
      * Encodes {@code function}, sends a signed raw transaction to {@code contractAddress},

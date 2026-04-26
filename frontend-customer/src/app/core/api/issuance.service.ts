@@ -12,6 +12,7 @@ import {
   PageParams,
   PageResponse,
 } from '../models';
+import { LiveHolder } from '@registerwerk/ui';
 
 @Injectable({ providedIn: 'root' })
 export class IssuanceService {
@@ -65,6 +66,35 @@ export class IssuanceService {
 
   addHolder(assetId: string, body: { walletAddress: string; nominalAmount: number }): Observable<AssetHolder> {
     return this.http.post<AssetHolder>(`${this.base}/${assetId}/holders`, body);
+  }
+
+  getLiveHolders(assetId: string, depId: string): Observable<LiveHolder[]> {
+    return this.http.get<LiveHolder[]>(`${this.base}/${assetId}/holders/${depId}/live`);
+  }
+
+  refreshHolders(assetId: string): Observable<{ status: string; message: string }> {
+    return this.http.post<{ status: string; message: string }>(
+      `${this.base}/${assetId}/holders/refresh`,
+      {}
+    );
+  }
+
+  // ── Issuer token operations ────────────────────────────────────────────────
+
+  mint(assetId: string, depId: string, body: { toAddress: string; amount: string; reason?: string }): Observable<void> {
+    return this.http.post<void>(`${this.base}/${assetId}/deployments/${depId}/issuer/mint`, body);
+  }
+
+  burn(assetId: string, depId: string, body: { fromAddress: string; amount: string }): Observable<void> {
+    return this.http.post<void>(`${this.base}/${assetId}/deployments/${depId}/issuer/burn`, body);
+  }
+
+  forceTransfer(assetId: string, depId: string, body: { from: string; to: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/forced-transfer`, body);
+  }
+
+  forceApprove(assetId: string, depId: string, body: { owner: string; spender: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/forced-approve`, body);
   }
 
   // ── Documents ──────────────────────────────────────────────────────────────

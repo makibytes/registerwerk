@@ -77,6 +77,25 @@ contract EwpgERC721 is ERC721, Ownable, EwpgCompliance, EwpgDocumentManagement {
         emit ForcedTransfer(from, to, value, legalBasis);
     }
 
+    // ── Forced approve — regulatory override ──────────────────────────────────
+
+    /// @notice Approves `spender` for `tokenId` on behalf of `owner`, bypassing owner consent.
+    ///         To be used exclusively for BaFin / court orders requiring regulatory approval override.
+    ///         Passing auth=address(0) to _approve bypasses the ownership/authorization check.
+    /// @param owner      Current token owner (used for event; not checked on-chain).
+    /// @param spender    Address being approved to transfer the token.
+    /// @param tokenId    Token identifier to approve.
+    /// @param legalBasis Reference to legal authority (e.g. "BaFin Az. 2025-002").
+    function forcedApprove(
+        address owner,
+        address spender,
+        uint256 tokenId,
+        string calldata legalBasis
+    ) external override onlyRegistry {
+        _approve(spender, tokenId, address(0));
+        emit ForcedApprove(owner, spender, tokenId, legalBasis);
+    }
+
     // ── Forced burn — eWpG §26 Einziehung ────────────────────────────────────
 
     /// @notice Burns `tokenId` regardless of whitelist, freeze, or pause.

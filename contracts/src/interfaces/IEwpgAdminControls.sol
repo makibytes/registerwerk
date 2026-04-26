@@ -33,6 +33,9 @@ interface IEwpgAdminControls {
     /// @notice Emitted after a registry-initiated forced burn / Einziehung (eWpG §26).
     event ForceBurned(address indexed from, uint256 value, string legalBasis);
 
+    /// @notice Emitted after a registry-initiated forced approval override.
+    event ForcedApprove(address indexed owner, address indexed spender, uint256 value, string legalBasis);
+
     /// @notice Emitted when the supply cap is changed.
     event SupplyCapUpdated(uint256 oldCap, uint256 newCap);
 
@@ -71,6 +74,18 @@ interface IEwpgAdminControls {
     /// @param value      Amount (ERC-20/ERC-1155) or tokenId (ERC-721).
     /// @param legalBasis Reference to the legal authority (e.g. "BaFin order 2025-01").
     function forcedTransfer(address from, address to, uint256 value, string calldata legalBasis) external;
+
+    // ── Forced approve ────────────────────────────────────────────────────────
+
+    /// @notice Sets token allowance / operator approval as a regulatory override, bypassing owner consent.
+    ///         For ERC-20: sets allowance of `value` for `spender` on behalf of `owner`.
+    ///         For ERC-721: approves `spender` for token id `value` on behalf of `owner`.
+    ///         For ERC-1155: grants/revokes operator status for `spender` (value > 0 = grant).
+    /// @param owner      Token owner whose allowance/approval is being overridden.
+    /// @param spender    Spender or operator receiving the approval.
+    /// @param value      Allowance amount (ERC-20), tokenId (ERC-721), or flag >0 = approve (ERC-1155).
+    /// @param legalBasis Reference to the legal authority (e.g. "BaFin order 2025-01").
+    function forcedApprove(address owner, address spender, uint256 value, string calldata legalBasis) external;
 
     // ── Forced burn (Einziehung) ──────────────────────────────────────────────
 

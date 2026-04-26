@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- Initial schema (v1) — squashed from prior development migrations.
+-- Initial schema (v1) — consolidated from prior development migrations.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ── Legal entities ──────────────────────────────────────────────────────────
@@ -67,7 +67,8 @@ CREATE INDEX idx_merge_target ON entity_merge_record (target_entity_id);
 CREATE TABLE kyc_document (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     legal_entity_id UUID NOT NULL REFERENCES legal_entity(id),
-    document_type   VARCHAR(30) NOT NULL,
+    document_type   VARCHAR(64) NOT NULL,
+    jurisdiction    VARCHAR(20),
     mime_type       VARCHAR(100) NOT NULL,
     file_name       VARCHAR(500) NOT NULL,
     storage_ref     VARCHAR(1000) NOT NULL,
@@ -77,12 +78,6 @@ CREATE TABLE kyc_document (
     uploaded_by     UUID,
     expires_at      DATE,
     deleted_at      TIMESTAMPTZ,
-    CONSTRAINT chk_doc_type CHECK (
-        document_type IN (
-            'PASSPORT','COMMERCIAL_REGISTER','ANNUAL_REPORT',
-            'OWNERSHIP_CHART','AML_QUESTIONNAIRE','OTHER'
-        )
-    ),
     CONSTRAINT chk_mime CHECK (
         mime_type IN (
             'application/pdf','image/jpeg','image/png',
@@ -99,6 +94,23 @@ CREATE TABLE kyc_document_content (
     id      UUID PRIMARY KEY REFERENCES kyc_document(id) ON DELETE CASCADE,
     content BYTEA NOT NULL
 );
+
+CREATE TABLE kyc_jurisdiction_approval (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id        UUID NOT NULL REFERENCES legal_entity(id),
+    jurisdiction     VARCHAR(20) NOT NULL,
+    status           VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    approved_by      UUID,
+    approved_at      TIMESTAMPTZ,
+    expires_at       DATE,
+    rejection_reason TEXT,
+    override_note    TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (entity_id, jurisdiction)
+);
+
+CREATE INDEX idx_kyc_jur_entity ON kyc_jurisdiction_approval(entity_id);
 
 -- ── Onboarding tokens ───────────────────────────────────────────────────────
 CREATE TABLE onboarding_token (
@@ -117,6 +129,23 @@ CREATE UNIQUE INDEX idx_onboarding_token_active
 
 CREATE INDEX idx_onboarding_token_hash ON onboarding_token (token_hash);
 
+-- ── App users ───────────────────────────────────────────────────────────────
+CREATE TABLE app_user (
+    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    email           VARCHAR(320) NOT NULL UNIQUE,
+    password_hash   VARCHAR(100) NOT NULL,
+    role            VARCHAR(30)  NOT NULL DEFAULT 'REGISTRY_ADMIN',
+    enabled         BOOLEAN      NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    last_login_at   TIMESTAMPTZ,
+    CONSTRAINT chk_app_user_role CHECK (
+        role IN ('REGISTRY_ADMIN','AUDIT','COMPLIANCE_OFFICER')
+    )
+);
+
+CREATE INDEX idx_app_user_email_lower ON app_user (LOWER(email));
+
 -- ── Assets ──────────────────────────────────────────────────────────────────
 CREATE TABLE asset (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -126,11 +155,13 @@ CREATE TABLE asset (
     isin             VARCHAR(12),
     token_standard   VARCHAR(20) NOT NULL,
     onchain_level    VARCHAR(10) NOT NULL DEFAULT 'NONE',
+    jurisdiction     VARCHAR(20),
     status           VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
     termsheet_doc_id UUID REFERENCES kyc_document(id),
     public_data      JSONB,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_holder_sync_time TIMESTAMP WITH TIME ZONE,
     CONSTRAINT chk_token_standard CHECK (
         token_standard IN ('ERC20','ERC721','ERC1155','ERC3643','CONF_ERC20','CONF_ERC3643','SPL')
     ),
@@ -145,6 +176,37 @@ CREATE INDEX        idx_asset_isin_btree ON asset (isin) WHERE isin IS NOT NULL;
 CREATE INDEX        idx_asset_issuer     ON asset (issuer_id);
 CREATE INDEX        idx_asset_status     ON asset (status);
 CREATE INDEX        idx_asset_public_data ON asset USING GIN (public_data) WHERE public_data IS NOT NULL;
+
+CREATE INDEX idx_asset_last_holder_sync_time ON asset(last_holder_sync_time DESC NULLS LAST);
+-- ── Asset documents ─────────────────────────────────────────────────────────
+CREATE TABLE asset_document (
+    id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id         UUID         NOT NULL REFERENCES asset(id),
+    document_type    VARCHAR(30)  NOT NULL DEFAULT 'TERM_SHEET',
+    source           VARCHAR(30)  NOT NULL DEFAULT 'UPLOAD',
+    mime_type        VARCHAR(100) NOT NULL,
+    file_name        VARCHAR(500),
+    storage_ref      VARCHAR(1000),
+    content_hash     VARCHAR(66),
+    size_bytes       BIGINT,
+    chain            VARCHAR(20),
+    network          VARCHAR(10),
+    onchain_doc_name VARCHAR(66),
+    onchain_uri      VARCHAR(2000),
+    uploaded_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    uploaded_by      UUID,
+    fetched_at       TIMESTAMPTZ,
+    deleted_at       TIMESTAMPTZ
+);
+
+CREATE TABLE asset_document_content (
+    id      UUID PRIMARY KEY REFERENCES asset_document(id) ON DELETE CASCADE,
+    content BYTEA NOT NULL
+);
+
+CREATE INDEX idx_asset_doc_asset_type
+    ON asset_document(asset_id, document_type)
+    WHERE deleted_at IS NULL;
 
 -- ── On-chain deployments ────────────────────────────────────────────────────
 CREATE TABLE asset_deployment (

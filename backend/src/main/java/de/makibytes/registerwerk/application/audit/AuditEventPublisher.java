@@ -4,8 +4,11 @@ import de.makibytes.registerwerk.domain.audit.AuditEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -42,15 +45,27 @@ public class AuditEventPublisher {
             String actorRole,
             Map<String, Object> payload) {
 
+        // Enrich payload with actor name from the current security context
+        Map<String, Object> enrichedPayload = payload != null ? new HashMap<>(payload) : new HashMap<>();
+        String actorName = currentActorName();
+        if (actorName != null && !enrichedPayload.containsKey("actorName")) {
+            enrichedPayload.put("actorName", actorName);
+        }
+
         AuditEvent event = new AuditEvent();
         event.setEventType(eventType);
         event.setSubjectType(subjectType);
         event.setSubjectId(subjectId);
         event.setActorId(actorId);
         event.setActorRole(actorRole);
-        event.setPayload(payload);
+        event.setPayload(enrichedPayload);
 
-        log.debug("Publishing audit event: type={}, subject={}/{}", eventType, subjectType, subjectId);
+        log.debug("Publishing audit event: type={}, subject={}/{}, actor={}", eventType, subjectType, subjectId, actorName);
         eventPublisher.publishEvent(new AuditEventSpringEvent(this, event));
+    }
+
+    private static String currentActorName() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return (auth != null && auth.isAuthenticated()) ? auth.getName() : null;
     }
 }
