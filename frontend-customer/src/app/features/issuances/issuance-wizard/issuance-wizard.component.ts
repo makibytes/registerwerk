@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
@@ -14,7 +14,8 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { IssuanceService } from '../../../core/api/issuance.service';
-import { Chain, Network, OnchainLevel, TokenStandard } from '../../../core/models';
+import { KycService } from '../../../core/api/kyc.service';
+import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, JurisdictionRequirement } from '../../../core/models';
 
 @Component({
   selector: 'app-issuance-wizard',
@@ -70,6 +71,34 @@ import { Chain, Network, OnchainLevel, TokenStandard } from '../../../core/model
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Jurisdiction *</mat-label>
+                  <mat-select formControlName="jurisdiction">
+                    @for (j of jurisdictions; track j.value) {
+                      <mat-option [value]="j.value">{{ j.label }}</mat-option>
+                    }
+                  </mat-select>
+                  <mat-hint>Regulatory jurisdiction for this security issuance</mat-hint>
+                </mat-form-field>
+
+                @if (selectedJurisdictionProfile) {
+                  <div class="jurisdiction-requirements">
+                    <div class="jur-req-header">
+                      <mat-icon style="font-size:16px">policy</mat-icon>
+                      Required KYC documents for {{ selectedJurisdictionProfile.displayName }}
+                    </div>
+                    @for (req of selectedJurisdictionProfile.requirements; track req.documentType) {
+                      @if (req.mandatory) {
+                        <div class="jur-req-item">
+                          <mat-icon style="font-size:13px;color:#6366f1">chevron_right</mat-icon>
+                          {{ req.localName }}
+                          @if (req.maxAgeDays) { <span>(≤ {{ req.maxAgeDays }} days old)</span> }
+                        </div>
+                      }
+                    }
+                  </div>
+                }
+
+                <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Onchain Level *</mat-label>
                   <mat-select formControlName="onchainLevel">
                     @for (lvl of onchainLevels; track lvl.value) {
@@ -78,6 +107,35 @@ import { Chain, Network, OnchainLevel, TokenStandard } from '../../../core/model
                   </mat-select>
                   <mat-hint>Defines the degree of on-chain representation</mat-hint>
                 </mat-form-field>
+
+                <!-- Optional term sheet upload -->
+                <div class="termsheet-upload-section">
+                  <div class="termsheet-label">
+                    <mat-icon style="font-size:18px;width:18px;height:18px;color:var(--rw-text-muted)">description</mat-icon>
+                    <span>Term Sheet <span style="color:var(--rw-text-muted);font-size:12px">(optional — required by eWpG)</span></span>
+                  </div>
+                  @if (selectedTermSheetFile) {
+                    <div class="termsheet-file-selected">
+                      <mat-icon style="color:#10b981">check_circle</mat-icon>
+                      <span>{{ selectedTermSheetFile.name }}</span>
+                      <button mat-icon-button (click)="clearTermSheet()">
+                        <mat-icon>close</mat-icon>
+                      </button>
+                    </div>
+                  } @else {
+                    <label>
+                      <input #tsInput type="file"
+                        accept=".pdf,.html,.htm,.txt,.md,.json,.xml,.docx"
+                        style="display:none"
+                        (change)="onTermSheetSelected($event)" />
+                      <button mat-stroked-button type="button" (click)="tsInput.click()">
+                        <mat-icon>upload_file</mat-icon>
+                        Choose file
+                      </button>
+                    </label>
+                    <span style="font-size:11px;color:var(--rw-text-muted)">PDF, HTML, TXT, Markdown, JSON, XML, DOCX</span>
+                  }
+                </div>
 
                 <div class="step-actions">
                   <button mat-raised-button color="primary" matStepperNext [disabled]="detailsForm.invalid">
@@ -202,22 +260,86 @@ import { Chain, Network, OnchainLevel, TokenStandard } from '../../../core/model
     .review-label { font-size: 12px; color: #78909c; text-transform: uppercase; letter-spacing: 0.5px; }
     .review-value { font-size: 15px; font-weight: 500; color: #37474f; margin-top: 4px; }
     .error-message { color: #c62828; font-size: 13px; }
+    .jurisdiction-requirements {
+      border: 1px solid rgba(99,102,241,0.25);
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: rgba(99,102,241,0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .jur-req-header {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 600; color: #6366f1; margin-bottom: 6px;
+    }
+    .jur-req-item {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 12px; color: var(--rw-text-secondary);
+      span { color: var(--rw-text-muted); margin-left: 4px; }
+    }
+    .termsheet-upload-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      border: 1px dashed var(--rw-border);
+      background: rgba(0,0,0,0.01);
+      margin-top: 4px;
+    }
+    .termsheet-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .termsheet-file-selected {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #10b981;
+    }
   `]
 })
-export class IssuanceWizardComponent {
+export class IssuanceWizardComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly issuanceService = inject(IssuanceService);
+  private readonly kycService = inject(KycService);
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
 
   submitting = false;
   submitError = '';
+  selectedTermSheetFile: File | null = null;
+  jurisdictionProfiles: JurisdictionRequirement[] = [];
+
+  readonly jurisdictions: { value: Jurisdiction; label: string }[] = [
+    { value: 'DE_EWPG', label: 'Germany — eWpG / BaFin' },
+    { value: 'LU_CSSF', label: 'Luxembourg — CSSF' },
+    { value: 'FR_AMF',  label: 'France — AMF' },
+    { value: 'LI_TVTG', label: 'Liechtenstein — TVTG / FMA' },
+  ];
+
+  get selectedJurisdictionProfile(): JurisdictionRequirement | null {
+    const jur = this.detailsForm.get('jurisdiction')?.value as Jurisdiction | null;
+    return this.jurisdictionProfiles.find(p => p.jurisdiction === jur) ?? null;
+  }
+
+  ngOnInit(): void {
+    this.kycService.getJurisdictionRequirements().subscribe({
+      next: (profiles) => { this.jurisdictionProfiles = profiles; },
+    });
+  }
 
   // ── Form groups ────────────────────────────────────────────────────────────
 
   readonly detailsForm = this.fb.group({
     name:         ['', Validators.required],
     isin:         ['', [Validators.pattern(/^[A-Z0-9]{12}$/)]],
+    jurisdiction: [null as Jurisdiction | null, Validators.required],
     onchainLevel: ['SIMPLE' as OnchainLevel, Validators.required],
   });
 
@@ -280,6 +402,7 @@ export class IssuanceWizardComponent {
     const body = {
       name:          this.detailsForm.value.name!,
       isin:          this.detailsForm.value.isin || null,
+      jurisdiction:  this.detailsForm.value.jurisdiction || null,
       onchainLevel:  this.detailsForm.value.onchainLevel!,
       chain:         this.chainForm.value.chain!,
       network:       this.chainForm.value.network!,
@@ -289,6 +412,12 @@ export class IssuanceWizardComponent {
     this.issuanceService.createIssuance(body).subscribe({
       next: (asset) => {
         this.submitting = false;
+        if (this.selectedTermSheetFile) {
+          // Upload term sheet asynchronously after creation (non-blocking for navigation)
+          this.issuanceService.uploadDocument(asset.id, this.selectedTermSheetFile).subscribe({
+            error: () => this.snackBar.open('Issuance created, but term sheet upload failed.', 'Close', { duration: 5000 }),
+          });
+        }
         this.snackBar.open('Issuance created successfully!', 'OK', { duration: 3000 });
         this.router.navigate(['/issuances', asset.id]);
       },
@@ -297,5 +426,13 @@ export class IssuanceWizardComponent {
         this.submitError = err?.error?.message ?? 'Failed to create issuance. Please try again.';
       },
     });
+  }
+
+  onTermSheetSelected(event: Event): void {
+    this.selectedTermSheetFile = (event.target as HTMLInputElement).files?.[0] ?? null;
+  }
+
+  clearTermSheet(): void {
+    this.selectedTermSheetFile = null;
   }
 }

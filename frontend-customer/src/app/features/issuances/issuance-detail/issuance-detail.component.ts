@@ -17,8 +17,9 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { IssuanceService } from '../../../core/api/issuance.service';
+import { AuthService } from '../../../core/auth/auth.service';
 import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
-import { Asset, AssetDeployment, AssetHolder, Chain, Network } from '../../../core/models';
+import { Asset, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
 import { AddHolderDialogComponent } from './add-holder-dialog.component';
@@ -67,6 +68,11 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
                   <code class="asset-number">{{ asset.assetNumber }}</code>
                   @if (asset.isin) { <span class="isin">ISIN: {{ asset.isin }}</span> }
                   @if (asset.tokenStandard) { <mat-chip>{{ asset.tokenStandard }}</mat-chip> }
+                  @if (asset.jurisdiction) {
+                    <mat-chip style="background:rgba(99,102,241,0.12);color:#6366f1">
+                      {{ jurisdictionLabel(asset.jurisdiction) }}
+                    </mat-chip>
+                  }
                   @if (asset.chain) {
                     <app-chain-icon [chain]="asset.chain"></app-chain-icon>
                   }
@@ -186,6 +192,55 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
                 <tr mat-header-row *matHeaderRowDef="deploymentColumns"></tr>
                 <tr mat-row *matRowDef="let r; columns: deploymentColumns;"></tr>
               </table>
+            }
+          </mat-card-content>
+        </mat-card>
+
+        <!-- ── Term Sheet ────────────────────────────────────────────────── -->
+        <mat-card class="section-card">
+          <mat-card-header>
+            <mat-card-title>Term Sheet</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            @if (tsLoading) {
+              <div style="padding:16px;text-align:center"><mat-spinner diameter="32"></mat-spinner></div>
+            } @else if (termSheetDocs.length > 0) {
+              @for (doc of termSheetDocs; track doc.id) {
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--rw-border)">
+                  <mat-icon style="color:var(--rw-text-muted)">description</mat-icon>
+                  <div style="flex:1">
+                    <div style="font-size:13px;font-weight:500">{{ doc.fileName ?? doc.documentType }}</div>
+                    <div style="font-size:11px;color:var(--rw-text-muted)">
+                      {{ doc.mimeType }} · {{ doc.source === 'UPLOAD' ? 'Uploaded' : 'On-chain' }}
+                      @if (doc.sizeBytes) { · {{ (doc.sizeBytes / 1024 | number:'1.0-0') }} KB }
+                    </div>
+                  </div>
+                  @if (doc.contentAvailable) {
+                    <button mat-icon-button matTooltip="Download" (click)="downloadTermSheet(doc)">
+                      <mat-icon>download</mat-icon>
+                    </button>
+                  }
+                </div>
+              }
+            } @else if (isIssuer) {
+              <div style="display:flex;align-items:center;gap:10px;padding:12px 0;color:var(--rw-text-secondary);font-size:13px">
+                <mat-icon style="color:#F59E0B">warning_amber</mat-icon>
+                <span style="flex:1">No term sheet uploaded. eWpG requires a term sheet for this security.</span>
+                <label>
+                  <input #tsFileInput type="file"
+                    accept=".pdf,.html,.htm,.txt,.md,.json,.xml,.docx"
+                    style="display:none"
+                    (change)="onTermSheetFileSelected($event)" />
+                  <button mat-stroked-button (click)="tsFileInput.click()" [disabled]="tsUploading">
+                    <mat-icon>upload_file</mat-icon>
+                    @if (tsUploading) { Uploading… } @else { Upload Term Sheet }
+                  </button>
+                </label>
+              </div>
+            } @else {
+              <p style="color:var(--rw-text-muted);font-size:13px;padding:8px 0">
+                Term sheet pending upload by the issuer.
+              </p>
             }
           </mat-card-content>
         </mat-card>
@@ -334,6 +389,7 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
 export class IssuanceDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly issuanceService = inject(IssuanceService);
+  private readonly auth = inject(AuthService);
   private readonly erc3643Service = inject(Erc3643Service);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
@@ -343,6 +399,15 @@ export class IssuanceDetailComponent implements OnInit {
   holders: AssetHolder[] = [];
   loading = true;
   actionLoading = false;
+
+  // ── Term Sheet ────────────────────────────────────────────────────────────
+  termSheetDocs: AssetDocument[] = [];
+  tsLoading = false;
+  tsUploading = false;
+
+  get isIssuer(): boolean {
+    return this.auth?.hasRole('ISSUER') || this.auth?.hasRole('REGISTRY_ADMIN') || false;
+  }
 
   // ERC-3643 state
   complianceStatus: ComplianceStatus | null = null;
@@ -389,6 +454,7 @@ export class IssuanceDetailComponent implements OnInit {
         this.deployments = deployments;
         this.holders = holders.content;
         this.loading = false;
+        this.loadTermSheetDocs(id);
         // Load ERC-3643 data if applicable
         const erc3643 = asset.tokenStandard === 'ERC3643' || asset.tokenStandard === 'CONF_ERC3643';
         if (erc3643 && deployments.length > 0) {
@@ -439,6 +505,58 @@ export class IssuanceDetailComponent implements OnInit {
         },
         error: () => (this.actionLoading = false),
       });
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  jurisdictionLabel(jur: string): string {
+    const labels: Record<string, string> = {
+      DE_EWPG: 'DE — eWpG',
+      LU_CSSF: 'LU — CSSF',
+      FR_AMF: 'FR — AMF',
+      LI_TVTG: 'LI — TVTG',
+    };
+    return labels[jur] ?? jur;
+  }
+
+  // ── Term Sheet ────────────────────────────────────────────────────────────
+
+  private loadTermSheetDocs(assetId: string): void {
+    this.tsLoading = true;
+    this.issuanceService.listDocuments(assetId).subscribe({
+      next: docs => { this.termSheetDocs = docs; this.tsLoading = false; },
+      error: () => { this.tsLoading = false; },
+    });
+  }
+
+  onTermSheetFileSelected(event: Event): void {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file || !this.asset) return;
+    this.tsUploading = true;
+    this.issuanceService.uploadDocument(this.asset.id, file).subscribe({
+      next: doc => {
+        this.termSheetDocs = [doc, ...this.termSheetDocs];
+        this.tsUploading = false;
+        if (this.asset) this.asset.hasTermSheet = true;
+        this.snackBar.open('Term sheet uploaded.', 'OK', { duration: 3000 });
+      },
+      error: () => {
+        this.tsUploading = false;
+        this.snackBar.open('Upload failed.', 'Close', { duration: 4000 });
+      },
+    });
+  }
+
+  downloadTermSheet(doc: AssetDocument): void {
+    if (!this.asset) return;
+    this.issuanceService.downloadDocument(this.asset.id, doc.id).subscribe(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.fileName ?? 'term_sheet';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
   }
 
   openAddHolder(): void {

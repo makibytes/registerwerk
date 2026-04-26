@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.domain.entity;
 
+import de.makibytes.registerwerk.domain.enums.Jurisdiction;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -10,8 +11,31 @@ import java.util.UUID;
 public class KycDocument {
 
     public enum DocumentType {
-        PASSPORT, COMMERCIAL_REGISTER, ANNUAL_REPORT,
-        OWNERSHIP_CHART, AML_QUESTIONNAIRE, OTHER
+        // ── Legacy values (kept for backward compatibility) ───────────────
+        PASSPORT,
+        COMMERCIAL_REGISTER,
+        ANNUAL_REPORT,
+        OWNERSHIP_CHART,
+        AML_QUESTIONNAIRE,
+        OTHER,
+        // ── Extended EU-AMLD / jurisdiction-specific types ────────────────
+        CERTIFICATE_OF_INCORPORATION,
+        COMMERCIAL_REGISTER_EXTRACT,
+        UBO_DECLARATION,
+        BENEFICIAL_OWNER_REGISTER_EXTRACT,
+        OWNERSHIP_STRUCTURE_CHART,
+        SHAREHOLDER_REGISTER,
+        BOARD_RESOLUTION,
+        POWER_OF_ATTORNEY,
+        IDENTITY_DOCUMENT,
+        PROOF_OF_RESIDENCE,
+        BANK_STATEMENT,
+        SOURCE_OF_FUNDS,
+        LEI_CERTIFICATE,
+        REGULATORY_LICENSE,
+        TOKEN_WHITEPAPER,
+        SMART_CONTRACT_AUDIT,
+        PEP_SANCTIONS_SCREENING
     }
 
     @Id
@@ -50,6 +74,11 @@ public class KycDocument {
     @Column(name = "expires_at")
     private LocalDate expiresAt;
 
+    /** Optional jurisdiction scope. Null means the document is universal (counts for any jurisdiction). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "jurisdiction", length = 20)
+    private Jurisdiction jurisdiction;
+
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
@@ -86,6 +115,9 @@ public class KycDocument {
 
     public LocalDate getExpiresAt() { return expiresAt; }
     public void setExpiresAt(LocalDate expiresAt) { this.expiresAt = expiresAt; }
+
+    public Jurisdiction getJurisdiction() { return jurisdiction; }
+    public void setJurisdiction(Jurisdiction jurisdiction) { this.jurisdiction = jurisdiction; }
 
     public Instant getDeletedAt() { return deletedAt; }
     public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }

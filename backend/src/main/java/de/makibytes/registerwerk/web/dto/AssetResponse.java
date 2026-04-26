@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.web.dto;
 
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
+import de.makibytes.registerwerk.domain.enums.Jurisdiction;
 import de.makibytes.registerwerk.domain.enums.OnchainLevel;
 import de.makibytes.registerwerk.domain.enums.TokenStandard;
 
@@ -19,5 +20,7 @@ public record AssetResponse(
     TokenStandard tokenStandard,
     OnchainLevel onchainLevel,
     AssetStatus status,
-    Instant createdAt
+    Jurisdiction jurisdiction,
+    Instant createdAt,
+    boolean hasTermSheet
 ) {}

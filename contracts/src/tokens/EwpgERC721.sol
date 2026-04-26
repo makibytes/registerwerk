@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "../compliance/EwpgCompliance.sol";
+import "../documents/EwpgDocumentManagement.sol";
 
 /// @title EwpgERC721
 /// @notice Non-fungible security token backed by a real-world asset registered in the eWpG backend.
@@ -19,7 +20,7 @@ import "../compliance/EwpgCompliance.sol";
 ///   - setSupplyCap          : MiCAR Art. 46 (cap on number of minted NFTs)
 ///
 /// For ERC-721, `value` in IEwpgAdminControls events represents the tokenId.
-contract EwpgERC721 is ERC721, Ownable, EwpgCompliance {
+contract EwpgERC721 is ERC721, Ownable, EwpgCompliance, EwpgDocumentManagement {
     /// @notice Links this contract to the off-chain registry asset record.
     bytes32 public immutable assetId;
 
@@ -92,6 +93,20 @@ contract EwpgERC721 is ERC721, Ownable, EwpgCompliance {
         _burn(value);
         _inForceOp = false;
         emit ForceBurned(from, value, legalBasis);
+    }
+
+    // ── Document admin guard ──────────────────────────────────────────────────
+
+    function _requireDocumentAdmin() internal view override {
+        require(msg.sender == registry, "EwpgERC721: caller is not registry");
+    }
+
+    /// @notice Returns the term sheet URI for any tokenId (contract-level document).
+    ///         Overrides the default ERC-721 tokenURI to expose the term sheet to
+    ///         wallets and block explorers.
+    function tokenURI(uint256) public view override returns (string memory) {
+        (string memory uri,,) = this.getDocument(TERM_SHEET());
+        return uri;
     }
 
     // ── Transfer hook ─────────────────────────────────────────────────────────

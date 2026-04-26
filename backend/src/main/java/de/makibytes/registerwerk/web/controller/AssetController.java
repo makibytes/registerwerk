@@ -2,7 +2,12 @@ package de.makibytes.registerwerk.web.controller;
 
 import de.makibytes.registerwerk.application.asset.AssetLifecycleService;
 import de.makibytes.registerwerk.application.asset.AssetService;
+import de.makibytes.registerwerk.application.kyc.KycComplianceService;
 import de.makibytes.registerwerk.domain.asset.Asset;
+import de.makibytes.registerwerk.domain.enums.Jurisdiction;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDocumentRepository;
+import de.makibytes.registerwerk.web.dto.DocumentStatusResponse;
+import de.makibytes.registerwerk.web.dto.KycComplianceResponse;
 import de.makibytes.registerwerk.domain.audit.AuditEvent;
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AuditEventRepository;
@@ -35,16 +40,22 @@ public class AssetController {
     private final AssetLifecycleService assetLifecycleService;
     private final AuditEventRepository auditEventRepository;
     private final AssetMapper assetMapper;
+    private final AssetDocumentRepository assetDocumentRepository;
+    private final KycComplianceService kycComplianceService;
 
     public AssetController(
             AssetService assetService,
             AssetLifecycleService assetLifecycleService,
             AuditEventRepository auditEventRepository,
-            AssetMapper assetMapper) {
+            AssetMapper assetMapper,
+            AssetDocumentRepository assetDocumentRepository,
+            KycComplianceService kycComplianceService) {
         this.assetService = assetService;
         this.assetLifecycleService = assetLifecycleService;
         this.auditEventRepository = auditEventRepository;
         this.assetMapper = assetMapper;
+        this.assetDocumentRepository = assetDocumentRepository;
+        this.kycComplianceService = kycComplianceService;
     }
 
     /** Creates a new asset. */
@@ -71,7 +82,40 @@ public class AssetController {
     @GetMapping("/{id}")
     @PreAuthorize("@assetAccessChecker.canRead(#id, authentication)")
     public ResponseEntity<AssetResponse> getAsset(@PathVariable UUID id) {
-        return ResponseEntity.ok(assetMapper.toResponse(assetService.getAsset(id)));
+        Asset asset = assetService.getAsset(id);
+        AssetResponse base = assetMapper.toResponse(asset);
+        boolean hasTermSheet = assetDocumentRepository.existsByAssetIdAndDeletedAtIsNull(id);
+        return ResponseEntity.ok(new AssetResponse(base.id(), base.assetNumber(), base.issuerId(),
+            base.name(), base.isin(), base.tokenStandard(), base.onchainLevel(), base.status(),
+            asset.getJurisdiction(), base.createdAt(), hasTermSheet));
+    }
+
+    /**
+     * Returns the KYC compliance status for the asset's issuer against the asset's jurisdiction.
+     * Used by operators before approving an asset to check if all required documents are present.
+     */
+    @GetMapping("/{id}/kyc-compliance")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#id, authentication)")
+    public ResponseEntity<KycComplianceResponse> getKycCompliance(@PathVariable UUID id) {
+        Asset asset = assetService.getAsset(id);
+        Jurisdiction jurisdiction = asset.getJurisdiction();
+        if (jurisdiction == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        KycComplianceService.ComplianceResult result =
+            kycComplianceService.checkCompliance(asset.getIssuerId(), jurisdiction);
+        return ResponseEntity.ok(toComplianceResponse(result));
+    }
+
+    private KycComplianceResponse toComplianceResponse(KycComplianceService.ComplianceResult r) {
+        var docs = r.documents().stream().map(d -> new DocumentStatusResponse(
+            d.documentType().name(), d.mandatory(), d.localName(), d.description(),
+            d.present(), d.expired(), d.tooOld(), d.documentDate(), d.documentId()
+        )).toList();
+        return new KycComplianceResponse(
+            r.jurisdiction().name(), r.jurisdiction().displayName,
+            r.entityId(), docs, r.fullyCompliant(), r.missingCount(), r.expiredCount(), r.tooOldCount()
+        );
     }
 
     /** Partially updates an asset. */
@@ -83,6 +127,7 @@ public class AssetController {
         patch.setName(request.name());
         patch.setIsin(request.isin());
         patch.setPublicData(request.publicData());
+        patch.setJurisdiction(request.jurisdiction());
         return ResponseEntity.ok(assetMapper.toResponse(assetService.updateAsset(id, patch)));
     }
 

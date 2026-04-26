@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "../compliance/EwpgCompliance.sol";
+import "../documents/EwpgDocumentManagement.sol";
 
 /// @title EwpgERC20
 /// @notice Fungible security token backed by a real-world asset registered in the eWpG backend.
@@ -19,7 +20,7 @@ import "../compliance/EwpgCompliance.sol";
 ///
 /// pause/unpause, freezeAddress, unfreezeAddress, setSupplyCap are inherited from EwpgCompliance.
 /// forcedTransfer and forceBurn are implemented here because their ABI differs per token type.
-contract EwpgERC20 is ERC20, Ownable, EwpgCompliance {
+contract EwpgERC20 is ERC20, Ownable, EwpgCompliance, EwpgDocumentManagement {
     /// @notice Links this contract to the off-chain registry asset record.
     bytes32 public immutable assetId;
 
@@ -91,6 +92,12 @@ contract EwpgERC20 is ERC20, Ownable, EwpgCompliance {
         _burn(from, amount);
         _inForceOp = false;
         emit ForceBurned(from, amount, legalBasis);
+    }
+
+    // ── Document admin guard ──────────────────────────────────────────────────
+
+    function _requireDocumentAdmin() internal view override {
+        require(msg.sender == registry, "EwpgERC20: caller is not registry");
     }
 
     // ── Transfer hook ─────────────────────────────────────────────────────────

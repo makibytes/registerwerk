@@ -26,6 +26,9 @@ public interface AssetMapper {
 
     /**
      * Maps an {@link Asset} domain object to an {@link AssetResponse} DTO.
+     * hasTermSheet is always false here; callers that need the live value must
+     * use AssetController#buildResponse(Asset) which queries AssetDocumentRepository.
      */
+    @Mapping(target = "hasTermSheet", constant = "false")
     AssetResponse toResponse(Asset asset);
 }

@@ -6,6 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { AuthService } from '../../core/auth/auth.service';
+import { environment } from '../../../environments/environment';
 
 interface NavLink {
   label: string;
@@ -54,6 +55,10 @@ interface NavLink {
       </nav>
 
       <div class="spacer"></div>
+
+      @if (isTestEnv) {
+        <span class="env-badge">Test</span>
+      }
 
       <button class="user-btn" mat-button [matMenuTriggerFor]="userMenu" aria-label="User menu">
         <div class="avatar">{{ (userName || userEmail || 'U')[0].toUpperCase() }}</div>
@@ -233,6 +238,20 @@ interface NavLink {
       opacity: 0.5;
     }
 
+    .env-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(251, 146, 60, 0.15);
+      color: #FB923C;
+      border: 1px solid rgba(251, 146, 60, 0.3);
+      flex-shrink: 0;
+      margin-right: 4px;
+    }
+
     .menu-user-info {
       display: flex;
       align-items: center;
@@ -272,6 +291,7 @@ interface NavLink {
 })
 export class NavComponent implements OnInit {
   private readonly auth = inject(AuthService);
+  readonly isTestEnv = environment.testEnvironment;
 
   userName: string | null = null;
   userEmail: string | null = null;

@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.domain.asset;
 
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
+import de.makibytes.registerwerk.domain.enums.Jurisdiction;
 import de.makibytes.registerwerk.domain.enums.OnchainLevel;
 import de.makibytes.registerwerk.domain.enums.TokenStandard;
 import jakarta.persistence.*;
@@ -50,6 +51,10 @@ public class Asset {
     @NotNull
     private AssetStatus status = AssetStatus.DRAFT;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "jurisdiction", length = 20)
+    private Jurisdiction jurisdiction;
+
     @Column(name = "termsheet_doc_id")
     private UUID termsheetDocId;
 
@@ -93,6 +98,9 @@ public class Asset {
 
     public AssetStatus getStatus() { return status; }
     public void setStatus(AssetStatus status) { this.status = status; }
+
+    public Jurisdiction getJurisdiction() { return jurisdiction; }
+    public void setJurisdiction(Jurisdiction jurisdiction) { this.jurisdiction = jurisdiction; }
 
     public UUID getTermsheetDocId() { return termsheetDocId; }
     public void setTermsheetDocId(UUID termsheetDocId) { this.termsheetDocId = termsheetDocId; }

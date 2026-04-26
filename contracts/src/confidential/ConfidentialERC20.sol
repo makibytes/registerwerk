@@ -7,6 +7,7 @@ import "@fhevm/lib/TFHE.sol";
 import "@fhevm/lib/FHE.sol";
 import "@fhevm/gateway/GatewayCaller.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "../documents/EwpgDocumentManagement.sol";
 
 /**
  * @title ConfidentialERC20 (ERC-7984)
@@ -29,7 +30,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  *     emitted without amounts. A handle to the encrypted delta is exposed so
  *     an authorised oracle can re-decrypt off-chain for indexing purposes.
  */
-contract ConfidentialERC20 is Ownable {
+contract ConfidentialERC20 is Ownable, EwpgDocumentManagement {
     using TFHE for euint64;
 
     // ── ERC-7984 metadata ──────────────────────────────────────────────────
@@ -164,6 +165,12 @@ contract ConfidentialERC20 is Ownable {
         returns (euint64)
     {
         return _allowances[owner_][spender];
+    }
+
+    // ── Document admin guard ──────────────────────────────────────────────────
+
+    function _requireDocumentAdmin() internal view override {
+        require(msg.sender == owner(), "ConfidentialERC20: caller is not owner");
     }
 
     // ── Internal ───────────────────────────────────────────────────────────

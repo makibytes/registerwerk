@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.web.dto;
 
+import de.makibytes.registerwerk.domain.enums.Jurisdiction;
 import de.makibytes.registerwerk.domain.enums.OnchainLevel;
 import de.makibytes.registerwerk.domain.enums.TokenStandard;
 import jakarta.validation.constraints.NotBlank;
@@ -15,5 +16,6 @@ public record AssetCreateRequest(
     @NotBlank String name,
     String isin,
     @NotNull TokenStandard tokenStandard,
-    @NotNull OnchainLevel onchainLevel
+    @NotNull OnchainLevel onchainLevel,
+    Jurisdiction jurisdiction
 ) {}

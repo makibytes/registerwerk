@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "../compliance/EwpgCompliance.sol";
+import "../documents/EwpgDocumentManagement.sol";
 
 /// @title EwpgERC1155
 /// @notice Multi-token security token backed by real-world assets registered in the eWpG backend.
@@ -21,7 +22,7 @@ import "../compliance/EwpgCompliance.sol";
 ///
 /// NOTE: IEwpgAdminControls.forcedTransfer / forceBurn operate on a single id/amount pair.
 ///       For multi-id operations use forcedTransferBatch / forceBurnBatch.
-contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance {
+contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement {
     /// @notice Links this contract to the off-chain registry asset record.
     bytes32 public immutable assetId;
 
@@ -154,6 +155,20 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance {
         _burn(from, id, amount);
         _inForceOp = false;
         emit ForceBurned(from, amount, legalBasis);
+    }
+
+    // ── Document admin guard ──────────────────────────────────────────────────
+
+    function _requireDocumentAdmin() internal view override {
+        require(msg.sender == registry, "EwpgERC1155: caller is not registry");
+    }
+
+    /// @notice Returns the term sheet URI for any token id (contract-level document).
+    ///         Overrides the default ERC-1155 uri() to expose the term sheet to
+    ///         wallets and block explorers.
+    function uri(uint256) public view override returns (string memory) {
+        (string memory _uri,,) = this.getDocument(TERM_SHEET());
+        return _uri;
     }
 
     // ── Transfer hook ─────────────────────────────────────────────────────────

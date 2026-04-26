@@ -21,7 +21,10 @@ import {
   TrustedIssuer, ClaimTopic,
 } from '../../../core/api/erc3643.service';
 import { MintControlService, MintControlRule, RuleType } from '../../../core/api/mint-control.service';
-import { Asset, AssetDeployment, AssetHolder } from '../../../core/models';
+import {
+  Asset, AssetDeployment, AssetDocument, AssetHolder,
+  KycComplianceResponse, DocumentStatus,
+} from '../../../core/models';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { ChainNamePipe } from '../../../shared/pipes/chain-name.pipe';
 import { RegisterInvestorDialogComponent, RegisterInvestorData } from './register-investor-dialog.component';
@@ -109,6 +112,57 @@ import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-top
     }
 
     .spinner-wrap { display: flex; justify-content: center; padding: 40px; }
+
+    .jurisdiction-badge {
+      font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+      background: rgba(99,102,241,0.12); color: #6366f1;
+      border: 1px solid rgba(99,102,241,0.25); margin-left: 6px; vertical-align: middle;
+    }
+
+    .compliance-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--rw-border);
+      .comp-icon { font-size: 14px; flex-shrink: 0; }
+      .comp-name { flex: 1; font-weight: 500; }
+      .comp-note { color: var(--rw-text-muted); font-size: 11px; }
+    }
+
+    .termsheet-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+
+      h3 { margin: 0; font-size: 15px; font-weight: 600; flex: 1; }
+    }
+
+    .termsheet-warning {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border-radius: 6px;
+      border-left: 3px solid #F59E0B;
+      background: rgba(245,158,11,0.07);
+      color: var(--rw-text-secondary);
+      font-size: 13px;
+      margin-bottom: 16px;
+
+      mat-icon { color: #F59E0B; flex-shrink: 0; }
+    }
+
+    .source-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 4px;
+
+      &.upload { background: rgba(99,102,241,0.12); color: #6366f1; }
+      &.onchain { background: rgba(16,185,129,0.12); color: #10b981; }
+    }
   `],
   template: `
     <div class="back-row">
@@ -127,6 +181,9 @@ import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-top
           <span class="asset-number">{{ asset.assetNumber }}</span>
           &nbsp;
           <app-status-badge [status]="asset.status" />
+          @if (asset.jurisdiction) {
+            <span class="jurisdiction-badge">{{ jurisdictionLabel(asset.jurisdiction) }}</span>
+          }
         </div>
         <div class="asset-actions">
           @if (asset.status === 'PENDING_APPROVAL') {
@@ -190,6 +247,52 @@ import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-top
               </div>
             </div>
           </div>
+
+          @if (asset.status === 'PENDING_APPROVAL' && asset.jurisdiction) {
+            <div style="margin-top:20px">
+              <div style="font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+                <mat-icon style="font-size:16px">policy</mat-icon>
+                KYC Compliance — {{ jurisdictionLabel(asset.jurisdiction) }}
+                @if (kycCompliance?.fullyCompliant) {
+                  <span style="font-size:11px;padding:2px 7px;border-radius:4px;background:rgba(16,185,129,0.12);color:#10b981">COMPLIANT</span>
+                } @else if (kycCompliance) {
+                  <span style="font-size:11px;padding:2px 7px;border-radius:4px;background:rgba(245,158,11,0.12);color:#f59e0b">INCOMPLETE</span>
+                }
+              </div>
+              @if (kycComplianceLoading) {
+                <div class="spinner-wrap"><mat-spinner diameter="24" /></div>
+              } @else if (kycCompliance) {
+                <div style="border:1px solid var(--rw-border);border-radius:6px;overflow:hidden;padding:4px 12px">
+                  @for (doc of kycCompliance.documents; track doc.documentType) {
+                    <div class="compliance-row">
+                      @if (!doc.mandatory) {
+                        <mat-icon class="comp-icon" style="color:var(--rw-text-muted)">radio_button_unchecked</mat-icon>
+                      } @else if (doc.present && !doc.expired && !doc.tooOld) {
+                        <mat-icon class="comp-icon" style="color:#10b981">check_circle</mat-icon>
+                      } @else if (doc.tooOld) {
+                        <mat-icon class="comp-icon" style="color:#f59e0b">schedule</mat-icon>
+                      } @else {
+                        <mat-icon class="comp-icon" style="color:#ef4444">cancel</mat-icon>
+                      }
+                      <span class="comp-name">{{ doc.localName }}</span>
+                      <span class="comp-note">
+                        @if (doc.tooOld) { Document too old (max 90 days) }
+                        @else if (doc.expired) { Expired }
+                        @else if (!doc.present && doc.mandatory) { Missing }
+                        @else if (!doc.mandatory) { Recommended }
+                      </span>
+                    </div>
+                  }
+                </div>
+                @if (!kycCompliance.fullyCompliant) {
+                  <p style="font-size:12px;color:var(--rw-text-muted);margin-top:8px">
+                    <mat-icon style="font-size:14px;vertical-align:middle">info</mat-icon>
+                    Approving with an incomplete KYC checklist will be recorded in the audit trail.
+                  </p>
+                }
+              }
+            </div>
+          }
         </mat-tab>
 
         <!-- Deployments -->
@@ -260,6 +363,92 @@ import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-top
               @if (holders.length === 0) {
                 <p class="text-muted" style="text-align:center;padding:24px">No holder data available.</p>
               }
+            }
+          </div>
+        </mat-tab>
+
+        <!-- Term Sheet -->
+        <mat-tab label="Term Sheet">
+          <div class="tab-content">
+            <div class="termsheet-header">
+              <h3>Term Sheet Documents</h3>
+              <label>
+                <input #tsFileInput type="file"
+                  accept=".pdf,.html,.htm,.txt,.md,.json,.xml,.docx"
+                  style="display:none"
+                  (change)="onTermSheetFileSelected($event)" />
+                <button mat-stroked-button (click)="tsFileInput.click()" [disabled]="tsUploading">
+                  <mat-icon>upload_file</mat-icon>
+                  @if (tsUploading) { Uploading… } @else { Upload }
+                </button>
+              </label>
+              @if (deployments.length > 0 && deployments[0].deploymentStatus === 'CONFIRMED') {
+                <button mat-stroked-button (click)="syncTermSheetFromChain()" [disabled]="tsSyncing">
+                  <mat-icon>cloud_download</mat-icon>
+                  @if (tsSyncing) { Syncing… } @else { Sync from Chain }
+                </button>
+              }
+            </div>
+
+            @if (!asset.hasTermSheet && termSheetDocs.length === 0) {
+              <div class="termsheet-warning">
+                <mat-icon>warning_amber</mat-icon>
+                No term sheet uploaded. eWpG requires a term sheet before this security can be approved.
+              </div>
+            }
+
+            @if (tsLoading) {
+              <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
+            } @else if (termSheetDocs.length === 0) {
+              <p class="text-muted" style="text-align:center;padding:24px">
+                No documents attached. Upload a PDF or sync from a deployed contract.
+              </p>
+            } @else {
+              <table mat-table [dataSource]="termSheetDocs" style="width:100%">
+                <ng-container matColumnDef="type">
+                  <th mat-header-cell *matHeaderCellDef>Type</th>
+                  <td mat-cell *matCellDef="let d">{{ d.documentType }}</td>
+                </ng-container>
+                <ng-container matColumnDef="source">
+                  <th mat-header-cell *matHeaderCellDef>Source</th>
+                  <td mat-cell *matCellDef="let d">
+                    <span class="source-badge" [class.onchain]="d.source !== 'UPLOAD'" [class.upload]="d.source === 'UPLOAD'">
+                      {{ d.source === 'UPLOAD' ? 'Uploaded' : 'On-chain' }}
+                    </span>
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="fileName">
+                  <th mat-header-cell *matHeaderCellDef>File</th>
+                  <td mat-cell *matCellDef="let d">{{ d.fileName ?? '—' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="mimeType">
+                  <th mat-header-cell *matHeaderCellDef>Format</th>
+                  <td mat-cell *matCellDef="let d">{{ d.mimeType }}</td>
+                </ng-container>
+                <ng-container matColumnDef="sizeBytes">
+                  <th mat-header-cell *matHeaderCellDef>Size</th>
+                  <td mat-cell *matCellDef="let d">{{ d.sizeBytes ? (d.sizeBytes / 1024 | number:'1.0-0') + ' KB' : '—' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="uploadedAt">
+                  <th mat-header-cell *matHeaderCellDef>Date</th>
+                  <td mat-cell *matCellDef="let d">{{ d.uploadedAt | date:'shortDate' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="actions">
+                  <th mat-header-cell *matHeaderCellDef></th>
+                  <td mat-cell *matCellDef="let d">
+                    @if (d.contentAvailable) {
+                      <button mat-icon-button matTooltip="Download" (click)="downloadTermSheet(d)">
+                        <mat-icon>download</mat-icon>
+                      </button>
+                    }
+                    <button mat-icon-button matTooltip="Delete" color="warn" (click)="deleteTermSheet(d)">
+                      <mat-icon>delete_outline</mat-icon>
+                    </button>
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="termSheetColumns"></tr>
+                <tr mat-row *matRowDef="let row; columns: termSheetColumns;"></tr>
+              </table>
             }
           </div>
         </mat-tab>
@@ -631,6 +820,17 @@ export class AssetDetailComponent implements OnInit {
   burnAddress = '';
   burnAmount: number | null = null;
 
+  // ── KYC Compliance ────────────────────────────────────────────────────────
+  kycCompliance: KycComplianceResponse | null = null;
+  kycComplianceLoading = false;
+
+  // ── Term Sheet ────────────────────────────────────────────────────────────
+  tsLoading = false;
+  tsUploading = false;
+  tsSyncing = false;
+  termSheetDocs: AssetDocument[] = [];
+  readonly termSheetColumns = ['type', 'source', 'fileName', 'mimeType', 'sizeBytes', 'uploadedAt', 'actions'];
+
   // ── Mint Control Rules ────────────────────────────────────────────────────
   rulesLoading = false;
   mintRules: MintControlRule[] = [];
@@ -685,6 +885,10 @@ export class AssetDetailComponent implements OnInit {
         this.loading = false;
         this.loadDeployments();
         this.loadHolders();
+        this.loadTermSheetDocs();
+        if (asset.status === 'PENDING_APPROVAL' && asset.jurisdiction) {
+          this.loadKycCompliance(asset.id);
+        }
       },
       error: () => { this.loading = false; },
     });
@@ -998,6 +1202,92 @@ export class AssetDetailComponent implements OnInit {
         this.burnAmount = null;
         this.loadHolders();
       },
+    });
+  }
+
+  // ── KYC Compliance ────────────────────────────────────────────────────────
+
+  loadKycCompliance(assetId: string): void {
+    this.kycComplianceLoading = true;
+    this.assetService.getKycCompliance(assetId).subscribe({
+      next: (c) => { this.kycCompliance = c; this.kycComplianceLoading = false; },
+      error: () => { this.kycComplianceLoading = false; },
+    });
+  }
+
+  jurisdictionLabel(jur: string): string {
+    const labels: Record<string, string> = {
+      DE_EWPG: 'DE — eWpG / BaFin',
+      LU_CSSF: 'LU — CSSF',
+      FR_AMF: 'FR — AMF',
+      LI_TVTG: 'LI — TVTG / FMA',
+    };
+    return labels[jur] ?? jur;
+  }
+
+  // ── Term Sheet ────────────────────────────────────────────────────────────
+
+  loadTermSheetDocs(): void {
+    this.tsLoading = true;
+    this.assetService.listDocuments(this.id).subscribe({
+      next: docs => { this.termSheetDocs = docs; this.tsLoading = false; },
+      error: () => { this.tsLoading = false; },
+    });
+  }
+
+  onTermSheetFileSelected(event: Event): void {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    this.tsUploading = true;
+    this.assetService.uploadDocument(this.id, file).subscribe({
+      next: doc => {
+        this.termSheetDocs = [doc, ...this.termSheetDocs];
+        this.tsUploading = false;
+        if (this.asset) this.asset.hasTermSheet = true;
+        this.snackBar.open('Term sheet uploaded.', 'OK', { duration: 3000 });
+      },
+      error: () => {
+        this.tsUploading = false;
+        this.snackBar.open('Upload failed.', 'Close', { duration: 4000 });
+      },
+    });
+  }
+
+  syncTermSheetFromChain(): void {
+    const depId = this.primaryDeploymentId;
+    if (!depId) return;
+    this.tsSyncing = true;
+    this.assetService.syncFromChain(this.id, depId).subscribe({
+      next: doc => {
+        this.termSheetDocs = [doc, ...this.termSheetDocs];
+        this.tsSyncing = false;
+        if (this.asset) this.asset.hasTermSheet = true;
+        this.snackBar.open('Term sheet synced from chain.', 'OK', { duration: 3000 });
+      },
+      error: () => {
+        this.tsSyncing = false;
+        this.snackBar.open('Sync failed.', 'Close', { duration: 4000 });
+      },
+    });
+  }
+
+  downloadTermSheet(doc: AssetDocument): void {
+    this.assetService.downloadDocument(this.id, doc.id).subscribe(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.fileName ?? 'term_sheet';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  deleteTermSheet(doc: AssetDocument): void {
+    if (!confirm('Delete this document?')) return;
+    this.assetService.deleteDocument(this.id, doc.id).subscribe(() => {
+      this.termSheetDocs = this.termSheetDocs.filter(d => d.id !== doc.id);
+      if (this.termSheetDocs.length === 0 && this.asset) this.asset.hasTermSheet = false;
+      this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
     });
   }
 

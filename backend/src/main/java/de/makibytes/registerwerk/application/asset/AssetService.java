@@ -71,6 +71,7 @@ public class AssetService {
         if (patch.getName() != null) existing.setName(patch.getName());
         if (patch.getIsin() != null) existing.setIsin(patch.getIsin());
         if (patch.getPublicData() != null) existing.setPublicData(patch.getPublicData());
+        if (patch.getJurisdiction() != null) existing.setJurisdiction(patch.getJurisdiction());
         Asset saved = assetRepository.save(existing);
         auditEventPublisher.publish("ASSET_UPDATED", "Asset", id, null, null, null);
         return saved;

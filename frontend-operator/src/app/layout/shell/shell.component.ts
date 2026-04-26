@@ -5,6 +5,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { SidebarComponent } from '../sidebar/sidebar.component';
 import { AuthService } from '../../core/auth/auth.service';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-shell',
@@ -55,6 +56,19 @@ import { AuthService } from '../../core/auth/auth.service';
 
     .spacer { flex: 1; }
 
+    .env-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(251, 146, 60, 0.15);
+      color: #FB923C;
+      border: 1px solid rgba(251, 146, 60, 0.3);
+      flex-shrink: 0;
+    }
+
     .logout-btn {
       color: var(--rw-text-muted) !important;
 
@@ -77,6 +91,9 @@ import { AuthService } from '../../core/auth/auth.service';
       <div class="main">
         <header class="topbar">
           <span class="topbar-title">Operator Administration</span>
+          @if (isTestEnv) {
+            <span class="env-badge">Test</span>
+          }
           <span class="spacer"></span>
           <button
             class="logout-btn"
@@ -97,6 +114,7 @@ import { AuthService } from '../../core/auth/auth.service';
   `,
 })
 export class ShellComponent {
+  readonly isTestEnv = environment.testEnvironment;
   constructor(private readonly authService: AuthService) {}
   logout(): void { this.authService.logout(); }
 }

@@ -18,7 +18,11 @@ import { forkJoin } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { EntityService } from '../../../core/api/entity.service';
 import { KycService } from '../../../core/api/kyc.service';
-import { LegalEntity, KycDocument, LegalEntityNameHistory } from '../../../core/models';
+import {
+  LegalEntity, KycDocument, LegalEntityNameHistory,
+  KycJurisdictionApproval, KycComplianceResponse, Jurisdiction,
+  JurisdictionRequirement, DocumentStatus,
+} from '../../../core/models';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { environment } from '../../../../environments/environment';
 
@@ -215,47 +219,17 @@ interface OnchainIdentityView {
           </div>
         </mat-tab>
 
-        <!-- KYC Tab -->
+        <!-- KYC Documents -->
         <mat-tab label="KYC Documents">
           <div class="tab-content">
             <div class="kyc-actions">
-              <button mat-raised-button color="primary" (click)="uploadDoc()">
-                <mat-icon>upload</mat-icon>
-                Upload Document
-              </button>
-              <input
-                #fileInput
-                type="file"
-                style="display:none"
-                (change)="onFileSelected($event)"
-              />
-              @if (entity.kycStatus !== 'APPROVED') {
-                <button mat-raised-button color="accent" (click)="approveKyc()">
-                  <mat-icon>check_circle</mat-icon>
-                  Approve KYC
+              <label>
+                <input #fileInput type="file" style="display:none" (change)="onFileSelected($event)" />
+                <button mat-raised-button color="primary" (click)="fileInput.click()">
+                  <mat-icon>upload</mat-icon> Upload Document
                 </button>
-              }
-              @if (entity.kycStatus !== 'REJECTED') {
-                <button mat-stroked-button color="warn" (click)="showRejectForm = !showRejectForm">
-                  <mat-icon>cancel</mat-icon>
-                  Reject KYC
-                </button>
-              }
+              </label>
             </div>
-
-            @if (showRejectForm) {
-              <div class="reject-form">
-                <mat-form-field appearance="outline">
-                  <mat-label>Rejection reason</mat-label>
-                  <textarea matInput [(ngModel)]="rejectReason" rows="3"></textarea>
-                </mat-form-field>
-                <div>
-                  <button mat-raised-button color="warn" (click)="rejectKyc()" [disabled]="!rejectReason">
-                    Confirm Rejection
-                  </button>
-                </div>
-              </div>
-            }
 
             @if (docsLoading) {
               <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
@@ -263,10 +237,14 @@ interface OnchainIdentityView {
               <table mat-table [dataSource]="documents" class="doc-table">
                 <ng-container matColumnDef="documentType">
                   <th mat-header-cell *matHeaderCellDef>Type</th>
-                  <td mat-cell *matCellDef="let doc">{{ doc.documentType }}</td>
+                  <td mat-cell *matCellDef="let doc">{{ formatDocType(doc.documentType) }}</td>
+                </ng-container>
+                <ng-container matColumnDef="jurisdiction">
+                  <th mat-header-cell *matHeaderCellDef>Jurisdiction</th>
+                  <td mat-cell *matCellDef="let doc">{{ doc.jurisdiction ?? '—' }}</td>
                 </ng-container>
                 <ng-container matColumnDef="fileName">
-                  <th mat-header-cell *matHeaderCellDef>File Name</th>
+                  <th mat-header-cell *matHeaderCellDef>File</th>
                   <td mat-cell *matCellDef="let doc">{{ doc.fileName }}</td>
                 </ng-container>
                 <ng-container matColumnDef="sizeBytes">
@@ -291,6 +269,88 @@ interface OnchainIdentityView {
               @if (documents.length === 0) {
                 <p class="text-muted" style="text-align:center;padding:24px">No documents uploaded.</p>
               }
+            }
+          </div>
+        </mat-tab>
+
+        <!-- KYC Jurisdiction Approvals -->
+        <mat-tab label="Jurisdiction KYC">
+          <div class="tab-content">
+            <p style="font-size:13px;color:var(--rw-text-secondary);margin-bottom:16px">
+              Approve or reject KYC for each regulatory jurisdiction. Each jurisdiction has its own
+              document checklist. A security issued under a jurisdiction can only be approved when
+              the issuer's KYC is complete for that jurisdiction.
+            </p>
+
+            @for (jur of allJurisdictions; track jur) {
+              <mat-card style="margin-bottom:16px">
+                <mat-card-header>
+                  <mat-card-title style="font-size:14px;display:flex;align-items:center;gap:10px">
+                    {{ jurisdictionLabel(jur) }}
+                    @if (getJurisdictionStatus(jur) === 'APPROVED') {
+                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(16,185,129,0.12);color:#10b981">APPROVED</span>
+                    } @else if (getJurisdictionStatus(jur) === 'REJECTED') {
+                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(239,68,68,0.12);color:#ef4444">REJECTED</span>
+                    } @else {
+                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(245,158,11,0.12);color:#f59e0b">PENDING</span>
+                    }
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content style="padding-top:12px">
+                  @if (complianceByJurisdiction[jur]) {
+                    @let cr = complianceByJurisdiction[jur];
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
+                      @if (cr.fullyCompliant) {
+                        <span style="color:#10b981;font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">check_circle</mat-icon> All required documents present</span>
+                      } @else {
+                        @if (cr.missingCount > 0) {
+                          <span style="color:#ef4444;font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">cancel</mat-icon> {{ cr.missingCount }} missing</span>
+                        }
+                        @if (cr.tooOldCount > 0) {
+                          <span style="color:#f59e0b;font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">schedule</mat-icon> {{ cr.tooOldCount }} too old</span>
+                        }
+                        @if (cr.expiredCount > 0) {
+                          <span style="color:#ef4444;font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">event_busy</mat-icon> {{ cr.expiredCount }} expired</span>
+                        }
+                      }
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
+                      @for (doc of cr.documents; track doc.documentType) {
+                        <div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0">
+                          @if (!doc.mandatory) {
+                            <mat-icon style="font-size:14px;color:var(--rw-text-muted)">radio_button_unchecked</mat-icon>
+                          } @else if (doc.present && !doc.expired && !doc.tooOld) {
+                            <mat-icon style="font-size:14px;color:#10b981">check_circle</mat-icon>
+                          } @else if (doc.tooOld) {
+                            <mat-icon style="font-size:14px;color:#f59e0b">schedule</mat-icon>
+                          } @else {
+                            <mat-icon style="font-size:14px;color:#ef4444">cancel</mat-icon>
+                          }
+                          <span [style.font-weight]="doc.mandatory ? '600' : '400'">{{ doc.localName }}</span>
+                          @if (!doc.mandatory) {
+                            <span style="color:var(--rw-text-muted)">(recommended)</span>
+                          }
+                        </div>
+                      }
+                    </div>
+                  } @else {
+                    <p style="font-size:12px;color:var(--rw-text-muted);margin-bottom:12px">
+                      <button mat-button (click)="loadCompliance(jur)">Load compliance checklist</button>
+                    </p>
+                  }
+
+                  <div style="display:flex;gap:8px">
+                    <button mat-raised-button color="primary" (click)="approveJurisdiction(jur)"
+                            [disabled]="jurActionLoading[jur]">
+                      <mat-icon>check_circle</mat-icon> Approve
+                    </button>
+                    <button mat-stroked-button color="warn" (click)="rejectJurisdiction(jur)"
+                            [disabled]="jurActionLoading[jur]">
+                      <mat-icon>cancel</mat-icon> Reject
+                    </button>
+                  </div>
+                </mat-card-content>
+              </mat-card>
             }
           </div>
         </mat-tab>
@@ -401,9 +461,15 @@ export class CustomerDetailComponent implements OnInit {
   nameHistory: LegalEntityNameHistory[] = [];
   identities: OnchainIdentityView[] = [];
 
-  docColumns = ['documentType', 'fileName', 'sizeBytes', 'uploadedAt', 'actions'];
+  docColumns = ['documentType', 'jurisdiction', 'fileName', 'sizeBytes', 'uploadedAt', 'actions'];
   showRejectForm = false;
   rejectReason = '';
+
+  // ── Jurisdiction KYC ──────────────────────────────────────────────────────
+  readonly allJurisdictions: Jurisdiction[] = ['DE_EWPG', 'LU_CSSF', 'FR_AMF', 'LI_TVTG'];
+  jurisdictionApprovals: KycJurisdictionApproval[] = [];
+  complianceByJurisdiction: Partial<Record<Jurisdiction, KycComplianceResponse>> = {};
+  jurActionLoading: Partial<Record<Jurisdiction, boolean>> = {};
 
   ngOnInit(): void {
     this.loadEntity();
@@ -418,6 +484,7 @@ export class CustomerDetailComponent implements OnInit {
         this.loadDocuments();
         this.loadHistory();
         this.loadIdentities();
+        this.loadJurisdictionApprovals();
       },
       error: () => {
         this.loading = false;
@@ -428,14 +495,64 @@ export class CustomerDetailComponent implements OnInit {
   loadDocuments(): void {
     this.docsLoading = true;
     this.kycService.listDocuments(this.id).subscribe({
-      next: (docs) => {
-        this.documents = docs;
-        this.docsLoading = false;
-      },
-      error: () => {
-        this.docsLoading = false;
-      },
+      next: (docs) => { this.documents = docs; this.docsLoading = false; },
+      error: () => { this.docsLoading = false; },
     });
+  }
+
+  loadJurisdictionApprovals(): void {
+    this.kycService.getJurisdictionApprovals(this.id).subscribe({
+      next: (approvals) => { this.jurisdictionApprovals = approvals; },
+    });
+  }
+
+  loadCompliance(jurisdiction: Jurisdiction): void {
+    this.kycService.getCompliance(this.id, jurisdiction).subscribe({
+      next: (result) => { this.complianceByJurisdiction = { ...this.complianceByJurisdiction, [jurisdiction]: result }; },
+    });
+  }
+
+  getJurisdictionStatus(jur: Jurisdiction): string {
+    return this.jurisdictionApprovals.find(a => a.jurisdiction === jur)?.status ?? 'PENDING';
+  }
+
+  jurisdictionLabel(jur: Jurisdiction): string {
+    const labels: Record<Jurisdiction, string> = {
+      DE_EWPG: 'Germany — eWpG / BaFin',
+      LU_CSSF: 'Luxembourg — CSSF',
+      FR_AMF: 'France — AMF',
+      LI_TVTG: 'Liechtenstein — TVTG / FMA',
+    };
+    return labels[jur] ?? jur;
+  }
+
+  approveJurisdiction(jur: Jurisdiction): void {
+    this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
+    this.kycService.approveJurisdiction(this.id, jur).subscribe({
+      next: () => {
+        this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
+        this.loadJurisdictionApprovals();
+        this.loadCompliance(jur);
+      },
+      error: () => { this.jurActionLoading = { ...this.jurActionLoading, [jur]: false }; },
+    });
+  }
+
+  rejectJurisdiction(jur: Jurisdiction): void {
+    const reason = prompt('Rejection reason (required):');
+    if (!reason) return;
+    this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
+    this.kycService.rejectJurisdiction(this.id, jur, reason).subscribe({
+      next: () => {
+        this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
+        this.loadJurisdictionApprovals();
+      },
+      error: () => { this.jurActionLoading = { ...this.jurActionLoading, [jur]: false }; },
+    });
+  }
+
+  formatDocType(type: string): string {
+    return type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
   }
 
   loadHistory(): void {

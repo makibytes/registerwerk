@@ -3,7 +3,8 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --legacy-peer-deps
 COPY . .
-RUN npm run build:prod
+ARG BUILD_CONFIG=production
+RUN npm run build -- --configuration=${BUILD_CONFIG}
 
 FROM nginx:alpine
 COPY --from=builder /app/dist/registerwerk-operator/browser /usr/share/nginx/html

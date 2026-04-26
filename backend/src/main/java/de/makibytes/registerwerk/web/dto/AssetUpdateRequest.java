@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.web.dto;
 
+import de.makibytes.registerwerk.domain.enums.Jurisdiction;
+
 import java.util.Map;
 
 /**
@@ -8,5 +10,6 @@ import java.util.Map;
 public record AssetUpdateRequest(
     String name,
     String isin,
-    Map<String, Object> publicData
+    Map<String, Object> publicData,
+    Jurisdiction jurisdiction
 ) {}

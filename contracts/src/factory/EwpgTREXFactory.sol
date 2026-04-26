@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import "@erc3643/factory/TREXFactory.sol";
 import "@erc3643/factory/ITREXFactory.sol";
 import "../interfaces/IERC3643Suite.sol";
+import "../documents/EwpgDocumentStore.sol";
 
 /**
  * @title EwpgTREXFactory
@@ -32,6 +33,9 @@ contract EwpgTREXFactory is TREXFactory {
 
     /// @notice Maps registry assetId → deployed token address.
     mapping(bytes32 => address) public suiteByAssetId;
+
+    /// @notice Maps registry assetId → companion EwpgDocumentStore address.
+    mapping(bytes32 => address) public docStoreByAssetId;
 
     // ── Constructor ────────────────────────────────────────────────────────
 
@@ -68,6 +72,11 @@ contract EwpgTREXFactory is TREXFactory {
         tokenAddress = getToken(salt);
 
         suiteByAssetId[assetId] = tokenAddress;
+
+        // Deploy a companion document store for term sheet management.
+        // EwpgERC3643 is a T-REX upgradeable proxy so document storage is kept separate.
+        EwpgDocumentStore docStore = new EwpgDocumentStore(assetId, msg.sender);
+        docStoreByAssetId[assetId] = address(docStore);
 
         // Retrieve the ancillary contract addresses for the event.
         // TREXFactory.getContracts() returns (token, ir, irs, tir, ctr, mc).

@@ -8,6 +8,59 @@ export type AssetStatus =
   | 'SUSPENDED'
   | 'REDEEMED';
 
+export type Jurisdiction = 'DE_EWPG' | 'LU_CSSF' | 'FR_AMF' | 'LI_TVTG';
+
+export interface JurisdictionRequirement {
+  jurisdiction: Jurisdiction;
+  displayName: string;
+  regulator: string;
+  applicableLaw: string;
+  requirements: DocumentRequirement[];
+}
+
+export interface DocumentRequirement {
+  documentType: string;
+  mandatory: boolean;
+  localName: string;
+  description: string;
+  maxAgeDays: number | null;
+}
+
+export interface KycJurisdictionApproval {
+  id: string;
+  entityId: string;
+  jurisdiction: Jurisdiction;
+  jurisdictionDisplayName: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+  approvedBy?: string;
+  approvedAt?: string;
+  expiresAt?: string;
+  rejectionReason?: string;
+}
+
+export interface KycComplianceResponse {
+  jurisdiction: Jurisdiction;
+  jurisdictionDisplayName: string;
+  entityId: string;
+  documents: DocumentStatus[];
+  fullyCompliant: boolean;
+  missingCount: number;
+  expiredCount: number;
+  tooOldCount: number;
+}
+
+export interface DocumentStatus {
+  documentType: string;
+  mandatory: boolean;
+  localName: string;
+  description: string;
+  present: boolean;
+  expired: boolean;
+  tooOld: boolean;
+  documentDate?: string;
+  documentId?: string;
+}
+
 export type OnchainLevel = 'NONE' | 'SIMPLE' | 'CONTROL';
 
 export type TokenStandard =
@@ -62,8 +115,27 @@ export interface Asset {
   chain: Chain | null;
   network: Network | null;
   issuerEntityId: string;
+  jurisdiction: Jurisdiction | null;
   createdAt: string;
   updatedAt: string;
+  hasTermSheet: boolean;
+}
+
+export interface AssetDocument {
+  id: string;
+  assetId: string;
+  documentType: string;
+  source: 'UPLOAD' | 'ONCHAIN_ERC1643' | 'ONCHAIN_TOKEN_URI' | 'ONCHAIN_SOLANA';
+  mimeType: string;
+  fileName?: string;
+  sizeBytes?: number;
+  contentHash?: string;
+  chain?: string;
+  network?: string;
+  onchainUri?: string;
+  uploadedAt: string;
+  fetchedAt?: string;
+  contentAvailable: boolean;
 }
 
 export interface AssetDeployment {
