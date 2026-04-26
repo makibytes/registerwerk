@@ -54,7 +54,7 @@ interface NavItem {
       .brand-name {
         font-size: 14px;
         font-weight: 700;
-        color: #FFFFFF;
+        color: var(--rw-sidebar-brand-name);
         margin: 0;
         letter-spacing: -0.2px;
         line-height: 1.2;

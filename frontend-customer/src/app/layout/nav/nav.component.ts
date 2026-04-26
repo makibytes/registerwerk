@@ -131,7 +131,7 @@ interface NavLink {
     .brand-name {
       font-size: 14px;
       font-weight: 700;
-      color: #FFFFFF;
+      color: var(--rw-nav-brand-name);
       letter-spacing: -0.2px;
       line-height: 1.2;
     }
@@ -179,7 +179,7 @@ interface NavLink {
 
       &:hover {
         background: var(--rw-nav-hover-bg);
-        color: rgba(255,255,255,0.9);
+        color: var(--rw-nav-fg-hover);
 
         mat-icon { opacity: 0.9; }
       }
@@ -224,7 +224,7 @@ interface NavLink {
     .user-label {
       font-size: 13px;
       font-weight: 500;
-      color: rgba(255,255,255,0.75);
+      color: var(--rw-nav-user-label);
       max-width: 120px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -284,7 +284,7 @@ interface NavLink {
 
     .menu-user-email {
       font-size: 11px;
-      color: #94A3B8;
+      color: var(--rw-text-secondary);
       line-height: 1.3;
     }
   `]

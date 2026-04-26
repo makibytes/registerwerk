@@ -45,14 +45,17 @@ html { @include mat.all-component-themes($light); }
   --rw-shadow:     0 2px 6px rgba(15,26,46,0.08), 0 1px 3px rgba(15,26,46,0.04);
   --rw-shadow-md:  0 4px 12px rgba(15,26,46,0.1), 0 2px 4px rgba(15,26,46,0.05);
 
-  // Nav bar
-  --rw-nav-bg:          #111827;
-  --rw-nav-border:      rgba(255,255,255,0.06);
-  --rw-nav-fg:          rgba(255,255,255,0.6);
-  --rw-nav-fg-active:   #FFFFFF;
-  --rw-nav-active-bg:   rgba(255,255,255,0.1);
-  --rw-nav-hover-bg:    rgba(255,255,255,0.06);
-  --rw-nav-accent:      #2DD4BF;  // teal-400
+  // Nav bar — adapts with color-scheme
+  --rw-nav-bg:          #FFFFFF;
+  --rw-nav-border:      #E2E8F0;
+  --rw-nav-fg:          #6B7280;
+  --rw-nav-fg-active:   #0F172A;
+  --rw-nav-fg-hover:    #111827;
+  --rw-nav-active-bg:   rgba(13,148,136,0.08);
+  --rw-nav-hover-bg:    rgba(0,0,0,0.04);
+  --rw-nav-accent:      #0D9488;
+  --rw-nav-brand-name:  #111827;
+  --rw-nav-user-label:  #374151;
 
   // Brand
   --rw-accent:          #0D9488;  // teal-600
@@ -91,7 +94,7 @@ html { @include mat.all-component-themes($light); }
 
     --rw-text-primary:    #E6EDF3;
     --rw-text-secondary:  #8B949E;
-    --rw-text-muted:      #484F58;
+    --rw-text-muted:      #6E7681;
 
     --rw-shadow-xs:  0 1px 2px rgba(0,0,0,0.25);
     --rw-shadow-sm:  0 1px 3px rgba(0,0,0,0.35);
@@ -100,9 +103,14 @@ html { @include mat.all-component-themes($light); }
 
     --rw-nav-bg:          #0D1117;
     --rw-nav-border:      rgba(255,255,255,0.08);
-    --rw-nav-fg:          rgba(255,255,255,0.45);
-    --rw-nav-active-bg:   rgba(255,255,255,0.08);
-    --rw-nav-hover-bg:    rgba(255,255,255,0.04);
+    --rw-nav-fg:          rgba(255,255,255,0.6);
+    --rw-nav-fg-active:   #FFFFFF;
+    --rw-nav-fg-hover:    rgba(255,255,255,0.9);
+    --rw-nav-active-bg:   rgba(255,255,255,0.1);
+    --rw-nav-hover-bg:    rgba(255,255,255,0.06);
+    --rw-nav-accent:      #2DD4BF;
+    --rw-nav-brand-name:  #FFFFFF;
+    --rw-nav-user-label:  rgba(255,255,255,0.75);
 
     --rw-draft-bg:     rgba(29,78,216,0.15);    --rw-draft-fg:    #93C5FD;
     --rw-pending-bg:   rgba(146,64,14,0.15);    --rw-pending-fg:  #FCD34D;

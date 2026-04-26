@@ -45,17 +45,18 @@ html { @include mat.all-component-themes($light); }
   --rw-shadow:     0 2px 6px rgba(13,21,38,0.08), 0 1px 3px rgba(13,21,38,0.05);
   --rw-shadow-md:  0 4px 12px rgba(13,21,38,0.1), 0 2px 4px rgba(13,21,38,0.06);
 
-  // Sidebar — always dark regardless of color-scheme
-  --rw-sidebar-bg:             #07091A;
-  --rw-sidebar-border:         rgba(255,255,255,0.05);
-  --rw-sidebar-fg:             rgba(255,255,255,0.45);
-  --rw-sidebar-fg-hover:       rgba(255,255,255,0.82);
-  --rw-sidebar-fg-active:      #FCD34D;
-  --rw-sidebar-hover-bg:       rgba(255,255,255,0.05);
-  --rw-sidebar-active-bg:      rgba(252,211,77,0.1);
-  --rw-sidebar-icon:           rgba(255,255,255,0.35);
-  --rw-sidebar-icon-active:    #FCD34D;
-  --rw-sidebar-brand-bg:       rgba(255,255,255,0.03);
+  // Sidebar — adapts with color-scheme
+  --rw-sidebar-bg:             #FFFFFF;
+  --rw-sidebar-border:         #E2E8F0;
+  --rw-sidebar-fg:             #6B7280;
+  --rw-sidebar-fg-hover:       #111827;
+  --rw-sidebar-fg-active:      #B45309;
+  --rw-sidebar-hover-bg:       rgba(0,0,0,0.04);
+  --rw-sidebar-active-bg:      rgba(245,158,11,0.08);
+  --rw-sidebar-icon:           #9CA3AF;
+  --rw-sidebar-icon-active:    #B45309;
+  --rw-sidebar-brand-bg:       #F9FAFB;
+  --rw-sidebar-brand-name:     #111827;
 
   // Accent
   --rw-accent:         #F59E0B;
@@ -92,20 +93,24 @@ html { @include mat.all-component-themes($light); }
 
     --rw-text-primary:    #E6EDF3;
     --rw-text-secondary:  #8B949E;
-    --rw-text-muted:      #484F58;
+    --rw-text-muted:      #6E7681;
 
     --rw-shadow-xs:  0 1px 2px rgba(0,0,0,0.25);
     --rw-shadow-sm:  0 1px 3px rgba(0,0,0,0.35);
     --rw-shadow:     0 2px 6px rgba(0,0,0,0.4);
     --rw-shadow-md:  0 4px 12px rgba(0,0,0,0.45);
 
-    --rw-sidebar-bg:          #04050E;
-    --rw-sidebar-border:      rgba(255,255,255,0.04);
-    --rw-sidebar-fg:          rgba(255,255,255,0.35);
-    --rw-sidebar-fg-hover:    rgba(255,255,255,0.75);
-    --rw-sidebar-hover-bg:    rgba(255,255,255,0.04);
-    --rw-sidebar-active-bg:   rgba(252,211,77,0.08);
-    --rw-sidebar-brand-bg:    rgba(255,255,255,0.02);
+    --rw-sidebar-bg:             #07091A;
+    --rw-sidebar-border:         rgba(255,255,255,0.05);
+    --rw-sidebar-fg:             rgba(255,255,255,0.45);
+    --rw-sidebar-fg-hover:       rgba(255,255,255,0.82);
+    --rw-sidebar-fg-active:      #FCD34D;
+    --rw-sidebar-hover-bg:       rgba(255,255,255,0.05);
+    --rw-sidebar-active-bg:      rgba(252,211,77,0.1);
+    --rw-sidebar-icon:           rgba(255,255,255,0.35);
+    --rw-sidebar-icon-active:    #FCD34D;
+    --rw-sidebar-brand-bg:       rgba(255,255,255,0.03);
+    --rw-sidebar-brand-name:     #FFFFFF;
 
     --rw-draft-bg:     rgba(29,78,216,0.15);    --rw-draft-fg:    #93C5FD;
     --rw-pending-bg:   rgba(146,64,14,0.15);    --rw-pending-fg:  #FCD34D;
