@@ -43,9 +43,8 @@ public class EmailService {
         String htmlBody = templateEngine.process(templateName, context);
         try {
             smtpEmailAdapter.sendHtml(to, subject, htmlBody);
-        } catch (MessagingException e) {
-            log.error("Failed to send email to={}, template={}", to, templateName, e);
-            throw new RuntimeException("Email delivery failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Failed to send email to={}, template={} — SMTP error is non-fatal", to, templateName, e);
         }
     }
 }
