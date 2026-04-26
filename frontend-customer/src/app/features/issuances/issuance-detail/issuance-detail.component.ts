@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -461,6 +461,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
   `]
 })
 export class IssuanceDetailComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly issuanceService = inject(IssuanceService);
   private readonly auth = inject(AuthService);
@@ -534,12 +535,14 @@ export class IssuanceDetailComponent implements OnInit {
       next: (asset) => {
         this.asset = asset;
         this.loading = false;
+        this.cdr.detectChanges();
         this.loadDeployments(asset.id);
         this.loadHolders(asset.id);
         this.loadTermSheetDocs(id);
       },
       error: () => {
         this.loading = false;
+        this.cdr.detectChanges();
       },
     });
   }
@@ -550,12 +553,14 @@ export class IssuanceDetailComponent implements OnInit {
       next: (deployments) => {
         this.deployments = deployments;
         this.deploymentsState = resolveAsyncSection(this.deploymentsState, null);
+        this.cdr.detectChanges();
         if (this.isErc3643 && deployments.length > 0) {
           this.loadErc3643Data(assetId, deployments[0].id);
         }
       },
       error: () => {
         this.deploymentsState = failAsyncSection(this.deploymentsState);
+        this.cdr.detectChanges();
       },
     });
   }
@@ -566,9 +571,11 @@ export class IssuanceDetailComponent implements OnInit {
       next: (holders) => {
         this.holders = holders.content;
         this.holdersState = resolveAsyncSection(this.holdersState, null);
+        this.cdr.detectChanges();
       },
       error: () => {
         this.holdersState = failAsyncSection(this.holdersState);
+        this.cdr.detectChanges();
       },
     });
   }
@@ -578,15 +585,18 @@ export class IssuanceDetailComponent implements OnInit {
     this.erc3643Service.getComplianceStatus(assetId, deploymentId).subscribe({
       next: (compliance) => {
         this.complianceStatus = compliance;
+        this.cdr.detectChanges();
       },
     });
     this.erc3643Service.getIdentityRegistry(assetId, deploymentId).subscribe({
       next: (registry) => {
         this.identityRegistry = registry;
         this.identityRegistryState = resolveAsyncSection(this.identityRegistryState, null);
+        this.cdr.detectChanges();
       },
       error: () => {
         this.identityRegistryState = failAsyncSection(this.identityRegistryState);
+        this.cdr.detectChanges();
       },
     });
   }
@@ -600,8 +610,12 @@ export class IssuanceDetailComponent implements OnInit {
         this.asset = updated;
         this.actionLoading = false;
         this.snackBar.open('Submitted for approval.', 'OK', { duration: 3000 });
+        this.cdr.detectChanges();
       },
-      error: () => (this.actionLoading = false),
+      error: () => {
+        this.actionLoading = false;
+        this.cdr.detectChanges();
+      },
     });
   }
 
@@ -616,8 +630,12 @@ export class IssuanceDetailComponent implements OnInit {
           this.deployments = [...this.deployments, deployment];
           this.actionLoading = false;
           this.snackBar.open('Deployment initiated.', 'OK', { duration: 3000 });
+          this.cdr.detectChanges();
         },
-        error: () => (this.actionLoading = false),
+        error: () => {
+          this.actionLoading = false;
+          this.cdr.detectChanges();
+        },
       });
   }
 
@@ -638,8 +656,8 @@ export class IssuanceDetailComponent implements OnInit {
   private loadTermSheetDocs(assetId: string): void {
     this.tsLoading = true;
     this.issuanceService.listDocuments(assetId).subscribe({
-      next: docs => { this.termSheetDocs = docs; this.tsLoading = false; },
-      error: () => { this.tsLoading = false; },
+      next: docs => { this.termSheetDocs = docs; this.tsLoading = false; this.cdr.detectChanges(); },
+      error: () => { this.tsLoading = false; this.cdr.detectChanges(); },
     });
   }
 
@@ -653,10 +671,12 @@ export class IssuanceDetailComponent implements OnInit {
         this.tsUploading = false;
         if (this.asset) this.asset.hasTermSheet = true;
         this.snackBar.open('Term sheet uploaded.', 'OK', { duration: 3000 });
+        this.cdr.detectChanges();
       },
       error: () => {
         this.tsUploading = false;
         this.snackBar.open('Upload failed.', 'Close', { duration: 4000 });
+        this.cdr.detectChanges();
       },
     });
   }

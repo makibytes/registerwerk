@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -130,23 +130,25 @@ import { InviteUserDialogComponent } from './invite-user-dialog.component';
   styles: [`
     .entity-card { margin-bottom: 16px; }
     .entity-info { display: flex; align-items: center; gap: 16px; }
-    .entity-icon { font-size: 40px; width: 40px; height: 40px; color: #00695c; }
-    .entity-info h3 { margin: 0 0 4px; }
-    .entity-info p { margin: 0; font-size: 13px; color: #546e7a; }
+    .entity-icon { font-size: 40px; width: 40px; height: 40px; color: var(--rw-accent); }
+    .entity-info h3 { margin: 0 0 4px; color: var(--rw-text-primary); }
+    .entity-info p { margin: 0; font-size: 13px; color: var(--rw-text-secondary); }
     mat-card-header { display: flex; align-items: center; justify-content: space-between; }
     .role-chip {
       display: inline-block;
       padding: 2px 10px;
       border-radius: 12px;
-      font-size: 12px;
-      font-weight: 500;
-      background: #e0f2f1;
-      color: #00695c;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      background: var(--rw-accent-subtle);
+      color: var(--rw-accent);
     }
-    .empty-row { text-align: center; padding: 32px; color: #78909c; }
+    .empty-row { text-align: center; padding: 32px; color: var(--rw-text-muted); }
   `]
 })
 export class UserListComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly companyService = inject(CompanyService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
@@ -158,7 +160,13 @@ export class UserListComponent implements OnInit {
   readonly displayedColumns = ['name', 'email', 'role', 'actions'];
 
   ngOnInit(): void {
-    this.companyService.getMyEntity().subscribe({ next: e => (this.entity = e), error: () => {} });
+    this.companyService.getMyEntity().subscribe({
+      next: (entity) => {
+        this.entity = entity;
+        this.cdr.detectChanges();
+      },
+      error: () => {},
+    });
     this.loadUsers();
   }
 
@@ -179,9 +187,11 @@ export class UserListComponent implements OnInit {
       next: () => {
         this.users = this.users.filter(u => u.id !== user.id);
         this.snackBar.open(`${user.name} has been removed.`, 'OK', { duration: 3000 });
+        this.cdr.detectChanges();
       },
       error: () => {
         this.snackBar.open('Failed to remove user.', 'Dismiss', { duration: 4000 });
+        this.cdr.detectChanges();
       }
     });
   }
@@ -200,8 +210,15 @@ export class UserListComponent implements OnInit {
   private loadUsers(): void {
     this.loading = true;
     this.companyService.getEntityUsers().subscribe({
-      next: (users) => { this.users = users; this.loading = false; },
-      error: () => (this.loading = false),
+      next: (users) => {
+        this.users = users;
+        this.loading = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.loading = false;
+        this.cdr.detectChanges();
+      },
     });
   }
 }

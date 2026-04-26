@@ -1,5 +1,6 @@
 import {
   AfterViewInit,
+  ChangeDetectorRef,
   Component,
   OnInit,
   ViewChild,
@@ -285,19 +286,19 @@ interface Filters {
     .kpi-bar {
       display: flex;
       align-items: center;
-      gap: 0;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      background: var(--rw-surface);
+      border: 1px solid var(--rw-border);
+      border-radius: var(--rw-radius-md);
+      box-shadow: var(--rw-shadow-xs);
       padding: 20px 28px;
       margin-bottom: 24px;
       flex-wrap: wrap;
       gap: 16px;
     }
     .kpi-item { display: flex; flex-direction: column; align-items: center; min-width: 100px; }
-    .kpi-value { font-size: 26px; font-weight: 700; color: #006064; }
-    .kpi-label { font-size: 11px; color: #78909c; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .kpi-divider { width: 1px; height: 40px; background: #e0e0e0; flex-shrink: 0; }
+    .kpi-value { font-size: 26px; font-weight: 700; letter-spacing: -0.4px; color: var(--rw-text-primary); }
+    .kpi-label { font-size: 11px; color: var(--rw-text-muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+    .kpi-divider { width: 1px; height: 40px; background: var(--rw-border); flex-shrink: 0; }
 
     /* Charts */
     .charts-row {
@@ -323,25 +324,27 @@ interface Filters {
     .filter-field { min-width: 140px; }
     .filter-search { min-width: 200px; flex: 1; }
     .filter-date { min-width: 150px; }
-    .filter-hint { font-size: 12px; color: #78909c; margin-top: 4px; }
+    .filter-hint { font-size: 12px; color: var(--rw-text-muted); margin-top: 4px; }
 
     /* Table */
     .asset-cell { display: flex; flex-direction: column; }
-    .asset-name { font-size: 14px; color: #37474f; }
-    .asset-isin { font-size: 11px; color: #90a4ae; }
-    .amount-cell { font-weight: 600; color: #37474f; }
+    .asset-name { font-size: 14px; color: var(--rw-text-primary); }
+    .asset-isin { font-size: 11px; color: var(--rw-text-muted); }
+    .amount-cell { font-weight: 600; color: var(--rw-text-primary); }
     .address-code {
-      font-family: monospace;
+      font-family: 'IBM Plex Mono', 'Courier New', monospace;
       font-size: 12px;
-      background: #f5f5f5;
-      padding: 2px 4px;
-      border-radius: 3px;
+      background: var(--rw-bg);
+      color: var(--rw-text-secondary);
+      padding: 2px 6px;
+      border-radius: var(--rw-radius-sm);
       cursor: help;
     }
-    .empty-row { text-align: center; padding: 32px; color: #78909c; }
+    .empty-row { text-align: center; padding: 32px; color: var(--rw-text-muted); }
   `],
 })
 export class InvestmentListComponent implements OnInit, AfterViewInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly investmentService = inject(InvestmentService);
 
   @ViewChild(MatSort) sort!: MatSort;
@@ -451,8 +454,12 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
           this.dataSource.data = res.content;
           this.dataSource.filterPredicate = this.buildFilterPredicate();
           this.loading = false;
+          this.cdr.detectChanges();
         },
-        error: () => (this.loading = false),
+        error: () => {
+          this.loading = false;
+          this.cdr.detectChanges();
+        },
       });
   }
 

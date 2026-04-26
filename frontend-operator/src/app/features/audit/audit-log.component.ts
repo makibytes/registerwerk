@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, ViewChild, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatTableModule, MatTableDataSource } from '@angular/material/table';
 import { MatPaginatorModule, MatPaginator, PageEvent } from '@angular/material/paginator';
@@ -52,15 +52,16 @@ import { AuditEvent } from '../../core/models';
     .no-data {
       text-align: center;
       padding: 48px;
-      color: rgba(0, 0, 0, 0.38);
+      color: var(--rw-text-muted);
     }
 
     .event-type-cell {
-      font-family: monospace;
+      font-family: 'IBM Plex Mono', 'Courier New', monospace;
       font-size: 12px;
-      background: #f5f5f5;
+      background: var(--rw-bg);
       padding: 2px 6px;
-      border-radius: 3px;
+      border-radius: var(--rw-radius-sm);
+      color: var(--rw-text-secondary);
     }
 
     .metadata-cell {
@@ -69,7 +70,7 @@ import { AuditEvent } from '../../core/models';
       text-overflow: ellipsis;
       white-space: nowrap;
       font-size: 12px;
-      color: rgba(0,0,0,0.54);
+      color: var(--rw-text-muted);
     }
   `],
   template: `
@@ -186,6 +187,7 @@ import { AuditEvent } from '../../core/models';
   `,
 })
 export class AuditLogComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly auditService = inject(AuditService);
 
   readonly displayedColumns = [
@@ -227,8 +229,12 @@ export class AuditLogComponent implements OnInit {
           this.dataSource.data = resp.content;
           this.totalElements = resp.totalElements;
           this.loading = false;
+          this.cdr.detectChanges();
         },
-        error: () => { this.loading = false; },
+        error: () => {
+          this.loading = false;
+          this.cdr.detectChanges();
+        },
       });
   }
 

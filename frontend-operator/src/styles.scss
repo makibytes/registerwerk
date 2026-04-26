@@ -217,6 +217,16 @@ body {
   font-weight: 500;
 }
 
+// ── Material Card Overrides ────────────────────────────────────────────────────
+
+.mat-mdc-card {
+  background: var(--rw-surface) !important;
+  border: 1px solid var(--rw-border);
+  border-radius: var(--rw-radius-md) !important;
+  box-shadow: var(--rw-shadow-xs) !important;
+  color: var(--rw-text-primary) !important;
+}
+
 // ── Material Table Overrides ───────────────────────────────────────────────────
 
 .mat-mdc-table { background: transparent !important; }
@@ -273,12 +283,10 @@ body {
 .registry-page .graph-card {
   position: relative;
   overflow: hidden;
-  border-radius: 24px;
+  border-radius: var(--rw-radius-md);
   border: 1px solid var(--rw-border);
-  background:
-    radial-gradient(circle at top right, rgba(245, 158, 11, 0.18), transparent 26%),
-    linear-gradient(180deg, color-mix(in srgb, var(--rw-surface) 92%, #0B1020 8%), var(--rw-surface));
-  box-shadow: var(--rw-shadow-md);
+  background: var(--rw-surface);
+  box-shadow: var(--rw-shadow-xs);
 }
 
 .registry-page .hero-card {
@@ -292,22 +300,21 @@ body {
 .registry-page .section-kicker {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(245, 158, 11, 0.12);
-  color: #B45309;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
+  color: var(--rw-text-muted);
 }
 
 .registry-page .hero-copy h1,
 .registry-page .section-head h2 {
   margin: 10px 0 8px;
-  font-size: 28px;
-  line-height: 1.05;
-  letter-spacing: -1px;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.4px;
+  color: var(--rw-text-primary);
 }
 
 .registry-page .hero-copy p,
@@ -325,21 +332,22 @@ body {
 
 .registry-page .hero-stat {
   padding: 18px;
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--rw-surface-raised) 84%, transparent);
-  border: 1px solid color-mix(in srgb, var(--rw-border) 88%, transparent);
+  border-radius: var(--rw-radius-md);
+  background: var(--rw-surface);
+  border: 1px solid var(--rw-border);
 }
 
 .registry-page .hero-stat.accent {
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0.06));
-  border-color: rgba(245, 158, 11, 0.18);
+  background: var(--rw-surface);
+  border-color: var(--rw-border);
 }
 
 .registry-page .hero-value {
   display: block;
   font-size: 28px;
-  font-weight: 800;
-  letter-spacing: -0.8px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--rw-text-primary);
 }
 
 .registry-page .hero-label {
@@ -365,21 +373,26 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-radius: 999px;
   border: 1px solid var(--rw-border);
-  background: color-mix(in srgb, var(--rw-surface) 90%, transparent);
+  background: var(--rw-surface);
   color: var(--rw-text-secondary);
   cursor: pointer;
   font: inherit;
-  transition: transform 120ms ease, border-color 120ms ease, color 120ms ease;
+  font-size: 13px;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.registry-page .toggle-pill:hover {
+  border-color: var(--rw-text-muted);
+  color: var(--rw-text-primary);
 }
 
 .registry-page .toggle-pill.active {
-  color: #B45309;
-  border-color: rgba(245, 158, 11, 0.35);
-  box-shadow: 0 12px 24px rgba(245, 158, 11, 0.12);
-  transform: translateY(-1px);
+  color: var(--rw-accent);
+  border-color: var(--rw-accent);
+  background: var(--rw-accent-subtle);
 }
 
 .registry-page .search-field {
@@ -435,13 +448,13 @@ body {
 
 .registry-page .entity-card {
   padding: 16px;
-  border-radius: 18px;
-  border: 1px solid color-mix(in srgb, var(--rw-border) 88%, transparent);
-  background: color-mix(in srgb, var(--rw-surface-raised) 86%, transparent);
+  border-radius: var(--rw-radius-md);
+  border: 1px solid var(--rw-border);
+  background: var(--rw-surface);
 }
 
 .registry-page .entity-card.dual {
-  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.18);
+  border-color: var(--rw-accent);
 }
 
 .registry-page .entity-card-head {
@@ -518,12 +531,10 @@ body {
 .registry-page .graph-surface {
   position: relative;
   min-height: 760px;
-  border-radius: 22px;
+  border-radius: var(--rw-radius-md);
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--rw-border) 88%, transparent);
-  background:
-    linear-gradient(90deg, rgba(245, 158, 11, 0.04), transparent 34%, rgba(13, 21, 38, 0.04) 50%, transparent 66%, rgba(37, 99, 235, 0.04)),
-    radial-gradient(circle at center, rgba(15, 23, 42, 0.04), transparent 48%);
+  border: 1px solid var(--rw-border);
+  background: var(--rw-bg);
 }
 
 .registry-page .lane {
@@ -561,10 +572,10 @@ body {
   width: calc(100% - 36px);
   transform: translateY(-50%);
   padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid transparent;
-  background: color-mix(in srgb, var(--rw-surface-raised) 88%, transparent);
-  box-shadow: var(--rw-shadow-sm);
+  border-radius: var(--rw-radius);
+  border: 1px solid var(--rw-border);
+  background: var(--rw-surface);
+  box-shadow: var(--rw-shadow-xs);
 }
 
 .registry-page .graph-node.issuer {
@@ -603,9 +614,9 @@ body {
   justify-content: space-between;
   gap: 14px;
   padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--rw-border) 88%, transparent);
-  background: color-mix(in srgb, var(--rw-surface) 90%, transparent);
+  border-radius: var(--rw-radius);
+  border: 1px solid var(--rw-border);
+  background: var(--rw-surface);
 }
 
 .registry-page .relationship-side {

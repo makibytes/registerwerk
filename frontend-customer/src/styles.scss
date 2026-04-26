@@ -212,6 +212,16 @@ body {
   font-size: 13px;
 }
 
+// ── Material Card Overrides ────────────────────────────────────────────────────
+
+.mat-mdc-card {
+  background: var(--rw-surface) !important;
+  border: 1px solid var(--rw-border);
+  border-radius: var(--rw-radius-md) !important;
+  box-shadow: var(--rw-shadow-xs) !important;
+  color: var(--rw-text-primary) !important;
+}
+
 // ── Material Table Overrides ───────────────────────────────────────────────────
 
 .mat-mdc-table { background: transparent !important; }

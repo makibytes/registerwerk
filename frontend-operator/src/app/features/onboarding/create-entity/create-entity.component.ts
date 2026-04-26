@@ -59,7 +59,7 @@ import { EntityService } from '../../../core/api/entity.service';
 
     .optional-label {
       font-size: 12px;
-      color: rgba(0,0,0,0.38);
+      color: var(--rw-text-muted);
     }
   `],
   template: `

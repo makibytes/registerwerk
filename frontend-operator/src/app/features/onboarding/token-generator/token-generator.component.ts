@@ -35,16 +35,17 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
       margin-bottom: 20px;
 
       .field-label {
-        font-size: 12px;
-        color: rgba(0,0,0,0.54);
+        font-size: 11px;
+        color: var(--rw-text-muted);
         text-transform: uppercase;
         letter-spacing: 0.5px;
+        font-weight: 600;
         margin-bottom: 2px;
       }
 
       .field-value {
         font-size: 14px;
-        color: rgba(0,0,0,0.87);
+        color: var(--rw-text-primary);
       }
     }
 
@@ -55,33 +56,9 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
     .token-area {
       margin-top: 16px;
 
-      .warning-banner {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        background: #fff3e0;
-        border-left: 4px solid #ff9800;
-        padding: 12px 16px;
-        border-radius: 0 4px 4px 0;
-        color: #e65100;
-        font-size: 14px;
-        margin-bottom: 16px;
-      }
-
-      .token-display {
-        background: #f5f5f5;
-        border: 1px solid #e0e0e0;
-        border-radius: 4px;
-        padding: 16px;
-        font-family: 'Courier New', monospace;
-        font-size: 13px;
-        word-break: break-all;
-        line-height: 1.6;
-      }
-
       .token-meta {
         font-size: 12px;
-        color: rgba(0,0,0,0.54);
+        color: var(--rw-text-muted);
         margin-top: 8px;
       }
 
@@ -100,7 +77,7 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
 
     .copied-hint {
       font-size: 13px;
-      color: #2e7d32;
+      color: var(--rw-approved-fg);
       display: flex;
       align-items: center;
       gap: 4px;

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -230,6 +230,7 @@ import { DataStatePillComponent } from '../../../shared/components/data-state-pi
   `],
 })
 export class InvestmentDetailComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly investmentService = inject(InvestmentService);
   private readonly issuanceService = inject(IssuanceService);
@@ -252,10 +253,12 @@ export class InvestmentDetailComponent implements OnInit {
       next: (record) => {
         this.record = record;
         this.loading = false;
+        this.cdr.detectChanges();
         this.loadDeployments(record.assetId, record.walletAddress);
       },
       error: () => {
         this.loading = false;
+        this.cdr.detectChanges();
       },
     });
   }
@@ -265,12 +268,14 @@ export class InvestmentDetailComponent implements OnInit {
     this.issuanceService.getDeployments(assetId).subscribe({
       next: (deployments) => {
         this.deploymentsSection = resolveAsyncSection(this.deploymentsSection, deployments);
+        this.cdr.detectChanges();
         if (this.isErc3643 && deployments.length > 0) {
           this.loadIdentityStatus(assetId, deployments[0].id, walletAddress);
         }
       },
       error: () => {
         this.deploymentsSection = failAsyncSection(this.deploymentsSection);
+        this.cdr.detectChanges();
       },
     });
   }
@@ -283,9 +288,11 @@ export class InvestmentDetailComponent implements OnInit {
           entry => entry.walletAddress.toLowerCase() === walletAddress.toLowerCase()
         ) ?? null;
         this.identitySection = resolveAsyncSection(this.identitySection, match);
+        this.cdr.detectChanges();
       },
       error: () => {
         this.identitySection = failAsyncSection(this.identitySection);
+        this.cdr.detectChanges();
       },
     });
   }

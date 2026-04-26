@@ -1,12 +1,13 @@
 package de.makibytes.registerwerk.application.asset;
 
+import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
+import de.makibytes.registerwerk.application.blockchain.ChainDescriptor;
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
-import de.makibytes.registerwerk.domain.asset.Asset;
 import de.makibytes.registerwerk.domain.asset.AssetDeployment;
 import de.makibytes.registerwerk.domain.asset.AssetHolder;
 import de.makibytes.registerwerk.domain.entity.LegalEntity;
+import de.makibytes.registerwerk.domain.enums.Chain;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
 import de.makibytes.registerwerk.web.dto.LiveHolderResponse;
 import org.slf4j.Logger;
@@ -26,8 +27,14 @@ import org.web3j.utils.Numeric;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Scans on-chain Transfer events to build live holder balances.
@@ -55,22 +62,19 @@ public class LiveHolderService {
     );
 
     private final AssetDeploymentRepository deploymentRepository;
-    private final AssetRepository assetRepository;
     private final HolderService holderService;
     private final LegalEntityRepository legalEntityRepository;
-    private final org.web3j.protocol.Web3j evmClient;
+    private final BlockchainClientRegistry clientRegistry;
 
     public LiveHolderService(
             AssetDeploymentRepository deploymentRepository,
-            AssetRepository assetRepository,
             HolderService holderService,
             LegalEntityRepository legalEntityRepository,
-            de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry clientRegistry) {
+            BlockchainClientRegistry clientRegistry) {
         this.deploymentRepository = deploymentRepository;
-        this.assetRepository = assetRepository;
         this.holderService = holderService;
         this.legalEntityRepository = legalEntityRepository;
-        this.evmClient = null; // Will be obtained per-call via clientRegistry
+        this.clientRegistry = clientRegistry;
     }
 
     /**
@@ -87,13 +91,15 @@ public class LiveHolderService {
         AssetDeployment dep = deploymentRepository.findById(deploymentId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
 
+        if (dep.getChain() == Chain.SOLANA) {
+            throw new UnsupportedOperationException(
+                    "Live holder scanning from Transfer events is only supported for EVM deployments");
+        }
+
         if (dep.getContractAddress() == null || dep.getContractAddress().startsWith("0x-PENDING")) {
             log.warn("Token contract not deployed for deployment={}", deploymentId);
             return Collections.emptyList();
         }
-
-        Asset asset = assetRepository.findById(dep.getAssetId())
-                .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));
 
         // Build live balance map from Transfer events
         Map<String, BigDecimal> balanceMap = scanTransferEvents(dep);
@@ -148,6 +154,8 @@ public class LiveHolderService {
         Map<String, BigDecimal> balances = new HashMap<>();
 
         try {
+            Web3j evmClient = clientRegistry.getEvmClient(new ChainDescriptor(dep.getChain(), dep.getNetwork()));
+
             // Note: In a production system, you may want to paginate blocks or use a subgraph.
             // For now, we scan from genesis (block 0) to latest. This is simple but may be slow on large chains.
             EthFilter filter = new EthFilter(

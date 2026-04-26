@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -263,6 +263,7 @@ const ALL_DOC_TYPES = [
   `],
 })
 export class KycStatusComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly kycService = inject(KycService);
   private readonly authService = inject(AuthService);
   private readonly snackBar = inject(MatSnackBar);
@@ -292,8 +293,8 @@ export class KycStatusComponent implements OnInit {
     if (!this.entityId) return;
     this.loading = true;
     this.kycService.listDocuments(this.entityId).subscribe({
-      next: (docs) => { this.documents = docs; this.loading = false; },
-      error: () => { this.loading = false; },
+      next: (docs) => { this.documents = docs; this.loading = false; this.cdr.detectChanges(); },
+      error: () => { this.loading = false; this.cdr.detectChanges(); },
     });
   }
 
@@ -304,8 +305,12 @@ export class KycStatusComponent implements OnInit {
       next: (result) => {
         this.compliance = { ...this.compliance, [jur]: result };
         this.complianceLoading = { ...this.complianceLoading, [jur]: false };
+        this.cdr.detectChanges();
       },
-      error: () => { this.complianceLoading = { ...this.complianceLoading, [jur]: false }; },
+      error: () => {
+        this.complianceLoading = { ...this.complianceLoading, [jur]: false };
+        this.cdr.detectChanges();
+      },
     });
   }
 
@@ -326,12 +331,14 @@ export class KycStatusComponent implements OnInit {
         this.uploadFiles = { ...this.uploadFiles, [jur]: undefined as unknown as File };
         this.uploadDocType = { ...this.uploadDocType, [jur]: '' };
         this.uploadLoading = { ...this.uploadLoading, [jur]: false };
+        this.cdr.detectChanges();
         // Refresh compliance checklist
         this.loadCompliance(jur);
         this.snackBar.open('Document uploaded. Awaiting review.', 'OK', { duration: 4000 });
       },
       error: () => {
         this.uploadLoading = { ...this.uploadLoading, [jur]: false };
+        this.cdr.detectChanges();
         this.snackBar.open('Upload failed. Please try again.', 'OK', { duration: 3000 });
       },
     });
@@ -356,6 +363,7 @@ export class KycStatusComponent implements OnInit {
     this.kycService.deleteDocument(this.entityId, doc.id).subscribe({
       next: () => {
         this.documents = this.documents.filter(d => d.id !== doc.id);
+        this.cdr.detectChanges();
         this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
       },
     });

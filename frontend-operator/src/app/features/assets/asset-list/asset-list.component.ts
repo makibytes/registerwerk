@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, ViewChild, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatTableModule, MatTableDataSource } from '@angular/material/table';
@@ -52,14 +52,15 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
     .no-data {
       text-align: center;
       padding: 48px;
-      color: rgba(0, 0, 0, 0.38);
+      color: var(--rw-text-muted);
     }
 
     code.isin {
       font-size: 12px;
-      background: #f5f5f5;
+      background: var(--rw-bg);
       padding: 2px 6px;
-      border-radius: 3px;
+      border-radius: var(--rw-radius-sm);
+      color: var(--rw-text-secondary);
     }
   `],
   template: `
@@ -180,6 +181,7 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
   `,
 })
 export class AssetListComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly assetService = inject(AssetService);
   private readonly router = inject(Router);
 
@@ -218,8 +220,12 @@ export class AssetListComponent implements OnInit {
           this.dataSource.data = resp.content;
           this.totalElements = resp.totalElements;
           this.loading = false;
+          this.cdr.detectChanges();
         },
-        error: () => { this.loading = false; },
+        error: () => {
+          this.loading = false;
+          this.cdr.detectChanges();
+        },
       });
   }
 

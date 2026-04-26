@@ -1,4 +1,5 @@
 import {
+  ChangeDetectorRef,
   Component,
   OnInit,
   ViewChild,
@@ -61,7 +62,7 @@ import { DatePipe } from '@angular/common';
     .no-data {
       text-align: center;
       padding: 48px;
-      color: rgba(0, 0, 0, 0.38);
+      color: var(--rw-text-muted);
     }
   `],
   template: `
@@ -189,6 +190,7 @@ import { DatePipe } from '@angular/common';
   `,
 })
 export class CustomerListComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly entityService = inject(EntityService);
   private readonly router = inject(Router);
 
@@ -236,9 +238,11 @@ export class CustomerListComponent implements OnInit {
           this.dataSource.data = resp.content;
           this.totalElements = resp.totalElements;
           this.loading = false;
+          this.cdr.detectChanges();
         },
         error: () => {
           this.loading = false;
+          this.cdr.detectChanges();
         },
       });
   }

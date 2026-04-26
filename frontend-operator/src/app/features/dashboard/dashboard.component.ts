@@ -1,25 +1,21 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { forkJoin } from 'rxjs';
-import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
-import { MatDividerModule } from '@angular/material/divider';
 import { RouterLink } from '@angular/router';
 import { DatePipe } from '@angular/common';
 import { EntityService } from '../../core/api/entity.service';
 import { AssetService } from '../../core/api/asset.service';
 import { AuditService } from '../../core/api/audit.service';
-import { AuditEvent, LegalEntity } from '../../core/models';
+import { AuditEvent } from '../../core/models';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
   imports: [
-    MatCardModule,
     MatIconModule,
     MatButtonModule,
-    MatDividerModule,
     RouterLink,
     DatePipe,
     StatusBadgeComponent,
@@ -42,36 +38,34 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         margin-bottom: 12px;
 
         .stat-label {
-          font-size: 13px;
-          color: rgba(0, 0, 0, 0.54);
+          font-size: 11px;
+          color: var(--rw-text-muted);
           text-transform: uppercase;
           letter-spacing: 0.5px;
+          font-weight: 600;
         }
 
         mat-icon {
-          color: #3f51b5;
-          font-size: 28px;
-          width: 28px;
-          height: 28px;
+          color: var(--rw-text-muted);
+          font-size: 22px;
+          width: 22px;
+          height: 22px;
         }
       }
 
       .stat-value {
-        font-size: 36px;
-        font-weight: 600;
-        color: rgba(0, 0, 0, 0.87);
+        font-size: 32px;
+        font-weight: 700;
+        color: var(--rw-text-primary);
         line-height: 1;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
+        letter-spacing: -0.4px;
       }
 
       .stat-sub {
-        font-size: 13px;
-        color: rgba(0, 0, 0, 0.54);
+        font-size: 12px;
+        color: var(--rw-text-secondary);
       }
-    }
-
-    .stat-card.warn {
-      border-left: 4px solid #ff9800;
     }
 
     .bottom-grid {
@@ -85,10 +79,12 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .section-title {
-      font-size: 15px;
-      font-weight: 500;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
       margin: 0 0 16px;
-      color: rgba(0, 0, 0, 0.87);
+      color: var(--rw-text-muted);
     }
 
     .status-list {
@@ -102,11 +98,11 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       justify-content: space-between;
       align-items: center;
       font-size: 14px;
-      color: rgba(0, 0, 0, 0.7);
+      color: var(--rw-text-secondary);
 
       .count {
         font-weight: 600;
-        color: rgba(0, 0, 0, 0.87);
+        color: var(--rw-text-primary);
       }
     }
 
@@ -118,7 +114,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
     .event-row {
       padding: 10px 0;
-      border-bottom: 1px solid #f0f0f0;
+      border-bottom: 1px solid var(--rw-border-subtle);
 
       &:last-child {
         border-bottom: none;
@@ -127,12 +123,12 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       .event-type {
         font-size: 13px;
         font-weight: 500;
-        color: rgba(0, 0, 0, 0.87);
+        color: var(--rw-text-primary);
       }
 
       .event-meta {
         font-size: 12px;
-        color: rgba(0, 0, 0, 0.54);
+        color: var(--rw-text-muted);
         margin-top: 2px;
       }
     }
@@ -142,11 +138,11 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       justify-content: flex-end;
       margin-top: 16px;
       padding-top: 12px;
-      border-top: 1px solid #f0f0f0;
+      border-top: 1px solid var(--rw-border-subtle);
     }
 
     .loading-text {
-      color: rgba(0, 0, 0, 0.38);
+      color: var(--rw-text-muted);
       font-size: 14px;
       text-align: center;
       padding: 24px;
@@ -158,45 +154,45 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     </div>
 
     <div class="dashboard-grid">
-      <mat-card class="stat-card">
+      <div class="content-card stat-card">
         <div class="stat-header">
           <span class="stat-label">Active Entities</span>
           <mat-icon>people</mat-icon>
         </div>
         <div class="stat-value">{{ stats.activeEntities }}</div>
         <div class="stat-sub">Legal entities registered</div>
-      </mat-card>
+      </div>
 
-      <mat-card class="stat-card warn">
+      <div class="content-card stat-card">
         <div class="stat-header">
           <span class="stat-label">Pending KYC</span>
           <mat-icon>pending_actions</mat-icon>
         </div>
         <div class="stat-value">{{ stats.pendingKyc }}</div>
         <div class="stat-sub">Reviews awaiting action</div>
-      </mat-card>
+      </div>
 
-      <mat-card class="stat-card">
+      <div class="content-card stat-card">
         <div class="stat-header">
           <span class="stat-label">Total Assets</span>
           <mat-icon>account_balance_wallet</mat-icon>
         </div>
         <div class="stat-value">{{ stats.totalAssets }}</div>
         <div class="stat-sub">Across all issuers</div>
-      </mat-card>
+      </div>
 
-      <mat-card class="stat-card">
+      <div class="content-card stat-card">
         <div class="stat-header">
           <span class="stat-label">Issued Assets</span>
           <mat-icon>check_circle</mat-icon>
         </div>
         <div class="stat-value">{{ stats.issuedAssets }}</div>
         <div class="stat-sub">Live on-chain</div>
-      </mat-card>
+      </div>
     </div>
 
     <div class="bottom-grid">
-      <mat-card class="content-card">
+      <div class="content-card">
         <p class="section-title">Assets by Status</p>
         @if (loading) {
           <p class="loading-text">Loading...</p>
@@ -213,9 +209,9 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         <div class="card-footer">
           <a mat-button color="primary" routerLink="/assets">View all assets</a>
         </div>
-      </mat-card>
+      </div>
 
-      <mat-card class="content-card">
+      <div class="content-card">
         <p class="section-title">Recent Audit Events</p>
         @if (loading) {
           <p class="loading-text">Loading...</p>
@@ -236,11 +232,12 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         <div class="card-footer">
           <a mat-button color="primary" routerLink="/audit">View audit log</a>
         </div>
-      </mat-card>
+      </div>
     </div>
   `,
 })
 export class DashboardComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly entityService = inject(EntityService);
   private readonly assetService = inject(AssetService);
   private readonly auditService = inject(AuditService);
@@ -278,9 +275,11 @@ export class DashboardComponent implements OnInit {
         this.stats.issuedAssets = countByStatus['ISSUED'] ?? 0;
         this.recentEvents = audit.content;
         this.loading = false;
+        this.cdr.detectChanges();
       },
       error: () => {
         this.loading = false;
+        this.cdr.detectChanges();
       },
     });
   }

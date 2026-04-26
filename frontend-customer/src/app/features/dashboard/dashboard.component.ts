@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
@@ -178,7 +178,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     </div>
   `,
   styles: [`
-    .welcome { color: #546e7a; margin: 0 0 24px; }
+    .welcome { color: var(--rw-text-secondary); margin: 0 0 24px; }
     .dashboard-section { margin-bottom: 40px; }
     .section-header {
       display: flex;
@@ -191,7 +191,10 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       align-items: center;
       gap: 8px;
       margin: 0;
-      font-size: 18px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: var(--rw-text-primary);
     }
     .activity-row {
       display: flex;
@@ -204,16 +207,16 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       display: flex;
       flex-direction: column;
     }
-    .asset-name { font-weight: 500; font-size: 14px; }
-    .asset-number, .wallet-addr { font-size: 12px; color: #78909c; }
-    .nominal-amount { font-weight: 500; color: #37474f; }
+    .asset-name { font-weight: 500; font-size: 14px; color: var(--rw-text-primary); }
+    .asset-number, .wallet-addr { font-size: 12px; color: var(--rw-text-muted); }
+    .nominal-amount { font-weight: 600; color: var(--rw-text-primary); }
     .action-card {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
     }
-    .action-icon { font-size: 40px; width: 40px; height: 40px; color: #00695c; }
+    .action-icon { font-size: 40px; width: 40px; height: 40px; color: var(--rw-accent); }
     .empty-state mat-card-content {
       display: flex;
       flex-direction: column;
@@ -221,10 +224,11 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       padding: 48px;
       text-align: center;
     }
-    .empty-icon { font-size: 48px; width: 48px; height: 48px; color: #b0bec5; margin-bottom: 16px; }
+    .empty-icon { font-size: 48px; width: 48px; height: 48px; color: var(--rw-text-muted); margin-bottom: 16px; }
   `]
 })
 export class DashboardComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly auth = inject(AuthService);
   private readonly issuanceService = inject(IssuanceService);
   private readonly investmentService = inject(InvestmentService);
@@ -278,6 +282,7 @@ export class DashboardComponent implements OnInit {
       }
 
       this.loading = false;
+      this.cdr.detectChanges();
     });
   }
 }

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -162,6 +162,7 @@ import { OnboardingTokenInfo } from '../../../core/models';
   `]
 })
 export class RedeemTokenComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly http = inject(HttpClient);
@@ -197,10 +198,12 @@ export class RedeemTokenComponent implements OnInit {
           } else {
             this.tokenInfo = info;
           }
+          this.cdr.detectChanges();
         },
         error: () => {
           this.loading = false;
           this.tokenError = 'Token is invalid or has expired. Please contact your registry administrator.';
+          this.cdr.detectChanges();
         },
       });
   }
@@ -220,12 +223,14 @@ export class RedeemTokenComponent implements OnInit {
         next: () => {
           this.submitting = false;
           this.success = true;
+          this.cdr.detectChanges();
           setTimeout(() => this.router.navigate(['/login']), 3000);
         },
         error: (err) => {
           this.submitting = false;
           this.submitError =
             err?.error?.message ?? 'Setup failed. Please check your details and try again.';
+          this.cdr.detectChanges();
         },
       });
   }
