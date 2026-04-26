@@ -1,11 +1,15 @@
 package de.makibytes.registerwerk.infrastructure.persistence.jpa;
 
-import de.makibytes.registerwerk.domain.audit.AuditEvent;
+import java.time.Instant;
+import java.util.UUID;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
-import java.util.UUID;
+import de.makibytes.registerwerk.domain.audit.AuditEvent;
 
 public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
 
@@ -14,4 +18,32 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
     Page<AuditEvent> findByEventType(String eventType, Pageable pageable);
 
     Page<AuditEvent> findByActorId(UUID actorId, Pageable pageable);
+
+    @Query(
+        value = """
+            select *
+            from audit_event e
+            where e.event_type = 'KYC_JURISDICTION_APPROVED'
+              and e.payload ->> 'overrideApplied' = 'true'
+              and (:jurisdiction is null or e.payload ->> 'jurisdiction' = :jurisdiction)
+              and (:fromTs is null or e.occurred_at >= :fromTs)
+              and (:toTs is null or e.occurred_at <= :toTs)
+            order by e.occurred_at desc
+            """,
+        countQuery = """
+            select count(*)
+            from audit_event e
+            where e.event_type = 'KYC_JURISDICTION_APPROVED'
+              and e.payload ->> 'overrideApplied' = 'true'
+              and (:jurisdiction is null or e.payload ->> 'jurisdiction' = :jurisdiction)
+              and (:fromTs is null or e.occurred_at >= :fromTs)
+              and (:toTs is null or e.occurred_at <= :toTs)
+            """,
+        nativeQuery = true
+    )
+    Page<AuditEvent> findKycOverrideApprovals(
+        @Param("jurisdiction") String jurisdiction,
+        @Param("fromTs") Instant fromTs,
+        @Param("toTs") Instant toTs,
+        Pageable pageable);
 }

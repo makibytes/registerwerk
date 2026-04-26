@@ -1,5 +1,17 @@
 package de.makibytes.registerwerk.application.customer;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
 import de.makibytes.registerwerk.domain.entity.LegalEntity;
@@ -8,17 +20,6 @@ import de.makibytes.registerwerk.domain.enums.KycStatus;
 import de.makibytes.registerwerk.domain.kyc.KycJurisdictionApproval;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.KycJurisdictionApprovalRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Manages KYC approval, rejection, and status queries for legal entities.
@@ -88,7 +89,14 @@ public class KycService {
      * {@link KycJurisdictionApproval} record.
      */
     public KycJurisdictionApproval approveKycForJurisdiction(
-            UUID entityId, Jurisdiction jurisdiction, LocalDate expiresAt, UUID actorId) {
+            UUID entityId,
+            Jurisdiction jurisdiction,
+            LocalDate expiresAt,
+            UUID actorId,
+            String overrideNote,
+            int missingCount,
+            int expiredCount,
+            int tooOldCount) {
 
         legalEntityRepository.findById(entityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
@@ -107,10 +115,18 @@ public class KycService {
         approval.setApprovedAt(Instant.now());
         approval.setExpiresAt(expiresAt != null ? expiresAt : LocalDate.now().plusYears(1));
         approval.setRejectionReason(null);
+        approval.setOverrideNote(overrideNote);
 
         KycJurisdictionApproval saved = jurisdictionApprovalRepository.save(approval);
         auditEventPublisher.publish("KYC_JURISDICTION_APPROVED", "LegalEntity", entityId, actorId, null,
-            Map.of("jurisdiction", jurisdiction.name(), "expiresAt", saved.getExpiresAt().toString()));
+            Map.of(
+                "jurisdiction", jurisdiction.name(),
+                "expiresAt", saved.getExpiresAt().toString(),
+                "overrideApplied", overrideNote != null && !overrideNote.isBlank(),
+                "missingCount", missingCount,
+                "expiredCount", expiredCount,
+                "tooOldCount", tooOldCount
+            ));
         log.info("KYC approved for entityId={}, jurisdiction={}", entityId, jurisdiction);
         return saved;
     }

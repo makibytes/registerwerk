@@ -36,10 +36,11 @@ The registry supports different levels of onchain data:
 
 ## Permissions & Roles
 
-- Registry Admin: all permissions
-- Audit Role: read everything
-- Issuer: read and write permissions on his own issuances
-- Investor: read all his investments (can be created by themselves or by issuer)
+- Registry Admin: full-system authority, including explicit compliance override authority
+- Compliance Officer: KYC/KYB decision authority for compliant approvals/rejections
+- Audit Role: read everything including audit and override reports
+- Issuer: read and write permissions on own issuances
+- Investor: read all own investments (can be created by themselves or by issuer)
 - Public: issuances have public data like the termsheet, which must be available
   publicly (without authentication), just by requesting the document by one of
   its identifiers:
@@ -52,6 +53,42 @@ PDF files, images, XML files, etc.
 Make sure to provide all necessary functionality for a full blown customer
 management application (the full lifecycle, also respect renaming of companies
 and mergers & acquisitions, keep all the customer's history).
+
+## Legal / Regulatory Baseline Requirements
+
+The software must implement controls that enable operators to satisfy obligations
+under the following baseline frameworks (final legal interpretation remains with
+licensed operator/legal counsel):
+
+- Germany eWpG context (electronic securities register integrity, traceability)
+- EU AML baseline (risk-based KYC/KYB and beneficial ownership verification)
+- FATF risk-based AML/CFT expectations for virtual-asset activity
+- GDPR baseline obligations for personal data governance
+- MiCA-era market integrity and disclosure support principles where applicable
+
+### Required software controls
+
+The platform must provide, at minimum:
+
+- Jurisdiction-aware KYC requirement profiles and compliance checklist evaluation
+- Per-jurisdiction approval state (`PENDING`, `APPROVED`, `REJECTED`, `EXPIRED`)
+- Evidence handling for required KYC document types, age checks, and expiry checks
+- Immutable audit trail for all compliance decisions and lifecycle events
+- Separation of duties between operational compliance approvals and system override authority
+- Explicit override path with mandatory justification (`overrideNote`)
+- Time- and jurisdiction-filterable override reporting endpoint for auditors
+- Access control at API level via role-based authorization and entity ownership checks
+- Public/private data partitioning for disclosure vs protected data
+- Data minimization, retention support, and controlled access to sensitive KYC files
+
+### Explicit non-goals of software-only controls
+
+Software controls do not replace:
+
+- Licensing and registration obligations with competent authorities
+- Mandatory reporting obligations (e.g. suspicious activity reports)
+- Legal classification duties (MiCA/MiFID/eWpG perimeter decisions)
+- Policy decisions on sanctions screening thresholds and investigation procedures
 
 ## Architecture
 
@@ -66,6 +103,35 @@ to cope with companies / legal entities as they've been mapped to in the
 API gateway already. The actual user authentication must be pluggable into
 an identity provider like Entra ID, but also be manageable ourselves.
 The API gateway should also contain a caching layer.
+
+## Security Concept
+
+### Authentication
+
+- OIDC mode: external IdP (for example Entra ID) via API gateway and JWT validation
+- Built-in mode: local operator accounts for demo/dev operation
+
+### Authorization
+
+- Spring method-level authorization (`@PreAuthorize`) with role + ownership checks
+- JWT roles claim mapped to `ROLE_*` authorities
+- Entity-scoped access as default for issuer/investor/company-admin roles
+
+### Compliance override model
+
+- `COMPLIANCE_OFFICER` can approve jurisdiction KYC only if checklist is fully compliant
+- `REGISTRY_ADMIN` may override non-compliance only when `overrideNote` is provided
+- Override approvals must be auditable as dedicated events with gap counters:
+  - `missingCount`
+  - `expiredCount`
+  - `tooOldCount`
+- Override reports must be available via API for `AUDIT` and `REGISTRY_ADMIN`
+
+### Audit and transparency requirements
+
+- Every state-changing compliance action must emit audit events
+- Override reports must support filtering by jurisdiction and period
+- Admin override is allowed, but never silent
 
 ## Frontends
 
@@ -102,3 +168,10 @@ integration tests. The integration tests can use testcontainers for
 PostgreSQL, as well as to setup a Foundry project for anything
 blockchain related (e.g. use an anvil test blockchain for depoying
 and interacting with smart contracts).
+
+Additionally, compliance-critical tests must cover:
+
+- compliant jurisdiction approval by `COMPLIANCE_OFFICER`
+- rejected non-compliant approval attempt by non-admin role
+- successful admin override with mandatory note
+- visibility of override approvals in audit report endpoint

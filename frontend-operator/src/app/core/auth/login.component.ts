@@ -8,7 +8,6 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AuthService } from './auth.service';
-import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-login',
@@ -287,42 +286,30 @@ import { environment } from '../../../environments/environment';
             <p class="form-subtitle">Access the registry administration portal</p>
           </div>
 
-          @if (entraEnabled) {
-            <button class="microsoft-btn" (click)="loginWithMicrosoft()">
-              <svg class="ms-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21">
-                <rect x="1" y="1" width="9" height="9" fill="#f35325"/>
-                <rect x="11" y="1" width="9" height="9" fill="#81bc06"/>
-                <rect x="1" y="11" width="9" height="9" fill="#05a6f0"/>
-                <rect x="11" y="11" width="9" height="9" fill="#ffba08"/>
-              </svg>
-              Continue with Microsoft
+          <form [formGroup]="form" (ngSubmit)="submit()">
+            <div class="fields-stack">
+              <mat-form-field class="login-field" appearance="outline" subscriptSizing="dynamic">
+                <mat-label>Email address</mat-label>
+                <input matInput type="email" formControlName="email" autocomplete="email" />
+              </mat-form-field>
+
+              <mat-form-field class="login-field" appearance="outline" subscriptSizing="dynamic">
+                <mat-label>Password</mat-label>
+                <input matInput type="password" formControlName="password" autocomplete="current-password" />
+              </mat-form-field>
+            </div>
+
+            <button class="submit-btn" mat-flat-button type="submit" [disabled]="loading">
+              @if (loading) {
+                <span class="spinner-row">
+                  <mat-spinner diameter="16" color="accent" />
+                  Signing in…
+                </span>
+              } @else {
+                Sign in
+              }
             </button>
-          } @else {
-            <form [formGroup]="form" (ngSubmit)="submit()">
-              <div class="fields-stack">
-                <mat-form-field class="login-field" appearance="outline" subscriptSizing="dynamic">
-                  <mat-label>Email address</mat-label>
-                  <input matInput type="email" formControlName="email" autocomplete="email" />
-                </mat-form-field>
-
-                <mat-form-field class="login-field" appearance="outline" subscriptSizing="dynamic">
-                  <mat-label>Password</mat-label>
-                  <input matInput type="password" formControlName="password" autocomplete="current-password" />
-                </mat-form-field>
-              </div>
-
-              <button class="submit-btn" mat-flat-button type="submit" [disabled]="loading">
-                @if (loading) {
-                  <span class="spinner-row">
-                    <mat-spinner diameter="16" color="accent" />
-                    Signing in…
-                  </span>
-                } @else {
-                  Sign in
-                }
-              </button>
-            </form>
-          }
+          </form>
 
           <p class="form-footer">Registerwerk v1.0 — Authorized access only</p>
         </div>
@@ -331,7 +318,6 @@ import { environment } from '../../../environments/environment';
   `,
 })
 export class LoginComponent {
-  readonly entraEnabled = environment.entraEnabled;
   readonly form: FormGroup;
   loading = false;
 
@@ -346,8 +332,6 @@ export class LoginComponent {
       password: ['', Validators.required],
     });
   }
-
-  loginWithMicrosoft(): void { this.authService.login(); }
 
   submit(): void {
     if (this.form.invalid) return;

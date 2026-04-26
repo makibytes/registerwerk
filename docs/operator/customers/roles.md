@@ -4,13 +4,12 @@ title: Roles and Permissions
 sidebar_position: 3
 ---
 
-# Roles and Permissions
-
 ## Role definitions
 
 | Role | Description |
-|---|---|
+| --- | --- |
 | `ROLE_REGISTRY_ADMIN` | Full access — manages all entities, assets, chains, and audit log |
+| `ROLE_COMPLIANCE_OFFICER` | KYC/KYB decision authority for compliant approvals and rejections |
 | `ROLE_ISSUER` | Can create and manage own assets; view own entity |
 | `ROLE_INVESTOR` | Can view own holdings; read-only on public asset data |
 | `ROLE_COMPANY_ADMIN` | Can manage users and IdP settings for own entity |
@@ -23,11 +22,18 @@ Roles are defined in the OIDC provider (Entra ID App Roles or Keycloak Realm Rol
 ## Entity-scoped access
 
 Most operations are entity-scoped. Even a `ROLE_ISSUER` can only:
+
 - Read/update **their own** legal entity
 - Create/manage **their own** assets
 - View holders of **their own** tokens
 
 Cross-entity access requires `ROLE_REGISTRY_ADMIN`.
+
+## Compliance override policy
+
+- `ROLE_COMPLIANCE_OFFICER` can approve jurisdiction KYC only when the checklist is fully compliant.
+- Non-compliant approvals require an explicit `overrideNote` and are restricted to `ROLE_REGISTRY_ADMIN`.
+- Every override is written to the audit trail with compliance gap counters (`missingCount`, `expiredCount`, `tooOldCount`).
 
 ## Fine-grained authorization
 
@@ -41,7 +47,7 @@ public LegalEntity getEntity(UUID entityId) { ... }
 ## Typical setup per customer type
 
 | Customer Type | Roles |
-|---|---|
+| --- | --- |
 | Issuer company admin | `ROLE_ISSUER`, `ROLE_COMPANY_ADMIN` |
 | Issuer user | `ROLE_ISSUER` |
 | Investor | `ROLE_INVESTOR` |

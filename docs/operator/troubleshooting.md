@@ -235,14 +235,14 @@ If a migration shows `success = false`, fix the migration SQL and restart. Never
 **Symptom**: `POST /api/v1/assets/{id}/deployments` returns 500
 
 1. Check deployer wallet has ETH for gas
-2. Verify `DEPLOYER_PRIVATE_KEY` is set
+2. Verify `REGISTRY_WALLET_PRIVATE_KEY` is set
 3. Check the T-REX submodule is initialized: `ls contracts/lib/erc3643/`
 4. Look for `Web3j` error in backend logs
 
 ## Kong returns 401 Unauthorized
 
 1. Verify `JWT_ISSUER_URI` matches what your OIDC provider returns in the `iss` claim
-2. Check `JWT_AUDIENCE` matches the `aud` claim in your token
+2. Verify Kong OIDC plugin values (`ENTRA_ISSUER`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_SECRET`) are correct
 3. Decode the JWT at [jwt.io](https://jwt.io) to inspect claims
 
 ## Onboarding token expired

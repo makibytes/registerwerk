@@ -20,13 +20,7 @@ npm run build       # Production build → dist/frontend-operator/
 Configure `src/environments/environment.ts`:
 ```typescript
 export const environment = {
-  apiUrl: 'https://your-kong-proxy.com',
-  msalConfig: {
-    auth: {
-      clientId: '<entra-app-id>',
-      authority: 'https://login.microsoftonline.com/<tenant>',
-    }
-  }
+  apiUrl: 'https://your-api-gateway-or-backend/api/v1'
 };
 ```
 

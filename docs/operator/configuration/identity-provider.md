@@ -18,7 +18,7 @@ Configure via environment variables:
 ENTRA_ENABLED=false
 DEFAULT_ADMIN_EMAIL=admin@local
 DEFAULT_ADMIN_PASSWORD=changeme-please
-# JWT_DEV_SECRET=          # leave blank to use the built-in dev secret
+JWT_DEV_SECRET=change-me-for-staging
 ```
 
 On startup the backend seeds (or refreshes) a row in the `app_user` table with the configured
@@ -43,7 +43,9 @@ The backend is an OAuth2 Resource Server. It accepts JWTs from any OIDC-complian
 4. Set environment variables:
    ```dotenv
    JWT_ISSUER_URI=https://login.microsoftonline.com/<tenant-id>/v2.0
-   JWT_AUDIENCE=api://<app-id>
+   ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+   ENTRA_CLIENT_ID=<app-id>
+   ENTRA_CLIENT_SECRET=<client-secret>
    ```
 
 Configure Kong OIDC plugin using `gateway/plugins/oidc-entra.yml`.
@@ -56,7 +58,9 @@ Configure Kong OIDC plugin using `gateway/plugins/oidc-entra.yml`.
 4. Set environment variables:
    ```dotenv
    JWT_ISSUER_URI=https://keycloak.yourhost.com/realms/ewpg
-   JWT_AUDIENCE=registerwerk
+   ENTRA_ISSUER=https://keycloak.yourhost.com/realms/ewpg
+   ENTRA_CLIENT_ID=<client-id>
+   ENTRA_CLIENT_SECRET=<client-secret>
    ```
 
 Configure Kong OIDC plugin using `gateway/plugins/oidc-self-managed.yml`.

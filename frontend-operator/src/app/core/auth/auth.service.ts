@@ -6,7 +6,6 @@ import { environment } from '../../../environments/environment';
 
 const TOKEN_KEY = 'registerwerk_operator_token';
 const ENTITY_ID_KEY = 'registerwerk_operator_entity_id';
-const TOKEN_TTL_SECONDS = 8 * 60 * 60;
 
 interface LoginApiResponse {
   token: string;
@@ -54,25 +53,6 @@ export class AuthService {
       );
   }
 
-  /**
-   * Stub Microsoft login — calls the MSAL OAuth2 flow once IdP is fully wired.
-   * TODO: replace stub with MSAL once IdP is wired
-   */
-  login(): void {
-    const issuedAt = Math.floor(Date.now() / 1000);
-    const stubToken = btoa(JSON.stringify({
-      sub: 'operator-1',
-      entityId: 'operator-1',
-      roles: ['REGISTRY_ADMIN'],
-      iat: issuedAt,
-      exp: issuedAt + TOKEN_TTL_SECONDS,
-    }));
-    localStorage.setItem(TOKEN_KEY, stubToken);
-    localStorage.setItem(ENTITY_ID_KEY, 'operator-1');
-    this._isAuthenticated$.next(true);
-    this.router.navigate(['/dashboard']);
-  }
-
   logout(): void {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(ENTITY_ID_KEY);
@@ -114,13 +94,13 @@ export class AuthService {
   private _parseTokenPayload(token: string): Record<string, unknown> | null {
     try {
       const parts = token.split('.');
-      if (parts.length === 3) {
-        // Real JWT: decode middle segment with URL-safe base64
-        const json = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-        return JSON.parse(json) as Record<string, unknown>;
+      if (parts.length !== 3) {
+        return null;
       }
-      // Legacy stub: single base64 blob
-      return JSON.parse(atob(token)) as Record<string, unknown>;
+
+      const base64Url = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64Url.padEnd(base64Url.length + ((4 - (base64Url.length % 4)) % 4), '=');
+      return JSON.parse(atob(padded)) as Record<string, unknown>;
     } catch {
       return null;
     }

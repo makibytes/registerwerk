@@ -39,9 +39,8 @@ public class SecurityConfig {
 
     /**
      * Provides a JwtDecoder from the configured OIDC issuer URI, or falls back to an HS256
-     * dev decoder when no issuer is configured (e.g. in local Docker Compose without OIDC).
-     * The dev key comes from {@link RegisterwerkAuthProperties#getDevSecret()} and is logged
-     * at startup so developers can mint test tokens via jwt.io.
+      * dev decoder when no issuer is configured (e.g. in local Docker Compose without OIDC).
+      * The dev key comes from {@link RegisterwerkAuthProperties#getDevSecret()}.
      */
     @Bean
     public JwtDecoder jwtDecoder(
@@ -52,8 +51,7 @@ public class SecurityConfig {
             return JwtDecoders.fromIssuerLocation(issuerUri);
         }
         String devSecret = props.getDevSecret();
-        log.warn("JWT_ISSUER_URI not set — using HS256 dev decoder. " +
-                 "Mint test tokens at jwt.io with algorithm HS256 and secret: {}", devSecret);
+        log.warn("JWT_ISSUER_URI not set - using HS256 dev decoder for local/demo mode.");
         SecretKey key = new SecretKeySpec(devSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         return NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
     }

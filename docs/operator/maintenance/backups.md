@@ -21,8 +21,8 @@ Add this cron job to your server (or run as a Docker container):
 ```bash
 # /etc/cron.d/ewpg-backup
 0 2 * * * root docker exec registerwerk-postgres-1 \
-  pg_dump -U ewpg ewpg | gzip \
-  > /backups/postgres/ewpg-$(date +%Y%m%d-%H%M%S).sql.gz
+  pg_dump -U registerwerk registerwerk | gzip \
+  > /backups/postgres/registerwerk-$(date +%Y%m%d-%H%M%S).sql.gz
 ```
 
 Retain daily backups for 30 days, weekly backups for 12 months:
@@ -52,9 +52,9 @@ Test your backup and restore procedure at least monthly:
 
 ```bash
 # Restore a backup to a test database
-gunzip -c /backups/postgres/ewpg-20250401-020000.sql.gz \
+gunzip -c /backups/postgres/registerwerk-20250401-020000.sql.gz \
   | docker exec -i registerwerk-postgres-1 \
-  psql -U ewpg ewpg_test
+  psql -U registerwerk registerwerk_test
 ```
 
 Verify key tables are present and data counts are sensible:
@@ -97,12 +97,12 @@ docker compose stop backend
 
 # Drop and recreate the database
 docker exec registerwerk-postgres-1 \
-  psql -U ewpg -c "DROP DATABASE ewpg; CREATE DATABASE ewpg;"
+  psql -U registerwerk -c "DROP DATABASE registerwerk; CREATE DATABASE registerwerk;"
 
 # Restore
-gunzip -c /backups/postgres/ewpg-latest.sql.gz \
+gunzip -c /backups/postgres/registerwerk-latest.sql.gz \
   | docker exec -i registerwerk-postgres-1 \
-  psql -U ewpg ewpg
+  psql -U registerwerk registerwerk
 
 # Restart the backend — Flyway will verify the schema
 docker compose start backend
@@ -131,59 +131,3 @@ Add a Prometheus alert for backup staleness:
 ```
 
 Implement `backup_last_success_timestamp` as a custom Prometheus gauge written by your backup script on successful completion.
-sidebar_position: 2
----
-
-# Backups
-
-## PostgreSQL
-
-### Automated backup
-
-```bash
-# Daily backup (add to cron)
-pg_dump -h $DB_HOST -U $DB_USER -Fc ewpg_registry > backup_$(date +%Y%m%d).dump
-```
-
-### Point-in-time recovery
-
-Enable WAL archiving in `postgresql.conf`:
-```ini
-wal_level = replica
-archive_mode = on
-archive_command = 'aws s3 cp %p s3://your-bucket/wal/%f'
-```
-
-### Audit log archival
-
-Monthly partitions can be detached and archived:
-
-```sql
--- Detach old partition (read-only, safe for archival)
-ALTER TABLE audit_event DETACH PARTITION audit_event_2025_01;
-
--- Export to S3
-COPY audit_event_2025_01 TO PROGRAM 'aws s3 cp - s3://archive/audit_2025_01.csv' CSV HEADER;
-```
-
-## S3 KYC documents
-
-Enable S3 versioning on the KYC bucket:
-```bash
-aws s3api put-bucket-versioning \
-  --bucket $AWS_S3_BUCKET \
-  --versioning-configuration Status=Enabled
-```
-
-## graph-node state
-
-graph-node stores its indexed state in its own PostgreSQL database. Back this up alongside the application DB. On restore, graph-node will resume from its last checkpoint.
-
-## Recovery checklist
-
-1. Restore application PostgreSQL from dump
-2. Restore graph-node PostgreSQL
-3. Verify `indexer_state` cursors are consistent with graph-node state
-4. Start services: `docker compose up -d`
-5. Verify health endpoints
-6. Monitor `indexer_state.last_synced_at` for catch-up

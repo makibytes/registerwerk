@@ -7,9 +7,15 @@ A German Electronic Securities Act (eWpG) compliant crypto asset registry built 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  frontend-operator (:4200)    frontend-customer (:4201)         │
-│       (Angular 18)                  (Angular 18)                │
+│       (Angular 21)                  (Angular 21)                │
 └──────────────────────────┬──────────────────────────────────────┘
-                           │
+                ┌──────────┴──────────┐
+                │                     │
+                │                     │
+         (operator frontend)   (customer frontend)
+         nginx -> backend      nginx -> Kong -> backend
+                │                     │
+                │                     │
                     ┌──────▼──────┐
                     │    Kong     │  :8000 (proxy)
                     │  API GW     │  :8001 (admin)
@@ -47,8 +53,19 @@ A German Electronic Securities Act (eWpG) compliant crypto asset registry built 
 ### 1. Copy environment file
 
 ```bash
-cp .env.example .env
-# Edit .env with your RPC endpoints, wallet key, and OAuth config
+# For demo/test deployments
+cp .env.example.test .env
+
+# For production-like/mainnet deployments
+# cp .env.example .env
+```
+
+For demo mode (`ENTRA_ENABLED=false`), set:
+
+```dotenv
+DEFAULT_ADMIN_EMAIL=admin@local
+DEFAULT_ADMIN_PASSWORD=changeme-please
+JWT_DEV_SECRET=replace-me
 ```
 
 ### 2. Start all services
@@ -96,8 +113,8 @@ forge test -vvv
 
 ```
 registerwerk/
-├── backend/                  Spring Boot 4 / Java 21 monolith
-│   └── src/main/java/com/ewpg/registry/
+├── backend/                  Spring Boot 4 / Java 25 monolith
+│   └── src/main/java/de/makibytes/registerwerk/
 │       ├── config/           Security, Cache, Web, Blockchain config
 │       ├── domain/           JPA entities + enums (no Spring deps)
 │       ├── application/      Use-case services + blockchain adapters
@@ -110,8 +127,8 @@ registerwerk/
 │       ├── confidential/     ConfidentialERC20, ConfidentialERC3643 (Zama fhEVM)
 │       └── factory/          AssetTokenFactory (CREATE2)
 ├── gateway/                  Kong declarative config + plugins
-├── frontend-operator/        Angular 18 — registry operator UI
-└── frontend-customer/        Angular 18 — issuer / investor UI
+├── frontend-operator/        Angular 21 — registry operator UI
+└── frontend-customer/        Angular 21 — issuer / investor UI
 ```
 
 ## Key Concepts
@@ -193,7 +210,9 @@ The `AssetTokenFactory` uses `CREATE2` with a deterministic salt so contract add
 
 ## Security Notes
 
-- The backend acts as an OAuth2 Resource Server; JWT validation is delegated to Kong
+- The backend acts as an OAuth2 Resource Server in both modes.
+- OIDC mode: JWTs are validated from `JWT_ISSUER_URI` and customer traffic typically flows through Kong.
+- Dev/demo mode (`ENTRA_ENABLED=false`): backend mints HS256 JWTs via `POST /api/v1/public/auth/login`.
 - Kong injects `X-Entity-Id` and `X-Entity-Roles` headers after validating the JWT; the backend trusts these headers only from Kong's internal network
 - Onboarding tokens are stored as SHA-256 hashes; the cleartext is sent once via email
 - KYC documents ≤ 5 MB are stored as PostgreSQL `BYTEA` (in a separate `kyc_document_content` table); larger files are stored in S3
