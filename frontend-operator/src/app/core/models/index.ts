@@ -193,3 +193,45 @@ export interface AuditFilterParams {
   page?: number;
   size?: number;
 }
+
+export type SyncStatus = 'READY' | 'PENDING' | 'UPDATING';
+
+export interface RegistryOverviewSummary {
+  entityCount: number;
+  issuerCount: number;
+  investorCount: number;
+  dualRoleCount: number;
+  relationshipCount: number;
+}
+
+export interface RegistryEntityNode {
+  id: string;
+  entityNumber: string;
+  currentName: string;
+  storedType: 'ISSUER' | 'INVESTOR' | 'AUDITOR';
+  roles: Array<'ISSUER' | 'INVESTOR' | 'AUDITOR'>;
+  status: LegalEntity['status'];
+  kycStatus: LegalEntity['kycStatus'];
+  issuedAssetCount: number;
+  investmentCount: number;
+  linkedInvestorCount: number;
+  linkedIssuerCount: number;
+}
+
+export interface RegistryRelationship {
+  assetId: string;
+  assetNumber: string;
+  assetName: string;
+  assetStatus: Asset['status'];
+  issuerId: string;
+  investorId: string;
+  nominalAmount: number;
+  whitelisted: boolean;
+}
+
+export interface RegistryOverview {
+  generatedAt: string;
+  summary: RegistryOverviewSummary;
+  entities: RegistryEntityNode[];
+  relationships: RegistryRelationship[];
+}

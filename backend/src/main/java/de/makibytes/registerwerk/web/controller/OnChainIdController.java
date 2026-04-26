@@ -7,8 +7,11 @@ import de.makibytes.registerwerk.domain.chain.ChainConfig;
 import de.makibytes.registerwerk.domain.erc3643.OnchainClaim;
 import de.makibytes.registerwerk.domain.erc3643.OnchainIdentity;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.ChainConfigRepository;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.BlockchainTransactionRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.OnchainClaimRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.OnchainIdentityRepository;
+import de.makibytes.registerwerk.domain.blockchain.BlockchainTransaction;
+import de.makibytes.registerwerk.web.dto.AsyncDataStatus;
 import de.makibytes.registerwerk.web.dto.erc3643.ClaimInfo;
 import de.makibytes.registerwerk.web.dto.erc3643.OnchainIdentityResponse;
 import org.slf4j.Logger;
@@ -37,6 +40,7 @@ public class OnChainIdController {
     private final OnChainIdService onChainIdService;
     private final ClaimIssuanceService claimIssuanceService;
     private final ChainConfigRepository chainConfigRepository;
+    private final BlockchainTransactionRepository blockchainTransactionRepository;
     private final OnchainIdentityRepository identityRepository;
     private final OnchainClaimRepository claimRepository;
 
@@ -44,11 +48,13 @@ public class OnChainIdController {
             OnChainIdService onChainIdService,
             ClaimIssuanceService claimIssuanceService,
             ChainConfigRepository chainConfigRepository,
+            BlockchainTransactionRepository blockchainTransactionRepository,
             OnchainIdentityRepository identityRepository,
             OnchainClaimRepository claimRepository) {
         this.onChainIdService = onChainIdService;
         this.claimIssuanceService = claimIssuanceService;
         this.chainConfigRepository = chainConfigRepository;
+        this.blockchainTransactionRepository = blockchainTransactionRepository;
         this.identityRepository = identityRepository;
         this.claimRepository = claimRepository;
     }
@@ -66,7 +72,7 @@ public class OnChainIdController {
         log.debug("GET onchain-identities for entityId={}", entityId);
         List<OnchainIdentity> identities = onChainIdService.getIdentities(entityId);
         List<OnchainIdentityResponse> responses = identities.stream()
-            .map(id -> toResponse(id, List.of()))
+            .map(id -> toResponse(id, claimIssuanceService.getActiveClaims(entityId, id.getChainConfigId())))
             .toList();
         return ResponseEntity.ok(responses);
     }
@@ -201,9 +207,30 @@ public class OnChainIdController {
             identity.getLegalEntityId(),
             chainIdentifier,
             identity.getIdentityAddress(),
+            identity.getDeployedByTx(),
+            resolveSyncStatus(identity),
             identity.getDeployedAt(),
             claimInfos
         );
+    }
+
+    private AsyncDataStatus resolveSyncStatus(OnchainIdentity identity) {
+        if (identity.getIdentityAddress() == null || identity.getIdentityAddress().startsWith("0x-PENDING")) {
+            return AsyncDataStatus.PENDING;
+        }
+        if (isTransactionPending(identity.getDeployedByTx())) {
+            return AsyncDataStatus.UPDATING;
+        }
+        return AsyncDataStatus.READY;
+    }
+
+    private boolean isTransactionPending(String txHash) {
+        if (txHash == null || txHash.isBlank()) {
+            return false;
+        }
+        return blockchainTransactionRepository.findByTxHash(txHash)
+            .map(tx -> tx.getStatus() == BlockchainTransaction.Status.PENDING)
+            .orElse(true);
     }
 
     private ClaimInfo toClaimInfo(OnchainClaim claim) {

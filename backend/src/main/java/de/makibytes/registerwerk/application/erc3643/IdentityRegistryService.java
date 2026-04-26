@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.application.erc3643;
 
 import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
+import de.makibytes.registerwerk.application.blockchain.BlockchainTransactionService;
 import de.makibytes.registerwerk.application.blockchain.ChainDescriptor;
 import de.makibytes.registerwerk.application.blockchain.EvmContractService;
 import de.makibytes.registerwerk.domain.asset.AssetDeployment;
@@ -12,11 +13,8 @@ import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643IdentityR
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643SuiteRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
-import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
-import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
@@ -45,19 +43,22 @@ public class IdentityRegistryService {
     private final OnChainIdService onChainIdService;
     private final EvmContractService evmContractService;
     private final BlockchainClientRegistry blockchainClientRegistry;
+    private final BlockchainTransactionService blockchainTransactionService;
 
     public IdentityRegistryService(Erc3643IdentityRegistryRepository registryRepo,
                                    Erc3643SuiteRepository suiteRepo,
-                                   AssetDeploymentRepository deploymentRepo,
-                                   OnChainIdService onChainIdService,
-                                   EvmContractService evmContractService,
-                                   BlockchainClientRegistry blockchainClientRegistry) {
+                                    AssetDeploymentRepository deploymentRepo,
+                                    OnChainIdService onChainIdService,
+                                    EvmContractService evmContractService,
+                                    BlockchainClientRegistry blockchainClientRegistry,
+                                    BlockchainTransactionService blockchainTransactionService) {
         this.registryRepo = registryRepo;
         this.suiteRepo = suiteRepo;
         this.deploymentRepo = deploymentRepo;
         this.onChainIdService = onChainIdService;
         this.evmContractService = evmContractService;
         this.blockchainClientRegistry = blockchainClientRegistry;
+        this.blockchainTransactionService = blockchainTransactionService;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -102,6 +103,9 @@ public class IdentityRegistryService {
         if (suite.getIdentityRegistryAddress() != null
                 && !suite.getIdentityRegistryAddress().startsWith("0x-PENDING")) {
             try {
+                AssetDeployment deployment = deploymentRepo.findById(suite.getAssetDeploymentId())
+                        .orElseThrow(() -> new IllegalStateException(
+                                "AssetDeployment not found for suite " + suite.getId()));
                 Web3j web3j = clientForSuite(suite);
                 Credentials creds = evmContractService.credentials();
                 String identityAddr = identity.getIdentityAddress() != null
@@ -117,18 +121,31 @@ public class IdentityRegistryService {
                         ),
                         java.util.Collections.emptyList()
                 );
-                var receipt = evmContractService.send(web3j, creds,
+                String txHash = evmContractService.submit(web3j, creds,
                         suite.getIdentityRegistryAddress(), fn);
+                blockchainTransactionService.record(
+                        txHash,
+                        fn.getName(),
+                        deployment.getId(),
+                        deployment.getAssetId(),
+                        deployment.getChain().name(),
+                        deployment.getNetwork().name(),
+                        suite.getIdentityRegistryAddress(),
+                        java.util.Map.of(
+                                "walletAddress", walletAddress,
+                                "legalEntityId", legalEntityId.toString()
+                        )
+                );
 
                 Erc3643IdentityRegistry entry = new Erc3643IdentityRegistry();
                 entry.setSuiteId(suiteId);
                 entry.setWalletAddress(walletAddress.toLowerCase());
                 entry.setOnchainIdentityId(identity.getId());
                 entry.setCountryCode(countryCode);
-                entry.setRegisteredByTx(receipt.getTransactionHash());
+                entry.setRegisteredByTx(txHash);
                 return registryRepo.save(entry);
             } catch (Exception e) {
-                throw new RuntimeException("registerIdentity on-chain call failed: " + e.getMessage(), e);
+                throw new RuntimeException("registerIdentity submission failed: " + e.getMessage(), e);
             }
         }
 
@@ -206,28 +223,6 @@ public class IdentityRegistryService {
         OnchainIdentity identity = onChainIdService
                 .findIdentityById(entry.get().getOnchainIdentityId()).orElse(null);
         if (identity == null) return false;
-
-        // Prefer on-chain call if the identity registry address is known
-        Erc3643Suite suite = suiteRepo.findById(suiteId).orElse(null);
-        if (suite != null && suite.getIdentityRegistryAddress() != null
-                && !suite.getIdentityRegistryAddress().startsWith("0x-PENDING")) {
-            try {
-                Web3j web3j = clientForSuite(suite);
-                // IIdentityRegistry.isVerified(address _userAddress) returns bool
-                Function fn = new Function(
-                        "isVerified",
-                        java.util.List.of(new Address(walletAddress)),
-                        java.util.List.of(new TypeReference<Bool>() {})
-                );
-                java.util.List<Type> result = evmContractService.call(
-                        web3j, suite.getIdentityRegistryAddress(), fn);
-                if (!result.isEmpty()) {
-                    return (Boolean) result.get(0).getValue();
-                }
-            } catch (Exception e) {
-                // Fall through to local check on error
-            }
-        }
 
         return onChainIdService.isVerified(identity.getLegalEntityId(), identity.getChainConfigId());
     }

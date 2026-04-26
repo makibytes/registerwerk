@@ -24,6 +24,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'registry',
+        loadComponent: () =>
+          import('./features/customers/registry-overview/registry-overview.component').then(
+            (m) => m.RegistryOverviewComponent
+          ),
+      },
+      {
         path: 'onboarding',
         loadChildren: () =>
           import('./features/onboarding/onboarding.routes').then(

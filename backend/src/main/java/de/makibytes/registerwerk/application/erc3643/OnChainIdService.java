@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.application.erc3643;
 
 import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
 import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
+import de.makibytes.registerwerk.application.blockchain.BlockchainTransactionService;
 import de.makibytes.registerwerk.application.blockchain.ChainDescriptor;
 import de.makibytes.registerwerk.application.blockchain.Erc3643DeploymentService;
 import de.makibytes.registerwerk.application.blockchain.EvmContractService;
@@ -57,6 +58,7 @@ public class OnChainIdService {
     private final EvmContractService evmContractService;
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final ContractAddressConfig contractAddressConfig;
+    private final BlockchainTransactionService blockchainTransactionService;
 
     public OnChainIdService(
             OnchainIdentityRepository identityRepository,
@@ -66,7 +68,8 @@ public class OnChainIdService {
             AuditEventPublisher auditPublisher,
             EvmContractService evmContractService,
             BlockchainClientRegistry blockchainClientRegistry,
-            ContractAddressConfig contractAddressConfig) {
+            ContractAddressConfig contractAddressConfig,
+            BlockchainTransactionService blockchainTransactionService) {
         this.identityRepository = identityRepository;
         this.claimRepository = claimRepository;
         this.chainConfigRepository = chainConfigRepository;
@@ -75,6 +78,7 @@ public class OnChainIdService {
         this.evmContractService = evmContractService;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.contractAddressConfig = contractAddressConfig;
+        this.blockchainTransactionService = blockchainTransactionService;
     }
 
     /**
@@ -107,7 +111,7 @@ public class OnChainIdService {
         ChainConfig chainConfig = chainConfigRepository.findById(chainConfigId)
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
 
-        String identityAddress;
+        String identityAddress = "0x-PENDING-ONCHAINID-" + UUID.randomUUID();
         String deployTxHash = null;
 
         try {
@@ -122,18 +126,26 @@ public class OnChainIdService {
                     List.of(new Address(creds.getAddress())),
                     List.of(new TypeReference<Address>() {})
             );
-
-            TransactionReceipt receipt = evmContractService.send(web3j, creds, idFactoryAddress, fn);
-            deployTxHash = receipt.getTransactionHash();
-
-            // Extract deployed identity address from WalletLinked event or return value
-            identityAddress = extractIdentityAddress(receipt, creds.getAddress());
+            deployTxHash = evmContractService.submit(web3j, creds, idFactoryAddress, fn);
+            blockchainTransactionService.record(
+                    deployTxHash,
+                    fn.getName(),
+                    null,
+                    null,
+                    parseChain(chainConfig.getIdentifier()),
+                    chainConfig.getNetworkType().name(),
+                    idFactoryAddress,
+                    Map.of(
+                            "legalEntityId", legalEntityId.toString(),
+                            "chainConfigId", chainConfigId.toString(),
+                            "identityPlaceholder", identityAddress
+                    )
+            );
         } catch (IllegalStateException e) {
             // IdFactory not configured for this chain — persist placeholder
             log.warn("IdFactory not configured for chain={}; persisting placeholder identity", chainConfigId);
-            identityAddress = "0x-PENDING-ONCHAINID-" + UUID.randomUUID();
         } catch (Exception e) {
-            throw new RuntimeException("deployIdentityProxy failed for entity=" + legalEntityId
+            throw new RuntimeException("deployIdentityProxy submission failed for entity=" + legalEntityId
                     + " on chain=" + chainConfigId + ": " + e.getMessage(), e);
         }
 
@@ -142,6 +154,7 @@ public class OnChainIdService {
         identity.setChainConfigId(chainConfigId);
         identity.setIdentityAddress(identityAddress);
         identity.setDeployedAt(Instant.now());
+        identity.setDeployedByTx(deployTxHash);
 
         OnchainIdentity saved = identityRepository.save(identity);
 
@@ -157,6 +170,11 @@ public class OnChainIdService {
                 "identityAddress", identityAddress));
 
         return saved;
+    }
+
+    private String parseChain(String identifier) {
+        int splitIndex = identifier.lastIndexOf('_');
+        return splitIndex > 0 ? identifier.substring(0, splitIndex) : identifier;
     }
 
     /**

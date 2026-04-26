@@ -27,6 +27,7 @@ export interface IdentityRegistryEntry {
   countryCode: number | null;
   registeredAt: string;
   registeredByTx: string | null;
+  syncStatus: 'READY' | 'PENDING' | 'UPDATING';
   active: boolean;
   verified: boolean;
 }

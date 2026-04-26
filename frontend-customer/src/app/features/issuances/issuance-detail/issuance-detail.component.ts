@@ -2,7 +2,6 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { forkJoin } from 'rxjs';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -22,8 +21,16 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
 import { AuthService } from '../../../core/auth/auth.service';
 import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
 import { Asset, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
+import {
+  AsyncSection,
+  beginAsyncSection,
+  createAsyncSection,
+  failAsyncSection,
+  resolveAsyncSection,
+} from '../../../core/async/async-section';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
+import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
 import { AddHolderDialogComponent } from './add-holder-dialog.component';
 import { HolderTableComponent } from '../../../shared/components/token-holders/holder-table.component';
 import { HolderDistributionComponent } from '../../../shared/components/token-holders/holder-distribution.component';
@@ -52,6 +59,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
     MatTooltipModule,
     StatusBadgeComponent,
     ChainIconComponent,
+    DataStatePillComponent,
     HolderTableComponent,
     HolderDistributionComponent,
     TokenAdminPanelComponent,
@@ -162,10 +170,11 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
 
         <!-- ── Deployments ───────────────────────────────────────────────── -->
         <mat-card class="section-card">
-          <mat-card-header>
-            <mat-card-title>Chain Deployments</mat-card-title>
-          </mat-card-header>
-          <mat-card-content>
+            <mat-card-header>
+              <mat-card-title>Chain Deployments</mat-card-title>
+              <app-data-state-pill [status]="deploymentsState.status" />
+            </mat-card-header>
+            <mat-card-content>
             @if (deployments.length === 0) {
               <p class="empty-text">No deployments yet.</p>
             } @else {
@@ -263,6 +272,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 <mat-icon class="trex-icon">verified_user</mat-icon>
                 T-REX Compliance
               </mat-card-title>
+              <app-data-state-pill [status]="identityRegistryState.status" />
             </mat-card-header>
             <mat-card-content>
               <div class="compliance-grid">
@@ -311,8 +321,9 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
         <!-- ── Holders ───────────────────────────────────────────────────── -->
         <mat-card class="section-card">
           <mat-card-header>
-            <mat-card-title>Holders ({{ holders.length }})</mat-card-title>
-          </mat-card-header>
+              <mat-card-title>Holders ({{ holders.length }})</mat-card-title>
+              <app-data-state-pill [status]="holdersState.status" />
+            </mat-card-header>
           <mat-card-content>
             @if (holders.length === 0) {
               <p class="empty-text">No holders recorded yet.</p>
@@ -374,6 +385,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
           <mat-card-header>
             <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
               <mat-card-title>Token Holders (Live from Blockchain)</mat-card-title>
+              <app-data-state-pill [status]="liveHoldersState.status" />
               <button mat-icon-button (click)="refreshLiveHolders()" [disabled]="liveHoldersLoading" matTooltip="Refresh holder data">
                 @if (liveHoldersLoading) {
                   <mat-spinner diameter="24"></mat-spinner>
@@ -465,6 +477,10 @@ export class IssuanceDetailComponent implements OnInit {
   holders: AssetHolder[] = [];
   loading = true;
   actionLoading = false;
+  deploymentsState: AsyncSection<null> = createAsyncSection<null>(null);
+  holdersState: AsyncSection<null> = createAsyncSection<null>(null);
+  identityRegistryState: AsyncSection<null> = createAsyncSection<null>(null);
+  liveHoldersState: AsyncSection<null> = { data: null, status: 'ready', hasLoaded: true };
 
   // ── Term Sheet ────────────────────────────────────────────────────────────
   termSheetDocs: AssetDocument[] = [];
@@ -514,35 +530,63 @@ export class IssuanceDetailComponent implements OnInit {
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id')!;
-    forkJoin({
-      asset: this.issuanceService.getIssuance(id),
-      deployments: this.issuanceService.getDeployments(id),
-      holders: this.issuanceService.getHolders(id, { size: 100 }),
-    }).subscribe({
-      next: ({ asset, deployments, holders }) => {
+    this.issuanceService.getIssuance(id).subscribe({
+      next: (asset) => {
         this.asset = asset;
-        this.deployments = deployments;
-        this.holders = holders.content;
         this.loading = false;
+        this.loadDeployments(asset.id);
+        this.loadHolders(asset.id);
         this.loadTermSheetDocs(id);
-        // Load ERC-3643 data if applicable
-        const erc3643 = asset.tokenStandard === 'ERC3643' || asset.tokenStandard === 'CONF_ERC3643';
-        if (erc3643 && deployments.length > 0) {
-          this.loadErc3643Data(asset.id, deployments[0].id);
+      },
+      error: () => {
+        this.loading = false;
+      },
+    });
+  }
+
+  private loadDeployments(assetId: string): void {
+    this.deploymentsState = beginAsyncSection(this.deploymentsState);
+    this.issuanceService.getDeployments(assetId).subscribe({
+      next: (deployments) => {
+        this.deployments = deployments;
+        this.deploymentsState = resolveAsyncSection(this.deploymentsState, null);
+        if (this.isErc3643 && deployments.length > 0) {
+          this.loadErc3643Data(assetId, deployments[0].id);
         }
       },
-      error: () => (this.loading = false),
+      error: () => {
+        this.deploymentsState = failAsyncSection(this.deploymentsState);
+      },
+    });
+  }
+
+  private loadHolders(assetId: string): void {
+    this.holdersState = beginAsyncSection(this.holdersState);
+    this.issuanceService.getHolders(assetId, { size: 100 }).subscribe({
+      next: (holders) => {
+        this.holders = holders.content;
+        this.holdersState = resolveAsyncSection(this.holdersState, null);
+      },
+      error: () => {
+        this.holdersState = failAsyncSection(this.holdersState);
+      },
     });
   }
 
   private loadErc3643Data(assetId: string, deploymentId: string): void {
-    forkJoin({
-      compliance: this.erc3643Service.getComplianceStatus(assetId, deploymentId),
-      registry: this.erc3643Service.getIdentityRegistry(assetId, deploymentId),
-    }).subscribe({
-      next: ({ compliance, registry }) => {
+    this.identityRegistryState = beginAsyncSection(this.identityRegistryState);
+    this.erc3643Service.getComplianceStatus(assetId, deploymentId).subscribe({
+      next: (compliance) => {
         this.complianceStatus = compliance;
+      },
+    });
+    this.erc3643Service.getIdentityRegistry(assetId, deploymentId).subscribe({
+      next: (registry) => {
         this.identityRegistry = registry;
+        this.identityRegistryState = resolveAsyncSection(this.identityRegistryState, null);
+      },
+      error: () => {
+        this.identityRegistryState = failAsyncSection(this.identityRegistryState);
       },
     });
   }
@@ -649,13 +693,16 @@ export class IssuanceDetailComponent implements OnInit {
   refreshLiveHolders(): void {
     if (!this.asset?.id) return;
     this.liveHoldersLoading = true;
+    this.liveHoldersState = beginAsyncSection(this.liveHoldersState);
     this.issuanceService.refreshHolders(this.asset.id).subscribe({
       next: (response) => {
         this.liveHoldersLoading = false;
+        this.liveHoldersState = resolveAsyncSection(this.liveHoldersState, null);
         this.snackBar.open(response.message || 'Holder data refresh initiated', '', { duration: 3000 });
       },
       error: (error) => {
         this.liveHoldersLoading = false;
+        this.liveHoldersState = failAsyncSection(this.liveHoldersState);
         const errorMsg = error?.error?.message || 'Failed to refresh holder data';
         this.snackBar.open(`Error: ${errorMsg}`, 'Close', { duration: 5000 });
       }

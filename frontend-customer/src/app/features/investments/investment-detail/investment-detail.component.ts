@@ -8,13 +8,20 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatTableModule } from '@angular/material/table';
 import { MatChipsModule } from '@angular/material/chips';
-import { forkJoin } from 'rxjs';
 import { InvestmentService } from '../../../core/api/investment.service';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { Erc3643Service, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
 import { AssetDeployment, InvestmentRecord } from '../../../core/models';
+import {
+  AsyncSection,
+  beginAsyncSection,
+  createAsyncSection,
+  failAsyncSection,
+  resolveAsyncSection,
+} from '../../../core/async/async-section';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
+import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
 
 @Component({
   selector: 'app-investment-detail',
@@ -31,6 +38,7 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
     MatChipsModule,
     StatusBadgeComponent,
     ChainIconComponent,
+    DataStatePillComponent,
   ],
   template: `
     <div class="page-container">
@@ -42,8 +50,6 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
       } @else if (record) {
-
-        <!-- ── Header ──────────────────────────────────────────────────────── -->
         <mat-card class="header-card">
           <mat-card-content>
             <div class="holding-header">
@@ -99,7 +105,6 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
           </mat-card-content>
         </mat-card>
 
-        <!-- ── ERC-3643 Identity Status ────────────────────────────────────── -->
         @if (isErc3643) {
           <mat-card class="section-card identity-card">
             <mat-card-header>
@@ -107,29 +112,36 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
                 <mat-icon class="identity-icon">fingerprint</mat-icon>
                 Identity Status
               </mat-card-title>
+              <app-data-state-pill [status]="identitySection.status" />
             </mat-card-header>
             <mat-card-content>
-              @if (identityEntry) {
+              @if (identitySection.data) {
                 <div class="identity-row">
-                  <mat-icon style="color:#388e3c">check_circle</mat-icon>
+                  <mat-icon [style.color]="identitySection.data.verified ? '#388e3c' : '#f59e0b'">
+                    {{ identitySection.data.syncStatus === 'PENDING' ? 'hourglass_top' : 'check_circle' }}
+                  </mat-icon>
                   <div>
-                    <span class="identity-label">ONCHAINID Registered</span>
-                    @if (identityEntry.identityAddress) {
-                      <code class="identity-address">{{ identityEntry.identityAddress }}</code>
+                    <span class="identity-label">
+                      {{ identitySection.data.syncStatus === 'PENDING' ? 'Identity registration pending' : 'ONCHAINID registered' }}
+                    </span>
+                    @if (identitySection.data.identityAddress) {
+                      <code class="identity-address">{{ identitySection.data.identityAddress }}</code>
                     }
                   </div>
                 </div>
                 <div class="claim-status-grid">
-                  <div class="claim-item" [class.claim-ok]="identityEntry.verified" [class.claim-fail]="!identityEntry.verified">
-                    <mat-icon>{{ identityEntry.verified ? 'verified' : 'gpp_bad' }}</mat-icon>
+                  <div class="claim-item" [class.claim-ok]="identitySection.data.verified" [class.claim-fail]="!identitySection.data.verified">
+                    <mat-icon>{{ identitySection.data.verified ? 'verified' : 'gpp_bad' }}</mat-icon>
                     <div>
                       <span class="claim-label">KYC (Topic 1)</span>
-                      <span class="claim-status">{{ identityEntry.verified ? 'Valid' : 'Missing or expired' }}</span>
+                      <span class="claim-status">
+                        @if (identitySection.data.syncStatus === 'PENDING') { Waiting for chain confirmation }
+                        @else if (identitySection.data.verified) { Valid }
+                        @else { Missing or expired }
+                      </span>
                     </div>
                   </div>
                 </div>
-              } @else if (identityLoading) {
-                <mat-spinner diameter="32"></mat-spinner>
               } @else {
                 <div class="identity-row not-deployed">
                   <mat-icon style="color:#e53935">cancel</mat-icon>
@@ -143,14 +155,14 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
           </mat-card>
         }
 
-        <!-- ── Chain Deployments ───────────────────────────────────────────── -->
-        @if (deployments.length > 0) {
-          <mat-card class="section-card">
-            <mat-card-header>
-              <mat-card-title>Chain Deployments</mat-card-title>
-            </mat-card-header>
-            <mat-card-content>
-              <table mat-table [dataSource]="deployments" class="mat-elevation-z0">
+        <mat-card class="section-card">
+          <mat-card-header>
+            <mat-card-title>Chain Deployments</mat-card-title>
+            <app-data-state-pill [status]="deploymentsSection.status" />
+          </mat-card-header>
+          <mat-card-content>
+            @if (deploymentsSection.data.length > 0) {
+              <table mat-table [dataSource]="deploymentsSection.data" class="mat-elevation-z0">
                 <ng-container matColumnDef="chain">
                   <th mat-header-cell *matHeaderCellDef>Chain</th>
                   <td mat-cell *matCellDef="let d"><app-chain-icon [chain]="d.chain"></app-chain-icon></td>
@@ -176,10 +188,14 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
                 <tr mat-header-row *matHeaderRowDef="deploymentColumns"></tr>
                 <tr mat-row *matRowDef="let r; columns: deploymentColumns;"></tr>
               </table>
-            </mat-card-content>
-          </mat-card>
-        }
-
+            } @else {
+              <p class="empty-text">
+                @if (deploymentsSection.status === 'pending') { Deployment data is still loading. }
+                @else { No deployments recorded yet. }
+              </p>
+            }
+          </mat-card-content>
+        </mat-card>
       }
     </div>
   `,
@@ -210,6 +226,7 @@ import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-
     .claim-item.claim-fail mat-icon { color: #e53935; }
     .claim-label { display: block; font-size: 12px; color: #546e7a; font-weight: 500; }
     .claim-status { display: block; font-size: 14px; color: #37474f; }
+    .empty-text { color: var(--rw-text-muted); }
   `],
 })
 export class InvestmentDetailComponent implements OnInit {
@@ -219,10 +236,9 @@ export class InvestmentDetailComponent implements OnInit {
   private readonly erc3643Service = inject(Erc3643Service);
 
   record: InvestmentRecord | null = null;
-  deployments: AssetDeployment[] = [];
   loading = true;
-  identityLoading = false;
-  identityEntry: IdentityRegistryEntry | null = null;
+  deploymentsSection: AsyncSection<AssetDeployment[]> = createAsyncSection<AssetDeployment[]>([]);
+  identitySection: AsyncSection<IdentityRegistryEntry | null> = createAsyncSection<IdentityRegistryEntry | null>(null);
 
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status'];
 
@@ -233,33 +249,44 @@ export class InvestmentDetailComponent implements OnInit {
   ngOnInit(): void {
     const holderId = this.route.snapshot.paramMap.get('holderId')!;
     this.investmentService.getInvestment(holderId).subscribe({
-      next: (rec) => {
-        this.record = rec;
-        this.issuanceService.getDeployments(rec.assetId).subscribe({
-          next: (deployments) => {
-            this.deployments = deployments;
-            this.loading = false;
-            if (this.isErc3643 && deployments.length > 0 && rec.walletAddress) {
-              this.loadIdentityStatus(rec.assetId, deployments[0].id, rec.walletAddress);
-            }
-          },
-          error: () => (this.loading = false),
-        });
+      next: (record) => {
+        this.record = record;
+        this.loading = false;
+        this.loadDeployments(record.assetId, record.walletAddress);
       },
-      error: () => (this.loading = false),
+      error: () => {
+        this.loading = false;
+      },
+    });
+  }
+
+  private loadDeployments(assetId: string, walletAddress: string): void {
+    this.deploymentsSection = beginAsyncSection(this.deploymentsSection);
+    this.issuanceService.getDeployments(assetId).subscribe({
+      next: (deployments) => {
+        this.deploymentsSection = resolveAsyncSection(this.deploymentsSection, deployments);
+        if (this.isErc3643 && deployments.length > 0) {
+          this.loadIdentityStatus(assetId, deployments[0].id, walletAddress);
+        }
+      },
+      error: () => {
+        this.deploymentsSection = failAsyncSection(this.deploymentsSection);
+      },
     });
   }
 
   private loadIdentityStatus(assetId: string, deploymentId: string, walletAddress: string): void {
-    this.identityLoading = true;
+    this.identitySection = beginAsyncSection(this.identitySection);
     this.erc3643Service.getIdentityRegistry(assetId, deploymentId).subscribe({
       next: (entries) => {
-        this.identityEntry = entries.find(
-          e => e.walletAddress.toLowerCase() === walletAddress.toLowerCase()
+        const match = entries.find(
+          entry => entry.walletAddress.toLowerCase() === walletAddress.toLowerCase()
         ) ?? null;
-        this.identityLoading = false;
+        this.identitySection = resolveAsyncSection(this.identitySection, match);
       },
-      error: () => (this.identityLoading = false),
+      error: () => {
+        this.identitySection = failAsyncSection(this.identitySection);
+      },
     });
   }
 }

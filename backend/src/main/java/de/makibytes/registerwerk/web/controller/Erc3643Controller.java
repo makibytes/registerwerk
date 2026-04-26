@@ -22,14 +22,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 import de.makibytes.registerwerk.application.erc3643.Erc3643LifecycleService;
 import de.makibytes.registerwerk.application.erc3643.IdentityRegistryService;
+import de.makibytes.registerwerk.domain.blockchain.BlockchainTransaction;
 import de.makibytes.registerwerk.domain.erc3643.Erc3643ClaimTopic;
 import de.makibytes.registerwerk.domain.erc3643.Erc3643IdentityRegistry;
 import de.makibytes.registerwerk.domain.erc3643.Erc3643Suite;
 import de.makibytes.registerwerk.domain.erc3643.Erc3643TrustedIssuer;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.BlockchainTransactionRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643ClaimTopicRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643TrustedIssuerRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.OnchainIdentityRepository;
+import de.makibytes.registerwerk.web.dto.AsyncDataStatus;
 import de.makibytes.registerwerk.web.dto.admin.FreezePartialRequest;
 import de.makibytes.registerwerk.web.dto.blockchain.TxSubmissionResponse;
 import de.makibytes.registerwerk.web.dto.erc3643.AddClaimTopicRequest;
@@ -57,19 +60,22 @@ public class Erc3643Controller {
     private final LegalEntityRepository entityRepo;
     private final Erc3643TrustedIssuerRepository trustedIssuerRepo;
     private final Erc3643ClaimTopicRepository claimTopicRepo;
+    private final BlockchainTransactionRepository blockchainTransactionRepository;
 
     public Erc3643Controller(Erc3643LifecycleService lifecycleService,
                              IdentityRegistryService identityRegistryService,
                              OnchainIdentityRepository identityRepo,
                              LegalEntityRepository entityRepo,
                              Erc3643TrustedIssuerRepository trustedIssuerRepo,
-                             Erc3643ClaimTopicRepository claimTopicRepo) {
+                             Erc3643ClaimTopicRepository claimTopicRepo,
+                             BlockchainTransactionRepository blockchainTransactionRepository) {
         this.lifecycleService = lifecycleService;
         this.identityRegistryService = identityRegistryService;
         this.identityRepo = identityRepo;
         this.entityRepo = entityRepo;
         this.trustedIssuerRepo = trustedIssuerRepo;
         this.claimTopicRepo = claimTopicRepo;
+        this.blockchainTransactionRepository = blockchainTransactionRepository;
     }
 
     // ── Suite ─────────────────────────────────────────────────────────────────
@@ -487,6 +493,25 @@ public class Erc3643Controller {
             entry.getId(), entry.getSuiteId(), entry.getWalletAddress(),
             entry.getOnchainIdentityId(), identityAddress, legalEntityId, entityName,
             entry.getCountryCode(), entry.getRegisteredAt(), entry.getRegisteredByTx(),
-            entry.isActive(), verified);
+            resolveSyncStatus(entry, identityAddress), entry.isActive(), verified);
+    }
+
+    private AsyncDataStatus resolveSyncStatus(Erc3643IdentityRegistry entry, String identityAddress) {
+        if (identityAddress == null || identityAddress.startsWith("0x-PENDING")) {
+            return AsyncDataStatus.PENDING;
+        }
+        if (isTransactionPending(entry.getRegisteredByTx())) {
+            return AsyncDataStatus.PENDING;
+        }
+        return AsyncDataStatus.READY;
+    }
+
+    private boolean isTransactionPending(String txHash) {
+        if (txHash == null || txHash.isBlank()) {
+            return false;
+        }
+        return blockchainTransactionRepository.findByTxHash(txHash)
+                .map(tx -> tx.getStatus() == BlockchainTransaction.Status.PENDING)
+                .orElse(true);
     }
 }

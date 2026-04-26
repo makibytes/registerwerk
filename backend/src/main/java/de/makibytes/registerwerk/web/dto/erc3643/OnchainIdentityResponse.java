@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.web.dto.erc3643;
 
+import de.makibytes.registerwerk.web.dto.AsyncDataStatus;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -13,6 +15,8 @@ public record OnchainIdentityResponse(
     /** Stable chain identifier (e.g. "ETHEREUM_MAINNET") resolved from the chain config. */
     String chainIdentifier,
     String identityAddress,
+    String deployedByTx,
+    AsyncDataStatus syncStatus,
     Instant deployedAt,
     List<ClaimInfo> activeClaims
 ) {}

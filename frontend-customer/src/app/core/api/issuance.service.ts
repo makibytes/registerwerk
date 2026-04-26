@@ -12,7 +12,7 @@ import {
   PageParams,
   PageResponse,
 } from '../models';
-import { LiveHolder } from '@registerwerk/ui';
+import { LiveHolder } from '../../shared/components/token-holders/models';
 
 @Injectable({ providedIn: 'root' })
 export class IssuanceService {

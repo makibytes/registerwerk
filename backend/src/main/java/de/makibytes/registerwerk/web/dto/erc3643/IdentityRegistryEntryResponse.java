@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.web.dto.erc3643;
 
+import de.makibytes.registerwerk.web.dto.AsyncDataStatus;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -18,6 +20,7 @@ public record IdentityRegistryEntryResponse(
     Short countryCode,
     Instant registeredAt,
     String registeredByTx,
+    AsyncDataStatus syncStatus,
     boolean active,
     boolean verified
 ) {}

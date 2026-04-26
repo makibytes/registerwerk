@@ -18,11 +18,13 @@ import { forkJoin } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { EntityService } from '../../../core/api/entity.service';
 import { KycService } from '../../../core/api/kyc.service';
+import { AsyncSectionStatus } from '../../../core/async/async-section';
 import {
   LegalEntity, KycDocument, LegalEntityNameHistory,
   KycJurisdictionApproval, KycComplianceResponse, Jurisdiction,
-  JurisdictionRequirement, DocumentStatus,
+  JurisdictionRequirement, DocumentStatus, SyncStatus,
 } from '../../../core/models';
+import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { environment } from '../../../../environments/environment';
 
@@ -31,6 +33,8 @@ interface OnchainIdentityView {
   chainConfigId: string;
   chainIdentifier: string;
   identityAddress: string;
+  deployedByTx?: string | null;
+  syncStatus: SyncStatus;
   deployedAt: string;
   activeClaims: { topic: number; topicLabel: string; issuedAt: string; expiresAt: string | null; isRevoked: boolean }[];
 }
@@ -52,6 +56,7 @@ interface OnchainIdentityView {
     MatDividerModule,
     MatDialogModule,
     MatTooltipModule,
+    DataStatePillComponent,
     StatusBadgeComponent,
     DatePipe,
   ],
@@ -369,20 +374,28 @@ interface OnchainIdentityView {
             } @else {
               @for (identity of identities; track identity.id) {
                 <mat-card style="margin-bottom:16px">
-                  <mat-card-header>
-                    <mat-card-title style="font-size:14px">
-                      <mat-icon style="vertical-align:middle;margin-right:4px">account_balance_wallet</mat-icon>
-                      {{ identity.chainIdentifier }}
-                    </mat-card-title>
-                    <mat-card-subtitle><code style="font-size:11px">{{ identity.identityAddress }}</code></mat-card-subtitle>
-                  </mat-card-header>
-                  <mat-card-content style="padding-top:12px">
-                    <div style="margin-bottom:8px;font-size:13px;color:rgba(0,0,0,0.54)">
-                      Deployed: {{ identity.deployedAt | date:'mediumDate' }}
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-                      @for (claim of identity.activeClaims; track claim.topic) {
-                        <span [style.background]="claim.isRevoked ? '#ffebee' : '#e8f5e9'"
+                    <mat-card-header>
+                     <mat-card-title style="font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                       <span>
+                         <mat-icon style="vertical-align:middle;margin-right:4px">account_balance_wallet</mat-icon>
+                         {{ identity.chainIdentifier }}
+                       </span>
+                       <app-data-state-pill [status]="asyncStatus(identity.syncStatus)" />
+                     </mat-card-title>
+                     <mat-card-subtitle><code style="font-size:11px">{{ identity.identityAddress }}</code></mat-card-subtitle>
+                   </mat-card-header>
+                   <mat-card-content style="padding-top:12px">
+                     <div style="margin-bottom:8px;font-size:13px;color:rgba(0,0,0,0.54)">
+                       Deployed: {{ identity.deployedAt | date:'mediumDate' }}
+                     </div>
+                     @if (identity.syncStatus !== 'READY') {
+                       <div style="margin-bottom:12px;font-size:12px;color:var(--rw-text-secondary)">
+                         {{ identity.syncStatus === 'PENDING' ? 'Deployment submitted and awaiting chain confirmation.' : 'Identity data is refreshing from the chain.' }}
+                       </div>
+                     }
+                     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+                       @for (claim of identity.activeClaims; track claim.topic) {
+                         <span [style.background]="claim.isRevoked ? '#ffebee' : '#e8f5e9'"
                               style="padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500">
                           {{ claim.topicLabel || ('Topic '+claim.topic) }}
                           {{ claim.isRevoked ? '✗' : '✓' }}
@@ -391,16 +404,16 @@ interface OnchainIdentityView {
                       } @empty {
                         <span style="font-size:12px;color:rgba(0,0,0,0.54)">No claims issued</span>
                       }
-                    </div>
-                    <div style="display:flex;gap:8px">
-                      <button mat-stroked-button color="primary" (click)="issueKycClaim(identity)">
-                        <mat-icon>verified</mat-icon> Issue KYC Claim
-                      </button>
-                      <button mat-stroked-button (click)="issueAmlClaim(identity)">
-                        Issue AML Claim
-                      </button>
-                    </div>
-                  </mat-card-content>
+                     </div>
+                     <div style="display:flex;gap:8px">
+                       <button mat-stroked-button color="primary" (click)="issueKycClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
+                         <mat-icon>verified</mat-icon> Issue KYC Claim
+                       </button>
+                       <button mat-stroked-button (click)="issueAmlClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
+                         Issue AML Claim
+                       </button>
+                     </div>
+                   </mat-card-content>
                 </mat-card>
               } @empty {
                 <p style="text-align:center;padding:24px;color:rgba(0,0,0,0.54)">
@@ -615,6 +628,17 @@ export class CustomerDetailComponent implements OnInit {
       next: (ids) => { this.identities = ids; this.identitiesLoading = false; },
       error: () => { this.identitiesLoading = false; },
     });
+  }
+
+  asyncStatus(syncStatus: SyncStatus): AsyncSectionStatus {
+    switch (syncStatus) {
+      case 'PENDING':
+        return 'pending';
+      case 'UPDATING':
+        return 'updating';
+      default:
+        return 'ready';
+    }
   }
 
   deployIdentity(): void {
