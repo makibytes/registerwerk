@@ -145,7 +145,7 @@ public class Erc3643DeploymentService {
 
             String factoryAddress = contractAddressConfig.requireTrexFactory(chainConfig.getIdentifier());
             Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
-            Credentials creds = evmContractService.credentials();
+            Credentials creds = evmContractService.credentials(chainConfigId);
 
             // CREATE2 salt: deterministic per asset
             String salt = "registerwerk-" + assetId.toString();
@@ -205,7 +205,7 @@ public class Erc3643DeploymentService {
 
             String factoryAddress = contractAddressConfig.requireTrexFactory(chainConfig.getIdentifier());
             Web3j web3j = clientRegistry.getEvmClient(chain);
-            Credentials creds = evmContractService.credentials();
+            Credentials creds = evmContractService.credentials(chain);
             String salt = "registerwerk-" + assetId;
             byte[] assetIdBytes = Erc20DeploymentService.uuidToBytes32(assetId);
             Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt);
@@ -307,7 +307,7 @@ public class Erc3643DeploymentService {
                         suite.getAssetDeploymentId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials();
+        Credentials creds = evmContractService.credentials(descriptor);
 
         // IIdentityRegistry.registerIdentity(address _userAddress, address _identity, uint16 _country)
         Function fn = new Function(
@@ -349,13 +349,9 @@ public class Erc3643DeploymentService {
             return;
         }
 
-        // Sign the claim off-chain using the registry wallet
-        Credentials creds = evmContractService.credentials();
+        // Sign the claim off-chain using the registry wallet for this chain
+        Credentials creds = evmContractService.credentials(identity.getChainConfigId());
         java.time.Instant expiresAt = java.time.Instant.now().plusSeconds(365L * 86400); // 1 year
-        de.makibytes.registerwerk.application.blockchain.ClaimSigningService signingService =
-                new de.makibytes.registerwerk.application.blockchain.ClaimSigningService();
-        // Note: ClaimSigningService gets the signing key via @Value injection in production;
-        // accessed here via evmContractService.credentials() for the same key.
         byte[] claimData = buildClaimData(creds.getAddress(), identityAddress, claimTopic, expiresAt);
         byte[] claimHash = claimHash(identityAddress, claimTopic, claimData);
         org.web3j.crypto.Sign.SignatureData sig =
@@ -408,7 +404,7 @@ public class Erc3643DeploymentService {
         }
 
         // ERC-735 claimId = keccak256(abi.encode(issuer, topic))
-        Credentials creds = evmContractService.credentials();
+        Credentials creds = evmContractService.credentials(identity.getChainConfigId());
         byte[] claimId = org.web3j.crypto.Hash.sha3(
                 encodeClaimId(creds.getAddress(), claim.getTopic()));
 

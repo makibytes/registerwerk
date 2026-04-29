@@ -22,6 +22,7 @@ import {
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
 import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
+import { AddressComponent } from '../../../shared/components/address.component';
 
 @Component({
   selector: 'app-investment-detail',
@@ -39,6 +40,7 @@ import { DataStatePillComponent } from '../../../shared/components/data-state-pi
     StatusBadgeComponent,
     ChainIconComponent,
     DataStatePillComponent,
+    AddressComponent,
   ],
   template: `
     <div class="page-container">
@@ -71,7 +73,7 @@ import { DataStatePillComponent } from '../../../shared/components/data-state-pi
               </div>
               <div class="detail-item">
                 <span class="detail-label">Wallet Address</span>
-                <code class="detail-value">{{ record.walletAddress }}</code>
+                <app-address [address]="record.walletAddress" />
               </div>
               <div class="detail-item">
                 <span class="detail-label">Acquisition Date</span>

@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.application.blockchain;
 
-import org.springframework.beans.factory.annotation.Value;
+import de.makibytes.registerwerk.application.wallet.WalletSigner;
 import org.springframework.stereotype.Service;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.datatypes.Address;
@@ -37,9 +37,11 @@ import java.util.Collections;
 @Service
 public class ClaimSigningService {
 
-    /** The private key of the wallet registered as Trusted Issuer in every T-REX suite. */
-    @Value("${registerwerk.blockchain.signing-key:}")
-    private String signingKeyHex;
+    private final WalletSigner walletSigner;
+
+    public ClaimSigningService(WalletSigner walletSigner) {
+        this.walletSigner = walletSigner;
+    }
 
     /**
      * Result record returned by {@link #signClaim}.
@@ -59,12 +61,7 @@ public class ClaimSigningService {
      * @return a {@link SignedClaim} containing hex-encoded data and signature
      */
     public SignedClaim signClaim(String identityAddress, long topic, Instant expiresAt) {
-        if (signingKeyHex == null || signingKeyHex.isBlank()) {
-            throw new IllegalStateException(
-                    "registerwerk.blockchain.signing-key is not configured; cannot sign claims");
-        }
-
-        Credentials credentials = Credentials.create(signingKeyHex);
+        Credentials credentials = walletSigner.credentialsForAnyEvm();
         String issuer = credentials.getAddress();
 
         long expiry = expiresAt != null ? expiresAt.getEpochSecond() : 0L;

@@ -10,7 +10,9 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
-RUN addgroup -S ewpg && adduser -S ewpg -G ewpg
+RUN addgroup -S ewpg && adduser -S ewpg -G ewpg \
+    && mkdir -p /data/wallets \
+    && chown -R ewpg:ewpg /data
 COPY --from=builder /app/target/*.jar app.jar
 USER ewpg
 EXPOSE 8080

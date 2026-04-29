@@ -1,9 +1,11 @@
 package de.makibytes.registerwerk.web.controller;
 
 import de.makibytes.registerwerk.application.chain.ChainConfigService;
+import de.makibytes.registerwerk.application.chain.RpcNodeService;
 import de.makibytes.registerwerk.domain.chain.ChainConfig;
 import de.makibytes.registerwerk.web.dto.ChainConfigCreateRequest;
 import de.makibytes.registerwerk.web.dto.ChainConfigResponse;
+import de.makibytes.registerwerk.web.dto.ChainHealthResponse;
 import de.makibytes.registerwerk.web.mapper.ChainConfigMapper;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -29,12 +31,15 @@ public class ChainConfigController {
 
     private final ChainConfigService chainConfigService;
     private final ChainConfigMapper chainConfigMapper;
+    private final RpcNodeService rpcNodeService;
 
     public ChainConfigController(
             ChainConfigService chainConfigService,
-            ChainConfigMapper chainConfigMapper) {
+            ChainConfigMapper chainConfigMapper,
+            RpcNodeService rpcNodeService) {
         this.chainConfigService = chainConfigService;
-        this.chainConfigMapper = chainConfigMapper;
+        this.chainConfigMapper  = chainConfigMapper;
+        this.rpcNodeService     = rpcNodeService;
     }
 
     /** Returns all chain configurations, including disabled ones. */
@@ -107,5 +112,28 @@ public class ChainConfigController {
     public ResponseEntity<Void> refreshClients() {
         chainConfigService.refreshBlockchainClients();
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Returns all chains together with their RPC nodes and current health state.
+     * Used by the operator frontend health dashboard.
+     */
+    @GetMapping("/health")
+    public ResponseEntity<List<ChainHealthResponse>> getHealth() {
+        List<ChainHealthResponse> result = chainConfigService.listAll().stream()
+                .map(chain -> new ChainHealthResponse(
+                        chain.getId(),
+                        chain.getIdentifier(),
+                        chain.getDisplayName(),
+                        chain.getChainType().name(),
+                        chain.getNetworkType().name(),
+                        chain.getChainId(),
+                        chain.isEnabled(),
+                        rpcNodeService.listByChain(chain.getId()).stream()
+                                .map(rpcNodeService::toResponse)
+                                .toList()
+                ))
+                .toList();
+        return ResponseEntity.ok(result);
     }
 }

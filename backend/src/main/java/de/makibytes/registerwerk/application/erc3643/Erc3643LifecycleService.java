@@ -109,7 +109,7 @@ public class Erc3643LifecycleService {
                         suite.getAssetDeploymentId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         org.web3j.protocol.Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-        org.web3j.crypto.Credentials creds = evmContractService.credentials();
+        org.web3j.crypto.Credentials creds = evmContractService.credentials(descriptor);
         evmContractService.send(web3j, creds, contractAddress, fn);
     }
 
@@ -130,7 +130,7 @@ public class Erc3643LifecycleService {
                         suite.getAssetDeploymentId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials();
+        Credentials creds = evmContractService.credentials(descriptor);
         String txHash = evmContractService.submit(web3j, creds, contractAddress, fn);
         return txService.record(txHash, fn.getName(), dep.getId(), dep.getAssetId(),
                 dep.getChain().name(), dep.getNetwork().name(), contractAddress, params);

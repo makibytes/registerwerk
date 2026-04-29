@@ -84,7 +84,7 @@ public class Erc20DeploymentService {
             String factoryAddress = contractAddressConfig.requireAssetTokenFactory(chainId);
 
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
-            Credentials creds = evmContractService.credentials();
+            Credentials creds = evmContractService.credentials(chain);
 
             // Encode assetId UUID as bytes32
             byte[] assetIdBytes = uuidToBytes32(assetId);

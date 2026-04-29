@@ -4,11 +4,12 @@ import { MatTableModule } from '@angular/material/table';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { LiveHolder } from './models';
+import { AddressComponent } from '../address.component';
 
 @Component({
   selector: 'app-holder-table',
   standalone: true,
-  imports: [CommonModule, MatTableModule, MatIconModule, MatTooltipModule],
+  imports: [CommonModule, MatTableModule, MatIconModule, MatTooltipModule, AddressComponent],
   template: `
     <div class="table-container">
       <h3 class="table-title">All Holders</h3>
@@ -24,9 +25,7 @@ import { LiveHolder } from './models';
             <ng-container matColumnDef="wallet">
               <th mat-header-cell *matHeaderCellDef>Wallet Address</th>
               <td mat-cell *matCellDef="let holder">
-                <code class="wallet-code" [title]="holder.walletAddress">
-                  {{ shortenAddress(holder.walletAddress) }}
-                </code>
+                <app-address [address]="holder.walletAddress" />
               </td>
             </ng-container>
 
@@ -190,10 +189,5 @@ export class HolderTableComponent {
 
   get totalSupply(): number {
     return this.holders.reduce((sum, h) => sum + h.tokenBalance, 0);
-  }
-
-  shortenAddress(address: string): string {
-    if (!address || address.length < 12) return address;
-    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
   }
 }

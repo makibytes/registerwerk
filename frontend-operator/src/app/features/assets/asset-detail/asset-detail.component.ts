@@ -15,6 +15,7 @@ import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
+import { AddressComponent } from '../../../shared/components/address.component';
 import { AssetService } from '../../../core/api/asset.service';
 import {
   Erc3643Service, Erc3643Suite, IdentityRegistryEntry, ComplianceStatus,
@@ -49,6 +50,7 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
     FormsModule,
     MatChipsModule,
     MatDialogModule,
+    AddressComponent,
     StatusBadgeComponent,
     ChainNamePipe,
     DatePipe,
@@ -315,7 +317,7 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                   <th mat-header-cell *matHeaderCellDef>Contract Address</th>
                   <td mat-cell *matCellDef="let d">
                     @if (d.contractAddress) {
-                      <code style="font-size:12px">{{ d.contractAddress }}</code>
+                      <app-address [address]="d.contractAddress" />
                     } @else { — }
                   </td>
                 </ng-container>
@@ -348,7 +350,7 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
               <table mat-table [dataSource]="holders">
                 <ng-container matColumnDef="address">
                   <th mat-header-cell *matHeaderCellDef>Address</th>
-                  <td mat-cell *matCellDef="let h"><code style="font-size:12px">{{ h.address }}</code></td>
+                  <td mat-cell *matCellDef="let h"><app-address [address]="h.address" /></td>
                 </ng-container>
                 <ng-container matColumnDef="balance">
                   <th mat-header-cell *matHeaderCellDef>Balance</th>
@@ -511,7 +513,7 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                 <table mat-table [dataSource]="mintRules">
                   <ng-container matColumnDef="target">
                     <th mat-header-cell *matHeaderCellDef>Target Address</th>
-                    <td mat-cell *matCellDef="let r"><code style="font-size:11px">{{ r.targetAddress }}</code></td>
+                    <td mat-cell *matCellDef="let r"><app-address [address]="r.targetAddress" /></td>
                   </ng-container>
                   <ng-container matColumnDef="type">
                     <th mat-header-cell *matHeaderCellDef>Type</th>
@@ -560,12 +562,12 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                   }
                 </div>
                 <div class="field-grid">
-                  <div class="field-item"><div class="field-label">Token Contract</div><code class="field-value" style="font-size:12px">{{ suite.tokenAddress }}</code></div>
-                  <div class="field-item"><div class="field-label">Identity Registry</div><code class="field-value" style="font-size:12px">{{ suite.identityRegistryAddress }}</code></div>
-                  <div class="field-item"><div class="field-label">Identity Registry Storage</div><code class="field-value" style="font-size:12px">{{ suite.identityRegistryStorage }}</code></div>
-                  <div class="field-item"><div class="field-label">Modular Compliance</div><code class="field-value" style="font-size:12px">{{ suite.complianceAddress }}</code></div>
-                  <div class="field-item"><div class="field-label">Claim Topics Registry</div><code class="field-value" style="font-size:12px">{{ suite.claimTopicsRegistry }}</code></div>
-                  <div class="field-item"><div class="field-label">Trusted Issuers Registry</div><code class="field-value" style="font-size:12px">{{ suite.trustedIssuersRegistry }}</code></div>
+                  <div class="field-item"><div class="field-label">Token Contract</div><div class="field-value"><app-address [address]="suite.tokenAddress" /></div></div>
+                  <div class="field-item"><div class="field-label">Identity Registry</div><div class="field-value"><app-address [address]="suite.identityRegistryAddress" /></div></div>
+                  <div class="field-item"><div class="field-label">Identity Registry Storage</div><div class="field-value"><app-address [address]="suite.identityRegistryStorage" /></div></div>
+                  <div class="field-item"><div class="field-label">Modular Compliance</div><div class="field-value"><app-address [address]="suite.complianceAddress" /></div></div>
+                  <div class="field-item"><div class="field-label">Claim Topics Registry</div><div class="field-value"><app-address [address]="suite.claimTopicsRegistry" /></div></div>
+                  <div class="field-item"><div class="field-label">Trusted Issuers Registry</div><div class="field-value"><app-address [address]="suite.trustedIssuersRegistry" /></div></div>
                   <div class="field-item"><div class="field-label">Deployed</div><div class="field-value">{{ suite.createdAt | date:'medium' }}</div></div>
                 </div>
               } @else {
@@ -587,9 +589,9 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                 <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
               } @else {
                 <table mat-table [dataSource]="identityRegistry">
-                  <ng-container matColumnDef="wallet"><th mat-header-cell *matHeaderCellDef>Wallet</th><td mat-cell *matCellDef="let e"><code style="font-size:11px">{{ e.walletAddress }}</code></td></ng-container>
+                  <ng-container matColumnDef="wallet"><th mat-header-cell *matHeaderCellDef>Wallet</th><td mat-cell *matCellDef="let e"><app-address [address]="e.walletAddress" /></td></ng-container>
                   <ng-container matColumnDef="entity"><th mat-header-cell *matHeaderCellDef>Entity</th><td mat-cell *matCellDef="let e">{{ e.entityName || '—' }}</td></ng-container>
-                  <ng-container matColumnDef="identity"><th mat-header-cell *matHeaderCellDef>ONCHAINID</th><td mat-cell *matCellDef="let e"><code style="font-size:11px">{{ e.identityAddress }}</code></td></ng-container>
+                  <ng-container matColumnDef="identity"><th mat-header-cell *matHeaderCellDef>ONCHAINID</th><td mat-cell *matCellDef="let e"><app-address [address]="e.identityAddress" /></td></ng-container>
                   <ng-container matColumnDef="country"><th mat-header-cell *matHeaderCellDef>Country</th><td mat-cell *matCellDef="let e">{{ e.countryCode || '—' }}</td></ng-container>
                   <ng-container matColumnDef="verified">
                     <th mat-header-cell *matHeaderCellDef>Verified</th>
@@ -649,7 +651,7 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                 <h4 style="font-size:14px;font-weight:500;margin-bottom:8px">Active Modules</h4>
                 <table mat-table [dataSource]="complianceStatus.modules">
                   <ng-container matColumnDef="type"><th mat-header-cell *matHeaderCellDef>Type</th><td mat-cell *matCellDef="let m">{{ m.moduleType }}</td></ng-container>
-                  <ng-container matColumnDef="address"><th mat-header-cell *matHeaderCellDef>Address</th><td mat-cell *matCellDef="let m"><code style="font-size:11px">{{ m.moduleAddress }}</code></td></ng-container>
+                  <ng-container matColumnDef="address"><th mat-header-cell *matHeaderCellDef>Address</th><td mat-cell *matCellDef="let m"><app-address [address]="m.moduleAddress" /></td></ng-container>
                   <tr mat-header-row *matHeaderRowDef="['type','address']"></tr>
                   <tr mat-row *matRowDef="let row; columns: ['type','address'];"></tr>
                 </table>
@@ -779,7 +781,7 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                 <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
               } @else {
                 <table mat-table [dataSource]="trustedIssuers">
-                  <ng-container matColumnDef="address"><th mat-header-cell *matHeaderCellDef>Issuer Address</th><td mat-cell *matCellDef="let i"><code style="font-size:11px">{{ i.issuerAddress }}</code></td></ng-container>
+                  <ng-container matColumnDef="address"><th mat-header-cell *matHeaderCellDef>Issuer Address</th><td mat-cell *matCellDef="let i"><app-address [address]="i.issuerAddress" /></td></ng-container>
                   <ng-container matColumnDef="topics"><th mat-header-cell *matHeaderCellDef>Claim Topics</th><td mat-cell *matCellDef="let i">{{ i.claimTopics.join(', ') }}</td></ng-container>
                   <ng-container matColumnDef="added"><th mat-header-cell *matHeaderCellDef>Added</th><td mat-cell *matCellDef="let i">{{ i.addedAt | date:'mediumDate' }}</td></ng-container>
                   <ng-container matColumnDef="actions"><th mat-header-cell *matHeaderCellDef></th><td mat-cell *matCellDef="let i"><button mat-icon-button color="warn" (click)="removeIssuer(i)"><mat-icon>delete</mat-icon></button></td></ng-container>

@@ -1,11 +1,11 @@
 package de.makibytes.registerwerk.application.blockchain;
 
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
+import de.makibytes.registerwerk.application.wallet.WalletSigner;
 import de.makibytes.registerwerk.domain.chain.ChainConfig;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.ChainConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.FunctionReturnDecoder;
@@ -35,56 +35,48 @@ import java.util.UUID;
  * <p>Handles credentials, gas pricing, nonce retrieval, raw-transaction building,
  * receipt polling, and ABI-encoded function calls / deployments.
  *
- * <p>All signing uses the registry operator wallet configured via
- * {@code registerwerk.wallet.private-key}.
+ * <p>All signing uses the registry operator wallet resolved from the {@link WalletSigner}
+ * for the relevant chain. Configure wallets via the Operator Portal → Wallets.
  */
 @Service
 public class EvmContractService {
 
     private static final Logger log = LoggerFactory.getLogger(EvmContractService.class);
 
-    /** Gas limit used for regular contract write calls. */
-    private static final BigInteger CALL_GAS_LIMIT = BigInteger.valueOf(500_000L);
-
-    /** Gas limit used for contract deployments (higher budget needed). */
+    private static final BigInteger CALL_GAS_LIMIT   = BigInteger.valueOf(500_000L);
     private static final BigInteger DEPLOY_GAS_LIMIT = BigInteger.valueOf(5_000_000L);
-
-    /** How many 2-second polls to attempt before timing out. */
-    private static final int RECEIPT_POLL_ATTEMPTS = 60;
-
-    @Value("${registerwerk.wallet.private-key:}")
-    private String privateKeyHex;
+    private static final int        RECEIPT_POLL_ATTEMPTS = 60;
 
     private final BlockchainClientRegistry clientRegistry;
-    private final ChainConfigRepository chainConfigRepository;
+    private final ChainConfigRepository    chainConfigRepository;
+    private final WalletSigner             walletSigner;
 
-    private volatile Credentials cachedCredentials;
     public EvmContractService(BlockchainClientRegistry clientRegistry,
-                               ChainConfigRepository chainConfigRepository) {
-        this.clientRegistry = clientRegistry;
+                               ChainConfigRepository chainConfigRepository,
+                               WalletSigner walletSigner) {
+        this.clientRegistry       = clientRegistry;
         this.chainConfigRepository = chainConfigRepository;
+        this.walletSigner          = walletSigner;
     }
 
     // ── Credential helpers ────────────────────────────────────────────────────
 
+    /** Returns credentials for the default wallet of the given chain config. */
+    public Credentials credentials(UUID chainConfigId) {
+        return walletSigner.credentialsForChain(chainConfigId);
+    }
+
+    /** Returns credentials for the default wallet of the given chain descriptor. */
+    public Credentials credentials(ChainDescriptor descriptor) {
+        return walletSigner.credentialsForDescriptor(descriptor);
+    }
+
     /**
-     * Returns {@link Credentials} for the registry operator wallet.
-     *
-     * @throws IllegalStateException if the private key is not configured
+     * Returns credentials from any configured EVM default wallet.
+     * Used for chain-agnostic operations and as a fallback.
      */
     public Credentials credentials() {
-        if (privateKeyHex == null || privateKeyHex.isBlank()) {
-            throw new IllegalStateException(
-                    "registerwerk.wallet.private-key is not configured; cannot sign transactions");
-        }
-        if (cachedCredentials == null) {
-            synchronized (this) {
-                if (cachedCredentials == null) {
-                    cachedCredentials = Credentials.create(privateKeyHex);
-                }
-            }
-        }
-        return cachedCredentials;
+        return walletSigner.credentialsForAnyEvm();
     }
 
     // ── Client helpers ────────────────────────────────────────────────────────

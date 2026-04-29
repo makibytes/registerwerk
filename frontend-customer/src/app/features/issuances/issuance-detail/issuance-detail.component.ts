@@ -35,6 +35,7 @@ import { AddHolderDialogComponent } from './add-holder-dialog.component';
 import { HolderTableComponent } from '../../../shared/components/token-holders/holder-table.component';
 import { HolderDistributionComponent } from '../../../shared/components/token-holders/holder-distribution.component';
 import { TokenAdminPanelComponent } from '../../../shared/components/token-holders/token-admin-panel.component';
+import { AddressComponent } from '../../../shared/components/address.component';
 import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from '../../../shared/components/token-holders/models';
 
 @Component({
@@ -63,6 +64,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
     HolderTableComponent,
     HolderDistributionComponent,
     TokenAdminPanelComponent,
+    AddressComponent,
   ],
   template: `
     <div class="page-container">
@@ -331,7 +333,9 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
               <table mat-table [dataSource]="holders" class="mat-elevation-z0">
                 <ng-container matColumnDef="wallet">
                   <th mat-header-cell *matHeaderCellDef>Wallet Address</th>
-                  <td mat-cell *matCellDef="let h"><code>{{ h.walletAddress }}</code></td>
+                  <td mat-cell *matCellDef="let h">
+                    <app-address [address]="h.walletAddress" />
+                  </td>
                 </ng-container>
                 <ng-container matColumnDef="amount">
                   <th mat-header-cell *matHeaderCellDef>Nominal Amount</th>

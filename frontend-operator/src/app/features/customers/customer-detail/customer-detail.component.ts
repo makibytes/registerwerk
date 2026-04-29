@@ -17,6 +17,7 @@ import { DatePipe } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { EntityService } from '../../../core/api/entity.service';
+import { AddressComponent } from '../../../shared/components/address.component';
 import { KycService } from '../../../core/api/kyc.service';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 import {
@@ -59,6 +60,7 @@ interface OnchainIdentityView {
     DataStatePillComponent,
     StatusBadgeComponent,
     DatePipe,
+    AddressComponent,
   ],
   styles: [`
     .back-row {
@@ -382,7 +384,7 @@ interface OnchainIdentityView {
                        </span>
                        <app-data-state-pill [status]="asyncStatus(identity.syncStatus)" />
                      </mat-card-title>
-                     <mat-card-subtitle><code style="font-size:11px">{{ identity.identityAddress }}</code></mat-card-subtitle>
+                     <mat-card-subtitle><app-address [address]="identity.identityAddress" /></mat-card-subtitle>
                    </mat-card-header>
                    <mat-card-content style="padding-top:12px">
                      <div style="margin-bottom:8px;font-size:13px;color:rgba(0,0,0,0.54)">

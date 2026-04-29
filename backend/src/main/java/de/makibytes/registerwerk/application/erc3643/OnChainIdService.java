@@ -117,7 +117,7 @@ public class OnChainIdService {
         try {
             String idFactoryAddress = contractAddressConfig.requireIdFactory(chainConfig.getIdentifier());
             Web3j web3j = blockchainClientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
-            Credentials creds = evmContractService.credentials();
+            Credentials creds = evmContractService.credentials(chainConfigId);
 
             // IdFactory.deployIdentityProxy(address _managementKey) returns address
             // The management key is the registry wallet (it manages the identity on behalf of the entity)

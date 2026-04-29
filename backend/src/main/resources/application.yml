@@ -109,10 +109,8 @@ registerwerk:
       testnet:
         rpc-url: ${SOLANA_DEVNET_RPC:https://api.devnet.solana.com}
   wallet:
-    private-key: ${REGISTRY_WALLET_PRIVATE_KEY:}
-    solana-private-key: ${REGISTRY_SOLANA_PRIVATE_KEY:}
-  blockchain:
-    signing-key: ${REGISTRY_WALLET_PRIVATE_KEY:}
+    master-key: ${REGISTERWERK_WALLET_MASTER_KEY:}
+    storage-dir: ${REGISTERWERK_WALLET_DIR:/data/wallets}
   contracts:
     # AssetTokenFactory address per chain identifier (populated after `forge script Deploy`)
     asset-token-factory:

@@ -71,6 +71,14 @@ public class IdentityRegistryService {
         return blockchainClientRegistry.getEvmClient(descriptor);
     }
 
+    private Credentials credentialsForSuite(Erc3643Suite suite) {
+        AssetDeployment dep = deploymentRepo.findById(suite.getAssetDeploymentId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "AssetDeployment not found for suite " + suite.getId()));
+        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
+        return evmContractService.credentials(descriptor);
+    }
+
     /**
      * Registers an investor wallet in the on-chain IdentityRegistry and persists the mapping.
      *
@@ -107,7 +115,7 @@ public class IdentityRegistryService {
                         .orElseThrow(() -> new IllegalStateException(
                                 "AssetDeployment not found for suite " + suite.getId()));
                 Web3j web3j = clientForSuite(suite);
-                Credentials creds = evmContractService.credentials();
+                Credentials creds = credentialsForSuite(suite);
                 String identityAddr = identity.getIdentityAddress() != null
                         ? identity.getIdentityAddress() : "0x0000000000000000000000000000000000000000";
                 short country = countryCode != null ? countryCode : 0;
@@ -178,7 +186,7 @@ public class IdentityRegistryService {
                 && !suite.getIdentityRegistryAddress().startsWith("0x-PENDING")) {
             try {
                 Web3j web3j = clientForSuite(suite);
-                Credentials creds = evmContractService.credentials();
+                Credentials creds = credentialsForSuite(suite);
                 Function fn = new Function(
                         "deleteIdentity",
                         java.util.List.of(new Address(entry.getWalletAddress())),

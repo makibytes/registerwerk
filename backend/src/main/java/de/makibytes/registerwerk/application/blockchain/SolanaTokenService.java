@@ -10,9 +10,10 @@ import org.p2p.solanaj.programs.MemoProgram;
 import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
+import de.makibytes.registerwerk.application.wallet.WalletSigner;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.ChainConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import de.makibytes.registerwerk.domain.enums.Chain;
@@ -54,13 +55,16 @@ public class SolanaTokenService {
     private static final byte IX_FREEZE_ACCOUNT = 10;
     private static final byte IX_THAW_ACCOUNT   = 11;
 
-    @Value("${registerwerk.wallet.solana-private-key:}")
-    private String solanaPrivateKeyHex;
-
     private final BlockchainClientRegistry blockchainClientRegistry;
+    private final WalletSigner             walletSigner;
+    private final ChainConfigRepository    chainConfigRepository;
 
-    public SolanaTokenService(BlockchainClientRegistry blockchainClientRegistry) {
+    public SolanaTokenService(BlockchainClientRegistry blockchainClientRegistry,
+                               WalletSigner walletSigner,
+                               ChainConfigRepository chainConfigRepository) {
         this.blockchainClientRegistry = blockchainClientRegistry;
+        this.walletSigner             = walletSigner;
+        this.chainConfigRepository    = chainConfigRepository;
     }
 
     /**
@@ -239,12 +243,13 @@ public class SolanaTokenService {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private Account loadPayerAccount() {
-        if (solanaPrivateKeyHex == null || solanaPrivateKeyHex.isBlank()) {
-            throw new IllegalStateException(
-                    "registerwerk.wallet.solana-private-key is not configured; cannot sign Solana transactions");
-        }
-        byte[] keyBytes = org.web3j.utils.Numeric.hexStringToByteArray(solanaPrivateKeyHex);
-        return new Account(keyBytes);
+        // Resolve the Solana default wallet from any configured Solana chain
+        return chainConfigRepository.findByChainTypeAndEnabledTrue(
+                de.makibytes.registerwerk.domain.chain.ChainConfig.ChainType.SOLANA).stream()
+                .findFirst()
+                .map(c -> walletSigner.solanaAccountForChain(c.getId()))
+                .orElseThrow(() -> new IllegalStateException(
+                        "No Solana wallet default configured. Add a Solana wallet via the Operator Portal → Wallets."));
     }
 
     /**

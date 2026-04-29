@@ -196,6 +196,54 @@ export interface AuditFilterParams {
 
 export type SyncStatus = 'READY' | 'PENDING' | 'UPDATING';
 
+export interface OperatorWallet {
+  id: string;
+  name: string;
+  type: 'EVM' | 'SOLANA';
+  address: string;
+  defaultForChains: string[]; // chain config UUIDs
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WalletDefault {
+  chainConfigId: string;
+  chainIdentifier: string;
+  chainDisplayName: string;
+  walletId: string;
+  walletName: string;
+  walletAddress: string;
+}
+
+export interface RpcNode {
+  id: string;
+  chainConfigId: string;
+  chainIdentifier: string;
+  url: string;
+  label?: string;
+  enabled: boolean;
+  exclusive: boolean;
+  latestBlockNumber?: number;
+  blockLastAdvancedAt?: string;
+  lastCheckedAt?: string;
+  lastSuccessAt?: string;
+  healthy: boolean;
+  consecutiveFailures: number;
+  lagFromBest?: number;
+  syncing: boolean;
+}
+
+export interface ChainHealth {
+  id: string;
+  identifier: string;
+  displayName: string;
+  chainType: 'EVM' | 'SOLANA';
+  networkType: 'MAINNET' | 'TESTNET';
+  chainId?: number;
+  enabled: boolean;
+  nodes: RpcNode[];
+}
+
 export interface RegistryOverviewSummary {
   entityCount: number;
   issuerCount: number;
@@ -234,4 +282,37 @@ export interface RegistryOverview {
   summary: RegistryOverviewSummary;
   entities: RegistryEntityNode[];
   relationships: RegistryRelationship[];
+}
+
+// ─── Address Endpoints ────────────────────────────────────────────────────────
+
+export type EndpointOwnerType = 'OPERATOR' | 'ENTITY';
+export type EndpointAddressType = 'WALLET' | 'CONTRACT';
+
+export interface Endpoint {
+  id: string;
+  ownerType: EndpointOwnerType;
+  ownerId: string | null;
+  address: string;
+  addressType: EndpointAddressType;
+  name: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EndpointCreateRequest {
+  address: string;
+  addressType: EndpointAddressType;
+  name: string;
+  notes?: string;
+}
+
+export interface EndpointUpdateRequest {
+  name: string;
+  notes?: string;
+}
+
+export interface AddressResolveResponse {
+  resolutions: Record<string, string>;
 }

@@ -73,7 +73,7 @@ public class Erc1155DeploymentService {
             String factoryAddress = contractAddressConfig.requireAssetTokenFactory(chainId);
 
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
-            Credentials creds = evmContractService.credentials();
+            Credentials creds = evmContractService.credentials(chain);
 
             Function deployToken = new Function(
                     "deployToken",

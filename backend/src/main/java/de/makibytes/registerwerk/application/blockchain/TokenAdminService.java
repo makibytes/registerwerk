@@ -285,7 +285,7 @@ public class TokenAdminService {
     private UUID submitAdmin(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials();
+        Credentials creds = evmContractService.credentials(descriptor);
         String txHash = evmContractService.submit(web3j, creds, dep.getContractAddress(), fn);
 
         Asset asset = assetRepository.findById(dep.getAssetId()).orElse(null);

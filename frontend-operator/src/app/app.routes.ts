@@ -51,6 +51,20 @@ export const routes: Routes = [
             (m) => m.AuditLogComponent
           ),
       },
+      {
+        path: 'network-nodes',
+        loadComponent: () =>
+          import('./features/network-nodes/network-nodes.component').then(
+            (m) => m.NetworkNodesComponent
+          ),
+      },
+      {
+        path: 'wallets',
+        loadComponent: () =>
+          import('./features/wallets/wallets-list.component').then(
+            (m) => m.WalletsListComponent
+          ),
+      },
     ],
   },
   {

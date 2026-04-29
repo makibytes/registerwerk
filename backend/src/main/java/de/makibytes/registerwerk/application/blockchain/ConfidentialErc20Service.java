@@ -61,7 +61,7 @@ public class ConfidentialErc20Service {
             String factoryAddress = contractAddressConfig.requireConfidentialFactory(chainId);
 
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
-            Credentials creds = evmContractService.credentials();
+            Credentials creds = evmContractService.credentials(chain);
 
             byte[] assetIdBytes = Erc20DeploymentService.uuidToBytes32(assetId);
 

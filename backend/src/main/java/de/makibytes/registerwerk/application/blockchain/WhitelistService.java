@@ -120,7 +120,7 @@ public class WhitelistService {
         try {
             ChainDescriptor descriptor = new ChainDescriptor(deployment.getChain(), deployment.getNetwork());
             Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-            Credentials creds = evmContractService.credentials();
+            Credentials creds = evmContractService.credentials(descriptor);
 
             Function fn = new Function(
                     functionName,

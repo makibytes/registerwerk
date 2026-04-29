@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.application.blockchain;
 
 import de.makibytes.registerwerk.domain.chain.ChainConfig;
+import de.makibytes.registerwerk.domain.chain.RpcNode;
 import de.makibytes.registerwerk.infrastructure.blockchain.evm.Web3jClientFactory;
 import de.makibytes.registerwerk.infrastructure.blockchain.solana.SolanaClientFactory;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.ChainConfigRepository;
@@ -11,20 +12,35 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.web3j.protocol.Web3j;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.time.Instant;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
- * Central registry mapping {@link ChainDescriptor}s to their respective RPC clients.
+ * Central registry mapping blockchain identifiers to their RPC clients.
  *
- * <p>The static client set is populated by {@link de.makibytes.registerwerk.config.BlockchainConfig}
- * at startup from application-property-based configuration. The dynamic set is refreshed at
- * runtime from the {@code chain_config} database table via {@link #refresh()}.
+ * <h3>Client tiers (checked in order)</h3>
+ * <ol>
+ *   <li><b>Node pool</b> — populated by {@link #refreshFromNodes} (called by
+ *       {@code RpcNodeHealthService} after each health-check round). Uses the
+ *       multi-node selection logic described below.</li>
+ *   <li><b>Dynamic single clients</b> — legacy: one client per enabled
+ *       {@code chain_config} row, populated by {@link #refresh()}.</li>
+ *   <li><b>Static clients</b> — loaded at startup from application properties.</li>
+ * </ol>
  *
- * <p>Lookups check both sets, with dynamic (DB-sourced) entries taking precedence.
+ * <h3>Node selection logic (tier 1)</h3>
+ * <ol>
+ *   <li>If any <em>enabled</em> node for the chain has {@code exclusive=true},
+ *       restrict candidates to those exclusive-enabled nodes.</li>
+ *   <li>Otherwise use all enabled nodes.</li>
+ *   <li>From the candidate set prefer healthy nodes; pick the one with smallest lag.</li>
+ *   <li>If no healthy candidates exist, pick the least-bad one (fewest consecutive
+ *       failures, most recent success) as a last resort.</li>
+ *   <li>If ALL nodes are manually disabled ({@code enabled=false}), throw —
+ *       this is the only way a chain can become completely unreachable.</li>
+ * </ol>
  */
 @Component
 public class BlockchainClientRegistry {
@@ -36,12 +52,19 @@ public class BlockchainClientRegistry {
     private final Map<ChainDescriptor, Web3j>    staticEvmClients;
     private final Map<ChainDescriptor, RpcClient> staticSolanaClients;
 
-    // ── Dynamic clients (from chain_config table) ─────────────────────────────
+    // ── Dynamic single clients (legacy, from chain_config table) ─────────────
 
-    /** identifier → Web3j, populated by {@link #refresh()}. */
     private volatile Map<String, Web3j>    dynamicEvmClients    = new ConcurrentHashMap<>();
-    /** identifier → RpcClient, populated by {@link #refresh()}. */
     private volatile Map<String, RpcClient> dynamicSolanaClients = new ConcurrentHashMap<>();
+
+    // ── Node pool (from rpc_node table, populated by health checker) ──────────
+
+    /** nodeId → Web3j client */
+    private volatile Map<UUID, Web3j>    nodeEvmClients    = new ConcurrentHashMap<>();
+    /** nodeId → RpcClient */
+    private volatile Map<UUID, RpcClient> nodeSolanaClients = new ConcurrentHashMap<>();
+    /** chainIdentifier → ordered node states for routing */
+    private volatile Map<String, List<NodeState>> nodesByChain = new ConcurrentHashMap<>();
 
     // ── Optional dependencies injected lazily to avoid circular beans ─────────
 
@@ -54,11 +77,8 @@ public class BlockchainClientRegistry {
     @Autowired(required = false)
     private SolanaClientFactory solanaClientFactory;
 
-    // ── Constructors ──────────────────────────────────────────────────────────
+    // ── Constructor ───────────────────────────────────────────────────────────
 
-    /**
-     * Primary constructor invoked by {@link de.makibytes.registerwerk.config.BlockchainConfig}.
-     */
     public BlockchainClientRegistry(
             Map<ChainDescriptor, Web3j> evmClients,
             Map<ChainDescriptor, RpcClient> solanaClients) {
@@ -66,137 +86,204 @@ public class BlockchainClientRegistry {
         this.staticSolanaClients = Collections.unmodifiableMap(new HashMap<>(solanaClients));
     }
 
-    // ── Lookups — ChainDescriptor-based (legacy) ──────────────────────────────
+    // ── Lookups — identifier-based ────────────────────────────────────────────
 
     /**
-     * Returns the Web3j client for the given EVM chain descriptor.
+     * Returns the best available Web3j client for the given chain identifier.
+     * Uses the node pool if populated, otherwise falls back to single-client tiers.
      *
-     * @throws IllegalArgumentException if no client is configured for the descriptor
-     */
-    public Web3j getEvmClient(ChainDescriptor descriptor) {
-        Web3j client = staticEvmClients.get(descriptor);
-        if (client == null) {
-            throw new IllegalArgumentException(
-                    "No EVM client configured for chain descriptor: " + descriptor);
-        }
-        return client;
-    }
-
-    /**
-     * Returns the Solana RpcClient for the given descriptor.
-     *
-     * @throws IllegalArgumentException if no client is configured for the descriptor
-     */
-    public RpcClient getSolanaClient(ChainDescriptor descriptor) {
-        RpcClient client = staticSolanaClients.get(descriptor);
-        if (client == null) {
-            throw new IllegalArgumentException(
-                    "No Solana client configured for chain descriptor: " + descriptor);
-        }
-        return client;
-    }
-
-    // ── Lookups — identifier-based (dynamic, from chain_config) ──────────────
-
-    /**
-     * Returns the Web3j client for a chain identified by its stable string identifier
-     * (e.g. {@code "ETHEREUM_MAINNET"}).
-     *
-     * <p>Dynamic clients (loaded via {@link #refresh()}) take precedence over static ones.
-     *
-     * @throws IllegalArgumentException if no client is registered for the identifier
+     * @throws IllegalStateException    if all nodes for the chain are manually disabled
+     * @throws IllegalArgumentException if no client is registered at all
      */
     public Web3j getEvmClientByIdentifier(String identifier) {
-        Web3j dynamic = dynamicEvmClients.get(identifier);
-        if (dynamic != null) {
-            return dynamic;
+        List<NodeState> nodes = nodesByChain.get(identifier);
+        if (nodes != null && !nodes.isEmpty()) {
+            return selectBestEvmNode(identifier, nodes);
         }
-        // Fall back to searching the static map by inspecting all descriptors.
+
+        // Legacy single-client fallback
+        Web3j dynamic = dynamicEvmClients.get(identifier);
+        if (dynamic != null) return dynamic;
+
         for (Map.Entry<ChainDescriptor, Web3j> entry : staticEvmClients.entrySet()) {
             String key = entry.getKey().chain().name() + "_" + entry.getKey().network().name();
-            if (key.equalsIgnoreCase(identifier)) {
-                return entry.getValue();
-            }
+            if (key.equalsIgnoreCase(identifier)) return entry.getValue();
         }
-        throw new IllegalArgumentException(
-                "No EVM client configured for identifier: " + identifier);
+        throw new IllegalArgumentException("No EVM client configured for identifier: " + identifier);
     }
 
     /**
-     * Returns the Solana RpcClient for a chain identified by its stable string identifier.
-     *
-     * @throws IllegalArgumentException if no client is registered for the identifier
+     * Returns the best available Solana RpcClient for the given chain identifier.
      */
     public RpcClient getSolanaClientByIdentifier(String identifier) {
-        RpcClient dynamic = dynamicSolanaClients.get(identifier);
-        if (dynamic != null) {
-            return dynamic;
+        List<NodeState> nodes = nodesByChain.get(identifier);
+        if (nodes != null && !nodes.isEmpty()) {
+            return selectBestSolanaNode(identifier, nodes);
         }
+
+        RpcClient dynamic = dynamicSolanaClients.get(identifier);
+        if (dynamic != null) return dynamic;
+
         for (Map.Entry<ChainDescriptor, RpcClient> entry : staticSolanaClients.entrySet()) {
             String key = entry.getKey().chain().name() + "_" + entry.getKey().network().name();
-            if (key.equalsIgnoreCase(identifier)) {
-                return entry.getValue();
-            }
+            if (key.equalsIgnoreCase(identifier)) return entry.getValue();
         }
-        throw new IllegalArgumentException(
-                "No Solana client configured for identifier: " + identifier);
+        throw new IllegalArgumentException("No Solana client configured for identifier: " + identifier);
     }
 
-    // ── Refresh ───────────────────────────────────────────────────────────────
+    // ── Legacy descriptor-based lookups ──────────────────────────────────────
+
+    public Web3j getEvmClient(ChainDescriptor descriptor) {
+        Web3j client = staticEvmClients.get(descriptor);
+        if (client == null) throw new IllegalArgumentException(
+                "No EVM client configured for chain descriptor: " + descriptor);
+        return client;
+    }
+
+    public RpcClient getSolanaClient(ChainDescriptor descriptor) {
+        RpcClient client = staticSolanaClients.get(descriptor);
+        if (client == null) throw new IllegalArgumentException(
+                "No Solana client configured for chain descriptor: " + descriptor);
+        return client;
+    }
+
+    // ── Node pool refresh (called by health service) ──────────────────────────
 
     /**
-     * Reloads Web3j and Solana RPC client instances from all enabled {@code chain_config} rows.
-     *
-     * <p>Previous dynamic clients are replaced atomically. Static clients (from
-     * application properties) are not affected.
-     *
-     * <p>No-ops if the optional {@link ChainConfigRepository} or factory beans are not wired.
+     * Rebuilds the node pool from the given (freshly health-checked) node list.
+     * Existing client instances are reused by node ID to preserve connection pools.
      */
+    public synchronized void refreshFromNodes(List<RpcNode> nodes) {
+        if (web3jClientFactory == null && solanaClientFactory == null) return;
+
+        Map<UUID, Web3j>     newEvmClients    = new ConcurrentHashMap<>();
+        Map<UUID, RpcClient>  newSolanaClients = new ConcurrentHashMap<>();
+        Map<String, List<NodeState>> newByChain = new ConcurrentHashMap<>();
+
+        for (RpcNode node : nodes) {
+            String identifier = node.getChainConfig().getIdentifier();
+            ChainConfig.ChainType type = node.getChainConfig().getChainType();
+
+            NodeState state = new NodeState(
+                    node.getId(), node.isHealthy(), node.isEnabled(), node.isExclusive(),
+                    node.getConsecutiveFailures(), node.getLastSuccessAt(), node.getLagFromBest());
+
+            if (type == ChainConfig.ChainType.EVM && web3jClientFactory != null) {
+                Web3j client = nodeEvmClients.getOrDefault(node.getId(),
+                        web3jClientFactory.createClient(node.getUrl()));
+                newEvmClients.put(node.getId(), client);
+            } else if (type == ChainConfig.ChainType.SOLANA && solanaClientFactory != null) {
+                RpcClient client = nodeSolanaClients.getOrDefault(node.getId(),
+                        solanaClientFactory.createClient(node.getUrl()));
+                newSolanaClients.put(node.getId(), client);
+            }
+
+            newByChain.computeIfAbsent(identifier, k -> new ArrayList<>()).add(state);
+        }
+
+        this.nodeEvmClients    = newEvmClients;
+        this.nodeSolanaClients = newSolanaClients;
+        this.nodesByChain      = newByChain;
+
+        log.debug("Node pool refreshed: {} chains, {} EVM nodes, {} Solana nodes",
+                newByChain.size(), newEvmClients.size(), newSolanaClients.size());
+    }
+
+    // ── Legacy single-client refresh (from chain_config table) ───────────────
+
     public void refresh() {
         if (chainConfigRepository == null) {
             log.warn("ChainConfigRepository not available; skipping dynamic client refresh.");
             return;
         }
 
-        List<ChainConfig> enabledChains = chainConfigRepository.findByEnabledTrue();
-        Map<String, Web3j>    newEvmClients    = new ConcurrentHashMap<>();
-        Map<String, RpcClient> newSolanaClients = new ConcurrentHashMap<>();
+        Map<String, Web3j>    newEvm    = new ConcurrentHashMap<>();
+        Map<String, RpcClient> newSolana = new ConcurrentHashMap<>();
 
-        for (ChainConfig chain : enabledChains) {
+        for (ChainConfig chain : chainConfigRepository.findByEnabledTrue()) {
             try {
-                if (chain.getChainType() == ChainConfig.ChainType.EVM) {
-                    if (web3jClientFactory != null && chain.getRpcUrl() != null) {
-                        Web3j client = web3jClientFactory.createClient(chain.getRpcUrl());
-                        newEvmClients.put(chain.getIdentifier(), client);
-                        log.debug("Refreshed EVM client for identifier={}", chain.getIdentifier());
-                    }
-                } else if (chain.getChainType() == ChainConfig.ChainType.SOLANA) {
-                    if (solanaClientFactory != null && chain.getRpcUrl() != null) {
-                        RpcClient client = solanaClientFactory.createClient(chain.getRpcUrl());
-                        newSolanaClients.put(chain.getIdentifier(), client);
-                        log.debug("Refreshed Solana client for identifier={}", chain.getIdentifier());
-                    }
+                if (chain.getChainType() == ChainConfig.ChainType.EVM && web3jClientFactory != null
+                        && chain.getRpcUrl() != null) {
+                    newEvm.put(chain.getIdentifier(), web3jClientFactory.createClient(chain.getRpcUrl()));
+                } else if (chain.getChainType() == ChainConfig.ChainType.SOLANA
+                        && solanaClientFactory != null && chain.getRpcUrl() != null) {
+                    newSolana.put(chain.getIdentifier(), solanaClientFactory.createClient(chain.getRpcUrl()));
                 }
             } catch (Exception e) {
-                log.error("Failed to refresh client for chain {}: {}", chain.getIdentifier(),
-                        e.getMessage(), e);
+                log.error("Failed to refresh client for chain {}: {}", chain.getIdentifier(), e.getMessage(), e);
             }
         }
 
-        this.dynamicEvmClients    = newEvmClients;
-        this.dynamicSolanaClients = newSolanaClients;
-
-        log.info("BlockchainClientRegistry refresh complete: {} EVM, {} Solana dynamic clients.",
-                newEvmClients.size(), newSolanaClients.size());
+        this.dynamicEvmClients    = newEvm;
+        this.dynamicSolanaClients = newSolana;
+        log.info("BlockchainClientRegistry refresh: {} EVM, {} Solana dynamic clients.",
+                newEvm.size(), newSolana.size());
     }
 
-    // ── Read-only accessors (static maps) ─────────────────────────────────────
+    // ── Read-only accessors ───────────────────────────────────────────────────
 
-    public Map<ChainDescriptor, Web3j> getEvmClients() {
-        return staticEvmClients;
+    public Map<ChainDescriptor, Web3j> getEvmClients() { return staticEvmClients; }
+
+    public Map<ChainDescriptor, RpcClient> getSolanaClients() { return staticSolanaClients; }
+
+    /** Returns the current node states grouped by chain identifier (for the health API). */
+    public Map<String, List<NodeState>> getNodesByChain() { return Collections.unmodifiableMap(nodesByChain); }
+
+    // ── Node selection ────────────────────────────────────────────────────────
+
+    private Web3j selectBestEvmNode(String identifier, List<NodeState> nodes) {
+        UUID id = selectBestNodeId(identifier, nodes);
+        return nodeEvmClients.get(id);
     }
 
-    public Map<ChainDescriptor, RpcClient> getSolanaClients() {
-        return staticSolanaClients;
+    private RpcClient selectBestSolanaNode(String identifier, List<NodeState> nodes) {
+        UUID id = selectBestNodeId(identifier, nodes);
+        return nodeSolanaClients.get(id);
     }
+
+    private UUID selectBestNodeId(String identifier, List<NodeState> nodes) {
+        // Determine candidate set: exclusive-enabled nodes take precedence
+        List<NodeState> exclusiveEnabled = nodes.stream()
+                .filter(n -> n.exclusive() && n.enabled()).toList();
+
+        List<NodeState> candidates = exclusiveEnabled.isEmpty()
+                ? nodes.stream().filter(NodeState::enabled).toList()
+                : exclusiveEnabled;
+
+        if (candidates.isEmpty()) {
+            throw new IllegalStateException(
+                    "All RPC nodes for chain '" + identifier + "' are manually disabled");
+        }
+
+        // Prefer healthy with smallest lag
+        Optional<NodeState> best = candidates.stream()
+                .filter(NodeState::healthy)
+                .min(Comparator.comparingInt(n -> n.lagFromBest() != null ? n.lagFromBest() : 0));
+
+        if (best.isPresent()) {
+            return best.get().nodeId();
+        }
+
+        // Last resort: fewest failures, most recent success
+        NodeState fallback = candidates.stream()
+                .min(Comparator.<NodeState>comparingInt(NodeState::consecutiveFailures)
+                        .thenComparing(
+                                n -> n.lastSuccessAt() != null ? n.lastSuccessAt() : Instant.EPOCH,
+                                Comparator.reverseOrder()))
+                .orElseThrow();
+
+        log.warn("No healthy RPC node for chain '{}'; using fallback node {}", identifier, fallback.nodeId());
+        return fallback.nodeId();
+    }
+
+    // ── NodeState record ──────────────────────────────────────────────────────
+
+    public record NodeState(
+            UUID nodeId,
+            boolean healthy,
+            boolean enabled,
+            boolean exclusive,
+            int consecutiveFailures,
+            Instant lastSuccessAt,
+            Integer lagFromBest) {}
 }

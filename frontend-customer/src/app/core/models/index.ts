@@ -267,3 +267,36 @@ export interface PageParams {
   sort?: string;
   [key: string]: string | number | boolean | undefined;
 }
+
+// ─── Address Endpoints ────────────────────────────────────────────────────────
+
+export type EndpointOwnerType = 'OPERATOR' | 'ENTITY';
+export type EndpointAddressType = 'WALLET' | 'CONTRACT';
+
+export interface Endpoint {
+  id: string;
+  ownerType: EndpointOwnerType;
+  ownerId: string | null;
+  address: string;
+  addressType: EndpointAddressType;
+  name: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EndpointCreateRequest {
+  address: string;
+  addressType: EndpointAddressType;
+  name: string;
+  notes?: string;
+}
+
+export interface EndpointUpdateRequest {
+  name: string;
+  notes?: string;
+}
+
+export interface AddressResolveResponse {
+  resolutions: Record<string, string>;
+}
