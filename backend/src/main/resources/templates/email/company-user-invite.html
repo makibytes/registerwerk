@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<body style="font-family: Arial, sans-serif; color: #111827;">
+  <p>Hello <span th:text="${inviteeName}">there</span>,</p>
+  <p>
+    You have been invited to join <strong th:text="${entityName}">your company</strong> on Registerwerk.
+  </p>
+  <p>
+    Complete your account setup here:
+    <a th:href="${registrationUrl}" th:text="${registrationUrl}">registration link</a>
+  </p>
+  <p>This link expires automatically for security reasons.</p>
+</body>
+</html>

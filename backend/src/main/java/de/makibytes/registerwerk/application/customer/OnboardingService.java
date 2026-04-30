@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.application.customer;
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
 import de.makibytes.registerwerk.application.notification.OnboardingEmailService;
 import de.makibytes.registerwerk.application.notification.WelcomeEmailService;
+import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.domain.entity.LegalEntity;
 import de.makibytes.registerwerk.domain.entity.OnboardingToken;
 import de.makibytes.registerwerk.domain.enums.EntityStatus;
@@ -41,6 +42,9 @@ public class OnboardingService {
     private final LegalEntityRepository legalEntityRepository;
     private final WelcomeEmailService welcomeEmailService;
     private final OnboardingEmailService onboardingEmailService;
+    private final CompanyUserService companyUserService;
+    private final RegisterwerkAuthProperties authProperties;
+    private final String frontendUrl;
     private final long tokenTtlHours;
 
     public OnboardingService(
@@ -48,12 +52,18 @@ public class OnboardingService {
             LegalEntityRepository legalEntityRepository,
             WelcomeEmailService welcomeEmailService,
             OnboardingEmailService onboardingEmailService,
-            @Value("${registerwerk.onboarding.token-ttl-hours:48}") long tokenTtlHours) {
+            CompanyUserService companyUserService,
+            RegisterwerkAuthProperties authProperties,
+            @Value("${registerwerk.onboarding.token-ttl-hours:48}") long tokenTtlHours,
+            @Value("${registerwerk.onboarding.frontend-url:http://localhost:4201}") String frontendUrl) {
         this.onboardingTokenRepository = onboardingTokenRepository;
         this.legalEntityRepository = legalEntityRepository;
         this.welcomeEmailService = welcomeEmailService;
         this.onboardingEmailService = onboardingEmailService;
+        this.companyUserService = companyUserService;
+        this.authProperties = authProperties;
         this.tokenTtlHours = tokenTtlHours;
+        this.frontendUrl = frontendUrl;
     }
 
     /**
@@ -110,7 +120,7 @@ public class OnboardingService {
      * @param actorId        UUID of the actor completing onboarding (may equal entity contact)
      * @throws IllegalArgumentException if the token is invalid or expired
      */
-    public void completeOnboarding(String cleartextToken, UUID actorId) {
+    public void completeOnboarding(String cleartextToken, String adminEmail, String adminName, String password, UUID actorId) {
         String hash = sha256Hex(cleartextToken);
         OnboardingToken token = onboardingTokenRepository.findByTokenHash(hash)
             .orElseThrow(() -> new IllegalArgumentException("Invalid onboarding token"));
@@ -126,6 +136,14 @@ public class OnboardingService {
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", token.getLegalEntityId()));
         entity.setStatus(EntityStatus.ACTIVE);
         legalEntityRepository.save(entity);
+        companyUserService.createInitialCompanyAdmin(
+            entity.getId(),
+            adminEmail,
+            adminName,
+            password,
+            authProperties.isEntraEnabled()
+        );
+        welcomeEmailService.sendWelcome(adminEmail, entity.getCurrentName(), frontendUrl + "/login", frontendUrl);
 
         log.info("Completed onboarding for entityId={}", token.getLegalEntityId());
     }

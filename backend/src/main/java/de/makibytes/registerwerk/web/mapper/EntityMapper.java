@@ -24,6 +24,9 @@ public interface EntityMapper {
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
+    @Mapping(target = "idpIssuerUrl", ignore = true)
+    @Mapping(target = "idpClientId", ignore = true)
+    @Mapping(target = "idpClientSecret", ignore = true)
     LegalEntity toEntity(EntityCreateRequest request);
 
     /**

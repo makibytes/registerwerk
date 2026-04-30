@@ -30,13 +30,24 @@ public class JwtMintingService {
     public String mint(AppUser user) {
         Instant now = Instant.now();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
+        List<String> roles = user.getRoles().stream().map(Enum::name).toList();
+        JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
             .subject(user.getId().toString())
-            .claim("entityId", user.getId().toString())
-            .claim("roles", List.of(user.getRole()))
+            .claim("roles", roles)
             .issuedAt(now)
-            .expiresAt(now.plusSeconds(tokenTtlSeconds))
-            .build();
-        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+            .expiresAt(now.plusSeconds(tokenTtlSeconds));
+        if (user.getEmail() != null) {
+            claims.claim("email", user.getEmail());
+        }
+        if (user.getFullName() != null) {
+            claims.claim("name", user.getFullName());
+        }
+        if (user.getLegalEntityId() != null) {
+            claims = JwtClaimsSet.from(claims.build())
+                .claim("entityId", user.getLegalEntityId().toString())
+                .claim("entity_id", user.getLegalEntityId().toString())
+                ;
+        }
+        return encoder.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
     }
 }

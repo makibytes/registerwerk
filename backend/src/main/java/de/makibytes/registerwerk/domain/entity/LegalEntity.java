@@ -47,6 +47,15 @@ public class LegalEntity {
     @Column(name = "registration_country", length = 2)
     private String registrationCountry;
 
+    @Column(name = "idp_issuer_url", length = 500)
+    private String idpIssuerUrl;
+
+    @Column(name = "idp_client_id", length = 255)
+    private String idpClientId;
+
+    @Column(name = "idp_client_secret", length = 500)
+    private String idpClientSecret;
+
     @Column(name = "incorporation_date")
     private LocalDate incorporationDate;
 
@@ -97,6 +106,15 @@ public class LegalEntity {
 
     public String getRegistrationCountry() { return registrationCountry; }
     public void setRegistrationCountry(String registrationCountry) { this.registrationCountry = registrationCountry; }
+
+    public String getIdpIssuerUrl() { return idpIssuerUrl; }
+    public void setIdpIssuerUrl(String idpIssuerUrl) { this.idpIssuerUrl = idpIssuerUrl; }
+
+    public String getIdpClientId() { return idpClientId; }
+    public void setIdpClientId(String idpClientId) { this.idpClientId = idpClientId; }
+
+    public String getIdpClientSecret() { return idpClientSecret; }
+    public void setIdpClientSecret(String idpClientSecret) { this.idpClientSecret = idpClientSecret; }
 
     public LocalDate getIncorporationDate() { return incorporationDate; }
     public void setIncorporationDate(LocalDate incorporationDate) { this.incorporationDate = incorporationDate; }

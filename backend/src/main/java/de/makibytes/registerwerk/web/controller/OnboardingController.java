@@ -4,7 +4,9 @@ import de.makibytes.registerwerk.application.customer.OnboardingService;
 import de.makibytes.registerwerk.domain.entity.LegalEntity;
 import de.makibytes.registerwerk.domain.entity.OnboardingToken;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
+import de.makibytes.registerwerk.web.dto.OnboardingCompleteRequest;
 import de.makibytes.registerwerk.web.dto.OnboardingTokenResponse;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -89,12 +91,14 @@ public class OnboardingController {
      */
     @PostMapping("/complete")
     public ResponseEntity<Map<String, String>> completeOnboarding(
-            @RequestBody Map<String, String> body) {
-        String token = body.get("token");
-        if (token == null || token.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "token is required"));
-        }
-        onboardingService.completeOnboarding(token, null);
+            @Valid @RequestBody OnboardingCompleteRequest request) {
+        onboardingService.completeOnboarding(
+            request.token(),
+            request.adminEmail(),
+            request.adminName(),
+            request.password(),
+            null
+        );
         return ResponseEntity.ok(Map.of("message", "Onboarding completed successfully"));
     }
 

@@ -73,7 +73,7 @@ export class AuthService {
     if (!token) return null;
     try {
       const payload = this.decodePayload(token);
-      return (payload['entityId'] as string) ?? null;
+      return (payload['entityId'] as string) ?? (payload['entity_id'] as string) ?? null;
     } catch {
       return null;
     }

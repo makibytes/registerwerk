@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.application.auth;
 
 import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.domain.entity.AppUser;
+import de.makibytes.registerwerk.domain.enums.AppUserRole;
+import de.makibytes.registerwerk.domain.enums.UserAuthProvider;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AppUserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,14 +42,18 @@ public class DefaultAdminSeeder implements ApplicationRunner {
             existing -> {
                 existing.setPasswordHash(encoder.encode(admin.getPassword()));
                 existing.setEnabled(true);
+                existing.setAuthProvider(UserAuthProvider.LOCAL);
+                existing.setRole(AppUserRole.REGISTRY_ADMIN);
                 users.save(existing);
                 log.info("Default admin user refreshed: {}", admin.getEmail());
             },
             () -> {
                 AppUser u = new AppUser();
                 u.setEmail(admin.getEmail());
+                u.setFullName("Registry Administrator");
                 u.setPasswordHash(encoder.encode(admin.getPassword()));
-                u.setRole("REGISTRY_ADMIN");
+                u.setRole(AppUserRole.REGISTRY_ADMIN);
+                u.setAuthProvider(UserAuthProvider.LOCAL);
                 u.setEnabled(true);
                 users.save(u);
                 log.info("Default admin user seeded: {}", admin.getEmail());

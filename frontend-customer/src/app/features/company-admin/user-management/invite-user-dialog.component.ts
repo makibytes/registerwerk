@@ -38,9 +38,9 @@ import { CompanyUser, UserRole } from '../../../core/models';
       </mat-form-field>
 
       <mat-form-field appearance="outline" class="full-width">
-        <mat-label>Role</mat-label>
-        <mat-select [(ngModel)]="role">
-          @for (r of roles; track r.value) {
+        <mat-label>Roles</mat-label>
+        <mat-select [(ngModel)]="selectedRoles" multiple>
+          @for (r of availableRoles; track r.value) {
             <mat-option [value]="r.value">{{ r.label }}</mat-option>
           }
         </mat-select>
@@ -56,7 +56,7 @@ import { CompanyUser, UserRole } from '../../../core/models';
       <button
         mat-raised-button
         color="primary"
-        [disabled]="saving || !email || !name"
+        [disabled]="saving || !email || !name || selectedRoles.length === 0"
         (click)="invite()"
       >
         @if (saving) { <mat-spinner diameter="18"></mat-spinner> }
@@ -76,16 +76,16 @@ export class InviteUserDialogComponent {
 
   email = '';
   name  = '';
-  role: UserRole = 'ISSUER';
+  selectedRoles: UserRole[] = ['ISSUER'];
   saving = false;
   error  = '';
 
-  readonly roles: { value: UserRole; label: string }[] = [
+  readonly availableRoles: { value: UserRole; label: string }[] = [
     { value: 'ISSUER',        label: 'Issuer' },
     { value: 'INVESTOR',      label: 'Investor' },
     { value: 'TRADER',        label: 'Trader' },
     { value: 'COMPANY_ADMIN', label: 'Company Admin' },
-    { value: 'AUDITOR',       label: 'Auditor' },
+    { value: 'AUDIT',         label: 'Audit' },
   ];
 
   invite(): void {
@@ -93,7 +93,7 @@ export class InviteUserDialogComponent {
     this.error = '';
 
     this.companyService
-      .inviteUser({ email: this.email, name: this.name, role: this.role })
+      .inviteUser({ email: this.email, name: this.name, roles: this.selectedRoles })
       .subscribe({
         next: (user) => this.dialogRef.close(user),
         error: (err) => {

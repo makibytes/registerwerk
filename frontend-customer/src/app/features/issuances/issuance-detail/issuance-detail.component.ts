@@ -299,14 +299,14 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     <span class="stat-value">{{ complianceStatus.transferCooldown }}s</span>
                   </div>
                 }
-                @if (complianceStatus?.blockedCountries && complianceStatus.blockedCountries.length) {
+                @if (complianceStatus.blockedCountries && complianceStatus.blockedCountries.length) {
                   <div class="compliance-stat">
                     <span class="stat-label">Blocked Countries</span>
                     <span class="stat-value">{{ complianceStatus.blockedCountries.join(', ') }}</span>
                   </div>
                 }
               </div>
-              @if (complianceStatus?.modules && complianceStatus.modules.length) {
+              @if (complianceStatus.modules && complianceStatus.modules.length) {
                 <div class="module-list">
                   <span class="module-list-label">Active Compliance Modules</span>
                   <div class="module-chips">

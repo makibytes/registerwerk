@@ -52,9 +52,9 @@ import { CompanyUser, UserRole } from '../../../core/models';
                 <input matInput [(ngModel)]="inviteName" placeholder="Full Name" />
               </mat-form-field>
 
-              <mat-form-field appearance="outline" style="width:160px">
-                <mat-label>Role</mat-label>
-                <mat-select [(ngModel)]="inviteRole">
+              <mat-form-field appearance="outline" style="width:240px">
+                <mat-label>Roles</mat-label>
+                <mat-select [(ngModel)]="inviteRoles" multiple>
                   @for (role of availableRoles; track role.value) {
                     <mat-option [value]="role.value">{{ role.label }}</mat-option>
                   }
@@ -64,7 +64,7 @@ import { CompanyUser, UserRole } from '../../../core/models';
               <button
                 mat-raised-button
                 color="primary"
-                [disabled]="!inviteEmail || !inviteName || inviting"
+                [disabled]="!inviteEmail || !inviteName || inviting || inviteRoles.length === 0"
                 (click)="invite()"
               >
                 @if (inviting) { <mat-spinner diameter="18"></mat-spinner> }
@@ -81,7 +81,7 @@ import { CompanyUser, UserRole } from '../../../core/models';
                 <mat-list-item>
                   <mat-icon matListItemIcon>person</mat-icon>
                   <span matListItemTitle>{{ user.name }}</span>
-                  <span matListItemLine>{{ user.email }} · {{ user.role }}</span>
+                  <span matListItemLine>{{ user.email }} · {{ user.roles.join(', ') }}</span>
                 </mat-list-item>
               }
             </mat-list>
@@ -115,7 +115,7 @@ export class SetupUsersComponent implements OnInit {
   users: CompanyUser[] = [];
   inviteEmail = '';
   inviteName = '';
-  inviteRole: UserRole = 'ISSUER';
+  inviteRoles: UserRole[] = ['ISSUER'];
   inviting = false;
 
   readonly availableRoles = [
@@ -123,7 +123,7 @@ export class SetupUsersComponent implements OnInit {
     { value: 'INVESTOR' as UserRole,      label: 'Investor' },
     { value: 'TRADER' as UserRole,        label: 'Trader' },
     { value: 'COMPANY_ADMIN' as UserRole, label: 'Company Admin' },
-    { value: 'AUDITOR' as UserRole,       label: 'Auditor' },
+    { value: 'AUDIT' as UserRole,         label: 'Audit' },
   ];
 
   ngOnInit(): void {
@@ -135,12 +135,13 @@ export class SetupUsersComponent implements OnInit {
 
   invite(): void {
     this.inviting = true;
-    this.company.inviteUser({ email: this.inviteEmail, name: this.inviteName, role: this.inviteRole }).subscribe({
+    this.company.inviteUser({ email: this.inviteEmail, name: this.inviteName, roles: this.inviteRoles }).subscribe({
       next: (user) => {
         this.inviting = false;
         this.users = [...this.users, user];
         this.inviteEmail = '';
         this.inviteName = '';
+        this.inviteRoles = ['ISSUER'];
         this.snackBar.open(`Invitation sent to ${user.email}`, 'OK', { duration: 3000 });
       },
       error: () => {

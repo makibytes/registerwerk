@@ -65,6 +65,12 @@ import { CompanyService } from '../../../core/api/company.service';
               your organisation can sign in using your corporate SSO.
             </p>
 
+            @if (lifecycleManagedExternally) {
+              <div class="managed-banner">
+                User lifecycle actions are managed in your identity provider while Entra mode is enabled.
+              </div>
+            }
+
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>OIDC Issuer URL</mat-label>
               <input
@@ -131,6 +137,15 @@ import { CompanyService } from '../../../core/api/company.service';
     .info-text { font-size: 14px; color: #546e7a; margin: 0 0 24px; }
     .full-width { width: 100%; margin-bottom: 16px; }
     .error-message { color: #c62828; font-size: 13px; }
+    .managed-banner {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(13, 148, 136, 0.08);
+      border: 1px solid rgba(13, 148, 136, 0.18);
+      color: var(--rw-text-primary);
+      font-size: 13px;
+    }
   `]
 })
 export class IdpSettingsComponent implements OnInit {
@@ -142,6 +157,7 @@ export class IdpSettingsComponent implements OnInit {
   clientSecret = '';
   hideSecret = true;
   hasExistingSecret = false;
+  lifecycleManagedExternally = false;
 
   loadingSettings = true;
   saving = false;
@@ -158,7 +174,8 @@ export class IdpSettingsComponent implements OnInit {
         this.clientId   = s.clientId;
         this.origIssuerUrl = s.issuerUrl;
         this.origClientId  = s.clientId;
-        this.hasExistingSecret = !!s.clientSecret;
+        this.hasExistingSecret = s.hasClientSecret;
+        this.lifecycleManagedExternally = s.lifecycleManagedExternally;
         this.loadingSettings = false;
       },
       error: () => (this.loadingSettings = false),

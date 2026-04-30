@@ -28,20 +28,7 @@ public class EntityOwnershipChecker {
         if (auth == null || !auth.isAuthenticated()) {
             return false;
         }
-        Object principal = auth.getPrincipal();
-        if (!(principal instanceof Jwt jwt)) {
-            return false;
-        }
-        String claimedEntityId = jwt.getClaimAsString("entity_id");
-        if (claimedEntityId == null) {
-            return false;
-        }
-        try {
-            UUID claimedUuid = UUID.fromString(claimedEntityId);
-            return claimedUuid.equals(entityId);
-        } catch (IllegalArgumentException e) {
-            log.warn("Invalid entity_id claim in JWT: {}", claimedEntityId);
-            return false;
-        }
+        UUID claimedEntityId = SecurityUtils.extractEntityId(auth);
+        return claimedEntityId != null && claimedEntityId.equals(entityId);
     }
 }

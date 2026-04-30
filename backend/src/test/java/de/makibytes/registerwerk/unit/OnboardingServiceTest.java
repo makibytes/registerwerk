@@ -1,8 +1,10 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.application.customer.OnboardingService;
+import de.makibytes.registerwerk.application.customer.CompanyUserService;
 import de.makibytes.registerwerk.application.notification.OnboardingEmailService;
 import de.makibytes.registerwerk.application.notification.WelcomeEmailService;
+import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.domain.entity.LegalEntity;
 import de.makibytes.registerwerk.domain.entity.OnboardingToken;
 import de.makibytes.registerwerk.domain.enums.EntityStatus;
@@ -47,16 +49,24 @@ class OnboardingServiceTest {
     @Mock
     private OnboardingEmailService onboardingEmailService;
 
+    @Mock
+    private CompanyUserService companyUserService;
+
     private OnboardingService onboardingService;
 
     @BeforeEach
     void setUp() {
+        RegisterwerkAuthProperties authProperties = new RegisterwerkAuthProperties();
+        authProperties.setEntraEnabled(false);
         onboardingService = new OnboardingService(
             onboardingTokenRepository,
             legalEntityRepository,
             welcomeEmailService,
             onboardingEmailService,
-            48
+            companyUserService,
+            authProperties,
+            48,
+            "http://localhost:4201"
         );
     }
 
@@ -192,7 +202,7 @@ class OnboardingServiceTest {
         when(onboardingTokenRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        onboardingService.completeOnboarding(cleartext, UUID.randomUUID());
+        onboardingService.completeOnboarding(cleartext, "admin@test.local", "Jane Admin", "Sup3rSecret!", UUID.randomUUID());
 
         assertThat(token.getUsedAt()).isNotNull();
         assertThat(token.isUsed()).isTrue();
@@ -217,7 +227,7 @@ class OnboardingServiceTest {
         when(onboardingTokenRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        onboardingService.completeOnboarding(cleartext, UUID.randomUUID());
+        onboardingService.completeOnboarding(cleartext, "admin@test.local", "Jane Admin", "Sup3rSecret!", UUID.randomUUID());
 
         assertThat(entity.getStatus()).isEqualTo(EntityStatus.ACTIVE);
         verify(legalEntityRepository).save(entity);

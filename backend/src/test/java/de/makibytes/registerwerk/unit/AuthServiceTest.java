@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.application.exception.InvalidCredentialsExcepti
 import de.makibytes.registerwerk.application.exception.LoginDisabledException;
 import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.domain.entity.AppUser;
+import de.makibytes.registerwerk.domain.enums.AppUserRole;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AppUserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -122,7 +123,7 @@ class AuthServiceTest {
         user.setId(UUID.randomUUID());
         user.setEmail("admin@local");
         user.setPasswordHash("hash");
-        user.setRole("REGISTRY_ADMIN");
+        user.setRole(AppUserRole.REGISTRY_ADMIN);
         user.setEnabled(true);
         return user;
     }

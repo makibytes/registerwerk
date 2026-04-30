@@ -293,14 +293,39 @@ export interface RegistryOverview {
   relationships: RegistryRelationship[];
 }
 
-// ─── Address Endpoints (re-exported from @registerwerk/ui) ────────────────────
+// ─── Address Endpoints ────────────────────────────────────────────────────────
 
-export type {
-  EndpointOwnerType,
-  EndpointAddressType,
-  EndpointRiskLevel,
-  Endpoint,
-  EndpointCreateRequest,
-  EndpointUpdateRequest,
-  AddressResolveResponse,
-} from '@registerwerk/ui';
+export type EndpointOwnerType = 'OPERATOR' | 'ENTITY';
+export type EndpointAddressType = 'WALLET' | 'CONTRACT';
+export type EndpointRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface Endpoint {
+  id: string;
+  ownerType: EndpointOwnerType;
+  ownerId: string | null;
+  address: string;
+  addressType: EndpointAddressType;
+  name: string;
+  notes?: string;
+  riskLevel?: EndpointRiskLevel;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EndpointCreateRequest {
+  address: string;
+  addressType: EndpointAddressType;
+  name: string;
+  notes?: string;
+  riskLevel?: EndpointRiskLevel;
+}
+
+export interface EndpointUpdateRequest {
+  name: string;
+  notes?: string;
+  riskLevel?: EndpointRiskLevel;
+}
+
+export interface AddressResolveResponse {
+  resolutions: Record<string, string>;
+}

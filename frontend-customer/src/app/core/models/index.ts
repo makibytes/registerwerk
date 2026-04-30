@@ -85,7 +85,7 @@ export type UserRole =
   | 'INVESTOR'
   | 'COMPANY_ADMIN'
   | 'REGISTRY_ADMIN'
-  | 'AUDITOR'
+  | 'AUDIT'
   | 'TRADER';
 
 // ─── Domain Models ────────────────────────────────────────────────────────────
@@ -230,8 +230,12 @@ export interface CompanyUser {
   id: string;
   email: string;
   name: string;
-  role: UserRole;
+  roles: UserRole[];
   entityId: string;
+  enabled: boolean;
+  lastLoginAt: string | null;
+  authProvider: 'LOCAL' | 'ENTRA';
+  passwordSetupRequired: boolean;
 }
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
@@ -258,6 +262,13 @@ export interface IdpSettings {
   issuerUrl: string;
   clientId: string;
   clientSecret: string;
+  hasClientSecret: boolean;
+  lifecycleManagedExternally: boolean;
+}
+
+export interface PublicUserActionTokenInfo {
+  email: string;
+  name: string;
 }
 
 // ─── Trading ──────────────────────────────────────────────────────────────────
@@ -390,14 +401,39 @@ export interface PageParams {
   [key: string]: string | number | boolean | undefined;
 }
 
-// ─── Address Endpoints (re-exported from @registerwerk/ui) ────────────────────
+// ─── Address Endpoints ────────────────────────────────────────────────────────
 
-export type {
-  EndpointOwnerType,
-  EndpointAddressType,
-  EndpointRiskLevel,
-  Endpoint,
-  EndpointCreateRequest,
-  EndpointUpdateRequest,
-  AddressResolveResponse,
-} from '@registerwerk/ui';
+export type EndpointOwnerType = 'OPERATOR' | 'ENTITY';
+export type EndpointAddressType = 'WALLET' | 'CONTRACT';
+export type EndpointRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface Endpoint {
+  id: string;
+  ownerType: EndpointOwnerType;
+  ownerId: string | null;
+  address: string;
+  addressType: EndpointAddressType;
+  name: string;
+  notes?: string;
+  riskLevel?: EndpointRiskLevel;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EndpointCreateRequest {
+  address: string;
+  addressType: EndpointAddressType;
+  name: string;
+  notes?: string;
+  riskLevel?: EndpointRiskLevel;
+}
+
+export interface EndpointUpdateRequest {
+  name: string;
+  notes?: string;
+  riskLevel?: EndpointRiskLevel;
+}
+
+export interface AddressResolveResponse {
+  resolutions: Record<string, string>;
+}

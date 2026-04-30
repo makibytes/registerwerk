@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.application.exception.InvalidCredentialsExcepti
 import de.makibytes.registerwerk.application.exception.LoginDisabledException;
 import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.domain.entity.AppUser;
+import de.makibytes.registerwerk.domain.enums.UserAuthProvider;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AppUserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -39,14 +40,20 @@ public class AuthService {
         }
         AppUser user = users.findByEmailIgnoreCase(email)
             .filter(AppUser::isEnabled)
+            .filter(found -> found.getAuthProvider() == UserAuthProvider.LOCAL)
             .orElseThrow(InvalidCredentialsException::new);
-        if (!encoder.matches(rawPassword, user.getPasswordHash())) {
+        if (user.getPasswordHash() == null || !encoder.matches(rawPassword, user.getPasswordHash())) {
             throw new InvalidCredentialsException();
         }
         user.setLastLoginAt(Instant.now());
         users.save(user);
         String token = minter.mint(user);
-        return new LoginResult(token, user.getId(), List.of(user.getRole()), props.getTokenTtlSeconds());
+        return new LoginResult(
+            token,
+            user.getId(),
+            user.getRoles().stream().map(Enum::name).toList(),
+            props.getTokenTtlSeconds()
+        );
     }
 
     public record LoginResult(String token, UUID userId, List<String> roles, long ttlSeconds) {}

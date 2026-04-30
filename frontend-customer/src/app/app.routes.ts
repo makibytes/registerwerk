@@ -9,6 +9,14 @@ export const routes: Routes = [
     path: 'onboarding',
     loadChildren: () => import('./features/onboarding-setup/onboarding-setup.routes').then(m => m.ONBOARDING_SETUP_ROUTES)
   },
+  {
+    path: 'register/:token',
+    loadComponent: () => import('./core/auth/register-account.component').then(m => m.RegisterAccountComponent)
+  },
+  {
+    path: 'reset-password/:token',
+    loadComponent: () => import('./core/auth/reset-password.component').then(m => m.ResetPasswordComponent)
+  },
   // Authenticated shell
   {
     path: '',

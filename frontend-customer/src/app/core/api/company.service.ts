@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { CompanyUser, IdpSettings, LegalEntity } from '../models';
+import { CompanyUser, IdpSettings, LegalEntity, PublicUserActionTokenInfo, UserRole } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class CompanyService {
@@ -21,8 +21,24 @@ export class CompanyService {
     return this.http.get<CompanyUser[]>(`${this.base}/users`);
   }
 
-  inviteUser(body: { email: string; name: string; role: string }): Observable<CompanyUser> {
+  inviteUser(body: { email: string; name: string; roles: UserRole[] }): Observable<CompanyUser> {
     return this.http.post<CompanyUser>(`${this.base}/users/invite`, body);
+  }
+
+  updateUserRoles(userId: string, roles: UserRole[]): Observable<CompanyUser> {
+    return this.http.patch<CompanyUser>(`${this.base}/users/${userId}/roles`, { roles });
+  }
+
+  disableUser(userId: string): Observable<CompanyUser> {
+    return this.http.post<CompanyUser>(`${this.base}/users/${userId}/disable`, {});
+  }
+
+  enableUser(userId: string): Observable<CompanyUser> {
+    return this.http.post<CompanyUser>(`${this.base}/users/${userId}/enable`, {});
+  }
+
+  sendPasswordReset(userId: string): Observable<void> {
+    return this.http.post<void>(`${this.base}/users/${userId}/password-reset`, {});
   }
 
   removeUser(userId: string): Observable<void> {
@@ -35,7 +51,30 @@ export class CompanyService {
     return this.http.get<IdpSettings>(`${this.base}/idp`);
   }
 
-  saveIdpSettings(body: IdpSettings): Observable<IdpSettings> {
+  saveIdpSettings(body: { issuerUrl: string; clientId: string; clientSecret: string }): Observable<IdpSettings> {
     return this.http.put<IdpSettings>(`${this.base}/idp`, body);
+  }
+
+  getRegistrationInfo(token: string): Observable<PublicUserActionTokenInfo> {
+    return this.http.get<PublicUserActionTokenInfo>(`${environment.apiUrl}/public/company-users/registration/${token}`);
+  }
+
+  completeRegistration(token: string, name: string, password: string): Observable<void> {
+    return this.http.post<void>(`${environment.apiUrl}/public/company-users/registration/complete`, {
+      token,
+      name,
+      password,
+    });
+  }
+
+  getPasswordResetInfo(token: string): Observable<PublicUserActionTokenInfo> {
+    return this.http.get<PublicUserActionTokenInfo>(`${environment.apiUrl}/public/company-users/password-reset/${token}`);
+  }
+
+  completePasswordReset(token: string, password: string): Observable<void> {
+    return this.http.post<void>(`${environment.apiUrl}/public/company-users/password-reset/complete`, {
+      token,
+      password,
+    });
   }
 }

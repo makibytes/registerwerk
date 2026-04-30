@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.unit;
 import de.makibytes.registerwerk.application.auth.JwtMintingService;
 import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.domain.entity.AppUser;
+import de.makibytes.registerwerk.domain.enums.AppUserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,8 +47,9 @@ class JwtMintingServiceTest {
         Jwt decoded = verifier.decode(tokenValue);
 
         assertThat(decoded.getSubject()).isEqualTo(user.getId().toString());
-        assertThat(decoded.getClaimAsString("entityId")).isEqualTo(user.getId().toString());
+        assertThat(decoded.getClaimAsString("entityId")).isNull();
         assertThat(decoded.<List<String>>getClaim("roles")).containsExactly("REGISTRY_ADMIN");
+        assertThat(decoded.getClaimAsString("email")).isEqualTo("admin@local");
         assertThat(decoded.getIssuedAt()).isBeforeOrEqualTo(Instant.now());
         assertThat(decoded.getExpiresAt()).isAfter(Instant.now());
     }
@@ -58,7 +60,7 @@ class JwtMintingServiceTest {
         AppUser user = new AppUser();
         user.setId(UUID.randomUUID());
         user.setEmail("admin@local");
-        user.setRole("REGISTRY_ADMIN");
+        user.setRole(AppUserRole.REGISTRY_ADMIN);
         user.setEnabled(true);
         return user;
     }
