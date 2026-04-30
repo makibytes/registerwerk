@@ -121,6 +121,7 @@ export class SetupUsersComponent implements OnInit {
   readonly availableRoles = [
     { value: 'ISSUER' as UserRole,        label: 'Issuer' },
     { value: 'INVESTOR' as UserRole,      label: 'Investor' },
+    { value: 'TRADER' as UserRole,        label: 'Trader' },
     { value: 'COMPANY_ADMIN' as UserRole, label: 'Company Admin' },
     { value: 'AUDITOR' as UserRole,       label: 'Auditor' },
   ];

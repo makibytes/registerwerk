@@ -83,6 +83,7 @@ export class InviteUserDialogComponent {
   readonly roles: { value: UserRole; label: string }[] = [
     { value: 'ISSUER',        label: 'Issuer' },
     { value: 'INVESTOR',      label: 'Investor' },
+    { value: 'TRADER',        label: 'Trader' },
     { value: 'COMPANY_ADMIN', label: 'Company Admin' },
     { value: 'AUDITOR',       label: 'Auditor' },
   ];

@@ -156,6 +156,23 @@ registerwerk:
     default-admin:
       email: ${DEFAULT_ADMIN_EMAIL:}
       password: ${DEFAULT_ADMIN_PASSWORD:}
+  trading:
+    enabled: ${REGISTERWERK_TRADING_ENABLED:true}
+    venues:
+      simulated:
+        enabled: ${REGISTERWERK_TRADING_VENUE_SIMULATED_ENABLED:true}
+      assetera:
+        enabled: ${REGISTERWERK_TRADING_VENUE_ASSETERA_ENABLED:true}
+        base-url: ${REGISTERWERK_TRADING_VENUE_ASSETERA_BASE_URL:}
+        api-key: ${REGISTERWERK_TRADING_VENUE_ASSETERA_API_KEY:}
+      archax:
+        enabled: ${REGISTERWERK_TRADING_VENUE_ARCHAX_ENABLED:true}
+        base-url: ${REGISTERWERK_TRADING_VENUE_ARCHAX_BASE_URL:}
+        api-key: ${REGISTERWERK_TRADING_VENUE_ARCHAX_API_KEY:}
+      talos:
+        enabled: ${REGISTERWERK_TRADING_VENUE_TALOS_ENABLED:true}
+        base-url: ${REGISTERWERK_TRADING_VENUE_TALOS_BASE_URL:}
+        api-key: ${REGISTERWERK_TRADING_VENUE_TALOS_API_KEY:}
   sync:
     # Auto-refresh interval in minutes for holder data sync from blockchain (0 = disabled)
     auto-refresh-interval-minutes: ${SYNC_INTERVAL_MINUTES:15}

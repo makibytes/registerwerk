@@ -85,7 +85,8 @@ export type UserRole =
   | 'INVESTOR'
   | 'COMPANY_ADMIN'
   | 'REGISTRY_ADMIN'
-  | 'AUDITOR';
+  | 'AUDITOR'
+  | 'TRADER';
 
 // ─── Domain Models ────────────────────────────────────────────────────────────
 
@@ -257,6 +258,127 @@ export interface IdpSettings {
   issuerUrl: string;
   clientId: string;
   clientSecret: string;
+}
+
+// ─── Trading ──────────────────────────────────────────────────────────────────
+
+export type TradingVenueCode = 'SIMULATED' | 'ASSETERA' | 'ARCHAX' | 'TALOS';
+
+export type TradingAssetType = 'EQUITY' | 'BOND' | 'FUND' | 'NOTE' | 'COMMODITY' | 'OTHER';
+
+export type PaymentOption =
+  | 'NATIVE_CHAIN_CURRENCY'
+  | 'STABLECOIN'
+  | 'CBMT'
+  | 'PONTES_TARGET'
+  | 'OFFCHAIN_SEPA';
+
+export type TradingOrderType = 'MARKET' | 'LIMIT' | 'IOC' | 'FOK';
+
+export type ListingStatus = 'OPEN' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELLED';
+
+export type SettlementStatus = 'PENDING' | 'SETTLED';
+
+export type WalletPreferenceMode = 'GLOBAL_DEFAULT' | 'ASSET_TYPE_DEFAULT' | 'ENDPOINT' | 'CUSTOM_ADDRESS';
+
+export type WalletTargetType = 'ENDPOINT' | 'CUSTOM_ADDRESS';
+
+export interface TradingVenue {
+  code: TradingVenueCode;
+  displayName: string;
+  connected: boolean;
+  executable: boolean;
+  supportedOrderTypes: TradingOrderType[];
+  summary: string;
+}
+
+export interface CompanyTraderWalletDefault {
+  id?: string;
+  assetType: TradingAssetType | null;
+  targetType: WalletTargetType;
+  endpointId: string | null;
+  walletAddress: string | null;
+}
+
+export interface CompanyTraderSettings {
+  defaultPaymentOption: PaymentOption;
+  immediateSettlementEnabled: boolean;
+  walletDefaults: CompanyTraderWalletDefault[];
+}
+
+export interface SellableHolding {
+  holderId: string;
+  assetId: string;
+  assetNumber: string;
+  assetName: string;
+  isin: string | null;
+  assetType: TradingAssetType;
+  tokenStandard: TokenStandard;
+  chain: Chain | null;
+  ownedQuantity: number;
+  availableQuantity: number;
+  walletAddress: string;
+}
+
+export interface TradeListing {
+  id: string;
+  venueCode: TradingVenueCode;
+  assetId: string;
+  assetNumber: string;
+  assetName: string;
+  isin: string | null;
+  assetType: TradingAssetType;
+  tokenStandard: TokenStandard;
+  chain: Chain | null;
+  status: ListingStatus;
+  quantityTotal: number;
+  quantityAvailable: number;
+  pricePerUnit: number;
+  allowedPaymentOptions: PaymentOption[];
+  createdAt: string;
+}
+
+export interface TradingOffer {
+  listingId: string;
+  venueCode: TradingVenueCode;
+  venueDisplayName: string;
+  assetId: string;
+  assetNumber: string;
+  assetName: string;
+  isin: string | null;
+  assetType: TradingAssetType;
+  tokenStandard: TokenStandard;
+  chain: Chain | null;
+  quantityAvailable: number;
+  pricePerUnit: number;
+  allowedPaymentOptions: PaymentOption[];
+  supportedOrderTypes: TradingOrderType[];
+  createdAt: string;
+}
+
+export interface TradeExecution {
+  id: string;
+  side: 'BUY' | 'SELL';
+  listingId: string;
+  venueCode: TradingVenueCode;
+  assetId: string;
+  assetNumber: string;
+  assetName: string;
+  isin: string | null;
+  assetType: TradingAssetType;
+  tokenStandard: TokenStandard;
+  chain: Chain | null;
+  orderType: TradingOrderType;
+  executedQuantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  paymentOption: PaymentOption;
+  settlementStatus: SettlementStatus;
+  walletPreferenceMode: WalletPreferenceMode;
+  walletEndpointId: string | null;
+  walletAddress: string;
+  createdAt: string;
+  settledAt: string | null;
 }
 
 // ─── Page / Query Params ──────────────────────────────────────────────────────

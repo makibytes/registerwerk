@@ -200,6 +200,7 @@ export class UserListComponent implements OnInit {
     const labels: Record<UserRole, string> = {
       ISSUER:         'Issuer',
       INVESTOR:       'Investor',
+      TRADER:         'Trader',
       COMPANY_ADMIN:  'Company Admin',
       REGISTRY_ADMIN: 'Registry Admin',
       AUDITOR:        'Auditor',

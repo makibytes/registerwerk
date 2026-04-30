@@ -301,6 +301,7 @@ export class NavComponent implements OnInit {
     { label: 'Dashboard',      route: '/dashboard',     icon: 'grid_view',       roles: [] },
     { label: 'Issuances',      route: '/issuances',     icon: 'description',     roles: ['ISSUER', 'REGISTRY_ADMIN'] },
     { label: 'Investments',    route: '/investments',   icon: 'savings',         roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
+    { label: 'Trading',        route: '/trading',       icon: 'candlestick_chart', roles: ['TRADER', 'REGISTRY_ADMIN'] },
     { label: 'Company Admin',  route: '/company-admin', icon: 'manage_accounts', roles: ['COMPANY_ADMIN'] },
     { label: 'KYC',            route: '/kyc',           icon: 'verified_user',   roles: [] },
     { label: 'Endpoints',     route: '/endpoints',     icon: 'contacts',        roles: [] },

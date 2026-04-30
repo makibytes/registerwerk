@@ -31,6 +31,11 @@ export const routes: Routes = [
         loadChildren: () => import('./features/investments/investments.routes').then(m => m.INVESTMENT_ROUTES)
       },
       {
+        path: 'trading',
+        canActivate: [roleGuard(['TRADER', 'REGISTRY_ADMIN'])],
+        loadComponent: () => import('./features/trading/trading-desk.component').then(m => m.TradingDeskComponent)
+      },
+      {
         path: 'company-admin',
         canActivate: [roleGuard(['COMPANY_ADMIN'])],
         loadChildren: () => import('./features/company-admin/company-admin.routes').then(m => m.COMPANY_ADMIN_ROUTES)
