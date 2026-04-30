@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { OperatorWallet, WalletDefault } from '../models';
+import { OperatorWallet, WalletBalance, WalletDefault } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class WalletService {
@@ -44,6 +44,14 @@ export class WalletService {
 
   delete(walletId: string): Observable<void> {
     return this.http.delete<void>(`${this.base}/${walletId}`);
+  }
+
+  getById(walletId: string): Observable<OperatorWallet> {
+    return this.http.get<OperatorWallet>(`${this.base}/${walletId}`);
+  }
+
+  getBalances(walletId: string): Observable<WalletBalance[]> {
+    return this.http.get<WalletBalance[]>(`${this.base}/${walletId}/balances`);
   }
 
   listDefaults(): Observable<WalletDefault[]> {

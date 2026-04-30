@@ -133,6 +133,7 @@ public class AssetController {
 
     /** Submits an asset for approval (DRAFT → PENDING_APPROVAL). */
     @PostMapping("/{id}/submit")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
     public ResponseEntity<Void> submitForApproval(@PathVariable UUID id, Authentication auth) {
         assetLifecycleService.submit(id, extractActorId(auth));
         return ResponseEntity.noContent().build();
@@ -159,6 +160,7 @@ public class AssetController {
 
     /** Issues an asset (APPROVED → ISSUED). */
     @PostMapping("/{id}/issue")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
     public ResponseEntity<Void> issueAsset(@PathVariable UUID id, Authentication auth) {
         assetLifecycleService.issue(id, extractActorId(auth));
         return ResponseEntity.noContent().build();
@@ -174,6 +176,7 @@ public class AssetController {
 
     /** Redeems an asset (ISSUED/SUSPENDED → REDEEMED). */
     @PostMapping("/{id}/redeem")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
     public ResponseEntity<Void> redeemAsset(@PathVariable UUID id, Authentication auth) {
         assetLifecycleService.redeem(id, extractActorId(auth));
         return ResponseEntity.noContent().build();

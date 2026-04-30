@@ -1,9 +1,8 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
-import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatSnackBar } from '@angular/material/snack-bar';
 
 /**
  * Displays a wallet address in shortened form with copy and hover functionality.
@@ -14,12 +13,11 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 @Component({
   selector: 'lib-wallet-address',
   standalone: true,
-  imports: [CommonModule, MatButtonModule, MatIconModule, MatTooltipModule, MatSnackBarModule],
+  imports: [CommonModule, MatButtonModule, MatIconModule],
   template: `
     <div class="wallet-address-container">
       <code 
-        [matTooltip]="address" 
-        matTooltipPosition="above"
+        [title]="address"
         class="wallet-address-code"
         [attr.aria-label]="'Wallet address: ' + address">
         {{ shortAddress }}
@@ -27,8 +25,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
       <button 
         mat-icon-button 
         (click)="copyToClipboard()" 
-        matTooltip="Copy full address"
-        matTooltipPosition="above"
+        title="Copy full address"
         class="copy-button"
         [attr.aria-label]="'Copy wallet address ' + address">
         <mat-icon>content_copy</mat-icon>
@@ -80,14 +77,14 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
   `]
 })
 export class WalletAddressComponent {
+  private readonly snackBar = inject(MatSnackBar);
+
   @Input() address!: string;
 
   get shortAddress(): string {
     if (!this.address || this.address.length < 13) return this.address;
     return `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
   }
-
-  constructor(private snackBar: MatSnackBar) {}
 
   copyToClipboard(): void {
     if (!this.address) return;

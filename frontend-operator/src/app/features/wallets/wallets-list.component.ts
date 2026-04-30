@@ -1,5 +1,6 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
@@ -21,7 +22,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
   selector: 'app-wallets-list',
   standalone: true,
   imports: [
-    CommonModule, MatIconModule, MatButtonModule, MatMenuModule, MatTooltipModule,
+    CommonModule, RouterLink, MatIconModule, MatButtonModule, MatMenuModule, MatTooltipModule,
     MatSnackBarModule, MatDialogModule, MatChipsModule, AddressComponent,
   ],
   styles: [`
@@ -37,6 +38,8 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
     tbody tr:not(:last-child) td { border-bottom: 1px solid var(--rw-border); }
     tbody tr:hover td { background: var(--rw-bg); }
     td { padding: 14px 20px; font-size: 13px; color: var(--rw-text-primary); vertical-align: middle; }
+    .wallet-name-link { color: var(--rw-text-primary); text-decoration: none; font-weight: 600; }
+    .wallet-name-link:hover { color: var(--rw-accent); text-decoration: underline; }
 
     .type-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
     .type-chip.evm { background: rgba(98,126,234,.12); color: #627EEA; }
@@ -91,7 +94,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
           <tbody>
             @for (wallet of wallets(); track wallet.id) {
               <tr>
-                <td><strong>{{ wallet.name }}</strong></td>
+                <td><a class="wallet-name-link" [routerLink]="['/wallets', wallet.id]">{{ wallet.name }}</a></td>
                 <td><span class="type-chip" [class.evm]="wallet.type === 'EVM'" [class.solana]="wallet.type === 'SOLANA'">{{ wallet.type }}</span></td>
                 <td><app-address [address]="wallet.address" /></td>
                 <td>
@@ -110,6 +113,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
                     <mat-icon>more_vert</mat-icon>
                   </button>
                   <mat-menu #actionMenu>
+                    <button mat-menu-item [routerLink]="['/wallets', wallet.id]"><mat-icon>open_in_new</mat-icon> View details</button>
                     <button mat-menu-item (click)="openSetDefault(wallet)"><mat-icon>star</mat-icon> Set as default</button>
                     <button mat-menu-item (click)="exportKeystore(wallet)" [disabled]="wallet.type !== 'EVM'"><mat-icon>download</mat-icon> Export keystore</button>
                     <button mat-menu-item (click)="exportRaw(wallet)"><mat-icon>key</mat-icon> Export raw key…</button>

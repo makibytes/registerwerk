@@ -65,6 +65,20 @@ export const routes: Routes = [
             (m) => m.WalletsListComponent
           ),
       },
+      {
+        path: 'wallets/:id',
+        loadComponent: () =>
+          import('./features/wallets/wallet-detail.component').then(
+            (m) => m.WalletDetailComponent
+          ),
+      },
+      {
+        path: 'endpoints',
+        loadComponent: () =>
+          import('./features/endpoints/endpoints-list.component').then(
+            (m) => m.EndpointsListComponent
+          ),
+      },
     ],
   },
   {

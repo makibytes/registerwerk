@@ -1,73 +1,91 @@
 package de.makibytes.registerwerk.web.security;
 
-import de.makibytes.registerwerk.domain.asset.Asset;
+import de.makibytes.registerwerk.domain.asset.AssetDeployment;
+import de.makibytes.registerwerk.domain.blockchain.BlockchainTransaction;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import de.makibytes.registerwerk.infrastructure.persistence.jpa.BlockchainTransactionRepository;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Security helper that determines read access to an asset.
- * Admins and auditors have unrestricted read access; issuers can only read their own assets.
+ * Security helper that controls access to assets and related resources.
  */
 @Component
 public class AssetAccessChecker {
 
-    private static final Logger log = LoggerFactory.getLogger(AssetAccessChecker.class);
-
     private final AssetRepository assetRepository;
+    private final AssetDeploymentRepository deploymentRepository;
+    private final BlockchainTransactionRepository transactionRepository;
 
-    public AssetAccessChecker(AssetRepository assetRepository) {
+    public AssetAccessChecker(
+            AssetRepository assetRepository,
+            AssetDeploymentRepository deploymentRepository,
+            BlockchainTransactionRepository transactionRepository) {
         this.assetRepository = assetRepository;
+        this.deploymentRepository = deploymentRepository;
+        this.transactionRepository = transactionRepository;
     }
 
     /**
      * Returns true if the authenticated user may read the given asset.
-     *
-     * <ul>
-     *   <li>REGISTRY_ADMIN and AUDIT roles have unrestricted access.</li>
-     *   <li>Other authenticated users may read an asset only if their {@code entity_id}
-     *       JWT claim matches the asset's {@code issuerId}.</li>
-     * </ul>
-     *
-     * @param assetId UUID of the asset to check
-     * @param auth    current Spring Security authentication
-     * @return true if access is permitted
+     * REGISTRY_ADMIN and AUDIT roles have unrestricted access; others may read only
+     * if their {@code entity_id} matches the asset's {@code issuerId}.
      */
     public boolean canRead(UUID assetId, Authentication auth) {
-        if (auth == null || !auth.isAuthenticated()) {
-            return false;
-        }
+        if (auth == null || !auth.isAuthenticated()) return false;
+        if (SecurityUtils.isAdminOrAudit(auth)) return true;
+        return isOwnerOfAsset(assetId, auth);
+    }
 
-        // Admins and auditors always have access
-        boolean isAdminOrAudit = auth.getAuthorities().stream()
-            .anyMatch(a -> a.getAuthority().equals("ROLE_REGISTRY_ADMIN")
-                || a.getAuthority().equals("ROLE_AUDIT"));
-        if (isAdminOrAudit) {
-            return true;
-        }
+    /**
+     * Returns true if the caller is the issuing company for this asset.
+     * Does NOT grant access to REGISTRY_ADMIN automatically — callers should
+     * compose: {@code hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(...)}.
+     */
+    public boolean canActAsIssuer(UUID assetId, Authentication auth) {
+        if (auth == null || !auth.isAuthenticated()) return false;
+        return isOwnerOfAsset(assetId, auth);
+    }
 
-        // Check issuer ownership via entity_id claim
-        Object principal = auth.getPrincipal();
-        if (!(principal instanceof Jwt jwt)) {
-            return false;
-        }
-        String claimedEntityId = jwt.getClaimAsString("entity_id");
-        if (claimedEntityId == null) {
-            return false;
-        }
-        try {
-            UUID claimedUuid = UUID.fromString(claimedEntityId);
-            Optional<Asset> asset = assetRepository.findById(assetId);
-            return asset.map(a -> claimedUuid.equals(a.getIssuerId())).orElse(false);
-        } catch (IllegalArgumentException e) {
-            log.warn("Invalid entity_id claim in JWT: {}", claimedEntityId);
-            return false;
-        }
+    /**
+     * Returns true if the caller may read the given blockchain transaction
+     * (resolved by looking up the transaction's asset and calling {@link #canRead}).
+     */
+    public boolean canReadTransaction(UUID txId, Authentication auth) {
+        if (auth == null || !auth.isAuthenticated()) return false;
+        if (SecurityUtils.isAdminOrAudit(auth)) return true;
+        Optional<BlockchainTransaction> tx = transactionRepository.findById(txId);
+        if (tx.isEmpty()) return false;
+        UUID assetId = tx.get().getAssetId();
+        if (assetId == null) return false;
+        return canRead(assetId, auth);
+    }
+
+    /**
+     * Returns true if the caller may read transactions for the given deployment
+     * (resolved by looking up the deployment's asset and calling {@link #canRead}).
+     */
+    public boolean canReadDeployment(UUID deploymentId, Authentication auth) {
+        if (auth == null || !auth.isAuthenticated()) return false;
+        if (SecurityUtils.isAdminOrAudit(auth)) return true;
+        Optional<AssetDeployment> dep = deploymentRepository.findById(deploymentId);
+        if (dep.isEmpty()) return false;
+        UUID assetId = dep.get().getAssetId();
+        if (assetId == null) return false;
+        return canRead(assetId, auth);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private boolean isOwnerOfAsset(UUID assetId, Authentication auth) {
+        UUID entityId = SecurityUtils.extractEntityId(auth);
+        if (entityId == null) return false;
+        return assetRepository.findById(assetId)
+                .map(a -> entityId.equals(a.getIssuerId()))
+                .orElse(false);
     }
 }

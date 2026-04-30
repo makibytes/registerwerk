@@ -57,6 +57,7 @@ public class InvestmentController {
      * Returns a single investment record by holder ID.
      */
     @GetMapping("/{holderId}")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @investmentAccessChecker.canRead(#holderId, authentication)")
     public ResponseEntity<InvestmentResponse> getInvestment(
             @PathVariable UUID holderId,
             Authentication auth) {

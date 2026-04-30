@@ -196,6 +196,15 @@ export interface AuditFilterParams {
 
 export type SyncStatus = 'READY' | 'PENDING' | 'UPDATING';
 
+export interface WalletBalance {
+  chainConfigId: string;
+  chainIdentifier: string;
+  chainDisplayName: string;
+  nativeCurrencySymbol: string;
+  balance: number | null;
+  error: string | null;
+}
+
 export interface OperatorWallet {
   id: string;
   name: string;
@@ -284,35 +293,14 @@ export interface RegistryOverview {
   relationships: RegistryRelationship[];
 }
 
-// ─── Address Endpoints ────────────────────────────────────────────────────────
+// ─── Address Endpoints (re-exported from @registerwerk/ui) ────────────────────
 
-export type EndpointOwnerType = 'OPERATOR' | 'ENTITY';
-export type EndpointAddressType = 'WALLET' | 'CONTRACT';
-
-export interface Endpoint {
-  id: string;
-  ownerType: EndpointOwnerType;
-  ownerId: string | null;
-  address: string;
-  addressType: EndpointAddressType;
-  name: string;
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EndpointCreateRequest {
-  address: string;
-  addressType: EndpointAddressType;
-  name: string;
-  notes?: string;
-}
-
-export interface EndpointUpdateRequest {
-  name: string;
-  notes?: string;
-}
-
-export interface AddressResolveResponse {
-  resolutions: Record<string, string>;
-}
+export type {
+  EndpointOwnerType,
+  EndpointAddressType,
+  EndpointRiskLevel,
+  Endpoint,
+  EndpointCreateRequest,
+  EndpointUpdateRequest,
+  AddressResolveResponse,
+} from '@registerwerk/ui';

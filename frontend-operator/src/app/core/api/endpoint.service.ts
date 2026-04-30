@@ -7,7 +7,7 @@ import {
   EndpointCreateRequest,
   EndpointUpdateRequest,
   AddressResolveResponse,
-} from '../models';
+} from '@registerwerk/ui';
 
 @Injectable({ providedIn: 'root' })
 export class EndpointService {

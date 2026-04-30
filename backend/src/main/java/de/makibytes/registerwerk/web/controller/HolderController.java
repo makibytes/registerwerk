@@ -31,6 +31,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/assets/{assetId}/holders")
+@PreAuthorize("isAuthenticated()")
 public class HolderController {
 
     private static final Logger log = LoggerFactory.getLogger(HolderController.class);
@@ -61,6 +62,7 @@ public class HolderController {
      * Adds a new holder to an asset.
      */
     @PostMapping
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<HolderResponse> addHolder(
             @PathVariable UUID assetId,
             @RequestBody @Valid HolderCreateRequest request) {
@@ -77,6 +79,7 @@ public class HolderController {
      * Returns a paginated list of holders for an asset.
      */
     @GetMapping
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
     public ResponseEntity<PageResponse<HolderResponse>> listHolders(
             @PathVariable UUID assetId,
             Pageable pageable) {
@@ -103,6 +106,7 @@ public class HolderController {
      * Requires a deploymentId in the request body to identify which contract to call.
      */
     @PostMapping("/{holderId}/whitelist")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<Void> whitelistHolder(
             @PathVariable UUID assetId,
             @PathVariable UUID holderId,
@@ -125,7 +129,7 @@ public class HolderController {
      * @return list of live holders with balance, identity, and whitelist status
      */
     @GetMapping("/{depId}/live")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('ISSUER') or hasRole('AUDITOR')")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
     public ResponseEntity<List<LiveHolderResponse>> getLiveHolders(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {
@@ -140,7 +144,7 @@ public class HolderController {
      * <p>Path: POST /api/v1/assets/{assetId}/holders/refresh
      */
     @PostMapping("/refresh")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('ISSUER')")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<Map<String, Object>> refreshAssetHolders(
             @PathVariable UUID assetId,
             Authentication auth) {

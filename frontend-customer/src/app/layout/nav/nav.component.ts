@@ -303,6 +303,7 @@ export class NavComponent implements OnInit {
     { label: 'Investments',    route: '/investments',   icon: 'savings',         roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
     { label: 'Company Admin',  route: '/company-admin', icon: 'manage_accounts', roles: ['COMPANY_ADMIN'] },
     { label: 'KYC',            route: '/kyc',           icon: 'verified_user',   roles: [] },
+    { label: 'Endpoints',     route: '/endpoints',     icon: 'contacts',        roles: [] },
   ];
 
   ngOnInit(): void {

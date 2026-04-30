@@ -53,7 +53,7 @@ public class EndpointController {
         UUID entityId = extractEntityId(auth);
         AddressEndpoint ep = endpointService.createEndpoint(
                 isOperator, entityId,
-                request.address(), request.addressType(), request.name(), request.notes());
+                request.address(), request.addressType(), request.name(), request.notes(), request.riskLevel());
         return ResponseEntity.status(HttpStatus.CREATED).body(EndpointResponse.from(ep));
     }
 
@@ -65,7 +65,7 @@ public class EndpointController {
         boolean isOperator = hasRole(auth, "REGISTRY_ADMIN");
         UUID entityId = extractEntityId(auth);
         AddressEndpoint ep = endpointService.updateEndpoint(id, isOperator, entityId,
-                request.name(), request.notes());
+                request.name(), request.notes(), request.riskLevel());
         return ResponseEntity.ok(EndpointResponse.from(ep));
     }
 

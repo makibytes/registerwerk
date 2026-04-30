@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.web.controller;
 
+import de.makibytes.registerwerk.application.wallet.WalletBalanceService;
 import de.makibytes.registerwerk.application.wallet.WalletDefaultService;
 import de.makibytes.registerwerk.application.wallet.WalletService;
 import de.makibytes.registerwerk.domain.wallet.OperatorWallet;
@@ -28,10 +29,13 @@ public class WalletController {
 
     private final WalletService        walletService;
     private final WalletDefaultService defaultService;
+    private final WalletBalanceService balanceService;
 
-    public WalletController(WalletService walletService, WalletDefaultService defaultService) {
+    public WalletController(WalletService walletService, WalletDefaultService defaultService,
+                            WalletBalanceService balanceService) {
         this.walletService  = walletService;
         this.defaultService = defaultService;
+        this.balanceService = balanceService;
     }
 
     @GetMapping
@@ -47,6 +51,11 @@ public class WalletController {
     public ResponseEntity<WalletResponse> get(@PathVariable UUID id) {
         OperatorWallet w = walletService.getById(id);
         return ResponseEntity.ok(toResponse(w, defaultService.listAll()));
+    }
+
+    @GetMapping("/{id}/balances")
+    public ResponseEntity<List<WalletBalanceResponse>> getBalances(@PathVariable UUID id) {
+        return ResponseEntity.ok(balanceService.getBalances(id));
     }
 
     @PostMapping("/generate")

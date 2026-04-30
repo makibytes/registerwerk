@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.application.endpoint;
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
 import de.makibytes.registerwerk.domain.asset.AssetHolder;
 import de.makibytes.registerwerk.domain.endpoint.AddressEndpoint;
+import de.makibytes.registerwerk.domain.endpoint.RiskLevel;
 import de.makibytes.registerwerk.domain.entity.LegalEntity;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AddressEndpointRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetHolderRepository;
@@ -101,7 +102,8 @@ public class EndpointService {
 
     @Transactional
     public AddressEndpoint createEndpoint(boolean isOperator, UUID entityId, String address,
-                                          AddressEndpoint.AddressType addressType, String name, String notes) {
+                                          AddressEndpoint.AddressType addressType, String name,
+                                          String notes, RiskLevel riskLevel) {
         boolean duplicate = isOperator
                 ? endpointRepository.findByOperatorAndAddress(AddressEndpoint.OwnerType.OPERATOR, address).isPresent()
                 : endpointRepository.findByOwnerTypeAndOwnerIdAndAddress(
@@ -118,17 +120,19 @@ public class EndpointService {
         ep.setAddressType(addressType);
         ep.setName(name);
         ep.setNotes(notes);
+        ep.setRiskLevel(riskLevel);
         return endpointRepository.save(ep);
     }
 
     @Transactional
     public AddressEndpoint updateEndpoint(UUID id, boolean isOperator, UUID entityId,
-                                          String name, String notes) {
+                                          String name, String notes, RiskLevel riskLevel) {
         AddressEndpoint ep = endpointRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("AddressEndpoint", id));
         assertOwner(ep, isOperator, entityId);
         ep.setName(name);
         ep.setNotes(notes);
+        ep.setRiskLevel(riskLevel);
         return endpointRepository.save(ep);
     }
 

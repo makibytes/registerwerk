@@ -181,5 +181,6 @@ export class SidebarComponent {
     { label: 'Audit Log',     icon: 'receipt_long',           route: '/audit' },
     { label: 'Network Nodes', icon: 'cable',                  route: '/network-nodes' },
     { label: 'Wallets',       icon: 'wallet',                 route: '/wallets' },
+    { label: 'Endpoints',     icon: 'contacts',               route: '/endpoints' },
   ];
 }

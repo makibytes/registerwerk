@@ -38,6 +38,10 @@ export const routes: Routes = [
       {
         path: 'kyc',
         loadComponent: () => import('./features/kyc/kyc-status.component').then(m => m.KycStatusComponent)
+      },
+      {
+        path: 'endpoints',
+        loadComponent: () => import('./features/endpoints/endpoints-list.component').then(m => m.EndpointsListComponent)
       }
     ]
   },

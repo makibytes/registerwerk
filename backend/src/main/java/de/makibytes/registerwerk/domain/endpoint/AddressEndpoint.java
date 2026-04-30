@@ -51,6 +51,10 @@ public class AddressEndpoint {
     @Size(max = 500)
     private String notes;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "risk_level", length = 10)
+    private RiskLevel riskLevel;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -81,6 +85,9 @@ public class AddressEndpoint {
 
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+
+    public RiskLevel getRiskLevel() { return riskLevel; }
+    public void setRiskLevel(RiskLevel riskLevel) { this.riskLevel = riskLevel; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

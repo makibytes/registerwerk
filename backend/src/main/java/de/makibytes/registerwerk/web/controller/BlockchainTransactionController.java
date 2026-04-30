@@ -21,7 +21,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/transactions")
-@PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('ISSUER') or hasRole('AUDITOR')")
+@PreAuthorize("isAuthenticated()")
 public class BlockchainTransactionController {
 
     private final BlockchainTransactionRepository repository;
@@ -31,6 +31,7 @@ public class BlockchainTransactionController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canReadTransaction(#id, authentication)")
     public ResponseEntity<TxRecordResponse> get(@PathVariable UUID id) {
         return ResponseEntity.ok(TxRecordResponse.from(
                 repository.findById(id)
@@ -38,6 +39,9 @@ public class BlockchainTransactionController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') "
+            + "or (#assetId != null and @assetAccessChecker.canRead(#assetId, authentication)) "
+            + "or (#deploymentId != null and @assetAccessChecker.canReadDeployment(#deploymentId, authentication))")
     public ResponseEntity<Page<TxRecordResponse>> list(
             @RequestParam(required = false) UUID deploymentId,
             @RequestParam(required = false) UUID assetId,

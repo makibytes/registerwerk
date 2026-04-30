@@ -30,7 +30,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1/assets/{assetId}/deployments/{depId}/issuer")
-@PreAuthorize("hasRole('ISSUER') or hasRole('REGISTRY_ADMIN') or hasRole('AUDITOR')")
+@PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
 public class IssuerTokenController {
 
     private static final Logger log = LoggerFactory.getLogger(IssuerTokenController.class);
@@ -42,7 +42,6 @@ public class IssuerTokenController {
     }
 
     @PostMapping("/mint")
-    @PreAuthorize("hasRole('ISSUER') or hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> mint(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid MintRequest request, Authentication auth) {
@@ -52,7 +51,6 @@ public class IssuerTokenController {
     }
 
     @PostMapping("/burn")
-    @PreAuthorize("hasRole('ISSUER') or hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> burn(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid BurnRequest request, Authentication auth) {
@@ -62,7 +60,6 @@ public class IssuerTokenController {
     }
 
     @PostMapping("/forced-transfer")
-    @PreAuthorize("hasRole('ISSUER') or hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> forcedTransfer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForcedTransferRequest request, Authentication auth) {
@@ -72,7 +69,6 @@ public class IssuerTokenController {
     }
 
     @PostMapping("/forced-approve")
-    @PreAuthorize("hasRole('ISSUER') or hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> forcedApprove(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForcedApproveRequest request, Authentication auth) {
