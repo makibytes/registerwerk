@@ -17,6 +17,11 @@ export const routes: Routes = [
     path: 'reset-password/:token',
     loadComponent: () => import('./core/auth/reset-password.component').then(m => m.ResetPasswordComponent)
   },
+  // Admin impersonation handoff — public, no auth guard (token arrives in URL fragment)
+  {
+    path: 'admin/handoff',
+    loadComponent: () => import('./features/admin-handoff/handoff.component').then(m => m.HandoffComponent)
+  },
   // Authenticated shell
   {
     path: '',
@@ -61,6 +66,11 @@ export const routes: Routes = [
   {
     path: 'login',
     loadComponent: () => import('./core/auth/login.component').then(m => m.LoginComponent)
+  },
+  {
+    path: 'select-company',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/admin-handoff/select-company.component').then(m => m.SelectCompanyComponent)
   },
   { path: '**', redirectTo: '' }
 ];

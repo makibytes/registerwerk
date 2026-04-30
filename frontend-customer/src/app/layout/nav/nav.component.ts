@@ -1,6 +1,6 @@
 import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
@@ -28,6 +28,16 @@ interface NavLink {
     MatDividerModule,
   ],
   template: `
+    @if (isImpersonating) {
+      <div class="impersonation-bar">
+        <mat-icon>admin_panel_settings</mat-icon>
+        <span>Acting as <strong>{{ impersonationEntityName }}</strong></span>
+        <div class="imp-actions">
+          <button class="imp-btn" (click)="switchCompany()">Switch company</button>
+          <button class="imp-btn imp-btn-exit" (click)="exitImpersonation()">Exit</button>
+        </div>
+      </div>
+    }
     <header class="nav-bar">
       <a routerLink="/dashboard" class="brand" aria-label="Registerwerk Home">
         <div class="brand-icon">
@@ -83,6 +93,44 @@ interface NavLink {
     </header>
   `,
   styles: [`
+    .impersonation-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 20px;
+      background: #92400e;
+      color: #FEF3C7;
+      font-size: 13px;
+      font-weight: 600;
+      position: relative;
+      z-index: 99;
+
+      mat-icon { font-size: 16px; width: 16px; height: 16px; }
+
+      .imp-actions { margin-left: auto; display: flex; gap: 8px; }
+
+      .imp-btn {
+        background: rgba(255,255,255,0.15);
+        border: 1px solid rgba(255,255,255,0.25);
+        border-radius: 5px;
+        color: #FEF3C7;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 3px 10px;
+        cursor: pointer;
+        font-family: 'Manrope', sans-serif;
+
+        &:hover { background: rgba(255,255,255,0.25); }
+      }
+
+      .imp-btn-exit {
+        background: rgba(220,38,38,0.3);
+        border-color: rgba(220,38,38,0.5);
+
+        &:hover { background: rgba(220,38,38,0.5); }
+      }
+    }
+
     .nav-bar {
       display: flex;
       align-items: center;
@@ -291,11 +339,14 @@ interface NavLink {
 })
 export class NavComponent implements OnInit {
   private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
   readonly isTestEnv = environment.testEnvironment;
 
   userName: string | null = null;
   userEmail: string | null = null;
   visibleLinks: NavLink[] = [];
+  isImpersonating = false;
+  impersonationEntityName = '';
 
   private readonly allLinks: NavLink[] = [
     { label: 'Dashboard',      route: '/dashboard',     icon: 'grid_view',       roles: [] },
@@ -304,7 +355,7 @@ export class NavComponent implements OnInit {
     { label: 'Trading',        route: '/trading',       icon: 'candlestick_chart', roles: ['TRADER', 'REGISTRY_ADMIN'] },
     { label: 'Company Admin',  route: '/company-admin', icon: 'manage_accounts', roles: ['COMPANY_ADMIN'] },
     { label: 'KYC',            route: '/kyc',           icon: 'verified_user',   roles: [] },
-    { label: 'Endpoints',     route: '/endpoints',     icon: 'contacts',        roles: [] },
+    { label: 'Endpoints',      route: '/endpoints',     icon: 'contacts',        roles: [] },
   ];
 
   ngOnInit(): void {
@@ -313,6 +364,23 @@ export class NavComponent implements OnInit {
     this.visibleLinks = this.allLinks.filter(link =>
       link.roles.length === 0 || link.roles.some(r => this.auth.hasRole(r))
     );
+    this.isImpersonating = this.auth.isImpersonating();
+    const meta = this.auth.getImpersonationMeta();
+    this.impersonationEntityName = meta?.entityName ?? '';
+  }
+
+  switchCompany(): void {
+    this.auth.exitImpersonation();
+    this.router.navigate(['/select-company']);
+  }
+
+  exitImpersonation(): void {
+    this.auth.exitImpersonation();
+    if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
+      this.router.navigate(['/select-company']);
+    } else {
+      this.router.navigate(['/dashboard']);
+    }
   }
 
   logout(): void { this.auth.logout(); }

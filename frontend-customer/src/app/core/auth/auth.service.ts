@@ -2,16 +2,11 @@ import { Injectable, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { Observable, of } from 'rxjs';
 
-/**
- * AuthService — wraps token storage / JWT inspection.
- *
- * In production this would be backed by MSAL or a custom OIDC flow.
- * The service is intentionally thin so it can be swapped without touching
- * components.
- */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly TOKEN_KEY = 'registerwerk_customer_token';
+  private readonly ADMIN_TOKEN_KEY = 'registerwerk_customer_admin_token';
+  private readonly IMP_META_KEY = 'registerwerk_customer_impersonation_meta';
   private readonly router = inject(Router);
 
   // ── Token storage ──────────────────────────────────────────────────────────
@@ -105,6 +100,48 @@ export class AuthService {
     return this.getUserRoles().includes(role);
   }
 
+  // ── Impersonation ──────────────────────────────────────────────────────────
+
+  isImpersonating(): boolean {
+    const token = this.getToken();
+    if (!token) return false;
+    try {
+      return this.decodePayload(token)['imp'] === true;
+    } catch {
+      return false;
+    }
+  }
+
+  getImpersonationMeta(): { entityId: string; entityName: string } | null {
+    const raw = localStorage.getItem(this.IMP_META_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as { entityId: string; entityName: string };
+    } catch {
+      return null;
+    }
+  }
+
+  enterImpersonation(impersonationToken: string, entityId: string, entityName: string): void {
+    const currentToken = this.getToken();
+    if (currentToken) {
+      localStorage.setItem(this.ADMIN_TOKEN_KEY, currentToken);
+    }
+    localStorage.setItem(this.TOKEN_KEY, impersonationToken);
+    localStorage.setItem(this.IMP_META_KEY, JSON.stringify({ entityId, entityName }));
+  }
+
+  exitImpersonation(): void {
+    const adminToken = localStorage.getItem(this.ADMIN_TOKEN_KEY);
+    localStorage.removeItem(this.IMP_META_KEY);
+    localStorage.removeItem(this.ADMIN_TOKEN_KEY);
+    if (adminToken) {
+      localStorage.setItem(this.TOKEN_KEY, adminToken);
+    } else {
+      localStorage.removeItem(this.TOKEN_KEY);
+    }
+  }
+
   // ── Navigation helpers ─────────────────────────────────────────────────────
 
   login(): void {
@@ -112,7 +149,9 @@ export class AuthService {
   }
 
   logout(): void {
-    this.clearToken();
+    localStorage.removeItem(this.TOKEN_KEY);
+    localStorage.removeItem(this.ADMIN_TOKEN_KEY);
+    localStorage.removeItem(this.IMP_META_KEY);
     this.router.navigate(['/login']);
   }
 

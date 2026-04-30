@@ -5,7 +5,6 @@ import { BehaviorSubject, Observable, tap, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 const TOKEN_KEY = 'registerwerk_operator_token';
-const ENTITY_ID_KEY = 'registerwerk_operator_entity_id';
 
 interface LoginApiResponse {
   token: string;
@@ -34,19 +33,12 @@ export class AuthService {
     return this._isAuthenticated$.getValue();
   }
 
-  /**
-   * Authenticates against the backend's /public/auth/login endpoint.
-   * Stores the returned JWT and entityId in localStorage.
-   */
   loginWithCredentials(email: string, password: string): Observable<void> {
     return this.http
       .post<LoginApiResponse>(`${environment.apiUrl}/public/auth/login`, { email, password })
       .pipe(
         tap(res => {
           localStorage.setItem(TOKEN_KEY, res.token);
-          const payload = this._decodeJwtPayload(res.token);
-          const entityId = (payload?.['entityId'] as string) ?? res.userId;
-          localStorage.setItem(ENTITY_ID_KEY, entityId);
           this._isAuthenticated$.next(true);
         }),
         map(() => void 0)
@@ -55,7 +47,6 @@ export class AuthService {
 
   logout(): void {
     localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(ENTITY_ID_KEY);
     this._isAuthenticated$.next(false);
     this.router.navigate(['/login']);
   }
@@ -64,15 +55,29 @@ export class AuthService {
     return localStorage.getItem(TOKEN_KEY);
   }
 
-  getCurrentEntityId(): string | null {
-    return localStorage.getItem(ENTITY_ID_KEY);
+  getUserRoles(): string[] {
+    const payload = this._decodeJwtPayload(this.getToken());
+    const roles = payload?.['roles'];
+    return Array.isArray(roles) ? (roles as string[]) : [];
+  }
+
+  getUserEmail(): string | null {
+    const payload = this._decodeJwtPayload(this.getToken());
+    return (payload?.['email'] as string) ?? null;
+  }
+
+  getUserName(): string | null {
+    const payload = this._decodeJwtPayload(this.getToken());
+    return (payload?.['name'] as string) ?? null;
+  }
+
+  hasRole(role: string): boolean {
+    return this.getUserRoles().includes(role);
   }
 
   private _hasValidToken(): boolean {
     const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      return false;
-    }
+    if (!token) return false;
     try {
       const payload = this._parseTokenPayload(token);
       const now = Math.floor(Date.now() / 1000);
@@ -82,22 +87,15 @@ export class AuthService {
     }
   }
 
-  /** Decodes the payload of a real JWT (header.payload.signature). */
-  private _decodeJwtPayload(token: string): Record<string, unknown> | null {
+  private _decodeJwtPayload(token: string | null): Record<string, unknown> | null {
+    if (!token) return null;
     return this._parseTokenPayload(token);
   }
 
-  /**
-   * Handles both real JWTs (three base64url segments) and the legacy stub format
-   * (a single base64 blob) so the Entra stub branch keeps working.
-   */
   private _parseTokenPayload(token: string): Record<string, unknown> | null {
     try {
       const parts = token.split('.');
-      if (parts.length !== 3) {
-        return null;
-      }
-
+      if (parts.length !== 3) return null;
       const base64Url = parts[1].replace(/-/g, '+').replace(/_/g, '/');
       const padded = base64Url.padEnd(base64Url.length + ((4 - (base64Url.length % 4)) % 4), '=');
       return JSON.parse(atob(padded)) as Record<string, unknown>;

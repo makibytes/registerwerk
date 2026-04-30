@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- Initial schema (v1) — consolidated from prior development migrations.
+-- Initial schema — squashed from V1-V8.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ── Legal entities ──────────────────────────────────────────────────────────
@@ -15,6 +15,9 @@ CREATE TABLE legal_entity (
     incorporation_date   DATE,
     kyc_status           VARCHAR(20) NOT NULL DEFAULT 'NOT_STARTED',
     kyc_expiry_date      DATE,
+    idp_issuer_url       VARCHAR(500),
+    idp_client_id        VARCHAR(255),
+    idp_client_secret    VARCHAR(500),
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by           UUID,
@@ -133,18 +136,70 @@ CREATE INDEX idx_onboarding_token_hash ON onboarding_token (token_hash);
 CREATE TABLE app_user (
     id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     email           VARCHAR(320) NOT NULL UNIQUE,
-    password_hash   VARCHAR(100) NOT NULL,
+    password_hash   VARCHAR(100),
+    full_name       VARCHAR(200),
     role            VARCHAR(30)  NOT NULL DEFAULT 'REGISTRY_ADMIN',
     enabled         BOOLEAN      NOT NULL DEFAULT true,
+    legal_entity_id UUID REFERENCES legal_entity(id),
+    auth_provider   VARCHAR(20)  NOT NULL DEFAULT 'LOCAL',
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     last_login_at   TIMESTAMPTZ,
+    created_by      UUID,
     CONSTRAINT chk_app_user_role CHECK (
-        role IN ('REGISTRY_ADMIN','AUDIT','COMPLIANCE_OFFICER')
+        role IN (
+            'REGISTRY_ADMIN',
+            'AUDIT',
+            'COMPLIANCE_OFFICER',
+            'ISSUER',
+            'INVESTOR',
+            'COMPANY_ADMIN',
+            'TRADER'
+        )
+    ),
+    CONSTRAINT chk_app_user_auth_provider CHECK (
+        auth_provider IN ('LOCAL', 'ENTRA')
     )
 );
 
-CREATE INDEX idx_app_user_email_lower ON app_user (LOWER(email));
+CREATE INDEX idx_app_user_email_lower     ON app_user (LOWER(email));
+CREATE INDEX idx_app_user_legal_entity_id ON app_user (legal_entity_id);
+
+CREATE TABLE app_user_role (
+    app_user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    role        VARCHAR(30) NOT NULL,
+    PRIMARY KEY (app_user_id, role),
+    CONSTRAINT chk_app_user_role_entry CHECK (
+        role IN (
+            'REGISTRY_ADMIN',
+            'AUDIT',
+            'COMPLIANCE_OFFICER',
+            'ISSUER',
+            'INVESTOR',
+            'COMPANY_ADMIN',
+            'TRADER'
+        )
+    )
+);
+
+CREATE TABLE app_user_action_token (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    token_hash  VARCHAR(128) NOT NULL,
+    token_type  VARCHAR(30) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_by  UUID,
+    CONSTRAINT chk_app_user_action_token_type CHECK (
+        token_type IN ('REGISTRATION', 'PASSWORD_RESET')
+    )
+);
+
+CREATE UNIQUE INDEX idx_app_user_action_token_hash ON app_user_action_token (token_hash);
+CREATE INDEX idx_app_user_action_token_active
+    ON app_user_action_token (app_user_id, token_type)
+    WHERE consumed_at IS NULL;
 
 -- ── Assets ──────────────────────────────────────────────────────────────────
 CREATE TABLE asset (
@@ -176,8 +231,8 @@ CREATE INDEX        idx_asset_isin_btree ON asset (isin) WHERE isin IS NOT NULL;
 CREATE INDEX        idx_asset_issuer     ON asset (issuer_id);
 CREATE INDEX        idx_asset_status     ON asset (status);
 CREATE INDEX        idx_asset_public_data ON asset USING GIN (public_data) WHERE public_data IS NOT NULL;
+CREATE INDEX        idx_asset_last_holder_sync_time ON asset(last_holder_sync_time DESC NULLS LAST);
 
-CREATE INDEX idx_asset_last_holder_sync_time ON asset(last_holder_sync_time DESC NULLS LAST);
 -- ── Asset documents ─────────────────────────────────────────────────────────
 CREATE TABLE asset_document (
     id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -243,7 +298,7 @@ CREATE TABLE asset_holder (
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX idx_holder_wallet ON asset_holder (asset_id, wallet_address);
+CREATE UNIQUE INDEX idx_holder_wallet   ON asset_holder (asset_id, wallet_address);
 CREATE INDEX        idx_holder_investor ON asset_holder (investor_id);
 CREATE INDEX        idx_holder_asset    ON asset_holder (asset_id);
 
@@ -318,12 +373,10 @@ CREATE TABLE chain_config (
 CREATE INDEX idx_chain_config_type    ON chain_config (chain_type, network_type);
 CREATE INDEX idx_chain_config_enabled ON chain_config (enabled);
 
--- Seed: pre-configure the chains from the original spec
 INSERT INTO chain_config (identifier, display_name, chain_type, network_type, chain_id,
                           rpc_url, ws_url, block_explorer_url,
                           graph_node_url, graph_subgraph_name) VALUES
 
--- Ethereum
 ('ETHEREUM_MAINNET', 'Ethereum Mainnet', 'EVM', 'MAINNET', 1,
  'https://mainnet.infura.io/v3/changeme', 'wss://mainnet.infura.io/ws/v3/changeme', 'https://etherscan.io',
  'http://graph-node:8000/subgraphs/name', 'registerwerk/ethereum-mainnet'),
@@ -332,7 +385,6 @@ INSERT INTO chain_config (identifier, display_name, chain_type, network_type, ch
  'https://sepolia.infura.io/v3/changeme', 'wss://sepolia.infura.io/ws/v3/changeme', 'https://sepolia.etherscan.io',
  'http://graph-node:8000/subgraphs/name', 'registerwerk/ethereum-sepolia'),
 
--- Polygon
 ('POLYGON_MAINNET', 'Polygon Mainnet', 'EVM', 'MAINNET', 137,
  'https://polygon-mainnet.infura.io/v3/changeme', 'wss://polygon-mainnet.infura.io/ws/v3/changeme', 'https://polygonscan.com',
  'http://graph-node:8000/subgraphs/name', 'registerwerk/polygon-mainnet'),
@@ -341,7 +393,6 @@ INSERT INTO chain_config (identifier, display_name, chain_type, network_type, ch
  'https://polygon-amoy.infura.io/v3/changeme', 'wss://polygon-amoy.infura.io/ws/v3/changeme', 'https://amoy.polygonscan.com',
  'http://graph-node:8000/subgraphs/name', 'registerwerk/polygon-amoy'),
 
--- Base
 ('BASE_MAINNET', 'Base Mainnet', 'EVM', 'MAINNET', 8453,
  'https://mainnet.base.org', 'wss://mainnet.base.org', 'https://basescan.org',
  'http://graph-node:8000/subgraphs/name', 'registerwerk/base-mainnet'),
@@ -350,7 +401,6 @@ INSERT INTO chain_config (identifier, display_name, chain_type, network_type, ch
  'https://sepolia.base.org', 'wss://sepolia.base.org', 'https://sepolia.basescan.org',
  'http://graph-node:8000/subgraphs/name', 'registerwerk/base-sepolia'),
 
--- Solana
 ('SOLANA_MAINNET', 'Solana Mainnet Beta', 'SOLANA', 'MAINNET', NULL,
  'https://api.mainnet-beta.solana.com', 'wss://api.mainnet-beta.solana.com', 'https://solscan.io',
  NULL, NULL),
@@ -359,7 +409,6 @@ INSERT INTO chain_config (identifier, display_name, chain_type, network_type, ch
  'https://api.devnet.solana.com', 'wss://api.devnet.solana.com', 'https://solscan.io',
  NULL, NULL),
 
--- Fhenix — FHE L2 on Ethereum
 ('FHENIX_MAINNET', 'Fhenix Mainnet', 'EVM', 'MAINNET', 21888,
  'https://api.fhenix.zone:7747', 'wss://api.fhenix.zone:7748', 'https://explorer.fhenix.zone',
  NULL, NULL),
@@ -368,7 +417,6 @@ INSERT INTO chain_config (identifier, display_name, chain_type, network_type, ch
  'https://api.helium.fhenix.zone:7747', 'wss://api.helium.fhenix.zone:7748', 'https://explorer.helium.fhenix.zone',
  NULL, NULL),
 
--- Inco — Confidentiality-as-a-Service
 ('INCO_MAINNET', 'Inco Mainnet', 'EVM', 'MAINNET', 9090,
  'https://mainnet.inco.org', 'wss://mainnet.inco.org', 'https://explorer.inco.org',
  NULL, NULL),
@@ -376,6 +424,34 @@ INSERT INTO chain_config (identifier, display_name, chain_type, network_type, ch
 ('INCO_RIVEST', 'Inco Rivest Testnet', 'EVM', 'TESTNET', 21097,
  'https://validator.rivest.inco.org', 'wss://validator.rivest.inco.org', 'https://explorer.rivest.inco.org',
  NULL, NULL);
+
+-- ── RPC nodes ───────────────────────────────────────────────────────────────
+CREATE TABLE rpc_node (
+    id                     UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    chain_config_id        UUID        NOT NULL REFERENCES chain_config(id) ON DELETE CASCADE,
+    url                    VARCHAR(512) NOT NULL,
+    label                  VARCHAR(100),
+    enabled                BOOLEAN     NOT NULL DEFAULT true,
+    exclusive              BOOLEAN     NOT NULL DEFAULT false,
+    latest_block_number    BIGINT,
+    block_last_advanced_at TIMESTAMPTZ,
+    last_checked_at        TIMESTAMPTZ,
+    last_success_at        TIMESTAMPTZ,
+    healthy                BOOLEAN     NOT NULL DEFAULT false,
+    consecutive_failures   INT         NOT NULL DEFAULT 0,
+    lag_from_best          INT,
+    syncing                BOOLEAN     NOT NULL DEFAULT false,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_rpc_node_chain  ON rpc_node (chain_config_id);
+CREATE INDEX idx_rpc_node_usable ON rpc_node (chain_config_id, enabled, healthy);
+
+INSERT INTO rpc_node (chain_config_id, url, label, enabled)
+SELECT id, rpc_url, 'Primary', true
+FROM chain_config
+WHERE rpc_url IS NOT NULL AND rpc_url <> '';
 
 -- ── Token transfer history ──────────────────────────────────────────────────
 CREATE TABLE token_transfer (
@@ -455,8 +531,8 @@ CREATE TABLE onchain_claim (
     expires_at          TIMESTAMPTZ,
     revoked_at          TIMESTAMPTZ,
     tx_hash             VARCHAR(66),
-    claim_data          TEXT,   -- hex-encoded ABI-encoded claim data
-    claim_signature     TEXT    -- hex-encoded ECDSA signature
+    claim_data          TEXT,
+    claim_signature     TEXT
 );
 
 CREATE INDEX idx_claim_identity ON onchain_claim (onchain_identity_id);
@@ -473,7 +549,7 @@ CREATE TABLE erc3643_suite (
     claim_topics_registry      VARCHAR(66),
     trusted_issuers_registry   VARCHAR(66),
     factory_tx_hash            VARCHAR(66),
-    is_confidential            BOOLEAN     NOT NULL DEFAULT false,  -- Zama fhEVM variant
+    is_confidential            BOOLEAN     NOT NULL DEFAULT false,
     created_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -524,3 +600,264 @@ CREATE TABLE erc3643_identity_registry (
 
 CREATE INDEX idx_erc3643_ir_suite    ON erc3643_identity_registry (suite_id);
 CREATE INDEX idx_erc3643_ir_identity ON erc3643_identity_registry (onchain_identity_id);
+
+-- ── Blockchain transactions ─────────────────────────────────────────────────
+CREATE TABLE blockchain_transaction (
+    id               UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    tx_hash          VARCHAR(66),
+    status           VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    chain            VARCHAR(30),
+    network          VARCHAR(30),
+    contract_address VARCHAR(42),
+    deployment_id    UUID,
+    asset_id         UUID,
+    method_name      VARCHAR(100),
+    params           JSONB,
+    actor_name       VARCHAR(255),
+    actor_role       VARCHAR(30),
+    gas_used         BIGINT,
+    block_number     BIGINT,
+    error_message    TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at     TIMESTAMPTZ
+);
+
+CREATE INDEX idx_btx_deployment ON blockchain_transaction (deployment_id);
+CREATE INDEX idx_btx_asset      ON blockchain_transaction (asset_id);
+CREATE INDEX idx_btx_actor      ON blockchain_transaction (actor_name);
+CREATE INDEX idx_btx_status     ON blockchain_transaction (status) WHERE status = 'PENDING';
+CREATE INDEX idx_btx_created    ON blockchain_transaction (created_at DESC);
+
+-- ── Operator wallets ─────────────────────────────────────────────────────────
+CREATE TABLE operator_wallet (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(120) NOT NULL UNIQUE,
+    type            VARCHAR(10)  NOT NULL,
+    address         VARCHAR(64)  NOT NULL,
+    keystore_path   VARCHAR(255) NOT NULL,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    created_by      UUID,
+    CONSTRAINT chk_wallet_type CHECK (type IN ('EVM','SOLANA')),
+    CONSTRAINT uq_wallet_addr  UNIQUE (type, address)
+);
+
+CREATE TABLE wallet_chain_default (
+    chain_config_id UUID        PRIMARY KEY REFERENCES chain_config(id) ON DELETE CASCADE,
+    wallet_id       UUID        NOT NULL REFERENCES operator_wallet(id) ON DELETE RESTRICT,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by      UUID
+);
+
+CREATE INDEX idx_wallet_chain_default_wallet ON wallet_chain_default (wallet_id);
+
+-- ── Address endpoints ────────────────────────────────────────────────────────
+CREATE TABLE address_endpoint (
+    id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_type   VARCHAR(10)  NOT NULL,
+    owner_id     UUID,
+    address      VARCHAR(66)  NOT NULL,
+    address_type VARCHAR(10)  NOT NULL,
+    name         VARCHAR(200) NOT NULL,
+    notes        VARCHAR(500),
+    risk_level   VARCHAR(10),
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_risk_level CHECK (risk_level IS NULL OR risk_level IN ('LOW', 'MEDIUM', 'HIGH'))
+);
+
+CREATE UNIQUE INDEX idx_endpoint_entity_address
+    ON address_endpoint (owner_type, owner_id, address)
+    WHERE owner_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_endpoint_operator_address
+    ON address_endpoint (owner_type, address)
+    WHERE owner_id IS NULL;
+
+CREATE INDEX idx_endpoint_owner   ON address_endpoint (owner_type, owner_id);
+CREATE INDEX idx_endpoint_address ON address_endpoint (address);
+
+-- ── Trading ──────────────────────────────────────────────────────────────────
+CREATE TABLE company_trader_settings (
+    legal_entity_id                UUID PRIMARY KEY REFERENCES legal_entity(id) ON DELETE CASCADE,
+    default_payment_option         VARCHAR(30)  NOT NULL DEFAULT 'OFFCHAIN_SEPA',
+    immediate_settlement_enabled   BOOLEAN      NOT NULL DEFAULT true,
+    updated_at                     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_by                     UUID,
+    CONSTRAINT chk_trader_default_payment_option CHECK (
+        default_payment_option IN (
+            'NATIVE_CHAIN_CURRENCY',
+            'STABLECOIN',
+            'CBMT',
+            'PONTES_TARGET',
+            'OFFCHAIN_SEPA'
+        )
+    )
+);
+
+CREATE TABLE company_trader_wallet_default (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    legal_entity_id UUID         NOT NULL REFERENCES legal_entity(id) ON DELETE CASCADE,
+    asset_type      VARCHAR(20),
+    target_type     VARCHAR(20)  NOT NULL,
+    endpoint_id     UUID REFERENCES address_endpoint(id) ON DELETE SET NULL,
+    wallet_address  VARCHAR(128),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT chk_trader_wallet_asset_type CHECK (
+        asset_type IS NULL OR asset_type IN ('EQUITY','BOND','FUND','NOTE','COMMODITY','OTHER')
+    ),
+    CONSTRAINT chk_trader_wallet_target_type CHECK (
+        target_type IN ('ENDPOINT','CUSTOM_ADDRESS')
+    ),
+    CONSTRAINT chk_trader_wallet_target_payload CHECK (
+        (target_type = 'ENDPOINT' AND endpoint_id IS NOT NULL AND wallet_address IS NULL)
+        OR
+        (target_type = 'CUSTOM_ADDRESS' AND endpoint_id IS NULL AND wallet_address IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX idx_trader_wallet_default_global
+    ON company_trader_wallet_default (legal_entity_id)
+    WHERE asset_type IS NULL;
+
+CREATE UNIQUE INDEX idx_trader_wallet_default_asset_type
+    ON company_trader_wallet_default (legal_entity_id, asset_type)
+    WHERE asset_type IS NOT NULL;
+
+CREATE INDEX idx_trader_wallet_default_entity
+    ON company_trader_wallet_default (legal_entity_id);
+
+CREATE TABLE trade_listing (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    venue_code         VARCHAR(20)     NOT NULL,
+    seller_entity_id   UUID            NOT NULL REFERENCES legal_entity(id),
+    seller_holder_id   UUID            NOT NULL REFERENCES asset_holder(id),
+    asset_id           UUID            NOT NULL REFERENCES asset(id),
+    asset_number       VARCHAR(30)     NOT NULL,
+    asset_name         VARCHAR(500)    NOT NULL,
+    isin               VARCHAR(12),
+    asset_type         VARCHAR(20)     NOT NULL,
+    token_standard     VARCHAR(20)     NOT NULL,
+    chain              VARCHAR(20),
+    status             VARCHAR(20)     NOT NULL DEFAULT 'OPEN',
+    quantity_total     NUMERIC(38, 18) NOT NULL,
+    quantity_available NUMERIC(38, 18) NOT NULL,
+    price_per_unit     NUMERIC(38, 18) NOT NULL,
+    created_at         TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT chk_trade_listing_venue CHECK (
+        venue_code IN ('SIMULATED', 'ASSETERA', 'ARCHAX', 'TALOS')
+    ),
+    CONSTRAINT chk_trade_listing_asset_type CHECK (
+        asset_type IN ('EQUITY','BOND','FUND','NOTE','COMMODITY','OTHER')
+    ),
+    CONSTRAINT chk_trade_listing_status CHECK (
+        status IN ('OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELLED')
+    ),
+    CONSTRAINT chk_trade_listing_token_standard CHECK (
+        token_standard IN ('ERC20','ERC721','ERC1155','ERC3643','CONF_ERC20','CONF_ERC3643','SPL')
+    ),
+    CONSTRAINT chk_trade_listing_chain CHECK (
+        chain IS NULL OR chain IN ('ETHEREUM','POLYGON','BASE','SOLANA')
+    ),
+    CONSTRAINT chk_trade_listing_quantity CHECK (
+        quantity_total > 0
+        AND quantity_available >= 0
+        AND quantity_available <= quantity_total
+    ),
+    CONSTRAINT chk_trade_listing_price CHECK (price_per_unit > 0)
+);
+
+CREATE INDEX idx_trade_listing_status_created ON trade_listing (status, created_at DESC);
+CREATE INDEX idx_trade_listing_seller         ON trade_listing (seller_entity_id, created_at DESC);
+CREATE INDEX idx_trade_listing_asset          ON trade_listing (asset_id, created_at DESC);
+CREATE INDEX idx_trade_listing_holder         ON trade_listing (seller_holder_id);
+
+CREATE TABLE trade_listing_payment_option (
+    trade_listing_id UUID        NOT NULL REFERENCES trade_listing(id) ON DELETE CASCADE,
+    payment_option   VARCHAR(30) NOT NULL,
+    PRIMARY KEY (trade_listing_id, payment_option),
+    CONSTRAINT chk_trade_listing_payment_option CHECK (
+        payment_option IN (
+            'NATIVE_CHAIN_CURRENCY',
+            'STABLECOIN',
+            'CBMT',
+            'PONTES_TARGET',
+            'OFFCHAIN_SEPA'
+        )
+    )
+);
+
+CREATE TABLE trade_execution (
+    id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    listing_id               UUID            NOT NULL REFERENCES trade_listing(id),
+    venue_code               VARCHAR(20)     NOT NULL,
+    buyer_entity_id          UUID            NOT NULL REFERENCES legal_entity(id),
+    seller_entity_id         UUID            NOT NULL REFERENCES legal_entity(id),
+    seller_holder_id         UUID            NOT NULL REFERENCES asset_holder(id),
+    buyer_holder_id          UUID REFERENCES asset_holder(id),
+    asset_id                 UUID            NOT NULL REFERENCES asset(id),
+    asset_number             VARCHAR(30)     NOT NULL,
+    asset_name               VARCHAR(500)    NOT NULL,
+    isin                     VARCHAR(12),
+    asset_type               VARCHAR(20)     NOT NULL,
+    token_standard           VARCHAR(20)     NOT NULL,
+    chain                    VARCHAR(20),
+    order_type               VARCHAR(20)     NOT NULL,
+    requested_quantity       NUMERIC(38, 18) NOT NULL,
+    executed_quantity        NUMERIC(38, 18) NOT NULL,
+    unit_price               NUMERIC(38, 18) NOT NULL,
+    total_price              NUMERIC(38, 18) NOT NULL,
+    payment_option           VARCHAR(30)     NOT NULL,
+    settlement_status        VARCHAR(20)     NOT NULL DEFAULT 'SETTLED',
+    wallet_preference_mode   VARCHAR(30)     NOT NULL,
+    wallet_endpoint_id       UUID REFERENCES address_endpoint(id) ON DELETE SET NULL,
+    wallet_address           VARCHAR(128)    NOT NULL,
+    created_at               TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    settled_at               TIMESTAMPTZ,
+    CONSTRAINT chk_trade_execution_venue CHECK (
+        venue_code IN ('SIMULATED', 'ASSETERA', 'ARCHAX', 'TALOS')
+    ),
+    CONSTRAINT chk_trade_execution_asset_type CHECK (
+        asset_type IN ('EQUITY','BOND','FUND','NOTE','COMMODITY','OTHER')
+    ),
+    CONSTRAINT chk_trade_execution_token_standard CHECK (
+        token_standard IN ('ERC20','ERC721','ERC1155','ERC3643','CONF_ERC20','CONF_ERC3643','SPL')
+    ),
+    CONSTRAINT chk_trade_execution_chain CHECK (
+        chain IS NULL OR chain IN ('ETHEREUM','POLYGON','BASE','SOLANA')
+    ),
+    CONSTRAINT chk_trade_execution_order_type CHECK (
+        order_type IN ('MARKET', 'LIMIT', 'IOC', 'FOK')
+    ),
+    CONSTRAINT chk_trade_execution_payment_option CHECK (
+        payment_option IN (
+            'NATIVE_CHAIN_CURRENCY',
+            'STABLECOIN',
+            'CBMT',
+            'PONTES_TARGET',
+            'OFFCHAIN_SEPA'
+        )
+    ),
+    CONSTRAINT chk_trade_execution_settlement_status CHECK (
+        settlement_status IN ('PENDING', 'SETTLED')
+    ),
+    CONSTRAINT chk_trade_execution_wallet_preference_mode CHECK (
+        wallet_preference_mode IN ('GLOBAL_DEFAULT', 'ASSET_TYPE_DEFAULT', 'ENDPOINT', 'CUSTOM_ADDRESS')
+    ),
+    CONSTRAINT chk_trade_execution_quantity CHECK (
+        requested_quantity > 0
+        AND executed_quantity > 0
+        AND executed_quantity <= requested_quantity
+    ),
+    CONSTRAINT chk_trade_execution_price CHECK (
+        unit_price > 0
+        AND total_price > 0
+    )
+);
+
+CREATE INDEX idx_trade_execution_buyer          ON trade_execution (buyer_entity_id, created_at DESC);
+CREATE INDEX idx_trade_execution_seller         ON trade_execution (seller_entity_id, created_at DESC);
+CREATE INDEX idx_trade_execution_listing        ON trade_execution (listing_id);
+CREATE INDEX idx_trade_execution_seller_pending ON trade_execution (seller_holder_id, settlement_status)
+    WHERE settlement_status = 'PENDING';

@@ -332,7 +332,12 @@ export class LoginComponent {
       .subscribe({
         next: (res) => {
           this.auth.setToken(res.token);
-          this.router.navigate(['/dashboard']);
+          // REGISTRY_ADMIN with no entity context → company picker
+          if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
+            this.router.navigate(['/select-company']);
+          } else {
+            this.router.navigate(['/dashboard']);
+          }
         },
         error: () => {
           this.loading = false;

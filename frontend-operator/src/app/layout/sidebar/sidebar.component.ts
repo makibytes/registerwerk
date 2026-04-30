@@ -175,6 +175,7 @@ export class SidebarComponent {
   readonly navItems: NavItem[] = [
     { label: 'Dashboard',     icon: 'grid_view',              route: '/dashboard' },
     { label: 'Customers',     icon: 'people_outline',         route: '/customers' },
+    { label: 'Users',         icon: 'group',                  route: '/users' },
     { label: 'Registry',      icon: 'hub',                    route: '/registry' },
     { label: 'Onboarding',    icon: 'person_add_alt',         route: '/onboarding' },
     { label: 'Assets',        icon: 'account_balance_wallet', route: '/assets' },

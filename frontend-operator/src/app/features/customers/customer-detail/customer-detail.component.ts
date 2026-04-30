@@ -17,6 +17,8 @@ import { DatePipe } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { EntityService } from '../../../core/api/entity.service';
+import { AdminUserService } from '../../../core/api/admin-user.service';
+import { environment } from '../../../../environments/environment';
 import { AddressComponent } from '../../../shared/components/address.component';
 import { KycService } from '../../../core/api/kyc.service';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
@@ -27,7 +29,6 @@ import {
 } from '../../../core/models';
 import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
-import { environment } from '../../../../environments/environment';
 
 interface OnchainIdentityView {
   id: string;
@@ -179,6 +180,10 @@ interface OnchainIdentityView {
           <button mat-raised-button color="primary" (click)="generateToken()">
             <mat-icon>key</mat-icon>
             Onboarding Token
+          </button>
+          <button mat-stroked-button (click)="openAsCompany()" matTooltip="Open this company in the customer portal as an admin">
+            <mat-icon>open_in_new</mat-icon>
+            Open as Company
           </button>
         </div>
       </div>
@@ -463,6 +468,7 @@ export class CustomerDetailComponent implements OnInit {
 
   private readonly entityService = inject(EntityService);
   private readonly kycService = inject(KycService);
+  private readonly adminUserService = inject(AdminUserService);
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
 
@@ -699,6 +705,18 @@ export class CustomerDetailComponent implements OnInit {
 
   generateToken(): void {
     this.router.navigate(['/onboarding/token', this.id]);
+  }
+
+  openAsCompany(): void {
+    if (!this.entity) return;
+    this.adminUserService.impersonate(this.entity.id).subscribe({
+      next: (res) => {
+        window.open(res.handoffUrl, '_blank');
+      },
+      error: (err) => {
+        alert(err?.error?.message ?? 'Impersonation failed');
+      },
+    });
   }
 
   goBack(): void {

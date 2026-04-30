@@ -4,6 +4,7 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.proc.SecurityContext;
 import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.domain.entity.AppUser;
+import de.makibytes.registerwerk.domain.entity.LegalEntity;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -49,5 +50,32 @@ public class JwtMintingService {
                 ;
         }
         return encoder.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
+    }
+
+    /**
+     * Mints an impersonation token for a REGISTRY_ADMIN acting on behalf of a legal entity.
+     * Deliberately assigns only customer-side functional roles so operator-only endpoints
+     * remain unreachable during the impersonation session. The {@code sub} claim remains
+     * the real admin's userId so audit events correctly attribute actions.
+     */
+    public String mintImpersonationToken(AppUser actor, LegalEntity target) {
+        Instant now = Instant.now();
+        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+            .subject(actor.getId().toString())
+            .claim("roles", List.of("COMPANY_ADMIN", "ISSUER", "INVESTOR", "TRADER"))
+            .claim("email", actor.getEmail())
+            .claim("name", actor.getFullName() != null ? actor.getFullName() : actor.getEmail())
+            .claim("entityId", target.getId().toString())
+            .claim("entity_id", target.getId().toString())
+            .claim("imp", true)
+            .issuedAt(now)
+            .expiresAt(now.plusSeconds(tokenTtlSeconds))
+            .build();
+        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
+    public long getTokenTtlSeconds() {
+        return tokenTtlSeconds;
     }
 }

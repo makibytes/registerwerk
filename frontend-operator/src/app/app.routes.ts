@@ -24,6 +24,11 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'users',
+        loadChildren: () =>
+          import('./features/users/users.routes').then((m) => m.USERS_ROUTES),
+      },
+      {
         path: 'registry',
         loadComponent: () =>
           import('./features/customers/registry-overview/registry-overview.component').then(
