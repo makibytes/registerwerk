@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -252,6 +252,7 @@ export class SelectCompanyComponent implements OnInit {
   private readonly auth = inject(AuthService);
   private readonly adminService = inject(AdminService);
   private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   entities: EntityListItem[] = [];
   loadingEntities = true;
@@ -278,6 +279,7 @@ export class SelectCompanyComponent implements OnInit {
       },
       error: (err) => {
         this.selecting = null;
+        this.cdr.markForCheck();
         alert(err?.error?.message ?? 'Impersonation failed');
       },
     });
@@ -293,9 +295,11 @@ export class SelectCompanyComponent implements OnInit {
       next: (page) => {
         this.entities = page.content;
         this.loadingEntities = false;
+        this.cdr.markForCheck();
       },
       error: () => {
         this.loadingEntities = false;
+        this.cdr.markForCheck();
       },
     });
   }

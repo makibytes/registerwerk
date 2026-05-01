@@ -12,6 +12,8 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
+import { MatDividerModule } from '@angular/material/divider';
+import { MatMenuModule } from '@angular/material/menu';
 import { AdminUserService, AppUserRole, OperatorUser } from '../../core/api/admin-user.service';
 import { InviteUserDialogComponent } from './invite-user-dialog.component';
 import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component';
@@ -48,6 +50,8 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
     MatDialogModule,
     MatTooltipModule,
     MatPaginatorModule,
+    MatMenuModule,
+    MatDividerModule,
   ],
   styles: [`
     .filter-row {
@@ -143,9 +147,12 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
 
     .actions-cell {
       display: flex;
-      gap: 6px;
       justify-content: flex-end;
-      flex-wrap: wrap;
+    }
+
+    .menu-delete {
+      color: #dc2626;
+      mat-icon { color: #dc2626; }
     }
 
     .empty-row td {
@@ -264,22 +271,34 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let u">
               <div class="actions-cell">
-                <button mat-stroked-button (click)="editRoles(u)">Roles</button>
-                <button mat-stroked-button (click)="toggleEnabled(u)">
-                  {{ u.enabled ? 'Disable' : 'Enable' }}
-                </button>
-                <button mat-stroked-button
-                  [disabled]="u.authProvider !== 'LOCAL'"
-                  matTooltip="Send password reset email"
-                  (click)="sendPasswordReset(u)">
-                  Reset pwd
-                </button>
-                <button mat-icon-button color="warn" matTooltip="Delete user" (click)="deleteUser(u)">
-                  <mat-icon>delete</mat-icon>
+                <button mat-icon-button [matMenuTriggerFor]="userMenu" [matMenuTriggerData]="{ user: u }" matTooltip="Actions">
+                  <mat-icon>more_vert</mat-icon>
                 </button>
               </div>
             </td>
           </ng-container>
+
+          <mat-menu #userMenu="matMenu">
+            <ng-template matMenuContent let-u="user">
+              <button mat-menu-item (click)="editRoles(u)">
+                <mat-icon>manage_accounts</mat-icon>
+                Edit roles
+              </button>
+              <button mat-menu-item (click)="toggleEnabled(u)">
+                <mat-icon>{{ u.enabled ? 'block' : 'check_circle' }}</mat-icon>
+                {{ u.enabled ? 'Disable' : 'Enable' }}
+              </button>
+              <button mat-menu-item [disabled]="u.authProvider !== 'LOCAL'" (click)="sendPasswordReset(u)">
+                <mat-icon>lock_reset</mat-icon>
+                Reset password
+              </button>
+              <mat-divider />
+              <button mat-menu-item class="menu-delete" (click)="deleteUser(u)">
+                <mat-icon>delete</mat-icon>
+                Delete
+              </button>
+            </ng-template>
+          </mat-menu>
 
           <tr mat-header-row *matHeaderRowDef="columns"></tr>
           <tr mat-row *matRowDef="let row; columns: columns;"></tr>

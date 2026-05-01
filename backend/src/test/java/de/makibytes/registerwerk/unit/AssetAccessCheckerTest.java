@@ -73,6 +73,18 @@ class AssetAccessCheckerTest {
     }
 
     @Test
+    void canRead_impersonatingAdmin_returnsTrue() {
+        // imp:true token has entity_id of a different company but admin should still read anything
+        assertThat(checker.canRead(ASSET_ID, impersonationAuth(ISSUER_B))).isTrue();
+    }
+
+    @Test
+    void canActAsIssuer_impersonatingAdmin_returnsFalse() {
+        // imp token must not grant issuer write access beyond the scoped entity
+        assertThat(checker.canActAsIssuer(ASSET_ID, impersonationAuth(ISSUER_B))).isFalse();
+    }
+
+    @Test
     void canActAsIssuer_owningIssuer_returnsTrue() {
         assertThat(checker.canActAsIssuer(ASSET_ID, jwtAuth(ISSUER_A, "ISSUER"))).isTrue();
     }
@@ -126,5 +138,19 @@ class AssetAccessCheckerTest {
                 .build();
         return new JwtAuthenticationToken(jwt,
                 List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+    }
+
+    private static Authentication impersonationAuth(UUID entityId) {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .claim("entity_id", entityId.toString())
+                .claim("sub", UUID.randomUUID().toString())
+                .claim("imp", true)
+                .build();
+        return new JwtAuthenticationToken(jwt,
+                List.of(new SimpleGrantedAuthority("ROLE_ISSUER"),
+                        new SimpleGrantedAuthority("ROLE_COMPANY_ADMIN")));
     }
 }

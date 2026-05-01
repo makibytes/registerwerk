@@ -38,6 +38,7 @@ public class AssetAccessChecker {
     public boolean canRead(UUID assetId, Authentication auth) {
         if (auth == null || !auth.isAuthenticated()) return false;
         if (SecurityUtils.isAdminOrAudit(auth)) return true;
+        if (SecurityUtils.isImpersonatingAdmin(auth)) return true;
         return isOwnerOfAsset(assetId, auth);
     }
 

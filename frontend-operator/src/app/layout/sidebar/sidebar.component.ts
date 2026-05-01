@@ -174,14 +174,14 @@ interface NavItem {
 export class SidebarComponent {
   readonly navItems: NavItem[] = [
     { label: 'Dashboard',     icon: 'grid_view',              route: '/dashboard' },
-    { label: 'Customers',     icon: 'people_outline',         route: '/customers' },
-    { label: 'Users',         icon: 'group',                  route: '/users' },
-    { label: 'Registry',      icon: 'hub',                    route: '/registry' },
-    { label: 'Onboarding',    icon: 'person_add_alt',         route: '/onboarding' },
     { label: 'Assets',        icon: 'account_balance_wallet', route: '/assets' },
     { label: 'Audit Log',     icon: 'receipt_long',           route: '/audit' },
-    { label: 'Network Nodes', icon: 'cable',                  route: '/network-nodes' },
-    { label: 'Wallets',       icon: 'wallet',                 route: '/wallets' },
+    { label: 'Customers',     icon: 'people_outline',         route: '/customers' },
     { label: 'Endpoints',     icon: 'contacts',               route: '/endpoints' },
+    { label: 'Network Nodes', icon: 'cable',                  route: '/network-nodes' },
+    { label: 'Onboarding',    icon: 'person_add_alt',         route: '/onboarding' },
+    { label: 'Registry',      icon: 'hub',                    route: '/registry' },
+    { label: 'Users',         icon: 'group',                  route: '/users' },
+    { label: 'Wallets',       icon: 'wallet',                 route: '/wallets' },
   ];
 }

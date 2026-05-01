@@ -88,8 +88,9 @@ public class CustomerController {
     }
 
     /**
-     * Partially updates a legal entity.
+     * Updates a legal entity (full or partial — all fields optional).
      */
+    @PutMapping("/{id}")
     @PatchMapping("/{id}")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<EntityResponse> updateEntity(
@@ -123,6 +124,25 @@ public class CustomerController {
     public ResponseEntity<Void> dissolveEntity(@PathVariable UUID id, Authentication auth) {
         legalEntityService.dissolveEntity(id, extractActorId(auth));
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Reactivates a suspended entity.
+     */
+    @PostMapping("/{id}/reactivate")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<Void> reactivateEntity(@PathVariable UUID id, Authentication auth) {
+        legalEntityService.reactivateEntity(id, extractActorId(auth));
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Returns just the name change history for an entity.
+     */
+    @GetMapping("/{id}/name-history")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT')")
+    public ResponseEntity<List<EntityNameHistory>> getNameHistory(@PathVariable UUID id) {
+        return ResponseEntity.ok(entityHistoryService.listNameHistory(id));
     }
 
     /**

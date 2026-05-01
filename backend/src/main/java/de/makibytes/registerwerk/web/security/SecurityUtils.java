@@ -21,6 +21,12 @@ public final class SecurityUtils {
                         || a.getAuthority().equals("ROLE_AUDIT"));
     }
 
+    /** Returns true when the token was minted by the impersonation flow ({@code imp: true}). */
+    public static boolean isImpersonatingAdmin(Authentication auth) {
+        if (!(auth.getPrincipal() instanceof Jwt jwt)) return false;
+        return Boolean.TRUE.equals(jwt.getClaimAsBoolean("imp"));
+    }
+
     public static UUID extractEntityId(Authentication auth) {
         if (!(auth.getPrincipal() instanceof Jwt jwt)) return null;
         String id = claim(jwt, "entity_id", "entityId");

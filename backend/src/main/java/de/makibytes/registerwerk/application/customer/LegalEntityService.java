@@ -121,6 +121,17 @@ public class LegalEntityService {
     }
 
     /**
+     * Reactivates a suspended entity.
+     */
+    public void reactivateEntity(UUID id, UUID actorId) {
+        LegalEntity entity = getEntity(id);
+        entity.setStatus(EntityStatus.ACTIVE);
+        legalEntityRepository.save(entity);
+        auditEventPublisher.publish("ENTITY_REACTIVATED", "LegalEntity", id, actorId, null, null);
+        log.info("Reactivated entity: id={}", id);
+    }
+
+    /**
      * Records a name change in the entity's name history and updates the current name.
      */
     public void renameEntity(UUID id, String newName, LocalDate effectiveDate, UUID actorId) {

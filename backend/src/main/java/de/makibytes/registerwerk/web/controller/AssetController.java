@@ -1,9 +1,11 @@
 package de.makibytes.registerwerk.web.controller;
 
+import de.makibytes.registerwerk.application.asset.AssetDeploymentService;
 import de.makibytes.registerwerk.application.asset.AssetLifecycleService;
 import de.makibytes.registerwerk.application.asset.AssetService;
 import de.makibytes.registerwerk.application.kyc.KycComplianceService;
 import de.makibytes.registerwerk.domain.asset.Asset;
+import de.makibytes.registerwerk.domain.asset.AssetDeployment;
 import de.makibytes.registerwerk.domain.enums.Jurisdiction;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDocumentRepository;
 import de.makibytes.registerwerk.web.dto.DocumentStatusResponse;
@@ -13,6 +15,7 @@ import de.makibytes.registerwerk.domain.enums.AssetStatus;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AuditEventRepository;
 import de.makibytes.registerwerk.web.dto.*;
 import de.makibytes.registerwerk.web.mapper.AssetMapper;
+import de.makibytes.registerwerk.web.mapper.DeploymentMapper;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,22 +41,28 @@ public class AssetController {
 
     private final AssetService assetService;
     private final AssetLifecycleService assetLifecycleService;
+    private final AssetDeploymentService assetDeploymentService;
     private final AuditEventRepository auditEventRepository;
     private final AssetMapper assetMapper;
+    private final DeploymentMapper deploymentMapper;
     private final AssetDocumentRepository assetDocumentRepository;
     private final KycComplianceService kycComplianceService;
 
     public AssetController(
             AssetService assetService,
             AssetLifecycleService assetLifecycleService,
+            AssetDeploymentService assetDeploymentService,
             AuditEventRepository auditEventRepository,
             AssetMapper assetMapper,
+            DeploymentMapper deploymentMapper,
             AssetDocumentRepository assetDocumentRepository,
             KycComplianceService kycComplianceService) {
         this.assetService = assetService;
         this.assetLifecycleService = assetLifecycleService;
+        this.assetDeploymentService = assetDeploymentService;
         this.auditEventRepository = auditEventRepository;
         this.assetMapper = assetMapper;
+        this.deploymentMapper = deploymentMapper;
         this.assetDocumentRepository = assetDocumentRepository;
         this.kycComplianceService = kycComplianceService;
     }
@@ -118,7 +127,8 @@ public class AssetController {
         );
     }
 
-    /** Partially updates an asset. */
+    /** Updates an asset (full or partial — all fields optional). */
+    @PutMapping("/{id}")
     @PatchMapping("/{id}")
     public ResponseEntity<AssetResponse> updateAsset(
             @PathVariable UUID id,
@@ -180,6 +190,18 @@ public class AssetController {
     public ResponseEntity<Void> redeemAsset(@PathVariable UUID id, Authentication auth) {
         assetLifecycleService.redeem(id, extractActorId(auth));
         return ResponseEntity.noContent().build();
+    }
+
+    /** Deploys an asset to a chain (alias for POST /assets/{id}/deployments). */
+    @PostMapping("/{id}/deploy")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
+    public ResponseEntity<DeploymentResponse> deployAsset(
+            @PathVariable UUID id,
+            @RequestBody @Valid DeploymentCreateRequest request,
+            Authentication auth) {
+        UUID actorId = extractActorId(auth);
+        AssetDeployment deployment = assetDeploymentService.deploy(id, request.chain(), request.network(), actorId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(deploymentMapper.toResponse(deployment));
     }
 
     /** Returns the audit log for an asset. */
