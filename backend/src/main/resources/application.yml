@@ -157,6 +157,7 @@ registerwerk:
     default-admin:
       email: ${DEFAULT_ADMIN_EMAIL:}
       password: ${DEFAULT_ADMIN_PASSWORD:}
+  seed-demo-data: ${SEED_DEMO_DATA:false}
   trading:
     enabled: ${REGISTERWERK_TRADING_ENABLED:true}
     venues:
