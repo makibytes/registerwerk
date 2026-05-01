@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, Input } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject, Input } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -471,6 +471,7 @@ export class CustomerDetailComponent implements OnInit {
   private readonly adminUserService = inject(AdminUserService);
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   loading = true;
   docsLoading = false;
@@ -502,6 +503,7 @@ export class CustomerDetailComponent implements OnInit {
       next: (entity) => {
         this.entity = entity;
         this.loading = false;
+        this.cdr.markForCheck();
         this.loadDocuments();
         this.loadHistory();
         this.loadIdentities();
@@ -509,6 +511,7 @@ export class CustomerDetailComponent implements OnInit {
       },
       error: () => {
         this.loading = false;
+        this.cdr.markForCheck();
       },
     });
   }
@@ -516,20 +519,20 @@ export class CustomerDetailComponent implements OnInit {
   loadDocuments(): void {
     this.docsLoading = true;
     this.kycService.listDocuments(this.id).subscribe({
-      next: (docs) => { this.documents = docs; this.docsLoading = false; },
-      error: () => { this.docsLoading = false; },
+      next: (docs) => { this.documents = docs; this.docsLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.docsLoading = false; this.cdr.markForCheck(); },
     });
   }
 
   loadJurisdictionApprovals(): void {
     this.kycService.getJurisdictionApprovals(this.id).subscribe({
-      next: (approvals) => { this.jurisdictionApprovals = approvals; },
+      next: (approvals) => { this.jurisdictionApprovals = approvals; this.cdr.markForCheck(); },
     });
   }
 
   loadCompliance(jurisdiction: Jurisdiction): void {
     this.kycService.getCompliance(this.id, jurisdiction).subscribe({
-      next: (result) => { this.complianceByJurisdiction = { ...this.complianceByJurisdiction, [jurisdiction]: result }; },
+      next: (result) => { this.complianceByJurisdiction = { ...this.complianceByJurisdiction, [jurisdiction]: result }; this.cdr.markForCheck(); },
     });
   }
 
@@ -552,10 +555,11 @@ export class CustomerDetailComponent implements OnInit {
     this.kycService.approveJurisdiction(this.id, jur).subscribe({
       next: () => {
         this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
+        this.cdr.markForCheck();
         this.loadJurisdictionApprovals();
         this.loadCompliance(jur);
       },
-      error: () => { this.jurActionLoading = { ...this.jurActionLoading, [jur]: false }; },
+      error: () => { this.jurActionLoading = { ...this.jurActionLoading, [jur]: false }; this.cdr.markForCheck(); },
     });
   }
 
@@ -566,9 +570,10 @@ export class CustomerDetailComponent implements OnInit {
     this.kycService.rejectJurisdiction(this.id, jur, reason).subscribe({
       next: () => {
         this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
+        this.cdr.markForCheck();
         this.loadJurisdictionApprovals();
       },
-      error: () => { this.jurActionLoading = { ...this.jurActionLoading, [jur]: false }; },
+      error: () => { this.jurActionLoading = { ...this.jurActionLoading, [jur]: false }; this.cdr.markForCheck(); },
     });
   }
 
@@ -582,9 +587,11 @@ export class CustomerDetailComponent implements OnInit {
       next: (history) => {
         this.nameHistory = history;
         this.historyLoading = false;
+        this.cdr.markForCheck();
       },
       error: () => {
         this.historyLoading = false;
+        this.cdr.markForCheck();
       },
     });
   }
@@ -633,8 +640,8 @@ export class CustomerDetailComponent implements OnInit {
     this.http.get<OnchainIdentityView[]>(
       `${environment.apiUrl}/entities/${this.id}/onchain-identity`
     ).subscribe({
-      next: (ids) => { this.identities = ids; this.identitiesLoading = false; },
-      error: () => { this.identitiesLoading = false; },
+      next: (ids) => { this.identities = ids; this.identitiesLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.identitiesLoading = false; this.cdr.markForCheck(); },
     });
   }
 

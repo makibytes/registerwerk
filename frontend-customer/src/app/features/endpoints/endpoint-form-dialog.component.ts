@@ -31,6 +31,11 @@ export type EndpointFormDialogResult = EndpointCreateRequest | EndpointUpdateReq
             <mat-radio-button value="WALLET">Wallet</mat-radio-button>
             <mat-radio-button value="CONTRACT">Contract</mat-radio-button>
           </mat-radio-group>
+          @if (form.addressType === 'WALLET' && data.mode !== 'edit') {
+            <p style="font-size:12px;color:var(--rw-text-muted);margin:6px 0 0;line-height:1.5">
+              A wallet can also be a <strong>smart wallet</strong> — a smart contract used as a wallet (e.g. multisig, account abstraction). Use type <em>Wallet</em> for these too.
+            </p>
+          }
         </div>
         <mat-form-field appearance="outline">
           <mat-label>Address</mat-label>

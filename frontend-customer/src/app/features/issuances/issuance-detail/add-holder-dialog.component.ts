@@ -1,13 +1,16 @@
 import { Component, inject, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA, MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { AssetHolder } from '../../../core/models';
+import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../shared/components/address-picker-dialog.component';
 
 interface DialogData {
   assetId: string;
@@ -23,7 +26,9 @@ interface DialogData {
     MatFormFieldModule,
     MatInputModule,
     MatButtonModule,
+    MatIconModule,
     MatProgressSpinnerModule,
+    MatTooltipModule,
   ],
   template: `
     <h2 mat-dialog-title>Add Holder</h2>
@@ -32,7 +37,11 @@ interface DialogData {
       <mat-form-field appearance="outline" class="full-width">
         <mat-label>Wallet Address</mat-label>
         <input matInput [(ngModel)]="walletAddress" placeholder="0x..." />
-        <mat-hint>Ethereum or equivalent wallet address</mat-hint>
+        <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                (click)="pickWallet()">
+          <mat-icon style="font-size:18px">contacts</mat-icon>
+        </button>
+        <mat-hint>Ethereum or equivalent wallet address (including smart wallets)</mat-hint>
       </mat-form-field>
 
       <mat-form-field appearance="outline" class="full-width">
@@ -68,6 +77,7 @@ interface DialogData {
 export class AddHolderDialogComponent {
   private readonly issuanceService = inject(IssuanceService);
   private readonly dialogRef = inject<MatDialogRef<AddHolderDialogComponent, AssetHolder>>(MatDialogRef);
+  private readonly dialog = inject(MatDialog);
 
   walletAddress = '';
   nominalAmount: number | null = null;
@@ -75,6 +85,13 @@ export class AddHolderDialogComponent {
   error = '';
 
   constructor(@Inject(MAT_DIALOG_DATA) public data: DialogData) {}
+
+  pickWallet(): void {
+    this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
+      AddressPickerDialogComponent,
+      { data: { mode: 'WALLET', title: 'Select holder wallet' }, width: '560px' }
+    ).afterClosed().subscribe(addr => { if (addr) this.walletAddress = addr; });
+  }
 
   save(): void {
     if (!this.walletAddress || !this.nominalAmount) return;

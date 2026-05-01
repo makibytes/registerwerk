@@ -28,14 +28,21 @@ interface NavLink {
     MatDividerModule,
   ],
   template: `
-    @if (isImpersonating) {
+    @if (isImpersonating || canImpersonate) {
       <div class="impersonation-bar">
         <mat-icon>admin_panel_settings</mat-icon>
-        <span>Acting as <strong>{{ impersonationEntityName }}</strong></span>
-        <div class="imp-actions">
-          <button class="imp-btn" (click)="switchCompany()">Switch company</button>
-          <button class="imp-btn imp-btn-exit" (click)="exitImpersonation()">Exit</button>
-        </div>
+        @if (isImpersonating) {
+          <span>Acting as <strong>{{ impersonationEntityName }}</strong></span>
+          <div class="imp-actions">
+            <button class="imp-btn" (click)="switchCompany()">Switch company</button>
+            <button class="imp-btn imp-btn-exit" (click)="exitImpersonation()">Exit impersonation</button>
+          </div>
+        } @else {
+          <span>Admin mode — no company selected</span>
+          <div class="imp-actions">
+            <button class="imp-btn" (click)="selectCompany()">Select company</button>
+          </div>
+        }
       </div>
     }
     <header class="nav-bar">
@@ -346,6 +353,7 @@ export class NavComponent implements OnInit {
   userEmail: string | null = null;
   visibleLinks: NavLink[] = [];
   isImpersonating = false;
+  canImpersonate = false;
   impersonationEntityName = '';
 
   private readonly allLinks: NavLink[] = [
@@ -365,8 +373,13 @@ export class NavComponent implements OnInit {
       link.roles.length === 0 || link.roles.some(r => this.auth.hasRole(r))
     );
     this.isImpersonating = this.auth.isImpersonating();
+    this.canImpersonate = this.auth.hasRole('REGISTRY_ADMIN');
     const meta = this.auth.getImpersonationMeta();
     this.impersonationEntityName = meta?.entityName ?? '';
+  }
+
+  selectCompany(): void {
+    this.router.navigate(['/select-company']);
   }
 
   switchCompany(): void {
@@ -376,11 +389,7 @@ export class NavComponent implements OnInit {
 
   exitImpersonation(): void {
     this.auth.exitImpersonation();
-    if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
-      this.router.navigate(['/select-company']);
-    } else {
-      this.router.navigate(['/dashboard']);
-    }
+    this.router.navigate(['/select-company']);
   }
 
   logout(): void { this.auth.logout(); }

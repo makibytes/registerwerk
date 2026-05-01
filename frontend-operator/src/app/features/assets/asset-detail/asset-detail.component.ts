@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, Input, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatCardModule } from '@angular/material/card';
@@ -32,6 +32,7 @@ import { RegisterInvestorDialogComponent, RegisterInvestorData } from './registe
 import { AddIssuerDialogComponent, AddIssuerData } from './add-issuer-dialog.component';
 import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-topic-dialog.component';
 import { TransactionService, TxRecord } from '../../../core/api/transaction.service';
+import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../shared/components/address-picker-dialog.component';
 
 @Component({
   selector: 'app-asset-detail',
@@ -465,6 +466,10 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                 <mat-form-field appearance="outline">
                   <mat-label>Recipient Address</mat-label>
                   <input matInput [(ngModel)]="mintAddress" placeholder="0x..." />
+                  <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                          (click)="pickAddress('WALLET', 'Select recipient wallet', a => mintAddress = a)">
+                    <mat-icon style="font-size:18px">contacts</mat-icon>
+                  </button>
                 </mat-form-field>
                 <mat-form-field appearance="outline">
                   <mat-label>Amount</mat-label>
@@ -485,6 +490,10 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                 <mat-form-field appearance="outline">
                   <mat-label>From Address</mat-label>
                   <input matInput [(ngModel)]="burnAddress" placeholder="0x..." />
+                  <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                          (click)="pickAddress('WALLET', 'Select holder wallet', a => burnAddress = a)">
+                    <mat-icon style="font-size:18px">contacts</mat-icon>
+                  </button>
                 </mat-form-field>
                 <mat-form-field appearance="outline">
                   <mat-label>Amount</mat-label>
@@ -676,6 +685,10 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                     <mat-form-field appearance="outline">
                       <mat-label>Address to Freeze/Unfreeze</mat-label>
                       <input matInput [(ngModel)]="freezeAddress" placeholder="0x..." />
+                      <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                              (click)="pickAddress('WALLET', 'Select address to freeze', a => freezeAddress = a)">
+                        <mat-icon style="font-size:18px">contacts</mat-icon>
+                      </button>
                     </mat-form-field>
                     <button mat-stroked-button color="warn" [disabled]="!freezeAddress" (click)="freezeAddr()" style="height:56px">Freeze</button>
                     <button mat-stroked-button color="primary" [disabled]="!freezeAddress" (click)="unfreezeAddr()" style="height:56px">Unfreeze</button>
@@ -687,10 +700,18 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                   <mat-form-field appearance="outline">
                     <mat-label>From Address</mat-label>
                     <input matInput [(ngModel)]="forceFrom" placeholder="0x..." />
+                    <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                            (click)="pickAddress('WALLET', 'Select source wallet', a => forceFrom = a)">
+                      <mat-icon style="font-size:18px">contacts</mat-icon>
+                    </button>
                   </mat-form-field>
                   <mat-form-field appearance="outline">
                     <mat-label>To Address</mat-label>
                     <input matInput [(ngModel)]="forceTo" placeholder="0x..." />
+                    <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                            (click)="pickAddress('WALLET', 'Select destination wallet', a => forceTo = a)">
+                      <mat-icon style="font-size:18px">contacts</mat-icon>
+                    </button>
                   </mat-form-field>
                   <div class="form-row">
                     <mat-form-field appearance="outline">
@@ -716,10 +737,18 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                   <mat-form-field appearance="outline">
                     <mat-label>Owner Address</mat-label>
                     <input matInput [(ngModel)]="forceApproveOwner" placeholder="0x..." />
+                    <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                            (click)="pickAddress('WALLET', 'Select owner wallet', a => forceApproveOwner = a)">
+                      <mat-icon style="font-size:18px">contacts</mat-icon>
+                    </button>
                   </mat-form-field>
                   <mat-form-field appearance="outline">
                     <mat-label>Spender Address</mat-label>
                     <input matInput [(ngModel)]="forceApproveSpender" placeholder="0x..." />
+                    <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                            (click)="pickAddress('WALLET', 'Select spender wallet', a => forceApproveSpender = a)">
+                      <mat-icon style="font-size:18px">contacts</mat-icon>
+                    </button>
                   </mat-form-field>
                   <div class="form-row">
                     <mat-form-field appearance="outline">
@@ -746,6 +775,10 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
                     <mat-form-field appearance="outline">
                       <mat-label>From Address</mat-label>
                       <input matInput [(ngModel)]="forceBurnFrom" placeholder="0x..." />
+                      <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                              (click)="pickAddress('WALLET', 'Select holder wallet', a => forceBurnFrom = a)">
+                        <mat-icon style="font-size:18px">contacts</mat-icon>
+                      </button>
                     </mat-form-field>
                     <mat-form-field appearance="outline">
                       <mat-label>Amount</mat-label>
@@ -883,6 +916,7 @@ export class AssetDetailComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   loading = true;
   deploymentsLoading = false;
@@ -967,6 +1001,7 @@ export class AssetDetailComponent implements OnInit {
       next: (asset) => {
         this.asset = asset;
         this.loading = false;
+        this.cdr.markForCheck();
         this.loadDeployments();
         this.loadHolders();
         this.loadTermSheetDocs();
@@ -974,7 +1009,7 @@ export class AssetDetailComponent implements OnInit {
           this.loadKycCompliance(asset.id);
         }
       },
-      error: () => { this.loading = false; },
+      error: () => { this.loading = false; this.cdr.markForCheck(); },
     });
   }
 
@@ -984,6 +1019,7 @@ export class AssetDetailComponent implements OnInit {
       next: (d) => {
         this.deployments = d;
         this.deploymentsLoading = false;
+        this.cdr.markForCheck();
         if (d.length > 0) {
           if (this.asset?.onchainLevel === 'CONTROL') {
             this.loadMintRules(d[0].id);
@@ -993,7 +1029,7 @@ export class AssetDetailComponent implements OnInit {
           }
         }
       },
-      error: () => { this.deploymentsLoading = false; },
+      error: () => { this.deploymentsLoading = false; this.cdr.markForCheck(); },
     });
   }
 
@@ -1002,32 +1038,37 @@ export class AssetDetailComponent implements OnInit {
   loadMintRules(deploymentId: string): void {
     this.rulesLoading = true;
     this.mintControlService.listRules(this.id, deploymentId).subscribe({
-      next: (rules) => { this.mintRules = rules; this.rulesLoading = false; },
-      error: () => { this.rulesLoading = false; },
+      next: (rules) => { this.mintRules = rules; this.rulesLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.rulesLoading = false; this.cdr.markForCheck(); },
     });
   }
 
   openAddRuleDialog(): void {
     const depId = this.primaryDeploymentId;
     if (!depId) return;
-    const address = prompt('Target address (0x... wallet or contract):');
-    if (!address) return;
-    const typeInput = prompt('Rule type: MINT_ALLOWANCE, AUTO_APPROVE_TRANSFER, or AUTO_APPROVE_BURN');
-    const ruleType = typeInput as RuleType;
-    if (!['MINT_ALLOWANCE', 'AUTO_APPROVE_TRANSFER', 'AUTO_APPROVE_BURN'].includes(ruleType)) {
-      this.snackBar.open('Invalid rule type.', 'OK', { duration: 3000 });
-      return;
-    }
-    const maxAmountStr = prompt('Max amount (leave empty for unlimited):');
-    this.mintControlService.createRule(this.id, depId, {
-      targetAddress: address,
-      ruleType,
-      maxAmount: maxAmountStr || undefined,
-    }).subscribe({
-      next: (rule) => {
-        this.mintRules = [...this.mintRules, rule];
-        this.snackBar.open('Rule created.', 'OK', { duration: 2000 });
-      },
+    this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
+      AddressPickerDialogComponent,
+      { data: { mode: 'ANY', title: 'Select target address for rule' }, width: '560px' }
+    ).afterClosed().subscribe(address => {
+      if (!address) return;
+      const typeInput = prompt('Rule type: MINT_ALLOWANCE, AUTO_APPROVE_TRANSFER, or AUTO_APPROVE_BURN');
+      const ruleType = typeInput as RuleType;
+      if (!['MINT_ALLOWANCE', 'AUTO_APPROVE_TRANSFER', 'AUTO_APPROVE_BURN'].includes(ruleType)) {
+        this.snackBar.open('Invalid rule type.', 'OK', { duration: 3000 });
+        return;
+      }
+      const maxAmountStr = prompt('Max amount (leave empty for unlimited):');
+      this.mintControlService.createRule(this.id, depId, {
+        targetAddress: address,
+        ruleType,
+        maxAmount: maxAmountStr || undefined,
+      }).subscribe({
+        next: (rule) => {
+          this.mintRules = [...this.mintRules, rule];
+          this.cdr.markForCheck();
+          this.snackBar.open('Rule created.', 'OK', { duration: 2000 });
+        },
+      });
     });
   }
 
@@ -1055,40 +1096,40 @@ export class AssetDetailComponent implements OnInit {
   loadSuite(deploymentId: string): void {
     this.suiteLoading = true;
     this.erc3643Service.getSuite(this.id, deploymentId).subscribe({
-      next: (s) => { this.suite = s; this.suiteLoading = false; },
-      error: () => { this.suiteLoading = false; },
+      next: (s) => { this.suite = s; this.suiteLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.suiteLoading = false; this.cdr.markForCheck(); },
     });
   }
 
   loadIdentityRegistry(deploymentId: string): void {
     this.irLoading = true;
     this.erc3643Service.getIdentityRegistry(this.id, deploymentId).subscribe({
-      next: (entries) => { this.identityRegistry = entries; this.irLoading = false; },
-      error: () => { this.irLoading = false; },
+      next: (entries) => { this.identityRegistry = entries; this.irLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.irLoading = false; this.cdr.markForCheck(); },
     });
   }
 
   loadComplianceStatus(deploymentId: string): void {
     this.complianceLoading = true;
     this.erc3643Service.getComplianceStatus(this.id, deploymentId).subscribe({
-      next: (s) => { this.complianceStatus = s; this.complianceLoading = false; },
-      error: () => { this.complianceLoading = false; },
+      next: (s) => { this.complianceStatus = s; this.complianceLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.complianceLoading = false; this.cdr.markForCheck(); },
     });
   }
 
   loadTrustedIssuers(deploymentId: string): void {
     this.issuersLoading = true;
     this.erc3643Service.getTrustedIssuers(this.id, deploymentId).subscribe({
-      next: (issuers) => { this.trustedIssuers = issuers; this.issuersLoading = false; },
-      error: () => { this.issuersLoading = false; },
+      next: (issuers) => { this.trustedIssuers = issuers; this.issuersLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.issuersLoading = false; this.cdr.markForCheck(); },
     });
   }
 
   loadClaimTopics(deploymentId: string): void {
     this.topicsLoading = true;
     this.erc3643Service.getClaimTopics(this.id, deploymentId).subscribe({
-      next: (topics) => { this.claimTopics = topics; this.topicsLoading = false; },
-      error: () => { this.topicsLoading = false; },
+      next: (topics) => { this.claimTopics = topics; this.topicsLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.topicsLoading = false; this.cdr.markForCheck(); },
     });
   }
 
@@ -1180,8 +1221,8 @@ export class AssetDetailComponent implements OnInit {
     if (!depId) return;
     this.txHistoryLoading = true;
     this.txService.listTransactions(depId).subscribe({
-      next: (page) => { this.txHistory = page.content; this.txHistoryLoading = false; },
-      error: () => { this.txHistoryLoading = false; },
+      next: (page) => { this.txHistory = page.content; this.txHistoryLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.txHistoryLoading = false; this.cdr.markForCheck(); },
     });
   }
 
@@ -1273,8 +1314,8 @@ export class AssetDetailComponent implements OnInit {
   loadHolders(): void {
     this.holdersLoading = true;
     this.assetService.getHolders(this.id).subscribe({
-      next: (h) => { this.holders = h; this.holdersLoading = false; },
-      error: () => { this.holdersLoading = false; },
+      next: (h) => { this.holders = h; this.holdersLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.holdersLoading = false; this.cdr.markForCheck(); },
     });
   }
 
@@ -1322,8 +1363,8 @@ export class AssetDetailComponent implements OnInit {
   loadKycCompliance(assetId: string): void {
     this.kycComplianceLoading = true;
     this.assetService.getKycCompliance(assetId).subscribe({
-      next: (c) => { this.kycCompliance = c; this.kycComplianceLoading = false; },
-      error: () => { this.kycComplianceLoading = false; },
+      next: (c) => { this.kycCompliance = c; this.kycComplianceLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.kycComplianceLoading = false; this.cdr.markForCheck(); },
     });
   }
 
@@ -1342,8 +1383,8 @@ export class AssetDetailComponent implements OnInit {
   loadTermSheetDocs(): void {
     this.tsLoading = true;
     this.assetService.listDocuments(this.id).subscribe({
-      next: docs => { this.termSheetDocs = docs; this.tsLoading = false; },
-      error: () => { this.tsLoading = false; },
+      next: docs => { this.termSheetDocs = docs; this.tsLoading = false; this.cdr.markForCheck(); },
+      error: () => { this.tsLoading = false; this.cdr.markForCheck(); },
     });
   }
 
@@ -1356,10 +1397,12 @@ export class AssetDetailComponent implements OnInit {
         this.termSheetDocs = [doc, ...this.termSheetDocs];
         this.tsUploading = false;
         if (this.asset) this.asset.hasTermSheet = true;
+        this.cdr.markForCheck();
         this.snackBar.open('Term sheet uploaded.', 'OK', { duration: 3000 });
       },
       error: () => {
         this.tsUploading = false;
+        this.cdr.markForCheck();
         this.snackBar.open('Upload failed.', 'Close', { duration: 4000 });
       },
     });
@@ -1374,10 +1417,12 @@ export class AssetDetailComponent implements OnInit {
         this.termSheetDocs = [doc, ...this.termSheetDocs];
         this.tsSyncing = false;
         if (this.asset) this.asset.hasTermSheet = true;
+        this.cdr.markForCheck();
         this.snackBar.open('Term sheet synced from chain.', 'OK', { duration: 3000 });
       },
       error: () => {
         this.tsSyncing = false;
+        this.cdr.markForCheck();
         this.snackBar.open('Sync failed.', 'Close', { duration: 4000 });
       },
     });
@@ -1401,6 +1446,13 @@ export class AssetDetailComponent implements OnInit {
       if (this.termSheetDocs.length === 0 && this.asset) this.asset.hasTermSheet = false;
       this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
     });
+  }
+
+  pickAddress(mode: 'WALLET' | 'CONTRACT' | 'ANY', title: string, callback: (addr: string) => void): void {
+    this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
+      AddressPickerDialogComponent,
+      { data: { mode, title }, width: '560px' }
+    ).afterClosed().subscribe(addr => { if (addr) callback(addr); });
   }
 
   edit(): void {

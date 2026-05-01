@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, Input, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -165,6 +165,7 @@ export class AssetEditComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly assetService = inject(AssetService);
   private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   loading = true;
   submitting = false;
@@ -194,8 +195,9 @@ export class AssetEditComponent implements OnInit {
           issuerId: asset.issuerId,
         });
         this.loading = false;
+        this.cdr.markForCheck();
       },
-      error: () => { this.loading = false; },
+      error: () => { this.loading = false; this.cdr.markForCheck(); },
     });
   }
 
