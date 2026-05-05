@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
+import de.makibytes.registerwerk.application.customer.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.application.customer.CompanyUserService;
 import de.makibytes.registerwerk.application.exception.InvalidStateTransitionException;
 import de.makibytes.registerwerk.application.notification.CompanyUserInvitationEmailService;
@@ -59,6 +60,7 @@ class CompanyUserServiceTest {
     @Mock private CompanyUserInvitationEmailService invitationEmailService;
     @Mock private PasswordResetEmailService passwordResetEmailService;
     @Mock private AuditEventPublisher auditEventPublisher;
+    @Mock private CompanyExternalReferenceService companyExternalReferenceService;
 
     private RegisterwerkAuthProperties authProperties;
     private CompanyUserService service;
@@ -79,6 +81,7 @@ class CompanyUserServiceTest {
             passwordResetEmailService,
             auditEventPublisher,
             authProperties,
+            companyExternalReferenceService,
             "http://localhost:4201",
             48
         );

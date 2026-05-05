@@ -252,6 +252,13 @@ interface Filters {
               </td>
             </ng-container>
 
+            <ng-container matColumnDef="externalId">
+              <th mat-header-cell *matHeaderCellDef>External ID</th>
+              <td mat-cell *matCellDef="let r">
+                {{ r.externalId || '—' }}
+              </td>
+            </ng-container>
+
             <ng-container matColumnDef="actions">
               <th mat-header-cell *matHeaderCellDef></th>
               <td mat-cell *matCellDef="let r" class="actions-cell">
@@ -364,7 +371,7 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
 
   readonly displayedColumns = [
     'assetName', 'tokenStandard', 'nominalAmount', 'acquisitionDate',
-    'walletAddress', 'whitelisted', 'assetStatus', 'actions',
+    'walletAddress', 'whitelisted', 'assetStatus', 'externalId', 'actions',
   ];
 
   readonly standardOptions: TokenStandard[] = [

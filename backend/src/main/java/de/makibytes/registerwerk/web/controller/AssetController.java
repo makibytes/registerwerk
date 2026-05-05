@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.web.controller;
 
+import de.makibytes.registerwerk.application.customer.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.application.asset.AssetDeploymentService;
 import de.makibytes.registerwerk.application.asset.AssetLifecycleService;
 import de.makibytes.registerwerk.application.asset.AssetService;
@@ -12,6 +13,7 @@ import de.makibytes.registerwerk.web.dto.DocumentStatusResponse;
 import de.makibytes.registerwerk.web.dto.KycComplianceResponse;
 import de.makibytes.registerwerk.domain.audit.AuditEvent;
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
+import de.makibytes.registerwerk.domain.enums.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AuditEventRepository;
 import de.makibytes.registerwerk.web.dto.*;
 import de.makibytes.registerwerk.web.mapper.AssetMapper;
@@ -47,6 +49,7 @@ public class AssetController {
     private final DeploymentMapper deploymentMapper;
     private final AssetDocumentRepository assetDocumentRepository;
     private final KycComplianceService kycComplianceService;
+    private final CompanyExternalReferenceService companyExternalReferenceService;
 
     public AssetController(
             AssetService assetService,
@@ -56,7 +59,8 @@ public class AssetController {
             AssetMapper assetMapper,
             DeploymentMapper deploymentMapper,
             AssetDocumentRepository assetDocumentRepository,
-            KycComplianceService kycComplianceService) {
+            KycComplianceService kycComplianceService,
+            CompanyExternalReferenceService companyExternalReferenceService) {
         this.assetService = assetService;
         this.assetLifecycleService = assetLifecycleService;
         this.assetDeploymentService = assetDeploymentService;
@@ -65,6 +69,7 @@ public class AssetController {
         this.deploymentMapper = deploymentMapper;
         this.assetDocumentRepository = assetDocumentRepository;
         this.kycComplianceService = kycComplianceService;
+        this.companyExternalReferenceService = companyExternalReferenceService;
     }
 
     /** Creates a new asset. */
@@ -74,7 +79,7 @@ public class AssetController {
             Authentication auth) {
         Asset asset = assetMapper.toEntity(request);
         Asset created = assetService.createAsset(asset, extractActorId(auth));
-        return ResponseEntity.status(HttpStatus.CREATED).body(assetMapper.toResponse(created));
+        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created, auth, false));
     }
 
     /** Returns a paginated list of assets with optional filters. */
@@ -82,21 +87,19 @@ public class AssetController {
     public ResponseEntity<PageResponse<AssetResponse>> listAssets(
             @RequestParam(required = false) UUID issuerId,
             @RequestParam(required = false) AssetStatus status,
+            Authentication auth,
             Pageable pageable) {
         Page<Asset> page = assetService.listAssets(issuerId, status, pageable);
-        return ResponseEntity.ok(PageResponse.of(page.map(assetMapper::toResponse)));
+        return ResponseEntity.ok(PageResponse.of(page.map(asset -> toResponse(asset, auth, false))));
     }
 
     /** Returns a single asset by ID. */
     @GetMapping("/{id}")
     @PreAuthorize("@assetAccessChecker.canRead(#id, authentication)")
-    public ResponseEntity<AssetResponse> getAsset(@PathVariable UUID id) {
+    public ResponseEntity<AssetResponse> getAsset(@PathVariable UUID id, Authentication auth) {
         Asset asset = assetService.getAsset(id);
-        AssetResponse base = assetMapper.toResponse(asset);
         boolean hasTermSheet = assetDocumentRepository.existsByAssetIdAndDeletedAtIsNull(id);
-        return ResponseEntity.ok(new AssetResponse(base.id(), base.assetNumber(), base.issuerId(),
-            base.name(), base.isin(), base.tokenStandard(), base.onchainLevel(), base.status(),
-            asset.getJurisdiction(), base.createdAt(), hasTermSheet));
+        return ResponseEntity.ok(toResponse(asset, auth, hasTermSheet));
     }
 
     /**
@@ -132,13 +135,14 @@ public class AssetController {
     @PatchMapping("/{id}")
     public ResponseEntity<AssetResponse> updateAsset(
             @PathVariable UUID id,
-            @RequestBody @Valid AssetUpdateRequest request) {
+            @RequestBody @Valid AssetUpdateRequest request,
+            Authentication auth) {
         Asset patch = new Asset();
         patch.setName(request.name());
         patch.setIsin(request.isin());
         patch.setPublicData(request.publicData());
         patch.setJurisdiction(request.jurisdiction());
-        return ResponseEntity.ok(assetMapper.toResponse(assetService.updateAsset(id, patch)));
+        return ResponseEntity.ok(toResponse(assetService.updateAsset(id, patch), auth, false));
     }
 
     /** Submits an asset for approval (DRAFT → PENDING_APPROVAL). */
@@ -223,5 +227,25 @@ public class AssetController {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    private AssetResponse toResponse(Asset asset, Authentication authentication, boolean hasTermSheet) {
+        AssetResponse base = assetMapper.toResponse(asset);
+        return new AssetResponse(
+                base.id(),
+                base.assetNumber(),
+                base.issuerId(),
+                base.name(),
+                base.isin(),
+                base.tokenStandard(),
+                base.onchainLevel(),
+                base.status(),
+                asset.getJurisdiction(),
+                base.createdAt(),
+                hasTermSheet,
+                companyExternalReferenceService
+                        .findExternalId(authentication, ExternalReferenceSubjectType.ASSET, asset.getId())
+                        .orElse(null)
+        );
     }
 }

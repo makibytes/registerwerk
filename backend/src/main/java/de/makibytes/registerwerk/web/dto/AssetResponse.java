@@ -22,5 +22,6 @@ public record AssetResponse(
     AssetStatus status,
     Jurisdiction jurisdiction,
     Instant createdAt,
-    boolean hasTermSheet
+    boolean hasTermSheet,
+    String externalId
 ) {}

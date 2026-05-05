@@ -23,6 +23,7 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
 import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
 import { AddressComponent } from '../../../shared/components/address.component';
+import { ExternalIdEditorComponent } from '../../../shared/components/external-id-editor.component';
 
 @Component({
   selector: 'app-investment-detail',
@@ -41,6 +42,7 @@ import { AddressComponent } from '../../../shared/components/address.component';
     ChainIconComponent,
     DataStatePillComponent,
     AddressComponent,
+    ExternalIdEditorComponent,
   ],
   template: `
     <div class="page-container">
@@ -66,7 +68,7 @@ import { AddressComponent } from '../../../shared/components/address.component';
 
             <mat-divider style="margin: 16px 0"></mat-divider>
 
-            <div class="detail-grid">
+              <div class="detail-grid">
               <div class="detail-item">
                 <span class="detail-label">Nominal Amount</span>
                 <span class="detail-value large">{{ record.nominalAmount | number:'1.0-2' }}</span>
@@ -97,14 +99,25 @@ import { AddressComponent } from '../../../shared/components/address.component';
                   <app-status-badge [status]="record.assetStatus"></app-status-badge>
                 </div>
               }
-              @if (record.assetNumber) {
-                <div class="detail-item">
-                  <span class="detail-label">Asset Number</span>
-                  <code class="detail-value">{{ record.assetNumber }}</code>
+                @if (record.assetNumber) {
+                  <div class="detail-item">
+                    <span class="detail-label">Asset Number</span>
+                    <code class="detail-value">{{ record.assetNumber }}</code>
+                  </div>
+                }
+                <div class="detail-item external-id-item">
+                  <span class="detail-label">External ID</span>
+                  <app-external-id-editor
+                    [subjectType]="'ASSET_HOLDER'"
+                    [subjectId]="record.id"
+                    [value]="record.externalId"
+                    label="Investment external ID"
+                    placeholder="Your internal holding ID"
+                    (valueChange)="record.externalId = $event"
+                  />
                 </div>
-              }
-            </div>
-          </mat-card-content>
+              </div>
+            </mat-card-content>
         </mat-card>
 
         @if (isErc3643) {
@@ -143,6 +156,16 @@ import { AddressComponent } from '../../../shared/components/address.component';
                       </span>
                     </div>
                   </div>
+                </div>
+                <div class="identity-external-id">
+                  <app-external-id-editor
+                    [subjectType]="'ERC3643_IDENTITY_REGISTRY_ENTRY'"
+                    [subjectId]="identitySection.data.id"
+                    [value]="identitySection.data.externalId"
+                    label="Identity registry external ID"
+                    placeholder="Your internal identity entry ID"
+                    (valueChange)="identitySection.data!.externalId = $event"
+                  />
                 </div>
               } @else {
                 <div class="identity-row not-deployed">
@@ -209,6 +232,7 @@ import { AddressComponent } from '../../../shared/components/address.component';
     .isin { font-size: 13px; color: #546e7a; }
     .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
     .detail-item { display: flex; flex-direction: column; gap: 4px; }
+    .external-id-item { grid-column: 1 / -1; }
     .detail-label { font-size: 11px; color: #78909c; text-transform: uppercase; letter-spacing: 0.5px; }
     .detail-value { font-size: 15px; color: #37474f; }
     .detail-value.large { font-size: 28px; font-weight: 700; color: #00695c; }
@@ -228,6 +252,7 @@ import { AddressComponent } from '../../../shared/components/address.component';
     .claim-item.claim-fail mat-icon { color: #e53935; }
     .claim-label { display: block; font-size: 12px; color: #546e7a; font-weight: 500; }
     .claim-status { display: block; font-size: 14px; color: #37474f; }
+    .identity-external-id { margin-top: 16px; }
     .empty-text { color: var(--rw-text-muted); }
   `],
 })

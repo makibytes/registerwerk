@@ -3,8 +3,10 @@ package de.makibytes.registerwerk.web.controller;
 import de.makibytes.registerwerk.application.asset.HolderService;
 import de.makibytes.registerwerk.application.asset.LiveHolderService;
 import de.makibytes.registerwerk.application.blockchain.WhitelistService;
+import de.makibytes.registerwerk.application.customer.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.application.indexer.HolderDataService;
 import de.makibytes.registerwerk.domain.asset.AssetHolder;
+import de.makibytes.registerwerk.domain.enums.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
 import de.makibytes.registerwerk.web.dto.HolderCreateRequest;
 import de.makibytes.registerwerk.web.dto.HolderResponse;
@@ -42,6 +44,7 @@ public class HolderController {
     private final HolderDataService holderDataService;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final HolderMapper holderMapper;
+    private final CompanyExternalReferenceService companyExternalReferenceService;
 
     public HolderController(
             HolderService holderService,
@@ -49,13 +52,15 @@ public class HolderController {
             WhitelistService whitelistService,
             HolderDataService holderDataService,
             AssetDeploymentRepository assetDeploymentRepository,
-            HolderMapper holderMapper) {
+            HolderMapper holderMapper,
+            CompanyExternalReferenceService companyExternalReferenceService) {
         this.holderService = holderService;
         this.liveHolderService = liveHolderService;
         this.whitelistService = whitelistService;
         this.holderDataService = holderDataService;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.holderMapper = holderMapper;
+        this.companyExternalReferenceService = companyExternalReferenceService;
     }
 
     /**
@@ -65,6 +70,7 @@ public class HolderController {
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<HolderResponse> addHolder(
             @PathVariable UUID assetId,
+            Authentication authentication,
             @RequestBody @Valid HolderCreateRequest request) {
         AssetHolder holder = holderService.addHolder(
             assetId,
@@ -72,7 +78,7 @@ public class HolderController {
             request.walletAddress(),
             request.nominalAmount()
         );
-        return ResponseEntity.status(HttpStatus.CREATED).body(holderMapper.toResponse(holder));
+        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(holder, authentication));
     }
 
     /**
@@ -82,9 +88,10 @@ public class HolderController {
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
     public ResponseEntity<PageResponse<HolderResponse>> listHolders(
             @PathVariable UUID assetId,
+            Authentication authentication,
             Pageable pageable) {
         Page<AssetHolder> page = holderService.listHolders(assetId, pageable);
-        return ResponseEntity.ok(PageResponse.of(page.map(holderMapper::toResponse)));
+        return ResponseEntity.ok(PageResponse.of(page.map(holder -> toResponse(holder, authentication))));
     }
 
     /**
@@ -172,5 +179,21 @@ public class HolderController {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    private HolderResponse toResponse(AssetHolder holder, Authentication authentication) {
+        HolderResponse base = holderMapper.toResponse(holder);
+        return new HolderResponse(
+                base.id(),
+                base.assetId(),
+                base.investorId(),
+                base.walletAddress(),
+                base.whitelisted(),
+                base.nominalAmount(),
+                base.acquisitionDate(),
+                companyExternalReferenceService
+                        .findExternalId(authentication, ExternalReferenceSubjectType.ASSET_HOLDER, holder.getId())
+                        .orElse(null)
+        );
     }
 }

@@ -1,8 +1,16 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { CompanyUser, IdpSettings, LegalEntity, PublicUserActionTokenInfo, UserRole } from '../models';
+import {
+  CompanyExternalReferenceRecord,
+  CompanyUser,
+  ExternalReferenceSubjectType,
+  IdpSettings,
+  LegalEntity,
+  PublicUserActionTokenInfo,
+  UserRole,
+} from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class CompanyService {
@@ -13,6 +21,40 @@ export class CompanyService {
 
   getMyEntity(): Observable<LegalEntity> {
     return this.http.get<LegalEntity>(`${this.base}/me`);
+  }
+
+  listExternalIds(subjectType?: ExternalReferenceSubjectType): Observable<CompanyExternalReferenceRecord[]> {
+    let params = new HttpParams();
+    if (subjectType) {
+      params = params.set('subjectType', subjectType);
+    }
+    return this.http.get<CompanyExternalReferenceRecord[]>(`${this.base}/external-ids`, { params });
+  }
+
+  lookupExternalIds(
+    externalId: string,
+    subjectType?: ExternalReferenceSubjectType
+  ): Observable<CompanyExternalReferenceRecord[]> {
+    let params = new HttpParams().set('externalId', externalId);
+    if (subjectType) {
+      params = params.set('subjectType', subjectType);
+    }
+    return this.http.get<CompanyExternalReferenceRecord[]>(`${this.base}/external-ids/lookup`, { params });
+  }
+
+  saveExternalId(
+    subjectType: ExternalReferenceSubjectType,
+    subjectId: string,
+    externalId: string
+  ): Observable<{ subjectType: ExternalReferenceSubjectType; subjectId: string; externalId: string; updatedAt: string }> {
+    return this.http.put<{ subjectType: ExternalReferenceSubjectType; subjectId: string; externalId: string; updatedAt: string }>(
+      `${this.base}/external-ids/${subjectType}/${subjectId}`,
+      { externalId }
+    );
+  }
+
+  deleteExternalId(subjectType: ExternalReferenceSubjectType, subjectId: string): Observable<void> {
+    return this.http.delete<void>(`${this.base}/external-ids/${subjectType}/${subjectId}`);
   }
 
   // ── Users ──────────────────────────────────────────────────────────────────

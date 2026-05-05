@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.web.controller;
 
+import de.makibytes.registerwerk.application.customer.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.application.customer.EntityHistoryService;
 import de.makibytes.registerwerk.application.customer.LegalEntityService;
 import de.makibytes.registerwerk.domain.entity.EntityMergeRecord;
@@ -7,6 +8,7 @@ import de.makibytes.registerwerk.domain.entity.EntityNameHistory;
 import de.makibytes.registerwerk.domain.entity.LegalEntity;
 import de.makibytes.registerwerk.domain.enums.EntityStatus;
 import de.makibytes.registerwerk.domain.enums.EntityType;
+import de.makibytes.registerwerk.domain.enums.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.web.dto.EntityResponse;
 import de.makibytes.registerwerk.web.dto.EntityUpdateRequest;
@@ -38,14 +40,17 @@ public class CustomerController {
 
     private final LegalEntityService legalEntityService;
     private final EntityHistoryService entityHistoryService;
+    private final CompanyExternalReferenceService companyExternalReferenceService;
     private final EntityMapper entityMapper;
 
     public CustomerController(
             LegalEntityService legalEntityService,
             EntityHistoryService entityHistoryService,
+            CompanyExternalReferenceService companyExternalReferenceService,
             EntityMapper entityMapper) {
         this.legalEntityService = legalEntityService;
         this.entityHistoryService = entityHistoryService;
+        this.companyExternalReferenceService = companyExternalReferenceService;
         this.entityMapper = entityMapper;
     }
 
@@ -60,7 +65,7 @@ public class CustomerController {
         UUID actorId = extractActorId(auth);
         LegalEntity entity = entityMapper.toEntity(request);
         LegalEntity created = legalEntityService.createEntity(entity, actorId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(entityMapper.toResponse(created));
+        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created, auth));
     }
 
     /**
@@ -71,9 +76,10 @@ public class CustomerController {
     public ResponseEntity<PageResponse<EntityResponse>> listEntities(
             @RequestParam(required = false) EntityType type,
             @RequestParam(required = false) EntityStatus status,
+            Authentication auth,
             Pageable pageable) {
         Page<LegalEntity> page = legalEntityService.listEntities(type, status, pageable);
-        return ResponseEntity.ok(PageResponse.of(page.map(entityMapper::toResponse)));
+        return ResponseEntity.ok(PageResponse.of(page.map(entity -> toResponse(entity, auth))));
     }
 
     /**
@@ -82,9 +88,9 @@ public class CustomerController {
      */
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @entityOwnershipChecker.isOwner(#id, authentication)")
-    public ResponseEntity<EntityResponse> getEntity(@PathVariable UUID id) {
+    public ResponseEntity<EntityResponse> getEntity(@PathVariable UUID id, Authentication auth) {
         LegalEntity entity = legalEntityService.getEntity(id);
-        return ResponseEntity.ok(entityMapper.toResponse(entity));
+        return ResponseEntity.ok(toResponse(entity, auth));
     }
 
     /**
@@ -95,7 +101,8 @@ public class CustomerController {
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<EntityResponse> updateEntity(
             @PathVariable UUID id,
-            @RequestBody @Valid EntityUpdateRequest request) {
+            @RequestBody @Valid EntityUpdateRequest request,
+            Authentication auth) {
         LegalEntity patch = new LegalEntity();
         patch.setCurrentName(request.currentName());
         patch.setLeiCode(request.leiCode());
@@ -103,7 +110,7 @@ public class CustomerController {
         patch.setRegistrationCountry(request.registrationCountry());
         patch.setIncorporationDate(request.incorporationDate());
         LegalEntity updated = legalEntityService.updateEntity(id, patch);
-        return ResponseEntity.ok(entityMapper.toResponse(updated));
+        return ResponseEntity.ok(toResponse(updated, auth));
     }
 
     /**
@@ -178,5 +185,23 @@ public class CustomerController {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    private EntityResponse toResponse(LegalEntity entity, Authentication authentication) {
+        EntityResponse base = entityMapper.toResponse(entity);
+        return new EntityResponse(
+                base.id(),
+                base.entityNumber(),
+                base.type(),
+                base.status(),
+                base.currentName(),
+                base.leiCode(),
+                base.registrationNumber(),
+                base.kycStatus(),
+                base.createdAt(),
+                companyExternalReferenceService
+                        .findExternalId(authentication, ExternalReferenceSubjectType.LEGAL_ENTITY, entity.getId())
+                        .orElse(null)
+        );
     }
 }

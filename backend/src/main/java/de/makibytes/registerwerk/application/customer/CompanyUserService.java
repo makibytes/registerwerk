@@ -12,6 +12,7 @@ import de.makibytes.registerwerk.domain.entity.LegalEntity;
 import de.makibytes.registerwerk.domain.enums.AppUserActionTokenType;
 import de.makibytes.registerwerk.domain.enums.AppUserRole;
 import de.makibytes.registerwerk.domain.enums.EntityStatus;
+import de.makibytes.registerwerk.domain.enums.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.domain.enums.UserAuthProvider;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AppUserActionTokenRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AppUserRepository;
@@ -62,6 +63,7 @@ public class CompanyUserService {
     private final PasswordResetEmailService passwordResetEmailService;
     private final AuditEventPublisher auditEventPublisher;
     private final RegisterwerkAuthProperties authProperties;
+    private final CompanyExternalReferenceService companyExternalReferenceService;
     private final String customerFrontendUrl;
     private final long userActionTokenTtlHours;
 
@@ -74,6 +76,7 @@ public class CompanyUserService {
             PasswordResetEmailService passwordResetEmailService,
             AuditEventPublisher auditEventPublisher,
             RegisterwerkAuthProperties authProperties,
+            CompanyExternalReferenceService companyExternalReferenceService,
             @Value("${registerwerk.onboarding.frontend-url:http://localhost:4201}") String customerFrontendUrl,
             @Value("${registerwerk.onboarding.user-action-ttl-hours:48}") long userActionTokenTtlHours) {
         this.appUserRepository = appUserRepository;
@@ -84,6 +87,7 @@ public class CompanyUserService {
         this.passwordResetEmailService = passwordResetEmailService;
         this.auditEventPublisher = auditEventPublisher;
         this.authProperties = authProperties;
+        this.companyExternalReferenceService = companyExternalReferenceService;
         this.customerFrontendUrl = customerFrontendUrl;
         this.userActionTokenTtlHours = userActionTokenTtlHours;
     }
@@ -103,7 +107,10 @@ public class CompanyUserService {
             entity.getIdpIssuerUrl(),
             entity.getIdpClientId(),
             entity.getCreatedAt(),
-            entity.getUpdatedAt()
+            entity.getUpdatedAt(),
+            companyExternalReferenceService
+                    .findExternalId(authentication, ExternalReferenceSubjectType.LEGAL_ENTITY, entity.getId())
+                    .orElse(null)
         );
     }
 

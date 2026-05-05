@@ -1,8 +1,10 @@
 package de.makibytes.registerwerk.web.controller;
 
+import de.makibytes.registerwerk.application.customer.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
 import de.makibytes.registerwerk.domain.asset.Asset;
 import de.makibytes.registerwerk.domain.asset.AssetHolder;
+import de.makibytes.registerwerk.domain.enums.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetHolderRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
 import de.makibytes.registerwerk.web.dto.InvestmentResponse;
@@ -32,12 +34,15 @@ public class InvestmentController {
 
     private final AssetHolderRepository assetHolderRepository;
     private final AssetRepository assetRepository;
+    private final CompanyExternalReferenceService companyExternalReferenceService;
 
     public InvestmentController(
             AssetHolderRepository assetHolderRepository,
-            AssetRepository assetRepository) {
+            AssetRepository assetRepository,
+            CompanyExternalReferenceService companyExternalReferenceService) {
         this.assetHolderRepository = assetHolderRepository;
         this.assetRepository = assetRepository;
+        this.companyExternalReferenceService = companyExternalReferenceService;
     }
 
     /**
@@ -50,7 +55,7 @@ public class InvestmentController {
         UUID investorId = extractEntityId(auth);
         Page<AssetHolder> page = assetHolderRepository.findByInvestorId(investorId, pageable);
         Map<UUID, Asset> assetCache = loadAssetCache(page.getContent());
-        return ResponseEntity.ok(PageResponse.of(page.map(h -> toResponse(h, assetCache.get(h.getAssetId())))));
+        return ResponseEntity.ok(PageResponse.of(page.map(h -> toResponse(auth, h, assetCache.get(h.getAssetId())))));
     }
 
     /**
@@ -64,12 +69,12 @@ public class InvestmentController {
         AssetHolder holder = assetHolderRepository.findById(holderId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetHolder", holderId));
         Asset asset = assetRepository.findById(holder.getAssetId()).orElse(null);
-        return ResponseEntity.ok(toResponse(holder, asset));
+        return ResponseEntity.ok(toResponse(auth, holder, asset));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private InvestmentResponse toResponse(AssetHolder h, Asset a) {
+    private InvestmentResponse toResponse(Authentication authentication, AssetHolder h, Asset a) {
         return new InvestmentResponse(
                 h.getId(),
                 h.getAssetId(),
@@ -85,7 +90,10 @@ public class InvestmentController {
                 h.getNominalAmount(),
                 h.getAcquisitionDate(),
                 h.getCreatedAt(),
-                h.getUpdatedAt()
+                h.getUpdatedAt(),
+                companyExternalReferenceService
+                        .findExternalId(authentication, ExternalReferenceSubjectType.ASSET_HOLDER, h.getId())
+                        .orElse(null)
         );
     }
 

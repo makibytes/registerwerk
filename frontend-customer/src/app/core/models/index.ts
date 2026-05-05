@@ -88,6 +88,22 @@ export type UserRole =
   | 'AUDIT'
   | 'TRADER';
 
+export type ExternalReferenceSubjectType =
+  | 'LEGAL_ENTITY'
+  | 'ASSET'
+  | 'ASSET_HOLDER'
+  | 'ERC3643_IDENTITY_REGISTRY_ENTRY';
+
+export interface CompanyExternalReferenceRecord {
+  subjectType: ExternalReferenceSubjectType;
+  subjectId: string;
+  externalId: string;
+  displayName: string;
+  contextLabel: string | null;
+  relatedAssetId: string | null;
+  updatedAt: string;
+}
+
 // ─── Domain Models ────────────────────────────────────────────────────────────
 
 export interface LegalEntity {
@@ -103,6 +119,7 @@ export interface LegalEntity {
   idpClientId: string | null;
   createdAt: string;
   updatedAt: string;
+  externalId: string | null;
 }
 
 export interface Asset {
@@ -120,6 +137,7 @@ export interface Asset {
   createdAt: string;
   updatedAt: string;
   hasTermSheet: boolean;
+  externalId: string | null;
 }
 
 export interface AssetDocument {
@@ -161,6 +179,7 @@ export interface AssetHolder {
   whitelistedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  externalId: string | null;
 }
 
 export interface KycDocument {
@@ -214,6 +233,7 @@ export interface InvestmentRecord {
   acquisitionDate: string | null;
   createdAt: string;
   updatedAt: string;
+  externalId: string | null;
 }
 
 export interface InvestmentSummary {

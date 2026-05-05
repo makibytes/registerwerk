@@ -14,5 +14,6 @@ public record HolderResponse(
     String walletAddress,
     Boolean whitelisted,
     BigDecimal nominalAmount,
-    LocalDate acquisitionDate
+    LocalDate acquisitionDate,
+    String externalId
 ) {}

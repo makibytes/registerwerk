@@ -15,5 +15,6 @@ public record CompanyMeResponse(
     String idpIssuerUrl,
     String idpClientId,
     Instant createdAt,
-    Instant updatedAt
+    Instant updatedAt,
+    String externalId
 ) {}

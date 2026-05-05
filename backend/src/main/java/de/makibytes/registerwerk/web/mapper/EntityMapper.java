@@ -32,5 +32,6 @@ public interface EntityMapper {
     /**
      * Maps a {@link LegalEntity} to an {@link EntityResponse} DTO.
      */
+    @Mapping(target = "externalId", constant = "")
     EntityResponse toResponse(LegalEntity entity);
 }

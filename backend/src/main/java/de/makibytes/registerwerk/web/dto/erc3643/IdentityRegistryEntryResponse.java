@@ -22,5 +22,7 @@ public record IdentityRegistryEntryResponse(
     String registeredByTx,
     AsyncDataStatus syncStatus,
     boolean active,
-    boolean verified
+    boolean verified,
+    String externalId,
+    String legalEntityExternalId
 ) {}

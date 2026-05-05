@@ -20,9 +20,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import de.makibytes.registerwerk.application.customer.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.application.erc3643.Erc3643LifecycleService;
 import de.makibytes.registerwerk.application.erc3643.IdentityRegistryService;
 import de.makibytes.registerwerk.domain.blockchain.BlockchainTransaction;
+import de.makibytes.registerwerk.domain.enums.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.domain.erc3643.Erc3643ClaimTopic;
 import de.makibytes.registerwerk.domain.erc3643.Erc3643IdentityRegistry;
 import de.makibytes.registerwerk.domain.erc3643.Erc3643Suite;
@@ -61,6 +63,7 @@ public class Erc3643Controller {
     private final Erc3643TrustedIssuerRepository trustedIssuerRepo;
     private final Erc3643ClaimTopicRepository claimTopicRepo;
     private final BlockchainTransactionRepository blockchainTransactionRepository;
+    private final CompanyExternalReferenceService companyExternalReferenceService;
 
     public Erc3643Controller(Erc3643LifecycleService lifecycleService,
                              IdentityRegistryService identityRegistryService,
@@ -68,7 +71,8 @@ public class Erc3643Controller {
                              LegalEntityRepository entityRepo,
                              Erc3643TrustedIssuerRepository trustedIssuerRepo,
                              Erc3643ClaimTopicRepository claimTopicRepo,
-                             BlockchainTransactionRepository blockchainTransactionRepository) {
+                             BlockchainTransactionRepository blockchainTransactionRepository,
+                             CompanyExternalReferenceService companyExternalReferenceService) {
         this.lifecycleService = lifecycleService;
         this.identityRegistryService = identityRegistryService;
         this.identityRepo = identityRepo;
@@ -76,6 +80,7 @@ public class Erc3643Controller {
         this.trustedIssuerRepo = trustedIssuerRepo;
         this.claimTopicRepo = claimTopicRepo;
         this.blockchainTransactionRepository = blockchainTransactionRepository;
+        this.companyExternalReferenceService = companyExternalReferenceService;
     }
 
     // ── Suite ─────────────────────────────────────────────────────────────────
@@ -219,13 +224,16 @@ public class Erc3643Controller {
      * Lists all currently registered investors in the suite's IdentityRegistry.
      */
     @GetMapping("/{deploymentId}/identity-registry")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT')")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
     public ResponseEntity<java.util.List<IdentityRegistryEntryResponse>> listIdentityRegistry(
             @PathVariable UUID assetId,
-            @PathVariable UUID deploymentId) {
+            @PathVariable UUID deploymentId,
+            Authentication authentication) {
         UUID suiteId = resolveSuiteId(deploymentId);
         var entries = identityRegistryService.getRegisteredInvestors(suiteId);
-        return ResponseEntity.ok(entries.stream().map(this::toRegistryEntryResponse).toList());
+        return ResponseEntity.ok(entries.stream()
+                .map(entry -> toRegistryEntryResponse(entry, authentication))
+                .toList());
     }
 
     /**
@@ -243,7 +251,7 @@ public class Erc3643Controller {
         var entry = identityRegistryService.registerInvestor(
                 suiteId, request.walletAddress(), request.legalEntityId(),
                 request.chainConfigId(), request.countryCode());
-        return ResponseEntity.status(HttpStatus.CREATED).body(toRegistryEntryResponse(entry));
+        return ResponseEntity.status(HttpStatus.CREATED).body(toRegistryEntryResponse(entry, null));
     }
 
     /**
@@ -481,7 +489,9 @@ public class Erc3643Controller {
         );
     }
 
-    private IdentityRegistryEntryResponse toRegistryEntryResponse(Erc3643IdentityRegistry entry) {
+    private IdentityRegistryEntryResponse toRegistryEntryResponse(
+            Erc3643IdentityRegistry entry,
+            Authentication authentication) {
         var identity = identityRepo.findById(entry.getOnchainIdentityId()).orElse(null);
         String identityAddress = identity != null ? identity.getIdentityAddress() : null;
         UUID legalEntityId = identity != null ? identity.getLegalEntityId() : null;
@@ -493,7 +503,15 @@ public class Erc3643Controller {
             entry.getId(), entry.getSuiteId(), entry.getWalletAddress(),
             entry.getOnchainIdentityId(), identityAddress, legalEntityId, entityName,
             entry.getCountryCode(), entry.getRegisteredAt(), entry.getRegisteredByTx(),
-            resolveSyncStatus(entry, identityAddress), entry.isActive(), verified);
+            resolveSyncStatus(entry, identityAddress), entry.isActive(), verified,
+            companyExternalReferenceService
+                    .findExternalId(authentication, ExternalReferenceSubjectType.ERC3643_IDENTITY_REGISTRY_ENTRY, entry.getId())
+                    .orElse(null),
+            legalEntityId == null
+                    ? null
+                    : companyExternalReferenceService
+                            .findExternalId(authentication, ExternalReferenceSubjectType.LEGAL_ENTITY, legalEntityId)
+                            .orElse(null));
     }
 
     private AsyncDataStatus resolveSyncStatus(Erc3643IdentityRegistry entry, String identityAddress) {

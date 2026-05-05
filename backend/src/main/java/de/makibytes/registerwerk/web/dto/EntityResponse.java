@@ -19,5 +19,6 @@ public record EntityResponse(
     String leiCode,
     String registrationNumber,
     KycStatus kycStatus,
-    Instant createdAt
+    Instant createdAt,
+    String externalId
 ) {}

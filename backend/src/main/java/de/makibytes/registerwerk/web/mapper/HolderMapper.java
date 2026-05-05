@@ -26,5 +26,6 @@ public interface HolderMapper {
     /**
      * Maps an {@link AssetHolder} to a {@link HolderResponse} DTO.
      */
+    @Mapping(target = "externalId", constant = "")
     HolderResponse toResponse(AssetHolder holder);
 }

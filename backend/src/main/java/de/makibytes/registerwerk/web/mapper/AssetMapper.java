@@ -30,5 +30,6 @@ public interface AssetMapper {
      * use AssetController#buildResponse(Asset) which queries AssetDocumentRepository.
      */
     @Mapping(target = "hasTermSheet", constant = "false")
+    @Mapping(target = "externalId", constant = "")
     AssetResponse toResponse(Asset asset);
 }

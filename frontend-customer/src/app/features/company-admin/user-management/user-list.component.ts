@@ -15,6 +15,7 @@ import { CompanyService } from '../../../core/api/company.service';
 import { CompanyUser, IdpSettings, LegalEntity, UserRole } from '../../../core/models';
 import { InviteUserDialogComponent } from './invite-user-dialog.component';
 import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component';
+import { ExternalIdEditorComponent } from '../../../shared/components/external-id-editor.component';
 
 @Component({
   selector: 'app-user-list',
@@ -32,6 +33,7 @@ import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component
     MatDialogModule,
     MatTooltipModule,
     MatTabsModule,
+    ExternalIdEditorComponent,
   ],
   template: `
     <div class="page-container">
@@ -49,6 +51,9 @@ import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component
         <a mat-tab-link routerLink="/company-admin/idp" routerLinkActive #rla2="routerLinkActive" [active]="rla2.isActive">
           <mat-icon>vpn_key</mat-icon>&nbsp;IdP Settings
         </a>
+        <a mat-tab-link routerLink="/company-admin/external-ids" routerLinkActive #rla3="routerLinkActive" [active]="rla3.isActive">
+          <mat-icon>tag</mat-icon>&nbsp;External IDs
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 
@@ -62,6 +67,16 @@ import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component
               <div>
                 <h3>{{ entity.legalName }}</h3>
                 <p>{{ entity.registrationNumber || 'No registration number' }} · {{ entity.jurisdiction || '—' }}</p>
+                <div class="entity-external-id">
+                  <app-external-id-editor
+                    [subjectType]="'LEGAL_ENTITY'"
+                    [subjectId]="entity.id"
+                    [value]="entity.externalId"
+                    label="Company external ID"
+                    placeholder="ID used in your internal systems"
+                    (valueChange)="entity.externalId = $event"
+                  />
+                </div>
               </div>
             </div>
           </mat-card-content>
@@ -196,6 +211,7 @@ import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component
     .entity-mark mat-icon { font-size: 26px; width: 26px; height: 26px; }
     .entity-info h3 { margin: 0 0 4px; color: var(--rw-text-primary); }
     .entity-info p { margin: 0; color: var(--rw-text-secondary); font-size: 13px; }
+    .entity-external-id { margin-top: 12px; max-width: 520px; }
 
     .managed-banner {
       margin: 0 0 16px;

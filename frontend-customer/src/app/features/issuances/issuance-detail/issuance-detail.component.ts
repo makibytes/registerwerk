@@ -36,6 +36,7 @@ import { HolderTableComponent } from '../../../shared/components/token-holders/h
 import { HolderDistributionComponent } from '../../../shared/components/token-holders/holder-distribution.component';
 import { TokenAdminPanelComponent } from '../../../shared/components/token-holders/token-admin-panel.component';
 import { AddressComponent } from '../../../shared/components/address.component';
+import { ExternalIdEditorComponent } from '../../../shared/components/external-id-editor.component';
 import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from '../../../shared/components/token-holders/models';
 
 @Component({
@@ -65,6 +66,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
     HolderDistributionComponent,
     TokenAdminPanelComponent,
     AddressComponent,
+    ExternalIdEditorComponent,
   ],
   template: `
     <div class="page-container">
@@ -143,6 +145,17 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                   Add Holder
                 </button>
               }
+            </div>
+
+            <div class="external-id-panel">
+              <app-external-id-editor
+                [subjectType]="'ASSET'"
+                [subjectId]="asset.id"
+                [value]="asset.externalId"
+                label="Issuance external ID"
+                placeholder="Your internal issuance ID"
+                (valueChange)="asset.externalId = $event"
+              />
             </div>
           </mat-card-content>
         </mat-card>
@@ -316,6 +329,69 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                   </div>
                 </div>
               }
+
+              @if (identityRegistry.length > 0) {
+                <div class="identity-table-wrap">
+                  <span class="module-list-label">Identity Registry Mappings</span>
+                  <table mat-table [dataSource]="identityRegistry" class="mat-elevation-z0">
+                    <ng-container matColumnDef="wallet">
+                      <th mat-header-cell *matHeaderCellDef>Wallet</th>
+                      <td mat-cell *matCellDef="let entry">
+                        <app-address [address]="entry.walletAddress"></app-address>
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="entity">
+                      <th mat-header-cell *matHeaderCellDef>Entity</th>
+                      <td mat-cell *matCellDef="let entry">
+                        {{ entry.entityName || entry.legalEntityId || '—' }}
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="legalEntityExternalId">
+                      <th mat-header-cell *matHeaderCellDef>Entity external ID</th>
+                      <td mat-cell *matCellDef="let entry">
+                        @if (entry.legalEntityId) {
+                          <app-external-id-editor
+                            [subjectType]="'LEGAL_ENTITY'"
+                            [subjectId]="entry.legalEntityId"
+                            [value]="entry.legalEntityExternalId"
+                            label="Entity external ID"
+                            placeholder="Your customer ID"
+                            (valueChange)="entry.legalEntityExternalId = $event"
+                          />
+                        } @else {
+                          —
+                        }
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="registryExternalId">
+                      <th mat-header-cell *matHeaderCellDef>Registry external ID</th>
+                      <td mat-cell *matCellDef="let entry">
+                        <app-external-id-editor
+                          [subjectType]="'ERC3643_IDENTITY_REGISTRY_ENTRY'"
+                          [subjectId]="entry.id"
+                          [value]="entry.externalId"
+                          label="Identity entry external ID"
+                          placeholder="Your identity entry ID"
+                          (valueChange)="entry.externalId = $event"
+                        />
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="status">
+                      <th mat-header-cell *matHeaderCellDef>Status</th>
+                      <td mat-cell *matCellDef="let entry">
+                        <app-status-badge [status]="entry.verified ? 'APPROVED' : 'PENDING'"></app-status-badge>
+                      </td>
+                    </ng-container>
+
+                    <tr mat-header-row *matHeaderRowDef="identityRegistryColumns"></tr>
+                    <tr mat-row *matRowDef="let row; columns: identityRegistryColumns;"></tr>
+                  </table>
+                </div>
+              }
             </mat-card-content>
           </mat-card>
         }
@@ -345,6 +421,19 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                   <th mat-header-cell *matHeaderCellDef>Whitelisted</th>
                   <td mat-cell *matCellDef="let h">
                     <app-status-badge [status]="h.whitelisted ? 'WHITELISTED' : 'NOT_WHITELISTED'"></app-status-badge>
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="externalId">
+                  <th mat-header-cell *matHeaderCellDef>External ID</th>
+                  <td mat-cell *matCellDef="let h">
+                    <app-external-id-editor
+                      [subjectType]="'ASSET_HOLDER'"
+                      [subjectId]="h.id"
+                      [value]="h.externalId"
+                      label="Holder external ID"
+                      placeholder="Your holding ID"
+                      (valueChange)="h.externalId = $event"
+                    />
                   </td>
                 </ng-container>
                 <!-- ERC-3643 extra columns -->
@@ -449,6 +538,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
     .asset-number { font-size: 13px; color: #546e7a; }
     .isin { font-size: 13px; color: #546e7a; }
     .action-bar { display: flex; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0; }
+    .external-id-panel { margin-top: 16px; max-width: 520px; }
     .empty-text { color: #9e9e9e; font-style: italic; }
     code { font-family: monospace; font-size: 13px; background: #f5f5f5; padding: 2px 4px; border-radius: 3px; }
     /* T-REX compliance card */
@@ -462,6 +552,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
     .module-list { margin-top: 8px; }
     .module-list-label { font-size: 12px; color: #546e7a; display: block; margin-bottom: 6px; }
     .module-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .identity-table-wrap { margin-top: 20px; }
   `]
 })
 export class IssuanceDetailComponent implements OnInit {
@@ -505,8 +596,9 @@ export class IssuanceDetailComponent implements OnInit {
   liveHoldersLoading = false;
 
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status', 'deployedAt'];
-  readonly baseHolderColumns  = ['wallet', 'amount', 'whitelisted'];
-  readonly erc3643HolderColumns = ['wallet', 'amount', 'whitelisted', 'onchainId', 'kyc'];
+  readonly baseHolderColumns  = ['wallet', 'amount', 'whitelisted', 'externalId'];
+  readonly erc3643HolderColumns = ['wallet', 'amount', 'whitelisted', 'externalId', 'onchainId', 'kyc'];
+  readonly identityRegistryColumns = ['wallet', 'entity', 'legalEntityExternalId', 'registryExternalId', 'status'];
 
   get isErc3643(): boolean {
     return this.asset?.tokenStandard === 'ERC3643' || this.asset?.tokenStandard === 'CONF_ERC3643';

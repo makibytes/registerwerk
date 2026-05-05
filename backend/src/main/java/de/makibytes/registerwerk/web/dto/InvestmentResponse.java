@@ -26,5 +26,6 @@ public record InvestmentResponse(
     BigDecimal nominalAmount,
     LocalDate acquisitionDate,
     Instant createdAt,
-    Instant updatedAt
+    Instant updatedAt,
+    String externalId
 ) {}

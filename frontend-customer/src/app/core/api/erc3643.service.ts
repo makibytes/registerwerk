@@ -30,6 +30,8 @@ export interface IdentityRegistryEntry {
   syncStatus: 'READY' | 'PENDING' | 'UPDATING';
   active: boolean;
   verified: boolean;
+  externalId: string | null;
+  legalEntityExternalId: string | null;
 }
 
 export interface ComplianceModuleInfo {

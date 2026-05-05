@@ -10,4 +10,8 @@ export const COMPANY_ADMIN_ROUTES: Routes = [
     path: 'idp',
     loadComponent: () => import('./idp-settings/idp-settings.component').then(m => m.IdpSettingsComponent)
   },
+  {
+    path: 'external-ids',
+    loadComponent: () => import('./external-ids/external-id-admin.component').then(m => m.ExternalIdAdminComponent)
+  },
 ];
