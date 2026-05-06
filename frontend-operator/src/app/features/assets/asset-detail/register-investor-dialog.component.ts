@@ -1,9 +1,12 @@
 import { Component, inject } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
+import { MatDialogModule, MatDialogRef, MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../shared/components/address-picker-dialog.component';
 
 export interface RegisterInvestorData {
   walletAddress: string;
@@ -15,7 +18,7 @@ export interface RegisterInvestorData {
 @Component({
   selector: 'app-register-investor-dialog',
   standalone: true,
-  imports: [ReactiveFormsModule, MatButtonModule, MatDialogModule, MatFormFieldModule, MatInputModule],
+  imports: [ReactiveFormsModule, MatButtonModule, MatDialogModule, MatFormFieldModule, MatIconModule, MatInputModule, MatTooltipModule],
   template: `
     <h2 mat-dialog-title>Register Investor</h2>
     <mat-dialog-content>
@@ -23,6 +26,10 @@ export interface RegisterInvestorData {
         <mat-form-field appearance="outline">
           <mat-label>Wallet Address</mat-label>
           <input matInput formControlName="walletAddress" placeholder="0x..." />
+          <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                  (click)="pickWalletAddress()">
+            <mat-icon style="font-size:18px">contacts</mat-icon>
+          </button>
           <mat-error>Required, must start with 0x</mat-error>
         </mat-form-field>
         <mat-form-field appearance="outline">
@@ -49,6 +56,7 @@ export interface RegisterInvestorData {
 })
 export class RegisterInvestorDialogComponent {
   private readonly dialogRef = inject(MatDialogRef<RegisterInvestorDialogComponent>);
+  private readonly dialog = inject(MatDialog);
   private readonly fb = inject(FormBuilder);
 
   form = this.fb.group({
@@ -57,6 +65,15 @@ export class RegisterInvestorDialogComponent {
     chainConfigId: ['', Validators.required],
     countryCode: [null as number | null],
   });
+
+  pickWalletAddress(): void {
+    this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
+      AddressPickerDialogComponent,
+      { data: { mode: 'WALLET', title: 'Select investor wallet' }, width: '560px' }
+    ).afterClosed().subscribe(addr => {
+      if (addr) this.form.patchValue({ walletAddress: addr });
+    });
+  }
 
   submit(): void {
     if (this.form.invalid) return;

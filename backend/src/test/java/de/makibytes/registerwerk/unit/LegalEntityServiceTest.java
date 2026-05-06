@@ -131,6 +131,25 @@ class LegalEntityServiceTest {
     }
 
     @Test
+    @DisplayName("updateEntity should save changes and publish an ENTITY_UPDATED audit event")
+    void updateEntity_shouldSaveAndPublishAuditEvent() {
+        LegalEntity entity = buildEntity();
+        UUID actorId = UUID.randomUUID();
+        when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
+        when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        LegalEntity patch = new LegalEntity();
+        patch.setCurrentName("Updated GmbH");
+
+        legalEntityService.updateEntity(entity.getId(), patch, actorId);
+
+        assertThat(entity.getCurrentName()).isEqualTo("Updated GmbH");
+        verify(legalEntityRepository).save(entity);
+        verify(auditEventPublisher).publish(
+            eq("ENTITY_UPDATED"), eq("LegalEntity"), eq(entity.getId()), eq(actorId), any(), any());
+    }
+
+    @Test
     @DisplayName("renameEntity should persist an EntityNameHistory record with the previous and new name")
     void renameEntity_shouldSaveHistoryRecord() {
         LegalEntity entity = buildEntity();

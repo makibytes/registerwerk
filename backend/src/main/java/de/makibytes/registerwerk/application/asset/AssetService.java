@@ -66,18 +66,14 @@ public class AssetService {
         return assetRepository.findAll(pageable);
     }
 
-    public Asset updateAsset(UUID id, Asset patch) {
+    public Asset updateAsset(UUID id, Asset patch, UUID actorId) {
         Asset existing = getAsset(id);
         if (patch.getName() != null) existing.setName(patch.getName());
         if (patch.getIsin() != null) existing.setIsin(patch.getIsin());
         if (patch.getPublicData() != null) existing.setPublicData(patch.getPublicData());
         if (patch.getJurisdiction() != null) existing.setJurisdiction(patch.getJurisdiction());
         Asset saved = assetRepository.save(existing);
-        auditEventPublisher.publish("ASSET_UPDATED", "Asset", id, null, null, null);
+        auditEventPublisher.publish("ASSET_UPDATED", "Asset", id, actorId, null, null);
         return saved;
-    }
-
-    public Asset patchAsset(UUID id, Asset patch) {
-        return updateAsset(id, patch);
     }
 }

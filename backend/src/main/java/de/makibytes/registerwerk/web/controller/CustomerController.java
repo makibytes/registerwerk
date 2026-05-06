@@ -109,7 +109,7 @@ public class CustomerController {
         patch.setRegistrationNumber(request.registrationNumber());
         patch.setRegistrationCountry(request.registrationCountry());
         patch.setIncorporationDate(request.incorporationDate());
-        LegalEntity updated = legalEntityService.updateEntity(id, patch);
+        LegalEntity updated = legalEntityService.updateEntity(id, patch, extractActorId(auth));
         return ResponseEntity.ok(toResponse(updated, auth));
     }
 

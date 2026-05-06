@@ -86,16 +86,19 @@ public class LegalEntityService {
     }
 
     /**
-     * Applies non-null fields from {@code patch} to the stored entity.
+     * Applies non-null fields from {@code patch} to the stored entity and emits an audit event.
      */
-    public LegalEntity updateEntity(UUID id, LegalEntity patch) {
+    public LegalEntity updateEntity(UUID id, LegalEntity patch, UUID actorId) {
         LegalEntity existing = getEntity(id);
         if (patch.getCurrentName() != null) existing.setCurrentName(patch.getCurrentName());
         if (patch.getLeiCode() != null) existing.setLeiCode(patch.getLeiCode());
         if (patch.getRegistrationNumber() != null) existing.setRegistrationNumber(patch.getRegistrationNumber());
         if (patch.getRegistrationCountry() != null) existing.setRegistrationCountry(patch.getRegistrationCountry());
         if (patch.getIncorporationDate() != null) existing.setIncorporationDate(patch.getIncorporationDate());
-        return legalEntityRepository.save(existing);
+        LegalEntity saved = legalEntityRepository.save(existing);
+        auditEventPublisher.publish("ENTITY_UPDATED", "LegalEntity", id, actorId, null, null);
+        log.info("Updated entity: id={}", id);
+        return saved;
     }
 
     /**

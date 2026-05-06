@@ -13,6 +13,9 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatDialogModule, MatDialog } from '@angular/material/dialog';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../shared/components/address-picker-dialog.component';
 import { EndpointService } from '../../core/api/endpoint.service';
 import { TradingService } from '../../core/api/trading.service';
 import {
@@ -67,6 +70,8 @@ interface BuyForm {
     MatSlideToggleModule,
     MatSnackBarModule,
     MatTabsModule,
+    MatDialogModule,
+    MatTooltipModule,
   ],
   template: `
     <div class="page-container">
@@ -288,7 +293,11 @@ interface BuyForm {
                       @if (buyForm.walletPreferenceMode === 'CUSTOM_ADDRESS') {
                         <mat-form-field appearance="outline">
                           <mat-label>Custom wallet address</mat-label>
-                          <input matInput [(ngModel)]="buyForm.walletAddress">
+                          <input matInput [(ngModel)]="buyForm.walletAddress" placeholder="0x…" style="font-family:'IBM Plex Mono',monospace;font-size:13px">
+                          <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                                  (click)="pickWallet(a => buyForm.walletAddress = a)">
+                            <mat-icon style="font-size:18px">contacts</mat-icon>
+                          </button>
                         </mat-form-field>
                       }
                     </div>
@@ -524,7 +533,11 @@ interface BuyForm {
                         } @else {
                           <mat-form-field appearance="outline" class="span-2">
                             <mat-label>Wallet address</mat-label>
-                            <input matInput [(ngModel)]="walletDefault.walletAddress">
+                            <input matInput [(ngModel)]="walletDefault.walletAddress" placeholder="0x…" style="font-family:'IBM Plex Mono',monospace;font-size:13px">
+                            <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                                    (click)="pickWallet(a => walletDefault.walletAddress = a)">
+                              <mat-icon style="font-size:18px">contacts</mat-icon>
+                            </button>
                           </mat-form-field>
                         }
 
@@ -614,6 +627,7 @@ export class TradingDeskComponent implements OnInit {
   private readonly tradingService = inject(TradingService);
   private readonly endpointService = inject(EndpointService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
 
   loading = true;
   tradingDisabled = false;
@@ -824,6 +838,13 @@ export class TradingDeskComponent implements OnInit {
       },
       error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to save settings.', 'OK', { duration: 4000 }),
     });
+  }
+
+  pickWallet(setter: (addr: string) => void): void {
+    this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
+      AddressPickerDialogComponent,
+      { data: { mode: 'WALLET', title: 'Select wallet' }, width: '560px' }
+    ).afterClosed().subscribe(addr => { if (addr) setter(addr); });
   }
 
   paymentLabel(option: PaymentOption): string {

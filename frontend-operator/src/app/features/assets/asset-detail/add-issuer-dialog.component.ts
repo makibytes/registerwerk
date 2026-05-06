@@ -1,9 +1,12 @@
 import { Component, inject } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
+import { MatDialogModule, MatDialogRef, MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../shared/components/address-picker-dialog.component';
 
 export interface AddIssuerData {
   issuerAddress: string;
@@ -14,7 +17,7 @@ export interface AddIssuerData {
 @Component({
   selector: 'app-add-issuer-dialog',
   standalone: true,
-  imports: [ReactiveFormsModule, MatButtonModule, MatDialogModule, MatFormFieldModule, MatInputModule],
+  imports: [ReactiveFormsModule, MatButtonModule, MatDialogModule, MatFormFieldModule, MatIconModule, MatInputModule, MatTooltipModule],
   template: `
     <h2 mat-dialog-title>Add Trusted Issuer</h2>
     <mat-dialog-content>
@@ -22,6 +25,10 @@ export interface AddIssuerData {
         <mat-form-field appearance="outline">
           <mat-label>Issuer Address</mat-label>
           <input matInput formControlName="issuerAddress" placeholder="0x..." />
+          <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                  (click)="pickIssuerAddress()">
+            <mat-icon style="font-size:18px">contacts</mat-icon>
+          </button>
           <mat-error>Required, must start with 0x</mat-error>
         </mat-form-field>
         <mat-form-field appearance="outline">
@@ -44,6 +51,7 @@ export interface AddIssuerData {
 })
 export class AddIssuerDialogComponent {
   private readonly dialogRef = inject(MatDialogRef<AddIssuerDialogComponent>);
+  private readonly dialog = inject(MatDialog);
   private readonly fb = inject(FormBuilder);
 
   form = this.fb.group({
@@ -51,6 +59,15 @@ export class AddIssuerDialogComponent {
     claimTopics: ['', Validators.required],
     legalEntityId: [''],
   });
+
+  pickIssuerAddress(): void {
+    this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
+      AddressPickerDialogComponent,
+      { data: { mode: 'CONTRACT', title: 'Select claim issuer contract' }, width: '560px' }
+    ).afterClosed().subscribe(addr => {
+      if (addr) this.form.patchValue({ issuerAddress: addr });
+    });
+  }
 
   submit(): void {
     if (this.form.invalid) return;

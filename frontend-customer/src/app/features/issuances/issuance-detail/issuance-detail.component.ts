@@ -17,7 +17,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { IssuanceService } from '../../../core/api/issuance.service';
-import { TransactionService, TxRecord } from '../../../core/api/transaction.service';
+import { TransactionService } from '../../../core/api/transaction.service';
 import { AuthService } from '../../../core/auth/auth.service';
 import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
 import { Asset, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
@@ -208,7 +208,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                   <th mat-header-cell *matHeaderCellDef>Contract Address</th>
                   <td mat-cell *matCellDef="let d">
                     @if (d.contractAddress) {
-                      <code>{{ d.contractAddress }}</code>
+                      <app-address [address]="d.contractAddress" />
                     } @else { — }
                   </td>
                 </ng-container>
@@ -565,9 +565,6 @@ export class IssuanceDetailComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
 
-  txHistory: TxRecord[] = [];
-  txHistoryLoading = false;
-
   asset: Asset | null = null;
   deployments: AssetDeployment[] = [];
   holders: AssetHolder[] = [];
@@ -681,6 +678,9 @@ export class IssuanceDetailComponent implements OnInit {
     this.erc3643Service.getComplianceStatus(assetId, deploymentId).subscribe({
       next: (compliance) => {
         this.complianceStatus = compliance;
+        this.cdr.detectChanges();
+      },
+      error: () => {
         this.cdr.detectChanges();
       },
     });
@@ -826,15 +826,25 @@ export class IssuanceDetailComponent implements OnInit {
   }
 
   onMint(action: MintAction): void {
-    if (!this.asset?.id) return;
-    // TODO: Call issuanceService to execute mint action
-    this.snackBar.open(`Mint initiated: ${action.amount} tokens`, 'OK', { duration: 3000 });
+    if (!this.asset?.id || this.deployments.length === 0) return;
+    this.issuanceService.mint(this.asset.id, this.deployments[0].id, {
+      toAddress: action.recipient,
+      amount: action.amount.toString(),
+    }).subscribe({
+      next: () => this.snackBar.open(`Mint of ${action.amount} tokens submitted.`, 'OK', { duration: 3000 }),
+      error: () => this.snackBar.open('Mint failed.', 'Close', { duration: 5000 }),
+    });
   }
 
   onBurn(action: BurnAction): void {
-    if (!this.asset?.id) return;
-    // TODO: Call issuanceService to execute burn action
-    this.snackBar.open(`Burn initiated: ${action.amount} tokens`, 'OK', { duration: 3000 });
+    if (!this.asset?.id || this.deployments.length === 0) return;
+    this.issuanceService.burn(this.asset.id, this.deployments[0].id, {
+      fromAddress: action.fromWallet ?? '',
+      amount: action.amount.toString(),
+    }).subscribe({
+      next: () => this.snackBar.open(`Burn of ${action.amount} tokens submitted.`, 'OK', { duration: 3000 }),
+      error: () => this.snackBar.open('Burn failed.', 'Close', { duration: 5000 }),
+    });
   }
 
   onForceTransfer(action: ForceTransferAction): void {
@@ -859,12 +869,4 @@ export class IssuanceDetailComponent implements OnInit {
     });
   }
 
-  loadTxHistory(): void {
-    if (!this.deployments[0]?.id) return;
-    this.txHistoryLoading = true;
-    this.txService.listTransactions(this.deployments[0].id).subscribe({
-      next: (page) => { this.txHistory = page.content; this.txHistoryLoading = false; },
-      error: () => { this.txHistoryLoading = false; },
-    });
-  }
 }

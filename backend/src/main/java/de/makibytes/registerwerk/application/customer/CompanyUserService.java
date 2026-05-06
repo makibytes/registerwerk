@@ -446,10 +446,6 @@ public class CompanyUserService {
     }
 
     private void ensureLocalLifecycleEnabled() {
-        throwIfManagedExternally();
-    }
-
-    private void throwIfManagedExternally() {
         if (authProperties.isEntraEnabled()) {
             throw new UnsupportedOperationException(
                 "User lifecycle changes are managed by the configured identity provider in Entra mode"

@@ -142,7 +142,7 @@ public class AssetController {
         patch.setIsin(request.isin());
         patch.setPublicData(request.publicData());
         patch.setJurisdiction(request.jurisdiction());
-        return ResponseEntity.ok(toResponse(assetService.updateAsset(id, patch), auth, false));
+        return ResponseEntity.ok(toResponse(assetService.updateAsset(id, patch, extractActorId(auth)), auth, false));
     }
 
     /** Submits an asset for approval (DRAFT → PENDING_APPROVAL). */

@@ -5,8 +5,10 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
+import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { AddressPickerDialogComponent, AddressPickerDialogData } from '../address-picker-dialog.component';
 import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from './models';
 
 @Component({
@@ -19,7 +21,9 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
     MatFormFieldModule,
     MatInputModule,
     MatButtonModule,
+    MatDialogModule,
     MatIconModule,
+    MatTooltipModule,
   ],
   template: `
     <div class="admin-panel">
@@ -41,6 +45,10 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
                 [(ngModel)]="mintForm.recipient"
                 placeholder="0x..."
                 class="address-input">
+              <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                      (click)="pickWallet(a => mintForm.recipient = a)">
+                <mat-icon style="font-size:18px">contacts</mat-icon>
+              </button>
             </mat-form-field>
 
             <mat-form-field class="full-width">
@@ -82,6 +90,10 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
                 [(ngModel)]="burnForm.fromWallet"
                 placeholder="Leave empty to burn from msg.sender"
                 class="address-input">
+              <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                      (click)="pickWallet(a => burnForm.fromWallet = a)">
+                <mat-icon style="font-size:18px">contacts</mat-icon>
+              </button>
             </mat-form-field>
 
             <mat-form-field class="full-width">
@@ -117,6 +129,10 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
                 [(ngModel)]="forceTransferForm.fromWallet"
                 placeholder="0x..."
                 class="address-input">
+              <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                      (click)="pickWallet(a => forceTransferForm.fromWallet = a)">
+                <mat-icon style="font-size:18px">contacts</mat-icon>
+              </button>
             </mat-form-field>
 
             <mat-form-field class="full-width">
@@ -125,6 +141,10 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
                 [(ngModel)]="forceTransferForm.toWallet"
                 placeholder="0x..."
                 class="address-input">
+              <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                      (click)="pickWallet(a => forceTransferForm.toWallet = a)">
+                <mat-icon style="font-size:18px">contacts</mat-icon>
+              </button>
             </mat-form-field>
 
             <mat-form-field class="full-width">
@@ -168,6 +188,10 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
                 [(ngModel)]="forceApproveForm.ownerWallet"
                 placeholder="0x..."
                 class="address-input">
+              <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                      (click)="pickWallet(a => forceApproveForm.ownerWallet = a)">
+                <mat-icon style="font-size:18px">contacts</mat-icon>
+              </button>
             </mat-form-field>
 
             <mat-form-field class="full-width">
@@ -176,6 +200,10 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
                 [(ngModel)]="forceApproveForm.spenderWallet"
                 placeholder="0x..."
                 class="address-input">
+              <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
+                      (click)="pickWallet(a => forceApproveForm.spenderWallet = a)">
+                <mat-icon style="font-size:18px">contacts</mat-icon>
+              </button>
             </mat-form-field>
 
             <mat-form-field class="full-width">
@@ -332,7 +360,7 @@ export class TokenAdminPanelComponent {
   @Output() forceTransfer = new EventEmitter<ForceTransferAction>();
   @Output() forceApprove = new EventEmitter<ForceApproveAction>();
 
-  private snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
 
   mintForm = {
     recipient: '',
@@ -355,6 +383,13 @@ export class TokenAdminPanelComponent {
     spenderWallet: '',
     amount: 0,
   };
+
+  pickWallet(setter: (addr: string) => void): void {
+    this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
+      AddressPickerDialogComponent,
+      { data: { mode: 'WALLET', title: 'Select wallet' }, width: '560px' }
+    ).afterClosed().subscribe(addr => { if (addr) setter(addr); });
+  }
 
   isValidMintForm(): boolean {
     return this.isValidAddress(this.mintForm.recipient) && this.mintForm.amount > 0;
@@ -386,60 +421,34 @@ export class TokenAdminPanelComponent {
 
   submitMint(): void {
     if (!this.isValidMintForm()) return;
-
-    const action: MintAction = {
-      recipient: this.mintForm.recipient,
-      amount: this.mintForm.amount,
-      chainId: 1, // TODO: Get actual chain ID from deployment
-    };
-
-    this.mint.emit(action);
+    this.mint.emit({ recipient: this.mintForm.recipient, amount: this.mintForm.amount });
     this.mintForm = { recipient: '', amount: 0 };
-    this.snackBar.open('Mint action submitted', 'OK', { duration: 3000 });
   }
 
   submitBurn(): void {
     if (!this.isValidBurnForm()) return;
-
-    const action: BurnAction = {
-      amount: this.burnForm.amount,
-      fromWallet: this.burnForm.fromWallet || undefined,
-      chainId: 1, // TODO: Get actual chain ID from deployment
-    };
-
-    this.burn.emit(action);
+    this.burn.emit({ amount: this.burnForm.amount, fromWallet: this.burnForm.fromWallet || undefined });
     this.burnForm = { fromWallet: '', amount: 0 };
-    this.snackBar.open('Burn action submitted', 'OK', { duration: 3000 });
   }
 
   submitForceTransfer(): void {
     if (!this.isValidForceTransferForm()) return;
-
-    const action: ForceTransferAction = {
+    this.forceTransfer.emit({
       fromWallet: this.forceTransferForm.fromWallet,
       toWallet: this.forceTransferForm.toWallet,
       amount: this.forceTransferForm.amount,
-      chainId: 1, // TODO: Get actual chain ID from deployment
-    };
-
-    this.forceTransfer.emit(action);
+    });
     this.forceTransferForm = { fromWallet: '', toWallet: '', amount: 0 };
-    this.snackBar.open('Force transfer action submitted', 'OK', { duration: 3000 });
   }
 
   submitForceApprove(): void {
     if (!this.isValidForceApproveForm()) return;
-
-    const action: ForceApproveAction = {
+    this.forceApprove.emit({
       ownerWallet: this.forceApproveForm.ownerWallet,
       spenderWallet: this.forceApproveForm.spenderWallet,
       amount: this.forceApproveForm.amount,
-      chainId: 1, // TODO: Get actual chain ID from deployment
-    };
-
-    this.forceApprove.emit(action);
+    });
     this.forceApproveForm = { ownerWallet: '', spenderWallet: '', amount: 0 };
-    this.snackBar.open('Force approve action submitted', 'OK', { duration: 3000 });
   }
 
   shortenAddress(address: string): string {
