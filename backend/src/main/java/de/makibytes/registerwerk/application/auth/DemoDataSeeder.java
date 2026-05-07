@@ -3,6 +3,8 @@ package de.makibytes.registerwerk.application.auth;
 import de.makibytes.registerwerk.domain.asset.Asset;
 import de.makibytes.registerwerk.domain.asset.AssetDeployment;
 import de.makibytes.registerwerk.domain.asset.AssetHolder;
+import de.makibytes.registerwerk.domain.chain.ChainConfig;
+import de.makibytes.registerwerk.domain.chain.RpcNode;
 import de.makibytes.registerwerk.domain.entity.AppUser;
 import de.makibytes.registerwerk.domain.entity.LegalEntity;
 import de.makibytes.registerwerk.domain.enums.*;
@@ -21,6 +23,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -37,6 +40,8 @@ public class DemoDataSeeder implements ApplicationRunner {
     private final AssetHolderRepository holders;
     private final TradeListingRepository listings;
     private final TradeExecutionRepository executions;
+    private final ChainConfigRepository chainConfigs;
+    private final RpcNodeRepository rpcNodes;
     private final PasswordEncoder encoder;
 
     public DemoDataSeeder(
@@ -47,6 +52,8 @@ public class DemoDataSeeder implements ApplicationRunner {
             AssetHolderRepository holders,
             TradeListingRepository listings,
             TradeExecutionRepository executions,
+            ChainConfigRepository chainConfigs,
+            RpcNodeRepository rpcNodes,
             PasswordEncoder encoder) {
         this.entities = entities;
         this.users = users;
@@ -55,6 +62,8 @@ public class DemoDataSeeder implements ApplicationRunner {
         this.holders = holders;
         this.listings = listings;
         this.executions = executions;
+        this.chainConfigs = chainConfigs;
+        this.rpcNodes = rpcNodes;
         this.encoder = encoder;
     }
 
@@ -67,6 +76,8 @@ public class DemoDataSeeder implements ApplicationRunner {
         }
 
         log.info("Seeding demo data…");
+
+        seedPublicNodes();
 
         // ── Companies ────────────────────────────────────────────────────────
 
@@ -473,6 +484,53 @@ public class DemoDataSeeder implements ApplicationRunner {
                 daysAgo(2), null);
 
         log.info("Demo data seeded: 7 companies, 14 users, 7 assets, 4 active listings, 4 trade executions");
+    }
+
+    // ── Node seeding ──────────────────────────────────────────────────────────
+
+    private void seedPublicNodes() {
+        // Public keyless RPC nodes; verified working 2026-05-07.
+        // Replaces the broken Infura "changeme" placeholders seeded by V1.
+        record NodeDef(String chainIdentifier, String url, String label) {}
+        var defs = List.of(
+            // Ethereum Mainnet
+            new NodeDef("ETHEREUM_MAINNET", "https://eth.llamarpc.com",                "LlamaRPC"),
+            new NodeDef("ETHEREUM_MAINNET", "https://ethereum.publicnode.com",         "PublicNode"),
+            new NodeDef("ETHEREUM_MAINNET", "https://eth.drpc.org",                    "dRPC"),
+            // Ethereum Sepolia
+            new NodeDef("ETHEREUM_SEPOLIA", "https://ethereum-sepolia.publicnode.com", "PublicNode"),
+            new NodeDef("ETHEREUM_SEPOLIA", "https://sepolia.drpc.org",                "dRPC"),
+            // Polygon Mainnet
+            new NodeDef("POLYGON_MAINNET",  "https://polygon.publicnode.com",          "PublicNode"),
+            new NodeDef("POLYGON_MAINNET",  "https://polygon.drpc.org",                "dRPC"),
+            // Polygon Amoy
+            new NodeDef("POLYGON_AMOY",     "https://rpc-amoy.polygon.technology",     "Polygon Foundation"),
+            new NodeDef("POLYGON_AMOY",     "https://polygon-amoy.publicnode.com",     "PublicNode"),
+            // Base Mainnet (mainnet.base.org already seeded by V1)
+            new NodeDef("BASE_MAINNET",     "https://base.llamarpc.com",               "LlamaRPC"),
+            // Base Sepolia (sepolia.base.org already seeded by V1)
+            new NodeDef("BASE_SEPOLIA",     "https://base-sepolia-rpc.publicnode.com", "PublicNode"),
+            new NodeDef("BASE_SEPOLIA",     "https://base-sepolia.drpc.org",           "dRPC")
+        );
+
+        for (var def : defs) {
+            chainConfigs.findByIdentifier(def.chainIdentifier()).ifPresent(chain -> {
+                boolean alreadyExists = rpcNodes.findByChainConfig_Identifier(def.chainIdentifier())
+                        .stream().anyMatch(n -> n.getUrl().equals(def.url()));
+                if (!alreadyExists) {
+                    rpcNode(chain, def.url(), def.label());
+                }
+            });
+        }
+    }
+
+    private void rpcNode(ChainConfig chain, String url, String label) {
+        RpcNode n = new RpcNode();
+        n.setChainConfig(chain);
+        n.setUrl(url);
+        n.setLabel(label);
+        n.setEnabled(true);
+        rpcNodes.save(n);
     }
 
     // ── Builder helpers ───────────────────────────────────────────────────────
