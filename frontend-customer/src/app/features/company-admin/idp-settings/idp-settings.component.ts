@@ -134,9 +134,9 @@ import { CompanyService } from '../../../core/api/company.service';
   `,
   styles: [`
     .settings-card { margin-top: 16px; }
-    .info-text { font-size: 14px; color: #546e7a; margin: 0 0 24px; }
+    .info-text { font-size: 14px; color: var(--rw-text-secondary); margin: 0 0 24px; }
     .full-width { width: 100%; margin-bottom: 16px; }
-    .error-message { color: #c62828; font-size: 13px; }
+    .error-message { color: var(--rw-text-danger); font-size: 13px; }
     .managed-banner {
       margin: 0 0 16px;
       padding: 12px 14px;

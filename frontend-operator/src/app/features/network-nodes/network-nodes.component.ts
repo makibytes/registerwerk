@@ -101,8 +101,11 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
       flex-shrink: 0;
     }
 
-    .chain-icon.evm   { background: rgba(98, 126, 234, 0.15); color: #627EEA; }
-    .chain-icon.solana { background: rgba(153, 69, 255, 0.15); color: #9945FF; }
+    .chain-icon.evm      { background: rgba(98, 126, 234, 0.15); color: #627EEA; }
+    .chain-icon.solana   { background: rgba(153, 69, 255, 0.15); color: #9945FF; }
+    .chain-icon.starknet { background: rgba(255, 138, 0, 0.15);  color: #FF8A00; }
+    .chain-icon.stellar  { background: rgba(0, 182, 255, 0.15);  color: #00B6FF; }
+    .chain-icon.canton   { background: rgba(22, 170, 120, 0.15); color: #16AA78; }
 
     .chain-info { flex: 1; min-width: 0; }
 
@@ -369,8 +372,13 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
     @for (chain of chains(); track chain.id) {
       <div class="chain-card">
         <div class="chain-header">
-          <div class="chain-icon" [class.evm]="chain.chainType === 'EVM'" [class.solana]="chain.chainType === 'SOLANA'">
-            {{ chain.chainType === 'SOLANA' ? '◎' : 'Ξ' }}
+          <div class="chain-icon"
+               [class.evm]="chain.chainType === 'EVM'"
+               [class.solana]="chain.chainType === 'SOLANA'"
+               [class.starknet]="chain.chainType === 'STARKNET'"
+               [class.stellar]="chain.chainType === 'STELLAR'"
+               [class.canton]="chain.chainType === 'CANTON'">
+            {{ chain.chainType === 'SOLANA' ? '◎' : chain.chainType === 'STARKNET' ? '★' : chain.chainType === 'STELLAR' ? '✦' : chain.chainType === 'CANTON' ? '⬡' : 'Ξ' }}
           </div>
           <div class="chain-info">
             <p class="chain-name">{{ chain.displayName }}</p>

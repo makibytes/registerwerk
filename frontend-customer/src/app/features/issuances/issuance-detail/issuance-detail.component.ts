@@ -447,7 +447,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                           {{ entry.active ? 'check_circle' : 'cancel' }}
                         </mat-icon>
                       } @else {
-                        <mat-icon style="color:#9e9e9e;font-size:18px;vertical-align:middle">radio_button_unchecked</mat-icon>
+                        <mat-icon style="color:var(--rw-text-muted);font-size:18px;vertical-align:middle">radio_button_unchecked</mat-icon>
                       }
                     </td>
                   </ng-container>
@@ -460,7 +460,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                           {{ kycEntry.verified ? 'verified' : 'gpp_bad' }}
                         </mat-icon>
                       } @else {
-                        <mat-icon style="color:#9e9e9e;font-size:18px;vertical-align:middle">help_outline</mat-icon>
+                        <mat-icon style="color:var(--rw-text-muted);font-size:18px;vertical-align:middle">help_outline</mat-icon>
                       }
                     </td>
                   </ng-container>
@@ -504,14 +504,21 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
               <!-- Token Admin Panel for Issuers -->
               @if (isIssuer && deployments.length > 0 && asset) {
                 <div style="margin-top:24px;border-top:1px solid var(--rw-border);padding-top:24px">
-                  <app-token-admin-panel
-                    [assetId]="asset.id"
-                    [deploymentId]="deployments[0].id"
-                    (mint)="onMint($event)"
-                    (burn)="onBurn($event)"
-                    (forceTransfer)="onForceTransfer($event)"
-                    (forceApprove)="onForceApprove($event)"
-                  ></app-token-admin-panel>
+                  @if (supportsGenericTokenAdmin) {
+                    <app-token-admin-panel
+                      [assetId]="asset.id"
+                      [deploymentId]="deployments[0].id"
+                      (mint)="onMint($event)"
+                      (burn)="onBurn($event)"
+                      (forceTransfer)="onForceTransfer($event)"
+                      (forceApprove)="onForceApprove($event)"
+                    ></app-token-admin-panel>
+                  } @else if (tokenAdminMessage) {
+                    <div class="token-admin-note">
+                      <mat-icon>info</mat-icon>
+                      <span>{{ tokenAdminMessage }}</span>
+                    </div>
+                  }
                 </div>
               }
             } @else {
@@ -535,25 +542,43 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
     .asset-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
     .asset-title h1 { margin: 0 0 8px; font-size: 22px; }
     .asset-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .asset-number { font-size: 13px; color: #546e7a; }
-    .isin { font-size: 13px; color: #546e7a; }
-    .action-bar { display: flex; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0; }
+    .asset-number { font-size: 13px; color: var(--rw-text-secondary); }
+    .isin { font-size: 13px; color: var(--rw-text-secondary); }
+    .action-bar { display: flex; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--rw-border); }
     .external-id-panel { margin-top: 16px; max-width: 520px; }
-    .empty-text { color: #9e9e9e; font-style: italic; }
-    code { font-family: monospace; font-size: 13px; background: #f5f5f5; padding: 2px 4px; border-radius: 3px; }
+    .empty-text { color: var(--rw-text-muted); font-style: italic; }
+    code { font-size: 13px; }
     /* T-REX compliance card */
-    .trex-card { border-left: 4px solid #00897b; }
-    .trex-icon { vertical-align: middle; margin-right: 6px; color: #00897b; }
+    .trex-card { border-left: 4px solid var(--rw-accent); }
+    .trex-icon { vertical-align: middle; margin-right: 6px; color: var(--rw-accent); }
     .compliance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; margin-bottom: 16px; }
     .compliance-stat { display: flex; flex-direction: column; gap: 4px; }
-    .stat-label { font-size: 11px; color: #78909c; text-transform: uppercase; letter-spacing: 0.5px; }
-    .stat-value { font-size: 20px; font-weight: 600; color: #37474f; }
-    .stat-max { font-size: 14px; font-weight: 400; color: #90a4ae; }
+    .stat-label { font-size: 11px; color: var(--rw-text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-value { font-size: 20px; font-weight: 600; color: var(--rw-text-primary); }
+    .stat-max { font-size: 14px; font-weight: 400; color: var(--rw-text-secondary); }
     .module-list { margin-top: 8px; }
-    .module-list-label { font-size: 12px; color: #546e7a; display: block; margin-bottom: 6px; }
-    .module-chips { display: flex; gap: 8px; flex-wrap: wrap; }
-    .identity-table-wrap { margin-top: 20px; }
-  `]
+     .module-list-label { font-size: 12px; color: var(--rw-text-secondary); display: block; margin-bottom: 6px; }
+     .module-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+     .identity-table-wrap { margin-top: 20px; }
+     .token-admin-note {
+       display: flex;
+       align-items: flex-start;
+       gap: 8px;
+       padding: 12px 14px;
+       border-radius: 8px;
+       background: var(--rw-surface-soft);
+       border: 1px solid var(--rw-border);
+       color: var(--rw-text-secondary);
+       font-size: 13px;
+     }
+     .token-admin-note mat-icon {
+       color: var(--rw-accent);
+       font-size: 18px;
+       width: 18px;
+       height: 18px;
+       margin-top: 1px;
+     }
+   `]
 })
 export class IssuanceDetailComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
@@ -603,6 +628,27 @@ export class IssuanceDetailComponent implements OnInit {
 
   get activeHolderColumns(): string[] {
     return this.isErc3643 ? this.erc3643HolderColumns : this.baseHolderColumns;
+  }
+
+  get supportsGenericTokenAdmin(): boolean {
+    return this.asset?.tokenStandard === 'ERC20'
+      || this.asset?.tokenStandard === 'ERC721'
+      || this.asset?.tokenStandard === 'ERC1155';
+  }
+
+  get tokenAdminMessage(): string | null {
+    switch (this.asset?.tokenStandard) {
+      case 'ERC3643':
+      case 'CONF_ERC3643':
+        return 'ERC-3643 issuances use registry and compliance controls instead of the generic issuer admin panel.';
+      case 'CONF_ERC20':
+        return 'Confidential token admin actions are intentionally hidden here until encrypted-input operations are exposed in the customer portal.';
+      case 'SPL':
+      case 'SPL_2022':
+        return 'Solana issuer admin actions are not yet exposed in this panel. Deployment and holder views remain available.';
+      default:
+        return null;
+    }
   }
 
   identityFor(walletAddress: string): IdentityRegistryEntry | undefined {
@@ -702,8 +748,10 @@ export class IssuanceDetailComponent implements OnInit {
     this.actionLoading = true;
 
     this.issuanceService.submitIssuance(this.asset.id).subscribe({
-      next: (updated) => {
-        this.asset = updated;
+      next: () => {
+        if (this.asset) {
+          this.asset = { ...this.asset, status: 'PENDING_APPROVAL' };
+        }
         this.actionLoading = false;
         this.snackBar.open('Submitted for approval.', 'OK', { duration: 3000 });
         this.cdr.detectChanges();

@@ -113,7 +113,7 @@ export interface AssetDocument {
 export interface AssetDeployment {
   id: string;
   assetId: string;
-  chain: 'ETHEREUM' | 'POLYGON' | 'BASE' | 'SOLANA';
+  chain: 'ETHEREUM' | 'POLYGON' | 'BASE' | 'FHENIX' | 'INCO' | 'SOLANA' | 'ARBITRUM' | 'AVALANCHE' | 'OPTIMISM' | 'STARKNET' | 'STELLAR' | 'CANTON';
   network: 'MAINNET' | 'TESTNET';
   contractAddress?: string;
   deploymentStatus: 'PENDING' | 'CONFIRMED' | 'FAILED';
@@ -246,7 +246,7 @@ export interface ChainHealth {
   id: string;
   identifier: string;
   displayName: string;
-  chainType: 'EVM' | 'SOLANA';
+  chainType: 'EVM' | 'SOLANA' | 'STARKNET' | 'STELLAR' | 'CANTON';
   networkType: 'MAINNET' | 'TESTNET';
   chainId?: number;
   enabled: boolean;

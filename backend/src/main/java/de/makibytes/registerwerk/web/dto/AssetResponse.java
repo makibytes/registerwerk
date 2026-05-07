@@ -1,7 +1,9 @@
 package de.makibytes.registerwerk.web.dto;
 
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
+import de.makibytes.registerwerk.domain.enums.Chain;
 import de.makibytes.registerwerk.domain.enums.Jurisdiction;
+import de.makibytes.registerwerk.domain.enums.Network;
 import de.makibytes.registerwerk.domain.enums.OnchainLevel;
 import de.makibytes.registerwerk.domain.enums.TokenStandard;
 
@@ -18,10 +20,13 @@ public record AssetResponse(
     String name,
     String isin,
     TokenStandard tokenStandard,
+    Chain chain,
+    Network network,
     OnchainLevel onchainLevel,
     AssetStatus status,
     Jurisdiction jurisdiction,
     Instant createdAt,
+    Instant updatedAt,
     boolean hasTermSheet,
     String externalId
 ) {}

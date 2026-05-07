@@ -11,6 +11,9 @@ import {
   Network,
   PageParams,
   PageResponse,
+  Jurisdiction,
+  OnchainLevel,
+  TokenStandard,
 } from '../models';
 import { LiveHolder } from '../../shared/components/token-holders/models';
 
@@ -30,7 +33,7 @@ export class IssuanceService {
     return this.http.get<Asset>(`${this.base}/${id}`);
   }
 
-  createIssuance(body: Partial<Asset>): Observable<Asset> {
+  createIssuance(body: IssuanceCreateRequest): Observable<Asset> {
     return this.http.post<Asset>(this.base, body);
   }
 
@@ -40,8 +43,8 @@ export class IssuanceService {
 
   // ── Lifecycle transitions ──────────────────────────────────────────────────
 
-  submitIssuance(id: string): Observable<Asset> {
-    return this.http.post<Asset>(`${this.base}/${id}/submit`, {});
+  submitIssuance(id: string): Observable<void> {
+    return this.http.post<void>(`${this.base}/${id}/submit`, {});
   }
 
   // ── Deployments ────────────────────────────────────────────────────────────
@@ -126,4 +129,14 @@ export class IssuanceService {
     });
     return httpParams;
   }
+}
+
+export interface IssuanceCreateRequest {
+  name: string;
+  isin: string | null;
+  jurisdiction: Jurisdiction | null;
+  onchainLevel: OnchainLevel;
+  chain: Chain | null;
+  network: Network | null;
+  tokenStandard: TokenStandard;
 }

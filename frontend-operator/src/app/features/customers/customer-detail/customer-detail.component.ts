@@ -76,7 +76,7 @@ interface OnchainIdentityView {
 
       .entity-title {
         h2 { margin: 0 0 4px; font-size: 22px; font-weight: 500; }
-        .entity-number { color: rgba(0,0,0,0.54); font-size: 13px; font-family: monospace; }
+        .entity-number { color: var(--rw-text-secondary); font-size: 13px; font-family: monospace; }
       }
 
       .entity-actions {
@@ -95,11 +95,11 @@ interface OnchainIdentityView {
 
     .field-item {
       padding: 12px 0;
-      border-bottom: 1px solid #f5f5f5;
+      border-bottom: 1px solid var(--rw-border);
 
       .field-label {
         font-size: 12px;
-        color: rgba(0,0,0,0.54);
+        color: var(--rw-text-muted);
         text-transform: uppercase;
         letter-spacing: 0.5px;
         margin-bottom: 4px;
@@ -107,7 +107,7 @@ interface OnchainIdentityView {
 
       .field-value {
         font-size: 14px;
-        color: rgba(0,0,0,0.87);
+        color: var(--rw-text-primary);
       }
     }
 
@@ -126,13 +126,13 @@ interface OnchainIdentityView {
 
     .history-item {
       padding: 12px 0;
-      border-bottom: 1px solid #f5f5f5;
+      border-bottom: 1px solid var(--rw-border);
       display: flex;
       justify-content: space-between;
       align-items: center;
 
       .name { font-size: 14px; font-weight: 500; }
-      .dates { font-size: 12px; color: rgba(0,0,0,0.54); }
+      .dates { font-size: 12px; color: var(--rw-text-secondary); }
     }
 
     .spinner-wrap {
@@ -392,7 +392,7 @@ interface OnchainIdentityView {
                      <mat-card-subtitle><app-address [address]="identity.identityAddress" /></mat-card-subtitle>
                    </mat-card-header>
                    <mat-card-content style="padding-top:12px">
-                     <div style="margin-bottom:8px;font-size:13px;color:rgba(0,0,0,0.54)">
+                     <div style="margin-bottom:8px;font-size:13px;color:var(--rw-text-secondary)">
                        Deployed: {{ identity.deployedAt | date:'mediumDate' }}
                      </div>
                      @if (identity.syncStatus !== 'READY') {
@@ -409,7 +409,7 @@ interface OnchainIdentityView {
                           @if (claim.expiresAt) { (until {{ claim.expiresAt | date:'shortDate' }}) }
                         </span>
                       } @empty {
-                        <span style="font-size:12px;color:rgba(0,0,0,0.54)">No claims issued</span>
+                        <span style="font-size:12px;color:var(--rw-text-secondary)">No claims issued</span>
                       }
                      </div>
                      <div style="display:flex;gap:8px">
@@ -423,7 +423,7 @@ interface OnchainIdentityView {
                    </mat-card-content>
                 </mat-card>
               } @empty {
-                <p style="text-align:center;padding:24px;color:rgba(0,0,0,0.54)">
+                <p style="text-align:center;padding:24px;color:var(--rw-text-secondary)">
                   No ONCHAINID deployed yet. Click "Deploy ONCHAINID" to create one on a supported chain.
                 </p>
               }

@@ -22,7 +22,7 @@ import de.makibytes.registerwerk.domain.enums.Network;
 /**
  * Creates and administers SPL token mints on Solana.
  *
- * <p>Implementation sends on-chain transactions to create a new SPL token mint account
+ * <p>Implementation sends on-chain transactions to create a new SPL or SPL Token-2022 mint account
  * and provides regulatory admin controls aligned with eWpG and MiCAR requirements.
  *
  * <p>Admin powers implemented:
@@ -50,6 +50,8 @@ public class SolanaTokenService {
 
     /** SPL Token program address. */
     private static final String TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+    /** SPL Token-2022 program address. */
+    private static final String TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
     // SPL Token instruction discriminators
     private static final byte IX_FREEZE_ACCOUNT = 10;
@@ -79,6 +81,22 @@ public class SolanaTokenService {
      * @return future resolving to the transaction signature
      */
     public CompletableFuture<String> createSplToken(UUID assetId, Network network, String ownerAddress) {
+        return createSplToken(assetId, network, ownerAddress, TOKEN_PROGRAM_ID, "SPL");
+    }
+
+    /**
+     * Creates a new SPL Token-2022 mint without extensions for the given asset.
+     *
+     * <p>This enables the Token-2022 mint path in the issuance wizard while keeping the
+     * extension set empty for now. Additional extensions can be layered in later without
+     * changing the basic deployment flow.
+     */
+    public CompletableFuture<String> createSplToken2022(UUID assetId, Network network, String ownerAddress) {
+        return createSplToken(assetId, network, ownerAddress, TOKEN_2022_PROGRAM_ID, "SPL_2022");
+    }
+
+    private CompletableFuture<String> createSplToken(
+            UUID assetId, Network network, String ownerAddress, String programId, String tokenFamily) {
         log.info("Creating SPL token mint: assetId={}, network={}, mintAuthority={}", assetId, network,
                 ownerAddress);
 
@@ -101,7 +119,7 @@ public class SolanaTokenService {
                         mintAccount.getPublicKey(),
                         rentExemptLamports,
                         82L,               // mint account size
-                        new PublicKey(TOKEN_PROGRAM_ID)
+                        new PublicKey(programId)
                 ));
 
                 // 2. Add a memo identifying the asset (best-effort; non-critical)
@@ -125,7 +143,7 @@ public class SolanaTokenService {
                                 new PublicKey("SysvarRent111111111111111111111111111111111"), false, false);
 
                 tx.addInstruction(new org.p2p.solanaj.core.TransactionInstruction(
-                        new PublicKey(TOKEN_PROGRAM_ID),
+                        new PublicKey(programId),
                         java.util.List.of(mintMeta, rentSysvar),
                         initMintData
                 ));
@@ -139,12 +157,12 @@ public class SolanaTokenService {
                         java.util.List.of(payer, mintAccount),
                         recentBlockhash
                 );
-                log.info("SPL token mint created: assetId={} mintAddress={} signature={}",
-                        assetId, mintAccount.getPublicKey().toBase58(), signature);
+                log.info("{} token mint created: assetId={} mintAddress={} signature={}",
+                        tokenFamily, assetId, mintAccount.getPublicKey().toBase58(), signature);
                 return signature;
 
             } catch (RpcException e) {
-                throw new RuntimeException("SPL token creation failed for assetId=" + assetId
+                throw new RuntimeException(tokenFamily + " token creation failed for assetId=" + assetId
                         + ": " + e.getMessage(), e);
             }
         });

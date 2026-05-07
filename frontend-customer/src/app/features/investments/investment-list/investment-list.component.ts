@@ -208,7 +208,7 @@ interface Filters {
               <th mat-header-cell *matHeaderCellDef mat-sort-header>Standard</th>
               <td mat-cell *matCellDef="let r">
                 @if (r.tokenStandard) {
-                  <mat-chip [style.background]="standardColor(r.tokenStandard)" style="color:#fff; font-size:11px">
+                  <mat-chip [style.background]="standardColor(r.tokenStandard)" style="color:var(--rw-accent-contrast); font-size:11px">
                     {{ r.tokenStandard }}
                   </mat-chip>
                 } @else { — }
@@ -376,16 +376,21 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
 
   readonly standardOptions: TokenStandard[] = [
     'ERC20', 'ERC721', 'ERC1155', 'ERC3643', 'CONF_ERC20', 'CONF_ERC3643', 'SPL',
+    'SPL_2022', 'STARKNET_ERC20', 'STELLAR_ASSET', 'CANTON_TOKEN',
   ];
 
   private readonly standardColors: Record<string, string> = {
-    ERC20: '#1565c0',
-    ERC721: '#6a1b9a',
-    ERC1155: '#f57c00',
-    ERC3643: '#00695c',
-    CONF_ERC20: '#e65100',
-    CONF_ERC3643: '#880e4f',
-    SPL: '#558b2f',
+    ERC20: '#3B82F6',
+    ERC721: '#A855F7',
+    ERC1155: '#F59E0B',
+    ERC3643: '#14B8A6',
+    CONF_ERC20: '#FB923C',
+    CONF_ERC3643: '#EC4899',
+    SPL: '#84CC16',
+    SPL_2022: '#65A30D',
+    STARKNET_ERC20: '#F97316',
+    STELLAR_ASSET: '#06B6D4',
+    CANTON_TOKEN: '#8B5CF6',
   };
 
   // ── Computed analytics ─────────────────────────────────────────────────────
@@ -424,7 +429,7 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
       .map(([label, value]) => ({
         label,
         value,
-        color: this.standardColors[label] ?? '#90a4ae',
+        color: this.standardColors[label] ?? '#94A3B8',
       }));
   }
 
@@ -497,7 +502,7 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
   }
 
   standardColor(std: string): string {
-    return this.standardColors[std] ?? '#90a4ae';
+    return this.standardColors[std] ?? '#94A3B8';
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

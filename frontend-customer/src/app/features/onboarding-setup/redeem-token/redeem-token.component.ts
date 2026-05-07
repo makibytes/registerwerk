@@ -144,11 +144,11 @@ import { OnboardingTokenInfo } from '../../../core/models';
       margin: 16px 0;
     }
     .entity-info h3 { margin: 0 0 4px; font-size: 18px; }
-    .reg-number, .jurisdiction { margin: 2px 0; font-size: 13px; color: #546e7a; }
+    .reg-number, .jurisdiction { margin: 2px 0; font-size: 13px; color: var(--rw-text-secondary); }
     .divider { margin: 16px 0; }
     h4 { margin: 0 0 16px; }
     .full-width { width: 100%; margin-bottom: 8px; }
-    .error-message { color: #c62828; font-size: 13px; }
+    .error-message { color: var(--rw-text-danger); font-size: 13px; }
     .error-state, .success-state {
       display: flex;
       flex-direction: column;

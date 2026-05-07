@@ -78,7 +78,14 @@ import { MatInputModule } from '@angular/material/input';
       background: linear-gradient(135deg, #1a237e 0%, #00695c 100%);
       padding: 24px;
     }
-    .onboarding-card { width: 480px; padding: 8px; }
+    .onboarding-card {
+      width: 480px;
+      padding: 8px;
+      background: color-mix(in srgb, var(--rw-surface) 92%, transparent);
+      border: 1px solid color-mix(in srgb, var(--rw-border) 88%, white 12%);
+      box-shadow: 0 24px 60px rgba(2, 6, 23, 0.28);
+      backdrop-filter: blur(18px);
+    }
     mat-card-header {
       flex-direction: column;
       align-items: center;
@@ -96,13 +103,13 @@ import { MatInputModule } from '@angular/material/input';
     }
     .header-icon { font-size: 30px; width: 30px; height: 30px; color: white; }
     .intro {
-      color: rgba(0,0,0,0.6);
+      color: var(--rw-text-secondary);
       font-size: 14px;
       line-height: 1.5;
       margin: 12px 0 20px;
     }
     .full-width { width: 100%; }
-    .error-message { color: #c62828; font-size: 13px; margin: 4px 0; }
+    .error-message { color: var(--rw-text-danger); font-size: 13px; margin: 4px 0; }
   `],
 })
 export class OnboardingEntryComponent {

@@ -6,7 +6,9 @@ import de.makibytes.registerwerk.application.customer.EntityNumberGenerator;
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
 import de.makibytes.registerwerk.domain.asset.Asset;
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
+import de.makibytes.registerwerk.domain.enums.Chain;
 import de.makibytes.registerwerk.domain.enums.Jurisdiction;
+import de.makibytes.registerwerk.domain.enums.Network;
 import de.makibytes.registerwerk.domain.enums.OnchainLevel;
 import de.makibytes.registerwerk.domain.enums.TokenStandard;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
@@ -83,6 +85,56 @@ class AssetServiceTest {
 
         verify(auditEventPublisher).publish(
             eq("ASSET_CREATED"), eq("Asset"), any(UUID.class), eq(actorId), any(), any());
+    }
+
+    @Test
+    @DisplayName("createAsset should reject assets without an issuerId")
+    void createAsset_shouldRejectMissingIssuerId() {
+        Asset asset = buildAsset();
+        asset.setIssuerId(null);
+
+        assertThatThrownBy(() -> assetService.createAsset(asset, UUID.randomUUID()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("issuerId is required");
+    }
+
+    @Test
+    @DisplayName("createAsset should require chain and network for on-chain assets")
+    void createAsset_shouldRequireDeploymentTargetForOnchainAssets() {
+        Asset asset = buildAsset();
+        asset.setOnchainLevel(OnchainLevel.SIMPLE);
+
+        assertThatThrownBy(() -> assetService.createAsset(asset, UUID.randomUUID()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("chain and network are required");
+    }
+
+    @Test
+    @DisplayName("createAsset should reject partial preferred deployment targets")
+    void createAsset_shouldRejectPartialDeploymentTarget() {
+        Asset asset = buildAsset();
+        asset.setChain(Chain.ETHEREUM);
+
+        assertThatThrownBy(() -> assetService.createAsset(asset, UUID.randomUUID()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("both be provided together");
+    }
+
+    @Test
+    @DisplayName("createAsset should allow on-chain assets with a preferred deployment target")
+    void createAsset_shouldAllowPreferredDeploymentTarget() {
+        Asset asset = buildAsset();
+        UUID actorId = UUID.randomUUID();
+        asset.setOnchainLevel(OnchainLevel.SIMPLE);
+        asset.setChain(Chain.POLYGON);
+        asset.setNetwork(Network.TESTNET);
+        when(entityNumberGenerator.generateAssetNumber()).thenReturn("AST-2026-000003");
+        when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Asset result = assetService.createAsset(asset, actorId);
+
+        assertThat(result.getChain()).isEqualTo(Chain.POLYGON);
+        assertThat(result.getNetwork()).isEqualTo(Network.TESTNET);
     }
 
     // ── getAsset ──────────────────────────────────────────────────────────────

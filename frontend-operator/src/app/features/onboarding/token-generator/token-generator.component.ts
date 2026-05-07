@@ -82,6 +82,12 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
       align-items: center;
       gap: 4px;
     }
+
+    .generate-copy {
+      color: var(--rw-text-secondary);
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
   `],
   template: `
     <div class="back-row">
@@ -127,12 +133,12 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
 
           <mat-divider />
 
-          <div class="generate-section">
-            @if (!token) {
-              <p style="color:rgba(0,0,0,0.6); font-size:14px; margin-bottom:16px">
-                Click the button below to generate a secure, single-use onboarding token
-                for this entity. The token expires in 24 hours.
-              </p>
+            <div class="generate-section">
+              @if (!token) {
+               <p class="generate-copy">
+                 Click the button below to generate a secure, single-use onboarding token
+                 for this entity. The token expires in 24 hours.
+               </p>
               <button
                 mat-raised-button
                 color="primary"

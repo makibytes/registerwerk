@@ -23,15 +23,21 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Component
 @ConditionalOnProperty(name = "registerwerk.seed-demo-data", havingValue = "true")
 public class DemoDataSeeder implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DemoDataSeeder.class);
+
+    private record NodeDef(String chainIdentifier, String url, String label, boolean enabled) {}
 
     private final LegalEntityRepository entities;
     private final AppUserRepository users;
@@ -70,14 +76,14 @@ public class DemoDataSeeder implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        syncPublicNodes();
+
         if (entities.findByEntityNumber("DEMO-MC-001").isPresent()) {
-            log.info("Demo data already present — skipping");
+            log.info("Demo business data already present — synced nodes only");
             return;
         }
 
         log.info("Seeding demo data…");
-
-        seedPublicNodes();
 
         // ── Companies ────────────────────────────────────────────────────────
 
@@ -488,48 +494,149 @@ public class DemoDataSeeder implements ApplicationRunner {
 
     // ── Node seeding ──────────────────────────────────────────────────────────
 
-    private void seedPublicNodes() {
+    private void syncPublicNodes() {
         // Public keyless RPC nodes; verified working 2026-05-07.
-        // Replaces the broken Infura "changeme" placeholders seeded by V1.
-        record NodeDef(String chainIdentifier, String url, String label) {}
-        var defs = List.of(
-            // Ethereum Mainnet
-            new NodeDef("ETHEREUM_MAINNET", "https://eth.llamarpc.com",                "LlamaRPC"),
-            new NodeDef("ETHEREUM_MAINNET", "https://ethereum.publicnode.com",         "PublicNode"),
-            new NodeDef("ETHEREUM_MAINNET", "https://eth.drpc.org",                    "dRPC"),
-            // Ethereum Sepolia
-            new NodeDef("ETHEREUM_SEPOLIA", "https://ethereum-sepolia.publicnode.com", "PublicNode"),
-            new NodeDef("ETHEREUM_SEPOLIA", "https://sepolia.drpc.org",                "dRPC"),
-            // Polygon Mainnet
-            new NodeDef("POLYGON_MAINNET",  "https://polygon.publicnode.com",          "PublicNode"),
-            new NodeDef("POLYGON_MAINNET",  "https://polygon.drpc.org",                "dRPC"),
-            // Polygon Amoy
-            new NodeDef("POLYGON_AMOY",     "https://rpc-amoy.polygon.technology",     "Polygon Foundation"),
-            new NodeDef("POLYGON_AMOY",     "https://polygon-amoy.publicnode.com",     "PublicNode"),
-            // Base Mainnet (mainnet.base.org already seeded by V1)
-            new NodeDef("BASE_MAINNET",     "https://base.llamarpc.com",               "LlamaRPC"),
-            // Base Sepolia (sepolia.base.org already seeded by V1)
-            new NodeDef("BASE_SEPOLIA",     "https://base-sepolia-rpc.publicnode.com", "PublicNode"),
-            new NodeDef("BASE_SEPOLIA",     "https://base-sepolia.drpc.org",           "dRPC")
-        );
+        // Demo mode uses this list as the source of truth for both chain_config RPC URLs
+        // and the operator-visible rpc_node rows.
+        Map<String, List<NodeDef>> defsByChain = demoNodeDefs().stream()
+                .collect(Collectors.groupingBy(
+                        NodeDef::chainIdentifier,
+                        LinkedHashMap::new,
+                        Collectors.toCollection(ArrayList::new)));
 
-        for (var def : defs) {
-            chainConfigs.findByIdentifier(def.chainIdentifier()).ifPresent(chain -> {
-                boolean alreadyExists = rpcNodes.findByChainConfig_Identifier(def.chainIdentifier())
-                        .stream().anyMatch(n -> n.getUrl().equals(def.url()));
-                if (!alreadyExists) {
-                    rpcNode(chain, def.url(), def.label());
-                }
-            });
+        for (var entry : defsByChain.entrySet()) {
+            chainConfigs.findByIdentifier(entry.getKey())
+                    .ifPresent(chain -> syncChainNodes(chain, entry.getValue()));
         }
     }
 
-    private void rpcNode(ChainConfig chain, String url, String label) {
+    private List<NodeDef> demoNodeDefs() {
+        return List.of(
+                // Ethereum Mainnet
+                new NodeDef("ETHEREUM_MAINNET", "https://eth.llamarpc.com", "LlamaRPC", true),
+                new NodeDef("ETHEREUM_MAINNET", "https://ethereum.publicnode.com", "PublicNode", true),
+                new NodeDef("ETHEREUM_MAINNET", "https://eth.drpc.org", "dRPC", true),
+                // Ethereum Sepolia
+                new NodeDef("ETHEREUM_SEPOLIA", "https://ethereum-sepolia.publicnode.com", "PublicNode", true),
+                new NodeDef("ETHEREUM_SEPOLIA", "https://sepolia.drpc.org", "dRPC", true),
+                // Polygon Mainnet
+                new NodeDef("POLYGON_MAINNET", "https://polygon.publicnode.com", "PublicNode", true),
+                new NodeDef("POLYGON_MAINNET", "https://polygon.drpc.org", "dRPC", true),
+                // Polygon Amoy
+                new NodeDef("POLYGON_AMOY", "https://rpc-amoy.polygon.technology", "Polygon Foundation", true),
+                new NodeDef("POLYGON_AMOY", "https://polygon-amoy.publicnode.com", "PublicNode", true),
+                // Base Mainnet
+                new NodeDef("BASE_MAINNET", "https://mainnet.base.org", "Base", true),
+                new NodeDef("BASE_MAINNET", "https://base.llamarpc.com", "LlamaRPC", true),
+                // Base Sepolia
+                new NodeDef("BASE_SEPOLIA", "https://sepolia.base.org", "Base", true),
+                new NodeDef("BASE_SEPOLIA", "https://base-sepolia-rpc.publicnode.com", "PublicNode", true),
+                new NodeDef("BASE_SEPOLIA", "https://base-sepolia.drpc.org", "dRPC", true),
+                // Solana
+                new NodeDef("SOLANA_MAINNET", "https://api.mainnet-beta.solana.com", "Solana Labs", true),
+                new NodeDef("SOLANA_DEVNET", "https://api.devnet.solana.com", "Solana Labs", true),
+                // Arbitrum One
+                new NodeDef("ARBITRUM_MAINNET", "https://arbitrum.publicnode.com", "PublicNode", true),
+                new NodeDef("ARBITRUM_MAINNET", "https://arbitrum.drpc.org", "dRPC", true),
+                // Arbitrum Sepolia
+                new NodeDef("ARBITRUM_SEPOLIA", "https://sepolia-rollup.arbitrum.io/rpc", "Offchain Labs", true),
+                new NodeDef("ARBITRUM_SEPOLIA", "https://arbitrum-sepolia.publicnode.com", "PublicNode", true),
+                // Avalanche C-Chain
+                new NodeDef("AVALANCHE_MAINNET", "https://api.avax.network/ext/bc/C/rpc", "Ava Labs", true),
+                new NodeDef("AVALANCHE_MAINNET", "https://avalanche.publicnode.com/ext/bc/C/rpc", "PublicNode", true),
+                new NodeDef("AVALANCHE_MAINNET", "https://avalanche.drpc.org", "dRPC", true),
+                // Avalanche Fuji
+                new NodeDef("AVALANCHE_FUJI", "https://api.avax-test.network/ext/bc/C/rpc", "Ava Labs", true),
+                new NodeDef("AVALANCHE_FUJI", "https://avalanche-fuji-c-chain-rpc.publicnode.com", "PublicNode", true),
+                // Optimism
+                new NodeDef("OPTIMISM_MAINNET", "https://mainnet.optimism.io", "OP Labs", true),
+                new NodeDef("OPTIMISM_MAINNET", "https://optimism.publicnode.com", "PublicNode", true),
+                new NodeDef("OPTIMISM_MAINNET", "https://optimism.drpc.org", "dRPC", true),
+                // Optimism Sepolia
+                new NodeDef("OPTIMISM_SEPOLIA", "https://sepolia.optimism.io", "OP Labs", true),
+                new NodeDef("OPTIMISM_SEPOLIA", "https://optimism-sepolia.publicnode.com", "PublicNode", true),
+                // Fhenix / Inco
+                new NodeDef("FHENIX_MAINNET", "https://api.fhenix.zone:7747", "Fhenix", true),
+                new NodeDef("FHENIX_HELIUM", "https://api.helium.fhenix.zone:7747", "Fhenix", true),
+                new NodeDef("INCO_MAINNET", "https://mainnet.inco.org", "Inco", true),
+                new NodeDef("INCO_RIVEST", "https://validator.rivest.inco.org", "Inco", true),
+                // Starknet (stub chains — disabled nodes visible in operator UI)
+                new NodeDef("STARKNET_MAINNET", "https://rpc.starknet.lava.build", "Lava", false),
+                new NodeDef("STARKNET_MAINNET", "https://api.cartridge.gg/x/starknet/mainnet", "Cartridge", false),
+                new NodeDef("STARKNET_SEPOLIA", "https://api.cartridge.gg/x/starknet/sepolia", "Cartridge", false),
+                // Stellar (Horizon REST API, not JSON-RPC — informational only)
+                new NodeDef("STELLAR_MAINNET", "https://horizon.stellar.org", "SDF Horizon", false),
+                new NodeDef("STELLAR_TESTNET", "https://horizon-testnet.stellar.org", "SDF Horizon Testnet", false)
+                // Canton: no plain public endpoint — operators wire their own participant.
+        );
+    }
+
+    private void syncChainNodes(ChainConfig chain, List<NodeDef> defs) {
+        syncChainRpcUrls(chain, defs);
+
+        Map<String, RpcNode> existingByUrl = rpcNodes.findByChainConfig_Identifier(chain.getIdentifier()).stream()
+                .collect(Collectors.toMap(
+                        RpcNode::getUrl,
+                        node -> node,
+                        (left, right) -> left,
+                        LinkedHashMap::new));
+
+        for (NodeDef def : defs) {
+            RpcNode existing = existingByUrl.get(def.url());
+            if (existing == null) {
+                rpcNode(chain, def.url(), def.label(), def.enabled());
+                continue;
+            }
+
+            boolean changed = false;
+            if (!Objects.equals(existing.getLabel(), def.label())) {
+                existing.setLabel(def.label());
+                changed = true;
+            }
+            if (existing.isEnabled() != def.enabled()) {
+                existing.setEnabled(def.enabled());
+                changed = true;
+            }
+
+            if (changed) {
+                rpcNodes.save(existing);
+            }
+        }
+    }
+
+    private void syncChainRpcUrls(ChainConfig chain, List<NodeDef> defs) {
+        List<String> urls = defs.stream()
+                .map(NodeDef::url)
+                .filter(url -> !url.isBlank())
+                .toList();
+        if (urls.isEmpty()) {
+            return;
+        }
+
+        String primaryUrl = urls.getFirst();
+        List<String> fallbackUrls = urls.size() > 1 ? urls.subList(1, urls.size()) : List.of();
+
+        boolean changed = false;
+        if (!Objects.equals(chain.getRpcUrl(), primaryUrl)) {
+            chain.setRpcUrl(primaryUrl);
+            changed = true;
+        }
+        if (!Objects.equals(chain.getFallbackRpcUrlList(), fallbackUrls)) {
+            chain.setFallbackRpcUrlList(fallbackUrls);
+            changed = true;
+        }
+
+        if (changed) {
+            chainConfigs.save(chain);
+        }
+    }
+
+    private void rpcNode(ChainConfig chain, String url, String label, boolean enabled) {
         RpcNode n = new RpcNode();
         n.setChainConfig(chain);
         n.setUrl(url);
         n.setLabel(label);
-        n.setEnabled(true);
+        n.setEnabled(enabled);
         rpcNodes.save(n);
     }
 

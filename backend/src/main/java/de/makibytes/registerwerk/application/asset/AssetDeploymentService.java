@@ -18,6 +18,7 @@ import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,6 +33,10 @@ import java.util.concurrent.CompletableFuture;
 public class AssetDeploymentService {
 
     private static final Logger log = LoggerFactory.getLogger(AssetDeploymentService.class);
+    private static final EnumSet<Chain> TRACKING_ONLY_CHAINS =
+            EnumSet.of(Chain.STARKNET, Chain.STELLAR, Chain.CANTON);
+    private static final EnumSet<Chain> FHEVM_CHAINS =
+            EnumSet.of(Chain.FHENIX, Chain.INCO);
 
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final AssetRepository assetRepository;
@@ -80,6 +85,8 @@ public class AssetDeploymentService {
     public AssetDeployment deploy(UUID assetId, Chain chain, Network network, UUID actorId) {
         Asset asset = assetRepository.findById(assetId)
             .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
+        TokenStandard standard = asset.getTokenStandard();
+        validateDeploymentSupport(chain, standard);
 
         AssetDeployment deployment = new AssetDeployment();
         deployment.setAssetId(assetId);
@@ -92,10 +99,14 @@ public class AssetDeploymentService {
 
         // Determine correct deployment service based on token standard
         CompletableFuture<String> txFuture;
-        TokenStandard standard = asset.getTokenStandard();
 
         if (chain == Chain.SOLANA) {
-            txFuture = solanaTokenService.createSplToken(assetId, network, "owner-placeholder");
+            txFuture = switch (standard) {
+                case SPL -> solanaTokenService.createSplToken(assetId, network, "owner-placeholder");
+                case SPL_2022 -> solanaTokenService.createSplToken2022(assetId, network, "owner-placeholder");
+                default -> throw new UnsupportedOperationException(
+                        "Solana deployments currently support SPL and SPL_2022 only");
+            };
         } else {
             txFuture = switch (standard) {
                 case ERC20 -> erc20DeploymentService.deploy(assetId, descriptor, "owner-placeholder");
@@ -131,6 +142,22 @@ public class AssetDeploymentService {
         auditEventPublisher.publish("ASSET_DEPLOYMENT_INITIATED", "AssetDeployment", saved.getId(),
             actorId, null, Map.of("chain", chain.name(), "network", network.name()));
         return saved;
+    }
+
+    private void validateDeploymentSupport(Chain chain, TokenStandard standard) {
+        if (TRACKING_ONLY_CHAINS.contains(chain)) {
+            throw new UnsupportedOperationException(
+                    chain + " is registered for tracking but issuance is not yet implemented");
+        }
+        if (isConfidentialStandard(standard) && !FHEVM_CHAINS.contains(chain)) {
+            throw new UnsupportedOperationException(
+                    "Confidential token deployment is not supported on " + chain
+                            + ". Use an fhEVM-compatible chain instead.");
+        }
+    }
+
+    private boolean isConfidentialStandard(TokenStandard standard) {
+        return standard == TokenStandard.CONF_ERC20 || standard == TokenStandard.CONF_ERC3643;
     }
 
     @Transactional(readOnly = true)

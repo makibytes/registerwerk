@@ -8,7 +8,9 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
+import de.makibytes.registerwerk.domain.enums.Chain;
 import de.makibytes.registerwerk.domain.enums.Jurisdiction;
+import de.makibytes.registerwerk.domain.enums.Network;
 import de.makibytes.registerwerk.domain.enums.OnchainLevel;
 import de.makibytes.registerwerk.domain.enums.TokenStandard;
 import jakarta.persistence.Column;
@@ -50,6 +52,14 @@ public class Asset {
     @Column(name = "token_standard", nullable = false, length = 20)
     @NotNull
     private TokenStandard tokenStandard;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private Chain chain;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10)
+    private Network network;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "onchain_level", nullable = false, length = 10)
@@ -105,6 +115,12 @@ public class Asset {
 
     public TokenStandard getTokenStandard() { return tokenStandard; }
     public void setTokenStandard(TokenStandard tokenStandard) { this.tokenStandard = tokenStandard; }
+
+    public Chain getChain() { return chain; }
+    public void setChain(Chain chain) { this.chain = chain; }
+
+    public Network getNetwork() { return network; }
+    public void setNetwork(Network network) { this.network = network; }
 
     public OnchainLevel getOnchainLevel() { return onchainLevel; }
     public void setOnchainLevel(OnchainLevel onchainLevel) { this.onchainLevel = onchainLevel; }

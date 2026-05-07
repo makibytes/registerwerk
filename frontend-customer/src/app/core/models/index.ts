@@ -70,9 +70,25 @@ export type TokenStandard =
   | 'ERC3643'
   | 'CONF_ERC20'
   | 'CONF_ERC3643'
-  | 'SPL';
+  | 'SPL'
+  | 'SPL_2022'
+  | 'STARKNET_ERC20'
+  | 'STELLAR_ASSET'
+  | 'CANTON_TOKEN';
 
-export type Chain = 'ETHEREUM' | 'POLYGON' | 'BASE' | 'SOLANA';
+export type Chain =
+  | 'ETHEREUM'
+  | 'POLYGON'
+  | 'BASE'
+  | 'FHENIX'
+  | 'INCO'
+  | 'SOLANA'
+  | 'ARBITRUM'
+  | 'AVALANCHE'
+  | 'OPTIMISM'
+  | 'STARKNET'
+  | 'STELLAR'
+  | 'CANTON';
 
 export type Network = 'MAINNET' | 'TESTNET';
 
@@ -132,7 +148,7 @@ export interface Asset {
   status: AssetStatus;
   chain: Chain | null;
   network: Network | null;
-  issuerEntityId: string;
+  issuerId: string;
   jurisdiction: Jurisdiction | null;
   createdAt: string;
   updatedAt: string;

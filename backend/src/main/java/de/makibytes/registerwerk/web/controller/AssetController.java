@@ -18,6 +18,7 @@ import de.makibytes.registerwerk.infrastructure.persistence.jpa.AuditEventReposi
 import de.makibytes.registerwerk.web.dto.*;
 import de.makibytes.registerwerk.web.mapper.AssetMapper;
 import de.makibytes.registerwerk.web.mapper.DeploymentMapper;
+import de.makibytes.registerwerk.web.security.SecurityUtils;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,6 +79,7 @@ public class AssetController {
             @RequestBody @Valid AssetCreateRequest request,
             Authentication auth) {
         Asset asset = assetMapper.toEntity(request);
+        asset.setIssuerId(resolveIssuerId(request, auth));
         Asset created = assetService.createAsset(asset, extractActorId(auth));
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created, auth, false));
     }
@@ -142,6 +144,8 @@ public class AssetController {
         patch.setIsin(request.isin());
         patch.setPublicData(request.publicData());
         patch.setJurisdiction(request.jurisdiction());
+        patch.setChain(request.chain());
+        patch.setNetwork(request.network());
         return ResponseEntity.ok(toResponse(assetService.updateAsset(id, patch, extractActorId(auth)), auth, false));
     }
 
@@ -238,14 +242,30 @@ public class AssetController {
                 base.name(),
                 base.isin(),
                 base.tokenStandard(),
+                base.chain(),
+                base.network(),
                 base.onchainLevel(),
                 base.status(),
                 asset.getJurisdiction(),
                 base.createdAt(),
+                base.updatedAt(),
                 hasTermSheet,
                 companyExternalReferenceService
                         .findExternalId(authentication, ExternalReferenceSubjectType.ASSET, asset.getId())
                         .orElse(null)
         );
+    }
+
+    private UUID resolveIssuerId(AssetCreateRequest request, Authentication auth) {
+        if (request.issuerId() != null) {
+            return request.issuerId();
+        }
+
+        UUID entityId = SecurityUtils.extractEntityId(auth);
+        if (entityId == null) {
+            throw new IllegalArgumentException(
+                    "issuerId is required when no authenticated entity is available");
+        }
+        return entityId;
     }
 }

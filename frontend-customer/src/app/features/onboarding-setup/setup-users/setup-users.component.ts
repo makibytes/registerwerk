@@ -101,7 +101,7 @@ import { CompanyUser, UserRole } from '../../../core/models';
   styles: [`
     .page-container { padding: 32px; max-width: 800px; margin: 0 auto; }
     .page-header h1 { margin: 0; }
-    .subtitle { color: #546e7a; margin: 4px 0 24px; }
+    .subtitle { color: var(--rw-text-secondary); margin: 4px 0 24px; }
     .invite-form { margin-bottom: 24px; }
     .form-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .flex-field { flex: 1; min-width: 180px; }

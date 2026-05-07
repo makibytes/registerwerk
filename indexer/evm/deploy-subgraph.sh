@@ -68,11 +68,29 @@ case "$TARGET" in
     deploy_chain "base"         "ewpg/base-mainnet"      "${FACTORY_ADDRESS_BASE:-0x0}"     "${START_BLOCK_BASE:-0}"
     ;;&
   base-sepolia|all)
-    deploy_chain "base-sepolia" "ewpg/base-sepolia"      "${FACTORY_ADDRESS_BASE_SEPOLIA:-0x0}" "0"
+    deploy_chain "base-sepolia"      "ewpg/base-sepolia"      "${FACTORY_ADDRESS_BASE_SEPOLIA:-0x0}"      "0"
+    ;;&
+  arbitrum-one|all)
+    deploy_chain "arbitrum-one"      "ewpg/arbitrum-mainnet"   "${FACTORY_ADDRESS_ARBITRUM:-0x0}"          "${START_BLOCK_ARBITRUM:-0}"
+    ;;&
+  arbitrum-sepolia|all)
+    deploy_chain "arbitrum-sepolia"  "ewpg/arbitrum-sepolia"   "${FACTORY_ADDRESS_ARBITRUM_SEPOLIA:-0x0}"  "0"
+    ;;&
+  avalanche|all)
+    deploy_chain "avalanche"         "ewpg/avalanche-mainnet"  "${FACTORY_ADDRESS_AVALANCHE:-0x0}"         "${START_BLOCK_AVALANCHE:-0}"
+    ;;&
+  avalanche-fuji|all)
+    deploy_chain "avalanche-fuji"    "ewpg/avalanche-fuji"     "${FACTORY_ADDRESS_AVALANCHE_FUJI:-0x0}"    "0"
+    ;;&
+  optimism|all)
+    deploy_chain "optimism"          "ewpg/optimism-mainnet"   "${FACTORY_ADDRESS_OPTIMISM:-0x0}"          "${START_BLOCK_OPTIMISM:-0}"
+    ;;&
+  optimism-sepolia|all)
+    deploy_chain "optimism-sepolia"  "ewpg/optimism-sepolia"   "${FACTORY_ADDRESS_OPTIMISM_SEPOLIA:-0x0}"  "0"
     ;;
   *)
     echo "Unknown target: $TARGET"
-    echo "Usage: $0 [mainnet|sepolia|polygon|polygon-amoy|base|base-sepolia|all]"
+    echo "Usage: $0 [mainnet|sepolia|polygon|polygon-amoy|base|base-sepolia|arbitrum-one|arbitrum-sepolia|avalanche|avalanche-fuji|optimism|optimism-sepolia|all]"
     exit 1
     ;;
 esac

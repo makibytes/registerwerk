@@ -25,10 +25,16 @@ html { @include mat.all-component-themes($light); }
 // ── Design Tokens ─────────────────────────────────────────────────────────────
 
 :root {
+  color-scheme: light;
+
   // Surfaces
   --rw-bg:              #F2F5FA;
   --rw-surface:         #FFFFFF;
   --rw-surface-raised:  #FFFFFF;
+  --rw-surface-soft:    #F8FBFD;
+  --rw-input-surface:   #F8FBFD;
+  --rw-code-bg:         #ECF4F8;
+  --rw-code-fg:         #334155;
 
   // Borders
   --rw-border:          #E0E6EF;
@@ -61,6 +67,13 @@ html { @include mat.all-component-themes($light); }
   --rw-accent:          #0D9488;  // teal-600
   --rw-accent-light:    #CCFBF1;
   --rw-accent-subtle:   rgba(13,148,136,0.08);
+  --rw-accent-contrast: #FFFFFF;
+
+  // Semantic text
+  --rw-text-success:    #0F766E;
+  --rw-text-warning:    #B45309;
+  --rw-text-danger:     #BE123C;
+  --rw-text-info:       #1D4ED8;
 
   // Status badges
   --rw-draft-bg:     #EFF6FF; --rw-draft-fg:    #1D4ED8;
@@ -81,13 +94,29 @@ html { @include mat.all-component-themes($light); }
   --rw-radius:    8px;
   --rw-radius-md: 10px;
   --rw-radius-lg: 14px;
+
+  --mat-sys-background:             var(--rw-bg);
+  --mat-sys-surface:                var(--rw-surface);
+  --mat-sys-surface-container:      var(--rw-surface-raised);
+  --mat-sys-surface-container-low:  var(--rw-surface-soft);
+  --mat-sys-surface-container-high: var(--rw-surface-raised);
+  --mat-sys-on-surface:             var(--rw-text-primary);
+  --mat-sys-on-surface-variant:     var(--rw-text-secondary);
+  --mat-sys-outline:                var(--rw-border);
+  --mat-sys-outline-variant:        var(--rw-border-subtle);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
+
     --rw-bg:              #0D1117;
     --rw-surface:         #161B22;
     --rw-surface-raised:  #21262D;
+    --rw-surface-soft:    #1C2128;
+    --rw-input-surface:   rgba(255,255,255,0.04);
+    --rw-code-bg:         #0F141A;
+    --rw-code-fg:         #C9D1D9;
 
     --rw-border:          #30363D;
     --rw-border-subtle:   #21262D;
@@ -111,6 +140,11 @@ html { @include mat.all-component-themes($light); }
     --rw-nav-accent:      #2DD4BF;
     --rw-nav-brand-name:  #FFFFFF;
     --rw-nav-user-label:  rgba(255,255,255,0.75);
+
+    --rw-text-success:    #5EEAD4;
+    --rw-text-warning:    #FCD34D;
+    --rw-text-danger:     #FDA4AF;
+    --rw-text-info:       #93C5FD;
 
     --rw-draft-bg:     rgba(29,78,216,0.15);    --rw-draft-fg:    #93C5FD;
     --rw-pending-bg:   rgba(146,64,14,0.15);    --rw-pending-fg:  #FCD34D;
@@ -212,6 +246,15 @@ body {
   font-size: 13px;
 }
 
+code {
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 12px;
+  background: var(--rw-code-bg);
+  color: var(--rw-code-fg);
+  padding: 2px 6px;
+  border-radius: var(--rw-radius-sm);
+}
+
 // ── Material Card Overrides ────────────────────────────────────────────────────
 
 .mat-mdc-card {
@@ -239,6 +282,77 @@ body {
   font-weight: 600 !important;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+}
+
+.mat-mdc-card-title,
+.mat-mdc-dialog-title,
+.mat-step-text-label,
+.mat-step-label,
+.mat-step-label-selected,
+.mat-mdc-tab .mdc-tab__text-label {
+  color: var(--rw-text-primary) !important;
+}
+
+.mat-mdc-card-subtitle,
+.mat-step-optional {
+  color: var(--rw-text-secondary) !important;
+}
+
+.mat-mdc-form-field-subscript-wrapper,
+.mat-mdc-form-field-hint,
+.mat-mdc-select-placeholder,
+.mat-mdc-form-field-icon-prefix,
+.mat-mdc-form-field-icon-suffix {
+  color: var(--rw-text-muted) !important;
+}
+
+.mat-mdc-form-field .mdc-text-field {
+  background: var(--rw-input-surface) !important;
+}
+
+.mat-mdc-form-field .mdc-floating-label,
+.mat-mdc-form-field .mat-mdc-input-element,
+.mat-mdc-select-value-text,
+.mat-mdc-select-arrow,
+.mat-mdc-option,
+.mat-mdc-option .mdc-list-item__primary-text {
+  color: var(--rw-text-primary) !important;
+}
+
+.mdc-text-field--outlined:not(.mdc-text-field--disabled) .mdc-notched-outline__leading,
+.mdc-text-field--outlined:not(.mdc-text-field--disabled) .mdc-notched-outline__notch,
+.mdc-text-field--outlined:not(.mdc-text-field--disabled) .mdc-notched-outline__trailing {
+  border-color: var(--rw-border) !important;
+}
+
+.mat-mdc-dialog-surface,
+.mat-mdc-menu-panel,
+.mat-mdc-select-panel {
+  background: var(--rw-surface-raised) !important;
+  color: var(--rw-text-primary) !important;
+  border: 1px solid var(--rw-border);
+}
+
+.mat-stepper-horizontal,
+.mat-stepper-vertical,
+.mat-mdc-tab-group {
+  background: transparent !important;
+}
+
+.mat-step-icon {
+  background: var(--rw-border-subtle) !important;
+  color: var(--rw-text-secondary) !important;
+}
+
+.mat-step-icon-selected,
+.mat-step-icon-state-done,
+.mat-step-icon-state-edit {
+  background: var(--rw-accent) !important;
+  color: var(--rw-accent-contrast) !important;
+}
+
+.mat-stepper-horizontal-line {
+  border-top-color: var(--rw-border) !important;
 }
 
 // ── Status Badges ─────────────────────────────────────────────────────────────

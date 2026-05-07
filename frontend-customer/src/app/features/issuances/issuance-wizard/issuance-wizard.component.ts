@@ -153,7 +153,9 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                   <mat-label>Blockchain *</mat-label>
                   <mat-select formControlName="chain" (valueChange)="onChainChange($event)">
                     @for (c of chains; track c.value) {
-                      <mat-option [value]="c.value">{{ c.label }}</mat-option>
+                      <mat-option [value]="c.value" [disabled]="c.comingSoon === true">
+                        {{ c.label }}@if (c.comingSoon) { <span class="coming-soon-badge"> — Coming soon</span>}
+                      </mat-option>
                     }
                   </mat-select>
                 </mat-form-field>
@@ -170,7 +172,9 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                   <mat-label>Token Standard *</mat-label>
                   <mat-select formControlName="tokenStandard">
                     @for (std of filteredStandards; track std.value) {
-                      <mat-option [value]="std.value">{{ std.label }}</mat-option>
+                      <mat-option [value]="std.value" [disabled]="std.comingSoon === true">
+                        {{ std.label }}@if (std.comingSoon) { <span class="coming-soon-badge"> — Coming soon</span>}
+                      </mat-option>
                     }
                   </mat-select>
                 </mat-form-field>
@@ -253,13 +257,14 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
   `,
   styles: [`
     .step-form { padding: 24px 0; display: flex; flex-direction: column; gap: 4px; }
+    .coming-soon-badge { font-size: 0.8em; opacity: 0.6; font-style: italic; }
     .full-width { width: 100%; }
     .step-actions { display: flex; gap: 12px; align-items: center; margin-top: 24px; }
     .review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .review-item { display: flex; flex-direction: column; }
-    .review-label { font-size: 12px; color: #78909c; text-transform: uppercase; letter-spacing: 0.5px; }
-    .review-value { font-size: 15px; font-weight: 500; color: #37474f; margin-top: 4px; }
-    .error-message { color: #c62828; font-size: 13px; }
+    .review-label { font-size: 12px; color: var(--rw-text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .review-value { font-size: 15px; font-weight: 500; color: var(--rw-text-primary); margin-top: 4px; }
+    .error-message { color: var(--rw-text-danger); font-size: 13px; }
     .jurisdiction-requirements {
       border: 1px solid rgba(99,102,241,0.25);
       border-radius: 8px;
@@ -285,7 +290,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
       padding: 14px 16px;
       border-radius: 8px;
       border: 1px dashed var(--rw-border);
-      background: rgba(0,0,0,0.01);
+      background: var(--rw-surface-soft);
       margin-top: 4px;
     }
     .termsheet-label {
@@ -300,7 +305,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
       align-items: center;
       gap: 8px;
       font-size: 13px;
-      color: #10b981;
+      color: var(--rw-text-success);
     }
   `]
 })
@@ -358,32 +363,65 @@ export class IssuanceWizardComponent implements OnInit {
     { value: 'CONTROL', label: 'Control — On-chain control and approvals' },
   ];
 
-  readonly chains: { value: Chain; label: string }[] = [
-    { value: 'ETHEREUM', label: 'Ethereum' },
-    { value: 'POLYGON',  label: 'Polygon' },
-    { value: 'BASE',     label: 'Base' },
-    { value: 'SOLANA',   label: 'Solana' },
+  readonly chains: { value: Chain; label: string; comingSoon?: true }[] = [
+    { value: 'ETHEREUM',  label: 'Ethereum' },
+    { value: 'POLYGON',   label: 'Polygon' },
+    { value: 'BASE',      label: 'Base' },
+    { value: 'FHENIX',    label: 'Fhenix' },
+    { value: 'INCO',      label: 'Inco' },
+    { value: 'SOLANA',    label: 'Solana' },
+    { value: 'ARBITRUM',  label: 'Arbitrum One' },
+    { value: 'AVALANCHE', label: 'Avalanche C-Chain' },
+    { value: 'OPTIMISM',  label: 'Optimism' },
+    { value: 'STARKNET',  label: 'Starknet', comingSoon: true },
+    { value: 'STELLAR',   label: 'Stellar',  comingSoon: true },
+    { value: 'CANTON',    label: 'Canton',   comingSoon: true },
   ];
 
-  private readonly standardsByChain: Record<Chain, { value: TokenStandard; label: string }[]> = {
+  private readonly standardsByChain: Record<Chain, { value: TokenStandard; label: string; comingSoon?: true }[]> = {
     ETHEREUM: [
       { value: 'ERC20',        label: 'ERC-20' },
       { value: 'ERC3643',      label: 'ERC-3643 (T-REX)' },
-      { value: 'CONF_ERC20',   label: 'Confidential ERC-20 (ERC-7984, Zama fhEVM)' },
-      { value: 'CONF_ERC3643', label: 'Confidential ERC-3643 (Zama fhEVM + T-REX)' },
     ],
     POLYGON: [
       { value: 'ERC20',        label: 'ERC-20' },
       { value: 'ERC3643',      label: 'ERC-3643 (T-REX)' },
-      { value: 'CONF_ERC20',   label: 'Confidential ERC-20 (ERC-7984, Zama fhEVM)' },
-      { value: 'CONF_ERC3643', label: 'Confidential ERC-3643 (Zama fhEVM + T-REX)' },
     ],
     BASE: [
       { value: 'ERC20',        label: 'ERC-20' },
+    ],
+    FHENIX: [
       { value: 'CONF_ERC20',   label: 'Confidential ERC-20 (ERC-7984, Zama fhEVM)' },
+      { value: 'CONF_ERC3643', label: 'Confidential ERC-3643 (Zama fhEVM + T-REX)' },
+    ],
+    INCO: [
+      { value: 'CONF_ERC20',   label: 'Confidential ERC-20 (ERC-7984, Zama fhEVM)' },
+      { value: 'CONF_ERC3643', label: 'Confidential ERC-3643 (Zama fhEVM + T-REX)' },
     ],
     SOLANA: [
-      { value: 'SPL', label: 'SPL Token' },
+      { value: 'SPL',      label: 'SPL Token' },
+      { value: 'SPL_2022', label: 'SPL Token-2022 (Token Extensions)' },
+    ],
+    ARBITRUM: [
+      { value: 'ERC20',        label: 'ERC-20' },
+      { value: 'ERC3643',      label: 'ERC-3643 (T-REX)' },
+    ],
+    AVALANCHE: [
+      { value: 'ERC20',        label: 'ERC-20' },
+      { value: 'ERC3643',      label: 'ERC-3643 (T-REX)' },
+    ],
+    OPTIMISM: [
+      { value: 'ERC20',        label: 'ERC-20' },
+      { value: 'ERC3643',      label: 'ERC-3643 (T-REX)' },
+    ],
+    STARKNET: [
+      { value: 'STARKNET_ERC20', label: 'Cairo ERC-20', comingSoon: true },
+    ],
+    STELLAR: [
+      { value: 'STELLAR_ASSET', label: 'Stellar Asset', comingSoon: true },
+    ],
+    CANTON: [
+      { value: 'CANTON_TOKEN', label: 'Canton / Daml Token', comingSoon: true },
     ],
   };
 

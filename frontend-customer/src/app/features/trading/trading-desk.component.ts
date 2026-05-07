@@ -694,7 +694,10 @@ export class TradingDeskComponent implements OnInit {
     { value: 'CUSTOM_ADDRESS', label: 'Custom address' },
   ];
 
-  readonly tokenStandardOptions: TokenStandard[] = ['ERC20', 'ERC721', 'ERC1155', 'ERC3643', 'CONF_ERC20', 'CONF_ERC3643', 'SPL'];
+  readonly tokenStandardOptions: TokenStandard[] = [
+    'ERC20', 'ERC721', 'ERC1155', 'ERC3643', 'CONF_ERC20', 'CONF_ERC3643', 'SPL',
+    'SPL_2022', 'STARKNET_ERC20', 'STELLAR_ASSET', 'CANTON_TOKEN',
+  ];
 
   ngOnInit(): void {
     this.reload();

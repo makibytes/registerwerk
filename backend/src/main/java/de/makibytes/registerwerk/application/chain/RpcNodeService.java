@@ -30,7 +30,7 @@ public class RpcNodeService {
 
     @Transactional(readOnly = true)
     public List<RpcNode> listByChain(UUID chainConfigId) {
-        return rpcNodeRepository.findByChainConfig_Id(chainConfigId);
+        return rpcNodeRepository.findByChainConfig_IdWithChainConfig(chainConfigId);
     }
 
     @Transactional(readOnly = true)

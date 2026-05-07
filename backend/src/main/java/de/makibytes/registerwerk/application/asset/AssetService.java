@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.application.customer.EntityNumberGenerator;
 import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
 import de.makibytes.registerwerk.domain.asset.Asset;
 import de.makibytes.registerwerk.domain.enums.AssetStatus;
+import de.makibytes.registerwerk.domain.enums.OnchainLevel;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +40,7 @@ public class AssetService {
     }
 
     public Asset createAsset(Asset asset, UUID actorId) {
+        validateCreate(asset);
         asset.setAssetNumber(entityNumberGenerator.generateAssetNumber());
         asset.setStatus(AssetStatus.DRAFT);
         Asset saved = assetRepository.save(asset);
@@ -72,8 +74,28 @@ public class AssetService {
         if (patch.getIsin() != null) existing.setIsin(patch.getIsin());
         if (patch.getPublicData() != null) existing.setPublicData(patch.getPublicData());
         if (patch.getJurisdiction() != null) existing.setJurisdiction(patch.getJurisdiction());
+        if (patch.getChain() != null) existing.setChain(patch.getChain());
+        if (patch.getNetwork() != null) existing.setNetwork(patch.getNetwork());
         Asset saved = assetRepository.save(existing);
         auditEventPublisher.publish("ASSET_UPDATED", "Asset", id, actorId, null, null);
         return saved;
+    }
+
+    private void validateCreate(Asset asset) {
+        if (asset.getIssuerId() == null) {
+            throw new IllegalArgumentException("issuerId is required to create an asset");
+        }
+
+        boolean hasEitherDeploymentField = asset.getChain() != null || asset.getNetwork() != null;
+        boolean hasBothDeploymentFields = asset.getChain() != null && asset.getNetwork() != null;
+
+        if (hasEitherDeploymentField && !hasBothDeploymentFields) {
+            throw new IllegalArgumentException("chain and network must both be provided together");
+        }
+
+        if (asset.getOnchainLevel() != OnchainLevel.NONE && !hasBothDeploymentFields) {
+            throw new IllegalArgumentException(
+                    "chain and network are required when onchainLevel is not NONE");
+        }
     }
 }

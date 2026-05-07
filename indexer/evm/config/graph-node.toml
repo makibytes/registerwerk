@@ -62,14 +62,53 @@ label = "base-sepolia-primary"
 url = "${BASE_SEPOLIA_RPC}"
 features = ["archive"]
 
-# Example: add Arbitrum One (just copy this block and set ARBITRUM_RPC in docker-compose)
-# [chains.arbitrum-one]
-# shard = "primary"
-# protocol = "ethereum"
-# [[chains.arbitrum-one.provider]]
-# label = "arbitrum-primary"
-# url = "${ARBITRUM_RPC}"
-# features = ["archive"]
+[chains.arbitrum-one]
+shard = "primary"
+protocol = "ethereum"
+[[chains.arbitrum-one.provider]]
+label = "arbitrum-primary"
+url = "${ARBITRUM_MAINNET_RPC}"
+features = ["archive"]
+
+[chains.arbitrum-sepolia]
+shard = "primary"
+protocol = "ethereum"
+[[chains.arbitrum-sepolia.provider]]
+label = "arbitrum-sepolia-primary"
+url = "${ARBITRUM_SEPOLIA_RPC}"
+features = ["archive"]
+
+[chains.avalanche]
+shard = "primary"
+protocol = "ethereum"
+[[chains.avalanche.provider]]
+label = "avalanche-primary"
+url = "${AVALANCHE_MAINNET_RPC}"
+features = ["archive"]
+
+[chains.avalanche-fuji]
+shard = "primary"
+protocol = "ethereum"
+[[chains.avalanche-fuji.provider]]
+label = "avalanche-fuji-primary"
+url = "${AVALANCHE_FUJI_RPC}"
+features = ["archive"]
+
+[chains.optimism]
+shard = "primary"
+protocol = "ethereum"
+[[chains.optimism.provider]]
+label = "optimism-primary"
+url = "${OPTIMISM_MAINNET_RPC}"
+features = ["archive"]
+
+[chains.optimism-sepolia]
+shard = "primary"
+protocol = "ethereum"
+[[chains.optimism-sepolia.provider]]
+label = "optimism-sepolia-primary"
+url = "${OPTIMISM_SEPOLIA_RPC}"
+features = ["archive"]
 
 [deployment]
 [[deployment.rule]]

@@ -41,7 +41,7 @@ class BlockchainClientRegistryTest {
     private static final ChainDescriptor SOLANA_TESTNET =
         new ChainDescriptor(Chain.SOLANA, Network.TESTNET);
     private static final ChainDescriptor UNKNOWN_DESCRIPTOR =
-        new ChainDescriptor(Chain.BASE, Network.MAINNET);
+        new ChainDescriptor(Chain.CANTON, Network.MAINNET);
 
     @BeforeEach
     void setUp() {
@@ -70,7 +70,7 @@ class BlockchainClientRegistryTest {
     void getEvmClient_shouldThrowForUnknownDescriptor() {
         assertThatThrownBy(() -> registry.getEvmClient(UNKNOWN_DESCRIPTOR))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("BASE/MAINNET");
+            .hasMessageContaining("CANTON/MAINNET");
     }
 
     // ── getSolanaClient ───────────────────────────────────────────────────────

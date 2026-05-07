@@ -7,10 +7,18 @@ import { Chain } from '../../core/models';
 })
 export class ChainNamePipe implements PipeTransform {
   private readonly names: Record<Chain, string> = {
-    ETHEREUM: 'Ethereum',
-    POLYGON: 'Polygon',
-    BASE: 'Base',
-    SOLANA: 'Solana',
+  ETHEREUM:  'Ethereum',
+  POLYGON:   'Polygon',
+  BASE:      'Base',
+  FHENIX:    'Fhenix',
+  INCO:      'Inco',
+  SOLANA:    'Solana',
+    ARBITRUM:  'Arbitrum One',
+    AVALANCHE: 'Avalanche C-Chain',
+    OPTIMISM:  'Optimism',
+    STARKNET:  'Starknet',
+    STELLAR:   'Stellar',
+    CANTON:    'Canton',
   };
 
   transform(value: Chain | null | undefined): string {

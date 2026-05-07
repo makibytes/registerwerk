@@ -57,19 +57,19 @@ export interface BarItem {
     }
     .bar-label {
       font-size: 12px;
-      color: #546e7a;
+      color: var(--rw-text-secondary);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .bar-subtitle {
       font-size: 10px;
-      color: #90a4ae;
+      color: var(--rw-text-muted);
     }
     .bar-track {
       flex: 1;
       height: 16px;
-      background: #f5f5f5;
+      background: var(--rw-border-subtle);
       border-radius: 8px;
       overflow: hidden;
     }
@@ -85,11 +85,11 @@ export interface BarItem {
       text-align: right;
       font-size: 12px;
       font-weight: 600;
-      color: #37474f;
+      color: var(--rw-text-primary);
     }
     .empty {
       font-size: 13px;
-      color: #90a4ae;
+      color: var(--rw-text-muted);
       text-align: center;
       padding: 12px;
     }

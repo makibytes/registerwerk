@@ -69,7 +69,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
 
       .asset-title {
         h2 { margin: 0 0 4px; font-size: 22px; font-weight: 500; }
-        .asset-number { color: rgba(0,0,0,0.54); font-size: 13px; font-family: monospace; }
+        .asset-number { color: var(--rw-text-secondary); font-size: 13px; font-family: monospace; }
       }
 
       .asset-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -84,16 +84,16 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
 
     .field-item {
       padding: 12px 0;
-      border-bottom: 1px solid #f5f5f5;
+      border-bottom: 1px solid var(--rw-border);
 
       .field-label {
         font-size: 12px;
-        color: rgba(0,0,0,0.54);
+        color: var(--rw-text-muted);
         text-transform: uppercase;
         letter-spacing: 0.5px;
         margin-bottom: 4px;
       }
-      .field-value { font-size: 14px; color: rgba(0,0,0,0.87); }
+      .field-value { font-size: 14px; color: var(--rw-text-primary); }
     }
 
     .tab-content { padding-top: 20px; }
@@ -548,7 +548,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   <tr mat-row *matRowDef="let row; columns: ruleColumns;"></tr>
                 </table>
                 @if (mintRules.length === 0) {
-                  <p style="text-align:center;padding:16px;color:rgba(0,0,0,0.54)">No mint control rules defined.</p>
+                  <p style="text-align:center;padding:16px;color:var(--rw-text-secondary)">No mint control rules defined.</p>
                 }
               }
             </div>
@@ -564,7 +564,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                 <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
               } @else if (suite) {
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
-                  <mat-icon style="color:#1a3a5c">verified_user</mat-icon>
+                  <mat-icon style="color:var(--rw-text-info)">verified_user</mat-icon>
                   <strong>T-REX Suite</strong>
                   @if (suite.isConfidential) {
                     <mat-chip color="accent" style="font-size:11px">Confidential (fhEVM)</mat-chip>
@@ -580,7 +580,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   <div class="field-item"><div class="field-label">Deployed</div><div class="field-value">{{ suite.createdAt | date:'medium' }}</div></div>
                 </div>
               } @else {
-                <p style="text-align:center;padding:24px;color:rgba(0,0,0,0.54)">No T-REX suite found for this deployment.</p>
+                <p style="text-align:center;padding:24px;color:var(--rw-text-secondary)">No T-REX suite found for this deployment.</p>
               }
             </div>
           </mat-tab>
@@ -620,7 +620,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   <tr mat-row *matRowDef="let row; columns: irColumns;"></tr>
                 </table>
                 @if (identityRegistry.length === 0) {
-                  <p style="text-align:center;padding:24px;color:rgba(0,0,0,0.54)">No investors registered yet.</p>
+                  <p style="text-align:center;padding:24px;color:var(--rw-text-secondary)">No investors registered yet.</p>
                 }
               }
             </div>
@@ -696,7 +696,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                 </div>
                 <!-- Forced Transfer -->
                 <div class="mint-form">
-                  <p style="font-size:12px;color:rgba(0,0,0,0.54);margin:0 0 4px">Forced Transfer (§ eWpG / MiCAR Art. 36)</p>
+                  <p style="font-size:12px;color:var(--rw-text-muted);margin:0 0 4px">Forced Transfer (§ eWpG / MiCAR Art. 36)</p>
                   <mat-form-field appearance="outline">
                     <mat-label>From Address</mat-label>
                     <input matInput [(ngModel)]="forceFrom" placeholder="0x..." />
@@ -733,7 +733,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                 </div>
                 <!-- Forced Approve -->
                 <div class="mint-form">
-                  <p style="font-size:12px;color:rgba(0,0,0,0.54);margin:0 0 4px">Forced Approve (Regulatory Override)</p>
+                  <p style="font-size:12px;color:var(--rw-text-muted);margin:0 0 4px">Forced Approve (Regulatory Override)</p>
                   <mat-form-field appearance="outline">
                     <mat-label>Owner Address</mat-label>
                     <input matInput [(ngModel)]="forceApproveOwner" placeholder="0x..." />
@@ -770,7 +770,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                 </div>
                 <!-- Force Burn -->
                 <div class="mint-form">
-                  <p style="font-size:12px;color:rgba(0,0,0,0.54);margin:0 0 4px">Force Burn (eWpG §26 / MiCAR Art. 94)</p>
+                  <p style="font-size:12px;color:var(--rw-text-muted);margin:0 0 4px">Force Burn (eWpG §26 / MiCAR Art. 94)</p>
                   <div class="form-row">
                     <mat-form-field appearance="outline">
                       <mat-label>From Address</mat-label>
@@ -822,7 +822,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   <tr mat-row *matRowDef="let row; columns: issuerColumns;"></tr>
                 </table>
                 @if (trustedIssuers.length === 0) {
-                  <p style="text-align:center;padding:24px;color:rgba(0,0,0,0.54)">No trusted issuers registered.</p>
+                  <p style="text-align:center;padding:24px;color:var(--rw-text-secondary)">No trusted issuers registered.</p>
                 }
               }
             </div>
@@ -847,7 +847,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   <tr mat-row *matRowDef="let row; columns: ['topic','label'];"></tr>
                 </table>
                 @if (claimTopics.length === 0) {
-                  <p style="text-align:center;padding:24px;color:rgba(0,0,0,0.54)">No claim topics required.</p>
+                  <p style="text-align:center;padding:24px;color:var(--rw-text-secondary)">No claim topics required.</p>
                 }
               }
             </div>
@@ -865,7 +865,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
               @if (txHistoryLoading) {
                 <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
               } @else if (txHistory.length === 0) {
-                <p style="text-align:center;padding:24px;color:rgba(0,0,0,0.54)">No transactions yet.</p>
+                <p style="text-align:center;padding:24px;color:var(--rw-text-secondary)">No transactions yet.</p>
               } @else {
                 <table mat-table [dataSource]="txHistory" class="full-width-table">
                   <ng-container matColumnDef="method">

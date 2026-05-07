@@ -21,7 +21,7 @@ interface ComputedSlice extends DonutSlice {
     <div class="donut-wrap">
       <svg viewBox="0 0 100 100" class="donut-svg" aria-hidden="true">
         @if (total === 0) {
-          <circle cx="50" cy="50" r="35" fill="none" stroke="#e0e0e0" stroke-width="14" />
+          <circle cx="50" cy="50" r="35" fill="none" class="empty-ring" stroke-width="14" />
         }
         @for (s of computed; track s.label) {
           <circle
@@ -66,15 +66,16 @@ interface ComputedSlice extends DonutSlice {
     }
     .center-label {
       font-size: 8px;
-      fill: #90a4ae;
-      font-family: Roboto, sans-serif;
+      fill: var(--rw-text-muted);
+      font-family: 'Manrope', sans-serif;
     }
     .center-value {
       font-size: 11px;
       font-weight: 700;
-      fill: #37474f;
-      font-family: Roboto, sans-serif;
+      fill: var(--rw-text-primary);
+      font-family: 'Manrope', sans-serif;
     }
+    .empty-ring { stroke: var(--rw-border); }
     .legend {
       display: flex;
       flex-direction: column;
@@ -94,7 +95,7 @@ interface ComputedSlice extends DonutSlice {
       flex-shrink: 0;
     }
     .legend-text {
-      color: #546e7a;
+      color: var(--rw-text-secondary);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -102,12 +103,12 @@ interface ComputedSlice extends DonutSlice {
     .legend-pct {
       margin-left: auto;
       font-weight: 600;
-      color: #37474f;
+      color: var(--rw-text-primary);
       padding-left: 8px;
     }
     .legend-empty {
       font-size: 13px;
-      color: #90a4ae;
+      color: var(--rw-text-muted);
     }
   `],
 })

@@ -86,10 +86,10 @@ import { CompanyService } from '../../../core/api/company.service';
   styles: [`
     .page-container { padding: 32px; max-width: 640px; margin: 0 auto; }
     .page-header h1 { margin: 0; }
-    .subtitle { color: #546e7a; margin: 4px 0 24px; }
-    .info-text { color: #546e7a; font-size: 14px; margin-bottom: 24px; }
+    .subtitle { color: var(--rw-text-secondary); margin: 4px 0 24px; }
+    .info-text { color: var(--rw-text-secondary); font-size: 14px; margin-bottom: 24px; }
     .full-width { width: 100%; margin-bottom: 16px; }
-    .error-message { color: #c62828; font-size: 13px; }
+    .error-message { color: var(--rw-text-danger); font-size: 13px; }
   `]
 })
 export class SetupIdpComponent {

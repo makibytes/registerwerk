@@ -27,10 +27,18 @@ export class ChainIconComponent {
 
   get label(): string {
     const labels: Record<Chain, string> = {
-      ETHEREUM: 'Ethereum',
-      POLYGON: 'Polygon',
-      BASE: 'Base',
-      SOLANA: 'Solana',
+      ETHEREUM:  'Ethereum',
+      POLYGON:   'Polygon',
+      BASE:      'Base',
+      FHENIX:    'Fhenix',
+      INCO:      'Inco',
+      SOLANA:    'Solana',
+      ARBITRUM:  'Arbitrum One',
+      AVALANCHE: 'Avalanche',
+      OPTIMISM:  'Optimism',
+      STARKNET:  'Starknet',
+      STELLAR:   'Stellar',
+      CANTON:    'Canton',
     };
     return labels[this.chain] ?? this.chain;
   }

@@ -51,7 +51,8 @@ spring:
       spec: maximumSize=1000,expireAfterWrite=30s
 
   thymeleaf:
-    prefix: classpath:/templates/email/
+    # Notification services resolve templates relative to the templates root, e.g. "email/welcome".
+    prefix: classpath:/templates/
     suffix: .html
     mode: HTML
 
@@ -103,11 +104,46 @@ registerwerk:
       testnet:
         rpc-url: ${BASE_SEPOLIA_RPC:https://sepolia.base.org}
         chain-id: 84532
+    fhenix:
+      mainnet:
+        rpc-url: ${FHENIX_MAINNET_RPC:https://api.fhenix.zone:7747}
+        chain-id: 21888
+      testnet:
+        rpc-url: ${FHENIX_HELIUM_RPC:https://api.helium.fhenix.zone:7747}
+        chain-id: 8008135
+    inco:
+      mainnet:
+        rpc-url: ${INCO_MAINNET_RPC:https://mainnet.inco.org}
+        chain-id: 9090
+      testnet:
+        rpc-url: ${INCO_RIVEST_RPC:https://validator.rivest.inco.org}
+        chain-id: 21097
     solana:
       mainnet:
         rpc-url: ${SOLANA_MAINNET_RPC:https://api.mainnet-beta.solana.com}
       testnet:
         rpc-url: ${SOLANA_DEVNET_RPC:https://api.devnet.solana.com}
+    arbitrum:
+      mainnet:
+        rpc-url: ${ARBITRUM_MAINNET_RPC:https://arbitrum.publicnode.com}
+        chain-id: 42161
+      testnet:
+        rpc-url: ${ARBITRUM_SEPOLIA_RPC:https://sepolia-rollup.arbitrum.io/rpc}
+        chain-id: 421614
+    avalanche:
+      mainnet:
+        rpc-url: ${AVALANCHE_MAINNET_RPC:https://api.avax.network/ext/bc/C/rpc}
+        chain-id: 43114
+      testnet:
+        rpc-url: ${AVALANCHE_FUJI_RPC:https://api.avax-test.network/ext/bc/C/rpc}
+        chain-id: 43113
+    optimism:
+      mainnet:
+        rpc-url: ${OPTIMISM_MAINNET_RPC:https://mainnet.optimism.io}
+        chain-id: 10
+      testnet:
+        rpc-url: ${OPTIMISM_SEPOLIA_RPC:https://sepolia.optimism.io}
+        chain-id: 11155420
   wallet:
     master-key: ${REGISTERWERK_WALLET_MASTER_KEY:}
     storage-dir: ${REGISTERWERK_WALLET_DIR:/data/wallets}
@@ -120,6 +156,12 @@ registerwerk:
       polygon-testnet:   ${ASSET_TOKEN_FACTORY_POLYGON_TESTNET:}
       base-mainnet:      ${ASSET_TOKEN_FACTORY_BASE_MAINNET:}
       base-testnet:      ${ASSET_TOKEN_FACTORY_BASE_TESTNET:}
+      arbitrum-mainnet:  ${ASSET_TOKEN_FACTORY_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${ASSET_TOKEN_FACTORY_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${ASSET_TOKEN_FACTORY_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${ASSET_TOKEN_FACTORY_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${ASSET_TOKEN_FACTORY_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${ASSET_TOKEN_FACTORY_OPTIMISM_TESTNET:}
     # EwpgTREXFactory address per chain (T-REX suite deployments)
     trex-factory:
       ethereum-mainnet:  ${TREX_FACTORY_ETH_MAINNET:}
@@ -128,6 +170,12 @@ registerwerk:
       polygon-testnet:   ${TREX_FACTORY_POLYGON_TESTNET:}
       base-mainnet:      ${TREX_FACTORY_BASE_MAINNET:}
       base-testnet:      ${TREX_FACTORY_BASE_TESTNET:}
+      arbitrum-mainnet:  ${TREX_FACTORY_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${TREX_FACTORY_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${TREX_FACTORY_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${TREX_FACTORY_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${TREX_FACTORY_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${TREX_FACTORY_OPTIMISM_TESTNET:}
     # ONCHAINID IdFactory address per chain
     id-factory:
       ethereum-mainnet:  ${ID_FACTORY_ETH_MAINNET:}
@@ -136,6 +184,17 @@ registerwerk:
       polygon-testnet:   ${ID_FACTORY_POLYGON_TESTNET:}
       base-mainnet:      ${ID_FACTORY_BASE_MAINNET:}
       base-testnet:      ${ID_FACTORY_BASE_TESTNET:}
+      arbitrum-mainnet:  ${ID_FACTORY_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${ID_FACTORY_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${ID_FACTORY_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${ID_FACTORY_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${ID_FACTORY_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${ID_FACTORY_OPTIMISM_TESTNET:}
+    confidential-factory:
+      fhenix-mainnet: ${CONFIDENTIAL_FACTORY_FHENIX_MAINNET:}
+      fhenix-testnet: ${CONFIDENTIAL_FACTORY_FHENIX_TESTNET:}
+      inco-mainnet:   ${CONFIDENTIAL_FACTORY_INCO_MAINNET:}
+      inco-testnet:   ${CONFIDENTIAL_FACTORY_INCO_TESTNET:}
   documents:
     max-inline-bytes: 5242880
     s3:

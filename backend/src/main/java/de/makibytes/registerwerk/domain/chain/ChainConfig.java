@@ -15,7 +15,7 @@ import java.util.UUID;
 @Table(name = "chain_config")
 public class ChainConfig {
 
-    public enum ChainType { EVM, SOLANA }
+    public enum ChainType { EVM, SOLANA, STARKNET, STELLAR, CANTON }
 
     public enum NetworkType { MAINNET, TESTNET }
 
