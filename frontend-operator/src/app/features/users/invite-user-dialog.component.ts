@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
@@ -105,6 +105,7 @@ export class InviteUserDialogComponent implements OnInit {
   private readonly adminUserService = inject(AdminUserService);
   private readonly entityService = inject(EntityService);
   private readonly dialogRef = inject<MatDialogRef<InviteUserDialogComponent, OperatorUser>>(MatDialogRef);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   email = '';
   fullName = '';
@@ -118,7 +119,7 @@ export class InviteUserDialogComponent implements OnInit {
 
   ngOnInit(): void {
     this.entityService.getEntities({ size: 200 }).subscribe({
-      next: (page) => { this.entities = page.content; }
+      next: (page) => { this.entities = page.content; this.cdr.markForCheck(); }
     });
   }
 
@@ -140,6 +141,7 @@ export class InviteUserDialogComponent implements OnInit {
       error: (err) => {
         this.saving = false;
         this.error = err?.error?.message ?? 'Failed to send invitation.';
+        this.cdr.markForCheck();
       },
     });
   }

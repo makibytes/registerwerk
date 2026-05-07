@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
@@ -312,6 +312,7 @@ export class LoginComponent {
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   email = '';
   password = '';
@@ -342,6 +343,7 @@ export class LoginComponent {
         error: () => {
           this.loading = false;
           this.errorMessage = 'Invalid credentials. Please check your email and password.';
+          this.cdr.markForCheck();
         },
       });
   }

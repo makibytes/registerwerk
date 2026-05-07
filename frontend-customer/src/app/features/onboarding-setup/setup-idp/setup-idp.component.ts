@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -96,6 +96,7 @@ export class SetupIdpComponent {
   private readonly company = inject(CompanyService);
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   issuerUrl = '';
   clientId = '';
@@ -119,6 +120,7 @@ export class SetupIdpComponent {
         error: (err) => {
           this.saving = false;
           this.saveError = err?.error?.message ?? 'Failed to save IdP settings.';
+          this.cdr.markForCheck();
         },
       });
   }

@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
@@ -310,6 +310,7 @@ export class IssuanceWizardComponent implements OnInit {
   private readonly kycService = inject(KycService);
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   submitting = false;
   submitError = '';
@@ -330,7 +331,7 @@ export class IssuanceWizardComponent implements OnInit {
 
   ngOnInit(): void {
     this.kycService.getJurisdictionRequirements().subscribe({
-      next: (profiles) => { this.jurisdictionProfiles = profiles; },
+      next: (profiles) => { this.jurisdictionProfiles = profiles; this.cdr.markForCheck(); },
     });
   }
 
@@ -412,6 +413,7 @@ export class IssuanceWizardComponent implements OnInit {
     this.issuanceService.createIssuance(body).subscribe({
       next: (asset) => {
         this.submitting = false;
+        this.cdr.markForCheck();
         if (this.selectedTermSheetFile) {
           // Upload term sheet asynchronously after creation (non-blocking for navigation)
           this.issuanceService.uploadDocument(asset.id, this.selectedTermSheetFile).subscribe({
@@ -424,6 +426,7 @@ export class IssuanceWizardComponent implements OnInit {
       error: (err) => {
         this.submitting = false;
         this.submitError = err?.error?.message ?? 'Failed to create issuance. Please try again.';
+        this.cdr.markForCheck();
       },
     });
   }

@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
@@ -71,6 +71,7 @@ export class EndpointDialogComponent {
   private readonly endpointService = inject(EndpointService);
   private readonly resolution = inject(AddressResolutionService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   name = '';
   addressType: EndpointAddressType = 'WALLET';
@@ -93,6 +94,7 @@ export class EndpointDialogComponent {
       },
       error: (err) => {
         this.saving = false;
+        this.cdr.markForCheck();
         const msg = err?.error?.message ?? 'Failed to save endpoint';
         this.snackBar.open(msg, 'Dismiss', { duration: 4000 });
       },

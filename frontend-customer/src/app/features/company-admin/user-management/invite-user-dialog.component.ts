@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
@@ -73,6 +73,7 @@ import { CompanyUser, UserRole } from '../../../core/models';
 export class InviteUserDialogComponent {
   private readonly companyService = inject(CompanyService);
   private readonly dialogRef = inject<MatDialogRef<InviteUserDialogComponent, CompanyUser>>(MatDialogRef);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   email = '';
   name  = '';
@@ -99,6 +100,7 @@ export class InviteUserDialogComponent {
         error: (err) => {
           this.saving = false;
           this.error = err?.error?.message ?? 'Failed to send invitation.';
+          this.cdr.markForCheck();
         },
       });
   }

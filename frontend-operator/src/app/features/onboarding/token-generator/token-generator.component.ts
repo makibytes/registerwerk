@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, Input, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
@@ -185,6 +185,7 @@ export class TokenGeneratorComponent implements OnInit {
   private readonly entityService = inject(EntityService);
   private readonly onboardingService = inject(OnboardingService);
   private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   loading = true;
   generating = false;
@@ -198,9 +199,11 @@ export class TokenGeneratorComponent implements OnInit {
       next: (entity) => {
         this.entity = entity;
         this.loading = false;
+        this.cdr.markForCheck();
       },
       error: () => {
         this.loading = false;
+        this.cdr.markForCheck();
       },
     });
   }
@@ -211,9 +214,11 @@ export class TokenGeneratorComponent implements OnInit {
       next: (token) => {
         this.token = token;
         this.generating = false;
+        this.cdr.markForCheck();
       },
       error: () => {
         this.generating = false;
+        this.cdr.markForCheck();
       },
     });
   }
@@ -222,7 +227,11 @@ export class TokenGeneratorComponent implements OnInit {
     if (!this.token) return;
     navigator.clipboard.writeText(this.token.token).then(() => {
       this.copied = true;
-      setTimeout(() => (this.copied = false), 3000);
+      this.cdr.markForCheck();
+      setTimeout(() => {
+        this.copied = false;
+        this.cdr.markForCheck();
+      }, 3000);
     });
   }
 

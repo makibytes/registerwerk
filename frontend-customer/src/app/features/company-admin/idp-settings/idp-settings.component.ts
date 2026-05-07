@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -151,6 +151,7 @@ import { CompanyService } from '../../../core/api/company.service';
 export class IdpSettingsComponent implements OnInit {
   private readonly companyService = inject(CompanyService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   issuerUrl = '';
   clientId  = '';
@@ -177,8 +178,9 @@ export class IdpSettingsComponent implements OnInit {
         this.hasExistingSecret = s.hasClientSecret;
         this.lifecycleManagedExternally = s.lifecycleManagedExternally;
         this.loadingSettings = false;
+        this.cdr.markForCheck();
       },
-      error: () => (this.loadingSettings = false),
+      error: () => { this.loadingSettings = false; this.cdr.markForCheck(); },
     });
   }
 
@@ -197,11 +199,13 @@ export class IdpSettingsComponent implements OnInit {
           this.saving = false;
           this.hasExistingSecret = true;
           this.clientSecret = '';
+          this.cdr.markForCheck();
           this.snackBar.open('IdP settings saved.', 'OK', { duration: 3000 });
         },
         error: (err) => {
           this.saving = false;
           this.saveError = err?.error?.message ?? 'Failed to save settings.';
+          this.cdr.markForCheck();
         },
       });
   }

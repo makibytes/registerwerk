@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { ChangeDetectorRef, Component } from '@angular/core';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -325,6 +325,7 @@ export class LoginComponent {
     private readonly authService: AuthService,
     private readonly router: Router,
     private readonly snackBar: MatSnackBar,
+    private readonly cdr: ChangeDetectorRef,
     fb: FormBuilder,
   ) {
     this.form = fb.group({
@@ -344,6 +345,7 @@ export class LoginComponent {
       },
       error: (err: { error?: { message?: string } }) => {
         this.loading = false;
+        this.cdr.markForCheck();
         this.snackBar.open(err?.error?.message ?? 'Login failed. Please try again.', 'Dismiss', { duration: 5000 });
       },
     });

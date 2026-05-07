@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -111,6 +111,7 @@ export class SetupUsersComponent implements OnInit {
   private readonly company = inject(CompanyService);
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   users: CompanyUser[] = [];
   inviteEmail = '';
@@ -128,7 +129,7 @@ export class SetupUsersComponent implements OnInit {
 
   ngOnInit(): void {
     this.company.getEntityUsers().subscribe({
-      next: users => (this.users = users),
+      next: users => { this.users = users; this.cdr.markForCheck(); },
       error: () => {}
     });
   }
@@ -142,10 +143,12 @@ export class SetupUsersComponent implements OnInit {
         this.inviteEmail = '';
         this.inviteName = '';
         this.inviteRoles = ['ISSUER'];
+        this.cdr.markForCheck();
         this.snackBar.open(`Invitation sent to ${user.email}`, 'OK', { duration: 3000 });
       },
       error: () => {
         this.inviting = false;
+        this.cdr.markForCheck();
         this.snackBar.open('Failed to send invitation', 'Dismiss', { duration: 4000 });
       }
     });

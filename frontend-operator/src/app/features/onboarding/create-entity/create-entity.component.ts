@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -148,6 +148,7 @@ export class CreateEntityComponent {
   private readonly fb = inject(FormBuilder);
   private readonly entityService = inject(EntityService);
   private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   submitting = false;
 
@@ -169,6 +170,7 @@ export class CreateEntityComponent {
       },
       error: () => {
         this.submitting = false;
+        this.cdr.markForCheck();
       },
     });
   }
