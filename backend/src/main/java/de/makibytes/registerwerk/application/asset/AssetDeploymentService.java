@@ -34,7 +34,7 @@ public class AssetDeploymentService {
 
     private static final Logger log = LoggerFactory.getLogger(AssetDeploymentService.class);
     private static final EnumSet<Chain> TRACKING_ONLY_CHAINS =
-            EnumSet.of(Chain.STARKNET, Chain.STELLAR, Chain.CANTON);
+            EnumSet.of(Chain.STARKNET, Chain.STELLAR);
     private static final EnumSet<Chain> FHEVM_CHAINS =
             EnumSet.of(Chain.FHENIX, Chain.INCO);
 
@@ -48,6 +48,7 @@ public class AssetDeploymentService {
     private final ConfidentialErc20Service confidentialErc20Service;
     private final ConfidentialErc3643Service confidentialErc3643Service;
     private final SolanaTokenService solanaTokenService;
+    private final CantonTokenService cantonTokenService;
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
 
@@ -62,6 +63,7 @@ public class AssetDeploymentService {
             ConfidentialErc20Service confidentialErc20Service,
             ConfidentialErc3643Service confidentialErc3643Service,
             SolanaTokenService solanaTokenService,
+            CantonTokenService cantonTokenService,
             BlockchainClientRegistry blockchainClientRegistry,
             EvmContractService evmContractService) {
         this.assetDeploymentRepository = assetDeploymentRepository;
@@ -74,6 +76,7 @@ public class AssetDeploymentService {
         this.confidentialErc20Service = confidentialErc20Service;
         this.confidentialErc3643Service = confidentialErc3643Service;
         this.solanaTokenService = solanaTokenService;
+        this.cantonTokenService = cantonTokenService;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
     }
@@ -106,6 +109,13 @@ public class AssetDeploymentService {
                 case SPL_2022 -> solanaTokenService.createSplToken2022(assetId, network, "owner-placeholder");
                 default -> throw new UnsupportedOperationException(
                         "Solana deployments currently support SPL and SPL_2022 only");
+            };
+        } else if (chain == Chain.CANTON) {
+            txFuture = switch (standard) {
+                case CANTON_TOKEN -> cantonTokenService.createInstrument(
+                        assetId, network, "owner-placeholder", 0);
+                default -> throw new UnsupportedOperationException(
+                        "Canton deployments currently support CANTON_TOKEN only");
             };
         } else {
             txFuture = switch (standard) {

@@ -4,6 +4,9 @@ import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry
 import de.makibytes.registerwerk.application.blockchain.ChainDescriptor;
 import de.makibytes.registerwerk.domain.enums.Chain;
 import de.makibytes.registerwerk.domain.enums.Network;
+import de.makibytes.registerwerk.infrastructure.blockchain.canton.CantonClientFactory;
+import de.makibytes.registerwerk.infrastructure.blockchain.canton.CantonLedgerClient;
+import de.makibytes.registerwerk.infrastructure.blockchain.canton.CantonProperties;
 import de.makibytes.registerwerk.infrastructure.blockchain.evm.EvmProperties;
 import de.makibytes.registerwerk.infrastructure.blockchain.evm.Web3jClientFactory;
 import de.makibytes.registerwerk.infrastructure.blockchain.solana.SolanaClientFactory;
@@ -13,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.util.StringUtils;
 import org.web3j.protocol.Web3j;
 
 import java.util.HashMap;
@@ -25,24 +29,31 @@ public class BlockchainConfig {
 
     private final EvmProperties evmProperties;
     private final SolanaProperties solanaProperties;
+    private final CantonProperties cantonProperties;
     private final Web3jClientFactory web3jClientFactory;
     private final SolanaClientFactory solanaClientFactory;
+    private final CantonClientFactory cantonClientFactory;
 
     public BlockchainConfig(
             EvmProperties evmProperties,
             SolanaProperties solanaProperties,
+            CantonProperties cantonProperties,
             Web3jClientFactory web3jClientFactory,
-            SolanaClientFactory solanaClientFactory) {
+            SolanaClientFactory solanaClientFactory,
+            CantonClientFactory cantonClientFactory) {
         this.evmProperties = evmProperties;
         this.solanaProperties = solanaProperties;
+        this.cantonProperties = cantonProperties;
         this.web3jClientFactory = web3jClientFactory;
         this.solanaClientFactory = solanaClientFactory;
+        this.cantonClientFactory = cantonClientFactory;
     }
 
     @Bean
     public BlockchainClientRegistry blockchainClientRegistry() {
-        Map<ChainDescriptor, Web3j> evmClients = new HashMap<>();
-        Map<ChainDescriptor, RpcClient> solanaClients = new HashMap<>();
+        Map<ChainDescriptor, Web3j>              evmClients    = new HashMap<>();
+        Map<ChainDescriptor, RpcClient>          solanaClients = new HashMap<>();
+        Map<ChainDescriptor, CantonLedgerClient> cantonClients = new HashMap<>();
 
         if (evmProperties.getChains() != null) {
             evmProperties.getChains().forEach((chainName, networkMap) -> {
@@ -89,6 +100,29 @@ public class BlockchainConfig {
             log.info("Registered Solana client for {}", testnetDescriptor);
         }
 
-        return new BlockchainClientRegistry(evmClients, solanaClients);
+        // Canton mainnet
+        registerCantonClient(cantonClients, cantonProperties.getMainnet(), Chain.CANTON, Network.MAINNET);
+        // Canton devnet (TESTNET network maps to Canton DevNet)
+        registerCantonClient(cantonClients, cantonProperties.getDevnet(), Chain.CANTON, Network.TESTNET);
+
+        return new BlockchainClientRegistry(evmClients, solanaClients, cantonClients);
+    }
+
+    private void registerCantonClient(
+            Map<ChainDescriptor, CantonLedgerClient> clients,
+            CantonProperties.NetworkProps props,
+            Chain chain, Network network) {
+        if (props == null || !StringUtils.hasText(props.getLedgerApiUrl())) return;
+        try {
+            ChainDescriptor descriptor = new ChainDescriptor(chain, network);
+            clients.put(descriptor, cantonClientFactory.createClient(
+                    props.getLedgerApiUrl(),
+                    props.getSynchronizerId(),
+                    props.getApplicationId(),
+                    props.getAuthToken()));
+            log.info("Registered Canton client for {}", descriptor);
+        } catch (Exception e) {
+            log.warn("Failed to connect Canton client for {} {}: {}", chain, network, e.getMessage());
+        }
     }
 }

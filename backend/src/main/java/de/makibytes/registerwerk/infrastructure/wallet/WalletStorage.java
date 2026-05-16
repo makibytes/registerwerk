@@ -234,6 +234,77 @@ public class WalletStorage {
         return storeSolana(walletId, keyBytes);
     }
 
+    // ── Canton (AES-256-GCM envelope, same scheme as Solana) ─────────────────
+
+    /**
+     * Stores a Canton party JWT (and optional party ID) encrypted with AES-256-GCM.
+     * Uses the same envelope format as Solana keystores for consistency.
+     *
+     * @param walletId the wallet's UUID (used as filename base)
+     * @param partyId  Canton party ID string (stored in plaintext inside the envelope)
+     * @param jwt      bearer JWT granting submission rights for this party
+     * @return relative path of the stored file
+     */
+    public String storeCanton(UUID walletId, String partyId, String jwt) {
+        try {
+            byte[] payload = (partyId + "\n" + jwt).getBytes(StandardCharsets.UTF_8);
+
+            byte[] salt = randomBytes(SALT_LENGTH);
+            byte[] iv   = randomBytes(GCM_IV_LENGTH);
+            SecretKey aesKey = deriveAesKey(props.getMasterKey(), salt);
+
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
+            byte[] ciphertext = cipher.doFinal(payload);
+
+            HexFormat hex = HexFormat.of();
+            Map<String, String> envelope = Map.of(
+                    "version",    "1",
+                    "type",       "canton",
+                    "salt",       hex.formatHex(salt),
+                    "iv",         hex.formatHex(iv),
+                    "ciphertext", hex.formatHex(ciphertext)
+            );
+
+            Path path = storagePath(walletId + ".json");
+            Files.writeString(path, MAPPER.writeValueAsString(envelope), StandardCharsets.UTF_8);
+            log.debug("Stored Canton keystore: {}", path);
+            return walletId + ".json";
+        } catch (Exception e) {
+            throw new WalletStorageException("Failed to store Canton keystore for wallet " + walletId, e);
+        }
+    }
+
+    /**
+     * Decrypts and returns a {@link CantonContext} containing the party ID and JWT.
+     */
+    public CantonContext loadCanton(String relativePath) {
+        try {
+            Path path = storagePath(relativePath);
+            @SuppressWarnings("unchecked")
+            Map<String, String> envelope = MAPPER.readValue(
+                    Files.readString(path, StandardCharsets.UTF_8), Map.class);
+
+            HexFormat hex = HexFormat.of();
+            byte[] salt       = hex.parseHex(envelope.get("salt"));
+            byte[] iv         = hex.parseHex(envelope.get("iv"));
+            byte[] ciphertext = hex.parseHex(envelope.get("ciphertext"));
+
+            SecretKey aesKey = deriveAesKey(props.getMasterKey(), salt);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, aesKey, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
+            byte[] plaintext = cipher.doFinal(ciphertext);
+
+            String[] parts = new String(plaintext, StandardCharsets.UTF_8).split("\n", 2);
+            return new CantonContext(parts[0].strip(), parts.length > 1 ? parts[1].strip() : "");
+        } catch (Exception e) {
+            throw new WalletStorageException("Failed to load Canton keystore at " + relativePath, e);
+        }
+    }
+
+    /** Holder for Canton authentication context. */
+    public record CantonContext(String partyId, String jwt) {}
+
     // ── Delete ────────────────────────────────────────────────────────────────
 
     public void delete(String relativePath) {

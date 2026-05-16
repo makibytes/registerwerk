@@ -1,0 +1,26 @@
+// Canton bootstrap script — runs once at participant startup
+// Sets up the local domain connection and loads the Daml Token Standard DAR.
+
+// 1. Start local domain
+local.start()
+
+// 2. Connect participant to local domain
+registerwerk.domains.connect_local(local, alias = "local")
+
+// 3. Upload the Daml Token Standard package.
+//    On public Canton Network this step is skipped — the package is pre-deployed.
+//    For dev we upload from the pre-built DAR in the daml/ directory.
+//    Comment out if you prefer to use the network-deployed package ID directly.
+//
+// val tokenStandardDar = better.files.File("../daml/.daml/dist/registerwerk-canton-0.1.0.dar")
+// if (tokenStandardDar.exists) {
+//   registerwerk.dars.upload(tokenStandardDar.path)
+//   println("Daml Token Standard DAR uploaded.")
+// }
+
+// 4. Allocate demo parties (for development; disabled in production)
+//    The DemoDataSeeder in the backend also handles this via the Ledger API.
+val issuer = registerwerk.parties.enable("Issuer-Demo")
+println(s"Demo issuer party: ${issuer.toLf}")
+
+println("Canton bootstrap complete.")

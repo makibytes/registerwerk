@@ -1,0 +1,26 @@
+services:
+  # Canton open-source participant node for local development.
+  # Provides the Ledger API on port 5001 that the Registerwerk backend connects to.
+  #
+  # Production operators run their own participant (on-premises or cloud-hosted).
+  # This sidecar is for development / smoke-testing only.
+  canton:
+    image: digitalasset/canton-open-source:3.2.0
+    ports:
+      - "5001:5001"     # Ledger API (gRPC)
+      - "5003:5003"     # Admin API (gRPC, participant management)
+    volumes:
+      - ./config/canton.conf:/app/canton.conf:ro
+      - ./config/bootstrap.canton:/app/bootstrap.canton:ro
+    command: >
+      daemon
+      --config /app/canton.conf
+      --bootstrap /app/bootstrap.canton
+    environment:
+      CANTON_LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:5001"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s

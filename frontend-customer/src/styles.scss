@@ -88,6 +88,7 @@ html { @include mat.all-component-themes($light); }
   --rw-chain-polygon-bg:  #FAF5FF; --rw-chain-polygon-fg: #7C3AED;
   --rw-chain-base-bg:     #EFF6FF; --rw-chain-base-fg:    #1D4ED8;
   --rw-chain-solana-bg:   #F0FDFA; --rw-chain-solana-fg:  #0F766E;
+  --rw-chain-canton-bg:   #FFF7ED; --rw-chain-canton-fg:  #C2410C;
 
   // Radius
   --rw-radius-sm: 4px;
@@ -157,6 +158,7 @@ html { @include mat.all-component-themes($light); }
     --rw-chain-polygon-bg:  rgba(124,58,237,0.15); --rw-chain-polygon-fg: #C4B5FD;
     --rw-chain-base-bg:     rgba(29,78,216,0.15);  --rw-chain-base-fg:    #93C5FD;
     --rw-chain-solana-bg:   rgba(15,118,110,0.15); --rw-chain-solana-fg:  #5EEAD4;
+    --rw-chain-canton-bg:   rgba(194,65,12,0.15);  --rw-chain-canton-fg:  #FDBA74;
   }
 }
 
@@ -393,6 +395,7 @@ code {
   &.chain-polygon  { background: var(--rw-chain-polygon-bg); color: var(--rw-chain-polygon-fg); }
   &.chain-base     { background: var(--rw-chain-base-bg);    color: var(--rw-chain-base-fg); }
   &.chain-solana   { background: var(--rw-chain-solana-bg);  color: var(--rw-chain-solana-fg); }
+  &.chain-canton   { background: var(--rw-chain-canton-bg);  color: var(--rw-chain-canton-fg); }
 }
 
 // ── Lifecycle Stepper ─────────────────────────────────────────────────────────

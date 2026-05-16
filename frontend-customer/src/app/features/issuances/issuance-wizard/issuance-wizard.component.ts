@@ -375,7 +375,7 @@ export class IssuanceWizardComponent implements OnInit {
     { value: 'OPTIMISM',  label: 'Optimism' },
     { value: 'STARKNET',  label: 'Starknet', comingSoon: true },
     { value: 'STELLAR',   label: 'Stellar',  comingSoon: true },
-    { value: 'CANTON',    label: 'Canton',   comingSoon: true },
+    { value: 'CANTON',    label: 'Canton' },
   ];
 
   private readonly standardsByChain: Record<Chain, { value: TokenStandard; label: string; comingSoon?: true }[]> = {
@@ -421,7 +421,7 @@ export class IssuanceWizardComponent implements OnInit {
       { value: 'STELLAR_ASSET', label: 'Stellar Asset', comingSoon: true },
     ],
     CANTON: [
-      { value: 'CANTON_TOKEN', label: 'Canton / Daml Token', comingSoon: true },
+      { value: 'CANTON_TOKEN', label: 'Canton / Daml Token Standard (CIP-0056)' },
     ],
   };
 

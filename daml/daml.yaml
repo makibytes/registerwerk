@@ -1,0 +1,13 @@
+sdk-version: 3.2.0
+name: registerwerk-canton
+version: 0.1.0
+source: daml
+dependencies:
+  # Canton Token Standard (CIP-0056) — pre-deployed on Canton Network public infrastructure.
+  # The package ID resolves from the participant at runtime; no DAR upload needed on CN.
+  # For private participants, upload the token-standard DAR during bootstrap.
+  - daml-stdlib
+  - daml-script
+  - canton-token-standard
+build-options:
+  - --target=1.15

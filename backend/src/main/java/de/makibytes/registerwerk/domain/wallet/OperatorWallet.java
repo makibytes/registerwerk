@@ -15,7 +15,7 @@ import java.util.UUID;
 @Table(name = "operator_wallet")
 public class OperatorWallet {
 
-    public enum WalletType { EVM, SOLANA }
+    public enum WalletType { EVM, SOLANA, CANTON }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -29,8 +29,8 @@ public class OperatorWallet {
     @Column(nullable = false, length = 10)
     private WalletType type;
 
-    /** Checksummed EVM address (0x…) or base58 Solana address. */
-    @Column(nullable = false, length = 64)
+    /** Checksummed EVM address (0x…), base58 Solana address, or Canton party ID (Name::fingerprint). */
+    @Column(nullable = false, length = 300)
     private String address;
 
     /** Path to the encrypted keystore file, relative to the configured storage root. */

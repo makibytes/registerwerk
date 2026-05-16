@@ -3,6 +3,8 @@ package de.makibytes.registerwerk.application.chain;
 import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
 import de.makibytes.registerwerk.domain.chain.ChainConfig;
 import de.makibytes.registerwerk.domain.chain.RpcNode;
+import de.makibytes.registerwerk.infrastructure.blockchain.canton.CantonClientFactory;
+import de.makibytes.registerwerk.infrastructure.blockchain.canton.CantonLedgerClient;
 import de.makibytes.registerwerk.infrastructure.blockchain.evm.Web3jClientFactory;
 import de.makibytes.registerwerk.infrastructure.blockchain.solana.SolanaClientFactory;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.RpcNodeRepository;
@@ -55,19 +57,24 @@ public class RpcNodeHealthService {
     private final SolanaClientFactory solanaClientFactory;
     private final BlockchainClientRegistry registry;
 
+    private final CantonClientFactory cantonClientFactory;
+
     /** Cached clients keyed by node ID to avoid creating new connections on every tick. */
-    private final Map<UUID, Web3j>    evmHealthClients    = new ConcurrentHashMap<>();
-    private final Map<UUID, RpcClient> solanaHealthClients = new ConcurrentHashMap<>();
+    private final Map<UUID, Web3j>              evmHealthClients    = new ConcurrentHashMap<>();
+    private final Map<UUID, RpcClient>          solanaHealthClients = new ConcurrentHashMap<>();
+    private final Map<UUID, CantonLedgerClient> cantonHealthClients = new ConcurrentHashMap<>();
 
     public RpcNodeHealthService(
             RpcNodeRepository rpcNodeRepository,
             Web3jClientFactory web3jClientFactory,
             SolanaClientFactory solanaClientFactory,
+            CantonClientFactory cantonClientFactory,
             BlockchainClientRegistry registry) {
-        this.rpcNodeRepository   = rpcNodeRepository;
-        this.web3jClientFactory  = web3jClientFactory;
-        this.solanaClientFactory = solanaClientFactory;
-        this.registry            = registry;
+        this.rpcNodeRepository    = rpcNodeRepository;
+        this.web3jClientFactory   = web3jClientFactory;
+        this.solanaClientFactory  = solanaClientFactory;
+        this.cantonClientFactory  = cantonClientFactory;
+        this.registry             = registry;
     }
 
     @Scheduled(fixedDelayString = "${registerwerk.rpc.health-check-interval-ms:30000}",
@@ -88,6 +95,8 @@ public class RpcNodeHealthService {
                     checkEvmNodes(chain, nodes);
                 } else if (chain.getChainType() == ChainConfig.ChainType.SOLANA) {
                     checkSolanaNodes(chain, nodes);
+                } else if (chain.getChainType() == ChainConfig.ChainType.CANTON) {
+                    checkCantonNodes(chain, nodes);
                 }
             } catch (Exception e) {
                 log.error("Health check failed for chain {}: {}", chain.getIdentifier(), e.getMessage(), e);
@@ -101,6 +110,7 @@ public class RpcNodeHealthService {
         Set<UUID> activeIds = allNodes.stream().map(RpcNode::getId).collect(Collectors.toSet());
         evmHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
         solanaHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
+        cantonHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
 
         registry.refreshFromNodes(allNodes);
     }
@@ -225,6 +235,39 @@ public class RpcNodeHealthService {
             long lag = bestSlot - ns;
             node.setLagFromBest((int) lag);
             node.setHealthy(lag <= maxLagBlocks && !isStalled(node));
+        }
+    }
+
+    // ── Canton ────────────────────────────────────────────────────────────────
+
+    private void checkCantonNodes(ChainConfig chain, List<RpcNode> nodes) {
+        for (RpcNode node : nodes) {
+            Instant checkStart = Instant.now();
+            try {
+                CantonLedgerClient client = cantonHealthClients.computeIfAbsent(node.getId(),
+                        id -> cantonClientFactory.createClient(
+                                node.getUrl(),
+                                chain.getSynchronizerId(),
+                                chain.getApplicationId() != null ? chain.getApplicationId() : "registerwerk",
+                                null));
+
+                // Ping via ledger-end — lightweight, no streaming
+                client.getLedgerEnd();
+
+                node.setLastSuccessAt(checkStart);
+                node.setConsecutiveFailures(0);
+                node.setSyncing(false);
+                node.setHealthy(true);
+                node.setLagFromBest(0);
+
+            } catch (Exception e) {
+                node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
+                node.setHealthy(false);
+                log.warn("Canton health check failed for node {} ({}): {}", node.getUrl(),
+                        chain.getIdentifier(), e.getMessage());
+                cantonHealthClients.remove(node.getId());
+            }
+            node.setLastCheckedAt(checkStart);
         }
     }
 

@@ -14,12 +14,15 @@ export class WalletService {
     return this.http.get<OperatorWallet[]>(this.base);
   }
 
-  generate(name: string, type: 'EVM' | 'SOLANA'): Observable<OperatorWallet> {
+  generate(name: string, type: 'EVM' | 'SOLANA' | 'CANTON'): Observable<OperatorWallet> {
     return this.http.post<OperatorWallet>(`${this.base}/generate`, { name, type });
   }
 
-  importRaw(name: string, type: 'EVM' | 'SOLANA', privateKey: string): Observable<OperatorWallet> {
-    return this.http.post<OperatorWallet>(`${this.base}/import-raw`, { name, type, privateKey });
+  importRaw(name: string, type: 'EVM' | 'SOLANA' | 'CANTON', privateKey: string, partyId?: string, jwt?: string): Observable<OperatorWallet> {
+    const body: Record<string, string> = { name, type, privateKey };
+    if (partyId) body['partyId'] = partyId;
+    if (jwt) body['jwt'] = jwt;
+    return this.http.post<OperatorWallet>(`${this.base}/import-raw`, body);
   }
 
   importKeystore(name: string, password: string, file: File): Observable<OperatorWallet> {

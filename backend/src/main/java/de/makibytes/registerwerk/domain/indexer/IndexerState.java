@@ -19,7 +19,7 @@ import java.util.UUID;
 )
 public class IndexerState {
 
-    public enum IndexerType { GRAPH_NODE, SOLANA_GEYSER, SOLANA_POLL }
+    public enum IndexerType { GRAPH_NODE, SOLANA_GEYSER, SOLANA_POLL, CANTON_STREAM }
 
     public enum IndexerStatus { ACTIVE, PAUSED, ERROR }
 

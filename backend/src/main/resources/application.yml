@@ -123,6 +123,17 @@ registerwerk:
         rpc-url: ${SOLANA_MAINNET_RPC:https://api.mainnet-beta.solana.com}
       testnet:
         rpc-url: ${SOLANA_DEVNET_RPC:https://api.devnet.solana.com}
+    canton:
+      mainnet:
+        ledger-api-url: ${CANTON_MAINNET_LEDGER_URL:}
+        synchronizer-id: ${CANTON_MAINNET_SYNCHRONIZER:global-synchronizer}
+        application-id: ${CANTON_APPLICATION_ID:registerwerk}
+        auth-token: ${CANTON_MAINNET_TOKEN:}
+      devnet:
+        ledger-api-url: ${CANTON_DEVNET_LEDGER_URL:}
+        synchronizer-id: ${CANTON_DEVNET_SYNCHRONIZER:dev-synchronizer}
+        application-id: ${CANTON_APPLICATION_ID:registerwerk}
+        auth-token: ${CANTON_DEVNET_TOKEN:}
     arbitrum:
       mainnet:
         rpc-url: ${ARBITRUM_MAINNET_RPC:https://arbitrum.publicnode.com}

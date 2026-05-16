@@ -39,6 +39,9 @@ public class DemoDataSeeder implements ApplicationRunner {
 
     private record NodeDef(String chainIdentifier, String url, String label, boolean enabled) {}
 
+    @org.springframework.beans.factory.annotation.Value("${registerwerk.chains.canton.devnet.ledger-api-url:}")
+    private String cantonDevnetLedgerUrl;
+
     private final LegalEntityRepository entities;
     private final AppUserRepository users;
     private final AssetRepository assets;
@@ -567,8 +570,14 @@ public class DemoDataSeeder implements ApplicationRunner {
                 // Stellar (Horizon REST API, not JSON-RPC — informational only)
                 new NodeDef("STELLAR_MAINNET", "https://horizon.stellar.org", "SDF Horizon", false),
                 new NodeDef("STELLAR_TESTNET", "https://horizon-testnet.stellar.org", "SDF Horizon Testnet", false)
-                // Canton: no plain public endpoint — operators wire their own participant.
+                // Canton: operators wire their own participant via CANTON_DEVNET_LEDGER_URL.
+                // The devnet rpc_url is populated from that env var at runtime (see below).
+                new NodeDef("CANTON_DEVNET", cantonDevnetUrl(), "Local Participant", !cantonDevnetUrl().isBlank())
         );
+    }
+
+    private String cantonDevnetUrl() {
+        return cantonDevnetLedgerUrl != null ? cantonDevnetLedgerUrl.strip() : "";
     }
 
     private void syncChainNodes(ChainConfig chain, List<NodeDef> defs) {

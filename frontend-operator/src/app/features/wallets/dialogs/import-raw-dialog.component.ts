@@ -39,27 +39,47 @@ import { MatIconModule } from '@angular/material/icon';
       <div class="type-row">
         <mat-radio-group [(ngModel)]="type">
           <mat-radio-button value="EVM" style="margin-right: 16px">EVM</mat-radio-button>
-          <mat-radio-button value="SOLANA">Solana</mat-radio-button>
+          <mat-radio-button value="SOLANA" style="margin-right: 16px">Solana</mat-radio-button>
+          <mat-radio-button value="CANTON">Canton</mat-radio-button>
         </mat-radio-group>
       </div>
-      <mat-form-field appearance="outline">
-        <mat-label>Private key (hex)</mat-label>
-        <input matInput [(ngModel)]="privateKey" type="password" placeholder="0x..." autocomplete="off" />
-      </mat-form-field>
+      @if (type === 'CANTON') {
+        <mat-form-field appearance="outline">
+          <mat-label>Party ID</mat-label>
+          <input matInput [(ngModel)]="partyId" placeholder="PartyName::1220abc..." autocomplete="off" />
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Participant JWT (optional)</mat-label>
+          <input matInput [(ngModel)]="privateKey" type="password" placeholder="eyJ..." autocomplete="off" />
+          <mat-hint>Leave blank to use the participant-level admin token</mat-hint>
+        </mat-form-field>
+      } @else {
+        <mat-form-field appearance="outline">
+          <mat-label>Private key (hex)</mat-label>
+          <input matInput [(ngModel)]="privateKey" type="password" placeholder="0x..." autocomplete="off" />
+        </mat-form-field>
+      }
     </mat-dialog-content>
     <mat-dialog-actions style="padding: 0 24px 20px">
       <div class="actions">
         <button mat-button mat-dialog-close>Cancel</button>
-        <button mat-flat-button color="primary" [disabled]="!name.trim() || !privateKey.trim()" (click)="submit()">Import</button>
+        <button mat-flat-button color="primary" [disabled]="!name.trim() || (type !== 'CANTON' && !privateKey.trim()) || (type === 'CANTON' && !partyId.trim())" (click)="submit()">Import</button>
       </div>
     </mat-dialog-actions>
   `,
 })
 export class ImportRawDialogComponent {
   private readonly dialogRef = inject(MatDialogRef<ImportRawDialogComponent>);
-  name = ''; type: 'EVM' | 'SOLANA' = 'EVM'; privateKey = '';
+  name = ''; type: 'EVM' | 'SOLANA' | 'CANTON' = 'EVM'; privateKey = ''; partyId = '';
+
   submit() {
-    if (!this.name.trim() || !this.privateKey.trim()) return;
-    this.dialogRef.close({ name: this.name.trim(), type: this.type, privateKey: this.privateKey.trim() });
+    if (!this.name.trim()) return;
+    if (this.type === 'CANTON') {
+      if (!this.partyId.trim()) return;
+      this.dialogRef.close({ name: this.name.trim(), type: this.type, partyId: this.partyId.trim(), privateKey: this.privateKey.trim() });
+    } else {
+      if (!this.privateKey.trim()) return;
+      this.dialogRef.close({ name: this.name.trim(), type: this.type, privateKey: this.privateKey.trim() });
+    }
   }
 }

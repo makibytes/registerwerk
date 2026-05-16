@@ -32,7 +32,8 @@ import { MatRadioModule } from '@angular/material/radio';
       <div class="type-row">
         <mat-radio-group [(ngModel)]="type">
           <mat-radio-button value="EVM" style="margin-right: 16px">EVM (Ethereum / Polygon / Base)</mat-radio-button>
-          <mat-radio-button value="SOLANA">Solana</mat-radio-button>
+          <mat-radio-button value="SOLANA" style="margin-right: 16px">Solana</mat-radio-button>
+          <mat-radio-button value="CANTON">Canton (Daml)</mat-radio-button>
         </mat-radio-group>
       </div>
     </mat-dialog-content>
@@ -48,7 +49,7 @@ export class GenerateWalletDialogComponent {
   private readonly dialogRef = inject(MatDialogRef<GenerateWalletDialogComponent>);
 
   name = '';
-  type: 'EVM' | 'SOLANA' = 'EVM';
+  type: 'EVM' | 'SOLANA' | 'CANTON' = 'EVM';
 
   submit() {
     if (!this.name.trim()) return;

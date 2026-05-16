@@ -37,6 +37,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
     .type-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
     .type-chip.evm { background: rgba(98,126,234,.12); color: #627EEA; }
     .type-chip.solana { background: rgba(153,69,255,.12); color: #9945FF; }
+    .type-chip.canton { background: rgba(255,107,53,.12); color: #FF6B35; }
 
     table { width: 100%; border-collapse: collapse; }
     thead th { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--rw-text-muted); padding: 12px 20px; text-align: left; border-bottom: 1px solid var(--rw-border); }
@@ -51,6 +52,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
     .chain-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
     .chain-badge.evm { background: rgba(98,126,234,.08); color: #627EEA; }
     .chain-badge.solana { background: rgba(153,69,255,.08); color: #9945FF; }
+    .chain-badge.canton { background: rgba(255,107,53,.08); color: #FF6B35; }
 
     .network-tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; letter-spacing: 0.4px; text-transform: uppercase; margin-left: 6px; }
     .network-tag.mainnet { background: rgba(34,197,94,.1); color: #16a34a; }
@@ -91,7 +93,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
             </div>
             <div class="meta-item">
               <span class="meta-label">Type</span>
-              <span class="type-chip" [class.evm]="wallet()!.type === 'EVM'" [class.solana]="wallet()!.type === 'SOLANA'">
+              <span class="type-chip" [class.evm]="wallet()!.type === 'EVM'" [class.solana]="wallet()!.type === 'SOLANA'" [class.canton]="wallet()!.type === 'CANTON'">
                 {{ wallet()!.type }}
               </span>
             </div>
@@ -145,7 +147,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
               @for (b of balances(); track b.chainConfigId) {
                 <tr>
                   <td>
-                    <span class="chain-badge" [class.evm]="wallet()!.type === 'EVM'" [class.solana]="wallet()!.type === 'SOLANA'">
+                    <span class="chain-badge" [class.evm]="wallet()!.type === 'EVM'" [class.solana]="wallet()!.type === 'SOLANA'" [class.canton]="wallet()!.type === 'CANTON'">
                       {{ b.chainDisplayName }}
                     </span>
                   </td>

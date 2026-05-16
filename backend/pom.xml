@@ -22,6 +22,8 @@
     <java.version>25</java.version>
     <web3j.version>4.12.3</web3j.version>
     <solanaj.version>1.18.2</solanaj.version>
+    <daml-bindings.version>3.2.0</daml-bindings.version>
+    <grpc.version>1.65.1</grpc.version>
     <mapstruct.version>1.6.3</mapstruct.version>
     <springdoc.version>2.8.3</springdoc.version>
     <testcontainers.version>1.20.4</testcontainers.version>
@@ -120,6 +122,23 @@
       <version>${solanaj.version}</version>
     </dependency>
 
+    <!-- ── Blockchain — Canton (Daml Ledger API gRPC bindings) ───────────── -->
+    <!--
+      Published at https://digitalasset.jfrog.io/artifactory/libs-release/
+      Add the repository block below if not reachable via Maven Central.
+      Version must match the Canton participant SDK installed by operators.
+    -->
+    <dependency>
+      <groupId>com.daml</groupId>
+      <artifactId>bindings-java</artifactId>
+      <version>${daml-bindings.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-netty-shaded</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+
     <!-- ── Object Storage (S3) ─────────────────────────────────────────────── -->
     <dependency>
       <groupId>software.amazon.awssdk</groupId>
@@ -187,6 +206,16 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <repositories>
+    <!-- Digital Asset JFrog — hosts com.daml:bindings-java and related Canton artifacts -->
+    <repository>
+      <id>digitalasset-releases</id>
+      <url>https://digitalasset.jfrog.io/artifactory/libs-release/</url>
+      <releases><enabled>true</enabled></releases>
+      <snapshots><enabled>false</enabled></snapshots>
+    </repository>
+  </repositories>
 
   <build>
     <plugins>

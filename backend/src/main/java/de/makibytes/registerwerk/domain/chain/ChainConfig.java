@@ -67,6 +67,14 @@ public class ChainConfig {
     @Column(name = "graph_subgraph_name", length = 200)
     private String graphSubgraphName;
 
+    /** Canton: application ID registered with the participant (e.g. "registerwerk"). */
+    @Column(name = "application_id", length = 255)
+    private String applicationId;
+
+    /** Canton: synchronizer/domain alias (e.g. "global-synchronizer" for public CN). */
+    @Column(name = "synchronizer_id", length = 255)
+    private String synchronizerId;
+
     @Column(nullable = false)
     private boolean enabled = true;
 
@@ -140,6 +148,12 @@ public class ChainConfig {
 
     public String getGraphSubgraphName() { return graphSubgraphName; }
     public void setGraphSubgraphName(String graphSubgraphName) { this.graphSubgraphName = graphSubgraphName; }
+
+    public String getApplicationId() { return applicationId; }
+    public void setApplicationId(String applicationId) { this.applicationId = applicationId; }
+
+    public String getSynchronizerId() { return synchronizerId; }
+    public void setSynchronizerId(String synchronizerId) { this.synchronizerId = synchronizerId; }
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

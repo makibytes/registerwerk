@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.domain.wallet.WalletChainDefault;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.OperatorWalletRepository;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.WalletChainDefaultRepository;
 import de.makibytes.registerwerk.infrastructure.wallet.WalletStorage;
+import de.makibytes.registerwerk.infrastructure.wallet.WalletStorage.CantonContext;
 import org.p2p.solanaj.core.Account;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,8 +34,9 @@ public class WalletSigner {
     private final OperatorWalletRepository walletRepository;
     private final WalletStorage walletStorage;
 
-    private final ConcurrentHashMap<UUID, Credentials> evmCache    = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, Account>     solanaCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Credentials>    evmCache    = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Account>        solanaCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, CantonContext>  cantonCache = new ConcurrentHashMap<>();
 
     public WalletSigner(
             WalletChainDefaultRepository defaultRepository,
@@ -107,12 +109,40 @@ public class WalletSigner {
         });
     }
 
+    // ── Canton ────────────────────────────────────────────────────────────────
+
+    /**
+     * Returns the Canton {@link CantonContext} (party ID + JWT) for the default wallet of the given chain.
+     */
+    public CantonContext cantonContextForChain(UUID chainConfigId) {
+        UUID walletId = resolveWalletId(chainConfigId);
+        return cantonCache.computeIfAbsent(walletId, id -> {
+            OperatorWallet wallet = loadWallet(id);
+            log.debug("Loading Canton context for wallet '{}' ({})", wallet.getName(), id);
+            return walletStorage.loadCanton(wallet.getKeystorePath());
+        });
+    }
+
+    /**
+     * Returns the Canton context for the chain identified by the given descriptor
+     * ({@code CHAIN_NETWORK} format lookup).
+     */
+    public CantonContext cantonContextForDescriptor(ChainDescriptor descriptor) {
+        String identifier = descriptor.chain().name() + "_" + descriptor.network().name();
+        WalletChainDefault match = defaultRepository.findByChainIdentifier(identifier)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No default wallet for chain '" + identifier + "'. " +
+                        "Please configure a Canton wallet default via the Operator Portal → Wallets."));
+        return cantonContextForChain(match.getChainConfigId());
+    }
+
     // ── Cache management ──────────────────────────────────────────────────────
 
     /** Removes cached credentials for the given wallet, forcing a reload on next use. */
     public void evict(UUID walletId) {
         evmCache.remove(walletId);
         solanaCache.remove(walletId);
+        cantonCache.remove(walletId);
         log.debug("Evicted cached credentials for wallet {}", walletId);
     }
 

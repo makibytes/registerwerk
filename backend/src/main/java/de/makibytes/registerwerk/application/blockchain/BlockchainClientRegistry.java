@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.application.blockchain;
 
 import de.makibytes.registerwerk.domain.chain.ChainConfig;
 import de.makibytes.registerwerk.domain.chain.RpcNode;
+import de.makibytes.registerwerk.infrastructure.blockchain.canton.CantonClientFactory;
+import de.makibytes.registerwerk.infrastructure.blockchain.canton.CantonLedgerClient;
 import de.makibytes.registerwerk.infrastructure.blockchain.evm.Web3jClientFactory;
 import de.makibytes.registerwerk.infrastructure.blockchain.solana.SolanaClientFactory;
 import de.makibytes.registerwerk.infrastructure.persistence.jpa.ChainConfigRepository;
@@ -49,20 +51,24 @@ public class BlockchainClientRegistry {
 
     // ── Static clients (from BlockchainConfig / application properties) ───────
 
-    private final Map<ChainDescriptor, Web3j>    staticEvmClients;
-    private final Map<ChainDescriptor, RpcClient> staticSolanaClients;
+    private final Map<ChainDescriptor, Web3j>              staticEvmClients;
+    private final Map<ChainDescriptor, RpcClient>          staticSolanaClients;
+    private final Map<ChainDescriptor, CantonLedgerClient> staticCantonClients;
 
     // ── Dynamic single clients (legacy, from chain_config table) ─────────────
 
-    private volatile Map<String, Web3j>    dynamicEvmClients    = new ConcurrentHashMap<>();
-    private volatile Map<String, RpcClient> dynamicSolanaClients = new ConcurrentHashMap<>();
+    private volatile Map<String, Web3j>              dynamicEvmClients    = new ConcurrentHashMap<>();
+    private volatile Map<String, RpcClient>          dynamicSolanaClients = new ConcurrentHashMap<>();
+    private volatile Map<String, CantonLedgerClient> dynamicCantonClients = new ConcurrentHashMap<>();
 
     // ── Node pool (from rpc_node table, populated by health checker) ──────────
 
     /** nodeId → Web3j client */
-    private volatile Map<UUID, Web3j>    nodeEvmClients    = new ConcurrentHashMap<>();
+    private volatile Map<UUID, Web3j>              nodeEvmClients    = new ConcurrentHashMap<>();
     /** nodeId → RpcClient */
-    private volatile Map<UUID, RpcClient> nodeSolanaClients = new ConcurrentHashMap<>();
+    private volatile Map<UUID, RpcClient>          nodeSolanaClients = new ConcurrentHashMap<>();
+    /** nodeId → CantonLedgerClient */
+    private volatile Map<UUID, CantonLedgerClient> nodeCantonClients = new ConcurrentHashMap<>();
     /** chainIdentifier → ordered node states for routing */
     private volatile Map<String, List<NodeState>> nodesByChain = new ConcurrentHashMap<>();
 
@@ -77,13 +83,18 @@ public class BlockchainClientRegistry {
     @Autowired(required = false)
     private SolanaClientFactory solanaClientFactory;
 
+    @Autowired(required = false)
+    private CantonClientFactory cantonClientFactory;
+
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public BlockchainClientRegistry(
-            Map<ChainDescriptor, Web3j> evmClients,
-            Map<ChainDescriptor, RpcClient> solanaClients) {
+            Map<ChainDescriptor, Web3j>              evmClients,
+            Map<ChainDescriptor, RpcClient>          solanaClients,
+            Map<ChainDescriptor, CantonLedgerClient> cantonClients) {
         this.staticEvmClients    = Collections.unmodifiableMap(new HashMap<>(evmClients));
         this.staticSolanaClients = Collections.unmodifiableMap(new HashMap<>(solanaClients));
+        this.staticCantonClients = Collections.unmodifiableMap(new HashMap<>(cantonClients));
     }
 
     // ── Lookups — identifier-based ────────────────────────────────────────────
@@ -131,6 +142,25 @@ public class BlockchainClientRegistry {
         throw new IllegalArgumentException("No Solana client configured for identifier: " + identifier);
     }
 
+    /**
+     * Returns the best available Canton client for the given chain identifier.
+     */
+    public CantonLedgerClient getCantonClientByIdentifier(String identifier) {
+        List<NodeState> nodes = nodesByChain.get(identifier);
+        if (nodes != null && !nodes.isEmpty()) {
+            return selectBestCantonNode(identifier, nodes);
+        }
+
+        CantonLedgerClient dynamic = dynamicCantonClients.get(identifier);
+        if (dynamic != null) return dynamic;
+
+        for (Map.Entry<ChainDescriptor, CantonLedgerClient> entry : staticCantonClients.entrySet()) {
+            String key = entry.getKey().chain().name() + "_" + entry.getKey().network().name();
+            if (key.equalsIgnoreCase(identifier)) return entry.getValue();
+        }
+        throw new IllegalArgumentException("No Canton client configured for identifier: " + identifier);
+    }
+
     // ── Legacy descriptor-based lookups ──────────────────────────────────────
 
     public Web3j getEvmClient(ChainDescriptor descriptor) {
@@ -147,6 +177,13 @@ public class BlockchainClientRegistry {
         return client;
     }
 
+    public CantonLedgerClient getCantonClient(ChainDescriptor descriptor) {
+        CantonLedgerClient client = staticCantonClients.get(descriptor);
+        if (client == null) throw new IllegalArgumentException(
+                "No Canton client configured for chain descriptor: " + descriptor);
+        return client;
+    }
+
     // ── Node pool refresh (called by health service) ──────────────────────────
 
     /**
@@ -156,13 +193,15 @@ public class BlockchainClientRegistry {
     public synchronized void refreshFromNodes(List<RpcNode> nodes) {
         if (web3jClientFactory == null && solanaClientFactory == null) return;
 
-        Map<UUID, Web3j>     newEvmClients    = new ConcurrentHashMap<>();
-        Map<UUID, RpcClient>  newSolanaClients = new ConcurrentHashMap<>();
-        Map<String, List<NodeState>> newByChain = new ConcurrentHashMap<>();
+        Map<UUID, Web3j>              newEvmClients    = new ConcurrentHashMap<>();
+        Map<UUID, RpcClient>          newSolanaClients = new ConcurrentHashMap<>();
+        Map<UUID, CantonLedgerClient> newCantonClients = new ConcurrentHashMap<>();
+        Map<String, List<NodeState>>  newByChain       = new ConcurrentHashMap<>();
 
         for (RpcNode node : nodes) {
             String identifier = node.getChainConfig().getIdentifier();
-            ChainConfig.ChainType type = node.getChainConfig().getChainType();
+            ChainConfig chain  = node.getChainConfig();
+            ChainConfig.ChainType type = chain.getChainType();
 
             NodeState state = new NodeState(
                     node.getId(), node.isHealthy(), node.isEnabled(), node.isExclusive(),
@@ -176,6 +215,14 @@ public class BlockchainClientRegistry {
                 RpcClient client = nodeSolanaClients.getOrDefault(node.getId(),
                         solanaClientFactory.createClient(node.getUrl()));
                 newSolanaClients.put(node.getId(), client);
+            } else if (type == ChainConfig.ChainType.CANTON && cantonClientFactory != null) {
+                CantonLedgerClient client = nodeCantonClients.getOrDefault(node.getId(),
+                        cantonClientFactory.createClient(
+                                node.getUrl(),
+                                chain.getSynchronizerId(),
+                                chain.getApplicationId() != null ? chain.getApplicationId() : "registerwerk",
+                                null));
+                newCantonClients.put(node.getId(), client);
             }
 
             newByChain.computeIfAbsent(identifier, k -> new ArrayList<>()).add(state);
@@ -183,10 +230,11 @@ public class BlockchainClientRegistry {
 
         this.nodeEvmClients    = newEvmClients;
         this.nodeSolanaClients = newSolanaClients;
+        this.nodeCantonClients = newCantonClients;
         this.nodesByChain      = newByChain;
 
-        log.debug("Node pool refreshed: {} chains, {} EVM nodes, {} Solana nodes",
-                newByChain.size(), newEvmClients.size(), newSolanaClients.size());
+        log.debug("Node pool refreshed: {} chains, {} EVM nodes, {} Solana nodes, {} Canton nodes",
+                newByChain.size(), newEvmClients.size(), newSolanaClients.size(), newCantonClients.size());
     }
 
     // ── Legacy single-client refresh (from chain_config table) ───────────────
@@ -200,6 +248,8 @@ public class BlockchainClientRegistry {
         Map<String, Web3j>    newEvm    = new ConcurrentHashMap<>();
         Map<String, RpcClient> newSolana = new ConcurrentHashMap<>();
 
+        Map<String, CantonLedgerClient> newCanton = new ConcurrentHashMap<>();
+
         for (ChainConfig chain : chainConfigRepository.findByEnabledTrue()) {
             try {
                 if (chain.getChainType() == ChainConfig.ChainType.EVM && web3jClientFactory != null
@@ -208,6 +258,12 @@ public class BlockchainClientRegistry {
                 } else if (chain.getChainType() == ChainConfig.ChainType.SOLANA
                         && solanaClientFactory != null && chain.getRpcUrl() != null) {
                     newSolana.put(chain.getIdentifier(), solanaClientFactory.createClient(chain.getRpcUrl()));
+                } else if (chain.getChainType() == ChainConfig.ChainType.CANTON
+                        && cantonClientFactory != null && chain.getRpcUrl() != null
+                        && !chain.getRpcUrl().isBlank()) {
+                    String appId = chain.getApplicationId() != null ? chain.getApplicationId() : "registerwerk";
+                    newCanton.put(chain.getIdentifier(), cantonClientFactory.createClient(
+                            chain.getRpcUrl(), chain.getSynchronizerId(), appId, null));
                 }
             } catch (Exception e) {
                 log.error("Failed to refresh client for chain {}: {}", chain.getIdentifier(), e.getMessage(), e);
@@ -216,15 +272,16 @@ public class BlockchainClientRegistry {
 
         this.dynamicEvmClients    = newEvm;
         this.dynamicSolanaClients = newSolana;
-        log.info("BlockchainClientRegistry refresh: {} EVM, {} Solana dynamic clients.",
-                newEvm.size(), newSolana.size());
+        this.dynamicCantonClients = newCanton;
+        log.info("BlockchainClientRegistry refresh: {} EVM, {} Solana, {} Canton dynamic clients.",
+                newEvm.size(), newSolana.size(), newCanton.size());
     }
 
     // ── Read-only accessors ───────────────────────────────────────────────────
 
-    public Map<ChainDescriptor, Web3j> getEvmClients() { return staticEvmClients; }
-
-    public Map<ChainDescriptor, RpcClient> getSolanaClients() { return staticSolanaClients; }
+    public Map<ChainDescriptor, Web3j>              getEvmClients()    { return staticEvmClients; }
+    public Map<ChainDescriptor, RpcClient>          getSolanaClients() { return staticSolanaClients; }
+    public Map<ChainDescriptor, CantonLedgerClient> getCantonClients() { return staticCantonClients; }
 
     /** Returns the current node states grouped by chain identifier (for the health API). */
     public Map<String, List<NodeState>> getNodesByChain() { return Collections.unmodifiableMap(nodesByChain); }
@@ -239,6 +296,11 @@ public class BlockchainClientRegistry {
     private RpcClient selectBestSolanaNode(String identifier, List<NodeState> nodes) {
         UUID id = selectBestNodeId(identifier, nodes);
         return nodeSolanaClients.get(id);
+    }
+
+    private CantonLedgerClient selectBestCantonNode(String identifier, List<NodeState> nodes) {
+        UUID id = selectBestNodeId(identifier, nodes);
+        return nodeCantonClients.get(id);
     }
 
     private UUID selectBestNodeId(String identifier, List<NodeState> nodes) {

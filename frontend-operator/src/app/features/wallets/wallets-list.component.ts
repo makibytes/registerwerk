@@ -44,6 +44,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
     .type-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
     .type-chip.evm { background: rgba(98,126,234,.12); color: #627EEA; }
     .type-chip.solana { background: rgba(153,69,255,.12); color: #9945FF; }
+    .type-chip.canton { background: rgba(255,107,53,.12); color: #FF6B35; }
 
     .default-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .default-chip { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; background: rgba(34,197,94,.1); color: #16a34a; }
@@ -95,7 +96,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
             @for (wallet of wallets(); track wallet.id) {
               <tr>
                 <td><a class="wallet-name-link" [routerLink]="['/wallets', wallet.id]">{{ wallet.name }}</a></td>
-                <td><span class="type-chip" [class.evm]="wallet.type === 'EVM'" [class.solana]="wallet.type === 'SOLANA'">{{ wallet.type }}</span></td>
+                <td><span class="type-chip" [class.evm]="wallet.type === 'EVM'" [class.solana]="wallet.type === 'SOLANA'" [class.canton]="wallet.type === 'CANTON'">{{ wallet.type }}</span></td>
                 <td><app-address [address]="wallet.address" /></td>
                 <td>
                   <div class="default-chips">
