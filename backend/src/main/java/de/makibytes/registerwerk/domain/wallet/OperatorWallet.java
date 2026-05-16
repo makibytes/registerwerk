@@ -15,7 +15,7 @@ import java.util.UUID;
 @Table(name = "operator_wallet")
 public class OperatorWallet {
 
-    public enum WalletType { EVM, SOLANA, CANTON }
+    public enum WalletType { EVM, SOLANA, STARKNET, STELLAR, CANTON }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

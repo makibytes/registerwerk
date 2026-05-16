@@ -33,8 +33,9 @@ import java.util.concurrent.CompletableFuture;
 public class AssetDeploymentService {
 
     private static final Logger log = LoggerFactory.getLogger(AssetDeploymentService.class);
-    private static final EnumSet<Chain> TRACKING_ONLY_CHAINS =
-            EnumSet.of(Chain.STARKNET, Chain.STELLAR);
+    private static final EnumSet<Chain> TRACKING_ONLY_CHAINS = EnumSet.noneOf(Chain.class);
+    private static final EnumSet<Chain> NON_EVM_CHAINS =
+            EnumSet.of(Chain.SOLANA, Chain.CANTON, Chain.STARKNET, Chain.STELLAR);
     private static final EnumSet<Chain> FHEVM_CHAINS =
             EnumSet.of(Chain.FHENIX, Chain.INCO);
 
@@ -49,6 +50,8 @@ public class AssetDeploymentService {
     private final ConfidentialErc3643Service confidentialErc3643Service;
     private final SolanaTokenService solanaTokenService;
     private final CantonTokenService cantonTokenService;
+    private final StarknetTokenService starknetTokenService;
+    private final StellarAssetService stellarAssetService;
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
 
@@ -64,6 +67,8 @@ public class AssetDeploymentService {
             ConfidentialErc3643Service confidentialErc3643Service,
             SolanaTokenService solanaTokenService,
             CantonTokenService cantonTokenService,
+            StarknetTokenService starknetTokenService,
+            StellarAssetService stellarAssetService,
             BlockchainClientRegistry blockchainClientRegistry,
             EvmContractService evmContractService) {
         this.assetDeploymentRepository = assetDeploymentRepository;
@@ -77,6 +82,8 @@ public class AssetDeploymentService {
         this.confidentialErc3643Service = confidentialErc3643Service;
         this.solanaTokenService = solanaTokenService;
         this.cantonTokenService = cantonTokenService;
+        this.starknetTokenService = starknetTokenService;
+        this.stellarAssetService = stellarAssetService;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
     }
@@ -116,6 +123,20 @@ public class AssetDeploymentService {
                         assetId, network, "owner-placeholder", 0);
                 default -> throw new UnsupportedOperationException(
                         "Canton deployments currently support CANTON_TOKEN only");
+            };
+        } else if (chain == Chain.STARKNET) {
+            txFuture = switch (standard) {
+                case STARKNET_ERC20 -> starknetTokenService.createCairoErc20(
+                        assetId, network, "owner-placeholder");
+                default -> throw new UnsupportedOperationException(
+                        "Starknet deployments currently support STARKNET_ERC20 only");
+            };
+        } else if (chain == Chain.STELLAR) {
+            txFuture = switch (standard) {
+                case STELLAR_ASSET -> stellarAssetService.createStellarAsset(
+                        assetId, network, "owner-placeholder");
+                default -> throw new UnsupportedOperationException(
+                        "Stellar deployments currently support STELLAR_ASSET only");
             };
         } else {
             txFuture = switch (standard) {
@@ -221,6 +242,13 @@ public class AssetDeploymentService {
 
         if (deployment.getChain() == null || deployment.getNetwork() == null) {
             log.warn("syncFromChain: deploymentId={} has no chain/network set", deploymentId);
+            return;
+        }
+
+        // Non-EVM chains have their own confirmation paths (not via ethGetTransactionReceipt)
+        Chain deployChain = deployment.getChain();
+        if (NON_EVM_CHAINS.contains(deployChain)) {
+            log.debug("syncFromChain: chain {} uses a non-EVM confirmation path", deployChain);
             return;
         }
 

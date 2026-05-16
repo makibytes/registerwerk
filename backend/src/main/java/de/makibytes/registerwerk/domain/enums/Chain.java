@@ -11,7 +11,7 @@ public enum Chain {
     ARBITRUM,
     AVALANCHE,
     OPTIMISM,
-    // Non-EVM stubs (registered for tracking; issuance not yet implemented)
+    // Non-EVM chains
     STARKNET,
     STELLAR,
     CANTON

@@ -373,8 +373,8 @@ export class IssuanceWizardComponent implements OnInit {
     { value: 'ARBITRUM',  label: 'Arbitrum One' },
     { value: 'AVALANCHE', label: 'Avalanche C-Chain' },
     { value: 'OPTIMISM',  label: 'Optimism' },
-    { value: 'STARKNET',  label: 'Starknet', comingSoon: true },
-    { value: 'STELLAR',   label: 'Stellar',  comingSoon: true },
+    { value: 'STARKNET',  label: 'Starknet' },
+    { value: 'STELLAR',   label: 'Stellar' },
     { value: 'CANTON',    label: 'Canton' },
   ];
 
@@ -415,10 +415,10 @@ export class IssuanceWizardComponent implements OnInit {
       { value: 'ERC3643',      label: 'ERC-3643 (T-REX)' },
     ],
     STARKNET: [
-      { value: 'STARKNET_ERC20', label: 'Cairo ERC-20', comingSoon: true },
+      { value: 'STARKNET_ERC20', label: 'Cairo ERC-20 (via UDC)' },
     ],
     STELLAR: [
-      { value: 'STELLAR_ASSET', label: 'Stellar Asset', comingSoon: true },
+      { value: 'STELLAR_ASSET', label: 'Stellar Asset (classic trustline)' },
     ],
     CANTON: [
       { value: 'CANTON_TOKEN', label: 'Canton / Daml Token Standard (CIP-0056)' },

@@ -11,6 +11,8 @@ import de.makibytes.registerwerk.application.blockchain.Erc3643DeploymentService
 import de.makibytes.registerwerk.application.blockchain.Erc721DeploymentService;
 import de.makibytes.registerwerk.application.blockchain.EvmContractService;
 import de.makibytes.registerwerk.application.blockchain.SolanaTokenService;
+import de.makibytes.registerwerk.application.blockchain.StarknetTokenService;
+import de.makibytes.registerwerk.application.blockchain.StellarAssetService;
 import de.makibytes.registerwerk.domain.asset.Asset;
 import de.makibytes.registerwerk.domain.asset.AssetDeployment;
 import de.makibytes.registerwerk.domain.enums.Chain;
@@ -71,6 +73,12 @@ class AssetDeploymentServiceTest {
 
     @Mock
     private SolanaTokenService solanaTokenService;
+
+    @Mock
+    private StarknetTokenService starknetTokenService;
+
+    @Mock
+    private StellarAssetService stellarAssetService;
 
     @Mock
     private BlockchainClientRegistry blockchainClientRegistry;
@@ -189,5 +197,102 @@ class AssetDeploymentServiceTest {
 
         assertThat(result.getChain()).isEqualTo(Chain.SOLANA);
         verify(solanaTokenService).createSplToken2022(eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
+    }
+
+    @Test
+    @DisplayName("deploy should route STARKNET_ERC20 assets through StarknetTokenService")
+    void deploy_shouldRouteStarknetErc20ThroughStarknetTokenService() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.STARKNET_ERC20);
+
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
+            AssetDeployment deployment = invocation.getArgument(0);
+            deployment.setId(deploymentId);
+            return deployment;
+        });
+        when(starknetTokenService.createCairoErc20(eq(assetId), eq(Network.TESTNET), any()))
+                .thenReturn(new CompletableFuture<>());
+
+        AssetDeployment result = assetDeploymentService.deploy(
+                assetId, Chain.STARKNET, Network.TESTNET, actorId);
+
+        assertThat(result.getChain()).isEqualTo(Chain.STARKNET);
+        assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
+        verify(starknetTokenService).createCairoErc20(
+                eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(auditEventPublisher).publish(
+                eq("ASSET_DEPLOYMENT_INITIATED"),
+                eq("AssetDeployment"),
+                eq(deploymentId),
+                eq(actorId),
+                eq(null),
+                any());
+    }
+
+    @Test
+    @DisplayName("deploy should route STELLAR_ASSET assets through StellarAssetService")
+    void deploy_shouldRouteStellarAssetThroughStellarAssetService() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.STELLAR_ASSET);
+
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
+            AssetDeployment deployment = invocation.getArgument(0);
+            deployment.setId(deploymentId);
+            return deployment;
+        });
+        when(stellarAssetService.createStellarAsset(eq(assetId), eq(Network.TESTNET), any()))
+                .thenReturn(new CompletableFuture<>());
+
+        AssetDeployment result = assetDeploymentService.deploy(
+                assetId, Chain.STELLAR, Network.TESTNET, actorId);
+
+        assertThat(result.getChain()).isEqualTo(Chain.STELLAR);
+        assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
+        verify(stellarAssetService).createStellarAsset(
+                eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(auditEventPublisher).publish(
+                eq("ASSET_DEPLOYMENT_INITIATED"),
+                eq("AssetDeployment"),
+                eq(deploymentId),
+                eq(actorId),
+                eq(null),
+                any());
+    }
+
+    @Test
+    @DisplayName("deploy should reject unsupported standard on Starknet with a clear error message")
+    void deploy_shouldRejectUnsupportedStandardOnStarknet() {
+        UUID assetId = UUID.randomUUID();
+
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        // ERC20 cannot be deployed on Starknet (Starknet only supports STARKNET_ERC20)
+        asset.setTokenStandard(TokenStandard.ERC20);
+
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
+            AssetDeployment dep = invocation.getArgument(0);
+            dep.setId(UUID.randomUUID());
+            return dep;
+        });
+
+        assertThatThrownBy(() -> assetDeploymentService.deploy(
+                assetId, Chain.STARKNET, Network.TESTNET, UUID.randomUUID()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("STARKNET_ERC20");
+
+        verify(starknetTokenService, never()).createCairoErc20(any(), any(), any());
     }
 }

@@ -34,9 +34,11 @@ public class WalletSigner {
     private final OperatorWalletRepository walletRepository;
     private final WalletStorage walletStorage;
 
-    private final ConcurrentHashMap<UUID, Credentials>    evmCache    = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, Account>        solanaCache = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, CantonContext>  cantonCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Credentials>    evmCache      = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Account>        solanaCache   = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, CantonContext>  cantonCache   = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, byte[]>         rawBytesCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, String>         addressCache  = new ConcurrentHashMap<>();
 
     public WalletSigner(
             WalletChainDefaultRepository defaultRepository,
@@ -136,6 +138,33 @@ public class WalletSigner {
         return cantonContextForChain(match.getChainConfigId());
     }
 
+    // ── Starknet / Stellar (raw-bytes, same AES-GCM envelope as Solana) ──────
+
+    /**
+     * Returns the raw 32-byte private key for a Starknet or Stellar wallet.
+     * Decrypted from the AES-256-GCM keystore (same format as Solana wallets).
+     *
+     * <p>For Starknet this is the STARK curve scalar; for Stellar the Ed25519 seed.
+     */
+    public byte[] rawPrivateKeyBytesForChain(UUID chainConfigId) {
+        UUID walletId = resolveWalletId(chainConfigId);
+        return rawBytesCache.computeIfAbsent(walletId, id -> {
+            OperatorWallet wallet = loadWallet(id);
+            log.debug("Loading raw private key for wallet '{}' ({})", wallet.getName(), id);
+            return walletStorage.loadSolana(wallet.getKeystorePath());
+        });
+    }
+
+    /**
+     * Returns the on-chain address stored in the wallet metadata.
+     * For Starknet: hex account address (0x-prefixed felt252).
+     * For Stellar: StrKey G-address (base32 + CRC16 checksum).
+     */
+    public String chainAddressForWallet(UUID chainConfigId) {
+        UUID walletId = resolveWalletId(chainConfigId);
+        return addressCache.computeIfAbsent(walletId, id -> loadWallet(id).getAddress());
+    }
+
     // ── Cache management ──────────────────────────────────────────────────────
 
     /** Removes cached credentials for the given wallet, forcing a reload on next use. */
@@ -143,6 +172,8 @@ public class WalletSigner {
         evmCache.remove(walletId);
         solanaCache.remove(walletId);
         cantonCache.remove(walletId);
+        rawBytesCache.remove(walletId);
+        addressCache.remove(walletId);
         log.debug("Evicted cached credentials for wallet {}", walletId);
     }
 
