@@ -25,6 +25,10 @@ import de.makibytes.registerwerk.asset.api.AssetDeployment;
 import de.makibytes.registerwerk.asset.api.TokenStandard;
 import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
+import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 
 /**
  * Registry-operator administrative controls for ERC-20, ERC-721, and ERC-1155 token contracts.
@@ -64,8 +68,7 @@ public class TokenAdminService {
             AssetRepository assetRepository,
             BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
-            BlockchainTransactionService txService,
-) {
+            BlockchainTransactionService txService) {
         this.deploymentRepository = deploymentRepository;
         this.assetRepository = assetRepository;
         this.clientRegistry = clientRegistry;

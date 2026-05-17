@@ -54,7 +54,7 @@ public class CantonPartyAllocator {
                 ? Network.MAINNET : Network.TESTNET;
         ChainDescriptor descriptor = new ChainDescriptor(Chain.CANTON, network);
 
-        CantonLedgerClient client = registry.getCantonClientByIdentifier(chainConfig.getIdentifier());
+        CantonLedgerClient client = (CantonLedgerClient) registry.getCantonClientByIdentifier(chainConfig.getIdentifier());
 
         AllocatePartyResponse response = client.partyManagementClient()
                 .allocateParty(displayName, displayName)
@@ -92,7 +92,7 @@ public class CantonPartyAllocator {
         // Return the admin token from the participant config.
         // In production this token covers all parties hosted on the participant.
         // The registry's CantonLedgerClient was built with this token.
-        CantonLedgerClient client = registry.getCantonClientByIdentifier(chainIdentifier);
+        CantonLedgerClient client = (CantonLedgerClient) registry.getCantonClientByIdentifier(chainIdentifier);
         // The client itself holds the JWT used for its own connection.
         // We surface it for storage so per-wallet signing can reuse it.
         // TODO: when per-party JWT issuance is available (Canton Enterprise), replace this.

@@ -2,11 +2,11 @@ package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransaction;
 import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionRepository;
 import de.makibytes.registerwerk.asset.web.AssetAccessChecker;
+import de.makibytes.registerwerk.blockchain.BlockchainApi;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionView;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.Authentication;
@@ -28,7 +28,7 @@ class AssetAccessCheckerTest {
 
     AssetRepository assetRepository;
     AssetDeploymentRepository deploymentRepository;
-    BlockchainTransactionRepository transactionRepository;
+    BlockchainApi blockchainApi;
     AssetAccessChecker checker;
 
     static final UUID ISSUER_A = UUID.randomUUID();
@@ -41,8 +41,8 @@ class AssetAccessCheckerTest {
     void setUp() {
         assetRepository      = mock(AssetRepository.class);
         deploymentRepository = mock(AssetDeploymentRepository.class);
-        transactionRepository = mock(BlockchainTransactionRepository.class);
-        checker = new AssetAccessChecker(assetRepository, deploymentRepository, transactionRepository);
+        blockchainApi        = mock(BlockchainApi.class);
+        checker = new AssetAccessChecker(assetRepository, deploymentRepository, blockchainApi);
 
         Asset asset = new Asset();
         asset.setIssuerId(ISSUER_A);
@@ -52,9 +52,11 @@ class AssetAccessCheckerTest {
         dep.setAssetId(ASSET_ID);
         when(deploymentRepository.findById(DEP_ID)).thenReturn(Optional.of(dep));
 
-        BlockchainTransaction tx = new BlockchainTransaction();
-        tx.setAssetId(ASSET_ID);
-        when(transactionRepository.findById(TX_ID)).thenReturn(Optional.of(tx));
+        BlockchainTransactionView txView = new BlockchainTransactionView(
+                TX_ID, null, "SUCCESS", null, null, null, null,
+                DEP_ID, ASSET_ID, null, null, null, null, null, null,
+                Instant.now(), null);
+        when(blockchainApi.findTransaction(TX_ID)).thenReturn(Optional.of(txView));
     }
 
     @Test
@@ -74,13 +76,11 @@ class AssetAccessCheckerTest {
 
     @Test
     void canRead_impersonatingAdmin_returnsTrue() {
-        // imp:true token has entity_id of a different company but admin should still read anything
         assertThat(checker.canRead(ASSET_ID, impersonationAuth(ISSUER_B))).isTrue();
     }
 
     @Test
     void canActAsIssuer_impersonatingAdmin_returnsFalse() {
-        // imp token must not grant issuer write access beyond the scoped entity
         assertThat(checker.canActAsIssuer(ASSET_ID, impersonationAuth(ISSUER_B))).isFalse();
     }
 
@@ -91,7 +91,6 @@ class AssetAccessCheckerTest {
 
     @Test
     void canActAsIssuer_admin_returnsFalse() {
-        // Admin access is composed at the call site; this checker is pure issuer check
         assertThat(checker.canActAsIssuer(ASSET_ID, jwtAuth(ISSUER_B, "REGISTRY_ADMIN"))).isFalse();
     }
 

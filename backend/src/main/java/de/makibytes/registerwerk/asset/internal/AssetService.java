@@ -1,6 +1,6 @@
-import de.makibytes.registerwerk.customer.CustomerApi;
 package de.makibytes.registerwerk.asset.internal;
 
+import de.makibytes.registerwerk.customer.CustomerApi;
 import de.makibytes.registerwerk.asset.events.AssetCreatedEvent;
 import de.makibytes.registerwerk.asset.events.AssetUpdatedEvent;
 import org.springframework.context.ApplicationEventPublisher;

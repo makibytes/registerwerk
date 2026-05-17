@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.trading.web.dto;
 
-import de.makibytes.registerwerk.trading.internal.TradingAssetType;
-import de.makibytes.registerwerk.trading.internal.WalletTargetType;
+import de.makibytes.registerwerk.trading.api.TradingAssetType;
+import de.makibytes.registerwerk.trading.api.WalletTargetType;
 
 import java.util.UUID;
 

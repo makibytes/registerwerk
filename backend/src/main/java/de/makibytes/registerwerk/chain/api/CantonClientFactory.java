@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.chain.api;
 
 import com.daml.ledger.rxjava.DamlLedgerClient;
+// CantonLedgerEndpoint is in the same package — no import needed
 import io.grpc.*;
 import io.grpc.stub.MetadataUtils;
 import org.slf4j.Logger;
@@ -13,7 +14,7 @@ import org.springframework.util.StringUtils;
  * Mirrors {@code SolanaClientFactory} and {@code Web3jClientFactory} in structure.
  */
 @Component
-public class CantonClientFactory {
+public class CantonClientFactory implements CantonClientProvider {
 
     private static final Logger log = LoggerFactory.getLogger(CantonClientFactory.class);
 
@@ -25,7 +26,8 @@ public class CantonClientFactory {
      * @param applicationId  application ID registered with the participant
      * @param authToken      optional JWT bearer token for authentication (null or blank = no auth)
      */
-    public CantonLedgerClient createClient(
+    @Override
+    public CantonLedgerEndpoint createClient(
             String ledgerApiUrl,
             String synchronizerId,
             String applicationId,

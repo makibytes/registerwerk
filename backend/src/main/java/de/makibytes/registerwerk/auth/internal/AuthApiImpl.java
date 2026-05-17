@@ -1,7 +1,11 @@
 package de.makibytes.registerwerk.auth.internal;
 
 import de.makibytes.registerwerk.auth.AuthApi;
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserActionToken;
+import de.makibytes.registerwerk.auth.api.AppUserActionTokenRepository;
 import de.makibytes.registerwerk.auth.api.AppUserActionTokenType;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
 import org.springframework.context.ApplicationEventPublisher;

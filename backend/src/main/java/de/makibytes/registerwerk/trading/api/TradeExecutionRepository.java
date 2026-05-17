@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.trading.api;
 
-import de.makibytes.registerwerk.trading.internal.SettlementStatus;
+import de.makibytes.registerwerk.trading.api.SettlementStatus;
 import de.makibytes.registerwerk.trading.api.TradeExecution;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;

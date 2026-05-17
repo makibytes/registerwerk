@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.trading.api;
 
-import de.makibytes.registerwerk.trading.internal.ListingStatus;
+import de.makibytes.registerwerk.trading.api.ListingStatus;
 import de.makibytes.registerwerk.trading.api.TradeListing;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;

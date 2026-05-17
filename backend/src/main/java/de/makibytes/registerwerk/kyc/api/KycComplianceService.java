@@ -22,7 +22,7 @@ import java.util.UUID;
  */
 @Service
 @Transactional(readOnly = true)
-public class KycComplianceService {
+public class KycComplianceService implements de.makibytes.registerwerk.kyc.KycApi {
 
     private final KycDocumentRepository kycDocumentRepository;
     private final JurisdictionRequirementConfig requirementConfig;

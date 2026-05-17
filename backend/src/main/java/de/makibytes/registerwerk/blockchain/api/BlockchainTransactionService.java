@@ -1,9 +1,10 @@
 package de.makibytes.registerwerk.blockchain.api;
 
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
+import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
+import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import org.springframework.context.ApplicationEventPublisher;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransaction;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -117,8 +118,8 @@ public class BlockchainTransactionService {
                 if (tx.getTxHash() == null || tx.getChain() == null) continue;
 
                 ChainDescriptor descriptor = new ChainDescriptor(
-                de.makibytes.registerwerk.domain.enums.Chain.valueOf(tx.getChain()),
-                de.makibytes.registerwerk.domain.enums.Network.valueOf(tx.getNetwork()));
+                de.makibytes.registerwerk.chain.api.Chain.valueOf(tx.getChain()),
+                de.makibytes.registerwerk.chain.api.Network.valueOf(tx.getNetwork()));
                 Web3j web3j = clientRegistry.getEvmClient(descriptor);
                 Optional<TransactionReceipt> receipt =
                         web3j.ethGetTransactionReceipt(tx.getTxHash()).send().getTransactionReceipt();

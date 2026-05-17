@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.blockchain.internal;
+package de.makibytes.registerwerk.blockchain.internal.deploy;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -10,6 +10,7 @@ import org.p2p.solanaj.programs.MemoProgram;
 import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import org.slf4j.Logger;
@@ -17,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.Network;
 
 /**
@@ -263,7 +265,7 @@ public class SolanaTokenService {
     private Account loadPayerAccount() {
         // Resolve the Solana default wallet from any configured Solana chain
         return chainConfigRepository.findByChainTypeAndEnabledTrue(
-                de.makibytes.registerwerk.domain.chain.ChainConfig.ChainType.SOLANA).stream()
+                de.makibytes.registerwerk.chain.api.ChainConfig.ChainType.SOLANA).stream()
                 .findFirst()
                 .map(c -> walletSigner.solanaAccountForChain(c.getId()))
                 .orElseThrow(() -> new IllegalStateException(

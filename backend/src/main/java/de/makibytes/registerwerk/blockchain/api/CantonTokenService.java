@@ -52,7 +52,7 @@ import java.util.concurrent.CompletableFuture;
  * </ul>
  */
 @Service
-public class CantonTokenService {
+public class CantonTokenService implements CantonTokenOperations {
 
     private static final Logger log = LoggerFactory.getLogger(CantonTokenService.class);
 
@@ -368,7 +368,7 @@ public class CantonTokenService {
 
     private CantonLedgerClient resolveClient(Network network) {
         String identifier = "CANTON_" + (network == Network.MAINNET ? "MAINNET" : "DEVNET");
-        return registry.getCantonClientByIdentifier(identifier);
+        return (CantonLedgerClient) registry.getCantonClientByIdentifier(identifier);
     }
 
     private String resolveIdentifier(Network network) {
@@ -386,7 +386,7 @@ public class CantonTokenService {
         // a chain config UUID; we go through the registry's stored client context instead.
         // TODO: wire WalletSigner injection once the circular-dep guard is lifted.
         String identifier = resolveIdentifier(deployment.getNetwork());
-        CantonLedgerClient client = registry.getCantonClientByIdentifier(identifier);
+        CantonLedgerClient client = (CantonLedgerClient) registry.getCantonClientByIdentifier(identifier);
         // The client carries the submission JWT via its call credentials; the party ID
         // is retrieved from the default wallet's address field.
         // Return a context with empty JWT (the channel already carries auth headers).

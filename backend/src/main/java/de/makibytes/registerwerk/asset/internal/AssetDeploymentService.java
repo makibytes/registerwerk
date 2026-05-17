@@ -2,7 +2,19 @@ package de.makibytes.registerwerk.asset.internal;
 
 import de.makibytes.registerwerk.asset.events.AssetDeploymentInitiatedEvent;
 import org.springframework.context.ApplicationEventPublisher;
-import de.makibytes.registerwerk.blockchain.api.*;
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.CantonTokenOperations;
+import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.internal.confidential.ConfidentialErc20Service;
+import de.makibytes.registerwerk.erc3643.internal.ConfidentialErc3643Service;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc1155DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc20DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc721DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.SolanaTokenService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetTokenService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.StellarAssetService;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.erc3643.internal.Erc3643DeploymentService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
@@ -50,7 +62,7 @@ public class AssetDeploymentService {
     private final ConfidentialErc20Service confidentialErc20Service;
     private final ConfidentialErc3643Service confidentialErc3643Service;
     private final SolanaTokenService solanaTokenService;
-    private final CantonTokenService cantonTokenService;
+    private final CantonTokenOperations cantonTokenService;
     private final StarknetTokenService starknetTokenService;
     private final StellarAssetService stellarAssetService;
     private final BlockchainClientRegistry blockchainClientRegistry;
@@ -67,7 +79,7 @@ public class AssetDeploymentService {
             ConfidentialErc20Service confidentialErc20Service,
             ConfidentialErc3643Service confidentialErc3643Service,
             SolanaTokenService solanaTokenService,
-            CantonTokenService cantonTokenService,
+            CantonTokenOperations cantonTokenService,
             StarknetTokenService starknetTokenService,
             StellarAssetService stellarAssetService,
             BlockchainClientRegistry blockchainClientRegistry,

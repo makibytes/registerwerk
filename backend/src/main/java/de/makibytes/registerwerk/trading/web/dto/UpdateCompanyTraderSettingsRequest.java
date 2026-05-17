@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.trading.web.dto;
 
-import de.makibytes.registerwerk.trading.internal.PaymentOption;
+import de.makibytes.registerwerk.trading.api.PaymentOption;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.List;

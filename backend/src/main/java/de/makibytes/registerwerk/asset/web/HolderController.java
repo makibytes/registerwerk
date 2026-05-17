@@ -3,8 +3,8 @@ package de.makibytes.registerwerk.asset.web;
 import de.makibytes.registerwerk.asset.internal.HolderService;
 import de.makibytes.registerwerk.asset.internal.LiveHolderService;
 import de.makibytes.registerwerk.blockchain.api.WhitelistService;
-import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
-import de.makibytes.registerwerk.indexer.api.HolderDataService;
+import de.makibytes.registerwerk.externalref.ExternalRefApi;
+import de.makibytes.registerwerk.indexer.IndexerApi;
 import de.makibytes.registerwerk.asset.api.AssetHolder;
 import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
@@ -41,19 +41,19 @@ public class HolderController {
     private final HolderService holderService;
     private final LiveHolderService liveHolderService;
     private final WhitelistService whitelistService;
-    private final HolderDataService holderDataService;
+    private final IndexerApi holderDataService;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final HolderMapper holderMapper;
-    private final CompanyExternalReferenceService companyExternalReferenceService;
+    private final ExternalRefApi companyExternalReferenceService;
 
     public HolderController(
             HolderService holderService,
             LiveHolderService liveHolderService,
             WhitelistService whitelistService,
-            HolderDataService holderDataService,
+            IndexerApi holderDataService,
             AssetDeploymentRepository assetDeploymentRepository,
             HolderMapper holderMapper,
-            CompanyExternalReferenceService companyExternalReferenceService) {
+            ExternalRefApi companyExternalReferenceService) {
         this.holderService = holderService;
         this.liveHolderService = liveHolderService;
         this.whitelistService = whitelistService;

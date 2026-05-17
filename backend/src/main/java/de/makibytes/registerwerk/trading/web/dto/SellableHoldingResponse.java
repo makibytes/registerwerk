@@ -2,7 +2,7 @@ package de.makibytes.registerwerk.trading.web.dto;
 
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.asset.api.TokenStandard;
-import de.makibytes.registerwerk.trading.internal.TradingAssetType;
+import de.makibytes.registerwerk.trading.api.TradingAssetType;
 
 import java.math.BigDecimal;
 import java.util.UUID;

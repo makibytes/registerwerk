@@ -1,12 +1,12 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransaction;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionView;
 
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
-/** Read-only view of a {@link BlockchainTransaction} record. */
+/** Read-only view of a blockchain transaction record returned to API callers. */
 public record TxRecordResponse(
         UUID id,
         String txHash,
@@ -26,13 +26,13 @@ public record TxRecordResponse(
         Instant createdAt,
         Instant completedAt
 ) {
-    public static TxRecordResponse from(BlockchainTransaction tx) {
+    public static TxRecordResponse from(BlockchainTransactionView tx) {
         return new TxRecordResponse(
-                tx.getId(), tx.getTxHash(), tx.getStatus().name(),
-                tx.getMethodName(), tx.getChain(), tx.getNetwork(),
-                tx.getContractAddress(), tx.getDeploymentId(), tx.getAssetId(),
-                tx.getActorName(), tx.getActorRole(), tx.getParams(),
-                tx.getGasUsed(), tx.getBlockNumber(), tx.getErrorMessage(),
-                tx.getCreatedAt(), tx.getCompletedAt());
+                tx.id(), tx.txHash(), tx.status(),
+                tx.methodName(), tx.chain(), tx.network(),
+                tx.contractAddress(), tx.deploymentId(), tx.assetId(),
+                tx.actorName(), tx.actorRole(), tx.params(),
+                tx.gasUsed(), tx.blockNumber(), tx.errorMessage(),
+                tx.createdAt(), tx.completedAt());
     }
 }

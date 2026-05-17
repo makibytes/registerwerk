@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.blockchain.internal;
+package de.makibytes.registerwerk.blockchain.internal.deploy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -444,7 +444,7 @@ public class StellarAssetService {
     /**
      * Stellar transaction hash = SHA-256(SHA-256(networkPassphrase) || envelopeType || txXdr).
      */
-    static byte[] computeTxHash(String networkPassphrase, byte[] txXdr) {
+    public static byte[] computeTxHash(String networkPassphrase, byte[] txXdr) {
         try {
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
             byte[] passphraseHash = sha256.digest(
@@ -463,7 +463,7 @@ public class StellarAssetService {
 
     // ── Ed25519 signing ───────────────────────────────────────────────────────
 
-    static byte[] ed25519Sign(Ed25519PrivateKeyParameters privKey, byte[] message) {
+    public static byte[] ed25519Sign(Ed25519PrivateKeyParameters privKey, byte[] message) {
         Ed25519Signer signer = new Ed25519Signer();
         signer.init(true, privKey);
         signer.update(message, 0, message.length);
@@ -487,7 +487,7 @@ public class StellarAssetService {
      * Decodes a Stellar StrKey G-address to the raw 32-byte Ed25519 public key.
      * Format: base32( [0x06 << 3] || pubkey[32] || CRC16-XModem[2] )
      */
-    static byte[] strKeyDecode(String gAddress) {
+    public static byte[] strKeyDecode(String gAddress) {
         // Pad to multiple of 8 chars for base32
         String padded = gAddress;
         int pad = (8 - padded.length() % 8) % 8;
@@ -524,7 +524,7 @@ public class StellarAssetService {
     /**
      * Encodes a raw 32-byte Ed25519 public key as a Stellar StrKey G-address.
      */
-    static String strKeyEncode(byte[] pubKeyBytes) {
+    public static String strKeyEncode(byte[] pubKeyBytes) {
         // Version byte for account: 6 << 3 = 0x30
         byte[] payload = new byte[35];
         payload[0] = 0x30;

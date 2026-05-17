@@ -3,8 +3,8 @@ package de.makibytes.registerwerk.chain.internal;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.RpcNode;
-import de.makibytes.registerwerk.chain.api.CantonClientFactory;
-import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
+import de.makibytes.registerwerk.chain.api.CantonClientProvider;
+import de.makibytes.registerwerk.chain.api.CantonLedgerEndpoint;
 import de.makibytes.registerwerk.blockchain.api.Web3jClientFactory;
 import de.makibytes.registerwerk.blockchain.api.SolanaClientFactory;
 import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
@@ -16,6 +16,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.web3j.protocol.Web3j;
+
+import org.springframework.lang.Nullable;
 
 import java.math.BigInteger;
 import java.time.Duration;
@@ -57,18 +59,18 @@ public class RpcNodeHealthService {
     private final SolanaClientFactory solanaClientFactory;
     private final BlockchainClientRegistry registry;
 
-    private final CantonClientFactory cantonClientFactory;
+    private final CantonClientProvider cantonClientFactory;
 
     /** Cached clients keyed by node ID to avoid creating new connections on every tick. */
     private final Map<UUID, Web3j>              evmHealthClients    = new ConcurrentHashMap<>();
     private final Map<UUID, RpcClient>          solanaHealthClients = new ConcurrentHashMap<>();
-    private final Map<UUID, CantonLedgerClient> cantonHealthClients = new ConcurrentHashMap<>();
+    private final Map<UUID, CantonLedgerEndpoint> cantonHealthClients = new ConcurrentHashMap<>();
 
     public RpcNodeHealthService(
             RpcNodeRepository rpcNodeRepository,
             Web3jClientFactory web3jClientFactory,
             SolanaClientFactory solanaClientFactory,
-            CantonClientFactory cantonClientFactory,
+            @Nullable CantonClientProvider cantonClientFactory,
             BlockchainClientRegistry registry) {
         this.rpcNodeRepository    = rpcNodeRepository;
         this.web3jClientFactory   = web3jClientFactory;
@@ -95,7 +97,7 @@ public class RpcNodeHealthService {
                     checkEvmNodes(chain, nodes);
                 } else if (chain.getChainType() == ChainConfig.ChainType.SOLANA) {
                     checkSolanaNodes(chain, nodes);
-                } else if (chain.getChainType() == ChainConfig.ChainType.CANTON) {
+                } else if (chain.getChainType() == ChainConfig.ChainType.CANTON && cantonClientFactory != null) {
                     checkCantonNodes(chain, nodes);
                 }
             } catch (Exception e) {
@@ -244,7 +246,7 @@ public class RpcNodeHealthService {
         for (RpcNode node : nodes) {
             Instant checkStart = Instant.now();
             try {
-                CantonLedgerClient client = cantonHealthClients.computeIfAbsent(node.getId(),
+                CantonLedgerEndpoint client = cantonHealthClients.computeIfAbsent(node.getId(),
                         id -> cantonClientFactory.createClient(
                                 node.getUrl(),
                                 chain.getSynchronizerId(),

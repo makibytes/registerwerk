@@ -1,6 +1,5 @@
-package de.makibytes.registerwerk.blockchain.api;
+package de.makibytes.registerwerk.blockchain.internal.tx;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransaction;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;

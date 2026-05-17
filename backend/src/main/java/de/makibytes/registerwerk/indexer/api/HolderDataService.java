@@ -14,7 +14,7 @@ import java.util.UUID;
  * Full on-chain sync logic is not yet implemented.
  */
 @Service
-public class HolderDataService {
+public class HolderDataService implements de.makibytes.registerwerk.indexer.IndexerApi {
 
     private static final Logger log = LoggerFactory.getLogger(HolderDataService.class);
 

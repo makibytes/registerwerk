@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.kyc.api;
 
-import de.makibytes.registerwerk.kyc.internal.KycDocument.DocumentType;
+import de.makibytes.registerwerk.kyc.api.KycDocument.DocumentType;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import org.springframework.stereotype.Component;
 

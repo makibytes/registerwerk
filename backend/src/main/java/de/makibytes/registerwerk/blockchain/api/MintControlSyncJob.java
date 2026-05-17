@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.blockchain.api;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
 import de.makibytes.registerwerk.asset.api.MintControlRule;
 import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.MintControlRuleRepository;
 import org.slf4j.Logger;

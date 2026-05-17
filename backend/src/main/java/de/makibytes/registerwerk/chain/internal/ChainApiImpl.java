@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.chain.internal;
 
 import de.makibytes.registerwerk.chain.ChainApi;
 import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
 import de.makibytes.registerwerk.chain.api.Network;
 import org.springframework.stereotype.Service;
@@ -35,11 +37,14 @@ class ChainApiImpl implements ChainApi {
 
     @Override
     public List<ChainConfig> findByChain(Chain chain, Network network) {
-        return repository.findByChainAndNetwork(chain, network);
+        String identifier = chain.name() + "_" + network.name();
+        return repository.findByIdentifier(identifier)
+                .map(java.util.List::of)
+                .orElse(java.util.List.of());
     }
 
     @Override
     public String explorerUrl(ChainConfig chainConfig, String txHash) {
-        return explorerUrlBuilder.txUrl(chainConfig, txHash);
+        return explorerUrlBuilder.buildTxUrl(chainConfig, txHash);
     }
 }

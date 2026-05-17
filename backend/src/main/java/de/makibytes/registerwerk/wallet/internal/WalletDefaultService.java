@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.wallet.api.WalletChainDefault;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.wallet.api.OperatorWalletRepository;
 import de.makibytes.registerwerk.wallet.api.WalletChainDefaultRepository;
+import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;

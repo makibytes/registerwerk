@@ -20,10 +20,10 @@ public interface WalletChainDefaultRepository extends JpaRepository<WalletChainD
     @Query("SELECT d FROM WalletChainDefault d JOIN FETCH d.chainConfig JOIN FETCH d.wallet")
     List<WalletChainDefault> findAllWithAssociations();
 
-    @Query("SELECT d FROM WalletChainDefault d JOIN FETCH d.chainConfig JOIN FETCH d.wallet WHERE d.chainConfig.chainType = de.makibytes.registerwerk.domain.chain.ChainConfig.ChainType.EVM")
+    @Query("SELECT d FROM WalletChainDefault d JOIN FETCH d.chainConfig JOIN FETCH d.wallet WHERE d.chainConfig.chainType = de.makibytes.registerwerk.chain.api.ChainConfig.ChainType.EVM")
     List<WalletChainDefault> findAllEvmDefaults();
 
-    @Query("SELECT d FROM WalletChainDefault d JOIN FETCH d.chainConfig JOIN FETCH d.wallet WHERE d.chainConfig.chainType = de.makibytes.registerwerk.domain.chain.ChainConfig.ChainType.SOLANA")
+    @Query("SELECT d FROM WalletChainDefault d JOIN FETCH d.chainConfig JOIN FETCH d.wallet WHERE d.chainConfig.chainType = de.makibytes.registerwerk.chain.api.ChainConfig.ChainType.SOLANA")
     List<WalletChainDefault> findAllSolanaDefaults();
 
     @Query("SELECT d FROM WalletChainDefault d JOIN FETCH d.chainConfig JOIN FETCH d.wallet WHERE d.chainConfig.identifier = :identifier")

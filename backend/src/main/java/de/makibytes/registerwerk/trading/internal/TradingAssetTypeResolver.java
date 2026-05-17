@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.trading.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.trading.internal.TradingAssetType;
+import de.makibytes.registerwerk.trading.api.TradingAssetType;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;

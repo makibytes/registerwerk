@@ -1,6 +1,9 @@
-package de.makibytes.registerwerk.blockchain.internal;
+package de.makibytes.registerwerk.blockchain.internal.deploy;
 
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
+import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.slf4j.Logger;
@@ -24,15 +27,17 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Handles on-chain deployment of ERC-721 (NFT) security token contracts via
- * {@code AssetTokenFactory.deployToken(1, name, symbol, assetId)}.
+ * Handles on-chain deployment of ERC-1155 (multi-token) security token contracts via
+ * {@code AssetTokenFactory.deployToken(2, "", symbol, assetId)}.
+ *
+ * <p>Note: ERC-1155 constructor ignores the {@code name} argument; an empty string is passed.
  */
 @Service
-public class Erc721DeploymentService {
+public class Erc1155DeploymentService {
 
-    private static final Logger log = LoggerFactory.getLogger(Erc721DeploymentService.class);
+    private static final Logger log = LoggerFactory.getLogger(Erc1155DeploymentService.class);
 
-    private static final BigInteger TOKEN_TYPE_ERC721 = BigInteger.ONE;
+    private static final BigInteger TOKEN_TYPE_ERC1155 = BigInteger.valueOf(2);
 
     private static final String TOKEN_DEPLOYED_TOPIC =
             "0x" + org.web3j.crypto.Hash.sha3String("TokenDeployed(bytes32,uint8,address)");
@@ -42,10 +47,10 @@ public class Erc721DeploymentService {
     private final ContractAddressConfig contractAddressConfig;
     private final AssetRepository assetRepository;
 
-    public Erc721DeploymentService(BlockchainClientRegistry blockchainClientRegistry,
-                                    EvmContractService evmContractService,
-                                    ContractAddressConfig contractAddressConfig,
-                                    AssetRepository assetRepository) {
+    public Erc1155DeploymentService(BlockchainClientRegistry blockchainClientRegistry,
+                                     EvmContractService evmContractService,
+                                     ContractAddressConfig contractAddressConfig,
+                                     AssetRepository assetRepository) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
@@ -53,15 +58,15 @@ public class Erc721DeploymentService {
     }
 
     /**
-     * Deploys an EwpgERC721 token contract for {@code assetId} on the target chain.
+     * Deploys an EwpgERC1155 token contract for {@code assetId} on the target chain.
      *
      * @param assetId      ID of the asset to deploy
      * @param chain        target chain descriptor
-     * @param ownerAddress on-chain owner address (logged only; factory controls deployment)
+     * @param ownerAddress on-chain owner address (logged only)
      * @return future resolving to the deployment transaction hash
      */
     public CompletableFuture<String> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
-        log.info("Deploying ERC-721 contract: assetId={}, chain={}", assetId, chain);
+        log.info("Deploying ERC-1155 contract: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
             Asset asset = assetRepository.findById(assetId)
@@ -76,8 +81,8 @@ public class Erc721DeploymentService {
             Function deployToken = new Function(
                     "deployToken",
                     Arrays.asList(
-                            new Uint8(TOKEN_TYPE_ERC721),
-                            new Utf8String(asset.getName()),
+                            new Uint8(TOKEN_TYPE_ERC1155),
+                            new Utf8String(""),                                                   // name ignored by ERC-1155
                             new Utf8String(asset.getTokenStandard().name()),
                             new Bytes32(Erc20DeploymentService.uuidToBytes32(assetId))
                     ),
@@ -86,7 +91,7 @@ public class Erc721DeploymentService {
 
             TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, deployToken);
             String tokenAddress = extractTokenAddress(receipt);
-            log.info("ERC-721 deployed: assetId={} → tokenAddress={} tx={}",
+            log.info("ERC-1155 deployed: assetId={} → tokenAddress={} tx={}",
                     assetId, tokenAddress, receipt.getTransactionHash());
 
             return receipt.getTransactionHash();

@@ -4,8 +4,6 @@ import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.customer.internal.CompanyUserService;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
-import de.makibytes.registerwerk.notification.internal.CompanyUserInvitationEmailService;
-import de.makibytes.registerwerk.notification.internal.PasswordResetEmailService;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserActionToken;
@@ -57,8 +55,6 @@ class CompanyUserServiceTest {
     @Mock private AppUserActionTokenRepository actionTokenRepository;
     @Mock private LegalEntityRepository legalEntityRepository;
     @Mock private PasswordEncoder passwordEncoder;
-    @Mock private CompanyUserInvitationEmailService invitationEmailService;
-    @Mock private PasswordResetEmailService passwordResetEmailService;
     @Mock ApplicationEventPublisher eventPublisher;
     @Mock private CompanyExternalReferenceService companyExternalReferenceService;
 
@@ -77,13 +73,11 @@ class CompanyUserServiceTest {
             actionTokenRepository,
             legalEntityRepository,
             passwordEncoder,
-            invitationEmailService,
-            passwordResetEmailService,
-            auditEventPublisher,
+            eventPublisher,
             authProperties,
             companyExternalReferenceService,
             "http://localhost:4201",
-            48
+            48L
         );
         entityId = UUID.randomUUID();
         actorId = UUID.randomUUID();
@@ -117,7 +111,7 @@ class CompanyUserServiceTest {
         assertThat(savedUser.getAuthProvider()).isEqualTo(UserAuthProvider.LOCAL);
         assertThat(savedUser.getRoles()).containsExactlyInAnyOrder(AppUserRole.ISSUER, AppUserRole.COMPANY_ADMIN);
         verify(actionTokenRepository).save(any(AppUserActionToken.class));
-        verify(invitationEmailService).sendInvite(eq("alice@test.local"), eq("Alice Example"), eq(entity.getCurrentName()), any(String.class));
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test

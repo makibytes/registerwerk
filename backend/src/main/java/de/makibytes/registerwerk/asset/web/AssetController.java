@@ -1,9 +1,10 @@
 package de.makibytes.registerwerk.asset.web;
 
-import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
+import de.makibytes.registerwerk.externalref.ExternalRefApi;
 import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
 import de.makibytes.registerwerk.asset.internal.AssetLifecycleService;
 import de.makibytes.registerwerk.asset.internal.AssetService;
+import de.makibytes.registerwerk.kyc.KycApi;
 import de.makibytes.registerwerk.kyc.api.KycComplianceService;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
@@ -11,10 +12,10 @@ import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
 import de.makibytes.registerwerk.asset.web.dto.DocumentStatusResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycComplianceResponse;
-import de.makibytes.registerwerk.audit.api.AuditEvent;
+import de.makibytes.registerwerk.audit.AuditApi;
+import de.makibytes.registerwerk.audit.api.AuditEventView;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
-import de.makibytes.registerwerk.audit.api.AuditEventRepository;
 import de.makibytes.registerwerk.asset.web.dto.*;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.asset.web.AssetMapper;
@@ -46,32 +47,32 @@ public class AssetController {
     private final AssetService assetService;
     private final AssetLifecycleService assetLifecycleService;
     private final AssetDeploymentService assetDeploymentService;
-    private final AuditEventRepository auditEventRepository;
+    private final AuditApi auditApi;
     private final AssetMapper assetMapper;
     private final DeploymentMapper deploymentMapper;
     private final AssetDocumentRepository assetDocumentRepository;
-    private final KycComplianceService kycComplianceService;
-    private final CompanyExternalReferenceService companyExternalReferenceService;
+    private final KycApi kycApi;
+    private final ExternalRefApi externalRefApi;
 
     public AssetController(
             AssetService assetService,
             AssetLifecycleService assetLifecycleService,
             AssetDeploymentService assetDeploymentService,
-            AuditEventRepository auditEventRepository,
+            AuditApi auditApi,
             AssetMapper assetMapper,
             DeploymentMapper deploymentMapper,
             AssetDocumentRepository assetDocumentRepository,
-            KycComplianceService kycComplianceService,
-            CompanyExternalReferenceService companyExternalReferenceService) {
+            KycApi kycApi,
+            ExternalRefApi externalRefApi) {
         this.assetService = assetService;
         this.assetLifecycleService = assetLifecycleService;
         this.assetDeploymentService = assetDeploymentService;
-        this.auditEventRepository = auditEventRepository;
+        this.auditApi = auditApi;
         this.assetMapper = assetMapper;
         this.deploymentMapper = deploymentMapper;
         this.assetDocumentRepository = assetDocumentRepository;
-        this.kycComplianceService = kycComplianceService;
-        this.companyExternalReferenceService = companyExternalReferenceService;
+        this.kycApi = kycApi;
+        this.externalRefApi = externalRefApi;
     }
 
     /** Creates a new asset. */
@@ -118,7 +119,7 @@ public class AssetController {
             return ResponseEntity.badRequest().build();
         }
         KycComplianceService.ComplianceResult result =
-            kycComplianceService.checkCompliance(asset.getIssuerId(), jurisdiction);
+            kycApi.checkCompliance(asset.getIssuerId(), jurisdiction);
         return ResponseEntity.ok(toComplianceResponse(result));
     }
 
@@ -216,11 +217,10 @@ public class AssetController {
     /** Returns the audit log for an asset. */
     @GetMapping("/{id}/audit-log")
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#id, authentication)")
-    public ResponseEntity<PageResponse<AuditEvent>> getAuditLog(
+    public ResponseEntity<PageResponse<AuditEventView>> getAuditLog(
             @PathVariable UUID id,
             Pageable pageable) {
-        Page<AuditEvent> events = auditEventRepository.findBySubjectTypeAndSubjectId("Asset", id, pageable);
-        return ResponseEntity.ok(PageResponse.of(events));
+        return ResponseEntity.ok(PageResponse.of(auditApi.findBySubject("Asset", id, pageable)));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ public class AssetController {
                 base.createdAt(),
                 base.updatedAt(),
                 hasTermSheet,
-                companyExternalReferenceService
+                externalRefApi
                         .findExternalId(authentication, ExternalReferenceSubjectType.ASSET, asset.getId())
                         .orElse(null)
         );

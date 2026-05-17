@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.blockchain.api;
+package de.makibytes.registerwerk.blockchain.internal.tx;
 
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;

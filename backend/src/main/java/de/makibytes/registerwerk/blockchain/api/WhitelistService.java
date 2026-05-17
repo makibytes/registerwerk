@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.api.AssetDeployment;
 import de.makibytes.registerwerk.asset.api.AssetHolder;
 import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;

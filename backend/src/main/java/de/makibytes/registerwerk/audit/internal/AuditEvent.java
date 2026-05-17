@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.audit.api;
+package de.makibytes.registerwerk.audit.internal;
 
 import de.makibytes.registerwerk.audit.api.AuditableEvent;
 import jakarta.persistence.*;

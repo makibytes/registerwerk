@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import de.makibytes.registerwerk.blockchain.api.CantonTokenService;
+import de.makibytes.registerwerk.blockchain.api.CantonTokenOperations;
 import de.makibytes.registerwerk.blockchain.internal.TokenAdminService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
@@ -67,12 +67,12 @@ public class TokenAdminController {
     private static final Logger log = LoggerFactory.getLogger(TokenAdminController.class);
 
     private final TokenAdminService adminService;
-    private final CantonTokenService cantonTokenService;
+    private final CantonTokenOperations cantonTokenService;
     private final AssetDeploymentRepository deploymentRepository;
 
     public TokenAdminController(
             TokenAdminService adminService,
-            CantonTokenService cantonTokenService,
+            CantonTokenOperations cantonTokenService,
             AssetDeploymentRepository deploymentRepository) {
         this.adminService       = adminService;
         this.cantonTokenService = cantonTokenService;

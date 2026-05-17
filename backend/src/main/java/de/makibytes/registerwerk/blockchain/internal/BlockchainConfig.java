@@ -4,8 +4,8 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
-import de.makibytes.registerwerk.chain.api.CantonClientFactory;
-import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
+import de.makibytes.registerwerk.chain.api.CantonClientProvider;
+import de.makibytes.registerwerk.chain.api.CantonLedgerEndpoint;
 import de.makibytes.registerwerk.chain.api.CantonProperties;
 import de.makibytes.registerwerk.blockchain.api.EvmProperties;
 import de.makibytes.registerwerk.blockchain.api.Web3jClientFactory;
@@ -14,8 +14,10 @@ import de.makibytes.registerwerk.blockchain.api.SolanaProperties;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.lang.Nullable;
 import org.springframework.util.StringUtils;
 import org.web3j.protocol.Web3j;
 
@@ -32,15 +34,16 @@ public class BlockchainConfig {
     private final CantonProperties cantonProperties;
     private final Web3jClientFactory web3jClientFactory;
     private final SolanaClientFactory solanaClientFactory;
-    private final CantonClientFactory cantonClientFactory;
+    private final CantonClientProvider cantonClientFactory;
 
+    @Autowired
     public BlockchainConfig(
             EvmProperties evmProperties,
             SolanaProperties solanaProperties,
             CantonProperties cantonProperties,
             Web3jClientFactory web3jClientFactory,
             SolanaClientFactory solanaClientFactory,
-            CantonClientFactory cantonClientFactory) {
+            @Nullable CantonClientProvider cantonClientFactory) {
         this.evmProperties = evmProperties;
         this.solanaProperties = solanaProperties;
         this.cantonProperties = cantonProperties;
@@ -53,7 +56,7 @@ public class BlockchainConfig {
     public BlockchainClientRegistry blockchainClientRegistry() {
         Map<ChainDescriptor, Web3j>              evmClients    = new HashMap<>();
         Map<ChainDescriptor, RpcClient>          solanaClients = new HashMap<>();
-        Map<ChainDescriptor, CantonLedgerClient> cantonClients = new HashMap<>();
+        Map<ChainDescriptor, CantonLedgerEndpoint> cantonClients = new HashMap<>();
 
         if (evmProperties.getChains() != null) {
             evmProperties.getChains().forEach((chainName, networkMap) -> {
@@ -100,16 +103,18 @@ public class BlockchainConfig {
             log.info("Registered Solana client for {}", testnetDescriptor);
         }
 
-        // Canton mainnet
-        registerCantonClient(cantonClients, cantonProperties.getMainnet(), Chain.CANTON, Network.MAINNET);
-        // Canton devnet (TESTNET network maps to Canton DevNet)
-        registerCantonClient(cantonClients, cantonProperties.getDevnet(), Chain.CANTON, Network.TESTNET);
+        if (cantonClientFactory != null) {
+            // Canton mainnet
+            registerCantonClient(cantonClients, cantonProperties.getMainnet(), Chain.CANTON, Network.MAINNET);
+            // Canton devnet (TESTNET network maps to Canton DevNet)
+            registerCantonClient(cantonClients, cantonProperties.getDevnet(), Chain.CANTON, Network.TESTNET);
+        }
 
         return new BlockchainClientRegistry(evmClients, solanaClients, cantonClients);
     }
 
     private void registerCantonClient(
-            Map<ChainDescriptor, CantonLedgerClient> clients,
+            Map<ChainDescriptor, CantonLedgerEndpoint> clients,
             CantonProperties.NetworkProps props,
             Chain chain, Network network) {
         if (props == null || !StringUtils.hasText(props.getLedgerApiUrl())) return;

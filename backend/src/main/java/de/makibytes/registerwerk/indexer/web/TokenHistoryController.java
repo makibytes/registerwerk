@@ -5,7 +5,7 @@ import de.makibytes.registerwerk.indexer.internal.TokenHistoryService.TokenTrans
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.indexer.web.dto.TokenTransferResponse;
-import de.makibytes.registerwerk.asset.web.TokenTransferMapper;
+import de.makibytes.registerwerk.indexer.web.TokenTransferMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;

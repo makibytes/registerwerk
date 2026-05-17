@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import de.makibytes.registerwerk.kyc.internal.DocumentService;
+import de.makibytes.registerwerk.customer.internal.DocumentService;
 import de.makibytes.registerwerk.kyc.internal.KycService;
 import de.makibytes.registerwerk.kyc.api.KycComplianceService;
 import de.makibytes.registerwerk.kyc.api.KycDocument;

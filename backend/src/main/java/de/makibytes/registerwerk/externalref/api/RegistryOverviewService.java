@@ -8,9 +8,9 @@ import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.customer.web.dto.RegistryEntityNodeResponse;
-import de.makibytes.registerwerk.customer.web.dto.RegistryOverviewResponse;
-import de.makibytes.registerwerk.customer.web.dto.RegistryOverviewSummaryResponse;
 import de.makibytes.registerwerk.customer.web.dto.RegistryRelationshipResponse;
+import de.makibytes.registerwerk.externalref.web.dto.RegistryOverviewResponse;
+import de.makibytes.registerwerk.externalref.web.dto.RegistryOverviewSummaryResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

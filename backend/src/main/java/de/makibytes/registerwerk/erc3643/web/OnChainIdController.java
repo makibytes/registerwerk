@@ -6,11 +6,10 @@ import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.erc3643.api.OnchainClaim;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
+import de.makibytes.registerwerk.blockchain.BlockchainApi;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionRepository;
 import de.makibytes.registerwerk.erc3643.api.OnchainClaimRepository;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransaction;
 import de.makibytes.registerwerk.shared.api.AsyncDataStatus;
 import de.makibytes.registerwerk.erc3643.web.dto.ClaimInfo;
 import de.makibytes.registerwerk.erc3643.web.dto.OnchainIdentityResponse;
@@ -40,7 +39,7 @@ public class OnChainIdController {
     private final OnChainIdService onChainIdService;
     private final ClaimIssuanceService claimIssuanceService;
     private final ChainConfigRepository chainConfigRepository;
-    private final BlockchainTransactionRepository blockchainTransactionRepository;
+    private final BlockchainApi blockchainApi;
     private final OnchainIdentityRepository identityRepository;
     private final OnchainClaimRepository claimRepository;
 
@@ -48,13 +47,13 @@ public class OnChainIdController {
             OnChainIdService onChainIdService,
             ClaimIssuanceService claimIssuanceService,
             ChainConfigRepository chainConfigRepository,
-            BlockchainTransactionRepository blockchainTransactionRepository,
+            BlockchainApi blockchainApi,
             OnchainIdentityRepository identityRepository,
             OnchainClaimRepository claimRepository) {
         this.onChainIdService = onChainIdService;
         this.claimIssuanceService = claimIssuanceService;
         this.chainConfigRepository = chainConfigRepository;
-        this.blockchainTransactionRepository = blockchainTransactionRepository;
+        this.blockchainApi = blockchainApi;
         this.identityRepository = identityRepository;
         this.claimRepository = claimRepository;
     }
@@ -225,12 +224,10 @@ public class OnChainIdController {
     }
 
     private boolean isTransactionPending(String txHash) {
-        if (txHash == null || txHash.isBlank()) {
-            return false;
-        }
-        return blockchainTransactionRepository.findByTxHash(txHash)
-            .map(tx -> tx.getStatus() == BlockchainTransaction.Status.PENDING)
-            .orElse(true);
+        if (txHash == null || txHash.isBlank()) return false;
+        return blockchainApi.findByTxHash(txHash)
+                .map(tx -> "PENDING".equals(tx.status()))
+                .orElse(true);
     }
 
     private ClaimInfo toClaimInfo(OnchainClaim claim) {

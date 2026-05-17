@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.trading.internal;
 
-import de.makibytes.registerwerk.trading.internal.TradingVenueCode;
+import de.makibytes.registerwerk.trading.api.TradingVenueCode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 

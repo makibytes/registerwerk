@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.customer.internal;
 
 import de.makibytes.registerwerk.customer.CustomerApi;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

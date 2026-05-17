@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.blockchain.internal;
+package de.makibytes.registerwerk.blockchain.internal.deploy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -448,12 +448,12 @@ public class StarknetTokenService {
      * @param msgHash field element to sign
      * @return [r, s] signature pair
      */
-    static BigInteger[] starkSign(BigInteger privKey, BigInteger msgHash) {
+    public static BigInteger[] starkSign(BigInteger privKey, BigInteger msgHash) {
         BigInteger k = rfc6979Nonce(privKey, msgHash);
         return starkSignWithK(privKey, msgHash, k);
     }
 
-    static BigInteger[] starkSignWithK(BigInteger privKey, BigInteger msgHash, BigInteger k) {
+    public static BigInteger[] starkSignWithK(BigInteger privKey, BigInteger msgHash, BigInteger k) {
         BigInteger[] kG = ecMul(k, new BigInteger[]{GX, GY});
         BigInteger r = kG[0].mod(N);
         if (r.equals(BigInteger.ZERO)) {
@@ -499,7 +499,7 @@ public class StarknetTokenService {
 
     // ── EC arithmetic (Weierstrass, affine coordinates) ───────────────────────
 
-    static BigInteger[] ecAdd(BigInteger[] p1, BigInteger[] p2) {
+    public static BigInteger[] ecAdd(BigInteger[] p1, BigInteger[] p2) {
         if (p1 == null) return p2;
         if (p2 == null) return p1;
         if (p1[0].equals(p2[0])) {
@@ -513,7 +513,7 @@ public class StarknetTokenService {
         return new BigInteger[]{x.mod(P), y.mod(P)};
     }
 
-    static BigInteger[] ecDouble(BigInteger[] p) {
+    public static BigInteger[] ecDouble(BigInteger[] p) {
         if (p == null) return null;
         BigInteger lam = ALPHA.add(p[0].pow(2).multiply(BigInteger.valueOf(3)))
                 .multiply(p[1].multiply(BigInteger.TWO).modInverse(P)).mod(P);
@@ -522,7 +522,7 @@ public class StarknetTokenService {
         return new BigInteger[]{x.mod(P), y.mod(P)};
     }
 
-    static BigInteger[] ecMul(BigInteger scalar, BigInteger[] point) {
+    public static BigInteger[] ecMul(BigInteger scalar, BigInteger[] point) {
         BigInteger[] result = null;
         BigInteger[] addend = point;
         scalar = scalar.mod(N);
@@ -542,11 +542,11 @@ public class StarknetTokenService {
      * starknet_keccak = keccak256(data) & ((1 << 250) − 1).
      * Used for computing function selectors and the "invoke" prefix felt252.
      */
-    static BigInteger starknetKeccak(String text) {
+    public static BigInteger starknetKeccak(String text) {
         return starknetKeccak(text.getBytes(StandardCharsets.UTF_8));
     }
 
-    static BigInteger starknetKeccak(byte[] data) {
+    public static BigInteger starknetKeccak(byte[] data) {
         byte[] hash = keccak256(data);
         BigInteger result = new BigInteger(1, hash);
         return result.and(BigInteger.ONE.shiftLeft(250).subtract(BigInteger.ONE));
@@ -554,7 +554,7 @@ public class StarknetTokenService {
 
     // ── Utilities ─────────────────────────────────────────────────────────────
 
-    static BigInteger parseHexFelt(String hex) {
+    public static BigInteger parseHexFelt(String hex) {
         String h = hex.startsWith("0x") ? hex.substring(2) : hex;
         return new BigInteger(h, 16);
     }

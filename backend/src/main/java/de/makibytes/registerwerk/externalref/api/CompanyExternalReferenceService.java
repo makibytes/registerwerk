@@ -38,7 +38,7 @@ import java.util.UUID;
 
 @Service
 @Transactional
-public class CompanyExternalReferenceService {
+public class CompanyExternalReferenceService implements de.makibytes.registerwerk.externalref.ExternalRefApi {
 
     private final CompanyExternalReferenceRepository referenceRepository;
     private final LegalEntityRepository legalEntityRepository;
@@ -119,11 +119,12 @@ public class CompanyExternalReferenceService {
                 .map(CompanyExternalReference::getExternalId);
     }
 
+    @Override
     @Transactional(readOnly = true)
     public Map<UUID, String> findExternalIds(
             Authentication authentication,
             ExternalReferenceSubjectType subjectType,
-            Collection<UUID> subjectIds) {
+            List<UUID> subjectIds) {
         UUID ownerEntityId = SecurityUtils.extractEntityId(authentication);
         if (ownerEntityId == null || subjectIds == null || subjectIds.isEmpty()) {
             return Map.of();
@@ -134,6 +135,15 @@ public class CompanyExternalReferenceService {
         return resolved;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<CompanyExternalReferenceLookupResponse> list(Authentication authentication) {
+        UUID ownerEntityId = requireOwnerEntityId(authentication);
+        List<CompanyExternalReference> references =
+                referenceRepository.findByOwnerLegalEntityIdOrderByUpdatedAtDesc(ownerEntityId);
+        return buildLookupResponses(references);
+    }
+
     @Transactional(readOnly = true)
     public List<CompanyExternalReferenceLookupResponse> list(
             Authentication authentication,
@@ -142,6 +152,21 @@ public class CompanyExternalReferenceService {
         List<CompanyExternalReference> references = subjectType == null
                 ? referenceRepository.findByOwnerLegalEntityIdOrderByUpdatedAtDesc(ownerEntityId)
                 : referenceRepository.findByOwnerLegalEntityIdAndSubjectTypeOrderByUpdatedAtDesc(ownerEntityId, subjectType);
+        return buildLookupResponses(references);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CompanyExternalReferenceLookupResponse> lookup(
+            Authentication authentication,
+            ExternalReferenceSubjectType subjectType,
+            java.util.List<UUID> subjectIds) {
+        UUID ownerEntityId = requireOwnerEntityId(authentication);
+        List<CompanyExternalReference> references = subjectType == null
+                ? referenceRepository.findByOwnerLegalEntityIdOrderByUpdatedAtDesc(ownerEntityId)
+                        .stream().filter(r -> subjectIds.contains(r.getSubjectId())).toList()
+                : referenceRepository.findByOwnerLegalEntityIdAndSubjectTypeAndSubjectIdIn(
+                        ownerEntityId, subjectType, subjectIds);
         return buildLookupResponses(references);
     }
 

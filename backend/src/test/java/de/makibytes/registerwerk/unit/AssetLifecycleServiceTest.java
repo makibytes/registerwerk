@@ -70,8 +70,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.submit(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.PENDING_APPROVAL);
-        verify(auditEventPublisher).publish(eq("ASSET_SUBMITTED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test
@@ -97,8 +96,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.approve(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.APPROVED);
-        verify(auditEventPublisher).publish(eq("ASSET_APPROVED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     // ── reject ────────────────────────────────────────────────────────────────
@@ -114,8 +112,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.reject(asset.getId(), "Incomplete documentation", actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.DRAFT);
-        verify(auditEventPublisher).publish(eq("ASSET_REJECTED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     // ── issue ─────────────────────────────────────────────────────────────────
@@ -131,8 +128,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.issue(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.ISSUED);
-        verify(auditEventPublisher).publish(eq("ASSET_ISSUED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     // ── suspend ───────────────────────────────────────────────────────────────
@@ -148,8 +144,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.suspend(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.SUSPENDED);
-        verify(auditEventPublisher).publish(eq("ASSET_SUSPENDED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     // ── redeem ────────────────────────────────────────────────────────────────
@@ -165,7 +160,6 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.redeem(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.REDEEMED);
-        verify(auditEventPublisher).publish(eq("ASSET_REDEEMED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 }

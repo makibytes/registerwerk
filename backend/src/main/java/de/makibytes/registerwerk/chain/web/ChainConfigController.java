@@ -6,7 +6,7 @@ import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.web.dto.ChainConfigCreateRequest;
 import de.makibytes.registerwerk.chain.web.dto.ChainConfigResponse;
 import de.makibytes.registerwerk.chain.web.dto.ChainHealthResponse;
-import de.makibytes.registerwerk.asset.web.ChainConfigMapper;
+import de.makibytes.registerwerk.chain.web.ChainConfigMapper;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

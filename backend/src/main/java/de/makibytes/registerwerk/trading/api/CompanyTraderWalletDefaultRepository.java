@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.trading.api;
 
 import de.makibytes.registerwerk.trading.api.CompanyTraderWalletDefault;
-import de.makibytes.registerwerk.trading.internal.TradingAssetType;
+import de.makibytes.registerwerk.trading.api.TradingAssetType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

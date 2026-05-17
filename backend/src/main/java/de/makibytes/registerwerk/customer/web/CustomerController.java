@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.customer.web;
 
-import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
+import de.makibytes.registerwerk.externalref.ExternalRefApi;
 import de.makibytes.registerwerk.customer.internal.EntityHistoryService;
 import de.makibytes.registerwerk.customer.internal.LegalEntityService;
 import de.makibytes.registerwerk.customer.api.EntityMergeRecord;
@@ -13,7 +13,7 @@ import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
 import de.makibytes.registerwerk.customer.web.dto.EntityUpdateRequest;
 import de.makibytes.registerwerk.shared.api.PageResponse;
-import de.makibytes.registerwerk.asset.web.EntityMapper;
+import de.makibytes.registerwerk.customer.web.EntityMapper;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,13 +40,13 @@ public class CustomerController {
 
     private final LegalEntityService legalEntityService;
     private final EntityHistoryService entityHistoryService;
-    private final CompanyExternalReferenceService companyExternalReferenceService;
+    private final ExternalRefApi companyExternalReferenceService;
     private final EntityMapper entityMapper;
 
     public CustomerController(
             LegalEntityService legalEntityService,
             EntityHistoryService entityHistoryService,
-            CompanyExternalReferenceService companyExternalReferenceService,
+            ExternalRefApi companyExternalReferenceService,
             EntityMapper entityMapper) {
         this.legalEntityService = legalEntityService;
         this.entityHistoryService = entityHistoryService;
@@ -96,8 +96,7 @@ public class CustomerController {
     /**
      * Updates a legal entity (full or partial — all fields optional).
      */
-    @PutMapping("/{id}")
-    @PatchMapping("/{id}")
+    @RequestMapping(path = "/{id}", method = {RequestMethod.PUT, RequestMethod.PATCH})
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<EntityResponse> updateEntity(
             @PathVariable UUID id,

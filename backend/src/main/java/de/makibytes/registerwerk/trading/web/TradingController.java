@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.trading.web;
 
 import de.makibytes.registerwerk.asset.api.TokenStandard;
-import de.makibytes.registerwerk.trading.internal.PaymentOption;
-import de.makibytes.registerwerk.trading.internal.TradingAssetType;
-import de.makibytes.registerwerk.trading.internal.TradingVenueCode;
+import de.makibytes.registerwerk.trading.api.PaymentOption;
+import de.makibytes.registerwerk.trading.api.TradingAssetType;
+import de.makibytes.registerwerk.trading.api.TradingVenueCode;
 import de.makibytes.registerwerk.trading.web.dto.*;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.trading.internal.TradingService;

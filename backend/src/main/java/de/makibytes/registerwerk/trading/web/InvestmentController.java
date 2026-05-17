@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.trading.web;
 
-import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
+import de.makibytes.registerwerk.externalref.ExternalRefApi;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetHolder;
@@ -34,12 +34,12 @@ public class InvestmentController {
 
     private final AssetHolderRepository assetHolderRepository;
     private final AssetRepository assetRepository;
-    private final CompanyExternalReferenceService companyExternalReferenceService;
+    private final ExternalRefApi companyExternalReferenceService;
 
     public InvestmentController(
             AssetHolderRepository assetHolderRepository,
             AssetRepository assetRepository,
-            CompanyExternalReferenceService companyExternalReferenceService) {
+            ExternalRefApi companyExternalReferenceService) {
         this.assetHolderRepository = assetHolderRepository;
         this.assetRepository = assetRepository;
         this.companyExternalReferenceService = companyExternalReferenceService;

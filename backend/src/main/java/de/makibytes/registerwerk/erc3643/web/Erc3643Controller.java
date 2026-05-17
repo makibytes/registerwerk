@@ -20,20 +20,19 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
-import de.makibytes.registerwerk.erc3643.internal.Erc3643LifecycleService;
-import de.makibytes.registerwerk.erc3643.internal.IdentityRegistryService;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransaction;
+import de.makibytes.registerwerk.blockchain.BlockchainApi;
 import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopic;
+import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopicRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistry;
 import de.makibytes.registerwerk.erc3643.api.Erc3643Suite;
 import de.makibytes.registerwerk.erc3643.api.Erc3643TrustedIssuer;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionRepository;
-import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopicRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643TrustedIssuerRepository;
-import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
+import de.makibytes.registerwerk.erc3643.internal.Erc3643LifecycleService;
+import de.makibytes.registerwerk.erc3643.internal.IdentityRegistryService;
+import de.makibytes.registerwerk.externalref.ExternalRefApi;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.shared.api.AsyncDataStatus;
 import de.makibytes.registerwerk.blockchain.web.dto.FreezePartialRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.TxSubmissionResponse;
@@ -62,8 +61,8 @@ public class Erc3643Controller {
     private final LegalEntityRepository entityRepo;
     private final Erc3643TrustedIssuerRepository trustedIssuerRepo;
     private final Erc3643ClaimTopicRepository claimTopicRepo;
-    private final BlockchainTransactionRepository blockchainTransactionRepository;
-    private final CompanyExternalReferenceService companyExternalReferenceService;
+    private final BlockchainApi blockchainApi;
+    private final ExternalRefApi companyExternalReferenceService;
 
     public Erc3643Controller(Erc3643LifecycleService lifecycleService,
                              IdentityRegistryService identityRegistryService,
@@ -71,15 +70,15 @@ public class Erc3643Controller {
                              LegalEntityRepository entityRepo,
                              Erc3643TrustedIssuerRepository trustedIssuerRepo,
                              Erc3643ClaimTopicRepository claimTopicRepo,
-                             BlockchainTransactionRepository blockchainTransactionRepository,
-                             CompanyExternalReferenceService companyExternalReferenceService) {
+                             BlockchainApi blockchainApi,
+                             ExternalRefApi companyExternalReferenceService) {
         this.lifecycleService = lifecycleService;
         this.identityRegistryService = identityRegistryService;
         this.identityRepo = identityRepo;
         this.entityRepo = entityRepo;
         this.trustedIssuerRepo = trustedIssuerRepo;
         this.claimTopicRepo = claimTopicRepo;
-        this.blockchainTransactionRepository = blockchainTransactionRepository;
+        this.blockchainApi = blockchainApi;
         this.companyExternalReferenceService = companyExternalReferenceService;
     }
 
@@ -525,11 +524,9 @@ public class Erc3643Controller {
     }
 
     private boolean isTransactionPending(String txHash) {
-        if (txHash == null || txHash.isBlank()) {
-            return false;
-        }
-        return blockchainTransactionRepository.findByTxHash(txHash)
-                .map(tx -> tx.getStatus() == BlockchainTransaction.Status.PENDING)
+        if (txHash == null || txHash.isBlank()) return false;
+        return blockchainApi.findByTxHash(txHash)
+                .map(tx -> "PENDING".equals(tx.status()))
                 .orElse(true);
     }
 }

@@ -2,8 +2,7 @@ package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.onboarding.internal.OnboardingService;
 import de.makibytes.registerwerk.customer.internal.CompanyUserService;
-import de.makibytes.registerwerk.notification.internal.OnboardingEmailService;
-import de.makibytes.registerwerk.notification.internal.WelcomeEmailService;
+import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.onboarding.api.OnboardingToken;
@@ -44,10 +43,7 @@ class OnboardingServiceTest {
     private LegalEntityRepository legalEntityRepository;
 
     @Mock
-    private WelcomeEmailService welcomeEmailService;
-
-    @Mock
-    private OnboardingEmailService onboardingEmailService;
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
     private CompanyUserService companyUserService;
@@ -61,8 +57,7 @@ class OnboardingServiceTest {
         onboardingService = new OnboardingService(
             onboardingTokenRepository,
             legalEntityRepository,
-            welcomeEmailService,
-            onboardingEmailService,
+            eventPublisher,
             companyUserService,
             authProperties,
             48,

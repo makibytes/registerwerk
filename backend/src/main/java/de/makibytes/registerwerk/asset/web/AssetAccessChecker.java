@@ -1,40 +1,34 @@
 package de.makibytes.registerwerk.asset.web;
 
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransaction;
 import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionRepository;
+import de.makibytes.registerwerk.blockchain.BlockchainApi;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionView;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Security helper that controls access to assets and related resources.
- */
+/** Security helper that controls access to assets and related resources. */
 @Component
 public class AssetAccessChecker {
 
     private final AssetRepository assetRepository;
     private final AssetDeploymentRepository deploymentRepository;
-    private final BlockchainTransactionRepository transactionRepository;
+    private final BlockchainApi blockchainApi;
 
     public AssetAccessChecker(
             AssetRepository assetRepository,
             AssetDeploymentRepository deploymentRepository,
-            BlockchainTransactionRepository transactionRepository) {
+            BlockchainApi blockchainApi) {
         this.assetRepository = assetRepository;
         this.deploymentRepository = deploymentRepository;
-        this.transactionRepository = transactionRepository;
+        this.blockchainApi = blockchainApi;
     }
 
-    /**
-     * Returns true if the authenticated user may read the given asset.
-     * REGISTRY_ADMIN and AUDIT roles have unrestricted access; others may read only
-     * if their {@code entity_id} matches the asset's {@code issuerId}.
-     */
     public boolean canRead(UUID assetId, Authentication auth) {
         if (auth == null || !auth.isAuthenticated()) return false;
         if (SecurityUtils.isAdminOrAudit(auth)) return true;
@@ -42,34 +36,21 @@ public class AssetAccessChecker {
         return isOwnerOfAsset(assetId, auth);
     }
 
-    /**
-     * Returns true if the caller is the issuing company for this asset.
-     * Does NOT grant access to REGISTRY_ADMIN automatically — callers should
-     * compose: {@code hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(...)}.
-     */
     public boolean canActAsIssuer(UUID assetId, Authentication auth) {
         if (auth == null || !auth.isAuthenticated()) return false;
         return isOwnerOfAsset(assetId, auth);
     }
 
-    /**
-     * Returns true if the caller may read the given blockchain transaction
-     * (resolved by looking up the transaction's asset and calling {@link #canRead}).
-     */
     public boolean canReadTransaction(UUID txId, Authentication auth) {
         if (auth == null || !auth.isAuthenticated()) return false;
         if (SecurityUtils.isAdminOrAudit(auth)) return true;
-        Optional<BlockchainTransaction> tx = transactionRepository.findById(txId);
+        Optional<BlockchainTransactionView> tx = blockchainApi.findTransaction(txId);
         if (tx.isEmpty()) return false;
-        UUID assetId = tx.get().getAssetId();
+        UUID assetId = tx.get().assetId();
         if (assetId == null) return false;
         return canRead(assetId, auth);
     }
 
-    /**
-     * Returns true if the caller may read transactions for the given deployment
-     * (resolved by looking up the deployment's asset and calling {@link #canRead}).
-     */
     public boolean canReadDeployment(UUID deploymentId, Authentication auth) {
         if (auth == null || !auth.isAuthenticated()) return false;
         if (SecurityUtils.isAdminOrAudit(auth)) return true;
@@ -79,8 +60,6 @@ public class AssetAccessChecker {
         if (assetId == null) return false;
         return canRead(assetId, auth);
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private boolean isOwnerOfAsset(UUID assetId, Authentication auth) {
         UUID entityId = SecurityUtils.extractEntityId(auth);

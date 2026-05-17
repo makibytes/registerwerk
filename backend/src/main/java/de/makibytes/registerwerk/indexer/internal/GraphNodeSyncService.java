@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.indexer.internal.GraphNodeClient;
 import de.makibytes.registerwerk.indexer.internal.GraphNodeClient.GraphTransfer;
 import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
+import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import org.slf4j.Logger;

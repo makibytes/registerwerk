@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.integration;
 
-import de.makibytes.registerwerk.audit.api.AuditEvent;
-import de.makibytes.registerwerk.kyc.api.KycDocument;
+import de.makibytes.registerwerk.audit.internal.AuditEvent;
+import de.makibytes.registerwerk.audit.internal.AuditEventRepository;
 import de.makibytes.registerwerk.customer.api.EntityType;
-import de.makibytes.registerwerk.audit.api.AuditEventRepository;
+import de.makibytes.registerwerk.kyc.api.KycDocument;
 import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
 import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;

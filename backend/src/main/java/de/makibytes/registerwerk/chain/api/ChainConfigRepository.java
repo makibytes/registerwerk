@@ -23,4 +23,7 @@ public interface ChainConfigRepository extends JpaRepository<ChainConfig, UUID> 
 
     /** Returns all enabled configurations for a specific network type (MAINNET or TESTNET). */
     List<ChainConfig> findByNetworkTypeAndEnabledTrue(ChainConfig.NetworkType networkType);
+
+    /** Returns all chain configurations matching the identifier pattern (e.g. "ETHEREUM_MAINNET"). */
+    List<ChainConfig> findByIdentifierStartingWith(String prefix);
 }

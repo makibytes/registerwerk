@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.endpoint.web;
 
+import de.makibytes.registerwerk.blockchain.web.dto.AddressResolveRequest;
+import de.makibytes.registerwerk.blockchain.web.dto.AddressResolveResponse;
 import de.makibytes.registerwerk.endpoint.internal.EndpointService;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpoint;
 import de.makibytes.registerwerk.endpoint.web.dto.*;

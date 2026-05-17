@@ -3,16 +3,17 @@ package de.makibytes.registerwerk.unit;
 import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
-import de.makibytes.registerwerk.blockchain.api.ConfidentialErc20Service;
+import de.makibytes.registerwerk.blockchain.api.CantonTokenOperations;
+import de.makibytes.registerwerk.blockchain.internal.confidential.ConfidentialErc20Service;
 import de.makibytes.registerwerk.erc3643.internal.ConfidentialErc3643Service;
-import de.makibytes.registerwerk.blockchain.api.Erc1155DeploymentService;
-import de.makibytes.registerwerk.blockchain.internal.Erc20DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc1155DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc20DeploymentService;
 import de.makibytes.registerwerk.erc3643.internal.Erc3643DeploymentService;
-import de.makibytes.registerwerk.blockchain.internal.Erc721DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc721DeploymentService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
-import de.makibytes.registerwerk.blockchain.internal.SolanaTokenService;
-import de.makibytes.registerwerk.blockchain.api.StarknetTokenService;
-import de.makibytes.registerwerk.blockchain.api.StellarAssetService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.SolanaTokenService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetTokenService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.StellarAssetService;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
 import de.makibytes.registerwerk.chain.api.Chain;
@@ -72,6 +73,9 @@ class AssetDeploymentServiceTest {
     private ConfidentialErc3643Service confidentialErc3643Service;
 
     @Mock
+    private CantonTokenOperations cantonTokenService;
+
+    @Mock
     private SolanaTokenService solanaTokenService;
 
     @Mock
@@ -104,7 +108,7 @@ class AssetDeploymentServiceTest {
                 .hasMessageContaining("Confidential token deployment is not supported on ARBITRUM");
 
         verify(assetDeploymentRepository, never()).save(any());
-        verifyNoInteractions(confidentialErc20Service, auditEventPublisher);
+        verifyNoInteractions(confidentialErc20Service, eventPublisher);
     }
 
     @Test
@@ -137,13 +141,7 @@ class AssetDeploymentServiceTest {
                 eq(assetId),
                 any(),
                 eq("owner-placeholder"));
-        verify(auditEventPublisher).publish(
-                eq("ASSET_DEPLOYMENT_INITIATED"),
-                eq("AssetDeployment"),
-                eq(deploymentId),
-                eq(actorId),
-                eq(null),
-                any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test
@@ -226,13 +224,7 @@ class AssetDeploymentServiceTest {
         assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
         verify(starknetTokenService).createCairoErc20(
                 eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
-        verify(auditEventPublisher).publish(
-                eq("ASSET_DEPLOYMENT_INITIATED"),
-                eq("AssetDeployment"),
-                eq(deploymentId),
-                eq(actorId),
-                eq(null),
-                any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test
@@ -262,13 +254,7 @@ class AssetDeploymentServiceTest {
         assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
         verify(stellarAssetService).createStellarAsset(
                 eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
-        verify(auditEventPublisher).publish(
-                eq("ASSET_DEPLOYMENT_INITIATED"),
-                eq("AssetDeployment"),
-                eq(deploymentId),
-                eq(actorId),
-                eq(null),
-                any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test

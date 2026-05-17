@@ -1,7 +1,4 @@
-package de.makibytes.registerwerk.audit.api;
-
-import java.time.Instant;
-import java.util.UUID;
+package de.makibytes.registerwerk.audit.internal;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -9,7 +6,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import de.makibytes.registerwerk.audit.api.AuditEvent;
+import java.time.Instant;
+import java.util.UUID;
 
 public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
 

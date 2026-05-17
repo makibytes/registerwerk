@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.kyc.web.dto;
 
+import de.makibytes.registerwerk.asset.web.dto.DocumentStatusResponse;
 import java.util.List;
 import java.util.UUID;
 

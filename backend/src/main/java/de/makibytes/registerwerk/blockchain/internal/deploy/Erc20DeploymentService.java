@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.blockchain.internal;
+package de.makibytes.registerwerk.blockchain.internal.deploy;
 
 import java.math.BigInteger;
 import java.util.Arrays;
@@ -20,7 +20,10 @@ import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
+import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 
@@ -131,7 +134,7 @@ public class Erc20DeploymentService {
                 "TokenDeployed event not found in receipt: " + receipt.getTransactionHash());
     }
 
-    static byte[] uuidToBytes32(UUID uuid) {
+    public static byte[] uuidToBytes32(UUID uuid) {
         byte[] b = new byte[32];
         long hi = uuid.getMostSignificantBits();
         long lo = uuid.getLeastSignificantBits();

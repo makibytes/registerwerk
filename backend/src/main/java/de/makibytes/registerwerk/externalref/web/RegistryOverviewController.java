@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.externalref.web;
 
 import de.makibytes.registerwerk.externalref.api.RegistryOverviewService;
-import de.makibytes.registerwerk.customer.web.dto.RegistryOverviewResponse;
+import de.makibytes.registerwerk.externalref.web.dto.RegistryOverviewResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;

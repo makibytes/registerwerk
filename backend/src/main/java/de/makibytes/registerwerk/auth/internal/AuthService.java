@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.auth.internal;
 
 import de.makibytes.registerwerk.shared.InvalidCredentialsException;
 import de.makibytes.registerwerk.shared.LoginDisabledException;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;

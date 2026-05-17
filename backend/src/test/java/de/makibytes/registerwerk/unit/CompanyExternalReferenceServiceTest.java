@@ -68,7 +68,7 @@ class CompanyExternalReferenceServiceTest {
                 suiteRepository,
                 assetDeploymentRepository,
                 onchainIdentityRepository,
-                auditEventPublisher
+                eventPublisher
         );
     }
 

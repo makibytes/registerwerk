@@ -1,8 +1,8 @@
 package de.makibytes.registerwerk.blockchain.web;
 
-import de.makibytes.registerwerk.shared.EntityNotFoundException;
-import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionRepository;
+import de.makibytes.registerwerk.blockchain.BlockchainApi;
 import de.makibytes.registerwerk.blockchain.web.dto.TxRecordResponse;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -16,25 +16,23 @@ import java.util.UUID;
  * Read-only access to blockchain transaction records.
  *
  * <p>Base path: {@code /api/v1/transactions}
- *
- * <p>Frontend uses this to poll pending transactions and display history.
  */
 @RestController
 @RequestMapping("/api/v1/transactions")
 @PreAuthorize("isAuthenticated()")
 public class BlockchainTransactionController {
 
-    private final BlockchainTransactionRepository repository;
+    private final BlockchainApi blockchainApi;
 
-    public BlockchainTransactionController(BlockchainTransactionRepository repository) {
-        this.repository = repository;
+    public BlockchainTransactionController(BlockchainApi blockchainApi) {
+        this.blockchainApi = blockchainApi;
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canReadTransaction(#id, authentication)")
     public ResponseEntity<TxRecordResponse> get(@PathVariable UUID id) {
         return ResponseEntity.ok(TxRecordResponse.from(
-                repository.findById(id)
+                blockchainApi.findTransaction(id)
                         .orElseThrow(() -> new EntityNotFoundException("BlockchainTransaction", id))));
     }
 
@@ -52,14 +50,11 @@ public class BlockchainTransactionController {
 
         Page<TxRecordResponse> result;
         if (deploymentId != null) {
-            result = repository.findByDeploymentIdOrderByCreatedAtDesc(deploymentId, pageable)
-                    .map(TxRecordResponse::from);
+            result = blockchainApi.findTransactionsByDeployment(deploymentId, pageable).map(TxRecordResponse::from);
         } else if (assetId != null) {
-            result = repository.findByAssetIdOrderByCreatedAtDesc(assetId, pageable)
-                    .map(TxRecordResponse::from);
+            result = blockchainApi.findTransactionsByAsset(assetId, pageable).map(TxRecordResponse::from);
         } else {
-            result = repository.findAllByOrderByCreatedAtDesc(pageable)
-                    .map(TxRecordResponse::from);
+            result = blockchainApi.findAllTransactions(pageable).map(TxRecordResponse::from);
         }
         return ResponseEntity.ok(result);
     }

@@ -1,13 +1,14 @@
-package de.makibytes.registerwerk.customer.internal;
+package de.makibytes.registerwerk.onboarding.internal;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.onboarding.events.OnboardingCompletedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
-import de.makibytes.registerwerk.onboarding.api.OnboardingToken;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.customer.internal.CompanyUserService;
+import de.makibytes.registerwerk.onboarding.api.OnboardingToken;
 import de.makibytes.registerwerk.onboarding.api.OnboardingTokenRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -6,16 +6,17 @@ import de.makibytes.registerwerk.trading.events.TradeListingCancelledEvent;
 import de.makibytes.registerwerk.trading.events.TraderSettingsUpdatedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
-import de.makibytes.registerwerk.trading.internal.TradingProperties;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
+import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetHolder;
-import de.makibytes.registerwerk.endpoint.api.AddressEndpoint;
+import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.trading.internal.*;
-// TODO: replace wildcard with specific module repositories
-import de.makibytes.registerwerk.trading.web.dto.*;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpoint;
+import de.makibytes.registerwerk.endpoint.api.AddressEndpointRepository;
+import de.makibytes.registerwerk.trading.api.*;
+import de.makibytes.registerwerk.trading.web.dto.*;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -212,7 +213,7 @@ public class TradingService {
             UUID entityId,
             String search,
             TradingAssetType assetType,
-            de.makibytes.registerwerk.domain.enums.TokenStandard tokenStandard,
+            de.makibytes.registerwerk.asset.api.TokenStandard tokenStandard,
             TradingVenueCode venueCode,
             PaymentOption paymentOption,
             BigDecimal minPrice,

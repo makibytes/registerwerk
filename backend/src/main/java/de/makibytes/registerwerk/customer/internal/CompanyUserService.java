@@ -31,6 +31,7 @@ import de.makibytes.registerwerk.auth.web.dto.PublicPasswordResetCompleteRequest
 import de.makibytes.registerwerk.auth.web.dto.PublicUserActionTokenInfoResponse;
 import de.makibytes.registerwerk.auth.web.dto.PublicUserRegistrationCompleteRequest;
 import de.makibytes.registerwerk.customer.web.dto.UpdateCompanyUserRolesRequest;
+import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

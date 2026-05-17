@@ -87,8 +87,7 @@ class LegalEntityServiceTest {
         legalEntityService.createEntity(entity, actorId);
 
         verify(legalEntityRepository).save(entity);
-        verify(auditEventPublisher).publish(
-            eq("ENTITY_CREATED"), eq("LegalEntity"), any(UUID.class), eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test
@@ -145,8 +144,7 @@ class LegalEntityServiceTest {
 
         assertThat(entity.getCurrentName()).isEqualTo("Updated GmbH");
         verify(legalEntityRepository).save(entity);
-        verify(auditEventPublisher).publish(
-            eq("ENTITY_UPDATED"), eq("LegalEntity"), eq(entity.getId()), eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test

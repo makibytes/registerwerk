@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.domain.erc3643;
+package de.makibytes.registerwerk.erc3643.api;
 
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;

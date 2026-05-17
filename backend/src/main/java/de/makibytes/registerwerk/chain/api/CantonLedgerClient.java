@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
  * <p>Construct via {@link CantonClientFactory}; manage lifecycle through
  * {@link de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry}.
  */
-public class CantonLedgerClient implements AutoCloseable {
+public class CantonLedgerClient implements CantonLedgerEndpoint {
 
     private static final Logger log = LoggerFactory.getLogger(CantonLedgerClient.class);
 
