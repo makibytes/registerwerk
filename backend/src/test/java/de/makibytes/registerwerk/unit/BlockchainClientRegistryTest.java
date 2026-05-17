@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
-import de.makibytes.registerwerk.application.blockchain.ChainDescriptor;
-import de.makibytes.registerwerk.domain.enums.Chain;
-import de.makibytes.registerwerk.domain.enums.Network;
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.chain.api.Network;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

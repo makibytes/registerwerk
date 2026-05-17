@@ -20,6 +20,7 @@
 
   <properties>
     <java.version>25</java.version>
+    <spring-modulith.version>2.0.5</spring-modulith.version>
     <web3j.version>4.12.3</web3j.version>
     <solanaj.version>1.18.2</solanaj.version>
     <daml-bindings.version>3.2.0</daml-bindings.version>
@@ -37,6 +38,18 @@
     -->
     <docker.api.test.version>1.54</docker.api.test.version>
   </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.modulith</groupId>
+        <artifactId>spring-modulith-bom</artifactId>
+        <version>${spring-modulith.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
   <dependencies>
     <!-- ── Spring Boot ─────────────────────────────────────────────────────── -->
@@ -164,6 +177,26 @@
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-lang3</artifactId>
+    </dependency>
+
+    <!-- ── Spring Modulith ───────────────────────────────────────────────── -->
+    <dependency>
+      <groupId>org.springframework.modulith</groupId>
+      <artifactId>spring-modulith-starter-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.modulith</groupId>
+      <artifactId>spring-modulith-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.modulith</groupId>
+      <artifactId>spring-modulith-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.modulith</groupId>
+      <artifactId>spring-modulith-docs</artifactId>
+      <scope>test</scope>
     </dependency>
 
     <!-- ── Test ────────────────────────────────────────────────────────────── -->

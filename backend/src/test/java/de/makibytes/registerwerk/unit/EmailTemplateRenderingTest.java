@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.notification.EmailService;
-import de.makibytes.registerwerk.application.notification.OnboardingEmailService;
-import de.makibytes.registerwerk.application.notification.WelcomeEmailService;
-import de.makibytes.registerwerk.infrastructure.email.SmtpEmailAdapter;
+import de.makibytes.registerwerk.notification.internal.EmailService;
+import de.makibytes.registerwerk.notification.internal.OnboardingEmailService;
+import de.makibytes.registerwerk.notification.internal.WelcomeEmailService;
+import de.makibytes.registerwerk.notification.internal.SmtpEmailAdapter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

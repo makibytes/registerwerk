@@ -1,11 +1,11 @@
 package de.makibytes.registerwerk.unit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import de.makibytes.registerwerk.application.blockchain.StarknetTokenService;
-import de.makibytes.registerwerk.application.wallet.WalletSigner;
-import de.makibytes.registerwerk.domain.chain.ChainConfig;
-import de.makibytes.registerwerk.domain.enums.Network;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.ChainConfigRepository;
+import de.makibytes.registerwerk.blockchain.api.StarknetTokenService;
+import de.makibytes.registerwerk.wallet.api.WalletSigner;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.Network;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

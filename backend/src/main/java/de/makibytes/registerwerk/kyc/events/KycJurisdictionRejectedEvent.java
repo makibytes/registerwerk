@@ -1,0 +1,12 @@
+package de.makibytes.registerwerk.kyc.events;
+
+import de.makibytes.registerwerk.audit.api.AuditableEvent;
+import java.util.Map;
+import java.util.UUID;
+
+public record KycJurisdictionRejectedEvent(UUID entityId, UUID actorId, String actorRole, Map<String, Object> details) implements AuditableEvent {
+    public String eventType()   { return "KYC_JURISDICTION_REJECTED"; }
+    public String subjectType() { return "LegalEntity"; }
+    public UUID   subjectId()   { return entityId; }
+    public Map<String, Object> payload() { return details != null ? details : Map.of(); }
+}

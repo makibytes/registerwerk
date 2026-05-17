@@ -67,13 +67,19 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,modulith
   endpoint:
     health:
       show-details: when-authorized
   health:
     mail:
       enabled: false
+
+spring.modulith:
+  events:
+    jdbc-schema-initialization:
+      enabled: false
+  republish-outstanding-events-on-restart: true
 
 springdoc:
   api-docs:

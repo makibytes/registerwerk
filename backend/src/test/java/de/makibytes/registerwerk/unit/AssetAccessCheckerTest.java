@@ -1,12 +1,12 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.domain.asset.Asset;
-import de.makibytes.registerwerk.domain.asset.AssetDeployment;
-import de.makibytes.registerwerk.domain.blockchain.BlockchainTransaction;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.BlockchainTransactionRepository;
-import de.makibytes.registerwerk.web.security.AssetAccessChecker;
+import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetDeployment;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransaction;
+import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionRepository;
+import de.makibytes.registerwerk.asset.web.AssetAccessChecker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.Authentication;

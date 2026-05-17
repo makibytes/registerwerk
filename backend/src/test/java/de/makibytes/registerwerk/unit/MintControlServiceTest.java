@@ -1,11 +1,11 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
-import de.makibytes.registerwerk.application.blockchain.MintControlService;
-import de.makibytes.registerwerk.domain.asset.AssetDeployment;
-import de.makibytes.registerwerk.domain.asset.MintControlRule;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.MintControlRuleRepository;
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.MintControlService;
+import de.makibytes.registerwerk.asset.api.AssetDeployment;
+import de.makibytes.registerwerk.asset.api.MintControlRule;
+import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.asset.api.MintControlRuleRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

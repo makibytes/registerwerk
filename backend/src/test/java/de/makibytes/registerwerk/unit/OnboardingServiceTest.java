@@ -1,16 +1,16 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.customer.OnboardingService;
-import de.makibytes.registerwerk.application.customer.CompanyUserService;
-import de.makibytes.registerwerk.application.notification.OnboardingEmailService;
-import de.makibytes.registerwerk.application.notification.WelcomeEmailService;
-import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
-import de.makibytes.registerwerk.domain.entity.LegalEntity;
-import de.makibytes.registerwerk.domain.entity.OnboardingToken;
-import de.makibytes.registerwerk.domain.enums.EntityStatus;
-import de.makibytes.registerwerk.domain.enums.EntityType;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.OnboardingTokenRepository;
+import de.makibytes.registerwerk.onboarding.internal.OnboardingService;
+import de.makibytes.registerwerk.customer.internal.CompanyUserService;
+import de.makibytes.registerwerk.notification.internal.OnboardingEmailService;
+import de.makibytes.registerwerk.notification.internal.WelcomeEmailService;
+import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.onboarding.api.OnboardingToken;
+import de.makibytes.registerwerk.customer.api.EntityStatus;
+import de.makibytes.registerwerk.customer.api.EntityType;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.onboarding.api.OnboardingTokenRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

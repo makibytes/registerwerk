@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.auth.JwtMintingService;
-import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
-import de.makibytes.registerwerk.domain.entity.AppUser;
-import de.makibytes.registerwerk.domain.enums.AppUserRole;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
+import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

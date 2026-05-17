@@ -1,17 +1,17 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.asset.AssetService;
-import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
-import de.makibytes.registerwerk.application.customer.EntityNumberGenerator;
-import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
-import de.makibytes.registerwerk.domain.asset.Asset;
-import de.makibytes.registerwerk.domain.enums.AssetStatus;
-import de.makibytes.registerwerk.domain.enums.Chain;
-import de.makibytes.registerwerk.domain.enums.Jurisdiction;
-import de.makibytes.registerwerk.domain.enums.Network;
-import de.makibytes.registerwerk.domain.enums.OnchainLevel;
-import de.makibytes.registerwerk.domain.enums.TokenStandard;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
+import de.makibytes.registerwerk.asset.internal.AssetService;
+import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.customer.internal.EntityNumberGenerator;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.customer.api.Jurisdiction;
+import de.makibytes.registerwerk.chain.api.Network;
+import de.makibytes.registerwerk.asset.api.OnchainLevel;
+import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,7 +37,7 @@ class AssetServiceTest {
     private AssetRepository assetRepository;
 
     @Mock
-    private AuditEventPublisher auditEventPublisher;
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
     private EntityNumberGenerator entityNumberGenerator;

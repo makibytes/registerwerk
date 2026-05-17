@@ -1,25 +1,25 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.asset.AssetDeploymentService;
-import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
-import de.makibytes.registerwerk.application.blockchain.BlockchainClientRegistry;
-import de.makibytes.registerwerk.application.blockchain.ConfidentialErc20Service;
-import de.makibytes.registerwerk.application.blockchain.ConfidentialErc3643Service;
-import de.makibytes.registerwerk.application.blockchain.Erc1155DeploymentService;
-import de.makibytes.registerwerk.application.blockchain.Erc20DeploymentService;
-import de.makibytes.registerwerk.application.blockchain.Erc3643DeploymentService;
-import de.makibytes.registerwerk.application.blockchain.Erc721DeploymentService;
-import de.makibytes.registerwerk.application.blockchain.EvmContractService;
-import de.makibytes.registerwerk.application.blockchain.SolanaTokenService;
-import de.makibytes.registerwerk.application.blockchain.StarknetTokenService;
-import de.makibytes.registerwerk.application.blockchain.StellarAssetService;
-import de.makibytes.registerwerk.domain.asset.Asset;
-import de.makibytes.registerwerk.domain.asset.AssetDeployment;
-import de.makibytes.registerwerk.domain.enums.Chain;
-import de.makibytes.registerwerk.domain.enums.Network;
-import de.makibytes.registerwerk.domain.enums.TokenStandard;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
+import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
+import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.ConfidentialErc20Service;
+import de.makibytes.registerwerk.erc3643.internal.ConfidentialErc3643Service;
+import de.makibytes.registerwerk.blockchain.api.Erc1155DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.Erc20DeploymentService;
+import de.makibytes.registerwerk.erc3643.internal.Erc3643DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.Erc721DeploymentService;
+import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.internal.SolanaTokenService;
+import de.makibytes.registerwerk.blockchain.api.StarknetTokenService;
+import de.makibytes.registerwerk.blockchain.api.StellarAssetService;
+import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetDeployment;
+import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.chain.api.Network;
+import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -51,7 +51,7 @@ class AssetDeploymentServiceTest {
     private AssetRepository assetRepository;
 
     @Mock
-    private AuditEventPublisher auditEventPublisher;
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
     private Erc20DeploymentService erc20DeploymentService;

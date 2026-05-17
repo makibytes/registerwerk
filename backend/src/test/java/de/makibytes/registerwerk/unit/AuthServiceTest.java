@@ -1,14 +1,14 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.auth.AuthService;
-import de.makibytes.registerwerk.application.auth.AuthService.LoginResult;
-import de.makibytes.registerwerk.application.auth.JwtMintingService;
-import de.makibytes.registerwerk.application.exception.InvalidCredentialsException;
-import de.makibytes.registerwerk.application.exception.LoginDisabledException;
-import de.makibytes.registerwerk.config.RegisterwerkAuthProperties;
-import de.makibytes.registerwerk.domain.entity.AppUser;
-import de.makibytes.registerwerk.domain.enums.AppUserRole;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AppUserRepository;
+import de.makibytes.registerwerk.auth.internal.AuthService;
+import de.makibytes.registerwerk.auth.internal.AuthService.LoginResult;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
+import de.makibytes.registerwerk.shared.InvalidCredentialsException;
+import de.makibytes.registerwerk.shared.LoginDisabledException;
+import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRole;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
