@@ -261,6 +261,7 @@
             <exclude>**/CantonLedgerClient.java</exclude>
             <exclude>**/CantonClientFactory.java</exclude>
             <exclude>**/CantonTokenService.java</exclude>
+            <exclude>**/CantonBondService.java</exclude>
             <exclude>**/CantonPartyAllocator.java</exclude>
             <exclude>**/CantonTransferSyncService.java</exclude>
           </excludes>

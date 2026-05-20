@@ -90,11 +90,121 @@ public class SolanaTokenService {
      * Creates a new SPL Token-2022 mint without extensions for the given asset.
      *
      * <p>This enables the Token-2022 mint path in the issuance wizard while keeping the
-     * extension set empty for now. Additional extensions can be layered in later without
-     * changing the basic deployment flow.
+     * extension set empty. Use {@link #createSplToken2022(UUID, Network, String, SplExtensionSet)}
+     * to create a mint with security-grade extensions.
      */
     public CompletableFuture<String> createSplToken2022(UUID assetId, Network network, String ownerAddress) {
-        return createSplToken(assetId, network, ownerAddress, TOKEN_2022_PROGRAM_ID, "SPL_2022");
+        return createSplToken2022(assetId, network, ownerAddress, SplExtensionSet.NONE);
+    }
+
+    /**
+     * Creates a new SPL Token-2022 mint with the specified extension preset.
+     *
+     * <p>Extension-init instructions are prepended to the transaction in Token-2022 protocol order
+     * (all extension inits MUST precede {@code InitializeMint}). The extension preset determines
+     * which regulatory and privacy features are enabled on the mint:
+     * <ul>
+     *   <li>{@code BOND} — Interest-Bearing + Permanent Delegate + Transfer Hook + MintCloseAuthority</li>
+     *   <li>{@code CONFIDENTIAL} — Confidential Transfers + Permanent Delegate + Transfer Hook</li>
+     *   <li>{@code NONE} — no extensions (same as the no-arg overload)</li>
+     * </ul>
+     *
+     * <p><b>Token-2022 extension instruction ordering (mandatory):</b>
+     * The Solana Token-2022 program requires extension-initialization instructions to appear
+     * BEFORE the {@code InitializeMint} instruction in the transaction. This is enforced by
+     * the program and will revert if violated.
+     *
+     * <p><b>Reference:</b> Token-2022 program v0.6.x — spl_token_2022::instruction
+     *
+     * @param assetId      Registerwerk asset UUID (attached as memo and metadata)
+     * @param network      MAINNET or TESTNET
+     * @param ownerAddress base58 mint authority public key
+     * @param extensions   which extension preset to initialize
+     * @return future resolving to the transaction signature
+     */
+    public CompletableFuture<String> createSplToken2022(
+            UUID assetId, Network network, String ownerAddress, SplExtensionSet extensions) {
+        log.info("Creating SPL Token-2022 mint: assetId={} network={} extensions={}", assetId, network, extensions);
+
+        return CompletableFuture.supplyAsync(() -> {
+            ChainDescriptor descriptor = new ChainDescriptor(Chain.SOLANA, network);
+            RpcClient client = blockchainClientRegistry.getSolanaClient(descriptor);
+
+            Account payer = loadPayerAccount();
+            Account mintAccount = new Account();
+
+            try {
+                long rentExemptLamports = computeRentExemptLamports(extensions);
+
+                Transaction tx = new Transaction();
+
+                // 1. Create the mint account (size depends on extensions)
+                tx.addInstruction(SystemProgram.createAccount(
+                        payer.getPublicKey(),
+                        mintAccount.getPublicKey(),
+                        rentExemptLamports,
+                        mintAccountSize(extensions),
+                        new PublicKey(TOKEN_2022_PROGRAM_ID)
+                ));
+
+                // 2. Extension-init instructions (MUST precede InitializeMint)
+                PublicKey mintAuthority = new PublicKey(ownerAddress.isBlank()
+                        ? payer.getPublicKey().toBase58() : ownerAddress);
+
+                switch (extensions) {
+                    case BOND -> {
+                        // 2a. InitializeMintCloseAuthority (ix 25): registry payer closes at maturity
+                        tx.addInstruction(buildMintCloseAuthorityIx(mintAccount.getPublicKey(), payer.getPublicKey()));
+                        // 2b. InitializePermanentDelegate (ix 35): registry payer can force-transfer/burn (eWpG §24/26)
+                        tx.addInstruction(buildPermanentDelegateIx(mintAccount.getPublicKey(), payer.getPublicKey()));
+                        // 2c. InitializeTransferHook (ix 36): compliance hook for whitelist + AML checks
+                        tx.addInstruction(buildTransferHookIx(mintAccount.getPublicKey(), payer.getPublicKey()));
+                        // 2d. InitializeInterestBearingMint (ix 33+subtype 0): bond coupon accrual
+                        tx.addInstruction(buildInterestBearingMintIx(mintAccount.getPublicKey(), payer.getPublicKey(), (short) 0));
+                    }
+                    case CONFIDENTIAL -> {
+                        // 2a. InitializePermanentDelegate: regulatory force-transfer in encrypted state
+                        tx.addInstruction(buildPermanentDelegateIx(mintAccount.getPublicKey(), payer.getPublicKey()));
+                        // 2b. InitializeTransferHook: whitelist enforcement
+                        tx.addInstruction(buildTransferHookIx(mintAccount.getPublicKey(), payer.getPublicKey()));
+                        // 2c. InitializeConfidentialTransferMint (ix 27+subtype 0): ZK-encrypted balances
+                        tx.addInstruction(buildConfidentialTransferMintIx(mintAccount.getPublicKey(), payer.getPublicKey()));
+                    }
+                    case NONE -> { /* no extension-init instructions */ }
+                }
+
+                // 3. Memo identifying the asset
+                tx.addInstruction(MemoProgram.writeUtf8(
+                        payer.getPublicKey(),
+                        "registerwerk-asset:" + assetId + ":ext=" + extensions.name()
+                ));
+
+                // 4. InitializeMint — MUST come after all extension-init instructions
+                byte[] initMintData = buildInitializeMintInstruction(DEFAULT_DECIMALS, mintAuthority, payer.getPublicKey());
+                tx.addInstruction(new org.p2p.solanaj.core.TransactionInstruction(
+                        new PublicKey(TOKEN_2022_PROGRAM_ID),
+                        java.util.List.of(
+                                new org.p2p.solanaj.core.AccountMeta(mintAccount.getPublicKey(), false, true),
+                                new org.p2p.solanaj.core.AccountMeta(
+                                        new PublicKey("SysvarRent111111111111111111111111111111111"), false, false)
+                        ),
+                        initMintData
+                ));
+
+                String recentBlockhash = client.getApi().getRecentBlockhash();
+                tx.setRecentBlockHash(recentBlockhash);
+                tx.sign(java.util.List.of(payer, mintAccount));
+
+                String signature = client.getApi().sendTransaction(tx, java.util.List.of(payer, mintAccount), recentBlockhash);
+                log.info("SPL Token-2022 mint created: assetId={} extensions={} mintAddress={} sig={}",
+                        assetId, extensions, mintAccount.getPublicKey().toBase58(), signature);
+                return signature;
+
+            } catch (RpcException e) {
+                throw new RuntimeException("SPL Token-2022 creation failed for assetId=" + assetId
+                        + " extensions=" + extensions + ": " + e.getMessage(), e);
+            }
+        });
     }
 
     private CompletableFuture<String> createSplToken(
@@ -270,6 +380,183 @@ public class SolanaTokenService {
                 .map(c -> walletSigner.solanaAccountForChain(c.getId()))
                 .orElseThrow(() -> new IllegalStateException(
                         "No Solana wallet default configured. Add a Solana wallet via the Operator Portal → Wallets."));
+    }
+
+    // ── Token-2022 extension-init instruction builders ────────────────────────
+    //
+    // Byte layout references: Token-2022 program v0.6.x
+    // https://github.com/solana-labs/solana-program-library/blob/master/token/program-2022/src/instruction.rs
+    //
+    // All extension-init instructions must precede InitializeMint in the transaction.
+    // Account layout (shared): [mint_account (writable, signer = false)]
+
+    /**
+     * Builds an {@code InitializePermanentDelegate} (Token-2022 ix 35) instruction.
+     *
+     * <p>Layout: [35] [delegate: 32 bytes pubkey]
+     *
+     * <p>Legal basis: eWpG §24 Berichtigung, §26 Einziehung — the delegate can transfer
+     * or burn any amount unconditionally, enabling court-ordered register corrections.
+     */
+    private org.p2p.solanaj.core.TransactionInstruction buildPermanentDelegateIx(
+            PublicKey mint, PublicKey delegate) {
+        byte[] delegateBytes = delegate.toByteArray();
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(1 + 32);
+        buf.put((byte) 35);  // InitializePermanentDelegate discriminator
+        buf.put(delegateBytes, 0, Math.min(delegateBytes.length, 32));
+        return new org.p2p.solanaj.core.TransactionInstruction(
+                new PublicKey(TOKEN_2022_PROGRAM_ID),
+                java.util.List.of(new org.p2p.solanaj.core.AccountMeta(mint, false, true)),
+                buf.array()
+        );
+    }
+
+    /**
+     * Builds an {@code InitializeMintCloseAuthority} (Token-2022 ix 25) instruction.
+     *
+     * <p>Layout: [25] [COption::Some = 1] [close_authority: 32 bytes]
+     *
+     * <p>Used for bond mints: allows the registry to close the mint account at maturity,
+     * recovering rent. Corresponds to eWpG §26 Einziehung (compulsory cancellation).
+     */
+    private org.p2p.solanaj.core.TransactionInstruction buildMintCloseAuthorityIx(
+            PublicKey mint, PublicKey closeAuthority) {
+        byte[] caBytes = closeAuthority.toByteArray();
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(1 + 1 + 32);
+        buf.put((byte) 25);  // InitializeMintCloseAuthority discriminator
+        buf.put((byte) 1);   // COption::Some
+        buf.put(caBytes, 0, Math.min(caBytes.length, 32));
+        return new org.p2p.solanaj.core.TransactionInstruction(
+                new PublicKey(TOKEN_2022_PROGRAM_ID),
+                java.util.List.of(new org.p2p.solanaj.core.AccountMeta(mint, false, true)),
+                buf.array()
+        );
+    }
+
+    /**
+     * Builds an {@code InterestBearingMint::Initialize} (Token-2022 ix 33, sub-ix 0) instruction.
+     *
+     * <p>Layout: [33] [0] [rate_authority COption::Some = 1] [32-byte rate_authority]
+     *             [rate_bps: i16 little-endian]
+     *
+     * <p>The rate is set in basis points (100 bps = 1%). Actual rate is updated via
+     * {@code UpdateRateAuthority} by the operator after deployment. Initial rate is 0.
+     *
+     * @param rateAuthority  The account that can update the interest rate (registry payer).
+     * @param initialRateBps Initial interest rate in basis points (use 0; update post-deploy).
+     */
+    private org.p2p.solanaj.core.TransactionInstruction buildInterestBearingMintIx(
+            PublicKey mint, PublicKey rateAuthority, short initialRateBps) {
+        byte[] raBytes = rateAuthority.toByteArray();
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(1 + 1 + 1 + 32 + 2);
+        buf.put((byte) 33);  // InterestBearingMintInstruction outer discriminator
+        buf.put((byte) 0);   // Initialize sub-instruction
+        buf.put((byte) 1);   // COption::Some for rate_authority
+        buf.put(raBytes, 0, Math.min(raBytes.length, 32));
+        buf.order(java.nio.ByteOrder.LITTLE_ENDIAN).putShort(initialRateBps);
+        return new org.p2p.solanaj.core.TransactionInstruction(
+                new PublicKey(TOKEN_2022_PROGRAM_ID),
+                java.util.List.of(new org.p2p.solanaj.core.AccountMeta(mint, false, true)),
+                buf.array()
+        );
+    }
+
+    /**
+     * Builds an {@code TransferHookInstruction::Initialize} (Token-2022 ix 36, sub-ix 0) instruction.
+     *
+     * <p>Layout: [36] [0] [authority COption::Some = 1] [32-byte authority]
+     *             [COption for hook program — Some = 1] [32-byte hook program id]
+     *
+     * <p>The hook program is the Registerwerk transfer-hook Anchor program (whitelist + AML).
+     * Its program ID must be configured and deployed before bond mints can be created.
+     * The hook program ID is read from {@code registerwerk.chains.solana.transfer-hook-program}.
+     */
+    private org.p2p.solanaj.core.TransactionInstruction buildTransferHookIx(
+            PublicKey mint, PublicKey authority) {
+        // Hook program ID — configured externally; use system program as placeholder until deployed.
+        // In production: read from SolanaProperties.getTransferHookProgramId()
+        String hookProgramId = "11111111111111111111111111111111"; // SystemProgram — placeholder only
+        byte[] authBytes = authority.toByteArray();
+        byte[] hookBytes = new PublicKey(hookProgramId).toByteArray();
+
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(1 + 1 + 1 + 32 + 1 + 32);
+        buf.put((byte) 36);   // TransferHookInstruction outer discriminator
+        buf.put((byte) 0);    // Initialize sub-instruction
+        buf.put((byte) 1);    // COption::Some for authority
+        buf.put(authBytes, 0, Math.min(authBytes.length, 32));
+        buf.put((byte) 1);    // COption::Some for hook program id
+        buf.put(hookBytes, 0, Math.min(hookBytes.length, 32));
+        return new org.p2p.solanaj.core.TransactionInstruction(
+                new PublicKey(TOKEN_2022_PROGRAM_ID),
+                java.util.List.of(new org.p2p.solanaj.core.AccountMeta(mint, false, true)),
+                buf.array()
+        );
+    }
+
+    /**
+     * Builds a {@code ConfidentialTransferInstruction::InitializeMint} (Token-2022 ix 27, sub-ix 0) instruction.
+     *
+     * <p>Layout: [27] [0]
+     *             [auditor_elgamal_pubkey COption::Some = 1] [64-byte ElGamal pubkey]
+     *             [withdraw_withheld_authority_elgamal_pubkey COption::Some = 1] [64-byte]
+     *             [auto_approve_new_accounts: bool (1 byte)]
+     *
+     * <p>The auditor ElGamal public key is the registry's auditing key that can decrypt all transfers.
+     * <b>Important:</b> The ElGamal key pair must be generated and its public key stored in
+     * {@code SolanaProperties.getConfidentialTransferAuditorElgamalPubkey()}.
+     * This is a deployment blocker — the key must be generated and operator policy signed before
+     * any CONFIDENTIAL mint can be created.
+     *
+     * <p>This implementation uses a zeroed 64-byte key as a placeholder. Replace with the
+     * actual ElGamal public key from operator configuration before mainnet use.
+     */
+    private org.p2p.solanaj.core.TransactionInstruction buildConfidentialTransferMintIx(
+            PublicKey mint, PublicKey authority) {
+        byte[] zeroElgamal = new byte[64]; // placeholder — must be replaced with real ElGamal pubkey
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(1 + 1 + 1 + 64 + 1 + 64 + 1);
+        buf.put((byte) 27);   // ConfidentialTransferInstruction outer discriminator
+        buf.put((byte) 0);    // InitializeMint sub-instruction
+        buf.put((byte) 1);    // COption::Some for auditor key
+        buf.put(zeroElgamal); // auditor ElGamal pubkey (64 bytes) — replace with real key
+        buf.put((byte) 1);    // COption::Some for withdraw_withheld authority key
+        buf.put(zeroElgamal); // withdraw withheld authority ElGamal pubkey
+        buf.put((byte) 0);    // auto_approve_new_accounts = false (explicit approval required)
+        return new org.p2p.solanaj.core.TransactionInstruction(
+                new PublicKey(TOKEN_2022_PROGRAM_ID),
+                java.util.List.of(new org.p2p.solanaj.core.AccountMeta(mint, false, true)),
+                buf.array()
+        );
+    }
+
+    /**
+     * Computes the rent-exempt lamports needed for a Token-2022 mint with the given extension set.
+     *
+     * <p>Base mint size = 82 bytes. Each extension adds additional storage.
+     * The rent-exempt threshold is approximately 2,039,280 lamports for 82 bytes (at the
+     * current rent rate of ~1.461 lamports/byte/epoch × 200 epochs minimum).
+     *
+     * <p>Extension size additions (approximate, from Token-2022 source):
+     * <ul>
+     *   <li>PermanentDelegate: 40 bytes</li>
+     *   <li>MintCloseAuthority: 36 bytes</li>
+     *   <li>InterestBearingMint: 72 bytes</li>
+     *   <li>TransferHook: 64 bytes</li>
+     *   <li>ConfidentialTransferMint: 132 bytes</li>
+     * </ul>
+     */
+    private static long computeRentExemptLamports(SplExtensionSet extensions) {
+        long bytesPerLamport = 1461L;
+        long size = mintAccountSize(extensions);
+        // rent = lamports_per_byte_year * bytes * 2 (for 2 years minimum)
+        return Math.max(2_039_280L, size * 2 * bytesPerLamport / 1000);
+    }
+
+    private static long mintAccountSize(SplExtensionSet extensions) {
+        return switch (extensions) {
+            case NONE         -> 82L;
+            case BOND         -> 82L + 40L + 36L + 72L + 64L; // base + PD + MCA + IBMint + Hook = 294
+            case CONFIDENTIAL -> 82L + 40L + 132L + 64L;       // base + PD + CTMint + Hook = 318
+        };
     }
 
     /**

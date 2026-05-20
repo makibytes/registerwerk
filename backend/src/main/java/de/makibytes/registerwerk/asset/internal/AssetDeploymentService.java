@@ -3,14 +3,19 @@ package de.makibytes.registerwerk.asset.internal;
 import de.makibytes.registerwerk.asset.events.AssetDeploymentInitiatedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.CantonBondOperations;
 import de.makibytes.registerwerk.blockchain.api.CantonTokenOperations;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.blockchain.internal.confidential.ConfidentialErc20Service;
 import de.makibytes.registerwerk.erc3643.internal.ConfidentialErc3643Service;
 import de.makibytes.registerwerk.blockchain.internal.deploy.Erc1155DeploymentService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.Erc20DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc3525DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc4626DeploymentService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.Erc7540DeploymentService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.Erc721DeploymentService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.SolanaTokenService;
+import de.makibytes.registerwerk.blockchain.internal.deploy.SplExtensionSet;
 import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetTokenService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.StellarAssetService;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
@@ -59,10 +64,14 @@ public class AssetDeploymentService {
     private final Erc721DeploymentService erc721DeploymentService;
     private final Erc1155DeploymentService erc1155DeploymentService;
     private final Erc3643DeploymentService erc3643DeploymentService;
+    private final Erc3525DeploymentService erc3525DeploymentService;
+    private final Erc4626DeploymentService erc4626DeploymentService;
+    private final Erc7540DeploymentService erc7540DeploymentService;
     private final ConfidentialErc20Service confidentialErc20Service;
     private final ConfidentialErc3643Service confidentialErc3643Service;
     private final SolanaTokenService solanaTokenService;
     private final CantonTokenOperations cantonTokenService;
+    private final CantonBondOperations cantonBondOperations;
     private final StarknetTokenService starknetTokenService;
     private final StellarAssetService stellarAssetService;
     private final BlockchainClientRegistry blockchainClientRegistry;
@@ -76,10 +85,14 @@ public class AssetDeploymentService {
             Erc721DeploymentService erc721DeploymentService,
             Erc1155DeploymentService erc1155DeploymentService,
             Erc3643DeploymentService erc3643DeploymentService,
+            Erc3525DeploymentService erc3525DeploymentService,
+            Erc4626DeploymentService erc4626DeploymentService,
+            Erc7540DeploymentService erc7540DeploymentService,
             ConfidentialErc20Service confidentialErc20Service,
             ConfidentialErc3643Service confidentialErc3643Service,
             SolanaTokenService solanaTokenService,
             CantonTokenOperations cantonTokenService,
+            CantonBondOperations cantonBondOperations,
             StarknetTokenService starknetTokenService,
             StellarAssetService stellarAssetService,
             BlockchainClientRegistry blockchainClientRegistry,
@@ -91,10 +104,14 @@ public class AssetDeploymentService {
         this.erc721DeploymentService = erc721DeploymentService;
         this.erc1155DeploymentService = erc1155DeploymentService;
         this.erc3643DeploymentService = erc3643DeploymentService;
+        this.erc3525DeploymentService = erc3525DeploymentService;
+        this.erc4626DeploymentService = erc4626DeploymentService;
+        this.erc7540DeploymentService = erc7540DeploymentService;
         this.confidentialErc20Service = confidentialErc20Service;
         this.confidentialErc3643Service = confidentialErc3643Service;
         this.solanaTokenService = solanaTokenService;
         this.cantonTokenService = cantonTokenService;
+        this.cantonBondOperations = cantonBondOperations;
         this.starknetTokenService = starknetTokenService;
         this.stellarAssetService = stellarAssetService;
         this.blockchainClientRegistry = blockchainClientRegistry;
@@ -127,31 +144,44 @@ public class AssetDeploymentService {
             txFuture = switch (standard) {
                 case SPL -> solanaTokenService.createSplToken(assetId, network, "owner-placeholder");
                 case SPL_2022 -> solanaTokenService.createSplToken2022(assetId, network, "owner-placeholder");
+                case SPL_2022_BOND ->
+                    solanaTokenService.createSplToken2022(assetId, network, "owner-placeholder", SplExtensionSet.BOND);
+                case SPL_2022_CONFIDENTIAL ->
+                    solanaTokenService.createSplToken2022(assetId, network, "owner-placeholder", SplExtensionSet.CONFIDENTIAL);
                 default -> throw new UnsupportedOperationException(
-                        "Solana deployments currently support SPL and SPL_2022 only");
+                        "Solana does not support token standard: " + standard);
             };
         } else if (chain == Chain.CANTON) {
             txFuture = switch (standard) {
                 case CANTON_TOKEN -> cantonTokenService.createInstrument(
                         assetId, network, "owner-placeholder", 0);
+                case DAML_BOND_FIXED -> cantonBondOperations.createFixedBond(
+                        assetId, network, "owner-placeholder", null);
+                case DAML_BOND_FLOATING -> cantonBondOperations.createFloatingBond(
+                        assetId, network, "owner-placeholder", null);
+                case DAML_BOND_ZERO -> cantonBondOperations.createZeroBond(
+                        assetId, network, "owner-placeholder", null);
                 default -> throw new UnsupportedOperationException(
-                        "Canton deployments currently support CANTON_TOKEN only");
+                        "Canton does not support token standard: " + standard);
             };
         } else if (chain == Chain.STARKNET) {
             txFuture = switch (standard) {
                 case STARKNET_ERC20 -> starknetTokenService.createCairoErc20(
                         assetId, network, "owner-placeholder");
+                case STARKNET_ERC3525 -> starknetTokenService.createCairoErc3525(
+                        assetId, network, "owner-placeholder");
                 default -> throw new UnsupportedOperationException(
-                        "Starknet deployments currently support STARKNET_ERC20 only");
+                        "Starknet does not support token standard: " + standard);
             };
         } else if (chain == Chain.STELLAR) {
             txFuture = switch (standard) {
                 case STELLAR_ASSET -> stellarAssetService.createStellarAsset(
                         assetId, network, "owner-placeholder");
                 default -> throw new UnsupportedOperationException(
-                        "Stellar deployments currently support STELLAR_ASSET only");
+                        "Stellar does not support token standard: " + standard);
             };
         } else {
+            // EVM chains (Ethereum, Polygon, Base, Arbitrum, Avalanche, Optimism, Fhenix, Inco)
             txFuture = switch (standard) {
                 case ERC20 -> erc20DeploymentService.deploy(assetId, descriptor, "owner-placeholder");
                 case ERC721 -> erc721DeploymentService.deploy(assetId, descriptor, "owner-placeholder");
@@ -159,8 +189,12 @@ public class AssetDeploymentService {
                 case ERC3643 -> erc3643DeploymentService.deploy(assetId, descriptor, "owner-placeholder");
                 case CONF_ERC20 -> confidentialErc20Service.deploy(assetId, descriptor, "owner-placeholder");
                 case CONF_ERC3643 -> confidentialErc3643Service.deploy(assetId, descriptor, "owner-placeholder");
+                // ERC-3525/4626/7540: real contract deployment lands in Phase 2
+                case ERC3525 -> erc3525DeploymentService.deploy(assetId, descriptor, "owner-placeholder");
+                case ERC4626 -> erc4626DeploymentService.deploy(assetId, descriptor, "owner-placeholder");
+                case ERC7540 -> erc7540DeploymentService.deploy(assetId, descriptor, "owner-placeholder");
                 default -> {
-                    log.warn("No deployment service for token standard: {}", standard);
+                    log.warn("No EVM deployment service for token standard: {}", standard);
                     yield CompletableFuture.completedFuture("UNSUPPORTED_" + standard);
                 }
             };

@@ -22,4 +22,20 @@ export const ASSET_ROUTES: Routes = [
         (m) => m.AssetEditComponent
       ),
   },
+  {
+    path: ':id/wizards/bond-issuance',
+    loadComponent: () =>
+      import('./wizards/bond-issuance/bond-issuance-wizard.component').then(
+        (m) => m.BondIssuanceWizardComponent
+      ),
+    title: 'Bond Issuance Wizard',
+  },
+  {
+    path: ':id/wizards/vault-setup',
+    loadComponent: () =>
+      import('./wizards/vault-setup/vault-setup-wizard.component').then(
+        (m) => m.VaultSetupWizardComponent
+      ),
+    title: 'Vault Setup Wizard',
+  },
 ];

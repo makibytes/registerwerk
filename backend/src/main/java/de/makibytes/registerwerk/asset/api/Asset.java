@@ -49,7 +49,7 @@ public class Asset {
     private String isin;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "token_standard", nullable = false, length = 20)
+    @Column(name = "token_standard", nullable = false, length = 30)
     @NotNull
     private TokenStandard tokenStandard;
 

@@ -1,0 +1,67 @@
+-- | Floating-rate eWpG bond instrument.
+--
+-- Floating-rate bonds require a rate-fixing step before each coupon payment
+-- (EURIBOR, SONIA, etc.). The registryAdmin exercises FixRate on each rate-fixing date.
+module Registerwerk.Bond.FloatingBond where
+
+import Registerwerk.Bond.Types
+import DA.Date (Date)
+import DA.Decimal (Decimal)
+
+-- | A floating-rate bond instrument registered under eWpG.
+template FloatingRateBond with
+    assetId           : AssetId
+    registryAdmin     : Party
+    issuer            : Party
+    regulatorObserver : Party
+    terms             : EwpgBondTerms
+    referenceRate     : Text             -- ^ Reference rate code (e.g. "EURIBOR_3M")
+    spread            : Decimal          -- ^ Additional spread over the reference rate
+    latestFixedRate   : Optional Decimal -- ^ Most recently fixed rate; None before first fixing
+    status            : Text
+  where
+    signatory registryAdmin, issuer
+    observer regulatorObserver
+
+    ensure terms.assetId == assetId
+
+    -- | Fix the reference rate for the upcoming coupon period.
+    choice FixRate : ContractId FloatingRateBond with
+          fixingDate : Date
+          rate       : Decimal
+        controller registryAdmin
+      do
+        create this with latestFixedRate = Some rate
+
+    -- | Pay the coupon for the current period using the previously fixed rate.
+    choice PayCoupon : ContractId FloatingRateBond with
+          paymentDate   : Date
+          amountPerUnit : Decimal
+          txRef         : Text
+        controller registryAdmin
+      do
+        create this with status = status
+
+    -- | Redeem at maturity.
+    choice Redeem : ()
+        controller registryAdmin
+      do
+        return ()
+
+    -- | Early call.
+    choice EarlyCall : ()
+        with callDate : Date; callPrice : Decimal
+        controller registryAdmin
+      do
+        return ()
+
+    -- | Regulatory suspension.
+    choice SuspendInstrument : ContractId FloatingRateBond
+        controller registryAdmin
+      do
+        create this with status = "SUSPENDED"
+
+    choice ResumeInstrument : ContractId FloatingRateBond
+        controller registryAdmin
+      do
+        create this with status = "ACTIVE"

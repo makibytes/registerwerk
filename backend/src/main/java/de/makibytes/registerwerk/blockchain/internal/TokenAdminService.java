@@ -272,9 +272,30 @@ public class TokenAdminService {
             throw new UnsupportedOperationException(
                     "Confidential ERC-20 admin controls require Zama fhEVM support (not yet implemented).");
         }
-        if (standard == TokenStandard.SPL) {
+        if (standard == TokenStandard.SPL || standard == TokenStandard.SPL_2022) {
             throw new UnsupportedOperationException(
-                    "SPL token admin controls (freeze-authority) are not yet implemented.");
+                    "SPL token admin controls go through SolanaTokenAdminService (Phase-4 implementation).");
+        }
+        if (standard == TokenStandard.SPL_2022_BOND || standard == TokenStandard.SPL_2022_CONFIDENTIAL) {
+            throw new UnsupportedOperationException(
+                    "Token-2022 extension-preset admin operations go through SolanaTokenAdminService (Phase-4 implementation).");
+        }
+        if (standard == TokenStandard.ERC3525 || standard == TokenStandard.STARKNET_ERC3525) {
+            throw new IllegalArgumentException(
+                    "ERC-3525 and Starknet SFT admin operations (slot pause, token freeze, forcedTransferValue) " +
+                    "go through Erc3525AdminService (/api/v1/deployments/{id}/slots and /tokens endpoints).");
+        }
+        if (standard == TokenStandard.ERC4626 || standard == TokenStandard.ERC7540) {
+            throw new IllegalArgumentException(
+                    "ERC-4626/7540 vault admin operations (NAV strike, request fulfillment) " +
+                    "go through Erc4626AdminService and Erc7540AdminService " +
+                    "(/api/v1/deployments/{id}/nav-strike and /vault-requests endpoints).");
+        }
+        if (standard == TokenStandard.DAML_BOND_FIXED || standard == TokenStandard.DAML_BOND_FLOATING
+                || standard == TokenStandard.DAML_BOND_ZERO) {
+            throw new IllegalArgumentException(
+                    "DAML Finance bond admin operations (coupon payment, rate fixing, redemption, early call) " +
+                    "go through CantonBondOperations (/api/v1/deployments/{id}/coupon-payment etc.).");
         }
         if (dep.getContractAddress() == null || dep.getContractAddress().startsWith("0x-PENDING")) {
             throw new IllegalStateException("Token contract is not yet deployed for deployment=" + dep.getId());

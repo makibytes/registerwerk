@@ -100,6 +100,17 @@ public class StarknetTokenService {
     static final String DEFAULT_ERC20_CLASS_HASH =
             "0x04a444ef8caf8fa0db05da60bf0ad9bae264c73fa7baa0e8a591e5d2e4ca8ad";
 
+    /**
+     * Class hash of the Registerwerk EwpgERC3525 Cairo contract.
+     * Must be declared on the target network before the first ERC-3525 deployment.
+     * This placeholder must be replaced with the actual Sierra class hash after the contract is compiled
+     * and declared ({@code starkli declare}) on the target network.
+     *
+     * <p>Corresponding source: {@code contracts/cairo/src/erc3525/EwpgERC3525.cairo}
+     */
+    static final String DEFAULT_ERC3525_CLASS_HASH =
+            "0x0000000000000000000000000000000000000000000000000000000000000000"; // TODO: replace after declare
+
     /** Starknet Invoke v1 transaction type prefix (felt252 of "invoke"). */
     private static final BigInteger INVOKE_PREFIX = starknetKeccak("invoke");
 
@@ -177,6 +188,54 @@ public class StarknetTokenService {
         });
     }
 
+    /**
+     * Creates a Cairo ERC-3525 (Semi-Fungible Token) deployment on Starknet via UDC.
+     *
+     * <p>The ERC-3525 Cairo contract is the Carbonable implementation (Apache-2.0), compiled to Sierra
+     * and declared under a fixed class hash. The class hash must be declared on the target network before
+     * this method is called. Configure it via {@code registerwerk.chains.starknet.erc3525-class-hash}.
+     *
+     * <p>Like {@link #createCairoErc20}, this uses the UDC {@code deployContract} selector with the
+     * ERC-3525 class hash. The token is deployed with the registry wallet as the initial owner.
+     *
+     * @param assetId      Registerwerk asset UUID
+     * @param network      MAINNET or TESTNET
+     * @param ownerAddress felt252 address of the initial owner
+     * @return future resolving to the UDC deployment transaction hash
+     */
+    public CompletableFuture<String> createCairoErc3525(UUID assetId, Network network, String ownerAddress) {
+        log.info("Creating Cairo ERC-3525 (SFT): assetId={}, network={}", assetId, network);
+
+        return CompletableFuture.supplyAsync(() -> {
+            ChainConfig chain = resolveChainConfig(network);
+            String rpcUrl = chain.getRpcUrl();
+
+            byte[] privateKeyBytes = walletSigner.rawPrivateKeyBytesForChain(chain.getId());
+            String accountAddress = walletSigner.chainAddressForWallet(chain.getId());
+
+            BigInteger privKey = new BigInteger(1, privateKeyBytes);
+            BigInteger senderFelt = parseHexFelt(accountAddress);
+
+            CompletableFuture<BigInteger> nonceFuture =
+                    CompletableFuture.supplyAsync(() -> fetchNonce(rpcUrl, accountAddress));
+            CompletableFuture<BigInteger> chainIdFuture =
+                    CompletableFuture.supplyAsync(() -> fetchChainId(rpcUrl));
+            BigInteger nonce = nonceFuture.join();
+            BigInteger chainId = chainIdFuture.join();
+
+            // ERC-3525 calldata uses the same UDC pattern as ERC-20
+            BigInteger salt = generateSalt(assetId);
+            List<BigInteger> calldata = buildErc3525UdcCalldata(assetId, salt, ownerAddress);
+
+            BigInteger txHash = computeInvokeV1Hash(senderFelt, calldata, MAX_FEE, chainId, nonce);
+            BigInteger[] sig = starkSign(privKey, txHash);
+
+            String txHashHex = submitInvokeV1(rpcUrl, accountAddress, calldata, nonce, sig);
+            log.info("Cairo ERC-3525 deployment submitted: assetId={} txHash={}", assetId, txHashHex);
+            return txHashHex;
+        });
+    }
+
     // ── Regulatory admin controls ─────────────────────────────────────────────
 
     /**
@@ -218,7 +277,8 @@ public class StarknetTokenService {
 
     // ── Core invoke helper ────────────────────────────────────────────────────
 
-    private CompletableFuture<String> invokeContract(
+    /** Package-accessible for {@link de.makibytes.registerwerk.blockchain.internal.StarknetErc3525AdminService}. */
+    CompletableFuture<String> invokeContract(
             Network network, String contractAddress, String selector, List<BigInteger> args) {
         return CompletableFuture.supplyAsync(() -> {
             ChainConfig chain = resolveChainConfig(network);
@@ -379,6 +439,50 @@ public class StarknetTokenService {
         fullCalldata.add(udcFelt);
         fullCalldata.add(selectorFelt);
         fullCalldata.add(BigInteger.ZERO);  // calldata_offset
+        fullCalldata.add(BigInteger.valueOf(udcArgs.size()));
+        fullCalldata.addAll(udcArgs);
+        return fullCalldata;
+    }
+
+    /**
+     * Builds UDC calldata for the Cairo ERC-3525 (SFT) constructor.
+     *
+     * <p>The EwpgERC3525 Cairo constructor takes: (name, symbol, decimals, owner_address, asset_id)
+     * matching the Solidity constructor signature for interoperability.
+     */
+    private List<BigInteger> buildErc3525UdcCalldata(UUID assetId, BigInteger salt, String ownerAddress) {
+        BigInteger classHash = new BigInteger(DEFAULT_ERC3525_CLASS_HASH.substring(2), 16);
+        BigInteger ownerFelt = ownerAddress.isBlank() ? BigInteger.ZERO : parseHexFelt(ownerAddress);
+
+        String name   = "Registerwerk Bond";
+        String symbol = "RWB" + assetId.toString().substring(0, 4).toUpperCase();
+        BigInteger nameFelt   = shortStringToFelt(name);
+        BigInteger symbolFelt = shortStringToFelt(symbol);
+        BigInteger decimalsFelt = BigInteger.valueOf(18);
+
+        // Encode assetId as two felts (hi/lo 128 bits) since Cairo u256 = (low: u128, high: u128)
+        long hiLong = assetId.getMostSignificantBits();
+        long loLong = assetId.getLeastSignificantBits();
+        BigInteger assetIdLow  = BigInteger.valueOf(loLong & Long.MAX_VALUE).add(loLong < 0 ? BigInteger.ONE.shiftLeft(63) : BigInteger.ZERO);
+        BigInteger assetIdHigh = BigInteger.valueOf(hiLong & Long.MAX_VALUE).add(hiLong < 0 ? BigInteger.ONE.shiftLeft(63) : BigInteger.ZERO);
+
+        List<BigInteger> constructorCalldata = List.of(nameFelt, symbolFelt, decimalsFelt, ownerFelt, assetIdLow, assetIdHigh);
+
+        BigInteger udcFelt = parseHexFelt(UDC_ADDRESS);
+        BigInteger selectorFelt = new BigInteger(UDC_DEPLOY_SELECTOR.substring(2), 16);
+
+        List<BigInteger> udcArgs = new ArrayList<>();
+        udcArgs.add(classHash);
+        udcArgs.add(salt);
+        udcArgs.add(BigInteger.ZERO);  // unique = false
+        udcArgs.add(BigInteger.valueOf(constructorCalldata.size()));
+        udcArgs.addAll(constructorCalldata);
+
+        List<BigInteger> fullCalldata = new ArrayList<>();
+        fullCalldata.add(BigInteger.ONE);
+        fullCalldata.add(udcFelt);
+        fullCalldata.add(selectorFelt);
+        fullCalldata.add(BigInteger.ZERO);
         fullCalldata.add(BigInteger.valueOf(udcArgs.size()));
         fullCalldata.addAll(udcArgs);
         return fullCalldata;
@@ -562,6 +666,11 @@ public class StarknetTokenService {
     private static BigInteger shortStringToFelt(String s) {
         String truncated = s.length() > 31 ? s.substring(0, 31) : s;
         return new BigInteger(1, truncated.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    /** Package-accessible wrapper for {@link StarknetErc3525AdminService}. */
+    BigInteger shortStringToFeltPublic(String s) {
+        return shortStringToFelt(s);
     }
 
     private ChainConfig resolveChainConfig(Network network) {
