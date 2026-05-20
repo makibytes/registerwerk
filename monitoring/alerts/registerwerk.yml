@@ -1,0 +1,97 @@
+groups:
+  - name: registerwerk.critical
+    interval: 1m
+    rules:
+
+      # ── Audit chain integrity (eWpRV §6) ─────────────────────────────────
+      - alert: AuditChainBroken
+        expr: |
+          spring_boot_actuator_health_status{job="registerwerk-backend", component="auditChainVerificationService"} == 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Audit chain integrity BROKEN"
+          description: "The SHA-256 hash chain of audit_event has been violated. Immediate investigation required. DORA Art. 17 major incident."
+
+      # ── Indexer liveness ──────────────────────────────────────────────────
+      - alert: IndexerStaleCritical
+        expr: |
+          time() - registerwerk_indexer_last_sync_seconds > 7200
+        for: 2m
+        labels:
+          severity: critical
+          dora_category: INDEXER_STALE
+        annotations:
+          summary: "Indexer stale > 2h"
+          description: "Indexer {{ $labels.chain }} has not synced for more than 2 hours."
+
+      - alert: IndexerStaleWarning
+        expr: |
+          time() - registerwerk_indexer_last_sync_seconds > 1800
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Indexer stale > 30 min"
+          description: "Indexer {{ $labels.chain }} has not synced for more than 30 minutes."
+
+      # ── Chain drift ───────────────────────────────────────────────────────
+      - alert: ChainDriftDetected
+        expr: |
+          increase(registerwerk_chain_drift_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: CHAIN_DRIFT
+        annotations:
+          summary: "Chain ↔ DB balance drift detected"
+          description: "On-chain balances diverge from the registry DB (canonical per eWpG §16). Asset {{ $labels.asset_id }} auto-paused pending investigation."
+
+      # ── Sanctions hits ────────────────────────────────────────────────────
+      - alert: SanctionsHitOpenTooLong
+        expr: |
+          registerwerk_sanctions_hit_open_seconds > 14400
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Open sanctions hit not resolved in 4h"
+          description: "A sanctions screening hit has been open for more than 4 hours without acceptance/rejection. GwG §10 requires timely resolution."
+
+      # ── DB connection pool ────────────────────────────────────────────────
+      - alert: DBConnectionsNearExhaustion
+        expr: |
+          hikaricp_connections_active / hikaricp_connections_max > 0.80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB connection pool > 80% utilized"
+          description: "HikariCP pool is {{ $value | humanizePercentage }} utilized. Consider increasing maximum-pool-size."
+
+      # ── JWT signing key age ───────────────────────────────────────────────
+      - alert: JwtSigningKeyAgeWarning
+        expr: |
+          (time() - registerwerk_auth_signing_key_created_seconds) > 7776000
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JWT signing key older than 90 days"
+          description: "The HS256 / RSA signing key has not been rotated in 90+ days. Rotate per security policy."
+
+  - name: registerwerk.availability
+    interval: 1m
+    rules:
+      - alert: BackendDown
+        expr: |
+          up{job="registerwerk-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          dora_category: AVAILABILITY
+        annotations:
+          summary: "Registerwerk backend is down"
+          description: "The backend has been unreachable for 1 minute. eWpRV §6 availability ≥99.5% SLO at risk."

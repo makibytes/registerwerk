@@ -1,0 +1,64 @@
+{
+  "__inputs": [{"name": "DS_PROMETHEUS", "type": "datasource", "pluginId": "prometheus"}],
+  "title": "Registerwerk — Overview",
+  "uid": "rw-overview",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Audit Chain Status",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [{"expr": "spring_boot_actuator_health_status{component=\"auditChainVerificationService\"}", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"1": {"text": "UP", "color": "green"}, "0": {"text": "BROKEN", "color": "red"}}}]}}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Backend Health",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [{"expr": "up{job=\"registerwerk-backend\"}", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"1": {"text": "UP", "color": "green"}, "0": {"text": "DOWN", "color": "red"}}}]}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Open Chain Drift Events",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [{"expr": "registerwerk_chain_drift_open_total", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Open Sanctions Hits",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [{"expr": "registerwerk_sanctions_hit_open_seconds > 0", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}, {"value": 14400, "color": "red"}]}}}
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "p95 API Latency",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{job=\"registerwerk-backend\",method=\"GET\"}[5m]))", "legendFormat": "GET p95", "datasource": "${DS_PROMETHEUS}"},
+        {"expr": "histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{job=\"registerwerk-backend\",method!=\"GET\"}[5m]))", "legendFormat": "Write p95", "datasource": "${DS_PROMETHEUS}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"steps": [{"value": 0.2, "color": "green"}, {"value": 1, "color": "red"}]}}}
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "HTTP Error Rate (5xx)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [{"expr": "sum(rate(http_server_requests_seconds_count{job=\"registerwerk-backend\",status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{job=\"registerwerk-backend\"}[5m]))", "legendFormat": "5xx rate", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 0.005, "color": "red"}]}}}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Indexer Lag",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 12},
+      "targets": [{"expr": "time() - registerwerk_indexer_last_sync_seconds", "legendFormat": "{{chain}}", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"steps": [{"value": 1800, "color": "orange"}, {"value": 7200, "color": "red"}]}}}
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "JVM Memory",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 12},
+      "targets": [
+        {"expr": "jvm_memory_used_bytes{job=\"registerwerk-backend\",area=\"heap\"}", "legendFormat": "Heap Used", "datasource": "${DS_PROMETHEUS}"},
+        {"expr": "jvm_memory_max_bytes{job=\"registerwerk-backend\",area=\"heap\"}", "legendFormat": "Heap Max", "datasource": "${DS_PROMETHEUS}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    }
+  ]
+}

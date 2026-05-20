@@ -52,7 +52,7 @@ public class WalletStorage {
     private static final int  GCM_IV_LENGTH   = 12;  // bytes
     private static final int  GCM_TAG_LENGTH  = 128; // bits
     private static final int  SALT_LENGTH     = 16;  // bytes
-    private static final int  PBKDF2_ITER     = 100_000;
+    private static final int  PBKDF2_ITER     = 600_000; // OWASP 2023 baseline for PBKDF2-HMAC-SHA256
     private static final int  AES_KEY_BITS    = 256;
 
     private static final SecureRandom RNG = new SecureRandom();
@@ -73,7 +73,7 @@ public class WalletStorage {
      */
     public String storeEvm(UUID walletId, ECKeyPair ecKeyPair) {
         try {
-            WalletFile wf = Wallet.createLight(props.getMasterKey(), ecKeyPair);
+            WalletFile wf = Wallet.createStandard(props.getMasterKey(), ecKeyPair); // full scrypt N=2^18
             String json = MAPPER.writeValueAsString(wf);
             Path path = storagePath(walletId + ".json");
             Files.writeString(path, json, StandardCharsets.UTF_8);

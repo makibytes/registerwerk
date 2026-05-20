@@ -95,15 +95,16 @@ public class WalletController {
         return new ResponseEntity<>(bytes, headers, HttpStatus.OK);
     }
 
+    /**
+     * Raw private-key export has been removed (B2 security hardening).
+     * Key material must be recovered via the KMS break-glass procedure or offline Shamir shares.
+     * See docs/operator/dr/runbook.md for the break-glass procedure.
+     */
     @PostMapping("/{id}/export-raw")
-    public ResponseEntity<String> exportRaw(
-            @PathVariable UUID id,
-            @RequestParam(defaultValue = "false") boolean confirm) {
-        if (!confirm) {
-            return ResponseEntity.badRequest()
-                    .body("Set confirm=true to acknowledge that exporting the raw private key is dangerous.");
-        }
-        return ResponseEntity.ok(walletService.exportRaw(id));
+    public ResponseEntity<String> exportRaw(@PathVariable UUID id) {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.GONE)
+                .body("Raw key export is disabled. Use the KMS break-glass procedure. " +
+                      "See docs/operator/dr/runbook.md.");
     }
 
     @PatchMapping("/{id}")

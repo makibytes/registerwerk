@@ -8,7 +8,11 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
-/** Immutable, append-only audit log. No FK constraints for throughput. */
+/**
+ * Immutable, append-only audit log (eWpRV §6 integrity). No FK constraints for throughput.
+ * Hash chain enforced by AuditEventRecorder: entry_hash = SHA-256(prev_hash || payload || sequence_no).
+ * DB-level WORM trigger in V10__audit_chain.sql prevents UPDATE/DELETE.
+ */
 @Entity
 @Table(name = "audit_event")
 public class AuditEvent {
@@ -39,6 +43,23 @@ public class AuditEvent {
     @Column(name = "occurred_at", nullable = false, updatable = false)
     private Instant occurredAt = Instant.now();
 
+    // ── Hash chain fields (V10__audit_chain.sql) ──────────────────────────────
+    /** Monotonically increasing sequence number; populated by DB sequence. */
+    @Column(name = "sequence_no", insertable = false, updatable = false)
+    private Long sequenceNo;
+
+    /** SHA-256 of the previous row's entry_hash; NULL for the genesis row. */
+    @Column(name = "prev_hash", updatable = false)
+    private byte[] prevHash;
+
+    /** SHA-256(prev_hash || canonical_json(payload) || sequence_no). Populated by AuditEventRecorder. */
+    @Column(name = "entry_hash", updatable = false)
+    private byte[] entryHash;
+
+    /** Ed25519 signature over entry_hash using the registry signing key (KMS/HSM). */
+    @Column(name = "entry_sig", updatable = false)
+    private byte[] entrySig;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -62,6 +83,17 @@ public class AuditEvent {
     public void setPayload(Map<String, Object> payload) { this.payload = payload; }
 
     public Instant getOccurredAt() { return occurredAt; }
+
+    public Long getSequenceNo() { return sequenceNo; }
+
+    public byte[] getPrevHash() { return prevHash; }
+    public void setPrevHash(byte[] prevHash) { this.prevHash = prevHash; }
+
+    public byte[] getEntryHash() { return entryHash; }
+    public void setEntryHash(byte[] entryHash) { this.entryHash = entryHash; }
+
+    public byte[] getEntrySig() { return entrySig; }
+    public void setEntrySig(byte[] entrySig) { this.entrySig = entrySig; }
 
     public static AuditEvent from(AuditableEvent e) {
         AuditEvent ae = new AuditEvent();

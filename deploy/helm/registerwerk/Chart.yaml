@@ -1,0 +1,18 @@
+apiVersion: v2
+name: registerwerk
+description: Registerwerk eWpG electronic securities registry
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [ewpg, securities, registry, tokenization]
+maintainers:
+  - name: Maki Bytes
+dependencies:
+  - name: postgresql
+    repository: https://charts.bitnami.com/bitnami
+    version: "~15.5"
+    condition: postgresql.enabled
+  - name: kong
+    repository: https://charts.konghq.com
+    version: "~2.38"
+    condition: kong.enabled

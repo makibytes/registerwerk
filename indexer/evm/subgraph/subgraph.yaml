@@ -109,3 +109,127 @@ templates:
           handler: handleWhitelisted
         - event: RemovedFromWhitelist(indexed address)
           handler: handleRemovedFromWhitelist
+
+  # ── ERC-3525 Semi-Fungible Token (bond slots / SFT) ─────────────────────────
+  - kind: ethereum
+    name: EwpgERC3525
+    network: mainnet
+    source:
+      abi: EwpgERC3525
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/erc3525.ts
+      entities:
+        - Transfer
+        - SlotTransfer
+        - ValueTransfer
+      abis:
+        - name: EwpgERC3525
+          file: ./abis/EwpgERC3525.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,indexed uint256)
+          handler: handleTransfer
+        - event: TransferValue(indexed uint256,indexed uint256,uint256)
+          handler: handleTransferValue
+        - event: SlotChanged(indexed uint256,indexed uint256,indexed uint256)
+          handler: handleSlotChanged
+        - event: Whitelisted(indexed address)
+          handler: handleWhitelisted
+        - event: AddressFrozen(indexed address,bool,indexed address)
+          handler: handleAddressFrozen
+
+  # ── ERC-3643 T-REX (compliance-gated security token) ────────────────────────
+  - kind: ethereum
+    name: EwpgERC3643
+    network: mainnet
+    source:
+      abi: EwpgERC3643
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/erc3643.ts
+      entities:
+        - Transfer
+        - IdentityRegistered
+        - ComplianceChange
+      abis:
+        - name: EwpgERC3643
+          file: ./abis/EwpgERC3643.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransfer
+        - event: AddressFrozen(indexed address,indexed bool,indexed address)
+          handler: handleAddressFrozen
+        - event: TokensFrozen(indexed address,uint256)
+          handler: handleTokensFrozen
+        - event: Paused(address)
+          handler: handlePaused
+        - event: Unpaused(address)
+          handler: handleUnpaused
+        - event: IdentityRegistered(indexed address,indexed address)
+          handler: handleIdentityRegistered
+        - event: IdentityRemoved(indexed address,indexed address)
+          handler: handleIdentityRemoved
+        - event: ComplianceAdded(indexed address)
+          handler: handleComplianceAdded
+
+  # ── ERC-4626 Tokenized Vault (fund / portfolio) ──────────────────────────────
+  - kind: ethereum
+    name: EwpgERC4626
+    network: mainnet
+    source:
+      abi: EwpgERC4626
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/erc4626.ts
+      entities:
+        - Transfer
+        - VaultDeposit
+        - VaultWithdraw
+      abis:
+        - name: EwpgERC4626
+          file: ./abis/EwpgERC4626.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransfer
+        - event: Deposit(indexed address,indexed address,uint256,uint256)
+          handler: handleDeposit
+        - event: Withdraw(indexed address,indexed address,indexed address,uint256,uint256)
+          handler: handleWithdraw
+        - event: AddressFrozen(indexed address,bool,indexed address)
+          handler: handleAddressFrozen
+
+  # ── ERC-7540 Async Vault (capital-call / redemption window) ─────────────────
+  - kind: ethereum
+    name: EwpgERC7540
+    network: mainnet
+    source:
+      abi: EwpgERC7540
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/erc7540.ts
+      entities:
+        - Transfer
+        - DepositRequest
+        - RedeemRequest
+      abis:
+        - name: EwpgERC7540
+          file: ./abis/EwpgERC7540.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransfer
+        - event: DepositRequest(indexed address,indexed address,indexed uint256,address,uint256)
+          handler: handleDepositRequest
+        - event: RedeemRequest(indexed address,indexed address,indexed uint256,address,uint256)
+          handler: handleRedeemRequest
+        - event: DepositClaimable(indexed address,indexed uint256,uint256,uint256)
+          handler: handleDepositClaimable
+        - event: RedeemClaimable(indexed address,indexed uint256,uint256,uint256)
+          handler: handleRedeemClaimable

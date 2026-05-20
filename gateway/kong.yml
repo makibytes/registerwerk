@@ -77,15 +77,35 @@ plugins:
       strategy: memory
       cache_control: false
 
-  # Rate limiting per consumer
+  # Rate limiting per consumer — policy: redis ensures limits work across Kong replicas.
+  # Set REDIS_HOST / REDIS_PORT in environment or fall back to cluster policy.
   - name: rate-limiting
     service: registerwerk-backend
     config:
       minute: 300
       hour: 10000
-      policy: local
+      policy: redis
+      redis:
+        host: ${REDIS_HOST:redis}
+        port: ${REDIS_PORT:6379}
       fault_tolerant: true
       hide_client_headers: false
+
+  # Bot detection — blocks common crawler / attack user-agents
+  - name: bot-detection
+    service: registerwerk-backend
+    config:
+      deny:
+        - "(Googlebot|bingbot|Baiduspider|YandexBot|DotBot|AhrefsBot|SemrushBot)"
+
+  # IP restriction on admin endpoints (override with ADMIN_ALLOWED_IPS CSV in env)
+  - name: ip-restriction
+    service: registerwerk-backend
+    route: api-protected
+    config:
+      allow:
+        - ${ADMIN_ALLOWED_IPS:127.0.0.1}
+      message: "Access denied by IP restriction policy."
 
   # CORS
   - name: cors
@@ -128,3 +148,6 @@ plugins:
           - "X-Frame-Options:DENY"
           - "X-XSS-Protection:1; mode=block"
           - "Strict-Transport-Security:max-age=31536000; includeSubDomains"
+          - "Content-Security-Policy:default-src 'self'; frame-ancestors 'none'"
+          - "Permissions-Policy:geolocation=(), camera=(), microphone=()"
+          - "Referrer-Policy:strict-origin-when-cross-origin"

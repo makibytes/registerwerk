@@ -1,0 +1,6 @@
+backup:
+  s3Bucket: registerwerk-backups-prod
+  awsRegion: eu-central-1
+  retainFullBackups: 14   # days
+  # Ensure S3 bucket has object-lock (WORM) enabled for immutable backups
+  # per eWpRV §6 and DORA Art. 12 immutability requirement

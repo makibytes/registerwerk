@@ -13,12 +13,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import de.makibytes.registerwerk.blockchain.api.AssetDeploymentPort;
+import de.makibytes.registerwerk.blockchain.api.AssetDeploymentPort.DeploymentRef;
 import de.makibytes.registerwerk.blockchain.api.CantonTokenOperations;
 import de.makibytes.registerwerk.blockchain.internal.TokenAdminService;
-import de.makibytes.registerwerk.shared.EntityNotFoundException;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
 import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonBurnRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonForceTransferRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonFreezeHoldingRequest;
@@ -68,23 +68,23 @@ public class TokenAdminController {
 
     private final TokenAdminService adminService;
     private final CantonTokenOperations cantonTokenService;
-    private final AssetDeploymentRepository deploymentRepository;
+    private final AssetDeploymentPort deploymentPort;
 
     public TokenAdminController(
             TokenAdminService adminService,
             CantonTokenOperations cantonTokenService,
-            AssetDeploymentRepository deploymentRepository) {
+            AssetDeploymentPort deploymentPort) {
         this.adminService       = adminService;
         this.cantonTokenService = cantonTokenService;
-        this.deploymentRepository = deploymentRepository;
+        this.deploymentPort     = deploymentPort;
     }
 
     @PostMapping("/pause")
     public ResponseEntity<?> pause(
             @PathVariable UUID assetId, @PathVariable UUID depId, Authentication auth) {
         log.info("ADMIN pause deployment={} by actor={}", depId, actorName(auth));
-        AssetDeployment dep = loadDeployment(depId);
-        if (dep.getChain() == Chain.CANTON) {
+        DeploymentRef dep = loadDeployment(depId);
+        if (dep.chain() == Chain.CANTON) {
             return cantonAccepted(cantonTokenService.pauseInstrument(depId).join());
         }
         return accepted(adminService.pause(depId));
@@ -94,8 +94,8 @@ public class TokenAdminController {
     public ResponseEntity<?> unpause(
             @PathVariable UUID assetId, @PathVariable UUID depId, Authentication auth) {
         log.info("ADMIN unpause deployment={} by actor={}", depId, actorName(auth));
-        AssetDeployment dep = loadDeployment(depId);
-        if (dep.getChain() == Chain.CANTON) {
+        DeploymentRef dep = loadDeployment(depId);
+        if (dep.chain() == Chain.CANTON) {
             return cantonAccepted(cantonTokenService.unpauseInstrument(depId).join());
         }
         return accepted(adminService.unpause(depId));
@@ -159,6 +159,7 @@ public class TokenAdminController {
     }
 
     @PostMapping("/force-burn")
+    @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> forceBurn(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForceBurnRequest request, Authentication auth) {
@@ -251,9 +252,8 @@ public class TokenAdminController {
         return ResponseEntity.accepted().body(new CantonUpdateResponse(updateId));
     }
 
-    private AssetDeployment loadDeployment(UUID depId) {
-        return deploymentRepository.findById(depId)
-                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", depId));
+    private DeploymentRef loadDeployment(UUID depId) {
+        return deploymentPort.findById(depId);
     }
 
     private static String actorName(Authentication auth) {

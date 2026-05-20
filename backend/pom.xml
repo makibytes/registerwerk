@@ -143,6 +143,12 @@
       <artifactId>s3</artifactId>
       <version>${awssdk.version}</version>
     </dependency>
+    <!-- ── AWS KMS (wallet key envelope encryption — Track B1) ───────────── -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>kms</artifactId>
+      <version>${awssdk.version}</version>
+    </dependency>
 
     <!-- ── Mapping ─────────────────────────────────────────────────────────── -->
     <dependency>
@@ -182,6 +188,48 @@
       <groupId>org.springframework.modulith</groupId>
       <artifactId>spring-modulith-docs</artifactId>
       <scope>test</scope>
+    </dependency>
+
+    <!-- ── Quartz Scheduler (coupon/corporate-action cron — Track C2) ───── -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-quartz</artifactId>
+    </dependency>
+
+    <!-- ── PDF generation (position statements — Track C3) ──────────────── -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>3.0.3</version>
+    </dependency>
+
+    <!-- ── AOP (for @RequiresStepUp enforcement) ─────────────────────────── -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-aop</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.aspectj</groupId>
+      <artifactId>aspectjweaver</artifactId>
+    </dependency>
+
+    <!-- ── Observability ─────────────────────────────────────────────────── -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>net.logstash.logback</groupId>
+      <artifactId>logstash-logback-encoder</artifactId>
+      <version>8.0</version>
     </dependency>
 
     <!-- ── Test ────────────────────────────────────────────────────────────── -->
@@ -314,8 +362,7 @@
             <configuration>
               <!-- Exclude pure data carriers and infrastructure wiring that cannot
                    be meaningfully unit-tested without live external services.
-                   TODO: raise minimum to 0.60 once blockchain/erc3643/trading test
-                   suites are built out (feat/modulith migration baseline: ~29%). -->
+                   Roadmap: 0.30 (current) → 0.45 (after screening/KYC/audit ITs) → 0.60 (full) -->
               <excludes>
                 <!-- Domain event records — pure data carriers with generated equals/hashCode -->
                 <exclude>**/events/*Event.class</exclude>

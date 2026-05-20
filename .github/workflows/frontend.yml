@@ -1,0 +1,77 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [main, feat/**, fix/**]
+    paths:
+      - frontend-operator/**
+      - frontend-customer/**
+      - .github/workflows/frontend.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend-operator/**
+      - frontend-customer/**
+
+jobs:
+  frontend-operator:
+    name: Operator Frontend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend-operator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-operator/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test -- --watch=false --browsers=ChromeHeadless
+      - run: npm run build -- --configuration production
+      - name: Trivy SCA
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: frontend-operator
+          format: sarif
+          output: trivy-op.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-op.sarif
+
+  frontend-customer:
+    name: Customer Frontend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend-customer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-customer/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test -- --watch=false --browsers=ChromeHeadless
+      - run: npm run build -- --configuration production
+      - name: Trivy SCA
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: frontend-customer
+          format: sarif
+          output: trivy-cust.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-cust.sarif

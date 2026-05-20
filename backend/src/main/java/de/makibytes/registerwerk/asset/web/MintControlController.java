@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.asset.web;
 
-import de.makibytes.registerwerk.blockchain.api.MintControlService;
-import de.makibytes.registerwerk.blockchain.api.MintControlSyncJob;
+import de.makibytes.registerwerk.asset.api.MintControlService;
+import de.makibytes.registerwerk.asset.api.MintControlSyncJob;
 import de.makibytes.registerwerk.asset.api.MintControlRule;
 import de.makibytes.registerwerk.asset.web.dto.MintControlRuleCreateRequest;
 import de.makibytes.registerwerk.asset.web.dto.MintControlRuleResponse;

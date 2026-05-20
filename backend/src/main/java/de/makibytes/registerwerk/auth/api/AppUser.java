@@ -57,6 +57,16 @@ public class AppUser {
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 
+    // ── TOTP (step-up MFA) ──────────────────────────────────────────────────
+    @Column(name = "totp_secret")
+    private String totpSecret;
+
+    @Column(name = "totp_enabled", nullable = false)
+    private boolean totpEnabled = false;
+
+    @Column(name = "totp_enrolled_at")
+    private Instant totpEnrolledAt;
+
     @PreUpdate
     void onUpdate() {
         this.updatedAt = Instant.now();
@@ -109,7 +119,12 @@ public class AppUser {
     public Instant getLastLoginAt() { return lastLoginAt; }
     public void setLastLoginAt(Instant lastLoginAt) { this.lastLoginAt = lastLoginAt; }
 
-    public boolean hasRole(AppUserRole appUserRole) {
-        return roles.contains(appUserRole);
-    }
+    public boolean hasRole(AppUserRole appUserRole) { return roles.contains(appUserRole); }
+
+    public String getTotpSecret() { return totpSecret; }
+    public void setTotpSecret(String totpSecret) { this.totpSecret = totpSecret; }
+    public boolean isTotpEnabled() { return totpEnabled; }
+    public void setTotpEnabled(boolean totpEnabled) { this.totpEnabled = totpEnabled; }
+    public Instant getTotpEnrolledAt() { return totpEnrolledAt; }
+    public void setTotpEnrolledAt(Instant totpEnrolledAt) { this.totpEnrolledAt = totpEnrolledAt; }
 }

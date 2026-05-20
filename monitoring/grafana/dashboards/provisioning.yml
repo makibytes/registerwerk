@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: Registerwerk
+    orgId: 1
+    folder: Registerwerk
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/provisioning/dashboards

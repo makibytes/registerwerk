@@ -32,9 +32,27 @@ public class JurisdictionRequirementConfig {
         String description
     ) {}
 
+    /**
+     * Per-jurisdiction compliance metadata for sanctions, regulatory reporting,
+     * KYC cadence, beneficial-owner thresholds, and data retention.
+     */
+    public record ComplianceMetadata(
+        List<String> sanctionsProviders,        // e.g. ["OPEN_SANCTIONS"]
+        String supervisoryAuthority,            // "BaFin" | "CSSF" | "AMF" | "FMA"
+        String incidentReportingEndpoint,       // DORA Art. 17 initial-report endpoint
+        boolean mifirApplicable,               // whether RTS 22 transaction reporting applies
+        boolean micarApplicable,               // whether MiCAR (where not MiFID II instrument) applies
+        Duration kycRefreshCadence,            // how often ongoing monitoring re-screens
+        double beneficialOwnerThresholdPct,    // 25.0 = GwG §3 standard
+        Duration dataRetentionPeriod,          // regulatory retention (GwG §8: 5y; eWpG §15: 10y)
+        String travelRuleThresholdCurrency,    // "EUR"
+        double travelRuleThresholdAmount       // 1000.0 per TFR / TVTG
+    ) {}
+
     public record JurisdictionProfile(
         Jurisdiction jurisdiction,
-        List<DocumentRequirement> issuerRequirements
+        List<DocumentRequirement> issuerRequirements,
+        ComplianceMetadata compliance
     ) {}
 
     private final Map<Jurisdiction, JurisdictionProfile> profiles;
@@ -60,6 +78,54 @@ public class JurisdictionRequirementConfig {
     }
 
     // ── Germany — eWpG / BaFin ────────────────────────────────────────────────
+
+    private static final ComplianceMetadata DE_EWPG_COMPLIANCE = new ComplianceMetadata(
+        List.of("OPEN_SANCTIONS", "REFINITIV_WORLD_CHECK"),
+        "BaFin",
+        "https://portal.mvp.bafin.de/",
+        true,   // MiFIR RTS 22 applies for eWpG tokens classified as MiFID II financial instruments
+        false,  // MiCAR does NOT apply to MiFID II financial instruments (eWpG securities)
+        Duration.ofDays(365),
+        25.0,   // GwG §3 Abs. 2 — 25% beneficial owner threshold
+        Duration.ofDays(365 * 10), // eWpG §15(3) — 10-year retention for registry entries
+        "EUR", 1000.0
+    );
+
+    private static final ComplianceMetadata LU_CSSF_COMPLIANCE = new ComplianceMetadata(
+        List.of("OPEN_SANCTIONS"),
+        "CSSF",
+        "https://www.cssf.lu/en/complaints/",
+        true,   // MiFIR via MiFID II transposition
+        true,   // MiCAR applies for non-MiFID-II crypto-assets
+        Duration.ofDays(365),
+        25.0,
+        Duration.ofDays(365 * 5), // AML Law 2004 Art. 4 — 5 years minimum
+        "EUR", 1000.0
+    );
+
+    private static final ComplianceMetadata FR_AMF_COMPLIANCE = new ComplianceMetadata(
+        List.of("OPEN_SANCTIONS"),
+        "AMF",
+        "https://www.amf-france.org/",
+        true,
+        true,
+        Duration.ofDays(365),
+        25.0,
+        Duration.ofDays(365 * 5), // LCB-FT — 5 years
+        "EUR", 1000.0
+    );
+
+    private static final ComplianceMetadata LI_TVTG_COMPLIANCE = new ComplianceMetadata(
+        List.of("OPEN_SANCTIONS"),
+        "FMA",
+        "https://www.fma-li.li/",
+        false,  // MiFIR applies only via EEA passporting
+        true,   // TVTG (SPDG) token service providers subject to MiCAR-equivalent
+        Duration.ofDays(365),
+        25.0,   // SPG (Due Diligence Act) — 25% threshold
+        Duration.ofDays(365 * 10), // TVTG §33 — 10-year retention
+        "EUR", 1000.0  // TVTG adopts EU TFR threshold
+    );
 
     private JurisdictionProfile buildDeEwpg() {
         return new JurisdictionProfile(Jurisdiction.DE_EWPG, List.of(
@@ -93,7 +159,7 @@ public class JurisdictionRequirementConfig {
             req(DocumentType.LEI_CERTIFICATE, false, null,
                 "LEI-Zertifikat (empfohlen)",
                 "Legal Entity Identifier certificate (recommended for institutional issuers).")
-        ));
+        ), DE_EWPG_COMPLIANCE);
     }
 
     // ── Luxembourg — CSSF ─────────────────────────────────────────────────────
@@ -136,7 +202,7 @@ public class JurisdictionRequirementConfig {
             req(DocumentType.LEI_CERTIFICATE, false, null,
                 "Certificat LEI (recommandé)",
                 "Legal Entity Identifier certificate (recommended per ESMA guidelines).")
-        ));
+        ), LU_CSSF_COMPLIANCE);
     }
 
     // ── France — AMF ──────────────────────────────────────────────────────────
@@ -170,7 +236,7 @@ public class JurisdictionRequirementConfig {
             req(DocumentType.LEI_CERTIFICATE, false, null,
                 "Certificat LEI (recommandé)",
                 "Legal Entity Identifier certificate (recommended by AMF for securities issuers).")
-        ));
+        ), FR_AMF_COMPLIANCE);
     }
 
     // ── Liechtenstein — TVTG / FMA ────────────────────────────────────────────
@@ -210,7 +276,7 @@ public class JurisdictionRequirementConfig {
             req(DocumentType.REGULATORY_LICENSE, false, null,
                 "TVTG-Dienstleisternachricht (wenn zutreffend)",
                 "If acting as a TT Service Provider (TVTG §12), notification or registration with FMA Liechtenstein.")
-        ));
+        ), LI_TVTG_COMPLIANCE);
     }
 
     // ── Helper ─────────────────────────────────────────────────────────────────

@@ -24,14 +24,12 @@ class AuditEventRecorder {
 
     @ApplicationModuleListener
     void on(AuditableEvent event) {
-        try {
-            AuditEvent ae = AuditEvent.from(event);
-            enrichActorName(ae, event);
-            repository.save(ae);
-            log.debug("Recorded audit event: type={}, subject={}/{}", event.eventType(), event.subjectType(), event.subjectId());
-        } catch (Exception e) {
-            log.error("Failed to persist audit event: {}", event.eventType(), e);
-        }
+        AuditEvent ae = AuditEvent.from(event);
+        enrichActorName(ae, event);
+        repository.save(ae);
+        log.debug("Recorded audit event: type={}, subject={}/{}", event.eventType(), event.subjectType(), event.subjectId());
+        // Intentionally no try/catch: a failed audit write must propagate and roll back
+        // the originating transaction. Silent swallowing would violate eWpRV §6 integrity.
     }
 
     private static void enrichActorName(AuditEvent ae, AuditableEvent source) {

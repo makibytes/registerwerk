@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
-import de.makibytes.registerwerk.blockchain.api.MintControlService;
+import de.makibytes.registerwerk.asset.api.MintControlService;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
 import de.makibytes.registerwerk.asset.api.MintControlRule;
 import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
