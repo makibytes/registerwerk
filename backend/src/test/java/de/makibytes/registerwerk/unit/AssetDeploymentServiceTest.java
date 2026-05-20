@@ -3,21 +3,9 @@ package de.makibytes.registerwerk.unit;
 import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
-import de.makibytes.registerwerk.blockchain.api.CantonBondOperations;
-import de.makibytes.registerwerk.blockchain.api.CantonTokenOperations;
-import de.makibytes.registerwerk.blockchain.internal.confidential.ConfidentialErc20Service;
-import de.makibytes.registerwerk.erc3643.internal.ConfidentialErc3643Service;
-import de.makibytes.registerwerk.blockchain.internal.deploy.Erc1155DeploymentService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.Erc20DeploymentService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.Erc3525DeploymentService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.Erc4626DeploymentService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.Erc7540DeploymentService;
-import de.makibytes.registerwerk.erc3643.internal.Erc3643DeploymentService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.Erc721DeploymentService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.SolanaTokenService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetTokenService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.StellarAssetService;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
+import de.makibytes.registerwerk.erc3643.api.Erc3643DeploymentPort;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
 import de.makibytes.registerwerk.chain.api.Chain;
@@ -42,7 +30,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -59,46 +46,10 @@ class AssetDeploymentServiceTest {
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private Erc20DeploymentService erc20DeploymentService;
+    private TokenDeploymentPort tokenDeploymentPort;
 
     @Mock
-    private Erc721DeploymentService erc721DeploymentService;
-
-    @Mock
-    private Erc1155DeploymentService erc1155DeploymentService;
-
-    @Mock
-    private Erc3643DeploymentService erc3643DeploymentService;
-
-    @Mock
-    private Erc3525DeploymentService erc3525DeploymentService;
-
-    @Mock
-    private Erc4626DeploymentService erc4626DeploymentService;
-
-    @Mock
-    private Erc7540DeploymentService erc7540DeploymentService;
-
-    @Mock
-    private ConfidentialErc20Service confidentialErc20Service;
-
-    @Mock
-    private ConfidentialErc3643Service confidentialErc3643Service;
-
-    @Mock
-    private CantonTokenOperations cantonTokenService;
-
-    @Mock
-    private CantonBondOperations cantonBondOperations;
-
-    @Mock
-    private SolanaTokenService solanaTokenService;
-
-    @Mock
-    private StarknetTokenService starknetTokenService;
-
-    @Mock
-    private StellarAssetService stellarAssetService;
+    private Erc3643DeploymentPort erc3643DeploymentPort;
 
     @Mock
     private BlockchainClientRegistry blockchainClientRegistry;
@@ -124,7 +75,7 @@ class AssetDeploymentServiceTest {
                 .hasMessageContaining("Confidential token deployment is not supported on ARBITRUM");
 
         verify(assetDeploymentRepository, never()).save(any());
-        verifyNoInteractions(confidentialErc20Service, eventPublisher);
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -144,7 +95,7 @@ class AssetDeploymentServiceTest {
             deployment.setId(deploymentId);
             return deployment;
         });
-        when(erc20DeploymentService.deploy(eq(assetId), any(), any()))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.ARBITRUM), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
@@ -153,10 +104,7 @@ class AssetDeploymentServiceTest {
         assertThat(result.getId()).isEqualTo(deploymentId);
         assertThat(result.getChain()).isEqualTo(Chain.ARBITRUM);
         assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
-        verify(erc20DeploymentService).deploy(
-                eq(assetId),
-                any(),
-                eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.ARBITRUM), eq(Network.TESTNET), eq("owner-placeholder"));
         verify(eventPublisher).publishEvent(any(Object.class));
     }
 
@@ -177,14 +125,14 @@ class AssetDeploymentServiceTest {
             deployment.setId(deploymentId);
             return deployment;
         });
-        when(confidentialErc20Service.deploy(eq(assetId), any(), any()))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.CONF_ERC20), eq(Chain.FHENIX), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
                 assetId, Chain.FHENIX, Network.TESTNET, actorId);
 
         assertThat(result.getChain()).isEqualTo(Chain.FHENIX);
-        verify(confidentialErc20Service).deploy(eq(assetId), any(), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.CONF_ERC20), eq(Chain.FHENIX), eq(Network.TESTNET), eq("owner-placeholder"));
     }
 
     @Test
@@ -203,18 +151,18 @@ class AssetDeploymentServiceTest {
             deployment.setId(deploymentId);
             return deployment;
         });
-        when(solanaTokenService.createSplToken2022(eq(assetId), eq(Network.TESTNET), any()))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.SPL_2022), eq(Chain.SOLANA), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
                 assetId, Chain.SOLANA, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result.getChain()).isEqualTo(Chain.SOLANA);
-        verify(solanaTokenService).createSplToken2022(eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.SPL_2022), eq(Chain.SOLANA), eq(Network.TESTNET), eq("owner-placeholder"));
     }
 
     @Test
-    @DisplayName("deploy should route STARKNET_ERC20 assets through StarknetTokenService")
+    @DisplayName("deploy should route STARKNET_ERC20 assets through TokenDeploymentPort")
     void deploy_shouldRouteStarknetErc20ThroughStarknetTokenService() {
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
@@ -230,7 +178,7 @@ class AssetDeploymentServiceTest {
             deployment.setId(deploymentId);
             return deployment;
         });
-        when(starknetTokenService.createCairoErc20(eq(assetId), eq(Network.TESTNET), any()))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC20), eq(Chain.STARKNET), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
@@ -238,13 +186,12 @@ class AssetDeploymentServiceTest {
 
         assertThat(result.getChain()).isEqualTo(Chain.STARKNET);
         assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
-        verify(starknetTokenService).createCairoErc20(
-                eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC20), eq(Chain.STARKNET), eq(Network.TESTNET), eq("owner-placeholder"));
         verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test
-    @DisplayName("deploy should route STELLAR_ASSET assets through StellarAssetService")
+    @DisplayName("deploy should route STELLAR_ASSET assets through TokenDeploymentPort")
     void deploy_shouldRouteStellarAssetThroughStellarAssetService() {
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
@@ -260,7 +207,7 @@ class AssetDeploymentServiceTest {
             deployment.setId(deploymentId);
             return deployment;
         });
-        when(stellarAssetService.createStellarAsset(eq(assetId), eq(Network.TESTNET), any()))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.STELLAR_ASSET), eq(Chain.STELLAR), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
@@ -268,8 +215,7 @@ class AssetDeploymentServiceTest {
 
         assertThat(result.getChain()).isEqualTo(Chain.STELLAR);
         assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
-        verify(stellarAssetService).createStellarAsset(
-                eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STELLAR_ASSET), eq(Chain.STELLAR), eq(Network.TESTNET), eq("owner-placeholder"));
         verify(eventPublisher).publishEvent(any(Object.class));
     }
 
@@ -280,7 +226,6 @@ class AssetDeploymentServiceTest {
 
         Asset asset = new Asset();
         asset.setId(assetId);
-        // ERC20 cannot be deployed on Starknet (Starknet only supports STARKNET_ERC20 and STARKNET_ERC3525)
         asset.setTokenStandard(TokenStandard.ERC20);
 
         when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
@@ -289,17 +234,17 @@ class AssetDeploymentServiceTest {
             dep.setId(UUID.randomUUID());
             return dep;
         });
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.STARKNET), eq(Network.TESTNET), any()))
+                .thenThrow(new UnsupportedOperationException("Starknet does not support token standard: ERC20"));
 
         assertThatThrownBy(() -> assetDeploymentService.deploy(
                 assetId, Chain.STARKNET, Network.TESTNET, UUID.randomUUID()))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Starknet does not support token standard");
-
-        verify(starknetTokenService, never()).createCairoErc20(any(), any(), any());
     }
 
     @Test
-    @DisplayName("deploy should route STARKNET_ERC3525 through StarknetTokenService.createCairoErc3525")
+    @DisplayName("deploy should route STARKNET_ERC3525 through TokenDeploymentPort")
     void deploy_shouldRouteStarknetErc3525ThroughCreateCairoErc3525() {
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
@@ -314,18 +259,18 @@ class AssetDeploymentServiceTest {
             dep.setId(deploymentId);
             return dep;
         });
-        when(starknetTokenService.createCairoErc3525(eq(assetId), eq(Network.TESTNET), any()))
-                .thenReturn(new java.util.concurrent.CompletableFuture<>());
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC3525), eq(Chain.STARKNET), eq(Network.TESTNET), any()))
+                .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
                 assetId, Chain.STARKNET, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result.getChain()).isEqualTo(Chain.STARKNET);
-        verify(starknetTokenService).createCairoErc3525(eq(assetId), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC3525), eq(Chain.STARKNET), eq(Network.TESTNET), eq("owner-placeholder"));
     }
 
     @Test
-    @DisplayName("deploy should route ERC3525 on EVM through Erc3525DeploymentService stub")
+    @DisplayName("deploy should route ERC3525 on EVM through TokenDeploymentPort")
     void deploy_shouldRouteErc3525ThroughDeploymentServiceStub() {
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
@@ -340,18 +285,18 @@ class AssetDeploymentServiceTest {
             dep.setId(deploymentId);
             return dep;
         });
-        when(erc3525DeploymentService.deploy(eq(assetId), any(), any()))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC3525), eq(Chain.ETHEREUM), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
                 assetId, Chain.ETHEREUM, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result.getChain()).isEqualTo(Chain.ETHEREUM);
-        verify(erc3525DeploymentService).deploy(eq(assetId), any(), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.ERC3525), eq(Chain.ETHEREUM), eq(Network.TESTNET), eq("owner-placeholder"));
     }
 
     @Test
-    @DisplayName("deploy should route DAML_BOND_FIXED on Canton through CantonBondOperations stub")
+    @DisplayName("deploy should route DAML_BOND_FIXED on Canton through TokenDeploymentPort")
     void deploy_shouldRouteDamlBondFixedThroughCantonBondOperations() {
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
@@ -366,18 +311,18 @@ class AssetDeploymentServiceTest {
             dep.setId(deploymentId);
             return dep;
         });
-        when(cantonBondOperations.createFixedBond(eq(assetId), eq(Network.TESTNET), any(), any()))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.DAML_BOND_FIXED), eq(Chain.CANTON), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
                 assetId, Chain.CANTON, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result.getChain()).isEqualTo(Chain.CANTON);
-        verify(cantonBondOperations).createFixedBond(eq(assetId), eq(Network.TESTNET), any(), any());
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.DAML_BOND_FIXED), eq(Chain.CANTON), eq(Network.TESTNET), eq("owner-placeholder"));
     }
 
     @Test
-    @DisplayName("deploy should route SPL_2022_BOND through SolanaTokenService with BOND extension set")
+    @DisplayName("deploy should route SPL_2022_BOND through TokenDeploymentPort with SPL_2022_BOND standard")
     void deploy_shouldRouteSpl2022BondThroughSolanaTokenServiceWithExtensions() {
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
@@ -392,17 +337,13 @@ class AssetDeploymentServiceTest {
             dep.setId(deploymentId);
             return dep;
         });
-        when(solanaTokenService.createSplToken2022(
-                eq(assetId), eq(Network.TESTNET), any(),
-                eq(de.makibytes.registerwerk.blockchain.internal.deploy.SplExtensionSet.BOND)))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.SPL_2022_BOND), eq(Chain.SOLANA), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
                 assetId, Chain.SOLANA, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result).isNotNull();
-        verify(solanaTokenService).createSplToken2022(
-                eq(assetId), eq(Network.TESTNET), any(),
-                eq(de.makibytes.registerwerk.blockchain.internal.deploy.SplExtensionSet.BOND));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.SPL_2022_BOND), eq(Chain.SOLANA), eq(Network.TESTNET), eq("owner-placeholder"));
     }
 }

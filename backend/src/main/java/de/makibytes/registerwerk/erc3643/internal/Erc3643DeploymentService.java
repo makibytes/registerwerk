@@ -6,7 +6,7 @@ import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
-import de.makibytes.registerwerk.blockchain.internal.deploy.Erc20DeploymentService;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
 import de.makibytes.registerwerk.asset.api.AssetDeployment;
@@ -156,7 +156,7 @@ public class Erc3643DeploymentService {
             String salt = "registerwerk-" + assetId.toString();
 
             // Encode assetId as bytes32
-            byte[] assetIdBytes = Erc20DeploymentService.uuidToBytes32(assetId);
+            byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
 
             // EwpgTREXFactory.deployEwpgSuite(bytes32 assetId, string salt,
             //     ITREXFactory.TokenDetails details, ITREXFactory.ClaimDetails claims)
@@ -205,7 +205,7 @@ public class Erc3643DeploymentService {
             Web3j web3j = clientRegistry.getEvmClient(chain);
             Credentials creds = evmContractService.credentials(chain);
             String salt = "registerwerk-" + assetId;
-            byte[] assetIdBytes = Erc20DeploymentService.uuidToBytes32(assetId);
+            byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
             Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt);
             TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, fn);
             return receipt.getTransactionHash();

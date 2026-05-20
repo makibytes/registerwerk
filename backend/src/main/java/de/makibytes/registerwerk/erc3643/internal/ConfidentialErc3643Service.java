@@ -20,8 +20,8 @@ import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
-import de.makibytes.registerwerk.blockchain.internal.confidential.ConfidentialTokenEvents;
-import de.makibytes.registerwerk.blockchain.internal.deploy.Erc20DeploymentService;
+import de.makibytes.registerwerk.blockchain.api.ConfidentialTokenEvents;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
@@ -74,7 +74,7 @@ public class ConfidentialErc3643Service {
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
             Credentials creds = evmContractService.credentials(chain);
 
-            byte[] assetIdBytes = Erc20DeploymentService.uuidToBytes32(assetId);
+            byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
 
             Function deploy = new Function(
                     "deployConfidentialErc3643",

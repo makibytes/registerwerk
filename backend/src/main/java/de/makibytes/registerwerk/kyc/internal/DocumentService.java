@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.customer.internal;
+package de.makibytes.registerwerk.kyc.internal;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.kyc.api.KycDocument;

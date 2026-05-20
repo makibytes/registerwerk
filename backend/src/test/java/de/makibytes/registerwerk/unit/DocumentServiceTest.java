@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.customer.internal.DocumentService;
+import de.makibytes.registerwerk.kyc.internal.DocumentService;
 import de.makibytes.registerwerk.kyc.api.KycDocument;
 import de.makibytes.registerwerk.kyc.api.KycDocumentContent;
 import de.makibytes.registerwerk.kyc.api.KycDocumentContentRepository;

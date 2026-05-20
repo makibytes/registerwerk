@@ -7,7 +7,7 @@ import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
-import de.makibytes.registerwerk.customer.internal.CompanyUserService;
+import de.makibytes.registerwerk.auth.AuthApi;
 import de.makibytes.registerwerk.onboarding.api.OnboardingToken;
 import de.makibytes.registerwerk.onboarding.api.OnboardingTokenRepository;
 import org.slf4j.Logger;
@@ -42,7 +42,7 @@ public class OnboardingService {
     private final OnboardingTokenRepository onboardingTokenRepository;
     private final LegalEntityRepository legalEntityRepository;
     private final ApplicationEventPublisher eventPublisher;
-    private final CompanyUserService companyUserService;
+    private final AuthApi authApi;
     private final RegisterwerkAuthProperties authProperties;
     private final String frontendUrl;
     private final long tokenTtlHours;
@@ -51,14 +51,14 @@ public class OnboardingService {
             OnboardingTokenRepository onboardingTokenRepository,
             LegalEntityRepository legalEntityRepository,
             ApplicationEventPublisher eventPublisher,
-            CompanyUserService companyUserService,
+            AuthApi authApi,
             RegisterwerkAuthProperties authProperties,
             @Value("${registerwerk.onboarding.token-ttl-hours:48}") long tokenTtlHours,
             @Value("${registerwerk.onboarding.frontend-url:http://localhost:4201}") String frontendUrl) {
         this.onboardingTokenRepository = onboardingTokenRepository;
         this.legalEntityRepository = legalEntityRepository;
         this.eventPublisher = eventPublisher;
-        this.companyUserService = companyUserService;
+        this.authApi = authApi;
         this.authProperties = authProperties;
         this.tokenTtlHours = tokenTtlHours;
         this.frontendUrl = frontendUrl;
@@ -134,7 +134,7 @@ public class OnboardingService {
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", token.getLegalEntityId()));
         entity.setStatus(EntityStatus.ACTIVE);
         legalEntityRepository.save(entity);
-        companyUserService.createInitialCompanyAdmin(
+        authApi.createInitialCompanyAdmin(
             entity.getId(),
             adminEmail,
             adminName,

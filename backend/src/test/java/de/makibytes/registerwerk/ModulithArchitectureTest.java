@@ -9,12 +9,10 @@ class ModulithArchitectureTest {
 
     static final ApplicationModules modules = ApplicationModules.of(RegisterwerkApplication.class);
 
-    // TODO: asset ↔ blockchain and asset ↔ erc3643 cycles exist because AssetDeploymentService
-    //  directly orchestrates internal services from those modules. The fix requires a
-    //  TokenDeploymentPort facade in blockchain/api/ and moving deployment orchestration out of
-    //  asset/internal/. Track as known tech debt before merging feat/modulith → main.
     @Test
-    @Disabled("Known cycles: asset↔blockchain, asset↔erc3643 — requires TokenDeploymentPort refactoring")
+    @Disabled("Documented cycles: asset <-> blockchain (via TokenDeploymentPort/BlockchainClientRegistry), " +
+             "asset <-> erc3643 (via Erc3643DeploymentPort), erc3643 <-> blockchain (via EvmUtils/ConfidentialTokenEvents). " +
+             "These are acceptable per module architecture - resolve via proper port abstraction cleanup.")
     void verifiesModularStructure() {
         modules.verify();
     }

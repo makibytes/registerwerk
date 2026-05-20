@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.onboarding.internal.OnboardingService;
-import de.makibytes.registerwerk.customer.internal.CompanyUserService;
+import de.makibytes.registerwerk.auth.AuthApi;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
@@ -46,7 +46,7 @@ class OnboardingServiceTest {
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private CompanyUserService companyUserService;
+    private AuthApi authApi;
 
     private OnboardingService onboardingService;
 
@@ -58,7 +58,7 @@ class OnboardingServiceTest {
             onboardingTokenRepository,
             legalEntityRepository,
             eventPublisher,
-            companyUserService,
+            authApi,
             authProperties,
             48,
             "http://localhost:4201"
