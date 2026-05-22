@@ -309,7 +309,7 @@ export interface WalletBalance {
 export interface OperatorWallet {
   id: string;
   name: string;
-  type: 'EVM' | 'SOLANA';
+  type: 'EVM' | 'SOLANA' | 'CANTON';
   address: string;
   defaultForChains: string[]; // chain config UUIDs
   createdAt: string;

@@ -1,0 +1,127 @@
+site_name: Registerwerk — Technical & Regulatory Reference
+site_description: >-
+  Implementation reference for operators, compliance teams, and engineers.
+  Covers all supported legal frameworks, token standards, blockchains, and platform architecture.
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: custom
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Manrope
+    code: IBM Plex Mono
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+extra_css:
+  - assets/brand.css
+
+plugins:
+  - search:
+      lang: en
+
+hooks:
+  - docs/hooks.py
+
+exclude_docs: |
+  hooks.py
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+      title: On this page
+
+extra:
+  generator: false
+
+nav:
+  - Home: index.md
+  - Introduction:
+    - intro/index.md
+    - Core Concepts: intro/concepts.md
+    - System Architecture: intro/architecture.md
+    - User Roles & Permissions: intro/user-roles.md
+  - Legal Frameworks:
+    - legal/index.md
+    - Germany — eWpG: legal/ewpg.md
+    - Luxembourg — CSSF: legal/cssf-lu.md
+    - France — AMF: legal/amf-fr.md
+    - Liechtenstein — TVTG: legal/tvtg-li.md
+  - Compliance Components:
+    - compliance/index.md
+    - KYC & AML: compliance/kyc-aml.md
+    - Sanctions Screening: compliance/sanctions-screening.md
+    - Travel Rule (TFR): compliance/travel-rule.md
+    - Sperrvermerk §16 eWpG: compliance/sperrvermerk.md
+    - Step-Up MFA & 4-Eyes: compliance/step-up-mfa.md
+    - DORA — ICT Risk: compliance/dora.md
+    - MiFIR Transaction Reporting: compliance/mifir.md
+    - DAC8 / CARF: compliance/dac8.md
+    - Data Protection (DSGVO): compliance/data-protection.md
+  - Token Standards:
+    - token-standards/index.md
+    - ERC-20 — Fungible Token: token-standards/erc20.md
+    - ERC-721 — Non-Fungible Token: token-standards/erc721.md
+    - ERC-1155 — Multi-Token: token-standards/erc1155.md
+    - ERC-3525 — Semi-Fungible: token-standards/erc3525.md
+    - ERC-3643 — T-REX Regulated: token-standards/erc3643.md
+    - ERC-4626 — Tokenised Vault: token-standards/erc4626.md
+    - ERC-7540 — Async Vault: token-standards/erc7540.md
+    - DAML Finance Bonds: token-standards/canton-daml.md
+    - Solana SPL-2022: token-standards/spl-2022.md
+    - Confidential Tokens (Zama fhEVM): token-standards/confidential.md
+  - Supported Blockchains:
+    - blockchains/index.md
+    - Ethereum & EVM Chains: blockchains/evm.md
+    - Confidential EVM (Fhenix / Inco): blockchains/confidential-evm.md
+    - Solana: blockchains/solana.md
+    - Canton / DAML Ledger: blockchains/canton.md
+    - StarkNet & Stellar: blockchains/starknet-stellar.md
+  - Platform Architecture:
+    - platform/index.md
+    - Module Architecture: platform/modules.md
+    - Security & Authentication: platform/security.md
+    - Audit Log: platform/audit-log.md
+    - REST API Overview: platform/api.md

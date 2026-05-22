@@ -1,0 +1,45 @@
+/* Registerwerk brand colours for MkDocs Material */
+:root {
+  --md-primary-fg-color:        #1e2741;
+  --md-primary-fg-color--light: #2d3a5c;
+  --md-primary-fg-color--dark:  #07091a;
+  --md-primary-bg-color:        #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #1e2741;
+  --md-primary-fg-color--light: #2d3a5c;
+  --md-primary-fg-color--dark:  #07091a;
+  --md-hue:                     220;
+}
+
+/* Amber accent on links and highlights to match operator frontend */
+[data-md-color-accent="amber"] {
+  --md-accent-fg-color:        #f59e0b;
+  --md-accent-fg-color--transparent: rgba(245, 158, 11, 0.1);
+  --md-accent-bg-color:        #ffffff;
+  --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+/* IBM Plex Mono already set via theme.font.code but reinforce for code blocks */
+code, kbd, pre {
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+}
+
+/* Slightly tighter page width for dense regulatory content */
+.md-grid {
+  max-width: 1280px;
+}
+
+/* Make admonition titles slightly bolder */
+.md-typeset .admonition-title,
+.md-typeset summary {
+  font-weight: 600;
+}
+
+/* Jurisdiction comparison table: tighter padding */
+.md-typeset table:not([class]) th,
+.md-typeset table:not([class]) td {
+  padding: 0.5em 0.75em;
+}
