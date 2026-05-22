@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Indexer",
-        allowedDependencies = {"shared", "audit", "chain", "blockchain", "asset"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Indexer")
 package de.makibytes.registerwerk.indexer;

@@ -2,10 +2,10 @@ package de.makibytes.registerwerk.asset.internal;
 
 import de.makibytes.registerwerk.asset.AssetApi;
 import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetHolder;
-import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

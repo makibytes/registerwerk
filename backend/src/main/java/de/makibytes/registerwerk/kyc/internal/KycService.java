@@ -21,7 +21,7 @@ import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
-import de.makibytes.registerwerk.kyc.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.KycStatus;
 import de.makibytes.registerwerk.kyc.api.KycJurisdictionApproval;
 import de.makibytes.registerwerk.kyc.api.KycJurisdictionApprovalRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;

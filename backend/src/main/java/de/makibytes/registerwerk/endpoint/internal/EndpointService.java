@@ -1,12 +1,12 @@
 package de.makibytes.registerwerk.endpoint.internal;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
-import de.makibytes.registerwerk.asset.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpoint;
 import de.makibytes.registerwerk.endpoint.api.RiskLevel;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpointRepository;
-import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import org.springframework.security.access.AccessDeniedException;

@@ -110,7 +110,9 @@ public class BlockchainConfig {
             registerCantonClient(cantonClients, cantonProperties.getDevnet(), Chain.CANTON, Network.TESTNET);
         }
 
-        return new BlockchainClientRegistry(evmClients, solanaClients, cantonClients);
+        return new BlockchainClientRegistry(evmClients, solanaClients, cantonClients,
+                java.util.Optional.empty(), java.util.Optional.empty(),
+                java.util.Optional.empty(), java.util.Optional.empty());
     }
 
     private void registerCantonClient(

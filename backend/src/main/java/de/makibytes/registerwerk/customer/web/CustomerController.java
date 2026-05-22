@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.customer.web;
 
-import de.makibytes.registerwerk.externalref.ExternalRefApi;
 import de.makibytes.registerwerk.customer.internal.EntityHistoryService;
 import de.makibytes.registerwerk.customer.internal.LegalEntityService;
 import de.makibytes.registerwerk.customer.api.EntityMergeRecord;
@@ -8,7 +7,6 @@ import de.makibytes.registerwerk.customer.api.EntityNameHistory;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
-import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
 import de.makibytes.registerwerk.customer.web.dto.EntityUpdateRequest;
@@ -40,17 +38,14 @@ public class CustomerController {
 
     private final LegalEntityService legalEntityService;
     private final EntityHistoryService entityHistoryService;
-    private final ExternalRefApi companyExternalReferenceService;
     private final EntityMapper entityMapper;
 
     public CustomerController(
             LegalEntityService legalEntityService,
             EntityHistoryService entityHistoryService,
-            ExternalRefApi companyExternalReferenceService,
             EntityMapper entityMapper) {
         this.legalEntityService = legalEntityService;
         this.entityHistoryService = entityHistoryService;
-        this.companyExternalReferenceService = companyExternalReferenceService;
         this.entityMapper = entityMapper;
     }
 
@@ -198,9 +193,7 @@ public class CustomerController {
                 base.registrationNumber(),
                 base.kycStatus(),
                 base.createdAt(),
-                companyExternalReferenceService
-                        .findExternalId(authentication, ExternalReferenceSubjectType.LEGAL_ENTITY, entity.getId())
-                        .orElse(null)
+                null
         );
     }
 }

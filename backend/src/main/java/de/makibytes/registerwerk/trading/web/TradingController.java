@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.trading.web;
 
-import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.trading.api.PaymentOption;
 import de.makibytes.registerwerk.trading.api.TradingAssetType;
 import de.makibytes.registerwerk.trading.api.TradingVenueCode;

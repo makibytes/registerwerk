@@ -1,14 +1,14 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
-import de.makibytes.registerwerk.asset.api.AssetCouponPayment;
-import de.makibytes.registerwerk.asset.api.AssetCouponPaymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetSlot;
-import de.makibytes.registerwerk.asset.api.AssetSlotRepository;
-import de.makibytes.registerwerk.asset.api.AssetTokenUnit;
-import de.makibytes.registerwerk.asset.api.AssetTokenUnitRepository;
-import de.makibytes.registerwerk.asset.api.CouponStatus;
+import de.makibytes.registerwerk.deployment.api.AssetCouponPayment;
+import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetSlot;
+import de.makibytes.registerwerk.deployment.api.AssetSlotRepository;
+import de.makibytes.registerwerk.deployment.api.AssetTokenUnit;
+import de.makibytes.registerwerk.deployment.api.AssetTokenUnitRepository;
+import de.makibytes.registerwerk.deployment.api.CouponStatus;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
@@ -49,7 +49,7 @@ import java.util.UUID;
  */
 @Service
 @Transactional
-public class Erc3525AdminService {
+public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain.api.Erc3525AdminPort {
 
     private static final Logger log = LoggerFactory.getLogger(Erc3525AdminService.class);
 

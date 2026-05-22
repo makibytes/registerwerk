@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.trading.web.dto;
 
 import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.trading.api.OrderType;
 import de.makibytes.registerwerk.trading.api.PaymentOption;
 import de.makibytes.registerwerk.trading.api.TradingAssetType;

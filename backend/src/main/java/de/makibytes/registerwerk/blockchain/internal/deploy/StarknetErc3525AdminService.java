@@ -1,11 +1,11 @@
 package de.makibytes.registerwerk.blockchain.internal.deploy;
 
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetSlot;
-import de.makibytes.registerwerk.asset.api.AssetSlotRepository;
-import de.makibytes.registerwerk.asset.api.AssetTokenUnit;
-import de.makibytes.registerwerk.asset.api.AssetTokenUnitRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetSlot;
+import de.makibytes.registerwerk.deployment.api.AssetSlotRepository;
+import de.makibytes.registerwerk.deployment.api.AssetTokenUnit;
+import de.makibytes.registerwerk.deployment.api.AssetTokenUnitRepository;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;

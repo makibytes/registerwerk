@@ -1,7 +1,8 @@
 package de.makibytes.registerwerk.indexer.api;
 
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -18,12 +19,12 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
 
     private static final Logger log = LoggerFactory.getLogger(HolderDataService.class);
 
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
     private final AssetDeploymentRepository deploymentRepository;
 
-    public HolderDataService(AssetRepository assetRepository,
+    public HolderDataService(AssetLookupPort assetLookupPort,
                              AssetDeploymentRepository deploymentRepository) {
-        this.assetRepository = assetRepository;
+        this.assetLookupPort = assetLookupPort;
         this.deploymentRepository = deploymentRepository;
     }
 

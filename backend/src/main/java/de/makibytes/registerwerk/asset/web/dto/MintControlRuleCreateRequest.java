@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.asset.web.dto;
 
-import de.makibytes.registerwerk.asset.api.MintControlRule;
+import de.makibytes.registerwerk.deployment.api.MintControlRule;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 

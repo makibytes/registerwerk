@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.asset.web;
 
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.asset.web.dto.DeploymentCreateRequest;
 import de.makibytes.registerwerk.asset.web.dto.DeploymentResponse;
 import org.mapstruct.Mapper;

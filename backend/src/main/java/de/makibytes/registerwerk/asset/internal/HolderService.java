@@ -12,8 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
-import de.makibytes.registerwerk.asset.api.AssetHolder;
-import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 
 /**
  * Manages asset holder records (investor positions).

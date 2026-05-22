@@ -1,10 +1,9 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
@@ -30,7 +29,7 @@ import static org.mockito.Mockito.when;
 class TokenAdminServiceTest {
 
     @Mock private AssetDeploymentRepository deploymentRepository;
-    @Mock private AssetRepository assetRepository;
+    @Mock private AssetLookupPort assetLookupPort;
     @Mock private BlockchainClientRegistry clientRegistry;
     @Mock private EvmContractService evmContractService;
     @Mock private BlockchainTransactionService txService;
@@ -48,12 +47,9 @@ class TokenAdminServiceTest {
         dep.setContractAddress("0x" + "a".repeat(40));
         dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
 
-        Asset asset = new Asset();
-        asset.setId(assetId);
-        asset.setTokenStandard(standard);
-
         when(deploymentRepository.findById(depId)).thenReturn(Optional.of(dep));
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(assetLookupPort.findById(assetId)).thenReturn(
+                Optional.of(new AssetLookupPort.AssetInfo(assetId, "Test Asset", null, standard, null, null, null, "AST-001", null)));
         return dep;
     }
 
@@ -140,12 +136,9 @@ class TokenAdminServiceTest {
         dep.setNetwork(Network.TESTNET);
         dep.setContractAddress("0x" + "b".repeat(40));
 
-        Asset asset = new Asset();
-        asset.setId(assetId);
-        asset.setTokenStandard(TokenStandard.ERC20);
-
         when(deploymentRepository.findById(depId)).thenReturn(Optional.of(dep));
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(assetLookupPort.findById(assetId)).thenReturn(
+                Optional.of(new AssetLookupPort.AssetInfo(assetId, "ERC-20 Asset", null, TokenStandard.ERC20, null, null, null, "AST-002", null)));
         when(clientRegistry.getEvmClient(org.mockito.ArgumentMatchers.any())).thenReturn(null);
         when(evmContractService.credentials(org.mockito.ArgumentMatchers.<de.makibytes.registerwerk.chain.api.ChainDescriptor>any())).thenReturn(null);
         when(evmContractService.submit(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
@@ -157,7 +150,6 @@ class TokenAdminServiceTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(UUID.randomUUID());
 
-        // Should not throw
         tokenAdminService.setSupplyCap(depId, BigInteger.valueOf(1000));
     }
 }

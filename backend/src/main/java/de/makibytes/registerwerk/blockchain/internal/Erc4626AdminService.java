@@ -1,11 +1,11 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetVaultState;
-import de.makibytes.registerwerk.asset.api.AssetVaultStateRepository;
-import de.makibytes.registerwerk.asset.api.VaultNavStrike;
-import de.makibytes.registerwerk.asset.api.VaultNavStrikeRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetVaultState;
+import de.makibytes.registerwerk.deployment.api.AssetVaultStateRepository;
+import de.makibytes.registerwerk.deployment.api.VaultNavStrike;
+import de.makibytes.registerwerk.deployment.api.VaultNavStrikeRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
@@ -37,7 +37,7 @@ import java.util.UUID;
  */
 @Service
 @Transactional
-public class Erc4626AdminService {
+public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain.api.Erc4626AdminPort {
 
     private static final Logger log = LoggerFactory.getLogger(Erc4626AdminService.class);
 

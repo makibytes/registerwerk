@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Asset",
-        allowedDependencies = {"shared", "audit", "customer", "chain", "blockchain"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Asset")
 package de.makibytes.registerwerk.asset;

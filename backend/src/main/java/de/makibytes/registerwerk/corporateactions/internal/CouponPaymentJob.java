@@ -1,8 +1,8 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
-import de.makibytes.registerwerk.asset.api.AssetCouponPayment;
-import de.makibytes.registerwerk.asset.api.AssetCouponPaymentRepository;
-import de.makibytes.registerwerk.asset.api.CouponStatus;
+import de.makibytes.registerwerk.deployment.api.AssetCouponPayment;
+import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
+import de.makibytes.registerwerk.deployment.api.CouponStatus;
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import org.quartz.Job;

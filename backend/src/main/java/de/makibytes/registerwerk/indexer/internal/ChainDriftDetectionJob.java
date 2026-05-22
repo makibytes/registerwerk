@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.indexer.internal;
 
-import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;

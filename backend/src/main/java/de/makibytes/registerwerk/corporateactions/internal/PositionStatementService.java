@@ -1,8 +1,8 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetHolder;
-import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;

@@ -1,8 +1,8 @@
 package de.makibytes.registerwerk.asset;
 
 import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
 
 import java.util.List;
 import java.util.Optional;

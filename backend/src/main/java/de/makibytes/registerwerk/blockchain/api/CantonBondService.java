@@ -9,13 +9,12 @@ import com.daml.ledger.javaapi.data.Numeric;
 import com.daml.ledger.javaapi.data.Party;
 import com.daml.ledger.javaapi.data.Text;
 import com.daml.ledger.javaapi.data.Value;
-import de.makibytes.registerwerk.asset.api.AssetBondTerms;
-import de.makibytes.registerwerk.asset.api.AssetBondTermsRepository;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
-import de.makibytes.registerwerk.asset.api.BondStatus;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.BondStatus;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.blockchain.events.CantonBondCalledEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonBondCreatedEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonBondRedeemedEvent;
@@ -59,14 +58,14 @@ public class CantonBondService implements CantonBondOperations {
 
     private final BlockchainClientRegistry registry;
     private final AssetDeploymentRepository assetDeploymentRepository;
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
     private final AssetBondTermsRepository bondTermsRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     public CantonBondService(
             BlockchainClientRegistry registry,
             AssetDeploymentRepository assetDeploymentRepository,
-            AssetRepository assetRepository,
+            AssetLookupPort assetLookupPort,
             AssetBondTermsRepository bondTermsRepository,
             ApplicationEventPublisher eventPublisher) {
         this.registry                 = registry;

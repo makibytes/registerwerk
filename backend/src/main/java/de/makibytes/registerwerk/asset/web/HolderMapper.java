@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.asset.web;
 
-import de.makibytes.registerwerk.asset.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.asset.web.dto.HolderCreateRequest;
 import de.makibytes.registerwerk.asset.web.dto.HolderResponse;
 import org.mapstruct.Mapper;

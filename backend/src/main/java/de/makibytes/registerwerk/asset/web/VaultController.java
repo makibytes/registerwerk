@@ -1,14 +1,14 @@
 package de.makibytes.registerwerk.asset.web;
 
-import de.makibytes.registerwerk.blockchain.internal.Erc4626AdminService;
-import de.makibytes.registerwerk.blockchain.internal.Erc7540AdminService;
+import de.makibytes.registerwerk.blockchain.api.Erc4626AdminPort;
+import de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort;
 import de.makibytes.registerwerk.blockchain.web.dto.FulfillVaultRequestBody;
 import de.makibytes.registerwerk.blockchain.web.dto.NavStrikeRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.TxSubmissionResponse;
-import de.makibytes.registerwerk.asset.api.VaultNavStrike;
-import de.makibytes.registerwerk.asset.api.VaultNavStrikeRepository;
-import de.makibytes.registerwerk.asset.api.VaultRequest;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.VaultNavStrike;
+import de.makibytes.registerwerk.deployment.api.VaultNavStrikeRepository;
+import de.makibytes.registerwerk.deployment.api.VaultRequest;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -29,13 +29,13 @@ import java.util.UUID;
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
 public class VaultController {
 
-    private final Erc4626AdminService erc4626AdminService;
-    private final Erc7540AdminService erc7540AdminService;
+    private final Erc4626AdminPort erc4626AdminService;
+    private final Erc7540AdminPort erc7540AdminService;
     private final VaultNavStrikeRepository navStrikeRepository;
     private final AssetDeploymentRepository deploymentRepository;
 
-    public VaultController(Erc4626AdminService erc4626AdminService,
-                           Erc7540AdminService erc7540AdminService,
+    public VaultController(Erc4626AdminPort erc4626AdminService,
+                           Erc7540AdminPort erc7540AdminService,
                            VaultNavStrikeRepository navStrikeRepository,
                            AssetDeploymentRepository deploymentRepository) {
         this.erc4626AdminService = erc4626AdminService;

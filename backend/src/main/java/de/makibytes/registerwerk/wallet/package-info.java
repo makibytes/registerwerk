@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Wallet",
-        allowedDependencies = {"shared", "audit", "chain", "blockchain"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Wallet")
 package de.makibytes.registerwerk.wallet;

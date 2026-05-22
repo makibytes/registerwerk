@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
@@ -23,8 +25,6 @@ import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.blockchain.api.ConfidentialTokenEvents;
 import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
-import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
 
 /**
  * Deploys Confidential ERC-3643 security tokens (Zama fhEVM + T-REX) via
@@ -49,23 +49,23 @@ public class ConfidentialErc3643Service {
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
     private final ContractAddressConfig contractAddressConfig;
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
 
     public ConfidentialErc3643Service(BlockchainClientRegistry blockchainClientRegistry,
                                       EvmContractService evmContractService,
                                       ContractAddressConfig contractAddressConfig,
-                                      AssetRepository assetRepository) {
+                                      AssetLookupPort assetLookupPort) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
-        this.assetRepository = assetRepository;
+        this.assetLookupPort = assetLookupPort;
     }
 
     public CompletableFuture<String> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
         log.info("Deploying Confidential ERC-3643: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
-            Asset asset = assetRepository.findById(assetId)
+            AssetLookupPort.AssetInfo asset = assetLookupPort.findById(assetId)
                     .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + assetId));
 
             String chainId = chain.chain().name().toLowerCase() + "-" + chain.network().name().toLowerCase();
@@ -80,8 +80,8 @@ public class ConfidentialErc3643Service {
                     "deployConfidentialErc3643",
                     Arrays.asList(
                             new Bytes32(assetIdBytes),
-                            new Utf8String(asset.getName()),
-                            new Utf8String(asset.getTokenStandard().name()),
+                            new Utf8String(asset.name()),
+                            new Utf8String(asset.tokenStandard().name()),
                             new Address(ZERO_ADDRESS),
                             new Address(ZERO_ADDRESS)
                     ),

@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Trading",
-        allowedDependencies = {"shared", "audit", "customer", "asset", "endpoint"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Trading")
 package de.makibytes.registerwerk.trading;

@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Onboarding",
-        allowedDependencies = {"shared", "audit", "auth", "customer"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Onboarding")
 package de.makibytes.registerwerk.onboarding;

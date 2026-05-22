@@ -14,7 +14,7 @@ import de.makibytes.registerwerk.blockchain.internal.deploy.SolanaTokenService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.SplExtensionSet;
 import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetTokenService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.StellarAssetService;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.Network;

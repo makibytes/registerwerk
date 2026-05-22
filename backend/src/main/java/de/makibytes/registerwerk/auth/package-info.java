@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Authentication",
-        allowedDependencies = "shared"
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Authentication")
 package de.makibytes.registerwerk.auth;

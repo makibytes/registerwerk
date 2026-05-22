@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collections;
@@ -20,11 +22,9 @@ import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
-import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
@@ -58,19 +58,19 @@ public class TokenAdminService {
     private static final Logger log = LoggerFactory.getLogger(TokenAdminService.class);
 
     private final AssetDeploymentRepository deploymentRepository;
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
     private final BlockchainClientRegistry clientRegistry;
     private final EvmContractService evmContractService;
     private final BlockchainTransactionService txService;
 
     public TokenAdminService(
             AssetDeploymentRepository deploymentRepository,
-            AssetRepository assetRepository,
+            AssetLookupPort assetLookupPort,
             BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
             BlockchainTransactionService txService) {
         this.deploymentRepository = deploymentRepository;
-        this.assetRepository = assetRepository;
+        this.assetLookupPort = assetLookupPort;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
         this.txService = txService;
@@ -81,7 +81,7 @@ public class TokenAdminService {
     public UUID pause(UUID deploymentId) {
         log.info("ADMIN pause on deployment={}", deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         return submitAdmin(dep, asset, new Function("pause", Collections.emptyList(), Collections.emptyList()),
                 "pause", Map.of());
     }
@@ -89,7 +89,7 @@ public class TokenAdminService {
     public UUID unpause(UUID deploymentId) {
         log.info("ADMIN unpause on deployment={}", deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         return submitAdmin(dep, asset, new Function("unpause", Collections.emptyList(), Collections.emptyList()),
                 "unpause", Map.of());
     }
@@ -99,7 +99,7 @@ public class TokenAdminService {
     public UUID freezeAddress(UUID deploymentId, String walletAddress, String reason, String legalBasis) {
         log.info("ADMIN freezeAddress={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("freezeAddress",
                 Arrays.asList(new Address(walletAddress), new Utf8String(reason)),
                 Collections.emptyList());
@@ -110,7 +110,7 @@ public class TokenAdminService {
     public UUID unfreezeAddress(UUID deploymentId, String walletAddress) {
         log.info("ADMIN unfreezeAddress={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("unfreezeAddress",
                 Collections.singletonList(new Address(walletAddress)),
                 Collections.emptyList());
@@ -123,7 +123,7 @@ public class TokenAdminService {
     public UUID whitelist(UUID deploymentId, String walletAddress) {
         log.info("ADMIN whitelist={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("whitelist",
                 Collections.singletonList(new Address(walletAddress)),
                 Collections.emptyList());
@@ -134,7 +134,7 @@ public class TokenAdminService {
     public UUID unwhitelist(UUID deploymentId, String walletAddress) {
         log.info("ADMIN removeFromWhitelist={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("removeFromWhitelist",
                 Collections.singletonList(new Address(walletAddress)),
                 Collections.emptyList());
@@ -146,9 +146,9 @@ public class TokenAdminService {
     public UUID forcedTransfer(UUID deploymentId, String from, String to, BigInteger value, String legalBasis) {
         log.info("ADMIN forcedTransfer from={} to={} value={} on deployment={}", from, to, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function(
-                forcedTransferMethodName(asset.getTokenStandard()),
+                forcedTransferMethodName(asset.tokenStandard()),
                 Arrays.asList(new Address(from), new Address(to), new Uint256(value), new Utf8String(legalBasis)),
                 Collections.emptyList());
         return submitAdmin(dep, asset, fn, "forcedTransfer",
@@ -162,8 +162,8 @@ public class TokenAdminService {
                                      BigInteger id, BigInteger amount, String legalBasis) {
         log.info("ADMIN forcedTransferSingle id={} amount={} on deployment={}", id, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
-        if (asset.getTokenStandard() != TokenStandard.ERC1155) {
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forcedTransferSingle is only available for ERC-1155 tokens");
         }
         Function fn = new Function("forcedTransferSingle",
@@ -180,9 +180,9 @@ public class TokenAdminService {
     public UUID forcedApprove(UUID deploymentId, String owner, String spender, BigInteger value, String legalBasis) {
         log.info("ADMIN forcedApprove owner={} spender={} value={} on deployment={}", owner, spender, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function(
-                forcedApproveMethodName(asset.getTokenStandard()),
+                forcedApproveMethodName(asset.tokenStandard()),
                 Arrays.asList(new Address(owner), new Address(spender), new Uint256(value), new Utf8String(legalBasis)),
                 Collections.emptyList());
         return submitAdmin(dep, asset, fn, "forcedApprove",
@@ -194,7 +194,7 @@ public class TokenAdminService {
     public UUID forceBurn(UUID deploymentId, String from, BigInteger value, String legalBasis) {
         log.info("ADMIN forceBurn from={} value={} on deployment={}", from, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("forceBurn",
                 Arrays.asList(new Address(from), new Uint256(value), new Utf8String(legalBasis)),
                 Collections.emptyList());
@@ -208,8 +208,8 @@ public class TokenAdminService {
     public UUID forceBurnSingle(UUID deploymentId, String from, BigInteger id, BigInteger amount, String legalBasis) {
         log.info("ADMIN forceBurnSingle id={} amount={} on deployment={}", id, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
-        if (asset.getTokenStandard() != TokenStandard.ERC1155) {
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forceBurnSingle is only available for ERC-1155 tokens");
         }
         Function fn = new Function("forceBurnSingle",
@@ -224,7 +224,7 @@ public class TokenAdminService {
     public UUID mint(UUID deploymentId, String toAddress, BigInteger amount) {
         log.info("Issuer MINT to={} amount={} on deployment={}", toAddress, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("mint",
                 Arrays.asList(new Address(toAddress), new Uint256(amount)),
                 Collections.emptyList());
@@ -234,7 +234,7 @@ public class TokenAdminService {
     public UUID regularBurn(UUID deploymentId, String fromAddress, BigInteger amount) {
         log.info("Issuer BURN from={} amount={} on deployment={}", fromAddress, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("burn",
                 Arrays.asList(new Address(fromAddress), new Uint256(amount)),
                 Collections.emptyList());
@@ -246,7 +246,7 @@ public class TokenAdminService {
     public UUID setSupplyCap(UUID deploymentId, BigInteger newCap) {
         log.info("ADMIN setSupplyCap={} on deployment={}", newCap, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        Asset asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("setSupplyCap",
                 Collections.singletonList(new Uint256(newCap)),
                 Collections.emptyList());
@@ -260,10 +260,10 @@ public class TokenAdminService {
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
     }
 
-    private Asset requireEvmToken(AssetDeployment dep) {
-        Asset asset = assetRepository.findById(dep.getAssetId())
-                .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));
-        TokenStandard standard = asset.getTokenStandard();
+    private AssetLookupPort.AssetInfo requireEvmToken(AssetDeployment dep) {
+        AssetLookupPort.AssetInfo asset = assetLookupPort.findById(dep.getAssetId())
+                .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException("Asset", dep.getAssetId()));
+        TokenStandard standard = asset.tokenStandard();
         if (standard == TokenStandard.ERC3643 || standard == TokenStandard.CONF_ERC3643) {
             throw new IllegalArgumentException(
                     "ERC-3643 admin operations go through Erc3643LifecycleService (/erc3643 endpoints).");
@@ -303,13 +303,13 @@ public class TokenAdminService {
         return asset;
     }
 
-    private UUID submitAdmin(AssetDeployment dep, Asset asset, Function fn, String methodName, Map<String, Object> params) {
+    private UUID submitAdmin(AssetDeployment dep, AssetLookupPort.AssetInfo asset, Function fn, String methodName, Map<String, Object> params) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
         Credentials creds = evmContractService.credentials(descriptor);
         String txHash = evmContractService.submit(web3j, creds, dep.getContractAddress(), fn);
 
-        return txService.record(txHash, methodName, dep.getId(), asset.getId(),
+        return txService.record(txHash, methodName, dep.getId(), asset.id(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
     }
 

@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.asset.web;
 
-import de.makibytes.registerwerk.asset.api.AssetBondTerms;
-import de.makibytes.registerwerk.asset.api.AssetBondTermsRepository;
-import de.makibytes.registerwerk.asset.api.BondStatus;
-import de.makibytes.registerwerk.blockchain.web.dto.BondTermsRequest;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
+import de.makibytes.registerwerk.deployment.api.BondStatus;
+import de.makibytes.registerwerk.asset.web.dto.BondTermsRequest;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;

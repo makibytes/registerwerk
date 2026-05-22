@@ -1,11 +1,11 @@
 package de.makibytes.registerwerk.blockchain.internal.deploy;
 
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
-import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -43,16 +43,16 @@ public class Erc721DeploymentService {
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
     private final ContractAddressConfig contractAddressConfig;
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
 
     public Erc721DeploymentService(BlockchainClientRegistry blockchainClientRegistry,
                                     EvmContractService evmContractService,
                                     ContractAddressConfig contractAddressConfig,
-                                    AssetRepository assetRepository) {
+                                    AssetLookupPort assetLookupPort) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
-        this.assetRepository = assetRepository;
+        this.assetLookupPort = assetLookupPort;
     }
 
     /**
@@ -67,7 +67,7 @@ public class Erc721DeploymentService {
         log.info("Deploying ERC-721 contract: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
-            Asset asset = assetRepository.findById(assetId)
+            AssetLookupPort.AssetInfo asset = assetLookupPort.findById(assetId)
                     .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + assetId));
 
             String chainId = chain.chain().name().toLowerCase() + "-" + chain.network().name().toLowerCase();
@@ -80,8 +80,8 @@ public class Erc721DeploymentService {
                     "deployToken",
                     Arrays.asList(
                             new Uint8(TOKEN_TYPE_ERC721),
-                            new Utf8String(asset.getName()),
-                            new Utf8String(asset.getTokenStandard().name()),
+                            new Utf8String(asset.name()),
+                            new Utf8String(asset.tokenStandard().name()),
                             new Bytes32(Erc20DeploymentService.uuidToBytes32(assetId))
                     ),
                     Collections.singletonList(new TypeReference<Address>() {})

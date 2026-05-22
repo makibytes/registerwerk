@@ -2,7 +2,7 @@ package de.makibytes.registerwerk.customer.api;
 
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
-import de.makibytes.registerwerk.kyc.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.KycStatus;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;

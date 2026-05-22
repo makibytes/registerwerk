@@ -52,7 +52,9 @@ class BlockchainClientRegistryTest {
         Map<ChainDescriptor, RpcClient> solanaClients = new HashMap<>();
         solanaClients.put(SOLANA_TESTNET, solanaTestnetClient);
 
-        registry = new BlockchainClientRegistry(evmClients, solanaClients, new HashMap<>());
+        registry = new BlockchainClientRegistry(evmClients, solanaClients, new HashMap<>(),
+                java.util.Optional.empty(), java.util.Optional.empty(),
+                java.util.Optional.empty(), java.util.Optional.empty());
     }
 
     // ── getEvmClient ──────────────────────────────────────────────────────────

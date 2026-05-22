@@ -17,7 +17,6 @@ import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.auth.api.AppUserActionTokenType;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
-import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
 import de.makibytes.registerwerk.auth.api.AppUserActionTokenRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
@@ -27,11 +26,10 @@ import de.makibytes.registerwerk.customer.web.dto.CompanyIdpSettingsResponse;
 import de.makibytes.registerwerk.customer.web.dto.CompanyMeResponse;
 import de.makibytes.registerwerk.customer.web.dto.CompanyUserResponse;
 import de.makibytes.registerwerk.customer.web.dto.InviteCompanyUserRequest;
-import de.makibytes.registerwerk.auth.web.dto.PublicPasswordResetCompleteRequest;
-import de.makibytes.registerwerk.auth.web.dto.PublicUserActionTokenInfoResponse;
-import de.makibytes.registerwerk.auth.web.dto.PublicUserRegistrationCompleteRequest;
+import de.makibytes.registerwerk.auth.api.PublicPasswordResetCompleteRequest;
+import de.makibytes.registerwerk.auth.api.PublicUserActionTokenInfoResponse;
+import de.makibytes.registerwerk.auth.api.PublicUserRegistrationCompleteRequest;
 import de.makibytes.registerwerk.customer.web.dto.UpdateCompanyUserRolesRequest;
-import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,7 +65,6 @@ public class CompanyUserService {
     private final PasswordEncoder passwordEncoder;
     private final ApplicationEventPublisher eventPublisher;
     private final RegisterwerkAuthProperties authProperties;
-    private final CompanyExternalReferenceService companyExternalReferenceService;
     private final String customerFrontendUrl;
     private final long userActionTokenTtlHours;
 
@@ -78,8 +75,7 @@ public class CompanyUserService {
             PasswordEncoder passwordEncoder,
             ApplicationEventPublisher eventPublisher,
             RegisterwerkAuthProperties authProperties,
-            CompanyExternalReferenceService companyExternalReferenceService,
-            @Value("${registerwerk.onboarding.frontend-url:http://localhost:4201}") String customerFrontendUrl,
+                        @Value("${registerwerk.onboarding.frontend-url:http://localhost:4201}") String customerFrontendUrl,
             @Value("${registerwerk.onboarding.user-action-ttl-hours:48}") long userActionTokenTtlHours) {
         this.appUserRepository = appUserRepository;
         this.actionTokenRepository = actionTokenRepository;
@@ -87,7 +83,6 @@ public class CompanyUserService {
         this.passwordEncoder = passwordEncoder;
         this.eventPublisher = eventPublisher;
         this.authProperties = authProperties;
-        this.companyExternalReferenceService = companyExternalReferenceService;
         this.customerFrontendUrl = customerFrontendUrl;
         this.userActionTokenTtlHours = userActionTokenTtlHours;
     }
@@ -108,9 +103,7 @@ public class CompanyUserService {
             entity.getIdpClientId(),
             entity.getCreatedAt(),
             entity.getUpdatedAt(),
-            companyExternalReferenceService
-                    .findExternalId(authentication, ExternalReferenceSubjectType.LEGAL_ENTITY, entity.getId())
-                    .orElse(null)
+            null
         );
     }
 

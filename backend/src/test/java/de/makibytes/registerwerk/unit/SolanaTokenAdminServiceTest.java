@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.internal.SolanaTokenAdminService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.SplExtensionSet;

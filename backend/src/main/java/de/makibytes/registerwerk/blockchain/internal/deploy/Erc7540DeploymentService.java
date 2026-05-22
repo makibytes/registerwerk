@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.blockchain.internal.deploy;
 
-import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
-import de.makibytes.registerwerk.asset.api.AssetVaultState;
-import de.makibytes.registerwerk.asset.api.AssetVaultStateRepository;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+
+import de.makibytes.registerwerk.deployment.api.AssetVaultState;
+import de.makibytes.registerwerk.deployment.api.AssetVaultStateRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
@@ -48,18 +48,18 @@ public class Erc7540DeploymentService {
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
     private final ContractAddressConfig contractAddressConfig;
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
     private final AssetVaultStateRepository vaultStateRepository;
 
     public Erc7540DeploymentService(BlockchainClientRegistry blockchainClientRegistry,
                                     EvmContractService evmContractService,
                                     ContractAddressConfig contractAddressConfig,
-                                    AssetRepository assetRepository,
+                                    AssetLookupPort assetLookupPort,
                                     AssetVaultStateRepository vaultStateRepository) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
-        this.assetRepository = assetRepository;
+        this.assetLookupPort = assetLookupPort;
         this.vaultStateRepository = vaultStateRepository;
     }
 
@@ -67,7 +67,7 @@ public class Erc7540DeploymentService {
         log.info("Deploying ERC-7540 (async vault) contract: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
-            Asset asset = assetRepository.findById(assetId)
+            AssetLookupPort.AssetInfo asset = assetLookupPort.findById(assetId)
                     .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + assetId));
 
             AssetVaultState vaultState = vaultStateRepository.findById(assetId)

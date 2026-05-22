@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Corporate Actions",
-        allowedDependencies = {"shared", "audit", "customer", "asset", "blockchain", "notification"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Corporate Actions")
 package de.makibytes.registerwerk.corporateactions;

@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Endpoint",
-        allowedDependencies = {"shared", "audit", "customer", "asset"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Endpoint")
 package de.makibytes.registerwerk.endpoint;

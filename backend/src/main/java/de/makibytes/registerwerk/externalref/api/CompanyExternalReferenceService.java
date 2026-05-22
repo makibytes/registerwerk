@@ -4,18 +4,17 @@ import de.makibytes.registerwerk.customer.events.CompanyExternalIdUpsertedEvent;
 import de.makibytes.registerwerk.customer.events.CompanyExternalIdRemovedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
-import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.customer.api.CompanyExternalReference;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistry;
 import de.makibytes.registerwerk.erc3643.api.Erc3643Suite;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.customer.api.CompanyExternalReferenceRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistryRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643SuiteRepository;
@@ -42,7 +41,7 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
 
     private final CompanyExternalReferenceRepository referenceRepository;
     private final LegalEntityRepository legalEntityRepository;
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
     private final AssetHolderRepository assetHolderRepository;
     private final Erc3643IdentityRegistryRepository identityRegistryRepository;
     private final Erc3643SuiteRepository suiteRepository;
@@ -53,7 +52,7 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
     public CompanyExternalReferenceService(
             CompanyExternalReferenceRepository referenceRepository,
             LegalEntityRepository legalEntityRepository,
-            AssetRepository assetRepository,
+            AssetLookupPort assetLookupPort,
             AssetHolderRepository assetHolderRepository,
             Erc3643IdentityRegistryRepository identityRegistryRepository,
             Erc3643SuiteRepository suiteRepository,
@@ -62,7 +61,7 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
             ApplicationEventPublisher eventPublisher) {
         this.referenceRepository = referenceRepository;
         this.legalEntityRepository = legalEntityRepository;
-        this.assetRepository = assetRepository;
+        this.assetLookupPort = assetLookupPort;
         this.assetHolderRepository = assetHolderRepository;
         this.identityRegistryRepository = identityRegistryRepository;
         this.suiteRepository = suiteRepository;
@@ -208,7 +207,7 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
         if (ownerEntityId.equals(entity.getId())) {
             return;
         }
-        List<UUID> ownerAssetIds = assetRepository.findIdsByIssuerId(ownerEntityId);
+        List<UUID> ownerAssetIds = assetLookupPort.findByIssuerId(ownerEntityId).stream().map(AssetLookupPort.AssetInfo::id).toList();
         if (!ownerAssetIds.isEmpty() && assetHolderRepository.existsByInvestorIdAndAssetIdIn(subjectId, ownerAssetIds)) {
             return;
         }
@@ -219,9 +218,9 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
     }
 
     private void ensureAssetAccessible(UUID ownerEntityId, UUID subjectId) {
-        Asset asset = assetRepository.findById(subjectId)
+        AssetLookupPort.AssetInfo asset = assetLookupPort.findById(subjectId)
                 .orElseThrow(() -> new EntityNotFoundException("Asset", subjectId));
-        if (ownerEntityId.equals(asset.getIssuerId())
+        if (ownerEntityId.equals(asset.issuerId())
                 || assetHolderRepository.existsByAssetIdAndInvestorId(subjectId, ownerEntityId)) {
             return;
         }
@@ -234,9 +233,9 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
         if (ownerEntityId.equals(holder.getInvestorId())) {
             return;
         }
-        Asset asset = assetRepository.findById(holder.getAssetId())
+        AssetLookupPort.AssetInfo asset = assetLookupPort.findById(holder.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", holder.getAssetId()));
-        if (ownerEntityId.equals(asset.getIssuerId())) {
+        if (ownerEntityId.equals(asset.issuerId())) {
             return;
         }
         throw new IllegalArgumentException("The authenticated company cannot assign an external ID to this holding");
@@ -245,8 +244,8 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
     private void ensureIdentityRegistryEntryAccessible(UUID ownerEntityId, UUID subjectId) {
         Erc3643IdentityRegistry entry = identityRegistryRepository.findById(subjectId)
                 .orElseThrow(() -> new EntityNotFoundException("Erc3643IdentityRegistry", subjectId));
-        Asset asset = resolveAssetForIdentityEntry(entry);
-        if (asset != null && ownerEntityId.equals(asset.getIssuerId())) {
+        AssetLookupPort.AssetInfo asset = resolveAssetForIdentityEntry(entry);
+        if (asset != null && ownerEntityId.equals(asset.issuerId())) {
             return;
         }
         Optional<OnchainIdentity> identity = onchainIdentityRepository.findById(entry.getOnchainIdentityId());
@@ -265,9 +264,10 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
                 .stream()
                 .collect(LinkedHashMap::new, (map, entity) -> map.put(entity.getId(), entity), Map::putAll);
 
-        Map<UUID, Asset> assets = assetRepository.findAllById(subjectIds(references, ExternalReferenceSubjectType.ASSET))
-                .stream()
-                .collect(LinkedHashMap::new, (map, asset) -> map.put(asset.getId(), asset), Map::putAll);
+        var assetSubjectIds = subjectIds(references, ExternalReferenceSubjectType.ASSET);
+        Map<UUID, AssetLookupPort.AssetInfo> assets = assetLookupPort.findAll().stream()
+                .filter(a -> assetSubjectIds.contains(a.id()))
+                .collect(java.util.stream.Collectors.toMap(AssetLookupPort.AssetInfo::id, a -> a));
 
         Map<UUID, AssetHolder> holders = assetHolderRepository.findAllById(subjectIds(references, ExternalReferenceSubjectType.ASSET_HOLDER))
                 .stream()
@@ -278,10 +278,10 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
         Map<UUID, Erc3643IdentityRegistry> identityEntries = new LinkedHashMap<>();
         registryEntries.forEach(entry -> identityEntries.put(entry.getId(), entry));
 
-        Map<UUID, Asset> holderAssets = assetRepository.findAllById(
-                        holders.values().stream().map(AssetHolder::getAssetId).distinct().toList())
-                .stream()
-                .collect(LinkedHashMap::new, (map, asset) -> map.put(asset.getId(), asset), Map::putAll);
+        var holderAssetIds = holders.values().stream().map(AssetHolder::getAssetId).collect(java.util.stream.Collectors.toSet());
+        Map<UUID, AssetLookupPort.AssetInfo> holderAssets = assetLookupPort.findAll().stream()
+                .filter(a -> holderAssetIds.contains(a.id()))
+                .collect(java.util.stream.Collectors.toMap(AssetLookupPort.AssetInfo::id, a -> a));
 
         Map<UUID, Erc3643Suite> suites = suiteRepository.findAllById(
                         registryEntries.stream().map(Erc3643IdentityRegistry::getSuiteId).distinct().toList())
@@ -293,10 +293,10 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
                 .stream()
                 .collect(LinkedHashMap::new, (map, deployment) -> map.put(deployment.getId(), deployment), Map::putAll);
 
-        Map<UUID, Asset> registryAssets = assetRepository.findAllById(
-                        deployments.values().stream().map(AssetDeployment::getAssetId).distinct().toList())
-                .stream()
-                .collect(LinkedHashMap::new, (map, asset) -> map.put(asset.getId(), asset), Map::putAll);
+        var registryAssetIds = deployments.values().stream().map(AssetDeployment::getAssetId).collect(java.util.stream.Collectors.toSet());
+        Map<UUID, AssetLookupPort.AssetInfo> registryAssets = assetLookupPort.findAll().stream()
+                .filter(a -> registryAssetIds.contains(a.id()))
+                .collect(java.util.stream.Collectors.toMap(AssetLookupPort.AssetInfo::id, a -> a));
 
         Map<UUID, OnchainIdentity> onchainIdentities = onchainIdentityRepository.findAllById(
                         registryEntries.stream().map(Erc3643IdentityRegistry::getOnchainIdentityId).distinct().toList())
@@ -330,13 +330,13 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
     private CompanyExternalReferenceLookupResponse toLookupResponse(
             CompanyExternalReference reference,
             Map<UUID, LegalEntity> legalEntities,
-            Map<UUID, Asset> assets,
+            Map<UUID, AssetLookupPort.AssetInfo> assets,
             Map<UUID, AssetHolder> holders,
-            Map<UUID, Asset> holderAssets,
+            Map<UUID, AssetLookupPort.AssetInfo> holderAssets,
             Map<UUID, Erc3643IdentityRegistry> identityEntries,
             Map<UUID, Erc3643Suite> suites,
             Map<UUID, AssetDeployment> deployments,
-            Map<UUID, Asset> registryAssets,
+            Map<UUID, AssetLookupPort.AssetInfo> registryAssets,
             Map<UUID, OnchainIdentity> onchainIdentities,
             Map<UUID, LegalEntity> registryLegalEntities) {
         return switch (reference.getSubjectType()) {
@@ -356,22 +356,22 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
                         reference.getUpdatedAt());
             }
             case ASSET -> {
-                Asset asset = assets.get(reference.getSubjectId());
-                String displayName = asset != null ? asset.getName() : "Unknown asset";
-                String context = asset != null ? firstNonBlank(asset.getAssetNumber(), asset.getIsin()) : null;
+                AssetLookupPort.AssetInfo asset = assets.get(reference.getSubjectId());
+                String displayName = asset != null ? asset.name() : "Unknown asset";
+                String context = asset != null ? firstNonBlank(asset.assetNumber(), asset.isin()) : null;
                 yield new CompanyExternalReferenceLookupResponse(
                         reference.getSubjectType(),
                         reference.getSubjectId(),
                         reference.getExternalId(),
                         displayName,
                         context,
-                        asset != null ? asset.getId() : null,
+                        asset != null ? asset.id() : null,
                         reference.getUpdatedAt());
             }
             case ASSET_HOLDER -> {
                 AssetHolder holder = holders.get(reference.getSubjectId());
-                Asset asset = holder != null ? holderAssets.get(holder.getAssetId()) : null;
-                String displayName = asset != null ? asset.getName() : "Asset holding";
+                AssetLookupPort.AssetInfo asset = holder != null ? holderAssets.get(holder.getAssetId()) : null;
+                String displayName = asset != null ? asset.name() : "Asset holding";
                 String context = holder != null
                         ? holder.getWalletAddress()
                         : null;
@@ -390,10 +390,10 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
                 LegalEntity entity = identity != null ? registryLegalEntities.get(identity.getLegalEntityId()) : null;
                 Erc3643Suite suite = entry != null ? suites.get(entry.getSuiteId()) : null;
                 AssetDeployment deployment = suite != null ? deployments.get(suite.getAssetDeploymentId()) : null;
-                Asset asset = deployment != null ? registryAssets.get(deployment.getAssetId()) : null;
+                AssetLookupPort.AssetInfo asset = deployment != null ? registryAssets.get(deployment.getAssetId()) : null;
                 String displayName = entity != null ? entity.getCurrentName() : entry != null ? entry.getWalletAddress() : "Identity registry entry";
                 String context = joinNonBlank(
-                        asset != null ? asset.getName() : null,
+                        asset != null ? asset.name() : null,
                         entry != null ? entry.getWalletAddress() : null);
                 yield new CompanyExternalReferenceLookupResponse(
                         reference.getSubjectType(),
@@ -401,7 +401,7 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
                         reference.getExternalId(),
                         displayName,
                         context,
-                        asset != null ? asset.getId() : null,
+                        asset != null ? asset.id() : null,
                         reference.getUpdatedAt());
             }
         };
@@ -415,7 +415,7 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
                 .toList();
     }
 
-    private Asset resolveAssetForIdentityEntry(Erc3643IdentityRegistry entry) {
+    private AssetLookupPort.AssetInfo resolveAssetForIdentityEntry(Erc3643IdentityRegistry entry) {
         Erc3643Suite suite = suiteRepository.findById(entry.getSuiteId()).orElse(null);
         if (suite == null) {
             return null;
@@ -424,7 +424,7 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
         if (deployment == null) {
             return null;
         }
-        return assetRepository.findById(deployment.getAssetId()).orElse(null);
+        return assetLookupPort.findById(deployment.getAssetId()).orElse(null);
     }
 
     private static String firstNonBlank(String... values) {

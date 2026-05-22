@@ -16,6 +16,8 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
     Page<Asset> findByIssuerId(UUID issuerId, Pageable pageable);
 
+    List<Asset> findByIssuerId(UUID issuerId);
+
     Page<Asset> findByStatus(AssetStatus status, Pageable pageable);
 
     Page<Asset> findByIssuerIdAndStatus(UUID issuerId, AssetStatus status, Pageable pageable);

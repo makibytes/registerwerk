@@ -2,17 +2,15 @@ package de.makibytes.registerwerk.unit;
 
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
-import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.customer.api.CompanyExternalReference;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
-import de.makibytes.registerwerk.asset.api.OnchainLevel;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import de.makibytes.registerwerk.customer.api.CompanyExternalReferenceRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistryRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643SuiteRepository;
@@ -47,7 +45,7 @@ class CompanyExternalReferenceServiceTest {
 
     @Mock private CompanyExternalReferenceRepository referenceRepository;
     @Mock private LegalEntityRepository legalEntityRepository;
-    @Mock private AssetRepository assetRepository;
+    @Mock private AssetLookupPort assetLookupPort;
     @Mock private AssetHolderRepository assetHolderRepository;
     @Mock private Erc3643IdentityRegistryRepository identityRegistryRepository;
     @Mock private Erc3643SuiteRepository suiteRepository;
@@ -62,7 +60,7 @@ class CompanyExternalReferenceServiceTest {
         service = new CompanyExternalReferenceService(
                 referenceRepository,
                 legalEntityRepository,
-                assetRepository,
+                assetLookupPort,
                 assetHolderRepository,
                 identityRegistryRepository,
                 suiteRepository,
@@ -79,8 +77,8 @@ class CompanyExternalReferenceServiceTest {
         UUID issuerCompanyId = UUID.randomUUID();
         UUID investorCompanyId = UUID.randomUUID();
 
-        Asset asset = buildAsset(assetId, issuerCompanyId, "Green Bond 2028");
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        AssetLookupPort.AssetInfo asset = buildAsset(assetId, issuerCompanyId, "Green Bond 2028");
+        when(assetLookupPort.findById(assetId)).thenReturn(Optional.of(asset));
         when(assetHolderRepository.existsByAssetIdAndInvestorId(assetId, investorCompanyId)).thenReturn(true);
         when(referenceRepository.findByOwnerLegalEntityIdAndSubjectTypeAndSubjectId(issuerCompanyId, ExternalReferenceSubjectType.ASSET, assetId))
                 .thenReturn(Optional.empty());
@@ -117,7 +115,7 @@ class CompanyExternalReferenceServiceTest {
         when(referenceRepository.findByOwnerLegalEntityIdAndExternalIdOrderByUpdatedAtDesc(otherCompanyId, "INV-42"))
                 .thenReturn(List.of());
         when(legalEntityRepository.findAllById(any(Iterable.class))).thenReturn(List.of(buildEntity(entityId, "Investor Bar", "ENT-42")));
-        when(assetRepository.findAllById(any(Iterable.class))).thenReturn(List.of());
+        when(assetLookupPort.findAll()).thenReturn(List.of());
         when(assetHolderRepository.findAllById(any(Iterable.class))).thenReturn(List.of());
         when(identityRegistryRepository.findAllById(any(Iterable.class))).thenReturn(List.of());
         when(suiteRepository.findAllById(any(Iterable.class))).thenReturn(List.of());
@@ -178,15 +176,8 @@ class CompanyExternalReferenceServiceTest {
         return new JwtAuthenticationToken(jwt);
     }
 
-    private Asset buildAsset(UUID assetId, UUID issuerId, String name) {
-        Asset asset = new Asset();
-        asset.setId(assetId);
-        asset.setAssetNumber("AST-1");
-        asset.setIssuerId(issuerId);
-        asset.setName(name);
-        asset.setTokenStandard(TokenStandard.ERC20);
-        asset.setOnchainLevel(OnchainLevel.NONE);
-        return asset;
+    private AssetLookupPort.AssetInfo buildAsset(UUID assetId, UUID issuerId, String name) {
+        return new AssetLookupPort.AssetInfo(assetId, name, null, TokenStandard.ERC20, null, null, issuerId, "AST-1", "ISSUED");
     }
 
     private LegalEntity buildEntity(UUID entityId, String name, String entityNumber) {

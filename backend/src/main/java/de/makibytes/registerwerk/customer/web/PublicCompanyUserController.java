@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.customer.web;
 
 import de.makibytes.registerwerk.customer.internal.CompanyUserService;
-import de.makibytes.registerwerk.auth.web.dto.PublicPasswordResetCompleteRequest;
-import de.makibytes.registerwerk.auth.web.dto.PublicUserActionTokenInfoResponse;
-import de.makibytes.registerwerk.auth.web.dto.PublicUserRegistrationCompleteRequest;
+import de.makibytes.registerwerk.auth.api.PublicPasswordResetCompleteRequest;
+import de.makibytes.registerwerk.auth.api.PublicUserActionTokenInfoResponse;
+import de.makibytes.registerwerk.auth.api.PublicUserRegistrationCompleteRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;

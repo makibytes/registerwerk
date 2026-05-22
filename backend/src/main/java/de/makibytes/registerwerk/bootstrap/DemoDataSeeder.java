@@ -1,8 +1,9 @@
 package de.makibytes.registerwerk.bootstrap;
 
 import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.auth.api.AppUser;
@@ -16,8 +17,8 @@ import de.makibytes.registerwerk.trading.api.*;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.trading.api.TradeListingRepository;
 import de.makibytes.registerwerk.trading.api.TradeExecutionRepository;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;

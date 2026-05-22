@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Audit",
-        allowedDependencies = "shared"
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Audit")
 package de.makibytes.registerwerk.audit;

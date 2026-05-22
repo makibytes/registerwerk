@@ -1,11 +1,10 @@
 package de.makibytes.registerwerk.externalref.api;
 
-import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityType;
-import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.customer.web.dto.RegistryEntityNodeResponse;
 import de.makibytes.registerwerk.customer.web.dto.RegistryRelationshipResponse;
@@ -30,27 +29,27 @@ import java.util.stream.Collectors;
 public class RegistryOverviewService {
 
     private final LegalEntityRepository legalEntityRepository;
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
     private final AssetHolderRepository assetHolderRepository;
 
     public RegistryOverviewService(
             LegalEntityRepository legalEntityRepository,
-            AssetRepository assetRepository,
+            AssetLookupPort assetLookupPort,
             AssetHolderRepository assetHolderRepository) {
         this.legalEntityRepository = legalEntityRepository;
-        this.assetRepository = assetRepository;
+        this.assetLookupPort = assetLookupPort;
         this.assetHolderRepository = assetHolderRepository;
     }
 
     public RegistryOverviewResponse getOverview() {
         List<LegalEntity> entities = legalEntityRepository.findAll();
-        List<Asset> assets = assetRepository.findAll();
+        List<AssetLookupPort.AssetInfo> assets = assetLookupPort.findAll();
         List<AssetHolder> holders = assetHolderRepository.findAll();
 
-        Map<UUID, Asset> assetById = assets.stream()
-                .collect(Collectors.toMap(Asset::getId, asset -> asset));
-        Map<UUID, List<Asset>> assetsByIssuer = assets.stream()
-                .collect(Collectors.groupingBy(Asset::getIssuerId));
+        Map<UUID, AssetLookupPort.AssetInfo> assetById = assets.stream()
+                .collect(Collectors.toMap(AssetLookupPort.AssetInfo::id, a -> a));
+        Map<UUID, List<AssetLookupPort.AssetInfo>> assetsByIssuer = assets.stream()
+                .collect(Collectors.groupingBy(AssetLookupPort.AssetInfo::issuerId));
         Map<UUID, List<AssetHolder>> holdingsByInvestor = holders.stream()
                 .collect(Collectors.groupingBy(AssetHolder::getInvestorId));
         Map<UUID, EnumSet<EntityType>> rolesByEntity = new HashMap<>();
@@ -59,24 +58,22 @@ public class RegistryOverviewService {
             rolesByEntity.put(entity.getId(), EnumSet.of(entity.getType()));
         }
 
-        for (Asset asset : assets) {
-            rolesByEntity.computeIfAbsent(asset.getIssuerId(), ignored -> EnumSet.noneOf(EntityType.class))
+        for (AssetLookupPort.AssetInfo asset : assets) {
+            rolesByEntity.computeIfAbsent(asset.issuerId(), ignored -> EnumSet.noneOf(EntityType.class))
                     .add(EntityType.ISSUER);
         }
 
         Map<String, RelationshipAccumulator> relationshipMap = new LinkedHashMap<>();
         for (AssetHolder holder : holders) {
-            Asset asset = assetById.get(holder.getAssetId());
-            if (asset == null) {
-                continue;
-            }
+            AssetLookupPort.AssetInfo asset = assetById.get(holder.getAssetId());
+            if (asset == null) continue;
 
             rolesByEntity.computeIfAbsent(holder.getInvestorId(), ignored -> EnumSet.noneOf(EntityType.class))
                     .add(EntityType.INVESTOR);
-            rolesByEntity.computeIfAbsent(asset.getIssuerId(), ignored -> EnumSet.noneOf(EntityType.class))
+            rolesByEntity.computeIfAbsent(asset.issuerId(), ignored -> EnumSet.noneOf(EntityType.class))
                     .add(EntityType.ISSUER);
 
-            String key = asset.getId() + ":" + holder.getInvestorId();
+            String key = asset.id() + ":" + holder.getInvestorId();
             relationshipMap.computeIfAbsent(
                     key,
                     ignored -> new RelationshipAccumulator(asset, holder.getInvestorId())
@@ -99,7 +96,7 @@ public class RegistryOverviewService {
                         entity.getCurrentName(),
                         entity.getType(),
                         rolesByEntity.getOrDefault(entity.getId(), EnumSet.of(entity.getType())).stream()
-                                .sorted((left, right) -> left.compareTo(right))
+                                .sorted((l, r) -> l.compareTo(r))
                                 .toList(),
                         entity.getStatus(),
                         entity.getKycStatus(),
@@ -108,36 +105,30 @@ public class RegistryOverviewService {
                         investorLinksByIssuer.getOrDefault(entity.getId(), 0L),
                         issuerLinksByInvestor.getOrDefault(entity.getId(), 0L)
                 ))
-                .sorted((left, right) -> left.currentName().compareToIgnoreCase(right.currentName()))
+                .sorted((l, r) -> l.currentName().compareToIgnoreCase(r.currentName()))
                 .toList();
 
-        int issuerCount = (int) nodes.stream().filter(node -> node.roles().contains(EntityType.ISSUER)).count();
-        int investorCount = (int) nodes.stream().filter(node -> node.roles().contains(EntityType.INVESTOR)).count();
+        int issuerCount = (int) nodes.stream().filter(n -> n.roles().contains(EntityType.ISSUER)).count();
+        int investorCount = (int) nodes.stream().filter(n -> n.roles().contains(EntityType.INVESTOR)).count();
         int dualRoleCount = (int) nodes.stream()
-                .filter(node -> node.roles().contains(EntityType.ISSUER) && node.roles().contains(EntityType.INVESTOR))
+                .filter(n -> n.roles().contains(EntityType.ISSUER) && n.roles().contains(EntityType.INVESTOR))
                 .count();
 
         return new RegistryOverviewResponse(
                 Instant.now(),
-                new RegistryOverviewSummaryResponse(
-                        nodes.size(),
-                        issuerCount,
-                        investorCount,
-                        dualRoleCount,
-                        relationships.size()
-                ),
+                new RegistryOverviewSummaryResponse(nodes.size(), issuerCount, investorCount, dualRoleCount, relationships.size()),
                 nodes,
                 relationships
         );
     }
 
     private static final class RelationshipAccumulator {
-        private final Asset asset;
+        private final AssetLookupPort.AssetInfo asset;
         private final UUID investorId;
         private BigDecimal nominalAmount = BigDecimal.ZERO;
         private boolean whitelisted;
 
-        private RelationshipAccumulator(Asset asset, UUID investorId) {
+        private RelationshipAccumulator(AssetLookupPort.AssetInfo asset, UUID investorId) {
             this.asset = asset;
             this.investorId = investorId;
         }
@@ -149,15 +140,8 @@ public class RegistryOverviewService {
 
         private RegistryRelationshipResponse toResponse() {
             return new RegistryRelationshipResponse(
-                    asset.getId(),
-                    asset.getAssetNumber(),
-                    asset.getName(),
-                    asset.getStatus(),
-                    asset.getIssuerId(),
-                    investorId,
-                    nominalAmount,
-                    whitelisted
-            );
+                    asset.id(), asset.assetNumber(), asset.name(), asset.status(),
+                    asset.issuerId(), investorId, nominalAmount, whitelisted);
         }
     }
 }

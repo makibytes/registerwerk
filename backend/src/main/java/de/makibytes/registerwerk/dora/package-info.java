@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "DORA ICT Resilience",
-        allowedDependencies = {"shared", "audit"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "DORA ICT Resilience")
 package de.makibytes.registerwerk.dora;

@@ -2,8 +2,6 @@ package de.makibytes.registerwerk.chain.api;
 
 import de.makibytes.registerwerk.chain.events.ChainAddedEvent;
 import de.makibytes.registerwerk.chain.events.ChainUpdatedEvent;
-import org.springframework.context.ApplicationEventPublisher;
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
@@ -28,16 +26,13 @@ public class ChainConfigService {
     private static final Logger log = LoggerFactory.getLogger(ChainConfigService.class);
 
     private final ChainConfigRepository chainConfigRepository;
-    private final ApplicationEventPublisher eventPublisher;
-    private final BlockchainClientRegistry blockchainClientRegistry;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     public ChainConfigService(
             ChainConfigRepository chainConfigRepository,
-            ApplicationEventPublisher eventPublisher,
-            BlockchainClientRegistry blockchainClientRegistry) {
+            org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.chainConfigRepository = chainConfigRepository;
         this.eventPublisher = eventPublisher;
-        this.blockchainClientRegistry = blockchainClientRegistry;
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
@@ -127,7 +122,7 @@ public class ChainConfigService {
      */
     public void refreshBlockchainClients() {
         log.info("Refreshing blockchain client registry from chain_config...");
-        blockchainClientRegistry.refresh();
+        eventPublisher.publishEvent(new ChainConfigUpdatedEvent(null));
         log.info("Blockchain client registry refresh complete.");
     }
 }

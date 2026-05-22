@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.trading.api;
 
 import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;

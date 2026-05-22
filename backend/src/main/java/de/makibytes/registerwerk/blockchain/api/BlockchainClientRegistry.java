@@ -11,7 +11,6 @@ import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.web3j.protocol.Web3j;
 
@@ -73,18 +72,9 @@ public class BlockchainClientRegistry {
     /** chainIdentifier → ordered node states for routing */
     private volatile Map<String, List<NodeState>> nodesByChain = new ConcurrentHashMap<>();
 
-    // ── Optional dependencies injected lazily to avoid circular beans ─────────
-
-    @Autowired(required = false)
     private ChainConfigRepository chainConfigRepository;
-
-    @Autowired(required = false)
     private Web3jClientFactory web3jClientFactory;
-
-    @Autowired(required = false)
     private SolanaClientFactory solanaClientFactory;
-
-    @Autowired(required = false)
     private CantonClientProvider cantonClientFactory;
 
     // ── Constructor ───────────────────────────────────────────────────────────
@@ -92,10 +82,18 @@ public class BlockchainClientRegistry {
     public BlockchainClientRegistry(
             Map<ChainDescriptor, Web3j>              evmClients,
             Map<ChainDescriptor, RpcClient>          solanaClients,
-            Map<ChainDescriptor, CantonLedgerEndpoint> cantonClients) {
-        this.staticEvmClients    = Collections.unmodifiableMap(new HashMap<>(evmClients));
-        this.staticSolanaClients = Collections.unmodifiableMap(new HashMap<>(solanaClients));
-        this.staticCantonClients = Collections.unmodifiableMap(new HashMap<>(cantonClients));
+            Map<ChainDescriptor, CantonLedgerEndpoint> cantonClients,
+            java.util.Optional<ChainConfigRepository> chainConfigRepository,
+            java.util.Optional<Web3jClientFactory>    web3jClientFactory,
+            java.util.Optional<SolanaClientFactory>   solanaClientFactory,
+            java.util.Optional<CantonClientProvider>  cantonClientFactory) {
+        this.staticEvmClients      = Collections.unmodifiableMap(new HashMap<>(evmClients));
+        this.staticSolanaClients   = Collections.unmodifiableMap(new HashMap<>(solanaClients));
+        this.staticCantonClients   = Collections.unmodifiableMap(new HashMap<>(cantonClients));
+        this.chainConfigRepository = chainConfigRepository.orElse(null);
+        this.web3jClientFactory    = web3jClientFactory.orElse(null);
+        this.solanaClientFactory   = solanaClientFactory.orElse(null);
+        this.cantonClientFactory   = cantonClientFactory.orElse(null);
     }
 
     // ── Lookups — identifier-based ────────────────────────────────────────────

@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.wallet.web;
 
-import de.makibytes.registerwerk.wallet.internal.WalletBalanceService;
+import de.makibytes.registerwerk.wallet.api.WalletBalancePort;
 import de.makibytes.registerwerk.wallet.internal.WalletDefaultService;
 import de.makibytes.registerwerk.wallet.internal.WalletService;
 import de.makibytes.registerwerk.wallet.api.OperatorWallet;
@@ -29,10 +29,10 @@ public class WalletController {
 
     private final WalletService        walletService;
     private final WalletDefaultService defaultService;
-    private final WalletBalanceService balanceService;
+    private final WalletBalancePort balanceService;
 
     public WalletController(WalletService walletService, WalletDefaultService defaultService,
-                            WalletBalanceService balanceService) {
+                            WalletBalancePort balanceService) {
         this.walletService  = walletService;
         this.defaultService = defaultService;
         this.balanceService = balanceService;

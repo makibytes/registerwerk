@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.asset.internal;
 
-import de.makibytes.registerwerk.asset.api.AssetDeployment;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.blockchain.api.AssetDeploymentPort;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.springframework.stereotype.Component;

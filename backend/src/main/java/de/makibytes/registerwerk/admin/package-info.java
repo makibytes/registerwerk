@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Admin",
-        allowedDependencies = {"shared", "audit", "auth", "customer"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Admin")
 package de.makibytes.registerwerk.admin;

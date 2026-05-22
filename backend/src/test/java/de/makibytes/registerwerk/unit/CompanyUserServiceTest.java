@@ -1,7 +1,6 @@
 package de.makibytes.registerwerk.unit;
 
 import org.springframework.context.ApplicationEventPublisher;
-import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
 import de.makibytes.registerwerk.customer.internal.CompanyUserService;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
@@ -18,8 +17,8 @@ import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.customer.web.dto.CompanyIdpSettingsRequest;
 import de.makibytes.registerwerk.customer.web.dto.InviteCompanyUserRequest;
-import de.makibytes.registerwerk.auth.web.dto.PublicPasswordResetCompleteRequest;
-import de.makibytes.registerwerk.auth.web.dto.PublicUserRegistrationCompleteRequest;
+import de.makibytes.registerwerk.auth.api.PublicPasswordResetCompleteRequest;
+import de.makibytes.registerwerk.auth.api.PublicUserRegistrationCompleteRequest;
 import de.makibytes.registerwerk.customer.web.dto.UpdateCompanyUserRolesRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -56,7 +55,6 @@ class CompanyUserServiceTest {
     @Mock private LegalEntityRepository legalEntityRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock ApplicationEventPublisher eventPublisher;
-    @Mock private CompanyExternalReferenceService companyExternalReferenceService;
 
     private RegisterwerkAuthProperties authProperties;
     private CompanyUserService service;
@@ -75,7 +73,6 @@ class CompanyUserServiceTest {
             passwordEncoder,
             eventPublisher,
             authProperties,
-            companyExternalReferenceService,
             "http://localhost:4201",
             48L
         );

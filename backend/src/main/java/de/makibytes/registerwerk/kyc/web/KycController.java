@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.kyc.web;
 
+import de.makibytes.registerwerk.shared.web.DocumentStatusResponse;
+
 import java.io.IOException;
 import java.time.LocalDate;
 import java.util.List;
@@ -28,10 +30,10 @@ import de.makibytes.registerwerk.kyc.internal.KycService;
 import de.makibytes.registerwerk.kyc.api.KycComplianceService;
 import de.makibytes.registerwerk.kyc.api.KycDocument;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
-import de.makibytes.registerwerk.kyc.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.KycStatus;
 import de.makibytes.registerwerk.kyc.api.KycJurisdictionApproval;
 import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
-import de.makibytes.registerwerk.asset.web.dto.DocumentStatusResponse;
+
 import de.makibytes.registerwerk.kyc.web.dto.JurisdictionApprovalRequest;
 import de.makibytes.registerwerk.kyc.web.dto.KycComplianceResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycDocumentResponse;

@@ -11,7 +11,7 @@ import de.makibytes.registerwerk.asset.api.AssetDocumentSource;
 import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.asset.api.AssetDocumentContentRepository;
 import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.kyc.api.S3DocumentStorageAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

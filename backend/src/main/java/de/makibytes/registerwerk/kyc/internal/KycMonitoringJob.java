@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.kyc.internal;
 
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
-import de.makibytes.registerwerk.kyc.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.KycStatus;
 import de.makibytes.registerwerk.kyc.events.KycExpiringEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

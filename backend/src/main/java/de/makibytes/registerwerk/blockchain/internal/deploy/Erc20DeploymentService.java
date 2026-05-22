@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal.deploy;
 
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collections;
@@ -24,8 +26,6 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
-import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.asset.api.AssetRepository;
 
 /**
  * Handles on-chain deployment of ERC-20 security token contracts via {@code AssetTokenFactory}.
@@ -51,16 +51,16 @@ public class Erc20DeploymentService {
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
     private final ContractAddressConfig contractAddressConfig;
-    private final AssetRepository assetRepository;
+    private final AssetLookupPort assetLookupPort;
 
     public Erc20DeploymentService(BlockchainClientRegistry blockchainClientRegistry,
                                    EvmContractService evmContractService,
                                    ContractAddressConfig contractAddressConfig,
-                                   AssetRepository assetRepository) {
+                                   AssetLookupPort assetLookupPort) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
-        this.assetRepository = assetRepository;
+        this.assetLookupPort = assetLookupPort;
     }
 
     /**
@@ -80,7 +80,7 @@ public class Erc20DeploymentService {
         log.info("Deploying ERC-20 contract: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
-            Asset asset = assetRepository.findById(assetId)
+            AssetLookupPort.AssetInfo asset = assetLookupPort.findById(assetId)
                     .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + assetId));
 
             String chainId = chain.chain().name().toLowerCase() + "-" + chain.network().name().toLowerCase();
@@ -96,8 +96,8 @@ public class Erc20DeploymentService {
                     "deployToken",
                     Arrays.asList(
                             new Uint8(TOKEN_TYPE_ERC20),
-                            new Utf8String(asset.getName()),
-                            new Utf8String(asset.getTokenStandard().name()),
+                            new Utf8String(asset.name()),
+                            new Utf8String(asset.tokenStandard().name()),
                             new Bytes32(assetIdBytes)
                     ),
                     Collections.singletonList(new TypeReference<Address>() {})

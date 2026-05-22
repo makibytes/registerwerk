@@ -69,7 +69,7 @@ public class AdminImpersonationService {
         LegalEntity target = legalEntityRepository.findById(targetEntityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", targetEntityId));
 
-        String token = jwtMintingService.mintImpersonationToken(actor, target);
+        String token = jwtMintingService.mintImpersonationToken(actor, target.getId());
         OffsetDateTime expiresAt = OffsetDateTime.now().plusSeconds(jwtMintingService.getTokenTtlSeconds());
 
         eventPublisher.publishEvent(new AdminImpersonationStartedEvent(actorId, actorId, "REGISTRY_ADMIN", java.util.Map.of("targetEntityId", targetEntityId.toString(), "targetEntityName", target.getCurrentName())));

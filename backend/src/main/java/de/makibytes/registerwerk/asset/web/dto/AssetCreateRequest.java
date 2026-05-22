@@ -4,7 +4,7 @@ import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 

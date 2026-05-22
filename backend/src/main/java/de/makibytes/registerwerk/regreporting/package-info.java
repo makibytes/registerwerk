@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Regulatory Reporting",
-        allowedDependencies = {"shared", "audit", "customer", "asset", "blockchain", "kyc"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Regulatory Reporting")
 package de.makibytes.registerwerk.regreporting;

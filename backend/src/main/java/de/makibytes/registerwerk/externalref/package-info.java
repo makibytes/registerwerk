@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "External References",
-        allowedDependencies = {"shared", "audit", "customer", "asset", "erc3643"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "External References")
 package de.makibytes.registerwerk.externalref;

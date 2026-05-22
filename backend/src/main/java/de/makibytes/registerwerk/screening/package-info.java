@@ -1,5 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-        displayName = "Screening",
-        allowedDependencies = {"shared", "audit", "customer", "stepup"}
-)
+@org.springframework.modulith.ApplicationModule(displayName = "Screening")
 package de.makibytes.registerwerk.screening;

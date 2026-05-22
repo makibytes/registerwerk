@@ -2,7 +2,7 @@ package de.makibytes.registerwerk.customer.web.dto;
 
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
-import de.makibytes.registerwerk.kyc.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.KycStatus;
 
 import java.util.List;
 import java.util.UUID;

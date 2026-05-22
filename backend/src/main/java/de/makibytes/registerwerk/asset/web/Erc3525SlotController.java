@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.asset.web;
 
-import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.asset.api.AssetSlot;
-import de.makibytes.registerwerk.asset.api.AssetSlotRepository;
-import de.makibytes.registerwerk.blockchain.internal.Erc3525AdminService;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetSlot;
+import de.makibytes.registerwerk.deployment.api.AssetSlotRepository;
+import de.makibytes.registerwerk.blockchain.api.Erc3525AdminPort;
 import de.makibytes.registerwerk.blockchain.web.dto.CreateSlotRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.ForcedValueTransferRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.FreezeTokenRequest;
@@ -28,11 +28,11 @@ import java.util.UUID;
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
 public class Erc3525SlotController {
 
-    private final Erc3525AdminService erc3525AdminService;
+    private final Erc3525AdminPort erc3525AdminService;
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetSlotRepository slotRepository;
 
-    public Erc3525SlotController(Erc3525AdminService erc3525AdminService,
+    public Erc3525SlotController(Erc3525AdminPort erc3525AdminService,
                                  AssetDeploymentRepository deploymentRepository,
                                  AssetSlotRepository slotRepository) {
         this.erc3525AdminService = erc3525AdminService;

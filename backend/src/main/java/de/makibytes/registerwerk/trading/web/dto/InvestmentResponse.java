@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.trading.web.dto;
 
 import de.makibytes.registerwerk.asset.api.AssetStatus;
-import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 
 import java.math.BigDecimal;
 import java.time.Instant;
