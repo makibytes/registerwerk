@@ -7,7 +7,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "screening_hit")
-class ScreeningHit {
+public class ScreeningHit {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

@@ -22,6 +22,8 @@ spring:
     port: 3025
 
 registerwerk:
+  auth:
+    dev-secret: "registerwerk-test-jwt-secret-not-for-production!!"
   chains:
     ethereum:
       testnet:

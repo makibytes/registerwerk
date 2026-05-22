@@ -17,6 +17,7 @@ import de.makibytes.registerwerk.kyc.events.KycRejectedEvent;
 import de.makibytes.registerwerk.kyc.events.KycJurisdictionApprovedEvent;
 import de.makibytes.registerwerk.kyc.events.KycJurisdictionRejectedEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
@@ -37,22 +38,38 @@ public class KycService {
     private final LegalEntityRepository legalEntityRepository;
     private final KycJurisdictionApprovalRepository jurisdictionApprovalRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final ScreeningGate screeningGate;
 
     public KycService(
             LegalEntityRepository legalEntityRepository,
             KycJurisdictionApprovalRepository jurisdictionApprovalRepository,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            ScreeningGate screeningGate) {
         this.legalEntityRepository = legalEntityRepository;
         this.jurisdictionApprovalRepository = jurisdictionApprovalRepository;
         this.eventPublisher = eventPublisher;
+        this.screeningGate = screeningGate;
     }
 
     /**
      * Approves KYC for the given entity and sets the expiry date.
+     * GwG §10: blocked if entity or any beneficial owner has an unresolved sanctions hit.
      */
     public void approveKyc(UUID entityId, LocalDate expiryDate, UUID actorId) {
         LegalEntity entity = legalEntityRepository.findById(entityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
+
+        if (screeningGate.hasUnresolvedHit(entityId)) {
+            throw new IllegalStateException(
+                "Cannot approve KYC: entity has an unresolved sanctions screening hit. " +
+                "A compliance officer must review and dismiss the hit first (GwG §10).");
+        }
+        if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
+            throw new IllegalStateException(
+                "Cannot approve KYC: a beneficial owner has an unresolved sanctions screening hit. " +
+                "A compliance officer must review and dismiss the hit first (GwG §11).");
+        }
+
         entity.setKycStatus(KycStatus.APPROVED);
         entity.setKycExpiryDate(expiryDate);
         legalEntityRepository.save(entity);

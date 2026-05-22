@@ -46,12 +46,13 @@ public class MifirReportingService {
     private void generateForJurisdiction(String jurisdiction, LocalDate reportingDate) {
         var rows = jdbc.queryForList("""
             SELECT te.id, te.asset_id, te.buyer_entity_id, te.seller_entity_id,
-                   te.price, te.quantity, te.executed_at, a.isin, a.name
+                   te.unit_price AS price, te.executed_quantity AS quantity,
+                   te.created_at AS executed_at, a.isin, a.name
             FROM trade_execution te
             JOIN asset a ON a.id = te.asset_id
-            WHERE DATE(te.executed_at) = ?
+            WHERE DATE(te.created_at) = ?
               AND a.status = 'ISSUED'
-            ORDER BY te.executed_at
+            ORDER BY te.created_at
             """, reportingDate);
 
         if (rows.isEmpty()) {

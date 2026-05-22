@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.core.env.Environment;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -39,21 +40,32 @@ public class SecurityConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
 
+    private static final String DEFAULT_DEV_SECRET = "registerwerk-dev-jwt-secret-change-in-production!!";
+
     /**
      * Provides a JwtDecoder from the configured OIDC issuer URI, or falls back to an HS256
-      * dev decoder when no issuer is configured (e.g. in local Docker Compose without OIDC).
-      * The dev key comes from {@link RegisterwerkAuthProperties#getDevSecret()}.
+     * dev decoder when no issuer is configured (e.g. in local Docker Compose without OIDC).
+     * The dev key comes from {@link RegisterwerkAuthProperties#getDevSecret()}.
+     * Fails fast on startup if the default secret is used outside of the 'dev' Spring profile.
      */
     @Bean
     public JwtDecoder jwtDecoder(
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri,
-            RegisterwerkAuthProperties props) {
+            RegisterwerkAuthProperties props,
+            Environment env) {
         if (issuerUri != null && !issuerUri.isBlank()) {
             log.info("Configuring JWT decoder from issuer: {}", issuerUri);
             return JwtDecoders.fromIssuerLocation(issuerUri);
         }
         String devSecret = props.getDevSecret();
-        log.warn("JWT_ISSUER_URI not set - using HS256 dev decoder for local/demo mode.");
+        boolean isDevProfile = List.of(env.getActiveProfiles()).contains("dev")
+                || List.of(env.getActiveProfiles()).contains("test");
+        if (DEFAULT_DEV_SECRET.equals(devSecret) && !isDevProfile) {
+            throw new IllegalStateException(
+                "SECURITY: JWT_ISSUER_URI is not set and JWT_DEV_SECRET is the default factory value. " +
+                "Set a strong JWT_DEV_SECRET or configure JWT_ISSUER_URI before running in any non-dev environment.");
+        }
+        log.warn("JWT_ISSUER_URI not set — using HS256 mode. Ensure JWT_DEV_SECRET is set to a strong random value.");
         SecretKey key = new SecretKeySpec(devSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         return NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
     }
