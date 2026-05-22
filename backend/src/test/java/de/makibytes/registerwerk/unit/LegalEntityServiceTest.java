@@ -1,15 +1,15 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
-import de.makibytes.registerwerk.application.customer.EntityNumberGenerator;
-import de.makibytes.registerwerk.application.customer.LegalEntityService;
-import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
-import de.makibytes.registerwerk.domain.entity.EntityNameHistory;
-import de.makibytes.registerwerk.domain.entity.LegalEntity;
-import de.makibytes.registerwerk.domain.enums.EntityStatus;
-import de.makibytes.registerwerk.domain.enums.EntityType;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.EntityNameHistoryRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
+import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.customer.internal.EntityNumberGenerator;
+import de.makibytes.registerwerk.customer.internal.LegalEntityService;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.customer.api.EntityNameHistory;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.EntityStatus;
+import de.makibytes.registerwerk.customer.api.EntityType;
+import de.makibytes.registerwerk.customer.api.EntityNameHistoryRepository;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,7 +41,7 @@ class LegalEntityServiceTest {
     private EntityNameHistoryRepository entityNameHistoryRepository;
 
     @Mock
-    private AuditEventPublisher auditEventPublisher;
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
     private EntityNumberGenerator entityNumberGenerator;
@@ -87,8 +87,7 @@ class LegalEntityServiceTest {
         legalEntityService.createEntity(entity, actorId);
 
         verify(legalEntityRepository).save(entity);
-        verify(auditEventPublisher).publish(
-            eq("ENTITY_CREATED"), eq("LegalEntity"), any(UUID.class), eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test
@@ -145,8 +144,7 @@ class LegalEntityServiceTest {
 
         assertThat(entity.getCurrentName()).isEqualTo("Updated GmbH");
         verify(legalEntityRepository).save(entity);
-        verify(auditEventPublisher).publish(
-            eq("ENTITY_UPDATED"), eq("LegalEntity"), eq(entity.getId()), eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test

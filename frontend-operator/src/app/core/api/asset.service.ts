@@ -101,4 +101,8 @@ export class AssetService {
   getKycCompliance(assetId: string): Observable<KycComplianceResponse> {
     return this.http.get<KycComplianceResponse>(`${this.base}/${assetId}/kyc-compliance`);
   }
+
+  deployAsset(assetId: string, body: { chain: string; network: string; tokenStandard: string }): Observable<AssetDeployment> {
+    return this.http.post<AssetDeployment>(`${this.base}/${assetId}/deploy`, body);
+  }
 }

@@ -1,0 +1,15 @@
+{{- if .Values.wallets.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "registerwerk.fullname" . }}-wallets
+  labels:
+    {{- include "registerwerk.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.wallets.persistence.accessMode }}
+  storageClassName: {{ .Values.wallets.persistence.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.wallets.persistence.size }}
+{{- end }}

@@ -1,24 +1,24 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
-import de.makibytes.registerwerk.application.customer.CompanyExternalReferenceService;
-import de.makibytes.registerwerk.domain.asset.Asset;
-import de.makibytes.registerwerk.domain.customer.CompanyExternalReference;
-import de.makibytes.registerwerk.domain.entity.LegalEntity;
-import de.makibytes.registerwerk.domain.enums.EntityStatus;
-import de.makibytes.registerwerk.domain.enums.EntityType;
-import de.makibytes.registerwerk.domain.enums.ExternalReferenceSubjectType;
-import de.makibytes.registerwerk.domain.enums.OnchainLevel;
-import de.makibytes.registerwerk.domain.enums.TokenStandard;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetDeploymentRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetHolderRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.CompanyExternalReferenceRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643IdentityRegistryRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.Erc3643SuiteRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.LegalEntityRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.OnchainIdentityRepository;
-import de.makibytes.registerwerk.web.dto.CompanyExternalReferenceLookupResponse;
+import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.externalref.api.CompanyExternalReferenceService;
+import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.customer.api.CompanyExternalReference;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.EntityStatus;
+import de.makibytes.registerwerk.customer.api.EntityType;
+import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
+import de.makibytes.registerwerk.asset.api.OnchainLevel;
+import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.asset.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.customer.api.CompanyExternalReferenceRepository;
+import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistryRepository;
+import de.makibytes.registerwerk.erc3643.api.Erc3643SuiteRepository;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
+import de.makibytes.registerwerk.customer.web.dto.CompanyExternalReferenceLookupResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,7 +53,7 @@ class CompanyExternalReferenceServiceTest {
     @Mock private Erc3643SuiteRepository suiteRepository;
     @Mock private AssetDeploymentRepository assetDeploymentRepository;
     @Mock private OnchainIdentityRepository onchainIdentityRepository;
-    @Mock private AuditEventPublisher auditEventPublisher;
+    @Mock ApplicationEventPublisher eventPublisher;
 
     private CompanyExternalReferenceService service;
 
@@ -68,7 +68,7 @@ class CompanyExternalReferenceServiceTest {
                 suiteRepository,
                 assetDeploymentRepository,
                 onchainIdentityRepository,
-                auditEventPublisher
+                eventPublisher
         );
     }
 

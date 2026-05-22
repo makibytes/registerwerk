@@ -1,9 +1,9 @@
 package de.makibytes.registerwerk.integration;
 
-import de.makibytes.registerwerk.domain.enums.EntityType;
-import de.makibytes.registerwerk.web.dto.EntityCreateRequest;
-import de.makibytes.registerwerk.web.dto.EntityResponse;
-import de.makibytes.registerwerk.web.dto.KycDocumentResponse;
+import de.makibytes.registerwerk.customer.api.EntityType;
+import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
+import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
+import de.makibytes.registerwerk.kyc.web.dto.KycDocumentResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.resttestclient.TestRestTemplate;

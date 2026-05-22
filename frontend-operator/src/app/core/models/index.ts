@@ -1,3 +1,104 @@
+// ── Token standards ───────────────────────────────────────────────────────────
+export type TokenStandard =
+  | 'ERC20' | 'ERC721' | 'ERC1155' | 'ERC3643' | 'CONF_ERC20' | 'CONF_ERC3643'
+  | 'SPL' | 'SPL_2022' | 'STARKNET_ERC20' | 'STELLAR_ASSET' | 'CANTON_TOKEN'
+  | 'ERC3525' | 'ERC4626' | 'ERC7540' | 'STARKNET_ERC3525'
+  | 'DAML_BOND_FIXED' | 'DAML_BOND_FLOATING' | 'DAML_BOND_ZERO'
+  | 'SPL_2022_BOND' | 'SPL_2022_CONFIDENTIAL';
+
+export const BOND_STANDARDS: TokenStandard[] = [
+  'ERC3525', 'DAML_BOND_FIXED', 'DAML_BOND_FLOATING', 'DAML_BOND_ZERO',
+  'SPL_2022_BOND', 'STARKNET_ERC3525',
+];
+
+export const VAULT_STANDARDS: TokenStandard[] = ['ERC4626', 'ERC7540'];
+
+// ── Bond terms ────────────────────────────────────────────────────────────────
+export type DayCountConvention = 'ACT_360' | 'ACT_365' | 'ACT_ACT_ICMA' | 'THIRTY_360' | 'THIRTY_E_360';
+export type PaymentFrequency = 'ANNUAL' | 'SEMI_ANNUAL' | 'QUARTERLY' | 'MONTHLY' | 'ZERO';
+
+export interface CallEntry {
+  callDate: string; // ISO-8601 date
+  callPrice: number;
+}
+
+export interface AssetBondTerms {
+  assetId: string;
+  faceValue: number;
+  currencyIso: string;
+  issueDate: string;
+  maturityDate: string;
+  couponRate?: number;
+  referenceRate?: string;
+  spread?: number;
+  dayCount: DayCountConvention;
+  paymentFrequency: PaymentFrequency;
+  callable: boolean;
+  callSchedule?: CallEntry[];
+  bondStatus: 'ACTIVE' | 'MATURED' | 'CALLED' | 'DEFAULTED' | 'REDEEMED';
+}
+
+// ── Vault state ───────────────────────────────────────────────────────────────
+export interface AssetVaultState {
+  assetId: string;
+  underlyingAssetId?: string;
+  depositCap?: string; // BigInteger as string
+  minSettlementDelay?: number; // seconds
+  latestNavPerShare?: number;
+  latestNavStrikeAt?: string;
+}
+
+export interface VaultNavStrike {
+  id: string;
+  assetId: string;
+  strikeId: number;
+  navPerShare: number;
+  effectiveAt: string;
+  struckBy: string;
+  struckAt: string;
+  txHash?: string;
+}
+
+export interface VaultRequest {
+  id: string;
+  assetId: string;
+  requestId: string; // BigInteger as string
+  requestType: 'DEPOSIT' | 'REDEEM';
+  controllerAddr: string;
+  ownerAddr: string;
+  assetAmount?: string;
+  shareAmount?: string;
+  requestStatus: 'PENDING' | 'FULFILLED' | 'CANCELLED';
+  requestedAt: string;
+  fulfilledAt?: string;
+  navAtFulfill?: number;
+}
+
+// ── ERC-3525 slot ─────────────────────────────────────────────────────────────
+export interface AssetSlot {
+  id: string;
+  assetId: string;
+  slotId: string; // BigInteger as string
+  name?: string;
+  metadata?: Record<string, unknown>;
+  supplyCap?: string;
+  paused: boolean;
+  createdAt: string;
+}
+
+// ── Coupon payment ────────────────────────────────────────────────────────────
+export interface AssetCouponPayment {
+  id: string;
+  assetId: string;
+  slotId?: string;
+  periodNo: number;
+  scheduledDate: string;
+  paidDate?: string;
+  amountPerUnit?: number;
+  couponStatus: 'SCHEDULED' | 'PAID' | 'MISSED';
+  txRef?: string;
+}
+
 export interface LegalEntity {
   id: string;
   entityNumber: string;
@@ -82,7 +183,7 @@ export interface Asset {
   issuerName?: string;
   name: string;
   isin?: string;
-  tokenStandard: 'ERC20' | 'ERC721' | 'ERC1155' | 'ERC3643' | 'CONF_ERC20' | 'CONF_ERC3643' | 'SPL';
+  tokenStandard: TokenStandard;
   onchainLevel: 'NONE' | 'SIMPLE' | 'CONTROL';
   status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEEMED';
   jurisdiction?: Jurisdiction;

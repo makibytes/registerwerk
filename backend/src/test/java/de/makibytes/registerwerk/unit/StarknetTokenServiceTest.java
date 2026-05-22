@@ -1,11 +1,11 @@
 package de.makibytes.registerwerk.unit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import de.makibytes.registerwerk.application.blockchain.StarknetTokenService;
-import de.makibytes.registerwerk.application.wallet.WalletSigner;
-import de.makibytes.registerwerk.domain.chain.ChainConfig;
-import de.makibytes.registerwerk.domain.enums.Network;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.ChainConfigRepository;
+import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetTokenService;
+import de.makibytes.registerwerk.wallet.api.WalletSigner;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.Network;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,9 +58,9 @@ class StarknetTokenServiceTest {
     void starknetKeccak_knownSelectorShouldMatchUdcDeployContract() {
         BigInteger selector = StarknetTokenService.starknetKeccak("deployContract");
 
-        // Known selector: 0x026ef43612aca2d99cebbf98c43cbe8af9c5af7213e4da6e19c0a6b14e3a3b7
+        // starknet_keccak("deployContract") = keccak256("deployContract") & ((1<<250)-1)
         BigInteger expected = new BigInteger(
-                "026ef43612aca2d99cebbf98c43cbe8af9c5af7213e4da6e19c0a6b14e3a3b7", 16);
+                "1987cbd17808b9a23693d4de7e246a443cfe37e6e7fbaeabd7d7e6532b07c3d", 16);
         assertThat(selector).isEqualTo(expected);
     }
 
@@ -77,11 +77,13 @@ class StarknetTokenServiceTest {
 
         assertThat(pubKey).isNotNull();
         assertThat(pubKey).hasSize(2);
-        // Verify the point lies on y^2 = x^3 + x (mod P)
+        // Verify the point lies on y^2 = x^3 + x + beta (mod P) — the STARK Weierstrass curve
         BigInteger P = new BigInteger(
                 "800000000000011000000000000000000000000000000000000000000000001", 16);
+        BigInteger BETA = new BigInteger(
+                "6f21413efbe40de150e596d72f7a8c5609ad26c15c915c1f4cdfcb99cee9e89", 16);
         BigInteger lhs = pubKey[1].pow(2).mod(P);
-        BigInteger rhs = pubKey[0].pow(3).add(pubKey[0]).mod(P);
+        BigInteger rhs = pubKey[0].pow(3).add(pubKey[0]).add(BETA).mod(P);
         assertThat(lhs).isEqualTo(rhs);
     }
 

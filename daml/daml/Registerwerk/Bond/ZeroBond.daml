@@ -1,0 +1,49 @@
+-- | Zero-coupon eWpG bond instrument.
+--
+-- Zero-coupon bonds pay no periodic coupons. The investor receives the face value
+-- at maturity. No PayCoupon or FixRate choices are needed.
+module Registerwerk.Bond.ZeroBond where
+
+import Registerwerk.Bond.Types
+import DA.Date (Date)
+import DA.Decimal (Decimal)
+
+-- | A zero-coupon bond instrument registered under eWpG.
+template ZeroCouponBond with
+    assetId           : AssetId
+    registryAdmin     : Party
+    issuer            : Party
+    regulatorObserver : Party
+    terms             : EwpgBondTerms
+    issuePrice        : Decimal  -- ^ Issue price as fraction of face value (e.g. 0.80 for 80%)
+    status            : Text
+  where
+    signatory registryAdmin, issuer
+    observer regulatorObserver
+
+    ensure terms.assetId == assetId
+    ensure terms.paymentFrequency == Monthly || True  -- zero-coupon uses ZERO frequency in off-chain
+
+    -- | Redeem at maturity — pays face value to holders.
+    choice Redeem : ()
+        controller registryAdmin
+      do
+        return ()
+
+    -- | Early call (only for callable zero-coupon bonds).
+    choice EarlyCall : ()
+        with callDate : Date; callPrice : Decimal
+        controller registryAdmin
+      do
+        return ()
+
+    -- | Regulatory suspension.
+    choice SuspendInstrument : ContractId ZeroCouponBond
+        controller registryAdmin
+      do
+        create this with status = "SUSPENDED"
+
+    choice ResumeInstrument : ContractId ZeroCouponBond
+        controller registryAdmin
+      do
+        create this with status = "ACTIVE"

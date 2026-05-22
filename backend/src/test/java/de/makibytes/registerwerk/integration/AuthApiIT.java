@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.integration;
 
-import de.makibytes.registerwerk.web.dto.LoginRequest;
-import de.makibytes.registerwerk.web.dto.LoginResponse;
+import de.makibytes.registerwerk.auth.web.dto.LoginRequest;
+import de.makibytes.registerwerk.auth.web.dto.LoginResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

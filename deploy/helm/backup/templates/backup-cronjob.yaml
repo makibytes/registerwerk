@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: registerwerk-pg-backup
+  labels:
+    app.kubernetes.io/name: registerwerk-backup
+    app.kubernetes.io/component: database-backup
+spec:
+  # Daily backup at 01:30 UTC — satisfies eWpRV §6 and DORA Art. 12 (daily backup obligation)
+  schedule: "30 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: wal-g-backup
+              image: ghcr.io/wal-g/wal-g:v3.0.0
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "Starting WAL-G backup $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  wal-g backup-push /var/lib/postgresql/data
+                  echo "Backup complete. Purging old backups (retain 14 days)..."
+                  wal-g delete retain FULL 14 --confirm
+                  echo "Done."
+              env:
+                - name: PGHOST
+                  value: "{{ .Release.Namespace }}-postgresql"
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: registerwerk-secrets
+                      key: DB_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: registerwerk-secrets
+                      key: DB_PASSWORD
+                - name: PGDATABASE
+                  value: registerwerk
+                - name: WALG_S3_PREFIX
+                  value: "s3://{{ .Values.backup.s3Bucket }}/wal-g"
+                - name: AWS_REGION
+                  value: "{{ .Values.backup.awsRegion }}"
+                - name: WALG_COMPRESSION_METHOD
+                  value: lz4
+                - name: WALG_DELTA_MAX_STEPS
+                  value: "6"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: pgdata
+                  mountPath: /var/lib/postgresql/data
+                  readOnly: true
+          volumes:
+            - name: pgdata
+              persistentVolumeClaim:
+                claimName: data-registerwerk-postgresql-0

@@ -1,8 +1,8 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.domain.asset.AssetHolder;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetHolderRepository;
-import de.makibytes.registerwerk.web.security.InvestmentAccessChecker;
+import de.makibytes.registerwerk.asset.api.AssetHolder;
+import de.makibytes.registerwerk.asset.api.AssetHolderRepository;
+import de.makibytes.registerwerk.trading.web.InvestmentAccessChecker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.Authentication;

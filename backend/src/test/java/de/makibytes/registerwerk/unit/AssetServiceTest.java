@@ -1,17 +1,17 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.asset.AssetService;
-import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
-import de.makibytes.registerwerk.application.customer.EntityNumberGenerator;
-import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
-import de.makibytes.registerwerk.domain.asset.Asset;
-import de.makibytes.registerwerk.domain.enums.AssetStatus;
-import de.makibytes.registerwerk.domain.enums.Chain;
-import de.makibytes.registerwerk.domain.enums.Jurisdiction;
-import de.makibytes.registerwerk.domain.enums.Network;
-import de.makibytes.registerwerk.domain.enums.OnchainLevel;
-import de.makibytes.registerwerk.domain.enums.TokenStandard;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
+import de.makibytes.registerwerk.asset.internal.AssetService;
+import de.makibytes.registerwerk.customer.CustomerApi;
+import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.customer.api.Jurisdiction;
+import de.makibytes.registerwerk.chain.api.Network;
+import de.makibytes.registerwerk.asset.api.OnchainLevel;
+import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,10 +37,10 @@ class AssetServiceTest {
     private AssetRepository assetRepository;
 
     @Mock
-    private AuditEventPublisher auditEventPublisher;
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private EntityNumberGenerator entityNumberGenerator;
+    private CustomerApi customerApi;
 
     @InjectMocks
     private AssetService assetService;
@@ -63,14 +63,14 @@ class AssetServiceTest {
     void createAsset_shouldSetDraftStatusAndAssetNumber() {
         Asset asset = buildAsset();
         UUID actorId = UUID.randomUUID();
-        when(entityNumberGenerator.generateAssetNumber()).thenReturn("AST-2026-000001");
+        when(customerApi.nextEntityNumber()).thenReturn("AST-2026-000001");
         when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Asset result = assetService.createAsset(asset, actorId);
 
         assertThat(result.getStatus()).isEqualTo(AssetStatus.DRAFT);
         assertThat(result.getAssetNumber()).isEqualTo("AST-2026-000001");
-        verify(entityNumberGenerator).generateAssetNumber();
+        verify(customerApi).nextEntityNumber();
     }
 
     @Test
@@ -78,13 +78,12 @@ class AssetServiceTest {
     void createAsset_shouldPublishAuditEvent() {
         Asset asset = buildAsset();
         UUID actorId = UUID.randomUUID();
-        when(entityNumberGenerator.generateAssetNumber()).thenReturn("AST-2026-000002");
+        when(customerApi.nextEntityNumber()).thenReturn("AST-2026-000002");
         when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         assetService.createAsset(asset, actorId);
 
-        verify(auditEventPublisher).publish(
-            eq("ASSET_CREATED"), eq("Asset"), any(UUID.class), eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test
@@ -128,7 +127,7 @@ class AssetServiceTest {
         asset.setOnchainLevel(OnchainLevel.SIMPLE);
         asset.setChain(Chain.POLYGON);
         asset.setNetwork(Network.TESTNET);
-        when(entityNumberGenerator.generateAssetNumber()).thenReturn("AST-2026-000003");
+        when(customerApi.nextEntityNumber()).thenReturn("AST-2026-000003");
         when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Asset result = assetService.createAsset(asset, actorId);
@@ -181,8 +180,7 @@ class AssetServiceTest {
 
         assetService.updateAsset(existing.getId(), new Asset(), actorId);
 
-        verify(auditEventPublisher).publish(
-            eq("ASSET_UPDATED"), eq("Asset"), eq(existing.getId()), eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test

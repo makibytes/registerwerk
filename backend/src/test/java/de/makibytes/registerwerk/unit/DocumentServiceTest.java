@@ -1,11 +1,11 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.customer.DocumentService;
-import de.makibytes.registerwerk.domain.entity.KycDocument;
-import de.makibytes.registerwerk.domain.entity.KycDocumentContent;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.KycDocumentContentRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.KycDocumentRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.s3.S3DocumentStorageAdapter;
+import de.makibytes.registerwerk.kyc.internal.DocumentService;
+import de.makibytes.registerwerk.kyc.api.KycDocument;
+import de.makibytes.registerwerk.kyc.api.KycDocumentContent;
+import de.makibytes.registerwerk.kyc.api.KycDocumentContentRepository;
+import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
+import de.makibytes.registerwerk.kyc.api.S3DocumentStorageAdapter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

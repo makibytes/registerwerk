@@ -1,0 +1,35 @@
+-- | Shared types for Registerwerk eWpG bond instruments.
+module Registerwerk.Bond.Types where
+
+import DA.Date (Date)
+import DA.Decimal (Decimal)
+
+-- | Links the Canton instrument to the off-chain Registerwerk asset record.
+type AssetId = Text
+
+-- | Day-count convention for coupon calculations.
+data DayCount = Act360 | Act365 | ActActIcma | Thirty360 | ThirtyE360
+  deriving (Eq, Show)
+
+-- | Coupon payment frequency.
+data PaymentFrequency = Annual | SemiAnnual | Quarterly | Monthly
+  deriving (Eq, Show)
+
+-- | Call schedule entry — one potential early-call date with a price (as decimal).
+data CallEntry = CallEntry with
+    callDate  : Date
+    callPrice : Decimal
+  deriving (Eq, Show)
+
+-- | eWpG bond terms embedded in every Registerwerk bond instrument.
+data EwpgBondTerms = EwpgBondTerms with
+    assetId          : AssetId
+    faceValue        : Decimal
+    currencyIso      : Text          -- ^ ISO-4217 (e.g. "EUR")
+    issueDate        : Date
+    maturityDate     : Date
+    dayCount         : DayCount
+    paymentFrequency : PaymentFrequency
+    callable         : Bool
+    callSchedule     : [CallEntry]
+  deriving (Eq, Show)

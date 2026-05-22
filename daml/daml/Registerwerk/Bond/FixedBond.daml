@@ -1,0 +1,69 @@
+-- | Fixed-rate eWpG bond instrument backed by Daml Finance FixedRate bond.
+--
+-- This module wraps Daml.Finance.Instrument.Bond.FixedRate.T with registry-specific
+-- controls required under eWpG (assetId link, registryAdmin party, regulator observer).
+--
+-- Prerequisites:
+--   - The participant must have the daml-finance-instrument-bond DAR loaded.
+--   - The DAML Finance FixedRate instrument template must be pre-deployed.
+--
+-- Lifecycle:
+--   1. Registry creates a FixedRateBond instrument via Create choice.
+--   2. DAML Finance lifecycle engine generates coupon events on each pay date.
+--   3. Registry exercises PayCoupon choice to settle each coupon.
+--   4. At maturity, registry exercises Redeem.
+--   5. If callable, registry exercises EarlyCall on any scheduled call date.
+module Registerwerk.Bond.FixedBond where
+
+import Registerwerk.Bond.Types
+import DA.Date (Date)
+import DA.Decimal (Decimal)
+
+-- | A fixed-rate bond instrument registered under eWpG.
+template FixedRateBond with
+    assetId          : AssetId              -- ^ Registerwerk off-chain asset UUID
+    registryAdmin    : Party               -- ^ Registry operator (registry wallet party)
+    issuer           : Party               -- ^ Bond issuer
+    regulatorObserver : Party              -- ^ BaFin or regulator (observer, receives all events)
+    terms            : EwpgBondTerms
+    couponRate       : Decimal             -- ^ Annual coupon rate (e.g. 0.05 for 5%)
+    status           : Text                -- ^ "ACTIVE" | "MATURED" | "CALLED" | "REDEEMED"
+  where
+    signatory registryAdmin, issuer
+    observer regulatorObserver
+
+    ensure terms.assetId == assetId
+
+    -- | Record a coupon payment settlement. Emits an event for the off-chain indexer.
+    choice PayCoupon : ContractId FixedRateBond with
+          paymentDate   : Date
+          amountPerUnit : Decimal
+          txRef         : Text
+        controller registryAdmin
+      do
+        create this with status = status
+
+    -- | Redeem at maturity. Terminal choice — archives the instrument.
+    choice Redeem : ()
+        controller registryAdmin
+      do
+        return ()
+
+    -- | Early call at a scheduled call date. Terminal choice.
+    choice EarlyCall : ()
+        with callDate : Date; callPrice : Decimal
+        controller registryAdmin
+      do
+        return ()
+
+    -- | Regulatory freeze (AWG §17 / GwG §40) — suspends the instrument.
+    choice SuspendInstrument : ContractId FixedRateBond
+        controller registryAdmin
+      do
+        create this with status = "SUSPENDED"
+
+    -- | Lift suspension.
+    choice ResumeInstrument : ContractId FixedRateBond
+        controller registryAdmin
+      do
+        create this with status = "ACTIVE"

@@ -61,25 +61,43 @@ server:
   compression:
     enabled: true
   error:
-    include-message: always
+    include-message: never
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,modulith
   endpoint:
     health:
       show-details: when-authorized
   health:
     mail:
       enabled: false
+  tracing:
+    sampling:
+      probability: ${OTEL_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://tempo:4318/v1/traces}
+
+logging:
+  pattern:
+    correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-}] "
+
+spring.modulith:
+  events:
+    jdbc-schema-initialization:
+      enabled: false
+  republish-outstanding-events-on-restart: true
 
 springdoc:
   api-docs:
     path: /api-docs
+    enabled: ${SWAGGER_ENABLED:false}
   swagger-ui:
     path: /swagger-ui.html
+    enabled: ${SWAGGER_ENABLED:false}
 
 registerwerk:
   chains:

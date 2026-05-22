@@ -1,13 +1,13 @@
 package de.makibytes.registerwerk.integration;
 
-import de.makibytes.registerwerk.domain.audit.AuditEvent;
-import de.makibytes.registerwerk.domain.entity.KycDocument;
-import de.makibytes.registerwerk.domain.enums.EntityType;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AuditEventRepository;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.KycDocumentRepository;
-import de.makibytes.registerwerk.web.dto.EntityCreateRequest;
-import de.makibytes.registerwerk.web.dto.EntityResponse;
-import de.makibytes.registerwerk.web.dto.KycJurisdictionApprovalResponse;
+import de.makibytes.registerwerk.audit.internal.AuditEvent;
+import de.makibytes.registerwerk.audit.internal.AuditEventRepository;
+import de.makibytes.registerwerk.customer.api.EntityType;
+import de.makibytes.registerwerk.kyc.api.KycDocument;
+import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
+import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
+import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
+import de.makibytes.registerwerk.kyc.web.dto.KycJurisdictionApprovalResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

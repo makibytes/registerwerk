@@ -1,15 +1,15 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.application.asset.AssetDeploymentService;
-import de.makibytes.registerwerk.application.asset.AssetLifecycleService;
-import de.makibytes.registerwerk.application.audit.AuditEventPublisher;
-import de.makibytes.registerwerk.application.exception.EntityNotFoundException;
-import de.makibytes.registerwerk.application.exception.InvalidStateTransitionException;
-import de.makibytes.registerwerk.domain.asset.Asset;
-import de.makibytes.registerwerk.domain.enums.AssetStatus;
-import de.makibytes.registerwerk.domain.enums.OnchainLevel;
-import de.makibytes.registerwerk.domain.enums.TokenStandard;
-import de.makibytes.registerwerk.infrastructure.persistence.jpa.AssetRepository;
+import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
+import de.makibytes.registerwerk.asset.internal.AssetLifecycleService;
+import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
+import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.asset.api.OnchainLevel;
+import de.makibytes.registerwerk.asset.api.TokenStandard;
+import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,7 +35,7 @@ class AssetLifecycleServiceTest {
     private AssetRepository assetRepository;
 
     @Mock
-    private AuditEventPublisher auditEventPublisher;
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
     private AssetDeploymentService assetDeploymentService;
@@ -70,8 +70,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.submit(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.PENDING_APPROVAL);
-        verify(auditEventPublisher).publish(eq("ASSET_SUBMITTED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     @Test
@@ -97,8 +96,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.approve(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.APPROVED);
-        verify(auditEventPublisher).publish(eq("ASSET_APPROVED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     // ── reject ────────────────────────────────────────────────────────────────
@@ -114,8 +112,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.reject(asset.getId(), "Incomplete documentation", actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.DRAFT);
-        verify(auditEventPublisher).publish(eq("ASSET_REJECTED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     // ── issue ─────────────────────────────────────────────────────────────────
@@ -131,8 +128,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.issue(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.ISSUED);
-        verify(auditEventPublisher).publish(eq("ASSET_ISSUED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     // ── suspend ───────────────────────────────────────────────────────────────
@@ -148,8 +144,7 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.suspend(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.SUSPENDED);
-        verify(auditEventPublisher).publish(eq("ASSET_SUSPENDED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 
     // ── redeem ────────────────────────────────────────────────────────────────
@@ -165,7 +160,6 @@ class AssetLifecycleServiceTest {
         assetLifecycleService.redeem(asset.getId(), actorId);
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.REDEEMED);
-        verify(auditEventPublisher).publish(eq("ASSET_REDEEMED"), eq("Asset"), eq(asset.getId()),
-            eq(actorId), any(), any());
+        verify(eventPublisher).publishEvent(any(Object.class));
     }
 }

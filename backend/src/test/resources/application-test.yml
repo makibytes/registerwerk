@@ -29,7 +29,8 @@ registerwerk:
         rpc-url: http://localhost:8545
         chain-id: 31337
   wallet:
-    private-key: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    master-key: "registerwerk-test-master-key-at-least-32-chars!!"
+    storage-dir: "/tmp/registerwerk-test-wallets"
   documents:
     max-inline-bytes: 5242880
     s3:

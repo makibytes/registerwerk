@@ -98,6 +98,12 @@ cd frontend-customer && npm install && npm start
 cd backend
 ./mvnw verify
 # JaCoCo coverage report: target/site/jacoco/index.html
+
+# Integration tests use Testcontainers + Docker. On OrbStack (macOS):
+# export DOCKER_HOST=unix:///var/run/docker.sock
+
+# Canton/DAML support (requires JFrog credentials in ~/.m2/settings.xml):
+# ./mvnw verify -Pcanton
 ```
 
 ### 5. Smart contract tests
@@ -107,19 +113,33 @@ cd contracts
 forge install   # install submodules (forge-std, openzeppelin, erc3643)
 forge build
 forge test -vvv
+
+# Or via Maven:
+cd backend && ./mvnw verify -Pcontracts
 ```
 
 ## Project Structure
 
 ```
 registerwerk/
-├── backend/                  Spring Boot 4 / Java 25 monolith
+├── backend/                  Spring Boot 4 / Java 25 — Spring Modulith bounded-context architecture
 │   └── src/main/java/de/makibytes/registerwerk/
-│       ├── config/           Security, Cache, Web, Blockchain config
-│       ├── domain/           JPA entities + enums (no Spring deps)
-│       ├── application/      Use-case services + blockchain adapters
-│       ├── infrastructure/   JPA repos, S3, Web3j, Solana, SMTP
-│       └── web/              REST controllers, DTOs, MapStruct mappers
+│       ├── admin/            Operator user management + impersonation
+│       ├── asset/            Securities (assets, deployments, term sheets, holders)
+│       ├── audit/            Append-only audit log (event-driven via @ApplicationModuleListener)
+│       ├── auth/             JWT minting, user auth, onboarding tokens
+│       ├── blockchain/       RPC registry, EVM/Solana/Starknet/Stellar deployment, token admin
+│       ├── chain/            Chain/network config, RPC node health
+│       ├── customer/         Legal entities, KYB, company users
+│       ├── erc3643/          ERC-3643 (T-REX) compliance suite
+│       ├── externalref/      External system ID mapping
+│       ├── indexer/          Off-chain event sync (EVM/Solana/Canton)
+│       ├── kyc/              KYC document management + jurisdiction approvals
+│       ├── notification/     Email notification listeners (event-driven)
+│       ├── onboarding/       Customer onboarding flow
+│       ├── shared/           Cross-cutting exceptions, utilities
+│       ├── trading/          Trade listings + executions
+│       └── wallet/           Operator wallet management
 ├── contracts/                Foundry smart contracts
 │   └── src/
 │       ├── tokens/           EwpgERC20, ERC721, ERC1155, ERC3643 (T-REX)
@@ -130,6 +150,8 @@ registerwerk/
 ├── frontend-operator/        Angular 21 — registry operator UI
 └── frontend-customer/        Angular 21 — issuer / investor UI
 ```
+
+Each backend module follows the pattern `<module>/api/` (public surface), `<module>/internal/` (private), `<module>/events/` (typed domain events), `<module>/web/` (REST layer).
 
 ## Key Concepts
 

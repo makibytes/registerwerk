@@ -1,0 +1,6 @@
+apiVersion: v2
+name: registerwerk-backup
+description: PostgreSQL WAL-G backup CronJob for Registerwerk (eWpRV §6 + DORA Art. 12)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
