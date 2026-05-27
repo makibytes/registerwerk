@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.regreporting.internal;
 
+import de.makibytes.registerwerk.regreporting.api.SubmissionGateway;
+import de.makibytes.registerwerk.regreporting.api.SubmissionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -7,6 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -15,7 +18,7 @@ import java.util.UUID;
  * Applies to: DE_EWPG and FR_AMF jurisdictions where eWpG tokens qualify as MiFID II instruments.
  * Reporting destinations: BaFin MeldewesenPortal (DE), AMF ROSA (FR), CSSF (LU via ESMA ARM).
  *
- * Flow: TradeExecutedEvent → daily XML export → file via SFTP/API → record in regreport_submission.
+ * Flow: TradeExecutedEvent → daily XML export → persist to S3 → file via gateway → record submission ref.
  */
 @Service
 public class MifirReportingService {
@@ -24,10 +27,18 @@ public class MifirReportingService {
 
     private final JdbcTemplate jdbc;
     private final RegReportSubmissions submissions;
+    private final S3DocumentStore documentStore;
+    private final SubmissionGateway submissionGateway;
+    private final ReportingProperties reportingProperties;
 
-    MifirReportingService(JdbcTemplate jdbc, RegReportSubmissions submissions) {
+    MifirReportingService(JdbcTemplate jdbc, RegReportSubmissions submissions,
+                          S3DocumentStore documentStore, SubmissionGateway submissionGateway,
+                          ReportingProperties reportingProperties) {
         this.jdbc = jdbc;
         this.submissions = submissions;
+        this.documentStore = documentStore;
+        this.submissionGateway = submissionGateway;
+        this.reportingProperties = reportingProperties;
     }
 
     /**
@@ -61,10 +72,14 @@ public class MifirReportingService {
         }
 
         String xml = buildRts22Xml(rows, jurisdiction, reportingDate);
+        byte[] xmlBytes = xml.getBytes(StandardCharsets.UTF_8);
         UUID submissionId = submissions.persist("MIFIR_RTS22", jurisdiction, reportingDate, reportingDate);
+        documentStore.store(submissionId, "MIFIR_RTS22", jurisdiction, reportingDate, xmlBytes);
 
-        log.info("MiFIR RTS 22 {}: {} trades queued for submission id={}", jurisdiction, rows.size(), submissionId);
-        // TODO: file via SFTP/ESMA ARM API — implement SubmissionGateway per jurisdiction
+        SubmissionResult result = submissionGateway.submit(submissionId, "MIFIR_RTS22", jurisdiction, xmlBytes);
+        applyResult(submissionId, result);
+        log.info("MiFIR RTS 22 {}: {} trades filed, submission id={} status={}",
+                jurisdiction, rows.size(), submissionId, result.status());
     }
 
     @SuppressWarnings("unchecked")
@@ -75,7 +90,7 @@ public class MifirReportingService {
         sb.append("<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:auth.016.001.03\">\n");
         sb.append("  <FinInstrmRptgTxRpt>\n");
         sb.append("    <RptHdr>\n");
-        sb.append("      <RptgNtty><LEI>TODO_OPERATOR_LEI</LEI></RptgNtty>\n");
+        sb.append("      <RptgNtty><LEI>").append(RegReportSubmissions.esc(reportingProperties.getOperatorLei())).append("</LEI></RptgNtty>\n");
         sb.append("      <RptgPrd><Dt>").append(reportingDate).append("</Dt></RptgPrd>\n");
         sb.append("    </RptHdr>\n");
 
@@ -94,5 +109,13 @@ public class MifirReportingService {
         sb.append("  </FinInstrmRptgTxRpt>\n");
         sb.append("</Document>");
         return sb.toString();
+    }
+
+    private void applyResult(UUID submissionId, SubmissionResult result) {
+        switch (result.status()) {
+            case ACCEPTED -> submissions.markSubmitted(submissionId, result.submissionRef());
+            case PENDING_ACKNOWLEDGEMENT -> submissions.markPendingAck(submissionId, result.submissionRef());
+            case REJECTED -> submissions.markRejected(submissionId, result.errorMessage());
+        }
     }
 }

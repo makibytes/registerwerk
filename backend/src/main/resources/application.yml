@@ -179,6 +179,9 @@ registerwerk:
   wallet:
     master-key: ${REGISTERWERK_WALLET_MASTER_KEY:}
     storage-dir: ${REGISTERWERK_WALLET_DIR:/data/wallets}
+    kek-provider: ${REGISTERWERK_WALLET_KEK_PROVIDER:}
+    kms:
+      key-id: ${REGISTERWERK_WALLET_KMS_KEY_ID:}
   contracts:
     # AssetTokenFactory address per chain identifier (populated after `forge script Deploy`)
     asset-token-factory:
@@ -266,6 +269,36 @@ registerwerk:
         enabled: ${REGISTERWERK_TRADING_VENUE_TALOS_ENABLED:true}
         base-url: ${REGISTERWERK_TRADING_VENUE_TALOS_BASE_URL:}
         api-key: ${REGISTERWERK_TRADING_VENUE_TALOS_API_KEY:}
+  travel-rule:
+    protocol: ${REGISTERWERK_TRAVEL_RULE_PROTOCOL:NOOP}
+    threshold-eur: ${REGISTERWERK_TRAVEL_RULE_THRESHOLD_EUR:1000}
+    notabene:
+      base-url: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_BASE_URL:https://api.notabene.id}
+      api-key: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_API_KEY:}
+      vasp-did: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_VASP_DID:}
+    trp:
+      endpoint: ${REGISTERWERK_TRAVEL_RULE_TRP_ENDPOINT:}
+      mtls-cert-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_CERT:}
+      mtls-key-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY:}
+      directory-url: ${REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL:https://trp.notabene.id/directory}
+  reporting:
+    operator-tin: ${REGISTERWERK_OPERATOR_TIN:}
+    operator-lei: ${REGISTERWERK_OPERATOR_LEI:}
+    document-bucket: ${REGISTERWERK_REPORTING_S3_BUCKET:registerwerk-reports}
+    gateway: ${REGISTERWERK_REPORTING_GATEWAY:NOOP}
+    sftp:
+      DE_BAFIN:
+        host: ${REGISTERWERK_REPORTING_SFTP_DE_HOST:}
+        port: ${REGISTERWERK_REPORTING_SFTP_DE_PORT:22}
+        username: ${REGISTERWERK_REPORTING_SFTP_DE_USER:}
+        private-key-path: ${REGISTERWERK_REPORTING_SFTP_DE_KEY:}
+        remote-dir: ${REGISTERWERK_REPORTING_SFTP_DE_DIR:/incoming/mifir/}
+      FR_AMF:
+        host: ${REGISTERWERK_REPORTING_SFTP_FR_HOST:}
+        port: ${REGISTERWERK_REPORTING_SFTP_FR_PORT:22}
+        username: ${REGISTERWERK_REPORTING_SFTP_FR_USER:}
+        private-key-path: ${REGISTERWERK_REPORTING_SFTP_FR_KEY:}
+        remote-dir: ${REGISTERWERK_REPORTING_SFTP_FR_DIR:/incoming/mifir/}
   sync:
     # Auto-refresh interval in minutes for holder data sync from blockchain (0 = disabled)
     auto-refresh-interval-minutes: ${SYNC_INTERVAL_MINUTES:15}

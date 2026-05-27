@@ -21,11 +21,15 @@ class ProductionReadinessCheck {
     private final RegisterwerkAuthProperties authProps;
     private final String issuerUri;
 
+    private final String kekProviderName;
+
     ProductionReadinessCheck(
             RegisterwerkAuthProperties authProps,
-            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri) {
+            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri,
+            @Value("${registerwerk.wallet.kek-provider:}") String kekProviderName) {
         this.authProps = authProps;
         this.issuerUri = issuerUri;
+        this.kekProviderName = kekProviderName;
     }
 
     @PostConstruct
@@ -56,6 +60,12 @@ class ProductionReadinessCheck {
                     || adminPassword == null || adminPassword.isBlank()) {
                 throw new IllegalStateException(
                         "DEFAULT_ADMIN_EMAIL and DEFAULT_ADMIN_PASSWORD must be set in production mode.");
+            }
+            if (kekProviderName == null || kekProviderName.isBlank()
+                    || "ENV_VAR".equalsIgnoreCase(kekProviderName)) {
+                throw new IllegalStateException(
+                        "REGISTERWERK_WALLET_KEK_PROVIDER must be set to AWS_KMS, AZURE_KEY_VAULT, " +
+                        "or GCP_KMS in production mode. The EnvVarKekProvider is not safe for production.");
             }
             log.info("Production readiness checks passed.");
         }

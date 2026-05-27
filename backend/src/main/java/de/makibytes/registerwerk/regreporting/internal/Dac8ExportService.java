@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.regreporting.internal;
 
+import de.makibytes.registerwerk.regreporting.api.SubmissionGateway;
+import de.makibytes.registerwerk.regreporting.api.SubmissionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -7,6 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -24,10 +27,18 @@ public class Dac8ExportService {
     private static final Logger log = LoggerFactory.getLogger(Dac8ExportService.class);
     private final JdbcTemplate jdbc;
     private final RegReportSubmissions submissions;
+    private final S3DocumentStore documentStore;
+    private final SubmissionGateway submissionGateway;
+    private final ReportingProperties reportingProperties;
 
-    Dac8ExportService(JdbcTemplate jdbc, RegReportSubmissions submissions) {
+    Dac8ExportService(JdbcTemplate jdbc, RegReportSubmissions submissions,
+                      S3DocumentStore documentStore, SubmissionGateway submissionGateway,
+                      ReportingProperties reportingProperties) {
         this.jdbc = jdbc;
         this.submissions = submissions;
+        this.documentStore = documentStore;
+        this.submissionGateway = submissionGateway;
+        this.reportingProperties = reportingProperties;
     }
 
     /**
@@ -75,9 +86,14 @@ public class Dac8ExportService {
         }
 
         String xml = buildCarfXml(holdings, jurisdiction, year);
+        byte[] xmlBytes = xml.getBytes(StandardCharsets.UTF_8);
         UUID submissionId = submissions.persist("DAC8_CARF", jurisdiction, yearStart, yearEnd);
-        log.info("DAC8/CARF {}: {} holders, submission id={}", jurisdiction, holdings.size(), submissionId);
-        // TODO: file via jurisdiction-specific API (BZSt ELSTER, ACD portal, DGFiP DSN, LI portal)
+        documentStore.store(submissionId, "DAC8_CARF", jurisdiction, yearEnd, xmlBytes);
+
+        SubmissionResult result = submissionGateway.submit(submissionId, "DAC8_CARF", jurisdiction, xmlBytes);
+        applyResult(submissionId, result);
+        log.info("DAC8/CARF {}: {} holders filed, submission id={} status={}",
+                jurisdiction, holdings.size(), submissionId, result.status());
     }
 
     @SuppressWarnings("unchecked")
@@ -87,7 +103,7 @@ public class Dac8ExportService {
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         sb.append("<CARFMessage xmlns=\"urn:oecd:ties:carf:v1\">\n");
         sb.append("  <MessageSpec>\n");
-        sb.append("    <SendingEntityIN>TODO_OPERATOR_TIN</SendingEntityIN>\n");
+        sb.append("    <SendingEntityIN>").append(RegReportSubmissions.esc(reportingProperties.getOperatorTin())).append("</SendingEntityIN>\n");
         sb.append("    <MessageRefId>CARF-").append(jurisdiction).append("-").append(year).append("</MessageRefId>\n");
         sb.append("    <ReportingPeriod>").append(year).append("</ReportingPeriod>\n");
         sb.append("  </MessageSpec>\n");
@@ -104,5 +120,13 @@ public class Dac8ExportService {
 
         sb.append("  </CARFBody>\n</CARFMessage>");
         return sb.toString();
+    }
+
+    private void applyResult(UUID submissionId, SubmissionResult result) {
+        switch (result.status()) {
+            case ACCEPTED -> submissions.markSubmitted(submissionId, result.submissionRef());
+            case PENDING_ACKNOWLEDGEMENT -> submissions.markPendingAck(submissionId, result.submissionRef());
+            case REJECTED -> submissions.markRejected(submissionId, result.errorMessage());
+        }
     }
 }

@@ -31,8 +31,6 @@ import java.util.UUID;
  * The canonical state is on-chain; this table allows the backend to answer
  * identity questions without an RPC call on every request.</p>
  *
- * <p>On-chain writes are currently stubs ({@code // TODO: Web3j}) — the DB mirror
- * is updated optimistically so the API is functional during development.</p>
  */
 @Service
 public class IdentityRegistryService {

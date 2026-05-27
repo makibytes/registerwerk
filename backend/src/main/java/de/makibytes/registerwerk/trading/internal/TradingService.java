@@ -39,8 +39,7 @@ public class TradingService {
     private final AssetRepository assetRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final AddressEndpointRepository endpointRepository;
-    private final SimulatedTradingVenueAdapter simulatedTradingVenueAdapter;
-    private final PlaceholderTradingVenueAdapter placeholderTradingVenueAdapter;
+    private final List<TradingVenueAdapter> venueAdapters;
     private final TradingAssetTypeResolver tradingAssetTypeResolver;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -54,8 +53,7 @@ public class TradingService {
             AssetRepository assetRepository,
             AssetDeploymentRepository assetDeploymentRepository,
             AddressEndpointRepository endpointRepository,
-            SimulatedTradingVenueAdapter simulatedTradingVenueAdapter,
-            PlaceholderTradingVenueAdapter placeholderTradingVenueAdapter,
+            List<TradingVenueAdapter> venueAdapters,
             TradingAssetTypeResolver tradingAssetTypeResolver,
             ApplicationEventPublisher eventPublisher) {
         this.tradingProperties = tradingProperties;
@@ -67,8 +65,7 @@ public class TradingService {
         this.assetRepository = assetRepository;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.endpointRepository = endpointRepository;
-        this.simulatedTradingVenueAdapter = simulatedTradingVenueAdapter;
-        this.placeholderTradingVenueAdapter = placeholderTradingVenueAdapter;
+        this.venueAdapters = venueAdapters;
         this.tradingAssetTypeResolver = tradingAssetTypeResolver;
         this.eventPublisher = eventPublisher;
     }
@@ -76,10 +73,8 @@ public class TradingService {
     @Transactional(readOnly = true)
     public List<TradingVenueResponse> listVenues() {
         ensureTradingEnabled();
-        List<TradingVenueMetadata> metadata = new ArrayList<>();
-        metadata.add(simulatedTradingVenueAdapter.metadata());
-        metadata.addAll(placeholderTradingVenueAdapter.metadataEntries());
-        return metadata.stream()
+        return venueAdapters.stream()
+                .map(TradingVenueAdapter::metadata)
                 .filter(TradingVenueMetadata::enabled)
                 .map(meta -> new TradingVenueResponse(
                         meta.code(),
@@ -220,10 +215,15 @@ public class TradingService {
             BigDecimal maxPrice) {
         ensureTradingEnabled();
         TradingOfferFilter filter = new TradingOfferFilter(search, assetType, tokenStandard, venueCode, paymentOption, minPrice, maxPrice);
-        List<TradingVenueOffer> offers = new ArrayList<>(simulatedTradingVenueAdapter.searchOffers(filter));
-        // External adapters are scaffolded but non-executable for now, so they return no offers.
+        List<TradingVenueOffer> offers = new ArrayList<>();
+        for (TradingVenueAdapter adapter : venueAdapters) {
+            if (venueCode == null || venueCode == adapter.venueCode()) {
+                offers.addAll(adapter.searchOffers(filter));
+            }
+        }
         return offers.stream()
-                .filter(offer -> !entityId.equals(findListing(offer.listingId()).getSellerEntityId()))
+                .filter(offer -> offer.listingId() == null
+                        || !entityId.equals(findListing(offer.listingId()).getSellerEntityId()))
                 .map(this::toOfferResponse)
                 .toList();
     }
@@ -231,9 +231,6 @@ public class TradingService {
     public TradeExecutionResponse buy(UUID entityId, UUID actorId, UUID listingId, BuyTradingOfferRequest request) {
         ensureTradingEnabled();
         TradeListing listing = findListing(listingId);
-        if (listing.getVenueCode() != TradingVenueCode.SIMULATED) {
-            throw new IllegalArgumentException("Only simulated-venue execution is available in this build");
-        }
         if (entityId.equals(listing.getSellerEntityId())) {
             throw new IllegalArgumentException("A company cannot buy its own listing");
         }
@@ -291,12 +288,28 @@ public class TradingService {
         execution.setWalletEndpointId(resolvedWallet.endpointId());
         execution.setWalletAddress(resolvedWallet.address());
 
-        if (settings.isImmediateSettlementEnabled()) {
-            AssetHolder buyerHolder = settleExecution(execution);
-            execution.setBuyerHolderId(buyerHolder.getId());
-            execution.setSettlementStatus(SettlementStatus.SETTLED);
-            execution.setSettledAt(Instant.now());
+        if (listing.getVenueCode() == TradingVenueCode.SIMULATED) {
+            if (settings.isImmediateSettlementEnabled()) {
+                AssetHolder buyerHolder = settleExecution(execution);
+                execution.setBuyerHolderId(buyerHolder.getId());
+                execution.setSettlementStatus(SettlementStatus.SETTLED);
+                execution.setSettledAt(Instant.now());
+            } else {
+                execution.setSettlementStatus(SettlementStatus.PENDING);
+            }
         } else {
+            TradingVenueAdapter adapter = venueAdapters.stream()
+                    .filter(a -> a.venueCode() == listing.getVenueCode())
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "No active adapter for venue " + listing.getVenueCode()));
+            ExecuteOrderRequest orderRequest = new ExecuteOrderRequest(
+                    listingId, quantity, orderType, request.limitPrice(), paymentOption,
+                    resolvedWallet.address());
+            TradingVenueExecutionResult result = adapter.execute(orderRequest);
+            if (result.status() == TradingVenueExecutionResult.Status.REJECTED) {
+                throw new IllegalStateException("Venue rejected order: " + result.errorMessage());
+            }
             execution.setSettlementStatus(SettlementStatus.PENDING);
         }
 

@@ -151,7 +151,6 @@ public class ClaimIssuanceService {
             return;
         }
 
-        // TODO: Web3j implementation — requires generated T-REX contract wrappers
         deploymentService.revokeKycClaim(claimId);
 
         claim.setRevokedAt(Instant.now());

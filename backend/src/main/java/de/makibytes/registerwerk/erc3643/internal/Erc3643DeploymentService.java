@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import de.makibytes.registerwerk.erc3643.events.Erc3643SuiteDeployedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -24,12 +25,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.DynamicBytes;
+import org.web3j.abi.datatypes.DynamicStruct;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.abi.datatypes.generated.Uint16;
+import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.Log;
@@ -85,6 +89,7 @@ public class Erc3643DeploymentService {
     private final OnchainClaimRepository claimRepository;
     private final Erc3643SuiteRepository suiteRepository;
     private final AssetDeploymentRepository deploymentRepository;
+    private final AssetLookupPort assetLookupPort;
     private final ApplicationEventPublisher eventPublisher;
     private final ExplorerUrlBuilder explorerUrlBuilder;
     private final ChainConfigRepository chainConfigRepository;
@@ -97,6 +102,7 @@ public class Erc3643DeploymentService {
             OnchainClaimRepository claimRepository,
             Erc3643SuiteRepository suiteRepository,
             AssetDeploymentRepository deploymentRepository,
+            AssetLookupPort assetLookupPort,
             ApplicationEventPublisher eventPublisher,
             ExplorerUrlBuilder explorerUrlBuilder,
             ChainConfigRepository chainConfigRepository,
@@ -107,6 +113,7 @@ public class Erc3643DeploymentService {
         this.claimRepository = claimRepository;
         this.suiteRepository = suiteRepository;
         this.deploymentRepository = deploymentRepository;
+        this.assetLookupPort = assetLookupPort;
         this.eventPublisher = eventPublisher;
         this.explorerUrlBuilder = explorerUrlBuilder;
         this.chainConfigRepository = chainConfigRepository;
@@ -158,13 +165,12 @@ public class Erc3643DeploymentService {
             // Encode assetId as bytes32
             byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
 
-            // EwpgTREXFactory.deployEwpgSuite(bytes32 assetId, string salt,
-            //     ITREXFactory.TokenDetails details, ITREXFactory.ClaimDetails claims)
-            // TokenDetails and ClaimDetails are complex tuples — encode as raw bytes via low-level call.
-            // We use the 4-arg deployEwpgSuite function with placeholder tuple structs.
-            // Note: full struct encoding requires the ABI; using the simplified approach here
-            // where the factory is called with a pre-encoded payload built from the ABI spec.
-            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt);
+            AssetLookupPort.AssetInfo assetInfo = assetLookupPort.findById(assetId)
+                    .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
+            String assetName = assetInfo.name();
+            String assetSymbol = deriveSymbol(assetName);
+
+            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, creds.getAddress(), assetName, assetSymbol);
             TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, fn);
 
             Erc3643Suite suite = extractSuiteFromReceipt(receipt, deployment.getId(), assetIdBytes);
@@ -206,7 +212,10 @@ public class Erc3643DeploymentService {
             Credentials creds = evmContractService.credentials(chain);
             String salt = "registerwerk-" + assetId;
             byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
-            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt);
+            AssetLookupPort.AssetInfo assetInfo = assetLookupPort.findById(assetId)
+                    .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
+            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, creds.getAddress(),
+                    assetInfo.name(), deriveSymbol(assetInfo.name()));
             TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, fn);
             return receipt.getTransactionHash();
         });
@@ -417,41 +426,54 @@ public class Erc3643DeploymentService {
 
     // ── Suite deployment helpers ──────────────────────────────────────────────
 
-    /**
-     * Builds the {@code deployEwpgSuite} function call.
-     *
-     * <p>The T-REX {@code TokenDetails} and {@code ClaimDetails} structs are complex ABI tuples.
-     * We pass minimal defaults here (empty name/symbol/agents/topics/issuers) and expect
-     * the operator to configure them via the lifecycle service after deployment.
-     */
-    private static Function buildDeployEwpgSuiteFunction(byte[] assetIdBytes, String salt) {
-        // EwpgTREXFactory.deployEwpgSuite(bytes32 assetId, string salt,
-        //     TokenDetails details, ClaimDetails claims)
-        //
-        // TokenDetails struct (ITREXFactory.sol):
-        //   owner, name, symbol, decimals, irs, ONCHAINID, irAgents[], tokenAgents[],
-        //   complianceModules[], complianceSettings[]
-        //
-        // ClaimDetails struct:
-        //   claimTopics[], issuers[], issuerClaims[][]
-        //
-        // Encoding structs without generated wrappers requires raw ABI encoding.
-        // We use an empty (zero-field) approach and let the deployer configure post-hoc.
-        // This will revert on-chain if the factory validates struct fields; the operator
-        // must provide a fully-configured deployment script for production.
+    private static final String ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-        // Encode manually: this is a best-effort encoding for dev/test networks.
-        // For mainnet, use the Foundry deploy script which builds full TokenDetails.
+    /**
+     * Builds the {@code deployEwpgSuite(bytes32, string, TokenDetails, ClaimDetails)} call.
+     *
+     * TokenDetails: (address owner, string name, string symbol, uint8 decimals,
+     *   address irs, address ONCHAINID, address[] irAgents, address[] tokenAgents,
+     *   address[] complianceModules, bytes[] complianceSettings)
+     * ClaimDetails: (uint256[] claimTopics, address[] issuers, uint256[][] issuerClaims)
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Function buildDeployEwpgSuiteFunction(
+            byte[] assetIdBytes, String salt, String ownerAddress, String name, String symbol) {
+
+        DynamicStruct tokenDetails = new DynamicStruct(
+                new Address(ownerAddress),
+                new Utf8String(name),
+                new Utf8String(symbol),
+                new Uint8(java.math.BigInteger.valueOf(18)),
+                new Address(ZERO_ADDRESS),                               // IRS: zero = deploy new
+                new Address(ZERO_ADDRESS),                               // ONCHAINID: zero = deploy new
+                new DynamicArray<>(Address.class, new Address(ownerAddress)), // irAgents
+                new DynamicArray<>(Address.class, new Address(ownerAddress)), // tokenAgents
+                new DynamicArray<>(Address.class),                       // complianceModules (empty)
+                new DynamicArray<>(DynamicBytes.class)                   // complianceSettings (empty)
+        );
+
+        DynamicStruct claimDetails = new DynamicStruct(
+                new DynamicArray<>(Uint256.class, new Uint256(java.math.BigInteger.valueOf(CLAIM_TOPIC_KYC))),
+                new DynamicArray<>(Address.class, new Address(ownerAddress)),
+                new DynamicArray(DynamicArray.class)                     // issuerClaims (empty)
+        );
+
         return new Function(
                 "deployEwpgSuite",
                 Arrays.asList(
                         new Bytes32(assetIdBytes),
-                        new Utf8String(salt)
-                        // Note: TokenDetails and ClaimDetails structs omitted here;
-                        // production deployments must use the Foundry script or a generated wrapper.
+                        new Utf8String(salt),
+                        tokenDetails,
+                        claimDetails
                 ),
                 Collections.emptyList()
         );
+    }
+
+    private static String deriveSymbol(String assetName) {
+        String cleaned = assetName.toUpperCase().replaceAll("[^A-Z0-9]", "");
+        return cleaned.length() > 8 ? cleaned.substring(0, 8) : cleaned.isEmpty() ? "TOKEN" : cleaned;
     }
 
     /**

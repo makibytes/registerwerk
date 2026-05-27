@@ -149,6 +149,32 @@
       <artifactId>kms</artifactId>
       <version>${awssdk.version}</version>
     </dependency>
+    <!-- ── Azure Key Vault (optional — activate via REGISTERWERK_WALLET_KEK_PROVIDER=AZURE_KEY_VAULT) -->
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-security-keyvault-keys</artifactId>
+      <version>4.9.2</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-identity</artifactId>
+      <version>1.15.0</version>
+      <optional>true</optional>
+    </dependency>
+    <!-- ── GCP Cloud KMS (optional — activate via REGISTERWERK_WALLET_KEK_PROVIDER=GCP_KMS) ── -->
+    <dependency>
+      <groupId>com.google.cloud</groupId>
+      <artifactId>google-cloud-kms</artifactId>
+      <version>2.56.0</version>
+      <optional>true</optional>
+    </dependency>
+    <!-- ── Apache MINA SSHD SFTP (regulatory report filing) ─────────────── -->
+    <dependency>
+      <groupId>org.apache.sshd</groupId>
+      <artifactId>sshd-sftp</artifactId>
+      <version>2.14.0</version>
+    </dependency>
 
     <!-- ── Mapping ─────────────────────────────────────────────────────────── -->
     <dependency>

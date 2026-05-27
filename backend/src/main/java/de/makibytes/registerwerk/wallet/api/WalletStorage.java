@@ -31,14 +31,15 @@ import java.util.UUID;
  * Low-level encrypted keystore I/O for operator wallets.
  *
  * <h3>EVM wallets</h3>
- * Stored as Web3 Secret Storage v3 keystore JSON files, encrypted with the master KEK
- * via scrypt + AES-128-CTR (web3j's {@code Wallet.createLight}). The master KEK acts
- * as the keystore password — it never needs to be entered by an operator at runtime.
+ * Stored as Web3 Secret Storage v3 keystore JSON files. A random per-wallet DEK is
+ * generated and used as the keystore password. The DEK is wrapped via {@link KekProvider}
+ * and stored as a {@code .dek.bin} sidecar file alongside the keystore JSON. Legacy
+ * keystores (no sidecar) fall back to the master key as password.
  *
- * <h3>Solana wallets</h3>
- * Stored as a JSON envelope {@code {salt, iv, ciphertext}} where the 64-byte ed25519
- * keypair is encrypted with AES-256-GCM. The 32-byte AES key is derived with
- * PBKDF2-HMAC-SHA256 (100 000 iterations) from the master KEK + a per-wallet random salt.
+ * <h3>Solana/Canton wallets</h3>
+ * Stored as a JSON envelope. Version 2 envelopes use a random per-wallet DEK wrapped
+ * via {@link KekProvider} for AES-256-GCM encryption. Version 1 (legacy) uses
+ * PBKDF2-HMAC-SHA256 from the master key for backward compatibility.
  *
  * <h3>Export (user-facing)</h3>
  * EVM: re-encrypt with the user-chosen password and full scrypt before returning JSON.
@@ -54,30 +55,40 @@ public class WalletStorage {
     private static final int  SALT_LENGTH     = 16;  // bytes
     private static final int  PBKDF2_ITER     = 600_000; // OWASP 2023 baseline for PBKDF2-HMAC-SHA256
     private static final int  AES_KEY_BITS    = 256;
+    private static final int  DEK_BYTES       = 32;  // 256-bit DEK
 
     private static final SecureRandom RNG = new SecureRandom();
     private static final ObjectMapper MAPPER = ObjectMapperFactory.getObjectMapper();
 
     private final WalletProperties props;
+    private final KekProvider kekProvider;
 
-    public WalletStorage(WalletProperties props) {
+    public WalletStorage(WalletProperties props, KekProvider kekProvider) {
         this.props = props;
+        this.kekProvider = kekProvider;
+        log.info("WalletStorage initialized with KekProvider={}", kekProvider.name());
     }
 
     // ── EVM (Web3 Secret Storage v3) ──────────────────────────────────────────
 
     /**
-     * Stores an EVM keypair on disk encrypted with the master KEK.
+     * Stores an EVM keypair on disk. A random per-wallet DEK is generated, used as the
+     * scrypt password, and stored wrapped by {@link KekProvider} in a {@code .dek.bin} sidecar.
      *
      * @return path of the written keystore file (relative to storage root)
      */
     public String storeEvm(UUID walletId, ECKeyPair ecKeyPair) {
         try {
-            WalletFile wf = Wallet.createStandard(props.getMasterKey(), ecKeyPair); // full scrypt N=2^18
+            byte[] dek = randomBytes(DEK_BYTES);
+            byte[] wrappedDek = kekProvider.wrap(dek);
+            String dekPassword = HexFormat.of().formatHex(dek);
+
+            WalletFile wf = Wallet.createStandard(dekPassword, ecKeyPair); // full scrypt N=2^18
             String json = MAPPER.writeValueAsString(wf);
-            Path path = storagePath(walletId + ".json");
-            Files.writeString(path, json, StandardCharsets.UTF_8);
-            log.debug("Stored EVM keystore: {}", path);
+            Path keystorePath = storagePath(walletId + ".json");
+            Files.writeString(keystorePath, json, StandardCharsets.UTF_8);
+            Files.write(storagePath(walletId + ".dek.bin"), wrappedDek);
+            log.debug("Stored EVM keystore with wrapped DEK: {}", keystorePath);
             return walletId + ".json";
         } catch (Exception e) {
             throw new WalletStorageException("Failed to store EVM keystore for wallet " + walletId, e);
@@ -85,18 +96,30 @@ public class WalletStorage {
     }
 
     /**
-     * Loads and decrypts an EVM keystore from the given relative path.
+     * Loads and decrypts an EVM keystore. Uses the wrapped DEK sidecar when present;
+     * falls back to the master key for keystores created before envelope encryption.
      */
     public Credentials loadEvm(String relativePath) {
         try {
             Path path = storagePath(relativePath);
             String json = Files.readString(path, StandardCharsets.UTF_8);
             WalletFile wf = MAPPER.readValue(json, WalletFile.class);
-            ECKeyPair pair = Wallet.decrypt(props.getMasterKey(), wf);
+
+            Path dekPath = storagePath(relativePath.replace(".json", ".dek.bin"));
+            String password;
+            if (Files.exists(dekPath)) {
+                byte[] wrappedDek = Files.readAllBytes(dekPath);
+                byte[] dek = kekProvider.unwrap(wrappedDek);
+                password = HexFormat.of().formatHex(dek);
+            } else {
+                password = props.getMasterKey(); // legacy keystores
+            }
+
+            ECKeyPair pair = Wallet.decrypt(password, wf);
             return Credentials.create(pair);
         } catch (CipherException e) {
             throw new WalletStorageException("Failed to decrypt EVM keystore at " + relativePath +
-                    ": master key mismatch or corrupted file", e);
+                    ": wrong key or corrupted file", e);
         } catch (Exception e) {
             throw new WalletStorageException("Failed to load EVM keystore at " + relativePath, e);
         }
@@ -166,16 +189,17 @@ public class WalletStorage {
     // ── Solana (AES-256-GCM envelope) ────────────────────────────────────────
 
     /**
-     * Stores a Solana keypair (64-byte ed25519 secret key) encrypted with AES-256-GCM
-     * using a PBKDF2-derived key from the master KEK + a random per-wallet salt.
+     * Stores a Solana keypair (64-byte ed25519 secret key) encrypted with AES-256-GCM.
+     * Uses a random per-wallet DEK wrapped by {@link KekProvider} (version 2 envelope).
      *
      * @return relative path of the stored file
      */
     public String storeSolana(UUID walletId, byte[] secretKeyBytes) {
         try {
-            byte[] salt = randomBytes(SALT_LENGTH);
+            byte[] dek  = randomBytes(DEK_BYTES);
+            byte[] wrappedDek = kekProvider.wrap(dek);
             byte[] iv   = randomBytes(GCM_IV_LENGTH);
-            SecretKey aesKey = deriveAesKey(props.getMasterKey(), salt);
+            SecretKey aesKey = new SecretKeySpec(dek, "AES");
 
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
@@ -183,9 +207,9 @@ public class WalletStorage {
 
             HexFormat hex = HexFormat.of();
             Map<String, String> envelope = Map.of(
-                    "version",    "1",
+                    "version",    "2",
                     "type",       "solana",
-                    "salt",       hex.formatHex(salt),
+                    "wrappedDek", hex.formatHex(wrappedDek),
                     "iv",         hex.formatHex(iv),
                     "ciphertext", hex.formatHex(ciphertext)
             );
@@ -201,6 +225,7 @@ public class WalletStorage {
 
     /**
      * Decrypts and returns the raw Solana secret key bytes (64 bytes).
+     * Version 2 envelopes use KekProvider; version 1 falls back to PBKDF2 from master key.
      */
     public byte[] loadSolana(String relativePath) {
         try {
@@ -210,11 +235,10 @@ public class WalletStorage {
                     Files.readString(path, StandardCharsets.UTF_8), Map.class);
 
             HexFormat hex = HexFormat.of();
-            byte[] salt       = hex.parseHex(envelope.get("salt"));
             byte[] iv         = hex.parseHex(envelope.get("iv"));
             byte[] ciphertext = hex.parseHex(envelope.get("ciphertext"));
 
-            SecretKey aesKey = deriveAesKey(props.getMasterKey(), salt);
+            SecretKey aesKey = resolveAesKey(envelope, hex);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, aesKey, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
             return cipher.doFinal(ciphertext);
@@ -238,10 +262,10 @@ public class WalletStorage {
 
     /**
      * Stores a Canton party JWT (and optional party ID) encrypted with AES-256-GCM.
-     * Uses the same envelope format as Solana keystores for consistency.
+     * Uses the same version 2 envelope format as Solana keystores.
      *
      * @param walletId the wallet's UUID (used as filename base)
-     * @param partyId  Canton party ID string (stored in plaintext inside the envelope)
+     * @param partyId  Canton party ID string
      * @param jwt      bearer JWT granting submission rights for this party
      * @return relative path of the stored file
      */
@@ -249,9 +273,10 @@ public class WalletStorage {
         try {
             byte[] payload = (partyId + "\n" + jwt).getBytes(StandardCharsets.UTF_8);
 
-            byte[] salt = randomBytes(SALT_LENGTH);
-            byte[] iv   = randomBytes(GCM_IV_LENGTH);
-            SecretKey aesKey = deriveAesKey(props.getMasterKey(), salt);
+            byte[] dek = randomBytes(DEK_BYTES);
+            byte[] wrappedDek = kekProvider.wrap(dek);
+            byte[] iv  = randomBytes(GCM_IV_LENGTH);
+            SecretKey aesKey = new SecretKeySpec(dek, "AES");
 
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
@@ -259,9 +284,9 @@ public class WalletStorage {
 
             HexFormat hex = HexFormat.of();
             Map<String, String> envelope = Map.of(
-                    "version",    "1",
+                    "version",    "2",
                     "type",       "canton",
-                    "salt",       hex.formatHex(salt),
+                    "wrappedDek", hex.formatHex(wrappedDek),
                     "iv",         hex.formatHex(iv),
                     "ciphertext", hex.formatHex(ciphertext)
             );
@@ -277,6 +302,7 @@ public class WalletStorage {
 
     /**
      * Decrypts and returns a {@link CantonContext} containing the party ID and JWT.
+     * Version 2 envelopes use KekProvider; version 1 falls back to PBKDF2 from master key.
      */
     public CantonContext loadCanton(String relativePath) {
         try {
@@ -286,11 +312,10 @@ public class WalletStorage {
                     Files.readString(path, StandardCharsets.UTF_8), Map.class);
 
             HexFormat hex = HexFormat.of();
-            byte[] salt       = hex.parseHex(envelope.get("salt"));
             byte[] iv         = hex.parseHex(envelope.get("iv"));
             byte[] ciphertext = hex.parseHex(envelope.get("ciphertext"));
 
-            SecretKey aesKey = deriveAesKey(props.getMasterKey(), salt);
+            SecretKey aesKey = resolveAesKey(envelope, hex);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, aesKey, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
             byte[] plaintext = cipher.doFinal(ciphertext);
@@ -319,6 +344,20 @@ public class WalletStorage {
 
     private Path storagePath(String relativePath) {
         return Path.of(props.getStorageDir()).resolve(relativePath);
+    }
+
+    /**
+     * Resolves an AES key from the envelope map. Version 2 unwraps via KekProvider;
+     * version 1 derives via PBKDF2 from the master key (backward compatibility).
+     */
+    private SecretKey resolveAesKey(Map<String, String> envelope, HexFormat hex) throws Exception {
+        if ("2".equals(envelope.get("version"))) {
+            byte[] wrappedDek = hex.parseHex(envelope.get("wrappedDek"));
+            byte[] dek = kekProvider.unwrap(wrappedDek);
+            return new SecretKeySpec(dek, "AES");
+        }
+        byte[] salt = hex.parseHex(envelope.get("salt"));
+        return deriveAesKey(props.getMasterKey(), salt);
     }
 
     private static SecretKey deriveAesKey(String password, byte[] salt) throws Exception {

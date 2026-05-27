@@ -14,6 +14,7 @@ import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
@@ -53,8 +54,6 @@ import de.makibytes.registerwerk.erc3643.web.dto.ComplianceStatusResponse;
  *   <li>Agent-only regulatory operations (forced transfer, address freeze / unfreeze)</li>
  * </ul>
  *
- * <p>All on-chain calls are stubbed and require Web3j contract wrappers generated from
- * the Foundry-compiled T-REX ABI before they can be executed.
  */
 @Service
 @Transactional
@@ -164,6 +163,7 @@ public class Erc3643LifecycleService {
                 List.of()
         );
         sendToSuite(suite, suite.getComplianceAddress(), fn);
+        configureComplianceModule(suite, moduleAddress, params);
 
         Erc3643ComplianceModule module = new Erc3643ComplianceModule();
         module.setSuiteId(suiteId);
@@ -540,6 +540,36 @@ public class Erc3643LifecycleService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Sends on-chain configuration calls to a newly added compliance module.
+     * Each recognised param key maps to one EwpgModularCompliance setter.
+     */
+    private void configureComplianceModule(Erc3643Suite suite, String moduleAddress,
+                                           Map<String, Object> params) {
+        if (params.containsKey("maxInvestors")) {
+            int v = ((Number) params.get("maxInvestors")).intValue();
+            sendToSuite(suite, moduleAddress, new Function("setMaxInvestors",
+                    List.of(new Uint256(java.math.BigInteger.valueOf(v))), List.of()));
+        }
+        if (params.containsKey("maxBalance")) {
+            java.math.BigInteger v = new java.math.BigInteger(params.get("maxBalance").toString());
+            sendToSuite(suite, moduleAddress, new Function("setMaxBalance",
+                    List.of(new Uint256(v)), List.of()));
+        }
+        if (params.containsKey("transferCooldown")) {
+            int v = ((Number) params.get("transferCooldown")).intValue();
+            sendToSuite(suite, moduleAddress, new Function("setTransferCooldown",
+                    List.of(new Uint256(java.math.BigInteger.valueOf(v))), List.of()));
+        }
+        if (params.containsKey("blockedCountries") && params.get("blockedCountries") instanceof List<?> rawList) {
+            for (Object entry : rawList) {
+                int country = ((Number) entry).intValue();
+                sendToSuite(suite, moduleAddress, new Function("blockCountry",
+                        List.of(new Uint16(java.math.BigInteger.valueOf(country & 0xFFFF))), List.of()));
+            }
+        }
+    }
 
     private Erc3643Suite requireSuite(UUID suiteId) {
         return suiteRepository.findById(suiteId)

@@ -40,4 +40,36 @@ class RegReportSubmissions {
             """, id, reportType, jurisdiction, periodStart, periodEnd);
         return id;
     }
+
+    void recordDocumentKey(UUID submissionId, String s3Key) {
+        jdbc.update("""
+            UPDATE regreport_submission
+            SET document_s3_key = ?, updated_at = now()
+            WHERE id = ?
+            """, s3Key, submissionId);
+    }
+
+    void markSubmitted(UUID submissionId, String submissionRef) {
+        jdbc.update("""
+            UPDATE regreport_submission
+            SET status = 'SUBMITTED', submission_ref = ?, submitted_at = now(), updated_at = now()
+            WHERE id = ?
+            """, submissionRef, submissionId);
+    }
+
+    void markPendingAck(UUID submissionId, String submissionRef) {
+        jdbc.update("""
+            UPDATE regreport_submission
+            SET status = 'PENDING_ACK', submission_ref = ?, submitted_at = now(), updated_at = now()
+            WHERE id = ?
+            """, submissionRef, submissionId);
+    }
+
+    void markRejected(UUID submissionId, String reason) {
+        jdbc.update("""
+            UPDATE regreport_submission
+            SET status = 'REJECTED', rejection_reason = ?, updated_at = now()
+            WHERE id = ?
+            """, reason, submissionId);
+    }
 }
