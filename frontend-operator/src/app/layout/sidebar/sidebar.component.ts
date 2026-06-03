@@ -1,6 +1,8 @@
 import { Component } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { environment } from '../../../environments/environment';
 
 interface NavItem {
   label: string;
@@ -8,10 +10,15 @@ interface NavItem {
   route: string;
 }
 
+interface NavSection {
+  label: string;
+  items: NavItem[];
+}
+
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, MatIconModule],
+  imports: [RouterLink, RouterLinkActive, MatIconModule, MatTooltipModule],
   styles: [`
     :host {
       display: flex;
@@ -126,9 +133,12 @@ interface NavItem {
     }
 
     .sidebar-footer {
-      padding: 14px 18px;
+      padding: 12px 14px;
       border-top: 1px solid var(--rw-sidebar-border);
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .sidebar-footer-text {
@@ -136,6 +146,34 @@ interface NavItem {
       color: var(--rw-sidebar-fg);
       opacity: 0.4;
       letter-spacing: 0.3px;
+      flex: 1;
+    }
+
+    .portal-switch-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(245,158,11,0.25);
+      background: rgba(245,158,11,0.08);
+      color: rgba(245,158,11,0.8);
+      font-size: 11px;
+      font-weight: 600;
+      font-family: 'Manrope', sans-serif;
+      cursor: pointer;
+      text-decoration: none;
+      letter-spacing: 0.2px;
+      transition: background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+
+      mat-icon { font-size: 14px; width: 14px; height: 14px; }
+
+      &:hover {
+        background: rgba(245,158,11,0.16);
+        border-color: rgba(245,158,11,0.4);
+        color: #F59E0B;
+      }
     }
   `],
   template: `
@@ -152,36 +190,70 @@ interface NavItem {
     </div>
 
     <nav class="nav-section">
-      <div class="nav-section-label">Navigation</div>
-      @for (item of navItems; track item.route) {
-        <a
-          class="nav-item"
-          [routerLink]="item.route"
-          routerLinkActive="active"
-          [routerLinkActiveOptions]="{ exact: item.route === '/dashboard' }"
-        >
-          <mat-icon>{{ item.icon }}</mat-icon>
-          {{ item.label }}
-        </a>
+      @for (section of navSections; track section.label) {
+        <div class="nav-section-label">{{ section.label }}</div>
+        @for (item of section.items; track item.route) {
+          <a
+            class="nav-item"
+            [routerLink]="item.route"
+            routerLinkActive="active"
+            [routerLinkActiveOptions]="{ exact: item.route === '/dashboard' }"
+          >
+            <mat-icon>{{ item.icon }}</mat-icon>
+            {{ item.label }}
+          </a>
+        }
       }
     </nav>
 
     <div class="sidebar-footer">
       <div class="sidebar-footer-text">Registerwerk v1.0</div>
+      @if (customerUrl) {
+        <a [href]="customerUrl" target="_blank" class="portal-switch-btn"
+           matTooltip="Open Customer Portal in a new tab">
+          <mat-icon>open_in_new</mat-icon>
+          Customer
+        </a>
+      }
     </div>
   `,
 })
 export class SidebarComponent {
-  readonly navItems: NavItem[] = [
-    { label: 'Dashboard',     icon: 'grid_view',              route: '/dashboard' },
-    { label: 'Assets',        icon: 'account_balance_wallet', route: '/assets' },
-    { label: 'Audit Log',     icon: 'receipt_long',           route: '/audit' },
-    { label: 'Customers',     icon: 'people_outline',         route: '/customers' },
-    { label: 'Endpoints',     icon: 'contacts',               route: '/endpoints' },
-    { label: 'Network Nodes', icon: 'cable',                  route: '/network-nodes' },
-    { label: 'Onboarding',    icon: 'person_add_alt',         route: '/onboarding' },
-    { label: 'Registry',      icon: 'hub',                    route: '/registry' },
-    { label: 'Users',         icon: 'group',                  route: '/users' },
-    { label: 'Wallets',       icon: 'wallet',                 route: '/wallets' },
+  readonly customerUrl = environment.customerUrl;
+  readonly navSections: NavSection[] = [
+    {
+      label: 'Overview',
+      items: [
+        { label: 'Dashboard',  icon: 'grid_view',     route: '/dashboard' },
+      ],
+    },
+    {
+      label: 'Registry',
+      items: [
+        { label: 'Assets',     icon: 'account_balance_wallet', route: '/assets' },
+        { label: 'Customers',  icon: 'people_outline',         route: '/customers' },
+        { label: 'Registry',   icon: 'hub',                    route: '/registry' },
+        { label: 'Onboarding', icon: 'person_add_alt',         route: '/onboarding' },
+      ],
+    },
+    {
+      label: 'Compliance',
+      items: [
+        { label: 'Screening',      icon: 'policy',                    route: '/compliance/screening' },
+        { label: 'Holder Blocks',  icon: 'gavel',                     route: '/compliance/holder-blocks' },
+        { label: 'DORA',           icon: 'security_update_warning',   route: '/compliance/dora' },
+        { label: 'Reporting',      icon: 'assessment',                route: '/compliance/reporting' },
+        { label: 'Audit Log',      icon: 'receipt_long',              route: '/audit' },
+      ],
+    },
+    {
+      label: 'Infrastructure',
+      items: [
+        { label: 'Wallets',       icon: 'wallet',    route: '/wallets' },
+        { label: 'Network Nodes', icon: 'cable',     route: '/network-nodes' },
+        { label: 'Endpoints',     icon: 'contacts',  route: '/endpoints' },
+        { label: 'Users',         icon: 'group',     route: '/users' },
+      ],
+    },
   ];
 }

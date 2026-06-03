@@ -1,14 +1,12 @@
 import { Component, Input } from '@angular/core';
+
 @Component({
   selector: 'app-status-badge',
   standalone: true,
-  imports: [],
-  template: `
-    <span [class]="'status-badge status-' + cssClass">{{ label }}</span>
-  `,
+  template: `<span [class]="'status-badge status-' + cssClass">{{ label }}</span>`,
 })
 export class StatusBadgeComponent {
-  @Input() status = '';
+  @Input({ required: true }) status!: string;
 
   get label(): string {
     return this.status.replace(/_/g, ' ');

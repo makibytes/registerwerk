@@ -1,5 +1,5 @@
 import { TokenDeployed } from '../generated/AssetTokenFactory/AssetTokenFactory'
-import { EwpgERC20, EwpgERC721, EwpgERC1155 } from '../generated/templates'
+import { EwpgERC20, EwpgERC721, EwpgERC1155, EwpgERC3525, EwpgERC4626, EwpgERC7540 } from '../generated/templates'
 import { Token } from '../generated/schema'
 import { Address, BigInt } from '@graphprotocol/graph-ts'
 
@@ -29,12 +29,19 @@ export function handleTokenDeployed(event: TokenDeployed): void {
   token.totalBurns          = BigInt.fromI32(0)
   token.save()
 
-  // Instantiate the appropriate template — this starts indexing that contract
+  // Instantiate the appropriate template — this starts indexing that contract.
+  // tokenType mapping mirrors AssetTokenFactory.deployToken (0-3) and deployVault (4-5).
   if (tokenType == 0) {
     EwpgERC20.create(tokenAddress)
   } else if (tokenType == 1) {
     EwpgERC721.create(tokenAddress)
   } else if (tokenType == 2) {
     EwpgERC1155.create(tokenAddress)
+  } else if (tokenType == 3) {
+    EwpgERC3525.create(tokenAddress)
+  } else if (tokenType == 4) {
+    EwpgERC4626.create(tokenAddress)
+  } else if (tokenType == 5) {
+    EwpgERC7540.create(tokenAddress)
   }
 }

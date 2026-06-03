@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.corporateactions.internal;
 
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementRequestedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -77,11 +78,8 @@ public class CorporateActionService {
         log.info("Settling corporate action: id={} type={} assetId={}", ca.getId(), ca.getActionType(), ca.getAssetId());
         ca.setStatus(CorporateAction.Status.AWAITING_SETTLEMENT);
         repository.save(ca);
-        // TODO: dispatch to blockchain adapter based on asset.tokenStandard
-        // ERC-3525 → erc3525AdminService.distributeSlotCoupon(ca)
-        // ERC-4626/7540 → vaultService.settleDistribution(ca)
-        // DAML → cantonBondService.payCoupon(ca)
-        // SPL-2022 InterestBearing → solanaTokenService.settleCoupon(ca)
+        // Dispatch is handled by CorporateActionSettlementListener in the blockchain module,
+        // which looks up the asset's token standard and calls the appropriate chain service.
         events.publishEvent(new CorporateActionSettlementRequestedEvent(ca.getId(), ca.getAssetId(), ca.getActionType()));
     }
 }

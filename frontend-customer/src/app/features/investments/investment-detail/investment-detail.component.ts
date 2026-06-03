@@ -1,6 +1,7 @@
 import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -8,9 +9,13 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatTableModule } from '@angular/material/table';
 import { MatChipsModule } from '@angular/material/chips';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { InvestmentService } from '../../../core/api/investment.service';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { Erc3643Service, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
+import { IdentityRequestService } from '../../../core/api/identity-request.service';
 import { AssetDeployment, InvestmentRecord } from '../../../core/models';
 import {
   AsyncSection,
@@ -19,9 +24,9 @@ import {
   failAsyncSection,
   resolveAsyncSection,
 } from '../../../core/async/async-section';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { StatusBadgeComponent, DataStatePillComponent } from '@registerwerk/ui';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
-import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
+
 import { AddressComponent } from '../../../shared/components/address.component';
 import { ExternalIdEditorComponent } from '../../../shared/components/external-id-editor.component';
 
@@ -31,6 +36,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
   imports: [
     CommonModule,
     RouterLink,
+    FormsModule,
     MatCardModule,
     MatButtonModule,
     MatIconModule,
@@ -38,6 +44,8 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     MatDividerModule,
     MatTableModule,
     MatChipsModule,
+    MatFormFieldModule,
+    MatInputModule,
     StatusBadgeComponent,
     ChainIconComponent,
     DataStatePillComponent,
@@ -68,7 +76,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
 
             <mat-divider style="margin: 16px 0"></mat-divider>
 
-              <div class="detail-grid">
+            <div class="detail-grid">
               <div class="detail-item">
                 <span class="detail-label">Nominal Amount</span>
                 <span class="detail-value large">{{ record.nominalAmount | number:'1.0-2' }}</span>
@@ -99,25 +107,25 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                   <app-status-badge [status]="record.assetStatus"></app-status-badge>
                 </div>
               }
-                @if (record.assetNumber) {
-                  <div class="detail-item">
-                    <span class="detail-label">Asset Number</span>
-                    <code class="detail-value">{{ record.assetNumber }}</code>
-                  </div>
-                }
-                <div class="detail-item external-id-item">
-                  <span class="detail-label">External ID</span>
-                  <app-external-id-editor
-                    [subjectType]="'ASSET_HOLDER'"
-                    [subjectId]="record.id"
-                    [value]="record.externalId"
-                    label="Investment external ID"
-                    placeholder="Your internal holding ID"
-                    (valueChange)="record.externalId = $event"
-                  />
+              @if (record.assetNumber) {
+                <div class="detail-item">
+                  <span class="detail-label">Asset Number</span>
+                  <code class="detail-value">{{ record.assetNumber }}</code>
                 </div>
+              }
+              <div class="detail-item external-id-item">
+                <span class="detail-label">External ID</span>
+                <app-external-id-editor
+                  [subjectType]="'ASSET_HOLDER'"
+                  [subjectId]="record.id"
+                  [value]="record.externalId"
+                  label="Investment external ID"
+                  placeholder="Your internal holding ID"
+                  (valueChange)="record.externalId = $event"
+                />
               </div>
-            </mat-card-content>
+            </div>
+          </mat-card-content>
         </mat-card>
 
         @if (isErc3643) {
@@ -167,12 +175,82 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                     (valueChange)="identitySection.data!.externalId = $event"
                   />
                 </div>
-              } @else {
-                <div class="identity-row not-deployed">
-                  <mat-icon style="color:#e53935">cancel</mat-icon>
-                  <div>
-                    <span class="identity-label">ONCHAINID not deployed</span>
-                    <span class="identity-sub">Your wallet is not yet registered in the Identity Registry for this token.</span>
+
+              } @else if (identitySection.status === 'ready') {
+                <!-- Dead-end replaced with actionable self-service flow -->
+                <div class="identity-not-registered">
+                  <div class="idr-header">
+                    <mat-icon class="idr-icon warn">assignment_late</mat-icon>
+                    <div>
+                      <div class="identity-label">Wallet not in Identity Registry</div>
+                      <div class="identity-sub">
+                        This is a permissioned security token (ERC-3643). Your wallet must be
+                        registered in the on-chain Identity Registry before transfers are possible.
+                        Follow the steps below to request registration.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="idr-steps">
+                    <div class="idr-step">
+                      <span class="step-number">1</span>
+                      <div class="step-body">
+                        <strong>Complete your KYC</strong>
+                        <span>Your KYC documents must be approved by the registry operator.</span>
+                        <a mat-stroked-button routerLink="/kyc" style="margin-top:8px;width:fit-content">
+                          <mat-icon>how_to_reg</mat-icon>
+                          Check KYC Status
+                        </a>
+                      </div>
+                    </div>
+                    <div class="idr-step">
+                      <span class="step-number">2</span>
+                      <div class="step-body">
+                        <strong>Request Identity Registration</strong>
+                        <span>Once KYC is approved, submit a registration request to the operator.</span>
+
+                        @if (registrationRequested) {
+                          <div class="request-sent">
+                            <mat-icon>check_circle</mat-icon>
+                            Request submitted. The registry operator will register your wallet.
+                          </div>
+                        } @else {
+                          @if (showRegistrationForm) {
+                            <div class="reg-form">
+                              <mat-form-field appearance="outline" style="width:100%">
+                                <mat-label>Optional note to operator</mat-label>
+                                <textarea matInput [(ngModel)]="registrationNote" rows="2"
+                                          placeholder="e.g. Requested at onboarding meeting 2025-01-10"></textarea>
+                              </mat-form-field>
+                              <div style="display:flex;gap:8px">
+                                <button mat-raised-button color="primary"
+                                        (click)="submitRegistrationRequest()"
+                                        [disabled]="registrationSubmitting">
+                                  <mat-icon>send</mat-icon>
+                                  {{ registrationSubmitting ? 'Submitting…' : 'Submit Request' }}
+                                </button>
+                                <button mat-stroked-button (click)="showRegistrationForm = false">Cancel</button>
+                              </div>
+                            </div>
+                          } @else {
+                            <button mat-stroked-button color="primary"
+                                    (click)="showRegistrationForm = true"
+                                    style="margin-top:8px;width:fit-content"
+                                    [disabled]="deploymentsSection.data.length === 0">
+                              <mat-icon>how_to_reg</mat-icon>
+                              Request Registration
+                            </button>
+                          }
+                        }
+                      </div>
+                    </div>
+                    <div class="idr-step">
+                      <span class="step-number">3</span>
+                      <div class="step-body">
+                        <strong>Operator deploys your identity</strong>
+                        <span>The operator will deploy your ONCHAINID contract and add you to the registry. This page will update automatically.</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               }
@@ -240,7 +318,6 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     .identity-card { border-left: 4px solid #5e35b1; }
     .identity-icon { vertical-align: middle; margin-right: 6px; color: #5e35b1; }
     .identity-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
-    .identity-row.not-deployed mat-icon { margin-top: 2px; }
     .identity-label { display: block; font-weight: 500; color: var(--rw-text-primary); }
     .identity-sub { display: block; font-size: 13px; color: var(--rw-text-muted); margin-top: 2px; }
     .identity-address { display: block; margin-top: 4px; word-break: break-all; }
@@ -254,6 +331,34 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     .claim-status { display: block; font-size: 14px; color: var(--rw-text-primary); }
     .identity-external-id { margin-top: 16px; }
     .empty-text { color: var(--rw-text-muted); }
+
+    /* ── Identity not registered: actionable flow ──────────────────────────── */
+    .identity-not-registered { display: flex; flex-direction: column; gap: 20px; }
+    .idr-header { display: flex; gap: 12px; align-items: flex-start; }
+    .idr-icon { font-size: 28px; width: 28px; height: 28px; flex-shrink: 0; margin-top: 2px; }
+    .idr-icon.warn { color: #f59e0b; }
+    .idr-steps { display: flex; flex-direction: column; gap: 16px; border-left: 2px solid var(--rw-border); padding-left: 20px; margin-left: 8px; }
+    .idr-step { display: flex; gap: 14px; }
+    .step-number {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: var(--rw-accent); color: #07091A;
+      font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 2px;
+    }
+    .step-body { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+    .step-body strong { color: var(--rw-text-primary); font-size: 14px; }
+    .step-body span { color: var(--rw-text-secondary); }
+    .reg-form { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; max-width: 460px; }
+    .request-sent {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: #10b981; font-weight: 500;
+      margin-top: 8px; padding: 8px 12px;
+      background: rgba(16,185,129,0.08); border-radius: 6px;
+      border: 1px solid rgba(16,185,129,0.2);
+
+      mat-icon { font-size: 18px; width: 18px; height: 18px; }
+    }
   `],
 })
 export class InvestmentDetailComponent implements OnInit {
@@ -262,11 +367,18 @@ export class InvestmentDetailComponent implements OnInit {
   private readonly investmentService = inject(InvestmentService);
   private readonly issuanceService = inject(IssuanceService);
   private readonly erc3643Service = inject(Erc3643Service);
+  private readonly identityRequestService = inject(IdentityRequestService);
+  private readonly snackBar = inject(MatSnackBar);
 
   record: InvestmentRecord | null = null;
   loading = true;
   deploymentsSection: AsyncSection<AssetDeployment[]> = createAsyncSection<AssetDeployment[]>([]);
   identitySection: AsyncSection<IdentityRegistryEntry | null> = createAsyncSection<IdentityRegistryEntry | null>(null);
+
+  showRegistrationForm = false;
+  registrationNote = '';
+  registrationSubmitting = false;
+  registrationRequested = false;
 
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status'];
 
@@ -286,6 +398,41 @@ export class InvestmentDetailComponent implements OnInit {
       error: () => {
         this.loading = false;
         this.cdr.detectChanges();
+      },
+    });
+  }
+
+  submitRegistrationRequest(): void {
+    if (!this.record || this.deploymentsSection.data.length === 0) return;
+    this.registrationSubmitting = true;
+    this.cdr.detectChanges();
+
+    const deployment = this.deploymentsSection.data[0];
+    this.identityRequestService.requestIdentityRegistration({
+      assetId: this.record.assetId,
+      deploymentId: deployment.id,
+      walletAddress: this.record.walletAddress,
+      note: this.registrationNote || undefined,
+    }).subscribe({
+      next: () => {
+        this.registrationRequested = true;
+        this.registrationSubmitting = false;
+        this.showRegistrationForm = false;
+        this.cdr.detectChanges();
+        this.snackBar.open(
+          'Registration request submitted. The registry operator will contact you.',
+          'Dismiss',
+          { duration: 6000 },
+        );
+      },
+      error: (err) => {
+        this.registrationSubmitting = false;
+        this.cdr.detectChanges();
+        this.snackBar.open(
+          err?.error?.message ?? 'Failed to submit request. Please try again.',
+          'Dismiss',
+          { duration: 5000 },
+        );
       },
     });
   }

@@ -57,6 +57,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'compliance',
+        loadChildren: () =>
+          import('./features/compliance/compliance.routes').then(
+            (m) => m.COMPLIANCE_ROUTES
+          ),
+      },
+      {
         path: 'network-nodes',
         loadComponent: () =>
           import('./features/network-nodes/network-nodes.component').then(

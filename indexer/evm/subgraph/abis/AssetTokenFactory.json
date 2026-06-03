@@ -1,0 +1,11 @@
+[
+  {
+    "type": "event",
+    "name": "TokenDeployed",
+    "inputs": [
+      { "name": "assetId",      "type": "bytes32", "indexed": true },
+      { "name": "tokenType",    "type": "uint8",   "indexed": true },
+      { "name": "tokenAddress", "type": "address", "indexed": true }
+    ]
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "type": "event",
+    "name": "Transfer",
+    "inputs": [
+      { "name": "from",    "type": "address", "indexed": true },
+      { "name": "to",      "type": "address", "indexed": true },
+      { "name": "tokenId", "type": "uint256", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Whitelisted",
+    "inputs": [{ "name": "account", "type": "address", "indexed": true }]
+  },
+  {
+    "type": "event",
+    "name": "RemovedFromWhitelist",
+    "inputs": [{ "name": "account", "type": "address", "indexed": true }]
+  }
+]

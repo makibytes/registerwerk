@@ -1,12 +1,16 @@
-package de.makibytes.registerwerk.corporateactions.internal;
+package de.makibytes.registerwerk.corporateactions.api;
 
 import de.makibytes.registerwerk.audit.api.AuditableEvent;
-import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 
 import java.util.Map;
 import java.util.UUID;
 
-record CorporateActionSettlementRequestedEvent(
+/**
+ * Published when a corporate action is due for on-chain settlement.
+ * Placed in the api package so that the blockchain module can listen without violating
+ * Spring Modulith's internal-package encapsulation rules.
+ */
+public record CorporateActionSettlementRequestedEvent(
         UUID corporateActionId,
         UUID assetId,
         CorporateAction.ActionType actionType

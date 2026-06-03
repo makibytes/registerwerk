@@ -38,61 +38,15 @@ export interface BarItem {
     </div>
   `,
   styles: [`
-    .bar-chart {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      width: 100%;
-    }
-    .bar-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .bar-labels {
-      width: 110px;
-      min-width: 110px;
-      display: flex;
-      flex-direction: column;
-    }
-    .bar-label {
-      font-size: 12px;
-      color: var(--rw-text-secondary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .bar-subtitle {
-      font-size: 10px;
-      color: var(--rw-text-muted);
-    }
-    .bar-track {
-      flex: 1;
-      height: 16px;
-      background: var(--rw-border-subtle);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .bar-fill {
-      height: 100%;
-      border-radius: 8px;
-      transition: width 0.5s ease;
-      min-width: 4px;
-    }
-    .bar-value {
-      width: 80px;
-      min-width: 80px;
-      text-align: right;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--rw-text-primary);
-    }
-    .empty {
-      font-size: 13px;
-      color: var(--rw-text-muted);
-      text-align: center;
-      padding: 12px;
-    }
+    .bar-chart { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+    .bar-row { display: flex; align-items: center; gap: 10px; }
+    .bar-labels { width: 110px; min-width: 110px; display: flex; flex-direction: column; }
+    .bar-label { font-size: 12px; color: var(--rw-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-subtitle { font-size: 10px; color: var(--rw-text-muted); }
+    .bar-track { flex: 1; height: 16px; background: var(--rw-border-subtle); border-radius: 8px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 8px; transition: width 0.5s ease; min-width: 4px; }
+    .bar-value { width: 80px; min-width: 80px; text-align: right; font-size: 12px; font-weight: 600; color: var(--rw-text-primary); }
+    .empty { font-size: 13px; color: var(--rw-text-muted); text-align: center; padding: 12px; }
   `],
 })
 export class BarChartComponent {

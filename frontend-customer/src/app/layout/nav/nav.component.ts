@@ -8,6 +8,8 @@ import { MatDividerModule } from '@angular/material/divider';
 import { AuthService } from '../../core/auth/auth.service';
 import { environment } from '../../../environments/environment';
 
+const { operatorUrl } = environment;
+
 interface NavLink {
   label: string;
   route: string;
@@ -42,6 +44,11 @@ interface NavLink {
           <div class="imp-actions">
             <button class="imp-btn" (click)="selectCompany()">Select company</button>
           </div>
+        }
+        @if (operatorUrl) {
+          <a [href]="operatorUrl" target="_blank" class="imp-btn imp-btn-portal">
+            Operator Console ↗
+          </a>
         }
       </div>
     }
@@ -135,6 +142,16 @@ interface NavLink {
         border-color: rgba(220,38,38,0.5);
 
         &:hover { background: rgba(220,38,38,0.5); }
+      }
+
+      .imp-btn-portal {
+        margin-left: 6px;
+        background: rgba(13,148,136,0.18);
+        border-color: rgba(13,148,136,0.35);
+        color: #2DD4BF;
+        text-decoration: none;
+
+        &:hover { background: rgba(13,148,136,0.3); }
       }
     }
 
@@ -348,6 +365,7 @@ export class NavComponent implements OnInit {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   readonly isTestEnv = environment.testEnvironment;
+  readonly operatorUrl = operatorUrl;
 
   userName: string | null = null;
   userEmail: string | null = null;

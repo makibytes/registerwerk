@@ -8,7 +8,9 @@ import { EntityService } from '../../core/api/entity.service';
 import { AssetService } from '../../core/api/asset.service';
 import { AuditService } from '../../core/api/audit.service';
 import { AuditEvent } from '../../core/models';
-import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
+import { StatusBadgeComponent, DonutChartComponent, DonutSlice, PageHeaderComponent } from '@registerwerk/ui';
+
+
 
 @Component({
   selector: 'app-dashboard',
@@ -19,6 +21,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     RouterLink,
     DatePipe,
     StatusBadgeComponent,
+    DonutChartComponent,
+    PageHeaderComponent,
   ],
   styles: [`
     .dashboard-grid {
@@ -149,9 +153,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
   `],
   template: `
-    <div class="page-header">
-      <h1>Dashboard</h1>
-    </div>
+    <app-page-header title="Dashboard" subtitle="Registry overview — entities, assets, and recent activity"></app-page-header>
 
     <div class="dashboard-grid">
       <div class="content-card stat-card">
@@ -196,6 +198,12 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         <p class="section-title">Assets by Status</p>
         @if (loading) {
           <p class="loading-text">Loading...</p>
+        } @else if (assetDonutSlices.length > 0) {
+          <app-donut-chart
+            [slices]="assetDonutSlices"
+            centerLabel="Assets"
+            [centerValue]="stats.totalAssets.toString()">
+          </app-donut-chart>
         } @else {
           <div class="status-list">
             @for (entry of assetStatusBreakdown; track entry.status) {
@@ -250,7 +258,17 @@ export class DashboardComponent implements OnInit {
     issuedAssets: 0,
   };
   assetStatusBreakdown: { status: string; count: number }[] = [];
+  assetDonutSlices: DonutSlice[] = [];
   recentEvents: AuditEvent[] = [];
+
+  private readonly statusColors: Record<string, string> = {
+    ISSUED:           '#10b981',
+    APPROVED:         '#0d9488',
+    PENDING_APPROVAL: '#f59e0b',
+    DRAFT:            '#6b7280',
+    SUSPENDED:        '#ef4444',
+    REDEEMED:         '#8b5cf6',
+  };
 
   ngOnInit(): void {
     forkJoin({
@@ -272,6 +290,13 @@ export class DashboardComponent implements OnInit {
         this.assetStatusBreakdown = Object.entries(countByStatus).map(
           ([status, count]) => ({ status, count })
         );
+        this.assetDonutSlices = this.assetStatusBreakdown
+          .filter(e => e.count > 0)
+          .map(e => ({
+            label: e.status.replace(/_/g, ' '),
+            value: e.count,
+            color: this.statusColors[e.status] ?? '#94a3b8',
+          }));
         this.stats.issuedAssets = countByStatus['ISSUED'] ?? 0;
         this.recentEvents = audit.content;
         this.loading = false;

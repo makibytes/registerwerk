@@ -13,7 +13,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { DatePipe } from '@angular/common';
 import { AssetService } from '../../../core/api/asset.service';
 import { Asset } from '../../../core/models';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { StatusBadgeComponent } from '@registerwerk/ui';
 
 @Component({
   selector: 'app-asset-list',

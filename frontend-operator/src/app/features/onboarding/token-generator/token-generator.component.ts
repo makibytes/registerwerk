@@ -9,7 +9,7 @@ import { DatePipe } from '@angular/common';
 import { EntityService } from '../../../core/api/entity.service';
 import { OnboardingService } from '../../../core/api/onboarding.service';
 import { LegalEntity, OnboardingToken } from '../../../core/models';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { StatusBadgeComponent } from '@registerwerk/ui';
 
 @Component({
   selector: 'app-token-generator',

@@ -1,11 +1,9 @@
 import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { AsyncSectionStatus } from '../../../core/async/async-section';
+import { AsyncSectionStatus } from '../async-section';
 
 @Component({
   selector: 'app-data-state-pill',
   standalone: true,
-  imports: [CommonModule],
   template: `
     @if (status !== 'ready') {
       <span class="data-state-pill" [class]="'data-state-pill status-' + status">
@@ -27,9 +25,9 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     }
 
     .status-pending {
-      background: color-mix(in srgb, var(--rw-pending-bg) 85%, transparent);
-      color: var(--rw-pending-fg);
-      border-color: color-mix(in srgb, var(--rw-pending-fg) 16%, transparent);
+      background: color-mix(in srgb, var(--rw-pending-bg, rgba(245,158,11,0.12)) 85%, transparent);
+      color: var(--rw-pending-fg, #B45309);
+      border-color: color-mix(in srgb, var(--rw-pending-fg, rgba(245,158,11,0.26)) 16%, transparent);
     }
 
     .status-updating {
@@ -50,14 +48,10 @@ export class DataStatePillComponent {
 
   get label(): string {
     switch (this.status) {
-      case 'pending':
-        return 'Pending';
-      case 'updating':
-        return 'Updating';
-      case 'error':
-        return 'Unavailable';
-      default:
-        return '';
+      case 'pending':  return 'Pending';
+      case 'updating': return 'Updating';
+      case 'error':    return 'Unavailable';
+      default:         return '';
     }
   }
 }

@@ -13,7 +13,9 @@ import { AuthService } from '../../core/auth/auth.service';
 import { IssuanceService } from '../../core/api/issuance.service';
 import { InvestmentService } from '../../core/api/investment.service';
 import { Asset, InvestmentRecord } from '../../core/models';
-import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
+import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponent, BarItem } from '@registerwerk/ui';
+
+
 
 @Component({
   selector: 'app-dashboard',
@@ -28,6 +30,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     MatDividerModule,
     MatChipsModule,
     StatusBadgeComponent,
+    DonutChartComponent,
+    BarChartComponent,
   ],
   template: `
     <div class="page-container">
@@ -80,6 +84,18 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
                 </mat-card-actions>
               </mat-card>
             </div>
+
+            <!-- Issuance status chart -->
+            @if (issuanceBarItems.length > 0) {
+              <mat-card style="margin-bottom:16px">
+                <mat-card-header>
+                  <mat-card-title style="font-size:14px">Assets by Status</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <app-bar-chart [items]="issuanceBarItems"></app-bar-chart>
+                </mat-card-content>
+              </mat-card>
+            }
 
             <!-- Recent issuances -->
             @if (recentIssuances.length > 0) {
@@ -138,6 +154,22 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
                 </mat-card-content>
               </mat-card>
             </div>
+
+            <!-- Portfolio distribution chart -->
+            @if (portfolioDonutSlices.length > 0) {
+              <mat-card style="margin-bottom:16px">
+                <mat-card-header>
+                  <mat-card-title style="font-size:14px">Portfolio Distribution</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <app-donut-chart
+                    [slices]="portfolioDonutSlices"
+                    centerLabel="Holdings"
+                    [centerValue]="totalHoldings.toString()">
+                  </app-donut-chart>
+                </mat-card-content>
+              </mat-card>
+            }
 
             <!-- Recent holdings -->
             @if (recentHoldings.length > 0) {
@@ -251,6 +283,10 @@ export class DashboardComponent implements OnInit {
   totalNominal = 0;
   recentHoldings: InvestmentRecord[] = [];
 
+  // Charts
+  issuanceBarItems: BarItem[] = [];
+  portfolioDonutSlices: DonutSlice[] = [];
+
   ngOnInit(): void {
     this.userName = this.auth.getUserName();
     this.isIssuer = this.auth.hasRole('ISSUER') || this.auth.hasRole('REGISTRY_ADMIN');
@@ -271,6 +307,13 @@ export class DashboardComponent implements OnInit {
         this.pendingCount = items.filter(a => a.status === 'PENDING_APPROVAL').length;
         this.issuedCount  = items.filter(a => a.status === 'ISSUED').length;
         this.recentIssuances = items.slice(0, 5);
+
+        // Build issuance bar chart
+        this.issuanceBarItems = [
+          { label: 'Issued',           value: this.issuedCount,  color: '#10b981' },
+          { label: 'Pending Approval', value: this.pendingCount, color: '#f59e0b' },
+          { label: 'Draft',            value: this.draftCount,   color: '#6b7280' },
+        ].filter(i => i.value > 0);
       }
 
       if (investments) {
@@ -279,6 +322,17 @@ export class DashboardComponent implements OnInit {
         this.whitelistedCount = holdings.filter(h => h.whitelisted).length;
         this.totalNominal     = holdings.reduce((sum, h) => sum + h.nominalAmount, 0);
         this.recentHoldings   = holdings.slice(0, 5);
+
+        // Build portfolio donut chart (by token standard)
+        const byStandard = holdings.reduce((acc, h) => {
+          const key = h.tokenStandard ?? 'Unknown';
+          acc[key] = (acc[key] ?? 0) + 1;
+          return acc;
+        }, {} as Record<string, number>);
+        const colors = ['#0d9488','#f59e0b','#6366f1','#10b981','#ef4444','#8b5cf6'];
+        this.portfolioDonutSlices = Object.entries(byStandard).map(([label, value], i) => ({
+          label, value, color: colors[i % colors.length],
+        }));
       }
 
       this.loading = false;

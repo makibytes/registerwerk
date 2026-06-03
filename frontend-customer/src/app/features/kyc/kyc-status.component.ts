@@ -119,6 +119,12 @@ const ALL_DOC_TYPES = [
                           } @else if (!doc.present) {
                             <span class="check-note err-text">missing</span>
                           }
+                          @if (doc.mandatory && (!doc.present || doc.expired || doc.tooOld)) {
+                            <button mat-button color="primary" class="quick-upload-btn"
+                                    (click)="quickUpload(jur.value, doc.documentType)">
+                              <mat-icon>upload</mat-icon> Upload
+                            </button>
+                          }
                         </div>
                       }
                     </div>
@@ -252,6 +258,7 @@ const ALL_DOC_TYPES = [
     .warn-text { color: #f59e0b !important; }
     .err-text { color: #ef4444 !important; }
 
+    .quick-upload-btn { margin-left: auto; font-size: 11px; height: 24px; line-height: 24px; padding: 0 8px; }
     .upload-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
     .file-label {
       display: flex; align-items: center; gap: 6px;
@@ -317,6 +324,15 @@ export class KycStatusComponent implements OnInit {
   onFileSelected(event: Event, jur: Jurisdiction): void {
     const file = (event.target as HTMLInputElement).files?.[0] ?? null;
     if (file) this.uploadFiles = { ...this.uploadFiles, [jur]: file };
+  }
+
+  quickUpload(jur: Jurisdiction, docType: string): void {
+    this.uploadDocType = { ...this.uploadDocType, [jur]: docType };
+    // Scroll to the upload section in this tab — it sits after the checklist
+    setTimeout(() => {
+      const uploadSection = document.querySelector('.upload-row');
+      uploadSection?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
   }
 
   upload(jur: Jurisdiction): void {

@@ -34,6 +34,12 @@ public class HolderBlockController {
         this.repository = repository;
     }
 
+    /** Global view: all active blocks — used by the compliance work-queue. */
+    @GetMapping("/active")
+    public ResponseEntity<List<HolderBlock>> listAllActive() {
+        return ResponseEntity.ok(repository.findByStatusOrderByCreatedAtDesc(HolderBlock.Status.ACTIVE));
+    }
+
     @GetMapping
     public ResponseEntity<List<HolderBlock>> listByWallet(@RequestParam String walletAddress) {
         return ResponseEntity.ok(service.findActiveByWallet(walletAddress));

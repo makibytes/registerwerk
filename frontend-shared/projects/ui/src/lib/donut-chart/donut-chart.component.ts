@@ -54,62 +54,17 @@ interface ComputedSlice extends DonutSlice {
     </div>
   `,
   styles: [`
-    .donut-wrap {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-    }
-    .donut-svg {
-      width: 140px;
-      min-width: 140px;
-      height: 140px;
-    }
-    .center-label {
-      font-size: 8px;
-      fill: var(--rw-text-muted);
-      font-family: 'Manrope', sans-serif;
-    }
-    .center-value {
-      font-size: 11px;
-      font-weight: 700;
-      fill: var(--rw-text-primary);
-      font-family: 'Manrope', sans-serif;
-    }
+    .donut-wrap { display: flex; align-items: center; gap: 20px; }
+    .donut-svg { width: 140px; min-width: 140px; height: 140px; }
+    .center-label { font-size: 8px; fill: var(--rw-text-muted); font-family: 'Manrope', sans-serif; }
+    .center-value { font-size: 11px; font-weight: 700; fill: var(--rw-text-primary); font-family: 'Manrope', sans-serif; }
     .empty-ring { stroke: var(--rw-border); }
-    .legend {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      min-width: 0;
-    }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-    }
-    .legend-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .legend-text {
-      color: var(--rw-text-secondary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .legend-pct {
-      margin-left: auto;
-      font-weight: 600;
-      color: var(--rw-text-primary);
-      padding-left: 8px;
-    }
-    .legend-empty {
-      font-size: 13px;
-      color: var(--rw-text-muted);
-    }
+    .legend { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .legend-text { color: var(--rw-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .legend-pct { margin-left: auto; font-weight: 600; color: var(--rw-text-primary); padding-left: 8px; }
+    .legend-empty { font-size: 13px; color: var(--rw-text-muted); }
   `],
 })
 export class DonutChartComponent implements OnChanges {
@@ -125,10 +80,7 @@ export class DonutChartComponent implements OnChanges {
 
   ngOnChanges(): void {
     this.total = this.slices.reduce((s, x) => s + x.value, 0);
-    if (this.total === 0) {
-      this.computed = [];
-      return;
-    }
+    if (this.total === 0) { this.computed = []; return; }
     let accumulated = 0;
     this.computed = this.slices
       .filter(s => s.value > 0)
@@ -137,12 +89,7 @@ export class DonutChartComponent implements OnChanges {
         const dasharray = `${len} ${this.circumference - len}`;
         const dashoffset = -accumulated;
         accumulated += len;
-        return {
-          ...s,
-          dasharray,
-          dashoffset,
-          percentage: (s.value / this.total) * 100,
-        };
+        return { ...s, dasharray, dashoffset, percentage: (s.value / this.total) * 100 };
       });
   }
 }

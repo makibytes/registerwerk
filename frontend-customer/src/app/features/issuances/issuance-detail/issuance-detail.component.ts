@@ -28,9 +28,9 @@ import {
   failAsyncSection,
   resolveAsyncSection,
 } from '../../../core/async/async-section';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { StatusBadgeComponent, DataStatePillComponent } from '@registerwerk/ui';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
-import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
+
 import { AddHolderDialogComponent } from './add-holder-dialog.component';
 import { HolderTableComponent } from '../../../shared/components/token-holders/holder-table.component';
 import { HolderDistributionComponent } from '../../../shared/components/token-holders/holder-distribution.component';

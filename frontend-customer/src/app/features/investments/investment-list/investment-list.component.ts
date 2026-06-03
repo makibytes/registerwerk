@@ -23,9 +23,9 @@ import { MatInputModule } from '@angular/material/input';
 import { MatChipsModule } from '@angular/material/chips';
 import { InvestmentService } from '../../../core/api/investment.service';
 import { InvestmentRecord, TokenStandard } from '../../../core/models';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
-import { DonutChartComponent, DonutSlice } from '../../../shared/components/donut-chart/donut-chart.component';
-import { BarChartComponent, BarItem } from '../../../shared/components/bar-chart/bar-chart.component';
+import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponent, BarItem } from '@registerwerk/ui';
+
+
 import { AddressComponent } from '../../../shared/components/address.component';
 import { TOKEN_STANDARD_COLORS } from '../../../shared/token-standard-colors';
 

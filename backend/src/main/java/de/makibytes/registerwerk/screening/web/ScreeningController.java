@@ -6,10 +6,10 @@ import de.makibytes.registerwerk.screening.internal.ScreeningRun;
 import de.makibytes.registerwerk.screening.internal.ScreeningRunRepository;
 import de.makibytes.registerwerk.screening.internal.ScreeningService;
 import de.makibytes.registerwerk.screening.internal.ScreeningTrigger;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -17,7 +17,10 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * REST API for sanctions / PEP screening management.
@@ -39,6 +42,36 @@ public class ScreeningController {
         this.screeningService = screeningService;
         this.runRepository = runRepository;
         this.hitRepository = hitRepository;
+    }
+
+    /**
+     * Global open-hit work-queue: all unresolved screening hits across all entities.
+     * Enriched with run context (entityId, naturalPersonId, trigger, provider) so
+     * the compliance officer can prioritise without drilling into each entity first.
+     * Use {@code ?status=open} (default) to see pending hits.
+     */
+    @GetMapping("/hits")
+    public ResponseEntity<List<OpenHitResponse>> listOpenHits(
+            @RequestParam(defaultValue = "open") String status) {
+        List<ScreeningHit> hits = hitRepository.findByAcceptedIsNullOrderByCreatedAtDesc();
+        if (hits.isEmpty()) return ResponseEntity.ok(List.of());
+
+        Set<UUID> runIds = hits.stream().map(ScreeningHit::getRunId).collect(Collectors.toSet());
+        Map<UUID, ScreeningRun> runsById = runRepository.findAllById(runIds).stream()
+                .collect(Collectors.toMap(ScreeningRun::getId, r -> r));
+
+        List<OpenHitResponse> response = hits.stream()
+                .map(h -> OpenHitResponse.from(h, runsById.get(h.getRunId())))
+                .toList();
+        return ResponseEntity.ok(response);
+    }
+
+    /** Fetch a single screening run by ID (used by the run-detail screen). */
+    @GetMapping("/runs/{runId}")
+    public ResponseEntity<ScreeningRunResponse> getRun(@PathVariable UUID runId) {
+        ScreeningRun run = runRepository.findById(runId)
+                .orElseThrow(() -> new EntityNotFoundException("ScreeningRun", runId));
+        return ResponseEntity.ok(ScreeningRunResponse.from(run));
     }
 
     /** List recent screening runs for a legal entity. */
@@ -108,6 +141,37 @@ public class ScreeningController {
             @NotBlank String reason,
             UUID approverActorId
     ) {}
+
+    /** Enriched open-hit DTO combining hit + run context for the global work-queue. */
+    public record OpenHitResponse(
+            UUID hitId,
+            UUID runId,
+            UUID entityId,
+            UUID naturalPersonId,
+            String listSource,
+            String matchedField,
+            String matchedValue,
+            Double matchScore,
+            String triggerType,
+            String runStatus,
+            String provider,
+            String createdAt,
+            String startedAt
+    ) {
+        static OpenHitResponse from(ScreeningHit h, ScreeningRun r) {
+            return new OpenHitResponse(
+                    h.getId(), h.getRunId(),
+                    r != null ? r.getEntityId() : null,
+                    r != null ? r.getNaturalPersonId() : null,
+                    h.getListSource(), h.getMatchedField(), h.getMatchedValue(),
+                    h.getMatchScore() != null ? h.getMatchScore().doubleValue() : null,
+                    r != null ? r.getTriggerType().name() : null,
+                    r != null ? r.getStatus().name() : null,
+                    r != null ? r.getProvider() : null,
+                    h.getCreatedAt() != null ? h.getCreatedAt().toString() : null,
+                    r != null && r.getStartedAt() != null ? r.getStartedAt().toString() : null);
+        }
+    }
 
     public record ScreeningRunResponse(
             UUID id,

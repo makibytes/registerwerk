@@ -23,10 +23,10 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { Asset, AssetStatus, TokenStandard } from '../../../core/models';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
-import { ChainNamePipe } from '../../../shared/pipes/chain-name.pipe';
-import { DonutChartComponent, DonutSlice } from '../../../shared/components/donut-chart/donut-chart.component';
-import { BarChartComponent, BarItem } from '../../../shared/components/bar-chart/bar-chart.component';
+import { StatusBadgeComponent, ChainNamePipe, DonutChartComponent, DonutSlice, BarChartComponent, BarItem } from '@registerwerk/ui';
+
+
+
 import { TOKEN_STANDARD_COLORS } from '../../../shared/token-standard-colors';
 
 interface IssuanceFilters {

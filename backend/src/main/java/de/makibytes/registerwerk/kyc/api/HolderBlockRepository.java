@@ -18,4 +18,7 @@ public interface HolderBlockRepository extends JpaRepository<HolderBlock, UUID> 
 
     @Query("SELECT b FROM HolderBlock b WHERE b.status = 'ACTIVE' AND b.expiresAt IS NOT NULL AND b.expiresAt <= :now")
     List<HolderBlock> findExpiredActive(@Param("now") Instant now);
+
+    /** All blocks with the given status — used for the global compliance work-queue. */
+    List<HolderBlock> findByStatusOrderByCreatedAtDesc(HolderBlock.Status status);
 }

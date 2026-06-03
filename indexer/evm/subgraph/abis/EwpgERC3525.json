@@ -1,0 +1,43 @@
+[
+  {
+    "type": "event",
+    "name": "Transfer",
+    "inputs": [
+      { "name": "from",    "type": "address", "indexed": true },
+      { "name": "to",      "type": "address", "indexed": true },
+      { "name": "tokenId", "type": "uint256", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TransferValue",
+    "inputs": [
+      { "name": "fromTokenId", "type": "uint256", "indexed": true },
+      { "name": "toTokenId",   "type": "uint256", "indexed": true },
+      { "name": "value",       "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SlotChanged",
+    "inputs": [
+      { "name": "tokenId", "type": "uint256", "indexed": true },
+      { "name": "oldSlot", "type": "uint256", "indexed": true },
+      { "name": "newSlot", "type": "uint256", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Whitelisted",
+    "inputs": [{ "name": "account", "type": "address", "indexed": true }]
+  },
+  {
+    "type": "event",
+    "name": "AddressFrozen",
+    "inputs": [
+      { "name": "addr",    "type": "address", "indexed": true },
+      { "name": "frozen",  "type": "bool",    "indexed": false },
+      { "name": "imposer", "type": "address", "indexed": true }
+    ]
+  }
+]

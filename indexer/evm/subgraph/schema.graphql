@@ -5,7 +5,7 @@ Created automatically when AssetTokenFactory emits TokenDeployed.
 type Token @entity(immutable: false) {
   id: ID!                        # contract address (lowercase)
   assetId: Bytes!                # bytes32 asset ID from the registry DB
-  tokenType: Int!                # 0=ERC20, 1=ERC721, 2=ERC1155
+  tokenType: Int!                # 0=ERC20, 1=ERC721, 2=ERC1155, 3=ERC3525, 4=ERC4626, 5=ERC7540
   deployedAtBlock: BigInt!
   deployedAtTimestamp: BigInt!
   deployedByTx: Bytes!
@@ -25,8 +25,8 @@ type Transfer @entity(immutable: true) {
   tokenType: Int!                # duplicated for efficient filtering without joins
   from: Bytes!
   to: Bytes!
-  tokenId: BigInt               # ERC-721 / ERC-1155 token id (null for ERC-20)
-  amount: BigInt                # ERC-20 / ERC-1155 amount (null for pure ERC-721)
+  tokenId: BigInt               # ERC-721 / ERC-1155 / ERC-3525 token id
+  amount: BigInt                # ERC-20 / ERC-1155 / share amount
   eventType: String!             # 'MINT' | 'TRANSFER' | 'BURN'
   blockNumber: BigInt!
   blockTimestamp: BigInt!
@@ -49,13 +49,124 @@ type WhitelistChange @entity(immutable: true) {
 
 """
 Aggregate holder position per token. Updated on every Transfer.
-Deleted when balance reaches zero.
 """
 type HolderBalance @entity(immutable: false) {
   id: ID!                        # {tokenAddress}-{holderAddress}
   token: Token!
   holder: Bytes!
-  balance: BigInt!               # current balance (ERC-20 / ERC-1155 amount, or 1 for ERC-721)
+  balance: BigInt!               # current balance
   lastUpdatedBlock: BigInt!
   lastUpdatedTimestamp: BigInt!
+}
+
+# ── ERC-3525 Semi-Fungible (bond slots / SFT) ──────────────────────────────────
+
+"""Value transfer between two ERC-3525 token IDs within the same slot."""
+type ValueTransfer @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  fromTokenId: BigInt!
+  toTokenId: BigInt!
+  value: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+"""Slot assignment change for an ERC-3525 token ID."""
+type SlotTransfer @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  tokenId: BigInt!
+  oldSlot: BigInt!
+  newSlot: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+# ── ERC-3643 T-REX (permissioned security token) ──────────────────────────────
+
+"""Identity registry add / remove events for ERC-3643 T-REX tokens."""
+type IdentityRegistered @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  investorAddress: Bytes!
+  identity: Bytes!
+  eventKind: String!             # 'REGISTERED' | 'REMOVED'
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+"""Compliance module add events for ERC-3643 T-REX tokens."""
+type ComplianceChange @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  compliance: Bytes!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+# ── ERC-4626 Synchronous Vault ──────────────────────────────────────────────────
+
+"""Deposit into an ERC-4626 tokenized vault."""
+type VaultDeposit @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  caller: Bytes!
+  owner: Bytes!
+  assets: BigInt!
+  shares: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+"""Withdrawal from an ERC-4626 tokenized vault."""
+type VaultWithdraw @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  caller: Bytes!
+  receiver: Bytes!
+  owner: Bytes!
+  assets: BigInt!
+  shares: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+# ── ERC-7540 Async Vault (capital-call / redemption window) ──────────────────────
+
+"""
+Deposit or redeem request submitted to an ERC-7540 async vault.
+Also used for DepositClaimable / RedeemClaimable events (requestKind differentiates).
+"""
+type DepositRequest @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  controller: Bytes!
+  owner: Bytes!
+  requestId: BigInt!
+  assets: BigInt!
+  requestKind: String!           # 'DEPOSIT_REQUEST' | 'DEPOSIT_CLAIMABLE'
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+"""Redeem request submitted to or claimable from an ERC-7540 async vault."""
+type RedeemRequest @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  token: Token!
+  controller: Bytes!
+  owner: Bytes!
+  requestId: BigInt!
+  assets: BigInt!
+  requestKind: String!           # 'REDEEM_REQUEST' | 'REDEEM_CLAIMABLE'
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
 }

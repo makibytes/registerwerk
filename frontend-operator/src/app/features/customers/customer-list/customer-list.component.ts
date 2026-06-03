@@ -19,7 +19,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { EntityService } from '../../../core/api/entity.service';
 import { LegalEntity } from '../../../core/models';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { StatusBadgeComponent } from '@registerwerk/ui';
 import { DatePipe } from '@angular/common';
 
 @Component({

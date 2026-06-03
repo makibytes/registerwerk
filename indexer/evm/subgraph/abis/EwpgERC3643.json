@@ -1,0 +1,59 @@
+[
+  {
+    "type": "event",
+    "name": "Transfer",
+    "inputs": [
+      { "name": "from",  "type": "address", "indexed": true },
+      { "name": "to",    "type": "address", "indexed": true },
+      { "name": "value", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "AddressFrozen",
+    "inputs": [
+      { "name": "addr",    "type": "address", "indexed": true },
+      { "name": "frozen",  "type": "bool",    "indexed": true },
+      { "name": "imposer", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TokensFrozen",
+    "inputs": [
+      { "name": "addr",   "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Paused",
+    "inputs": [{ "name": "account", "type": "address", "indexed": false }]
+  },
+  {
+    "type": "event",
+    "name": "Unpaused",
+    "inputs": [{ "name": "account", "type": "address", "indexed": false }]
+  },
+  {
+    "type": "event",
+    "name": "IdentityRegistered",
+    "inputs": [
+      { "name": "investorAddress", "type": "address", "indexed": true },
+      { "name": "identity",        "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "IdentityRemoved",
+    "inputs": [
+      { "name": "investorAddress", "type": "address", "indexed": true },
+      { "name": "identity",        "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ComplianceAdded",
+    "inputs": [{ "name": "compliance", "type": "address", "indexed": true }]
+  }
+]

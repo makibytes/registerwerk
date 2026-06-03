@@ -253,19 +253,11 @@ public class Erc3643DeploymentService {
         // - @fhevm/solidity compiled ConfidentialERC3643 ABI
         // - fhEVM-compatible gas provider
 
-        return CompletableFuture.supplyAsync(() -> {
-            log.warn(
-                "Confidential ERC-3643 deployment requires the Zama fhEVM library and KMS Gateway " +
-                "configured for chain={}. Returning placeholder suite for asset={}.",
-                chainIdentifier, assetId);
-
-            Erc3643Suite suite = new Erc3643Suite();
-            suite.setIsConfidential(true);
-
-            eventPublisher.publishEvent(new Erc3643SuiteDeployedEvent(assetId, actorId, "REGISTRY_ADMIN", java.util.Map.of("confidential", true, "stub", true)));
-
-            return suite;
-        });
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(
+                "Confidential ERC-3643 deployment is not yet supported. " +
+                "It requires the @fhevm/solidity library (Zama), a compiled ConfidentialERC3643 ABI, " +
+                "and the Zama KMS Gateway address for chain=" + chainIdentifier + ". " +
+                "Configure these dependencies and re-enable this path."));
     }
 
     /**

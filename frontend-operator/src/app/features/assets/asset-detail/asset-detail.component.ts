@@ -26,8 +26,8 @@ import {
   Asset, AssetDeployment, AssetDocument, AssetHolder,
   KycComplianceResponse, DocumentStatus,
 } from '../../../core/models';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
-import { ChainNamePipe } from '../../../shared/pipes/chain-name.pipe';
+
+import { StatusBadgeComponent, ChainNamePipe } from '@registerwerk/ui';
 import { RegisterInvestorDialogComponent, RegisterInvestorData } from './register-investor-dialog.component';
 import { AddIssuerDialogComponent, AddIssuerData } from './add-issuer-dialog.component';
 import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-topic-dialog.component';

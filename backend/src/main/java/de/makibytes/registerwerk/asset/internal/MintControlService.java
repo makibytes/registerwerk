@@ -47,6 +47,21 @@ public class MintControlService {
         return saved;
     }
 
+    /**
+     * Patches a mint control rule's target address, type, or max amount.
+     * Null fields in the patch are ignored (partial update semantics).
+     */
+    public MintControlRule updateRule(UUID ruleId, MintControlRule patch) {
+        MintControlRule rule = mintControlRuleRepository.findById(ruleId)
+            .orElseThrow(() -> new EntityNotFoundException("MintControlRule", ruleId));
+        if (patch.getTargetAddress() != null) rule.setTargetAddress(patch.getTargetAddress());
+        if (patch.getRuleType()      != null) rule.setRuleType(patch.getRuleType());
+        if (patch.getMaxAmount()     != null) rule.setMaxAmount(patch.getMaxAmount());
+        MintControlRule saved = mintControlRuleRepository.save(rule);
+        log.info("Updated MintControlRule: id={}", ruleId);
+        return saved;
+    }
+
     public void deactivateRule(UUID ruleId) {
         MintControlRule rule = mintControlRuleRepository.findById(ruleId)
             .orElseThrow(() -> new EntityNotFoundException("MintControlRule", ruleId));

@@ -430,3 +430,146 @@ export interface EndpointUpdateRequest {
 export interface AddressResolveResponse {
   resolutions: Record<string, string>;
 }
+
+// ─── Sanctions / PEP Screening ────────────────────────────────────────────────
+
+export type ScreeningStatus = 'PENDING' | 'CLEAR' | 'HIT' | 'ERROR';
+export type ScreeningTriggerType =
+  | 'MANUAL'
+  | 'KYC_SUBMISSION'
+  | 'ONBOARDING'
+  | 'BENEFICIAL_OWNER_ADD'
+  | 'PERIODIC_REFRESH'
+  | 'ERC3643_CLAIM';
+
+export interface ScreeningRun {
+  id: string;
+  entityId: string | null;
+  naturalPersonId: string | null;
+  triggerType: ScreeningTriggerType;
+  status: ScreeningStatus;
+  provider: string;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface ScreeningHit {
+  id: string;
+  runId: string;
+  listSource: string;
+  matchedField: string;
+  matchedValue: string;
+  matchScore: number | null;
+  accepted: boolean | null;
+  acceptReason: string | null;
+  acceptedAt: string | null;
+}
+
+// ─── Holder Blocks (§16 eWpG Sperrvermerk) ───────────────────────────────────
+
+export type BlockType =
+  | 'PFANDRECHT' | 'PFAENDUNG' | 'GERICHTSBESCHLUSS' | 'NACHLASSSPERRE'
+  | 'VERFUGUNGSVERBOT' | 'INSOLVENZ' | 'TOD' | 'REGULATORISCH';
+
+export type BlockStatus = 'ACTIVE' | 'LIFTED' | 'EXPIRED' | 'SUPERSEDED';
+
+export interface HolderBlock {
+  id: string;
+  entityId: string | null;
+  assetId: string | null;
+  walletAddress: string;
+  blockType: BlockType;
+  status: BlockStatus;
+  legalBasis: string;
+  courtRef: string | null;
+  documentId: string | null;
+  startsAt: string;
+  expiresAt: string | null;
+  liftedAt: string | null;
+  liftedBy: string | null;
+  liftReason: string | null;
+  onChainFreezeTxHash: string | null;
+  createdBy: string;
+  dualControlApproverId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HolderBlockRequest {
+  entityId?: string;
+  assetId?: string;
+  walletAddress: string;
+  blockType: BlockType;
+  legalBasis: string;
+  courtRef?: string;
+  documentId?: string;
+  expiresAt?: string;
+}
+
+// ─── DORA (Digital Operational Resilience Act) ───────────────────────────────
+
+export type IctCategory = 'DATA_BREACH' | 'SYSTEM_OUTAGE' | 'RANSOMWARE' | 'THIRD_PARTY_FAILURE' | 'OTHER';
+export type IctSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'MAJOR';
+export type IctStatus =
+  | 'DETECTED' | 'INVESTIGATING' | 'CONTAINED' | 'RESOLVED'
+  | 'REPORTED_TO_AUTHORITY' | 'CLOSED';
+
+export interface IctIncident {
+  id: string;
+  title: string;
+  category: IctCategory;
+  severity: IctSeverity;
+  status: IctStatus;
+  detectedAt: string;
+  initialReportDeadline: string | null;
+  finalReportDeadline: string | null;
+  initialReportedAt: string | null;
+  finalReportedAt: string | null;
+  authorityRef: string | null;
+  rootCause: string | null;
+  remediationSteps: string | null;
+  resolvedAt: string | null;
+}
+
+export type ProviderCriticality = 'STANDARD' | 'IMPORTANT' | 'CRITICAL';
+
+export interface ThirdPartyProvider {
+  id: string;
+  name: string;
+  category: string;
+  criticality: ProviderCriticality;
+  country: string | null;
+  contractEnd: string | null;
+  notifiedAuthority: boolean;
+}
+
+// ─── Regulatory Reporting ────────────────────────────────────────────────────
+
+export interface RegulatorySubmission {
+  id: string;
+  report_type: string;
+  jurisdiction: string | null;
+  status: string;
+  reporting_period_start: string | null;
+  reporting_period_end: string | null;
+  submitted_at: string | null;
+  submission_ref: string | null;
+  created_at: string;
+}
+
+/** Enriched view returned by the global open-hit work-queue endpoint. */
+export interface OpenHitView {
+  hitId: string;
+  runId: string;
+  entityId: string | null;
+  naturalPersonId: string | null;
+  listSource: string;
+  matchedField: string;
+  matchedValue: string;
+  matchScore: number | null;
+  triggerType: string | null;
+  runStatus: string | null;
+  provider: string | null;
+  createdAt: string | null;
+  startedAt: string | null;
+}

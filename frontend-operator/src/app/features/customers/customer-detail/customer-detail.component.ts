@@ -1,5 +1,5 @@
 import { ChangeDetectorRef, Component, OnInit, inject, Input } from '@angular/core';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatCardModule } from '@angular/material/card';
@@ -18,6 +18,9 @@ import { forkJoin } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { EntityService } from '../../../core/api/entity.service';
 import { AdminUserService } from '../../../core/api/admin-user.service';
+import { ScreeningService } from '../../../core/api/screening.service';
+import { HolderBlockService } from '../../../core/api/holder-block.service';
+import { CorporateActionsService } from '../../../core/api/corporate-actions.service';
 import { environment } from '../../../../environments/environment';
 import { AddressComponent } from '../../../shared/components/address.component';
 import { KycService } from '../../../core/api/kyc.service';
@@ -25,10 +28,10 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
 import {
   LegalEntity, KycDocument, LegalEntityNameHistory,
   KycJurisdictionApproval, KycComplianceResponse, Jurisdiction,
-  JurisdictionRequirement, DocumentStatus, SyncStatus,
+  JurisdictionRequirement, DocumentStatus, SyncStatus, ScreeningRun, HolderBlock,
 } from '../../../core/models';
-import { DataStatePillComponent } from '../../../shared/components/data-state-pill/data-state-pill.component';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+
+import { DataStatePillComponent, StatusBadgeComponent } from '@registerwerk/ui';
 
 interface OnchainIdentityView {
   id: string;
@@ -45,6 +48,7 @@ interface OnchainIdentityView {
   selector: 'app-customer-detail',
   standalone: true,
   imports: [
+    RouterLink,
     FormsModule,
     MatTabsModule,
     MatCardModule,
@@ -457,6 +461,170 @@ interface OnchainIdentityView {
             }
           </div>
         </mat-tab>
+
+        <!-- Holder Blocks Tab -->
+        <mat-tab label="Holder Blocks">
+          <div class="tab-content">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <div>
+                <strong style="font-size:14px">Sperrvermerk (§16 eWpG)</strong>
+                <div style="font-size:12px;color:var(--rw-text-secondary);margin-top:2px">
+                  Active legal blocks on this entity's wallets
+                </div>
+              </div>
+              <button mat-stroked-button color="warn"
+                      [routerLink]="'/compliance/holder-blocks'">
+                <mat-icon>gavel</mat-icon>
+                Manage Blocks
+              </button>
+            </div>
+
+            @if (blocksLoading) {
+              <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
+            } @else {
+              <table mat-table [dataSource]="holderBlocks" style="width:100%">
+                <ng-container matColumnDef="blockType">
+                  <th mat-header-cell *matHeaderCellDef>Type</th>
+                  <td mat-cell *matCellDef="let b">{{ b.blockType.replace('_',' ') }}</td>
+                </ng-container>
+                <ng-container matColumnDef="walletAddress">
+                  <th mat-header-cell *matHeaderCellDef>Wallet</th>
+                  <td mat-cell *matCellDef="let b" style="font-family:monospace;font-size:12px">{{ b.walletAddress }}</td>
+                </ng-container>
+                <ng-container matColumnDef="legalBasis">
+                  <th mat-header-cell *matHeaderCellDef>Legal Basis</th>
+                  <td mat-cell *matCellDef="let b">{{ b.legalBasis }}</td>
+                </ng-container>
+                <ng-container matColumnDef="startsAt">
+                  <th mat-header-cell *matHeaderCellDef>Active Since</th>
+                  <td mat-cell *matCellDef="let b">{{ b.startsAt | date:'mediumDate' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="expiresAt">
+                  <th mat-header-cell *matHeaderCellDef>Expires</th>
+                  <td mat-cell *matCellDef="let b">{{ b.expiresAt ? (b.expiresAt | date:'mediumDate') : '—' }}</td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="holderBlockColumns"></tr>
+                <tr mat-row *matRowDef="let row; columns: holderBlockColumns;"></tr>
+              </table>
+              @if (holderBlocks.length === 0) {
+                <p style="text-align:center;padding:24px;color:var(--rw-text-secondary);font-size:13px">
+                  No active holder blocks for this entity.
+                </p>
+              }
+            }
+          </div>
+        </mat-tab>
+
+        <!-- Corporate Actions Tab -->
+        <mat-tab label="Documents &amp; Certificates">
+          <div class="tab-content">
+            <div style="display:flex;flex-direction:column;gap:16px">
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title style="font-size:14px">Position Statement (Depotauszug)</mat-card-title>
+                </mat-card-header>
+                <mat-card-content style="padding-top:8px">
+                  <p style="font-size:12px;color:var(--rw-text-secondary)">
+                    Current portfolio statement including all token holdings, balances and valuations.
+                  </p>
+                  <button mat-stroked-button color="primary" (click)="downloadStatement()">
+                    <mat-icon>download</mat-icon>
+                    Download Statement (PDF)
+                  </button>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title style="font-size:14px">Tax Certificate (Steuerbescheinigung)</mat-card-title>
+                </mat-card-header>
+                <mat-card-content style="padding-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <p style="font-size:12px;color:var(--rw-text-secondary);margin:0;flex-basis:100%">
+                    Annual German tax certificate for capital gains, interest and dividend income.
+                  </p>
+                  <mat-form-field appearance="outline" subscriptSizing="dynamic" style="width:100px">
+                    <mat-label>Tax year</mat-label>
+                    <input matInput type="number" [(ngModel)]="taxCertYear"
+                           [min]="2020" [max]="currentYear" />
+                  </mat-form-field>
+                  <button mat-stroked-button color="primary" (click)="downloadTaxCert()">
+                    <mat-icon>download</mat-icon>
+                    Download Certificate (PDF)
+                  </button>
+                </mat-card-content>
+              </mat-card>
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- Screening Tab -->
+        <mat-tab label="Screening">
+          <div class="tab-content">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <div>
+                <strong style="font-size:14px">Sanctions &amp; PEP Screening History</strong>
+                <div style="font-size:12px;color:var(--rw-text-secondary);margin-top:2px">
+                  GwG §10 ongoing monitoring — last {{ screeningRuns.length }} run(s)
+                </div>
+              </div>
+              <button mat-stroked-button color="primary"
+                      (click)="reScreenEntity()"
+                      [disabled]="screeningLoading">
+                <mat-icon>search</mat-icon>
+                Re-screen Now
+              </button>
+            </div>
+
+            @if (screeningLoading) {
+              <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
+            } @else {
+              <table mat-table [dataSource]="screeningRuns" style="width:100%">
+                <ng-container matColumnDef="status">
+                  <th mat-header-cell *matHeaderCellDef>Status</th>
+                  <td mat-cell *matCellDef="let run">
+                    <app-status-badge [status]="run.status" />
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="trigger">
+                  <th mat-header-cell *matHeaderCellDef>Trigger</th>
+                  <td mat-cell *matCellDef="let run">{{ run.triggerType?.replace('_', ' ') }}</td>
+                </ng-container>
+                <ng-container matColumnDef="provider">
+                  <th mat-header-cell *matHeaderCellDef>Provider</th>
+                  <td mat-cell *matCellDef="let run">{{ run.provider }}</td>
+                </ng-container>
+                <ng-container matColumnDef="startedAt">
+                  <th mat-header-cell *matHeaderCellDef>Started</th>
+                  <td mat-cell *matCellDef="let run">{{ run.startedAt | date:'mediumDate' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="actions">
+                  <th mat-header-cell *matHeaderCellDef></th>
+                  <td mat-cell *matCellDef="let run">
+                    @if (run.status === 'HIT') {
+                      <button mat-stroked-button color="warn" style="font-size:12px"
+                              (click)="viewScreeningRun(run)">
+                        <mat-icon style="font-size:16px;width:16px;height:16px">warning</mat-icon>
+                        Review Hits
+                      </button>
+                    } @else {
+                      <button mat-icon-button (click)="viewScreeningRun(run)"
+                              matTooltip="View run details">
+                        <mat-icon>open_in_new</mat-icon>
+                      </button>
+                    }
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="screeningRunColumns"></tr>
+                <tr mat-row *matRowDef="let row; columns: screeningRunColumns;"></tr>
+              </table>
+              @if (screeningRuns.length === 0) {
+                <p style="text-align:center;padding:24px;color:var(--rw-text-secondary);font-size:13px">
+                  No screening runs found. Click "Re-screen Now" to run the first check.
+                </p>
+              }
+            }
+          </div>
+        </mat-tab>
       </mat-tab-group>
     } @else {
       <p class="text-muted">Entity not found.</p>
@@ -469,6 +637,9 @@ export class CustomerDetailComponent implements OnInit {
   private readonly entityService = inject(EntityService);
   private readonly kycService = inject(KycService);
   private readonly adminUserService = inject(AdminUserService);
+  private readonly screeningService = inject(ScreeningService);
+  private readonly holderBlockService = inject(HolderBlockService);
+  private readonly corporateActionsService = inject(CorporateActionsService);
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
@@ -477,13 +648,22 @@ export class CustomerDetailComponent implements OnInit {
   docsLoading = false;
   historyLoading = false;
   identitiesLoading = false;
+  screeningLoading = false;
+  blocksLoading = false;
 
   entity: LegalEntity | null = null;
   documents: KycDocument[] = [];
   nameHistory: LegalEntityNameHistory[] = [];
   identities: OnchainIdentityView[] = [];
+  screeningRuns: ScreeningRun[] = [];
+  holderBlocks: HolderBlock[] = [];
+
+  readonly currentYear = new Date().getFullYear();
+  taxCertYear = this.currentYear - 1;
 
   docColumns = ['documentType', 'jurisdiction', 'fileName', 'sizeBytes', 'uploadedAt', 'actions'];
+  screeningRunColumns = ['status', 'trigger', 'provider', 'startedAt', 'actions'];
+  holderBlockColumns = ['blockType', 'walletAddress', 'legalBasis', 'startsAt', 'expiresAt'];
   showRejectForm = false;
   rejectReason = '';
 
@@ -508,11 +688,71 @@ export class CustomerDetailComponent implements OnInit {
         this.loadHistory();
         this.loadIdentities();
         this.loadJurisdictionApprovals();
+        this.loadScreeningRuns();
+        this.loadHolderBlocks();
       },
       error: () => {
         this.loading = false;
         this.cdr.markForCheck();
       },
+    });
+  }
+
+  loadScreeningRuns(): void {
+    this.screeningLoading = true;
+    this.cdr.markForCheck();
+    this.screeningService.listRunsByEntity(this.id).subscribe({
+      next: (runs) => {
+        this.screeningRuns = runs;
+        this.screeningLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.screeningLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  reScreenEntity(): void {
+    if (!this.entity) return;
+    this.screeningService.screenEntity(this.id, { name: this.entity.currentName }).subscribe({
+      next: (run) => {
+        this.screeningRuns = [run, ...this.screeningRuns];
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  viewScreeningRun(run: ScreeningRun): void {
+    this.router.navigate(['/compliance/screening/runs', run.id]);
+  }
+
+  loadHolderBlocks(): void {
+    this.blocksLoading = true;
+    this.cdr.markForCheck();
+    this.holderBlockService.listByEntity(this.id).subscribe({
+      next: (blocks) => {
+        this.holderBlocks = blocks;
+        this.blocksLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.blocksLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  downloadStatement(): void {
+    this.corporateActionsService.downloadPositionStatement(this.id).subscribe({
+      next: (blob) => triggerBlobDownload(blob, `depotauszug-${this.id}-${new Date().toISOString().split('T')[0]}.pdf`),
+    });
+  }
+
+  downloadTaxCert(): void {
+    this.corporateActionsService.downloadTaxCertificate(this.id, this.taxCertYear).subscribe({
+      next: (blob) => triggerBlobDownload(blob, `steuerbescheinigung-${this.id}-${this.taxCertYear}.pdf`),
     });
   }
 
@@ -729,4 +969,13 @@ export class CustomerDetailComponent implements OnInit {
   goBack(): void {
     this.router.navigate(['/customers']);
   }
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }

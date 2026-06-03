@@ -63,8 +63,8 @@ public class MintControlController {
     }
 
     /**
-     * Partially updates a mint control rule.
-     * TODO: Add full update logic.
+     * Partially updates a mint control rule's target address, type, or max amount.
+     * Null request fields are ignored (PATCH semantics).
      */
     @PatchMapping("/{ruleId}")
     public ResponseEntity<MintControlRuleResponse> updateRule(
@@ -72,9 +72,12 @@ public class MintControlController {
             @PathVariable UUID depId,
             @PathVariable UUID ruleId,
             @RequestBody MintControlRuleCreateRequest request) {
-        // TODO: implement update via a MintControlRuleRepository.findById + patch
-        log.warn("[STUB] updateRule called for ruleId={}", ruleId);
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        MintControlRule patch = new MintControlRule();
+        patch.setTargetAddress(request.targetAddress());
+        patch.setRuleType(request.ruleType());
+        patch.setMaxAmount(request.maxAmount());
+        MintControlRule updated = mintControlService.updateRule(ruleId, patch);
+        return ResponseEntity.ok(toResponse(updated));
     }
 
     /**

@@ -16,7 +16,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { RegistryOverviewService } from '../../../core/api/registry-overview.service';
 import { RegistryEntityNode, RegistryOverview } from '../../../core/models';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { StatusBadgeComponent } from '@registerwerk/ui';
 
 type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
 
