@@ -1,6 +1,8 @@
 package de.makibytes.registerwerk.screening.internal;
 
 import de.makibytes.registerwerk.audit.api.AuditableEvent;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningHitDto;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningSubjectDto;
@@ -27,19 +29,25 @@ public class ScreeningService {
 
     private static final Logger log = LoggerFactory.getLogger(ScreeningService.class);
 
+    /** Hits at or above this match score require a second approver (four-eyes principle). */
+    static final java.math.BigDecimal DUAL_CONTROL_SCORE_THRESHOLD = new java.math.BigDecimal("0.80");
+
     private final List<SanctionsScreeningPort> providers;
     private final ScreeningRunRepository runRepository;
     private final ScreeningHitRepository hitRepository;
     private final ApplicationEventPublisher events;
+    private final LegalEntityRepository legalEntityRepository;
 
     ScreeningService(List<SanctionsScreeningPort> providers,
                      ScreeningRunRepository runRepository,
                      ScreeningHitRepository hitRepository,
-                     ApplicationEventPublisher events) {
+                     ApplicationEventPublisher events,
+                     LegalEntityRepository legalEntityRepository) {
         this.providers = providers;
         this.runRepository = runRepository;
         this.hitRepository = hitRepository;
         this.events = events;
+        this.legalEntityRepository = legalEntityRepository;
     }
 
     @Transactional
@@ -132,13 +140,38 @@ public class ScreeningService {
         return runRepository.findTopByNaturalPersonIdOrderByStartedAtDesc(naturalPersonId);
     }
 
-    /** Accept a false-positive screening hit (dual-control required per GwG §10). */
+    /**
+     * Accept a false-positive screening hit.
+     *
+     * <p>Enforced controls (GwG §8 documentation duty, four-eyes principle):
+     * <ul>
+     *   <li>a non-blank reason is always mandatory,</li>
+     *   <li>hits with match score ≥ {@link #DUAL_CONTROL_SCORE_THRESHOLD} require a
+     *       second approver,</li>
+     *   <li>the approver must be a different user than the accepting officer.</li>
+     * </ul>
+     */
     @Transactional
     public ScreeningHit acceptHit(UUID hitId, UUID actorId, UUID approverActorId, String reason) {
         ScreeningHit hit = hitRepository.findById(hitId)
                 .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException("ScreeningHit", hitId));
         if (Boolean.TRUE.equals(hit.getAccepted())) {
             throw new IllegalStateException("Hit already accepted.");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException(
+                    "A reason is mandatory when accepting a screening hit (GwG §8 documentation duty).");
+        }
+        boolean dualControlRequired = hit.getMatchScore() != null
+                && hit.getMatchScore().compareTo(DUAL_CONTROL_SCORE_THRESHOLD) >= 0;
+        if (dualControlRequired && approverActorId == null) {
+            throw new IllegalStateException(
+                    "Dual control required: hits with match score >= " + DUAL_CONTROL_SCORE_THRESHOLD +
+                    " need a second approver (four-eyes principle).");
+        }
+        if (approverActorId != null && approverActorId.equals(actorId)) {
+            throw new IllegalArgumentException(
+                    "Dual-control approver must be a different user than the accepting officer.");
         }
         hit.setAccepted(true);
         hit.setAcceptedBy(actorId);
@@ -159,7 +192,15 @@ public class ScreeningService {
         List<UUID> entityIds = runRepository.findDistinctActiveEntityIds();
         for (UUID entityId : entityIds) {
             try {
-                screenEntity(entityId, null, null, null, ScreeningTrigger.PERIODIC_REFRESH);
+                // Load the entity's current data — a screening query without a name
+                // matches nothing and would record a meaningless run.
+                LegalEntity entity = legalEntityRepository.findById(entityId).orElse(null);
+                if (entity == null) {
+                    log.warn("Periodic screening: entity {} no longer exists, skipping.", entityId);
+                    continue;
+                }
+                screenEntity(entityId, entity.getCurrentName(), entity.getRegistrationCountry(),
+                        entity.getLeiCode(), ScreeningTrigger.PERIODIC_REFRESH);
             } catch (Exception e) {
                 log.error("Periodic screening failed for entity={}", entityId, e);
             }

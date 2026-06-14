@@ -29,6 +29,7 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.travelrule.api.TravelRuleGate;
 
 /**
  * Registry-operator administrative controls for ERC-20, ERC-721, and ERC-1155 token contracts.
@@ -62,18 +63,21 @@ public class TokenAdminService {
     private final BlockchainClientRegistry clientRegistry;
     private final EvmContractService evmContractService;
     private final BlockchainTransactionService txService;
+    private final TravelRuleGate travelRuleGate;
 
     public TokenAdminService(
             AssetDeploymentRepository deploymentRepository,
             AssetLookupPort assetLookupPort,
             BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
-            BlockchainTransactionService txService) {
+            BlockchainTransactionService txService,
+            TravelRuleGate travelRuleGate) {
         this.deploymentRepository = deploymentRepository;
         this.assetLookupPort = assetLookupPort;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
         this.txService = txService;
+        this.travelRuleGate = travelRuleGate;
     }
 
     // ── Pause / Unpause (MiCAR Art. 36, 84; eWpG §24) ────────────────────────
@@ -147,6 +151,10 @@ public class TokenAdminService {
         log.info("ADMIN forcedTransfer from={} to={} value={} on deployment={}", from, to, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        // TFR Reg (EU) 2023/1113: dispatch/record Travel Rule information before
+        // submitting the on-chain transfer. EUR valuation is not available at this
+        // layer — null is treated conservatively by the gate.
+        travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
         Function fn = new Function(
                 forcedTransferMethodName(asset.tokenStandard()),
                 Arrays.asList(new Address(from), new Address(to), new Uint256(value), new Utf8String(legalBasis)),
@@ -163,6 +171,7 @@ public class TokenAdminService {
         log.info("ADMIN forcedTransferSingle id={} amount={} on deployment={}", id, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
         if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forcedTransferSingle is only available for ERC-1155 tokens");
         }

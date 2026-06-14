@@ -7,7 +7,8 @@ import java.util.List;
 /**
  * IVMS-101 (InterVASP Messaging Standard) data model records.
  * Implements FATF Recommendation 16 / Regulation (EU) 2023/1113 (TFR).
- * Threshold: DE/EU/LI/LU/FR = €1,000.
+ * Note: TFR has no de minimis threshold for CASP-to-CASP transfers; the EUR 1,000
+ * figure applies only to self-hosted address ownership verification (Art. 14(5)).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public final class Ivms101 {

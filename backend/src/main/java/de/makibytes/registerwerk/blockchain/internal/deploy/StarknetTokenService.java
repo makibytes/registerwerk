@@ -18,8 +18,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,11 +37,10 @@ import java.util.concurrent.CompletableFuture;
  * Deterministic k-nonce generation uses RFC 6979 with SHA-256.
  *
  * <h3>Transaction hash</h3>
- * Starknet Invoke v1 hashes are computed with {@code hash_on_elements} over the Pedersen hash
- * function.  This implementation uses a keccak256-based approximation for the hash-on-elements
- * step; the service is structurally correct and production-ready once a full Pedersen or Poseidon
- * hash library is wired in.  Refer to the starknet-py or starknet-rs reference implementations
- * for the exact constant point tables.
+ * Starknet Invoke v1 hashes are computed with the canonical {@code hash_on_elements} over the
+ * Pedersen hash function — see {@link StarkPedersenHash}, whose constant points are taken from
+ * cairo-lang {@code pedersen_params.json} and pinned by unit test against the official
+ * Starkware test vector.
  *
  * <h3>Regulatory admin controls</h3>
  * <ul>
@@ -98,7 +95,7 @@ public class StarknetTokenService {
      * the first deployment.  Override via STARKNET_ERC20_CLASS_HASH environment variable.
      */
     static final String DEFAULT_ERC20_CLASS_HASH =
-            "0x04a444ef8caf8fa0db05da60bf0ad9bae264c73fa7baa0e8a591e5d2e4ca8ad";
+            "0x0000000000000000000000000000000000000000000000000000000000000000"; // declare contracts/cairo EwpgERC20, then configure
 
     /**
      * Class hash of the Registerwerk EwpgERC3525 Cairo contract.
@@ -111,14 +108,18 @@ public class StarknetTokenService {
     static final String DEFAULT_ERC3525_CLASS_HASH =
             "0x0000000000000000000000000000000000000000000000000000000000000000"; // TODO: replace after declare
 
-    /** Starknet Invoke v1 transaction type prefix (felt252 of "invoke"). */
-    private static final BigInteger INVOKE_PREFIX = starknetKeccak("invoke");
+    /**
+     * Starknet Invoke v1 transaction type prefix: the ASCII bytes of "invoke"
+     * interpreted as a big-endian integer (0x696e766f6b65) — per the Starknet
+     * transaction-hash specification. Not a keccak selector.
+     */
+    private static final BigInteger INVOKE_PREFIX = new BigInteger("696e766f6b65", 16);
 
     /** Invoke v1 version. */
     private static final BigInteger INVOKE_VERSION = BigInteger.ONE;
 
-    /** Max fee in STRK (fri): 10^15 = 0.001 STRK — sufficient for a simple deploy invoke. */
-    private static final BigInteger MAX_FEE = new BigInteger("100000000000000");
+    /** Max fee in fri: 10^15 = 0.001 STRK — sufficient for a simple deploy invoke. */
+    private static final BigInteger MAX_FEE = new BigInteger("1000000000000000");
 
     // ── Dependencies ─────────────────────────────────────────────────────────
 
@@ -126,17 +127,38 @@ public class StarknetTokenService {
     private final WalletSigner walletSigner;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final String erc20ClassHash;
+    private final String erc3525ClassHash;
 
     public StarknetTokenService(
             ChainConfigRepository chainConfigRepository,
             WalletSigner walletSigner,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${registerwerk.chains.starknet.erc20-class-hash:" + DEFAULT_ERC20_CLASS_HASH + "}")
+            String erc20ClassHash,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${registerwerk.chains.starknet.erc3525-class-hash:" + DEFAULT_ERC3525_CLASS_HASH + "}")
+            String erc3525ClassHash) {
         this.chainConfigRepository = chainConfigRepository;
         this.walletSigner = walletSigner;
         this.objectMapper = objectMapper;
+        this.erc20ClassHash = erc20ClassHash;
+        this.erc3525ClassHash = erc3525ClassHash;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
+    }
+
+    /** Fails fast with a clear message when the Sierra class was never declared/configured. */
+    private static BigInteger requireClassHash(String hash, String standard, String property) {
+        BigInteger value = parseHexFelt(hash);
+        if (value.signum() == 0) {
+            throw new IllegalStateException(
+                    "Starknet " + standard + " class hash is not configured. Compile and declare " +
+                    "contracts/cairo (scarb build + starkli declare), then set " + property + ".");
+        }
+        return value;
     }
 
     // ── Token creation ────────────────────────────────────────────────────────
@@ -254,7 +276,7 @@ public class StarknetTokenService {
         log.info("ADMIN freeze Starknet account={} contract={} network={}",
                 holderAddress, contractAddress, network);
         return invokeContract(network, contractAddress,
-                starknetKeccak("blacklist").toString(16), List.of(parseHexFelt(holderAddress)));
+                "freeze_address", List.of(parseHexFelt(holderAddress)));
     }
 
     /**
@@ -271,15 +293,20 @@ public class StarknetTokenService {
         log.info("ADMIN unfreeze Starknet account={} contract={} network={}",
                 holderAddress, contractAddress, network);
         return invokeContract(network, contractAddress,
-                starknetKeccak("remove_from_blacklist").toString(16),
-                List.of(parseHexFelt(holderAddress)));
+                "unfreeze_address", List.of(parseHexFelt(holderAddress)));
     }
 
     // ── Core invoke helper ────────────────────────────────────────────────────
 
-    /** Package-accessible for {@link de.makibytes.registerwerk.blockchain.internal.StarknetErc3525AdminService}. */
+    /**
+     * Package-accessible for {@link StarknetErc3525AdminService}.
+     *
+     * @param entryPointName the Cairo external function name (e.g. {@code pause_slot});
+     *                       the selector is derived via starknet_keccak internally —
+     *                       callers must never pass pre-hashed hex here
+     */
     CompletableFuture<String> invokeContract(
-            Network network, String contractAddress, String selector, List<BigInteger> args) {
+            Network network, String contractAddress, String entryPointName, List<BigInteger> args) {
         return CompletableFuture.supplyAsync(() -> {
             ChainConfig chain = resolveChainConfig(network);
             String rpcUrl = chain.getRpcUrl();
@@ -298,7 +325,7 @@ public class StarknetTokenService {
 
             // Single-call calldata: [to, selector, calldataLen, ...calldata]
             BigInteger contractFelt = parseHexFelt(contractAddress);
-            BigInteger selectorFelt = new BigInteger(selector, 16);
+            BigInteger selectorFelt = starknetKeccak(entryPointName);
             List<BigInteger> calldata = new ArrayList<>();
             calldata.add(BigInteger.ONE);     // calls_len
             calldata.add(contractFelt);
@@ -326,8 +353,10 @@ public class StarknetTokenService {
             JsonNode result = callRpc(rpcUrl, req);
             return parseHexFelt(result.asText());
         } catch (Exception e) {
-            log.warn("Could not fetch nonce for {}, using 0: {}", accountAddress, e.getMessage());
-            return BigInteger.ZERO;
+            // Fail fast: submitting with a guessed nonce yields opaque sequencer
+            // rejections; the RPC error is the actionable signal.
+            throw new RuntimeException("Could not fetch Starknet nonce for "
+                    + accountAddress + ": " + e.getMessage(), e);
         }
     }
 
@@ -407,20 +436,19 @@ public class StarknetTokenService {
 
     private List<BigInteger> buildUdcCalldata(UUID assetId, BigInteger salt, String ownerAddress) {
         // UDC.deployContract(classHash, salt, unique, calldata_len, ...constructorCalldata)
-        BigInteger classHash = new BigInteger(DEFAULT_ERC20_CLASS_HASH.substring(2), 16);
+        BigInteger classHash = requireClassHash(erc20ClassHash, "EwpgERC20",
+                "registerwerk.chains.starknet.erc20-class-hash");
         BigInteger ownerFelt = ownerAddress.isBlank() ? BigInteger.ZERO : parseHexFelt(ownerAddress);
 
-        // Constructor args for OZ Cairo ERC-20: [name, symbol, initial_supply, recipient]
-        // name and symbol are short strings encoded as felt252
+        // Constructor of contracts/cairo EwpgERC20: (name: felt252, symbol: felt252,
+        // registry: ContractAddress). Supply is zero at deployment — issuance happens
+        // later through registry-gated mint with whitelist + cap enforcement.
         String name   = "Registerwerk Asset";
         String symbol = assetId.toString().substring(0, 8).toUpperCase();
         BigInteger nameFelt   = shortStringToFelt(name);
         BigInteger symbolFelt = shortStringToFelt(symbol);
-        BigInteger supplyLow  = BigInteger.ZERO;  // zero initial supply (issued later)
-        BigInteger supplyHigh = BigInteger.ZERO;
 
-        List<BigInteger> constructorCalldata = List.of(
-                nameFelt, symbolFelt, supplyLow, supplyHigh, ownerFelt);
+        List<BigInteger> constructorCalldata = List.of(nameFelt, symbolFelt, ownerFelt);
 
         // Full calldata for the ACCOUNT to call UDC:
         // [calls_len=1, to=UDC, selector=deployContract, calldata_len, ...udcArgs]
@@ -447,11 +475,13 @@ public class StarknetTokenService {
     /**
      * Builds UDC calldata for the Cairo ERC-3525 (SFT) constructor.
      *
-     * <p>The EwpgERC3525 Cairo constructor takes: (name, symbol, decimals, owner_address, asset_id)
-     * matching the Solidity constructor signature for interoperability.
+     * <p>The EwpgERC3525 Cairo constructor takes
+     * {@code (name: felt252, symbol: felt252, value_decimals: u8, registry_admin: ContractAddress,
+     * asset_id: u256)} — six felts on the wire, since u256 serializes as (low, high).
      */
     private List<BigInteger> buildErc3525UdcCalldata(UUID assetId, BigInteger salt, String ownerAddress) {
-        BigInteger classHash = new BigInteger(DEFAULT_ERC3525_CLASS_HASH.substring(2), 16);
+        BigInteger classHash = requireClassHash(erc3525ClassHash, "EwpgERC3525",
+                "registerwerk.chains.starknet.erc3525-class-hash");
         BigInteger ownerFelt = ownerAddress.isBlank() ? BigInteger.ZERO : parseHexFelt(ownerAddress);
 
         String name   = "Registerwerk Bond";
@@ -524,21 +554,13 @@ public class StarknetTokenService {
     }
 
     /**
-     * hash_on_elements — approximation using starknet_keccak.
-     *
-     * <p>Production note: replace with the canonical Pedersen-based implementation from
-     * starkware-libs/cairo-lang (pedersen_hash.py) or the Poseidon equivalent for v3 txs.
+     * Canonical Starknet {@code hash_on_elements}: a Pedersen chain seeded with 0
+     * and finalized with the element count. A sequencer recomputes exactly this
+     * hash before verifying the signature — any deviation invalidates every
+     * transaction this service submits.
      */
     private static BigInteger hashOnElements(List<BigInteger> elements) {
-        MessageDigest md = sha256Digest();
-        for (BigInteger e : elements) {
-            byte[] b = toBytes32(e);
-            md.update(b);
-        }
-        md.update(toBytes32(BigInteger.valueOf(elements.size())));
-        byte[] hash = md.digest();
-        // Truncate to field element range
-        return new BigInteger(1, hash).mod(P);
+        return StarkPedersenHash.hashOnElements(elements);
     }
 
     // ── STARK ECDSA ───────────────────────────────────────────────────────────
@@ -726,11 +748,4 @@ public class StarknetTokenService {
         return org.web3j.crypto.Hash.sha3(data);
     }
 
-    private static MessageDigest sha256Digest() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
-    }
 }

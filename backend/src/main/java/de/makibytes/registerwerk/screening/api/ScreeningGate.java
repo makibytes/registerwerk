@@ -10,14 +10,17 @@ import java.util.UUID;
 public interface ScreeningGate {
 
     /**
-     * Returns true if the entity has at least one unresolved (accepted=null) screening HIT.
-     * A compliance officer must review and dismiss the hit before KYC can be approved.
+     * Returns true if approval must be blocked for this entity (fail closed):
+     * the entity has never been screened, the latest run is PENDING/ERROR/REJECTED,
+     * or the latest run produced a HIT with at least one unreviewed (accepted=null) match.
+     * A compliance officer must resolve the condition before KYC can be approved.
      */
     boolean hasUnresolvedHit(UUID entityId);
 
     /**
      * Returns true if any beneficial owner / natural person linked to the entity
-     * has an unresolved screening HIT.
+     * has a blocking screening condition (same fail-closed semantics as
+     * {@link #hasUnresolvedHit(UUID)}).
      */
     boolean hasUnresolvedBeneficialOwnerHit(UUID entityId);
 }

@@ -43,9 +43,7 @@ public class CorporateActionService {
 
     @Transactional(readOnly = true)
     public List<CorporateAction> findByAsset(UUID assetId) {
-        return repository.findAll().stream()
-                .filter(ca -> ca.getAssetId().equals(assetId))
-                .toList();
+        return repository.findByAssetId(assetId);
     }
 
     /** Daily job: transition ANNOUNCED → RECORD_DATE_SET → COMPUTED when dates are reached. */

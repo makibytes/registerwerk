@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import "./EwpgERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title EwpgERC7540
 /// @notice Async tokenized vault (EIP-7540) for eWpG-regulated funds with T+1 / NAV-cutoff settlement.
@@ -16,6 +17,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @dev Settlement model: NAV is locked at *fulfillment time* (not request time).
 ///      Operators must call setNavPerShare before fulfilling requests to ensure a current strike.
 contract EwpgERC7540 is EwpgERC4626 {
+    using SafeERC20 for IERC20;
+
     // ── Storage ───────────────────────────────────────────────────────────────
 
     struct DepositRequest {
@@ -98,7 +101,10 @@ contract EwpgERC7540 is EwpgERC4626 {
     {
         require(assets > 0, "EwpgERC7540: zero assets");
         require(isWhitelisted(owner), "EwpgERC7540: owner not whitelisted");
-        IERC20(asset()).transferFrom(msg.sender, address(this), assets);
+        // SafeERC20: tokens that signal failure by returning false (instead of
+        // reverting) would otherwise leave the request recorded WITHOUT the
+        // assets ever arriving — free shares at fulfillment.
+        IERC20(asset()).safeTransferFrom(msg.sender, address(this), assets);
         requestId = ++_requestCounter;
         _depositRequests[requestId] = DepositRequest({ assets: assets, controller: controller, owner: owner, pending: true });
         _requestTimestamps[requestId] = block.timestamp;
@@ -111,6 +117,8 @@ contract EwpgERC7540 is EwpgERC4626 {
         require(req.pending, "EwpgERC7540: not pending");
         require(block.timestamp >= _requestTimestamps[requestId] + _minSettlementDelay,
                 "EwpgERC7540: settlement delay not elapsed");
+        // A regulated fund must never settle at the implicit 1:1 pre-strike rate.
+        require(currentNavPerShare() > 0, "EwpgERC7540: NAV not struck");
         req.pending = false;
         uint256 shares = convertToShares(req.assets);
         _mint(req.owner, shares);
@@ -120,12 +128,19 @@ contract EwpgERC7540 is EwpgERC4626 {
     // ── Redeem request ────────────────────────────────────────────────────────
 
     /// @notice Investor places a redemption request. Shares are locked pending settlement.
+    /// @dev Authorization per EIP-7540: the caller must be the share owner or
+    ///      hold a sufficient ERC-20 allowance from the owner. Without this
+    ///      check, anyone could lock an arbitrary holder's shares and force
+    ///      their divestment at the next NAV strike.
     function requestRedeem(uint256 shares, address controller, address owner)
         external
         returns (uint256 requestId)
     {
         require(shares > 0, "EwpgERC7540: zero shares");
         require(balanceOf(owner) >= shares, "EwpgERC7540: insufficient shares");
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
         _transfer(owner, address(this), shares);
         requestId = ++_requestCounter;
         _redeemRequests[requestId] = RedeemRequest({ shares: shares, controller: controller, owner: owner, pending: true });
@@ -139,10 +154,11 @@ contract EwpgERC7540 is EwpgERC4626 {
         require(req.pending, "EwpgERC7540: not pending");
         require(block.timestamp >= _requestTimestamps[requestId] + _minSettlementDelay,
                 "EwpgERC7540: settlement delay not elapsed");
+        require(currentNavPerShare() > 0, "EwpgERC7540: NAV not struck");
         req.pending = false;
         uint256 assets = convertToAssets(req.shares);
         _burn(address(this), req.shares);
-        IERC20(asset()).transfer(req.owner, assets);
+        IERC20(asset()).safeTransfer(req.owner, assets);
         emit RedeemRequestFulfilled(requestId, req.shares, assets, currentNavPerShare());
     }
 
@@ -154,7 +170,7 @@ contract EwpgERC7540 is EwpgERC4626 {
         require(msg.sender == req.controller || msg.sender == registry,
                 "EwpgERC7540: not authorised to cancel");
         req.pending = false;
-        IERC20(asset()).transfer(req.owner, req.assets);
+        IERC20(asset()).safeTransfer(req.owner, req.assets);
         emit RequestCancelled(requestId, msg.sender);
     }
 

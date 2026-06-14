@@ -191,7 +191,7 @@ public class SolanaTokenService {
                         initMintData
                 ));
 
-                String recentBlockhash = client.getApi().getRecentBlockhash();
+                String recentBlockhash = client.getApi().getLatestBlockhash().getValue().getBlockhash();
                 tx.setRecentBlockHash(recentBlockhash);
                 tx.sign(java.util.List.of(payer, mintAccount));
 
@@ -260,7 +260,7 @@ public class SolanaTokenService {
                         initMintData
                 ));
 
-                String recentBlockhash = client.getApi().getRecentBlockhash();
+                String recentBlockhash = client.getApi().getLatestBlockhash().getValue().getBlockhash();
                 tx.setRecentBlockHash(recentBlockhash);
                 tx.sign(java.util.List.of(payer, mintAccount));
 
@@ -314,7 +314,7 @@ public class SolanaTokenService {
                         payer.getPublicKey()
                 ));
 
-                String blockhash = client.getApi().getRecentBlockhash();
+                String blockhash = client.getApi().getLatestBlockhash().getValue().getBlockhash();
                 tx.setRecentBlockHash(blockhash);
                 tx.sign(java.util.List.of(payer));
 
@@ -356,7 +356,7 @@ public class SolanaTokenService {
                         payer.getPublicKey()
                 ));
 
-                String blockhash = client.getApi().getRecentBlockhash();
+                String blockhash = client.getApi().getLatestBlockhash().getValue().getBlockhash();
                 tx.setRecentBlockHash(blockhash);
                 tx.sign(java.util.List.of(payer));
 

@@ -1,6 +1,5 @@
-// ERC-3525 semi-fungible token module
-// Based on Carbonable's cairo-erc-3525 (Apache-2.0) — vendor base files into src/erc3525/base/
-// after running: git clone https://github.com/carbonable-labs/cairo-erc-3525.git .carbonable-erc3525-src
+// ERC-3525 semi-fungible token module — self-contained implementation
+// (no external base library required).
 
 pub mod ewpg_erc3525;
 pub mod interface;

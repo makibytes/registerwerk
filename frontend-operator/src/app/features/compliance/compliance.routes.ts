@@ -16,6 +16,13 @@ export const COMPLIANCE_ROUTES: Routes = [
       ),
   },
   {
+    path: 'casp-register',
+    loadComponent: () =>
+      import('./casp-register/casp-register.component').then(
+        (m) => m.CaspRegisterComponent,
+      ),
+  },
+  {
     path: 'holder-blocks',
     loadComponent: () =>
       import('./holder-blocks/holder-blocks.component').then(

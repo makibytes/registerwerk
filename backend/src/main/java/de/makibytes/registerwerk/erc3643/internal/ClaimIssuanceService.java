@@ -124,7 +124,7 @@ public class ClaimIssuanceService {
 
         deploymentService.issueKycClaim(identity.getId(), topic);
 
-        OnchainClaim claim = buildClaimRecord(identity, topic, topicLabel, expiresAt);
+        OnchainClaim claim = buildClaimRecord(identity, chainConfigId, topic, topicLabel, expiresAt);
         OnchainClaim saved = claimRepository.save(claim);
 
         eventPublisher.publishEvent(new ClaimIssuedEvent(saved.getId(), null, "REGISTRY_ADMIN", java.util.Map.of()));
@@ -183,7 +183,7 @@ public class ClaimIssuanceService {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private OnchainClaim buildClaimRecord(
-            OnchainIdentity identity, long topic, String topicLabel, Instant expiresAt) {
+            OnchainIdentity identity, UUID chainConfigId, long topic, String topicLabel, Instant expiresAt) {
         OnchainClaim claim = new OnchainClaim();
         claim.setOnchainIdentityId(identity.getId());
         claim.setTopic(topic);
@@ -196,7 +196,7 @@ public class ClaimIssuanceService {
         if (identityAddress != null && !identityAddress.startsWith("0x-PENDING")) {
             try {
                 ClaimSigningService.SignedClaim signed =
-                        claimSigningService.signClaim(identityAddress, topic, expiresAt);
+                        claimSigningService.signClaim(chainConfigId, identityAddress, topic, expiresAt);
                 claim.setIssuerAddress(signed.issuerAddress());
                 claim.setClaimData(signed.claimData());
                 claim.setClaimSignature(signed.claimSignature());

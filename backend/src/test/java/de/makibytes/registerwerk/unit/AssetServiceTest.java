@@ -156,7 +156,7 @@ class AssetServiceTest {
     void updateAsset_shouldApplyNonNullPatchFields() {
         Asset existing = buildAsset();
         existing.setName("Original Name");
-        existing.setIsin("DE000A0001");
+        existing.setIsin("DE0007164600");
         UUID actorId = UUID.randomUUID();
         when(assetRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -167,7 +167,7 @@ class AssetServiceTest {
         Asset result = assetService.updateAsset(existing.getId(), patch, actorId);
 
         assertThat(result.getName()).isEqualTo("Updated Name");
-        assertThat(result.getIsin()).isEqualTo("DE000A0001");
+        assertThat(result.getIsin()).isEqualTo("DE0007164600");
     }
 
     @Test

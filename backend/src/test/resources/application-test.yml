@@ -24,6 +24,9 @@ spring:
 registerwerk:
   auth:
     dev-secret: "registerwerk-test-jwt-secret-not-for-production!!"
+    step-up:
+      # Tests use step-up endpoints without TOTP enrolment; production default is false.
+      allow-unenrolled: true
   chains:
     ethereum:
       testnet:

@@ -241,6 +241,7 @@ export class SidebarComponent {
       items: [
         { label: 'Screening',      icon: 'policy',                    route: '/compliance/screening' },
         { label: 'Holder Blocks',  icon: 'gavel',                     route: '/compliance/holder-blocks' },
+        { label: 'CASP Register',  icon: 'verified_user',             route: '/compliance/casp-register' },
         { label: 'DORA',           icon: 'security_update_warning',   route: '/compliance/dora' },
         { label: 'Reporting',      icon: 'assessment',                route: '/compliance/reporting' },
         { label: 'Audit Log',      icon: 'receipt_long',              route: '/audit' },

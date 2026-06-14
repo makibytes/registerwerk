@@ -39,11 +39,8 @@ class KycMonitoringJob {
         LocalDate expiredThreshold = today;
 
         // Flip APPROVED → EXPIRED for entities whose kyc_expiry_date has passed
-        var expired = entityRepository.findAll().stream()
-                .filter(e -> KycStatus.APPROVED.equals(e.getKycStatus())
-                        && e.getKycExpiryDate() != null
-                        && !e.getKycExpiryDate().isAfter(expiredThreshold))
-                .toList();
+        var expired = entityRepository
+                .findByKycStatusAndKycExpiryDateLessThanEqual(KycStatus.APPROVED, expiredThreshold);
 
         for (var entity : expired) {
             entity.setKycStatus(KycStatus.EXPIRED);
@@ -54,17 +51,17 @@ class KycMonitoringJob {
         }
 
         // Warn for entities expiring within 30 days
-        var expiringSoon = entityRepository.findAll().stream()
-                .filter(e -> KycStatus.APPROVED.equals(e.getKycStatus())
-                        && e.getKycExpiryDate() != null
-                        && e.getKycExpiryDate().isAfter(expiredThreshold)
-                        && !e.getKycExpiryDate().isAfter(warningThreshold))
-                .toList();
+        var expiringSoon = entityRepository
+                .findByKycStatusAndKycExpiryDateGreaterThanAndKycExpiryDateLessThanEqual(
+                        KycStatus.APPROVED, expiredThreshold, warningThreshold);
 
         for (var entity : expiringSoon) {
             events.publishEvent(new KycExpiringEvent(entity.getId(), null,
                     Map.of("reason", "EXPIRING_SOON", "expiryDate", entity.getKycExpiryDate().toString(),
-                           "daysRemaining", String.valueOf(today.until(entity.getKycExpiryDate()).getDays()))));
+                           // ChronoUnit, not Period.getDays(): the latter returns only the
+                           // day component (1 month 2 days -> "2"), misreporting the deadline.
+                           "daysRemaining", String.valueOf(
+                                   java.time.temporal.ChronoUnit.DAYS.between(today, entity.getKycExpiryDate())))));
             log.info("KYC expiring soon for entity={} expiry={}", entity.getId(), entity.getKycExpiryDate());
         }
 

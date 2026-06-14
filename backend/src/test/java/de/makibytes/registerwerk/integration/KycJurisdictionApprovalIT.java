@@ -8,6 +8,10 @@ import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
 import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycJurisdictionApprovalResponse;
+import de.makibytes.registerwerk.screening.internal.ScreeningRun;
+import de.makibytes.registerwerk.screening.internal.ScreeningRunRepository;
+import de.makibytes.registerwerk.screening.internal.ScreeningStatus;
+import de.makibytes.registerwerk.screening.internal.ScreeningTrigger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,6 +79,9 @@ class KycJurisdictionApprovalIT {
 
     @Autowired
     private AuditEventRepository auditEventRepository;
+
+    @Autowired
+    private ScreeningRunRepository screeningRunRepository;
 
     @LocalServerPort
     private int port;
@@ -155,6 +162,22 @@ class KycJurisdictionApprovalIT {
         createDocument(entityId, KycDocument.DocumentType.AML_QUESTIONNAIRE);
     }
 
+    /**
+     * Inserts a completed CLEAR sanctions screening run for the entity.
+     * The screening gate fails closed (GwG §10): without a clear run,
+     * jurisdiction approval is blocked even for REGISTRY_ADMIN.
+     */
+    private void recordClearScreening(UUID entityId) {
+        ScreeningRun run = new ScreeningRun();
+        run.setEntityId(entityId);
+        run.setTriggerType(ScreeningTrigger.ENTITY_ONBOARDING);
+        run.setProvider("TEST");
+        run.setStatus(ScreeningStatus.CLEAR);
+        run.setStartedAt(Instant.now());
+        run.setCompletedAt(Instant.now());
+        screeningRunRepository.save(run);
+    }
+
     private static String sha256(String input) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -166,10 +189,32 @@ class KycJurisdictionApprovalIT {
     }
 
     @Test
+    @DisplayName("Jurisdiction approval is blocked when no sanctions screening exists (fail closed)")
+    void approvalBlockedWithoutScreening() {
+        UUID entityId = createEntityAndGetId("Unscreened Entity GmbH");
+        addMandatoryDeEwpgDocs(entityId);
+
+        ResponseEntity<String> response = restTemplate.exchange(
+            url("/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve"),
+            HttpMethod.POST,
+            new HttpEntity<>(
+                Map.of("expiresAt", LocalDate.now().plusYears(1).toString()),
+                authHeaders("COMPLIANCE_OFFICER")
+            ),
+            String.class,
+            entityId
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).contains("sanctions");
+    }
+
+    @Test
     @DisplayName("Compliance officer can approve jurisdiction when checklist is fully compliant")
     void complianceOfficerCanApproveWhenCompliant() {
         UUID entityId = createEntityAndGetId("Compliance Officer Happy Path GmbH");
         addMandatoryDeEwpgDocs(entityId);
+        recordClearScreening(entityId);
 
         ResponseEntity<KycJurisdictionApprovalResponse> response = restTemplate.exchange(
             url("/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve"),
@@ -211,6 +256,7 @@ class KycJurisdictionApprovalIT {
     @DisplayName("Admin can override non-compliant jurisdiction approval with explicit note")
     void adminCanOverrideNonCompliant() {
         UUID entityId = createEntityAndGetId("Admin Override Path GmbH");
+        recordClearScreening(entityId);
 
         ResponseEntity<KycJurisdictionApprovalResponse> response = restTemplate.exchange(
             url("/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve"),

@@ -106,6 +106,21 @@ One record per match found. Fields:
 
 ---
 
+## Fail-closed screening gate
+
+The screening gate fails closed (GwG §10). KYC approval — global **and** per-jurisdiction — is blocked when:
+
+- the entity has **never been screened**,
+- the latest run is `PENDING` or `ERROR` (a screening that did not complete is not a clear result),
+- the latest run is `REJECTED`, or
+- the latest run produced a `HIT` with at least one unreviewed match.
+
+Provider failures (network errors, API errors, blank query) raise `ScreeningProviderException` and record the run as `ERROR` — they are **never** silently treated as `CLEAR`. Sanctions blocks are **not overridable** via `overrideNote`; an admin override can waive checklist gaps, but not EU sanctions law. The block is lifted by running a screening or by a compliance officer resolving the open hits.
+
+The nightly `periodicRefresh` job loads each entity's current name, registration country, and LEI before re-screening.
+
+---
+
 ## Resolving hits
 
 A `ScreeningHit` in status `OPEN` blocks:
@@ -117,7 +132,9 @@ A `COMPLIANCE_OFFICER` can resolve a hit as either `FALSE_POSITIVE` (not the sam
 
 1. `POST /api/v1/compliance/screening/hits/{hitId}/accept`
 2. Body: `{ "resolution": "FALSE_POSITIVE" | "ACCEPTED", "reason": "..." }`
-3. For high-score hits (≥ 80), a second approver from `SECOND_APPROVER` role is required
+3. A non-blank `reason` is always mandatory (GwG §8 documentation duty)
+4. For high-score hits (match score ≥ 0.80), a second approver is mandatory — enforced at the service layer
+5. The second approver must be a **different user** than the accepting officer (self-approval is rejected)
 
 All resolutions are written to the audit log with the accepting officer's identity.
 

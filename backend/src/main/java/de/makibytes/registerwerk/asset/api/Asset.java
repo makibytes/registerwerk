@@ -12,6 +12,7 @@ import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
+import de.makibytes.registerwerk.deployment.api.EntryType;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -75,6 +76,10 @@ public class Asset {
     @Column(name = "jurisdiction", length = 20)
     private Jurisdiction jurisdiction;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "entry_type", nullable = false, length = 20)
+    private EntryType entryType = EntryType.COLLECTIVE;
+
     @Column(name = "termsheet_doc_id")
     private UUID termsheetDocId;
 
@@ -127,6 +132,9 @@ public class Asset {
 
     public AssetStatus getStatus() { return status; }
     public void setStatus(AssetStatus status) { this.status = status; }
+
+    public EntryType getEntryType() { return entryType; }
+    public void setEntryType(EntryType entryType) { this.entryType = entryType; }
 
     public Jurisdiction getJurisdiction() { return jurisdiction; }
     public void setJurisdiction(Jurisdiction jurisdiction) { this.jurisdiction = jurisdiction; }

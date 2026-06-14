@@ -44,6 +44,18 @@ import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponen
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
       } @else {
 
+        <!-- Load failures must be visible: silently rendering zeros would
+             misrepresent the register state to the user. -->
+        @if (loadError) {
+          <mat-card class="error-banner">
+            <mat-card-content>
+              <mat-icon>error_outline</mat-icon>
+              <span>Some dashboard data could not be loaded. The numbers below may be incomplete.</span>
+              <button mat-stroked-button (click)="reload()">Retry</button>
+            </mat-card-content>
+          </mat-card>
+        }
+
         <!-- ── ISSUER section ──────────────────────────────────────────────── -->
         @if (isIssuer) {
           <section class="dashboard-section">
@@ -155,6 +167,19 @@ import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponen
               </mat-card>
             </div>
 
+            @if (!loadError && totalHoldings === 0) {
+              <mat-card class="empty-state">
+                <mat-card-content>
+                  <mat-icon class="empty-icon">storefront</mat-icon>
+                  <p>You don't hold any securities yet.</p>
+                  <p class="empty-hint">Browse the trading desk to find available offers from issuers.</p>
+                </mat-card-content>
+                <mat-card-actions class="empty-actions">
+                  <a mat-raised-button color="primary" routerLink="/trading">Open Trading Desk</a>
+                </mat-card-actions>
+              </mat-card>
+            }
+
             <!-- Portfolio distribution chart -->
             @if (portfolioDonutSlices.length > 0) {
               <mat-card style="margin-bottom:16px">
@@ -211,6 +236,12 @@ import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponen
   `,
   styles: [`
     .welcome { color: var(--rw-text-secondary); margin: 0 0 24px; }
+    .error-banner { margin-bottom: 24px; border-left: 4px solid var(--rw-rejected-fg); }
+    .error-banner mat-card-content { display: flex; align-items: center; gap: 12px; padding-top: 12px; }
+    .error-banner mat-icon { color: var(--rw-rejected-fg); }
+    .error-banner span { flex: 1; }
+    .empty-hint { color: var(--rw-text-secondary); font-size: 13px; margin-top: 4px; }
+    .empty-actions { display: flex; justify-content: center; padding-bottom: 16px; }
     .dashboard-section { margin-bottom: 40px; }
     .section-header {
       display: flex;
@@ -270,6 +301,7 @@ export class DashboardComponent implements OnInit {
 
   isIssuer = false;
   isInvestor = false;
+  loadError = false;
 
   // Issuer stats
   draftCount = 0;
@@ -291,13 +323,24 @@ export class DashboardComponent implements OnInit {
     this.userName = this.auth.getUserName();
     this.isIssuer = this.auth.hasRole('ISSUER') || this.auth.hasRole('REGISTRY_ADMIN');
     this.isInvestor = this.auth.hasRole('INVESTOR') || this.auth.hasRole('REGISTRY_ADMIN');
+    this.loadData();
+  }
+
+  reload(): void {
+    this.loading = true;
+    this.cdr.markForCheck();
+    this.loadData();
+  }
+
+  private loadData(): void {
+    this.loadError = false;
 
     const issuances$ = this.isIssuer
-      ? this.issuanceService.getIssuances({ size: 20 }).pipe(catchError(() => of(null)))
+      ? this.issuanceService.getIssuances({ size: 20 }).pipe(catchError(() => { this.loadError = true; return of(null); }))
       : of(null);
 
     const investments$ = this.isInvestor
-      ? this.investmentService.getMyInvestments({ size: 20 }).pipe(catchError(() => of(null)))
+      ? this.investmentService.getMyInvestments({ size: 20 }).pipe(catchError(() => { this.loadError = true; return of(null); }))
       : of(null);
 
     forkJoin({ issuances: issuances$, investments: investments$ }).subscribe(({ issuances, investments }) => {

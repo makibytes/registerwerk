@@ -36,13 +36,30 @@ public class SmtpEmailAdapter {
      * @throws MessagingException if the message cannot be sent
      */
     public void sendHtml(String to, String subject, String htmlBody) throws MessagingException {
-        log.debug("Sending email to={}, subject={}", to, subject);
+        sendHtml(to, subject, htmlBody, null, null);
+    }
+
+    /**
+     * Sends an HTML email, optionally with a single binary attachment.
+     *
+     * @param attachment      attachment bytes, or {@code null} for no attachment
+     * @param attachmentName  file name for the attachment (required if attachment present)
+     */
+    public void sendHtml(String to, String subject, String htmlBody,
+                         byte[] attachment, String attachmentName) throws MessagingException {
+        log.debug("Sending email to={}, subject={}, hasAttachment={}", to, subject, attachment != null);
         MimeMessage message = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        boolean multipart = attachment != null;
+        MimeMessageHelper helper = new MimeMessageHelper(message, multipart, "UTF-8");
         helper.setFrom(from);
         helper.setTo(to);
         helper.setSubject(subject);
         helper.setText(htmlBody, true);
+        if (multipart) {
+            helper.addAttachment(attachmentName,
+                    new org.springframework.core.io.ByteArrayResource(attachment),
+                    "application/pdf");
+        }
         mailSender.send(message);
         log.info("Email sent to={}", to);
     }

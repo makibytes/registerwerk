@@ -7,19 +7,14 @@ edition = "2024_07"
 [[target.starknet-contract]]
 sierra = true
 
+# Self-contained: both token contracts implement their full surface directly,
+# so no OpenZeppelin or Carbonable base library is required.
 [dependencies]
 starknet = ">=2.8.0"
-openzeppelin_token = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v0.17.0" }
-openzeppelin_access = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v0.17.0" }
-openzeppelin_introspection = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v0.17.0" }
-
-# Carbonable ERC-3525 base (Apache-2.0)
-# Vendored locally under src/erc3525/ — clone with:
-#   cd contracts/cairo && git clone https://github.com/carbonable-labs/cairo-erc-3525.git .carbonable-erc3525-src
-#   cp -r .carbonable-erc3525-src/src/erc3525 src/erc3525/base/
 
 [dev-dependencies]
-snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.27.0" }
+# snforge >= 0.31 supports Cairo 2.8 and the cheat_caller_address / DeclareResultTrait API.
+snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.31.0" }
 
 [tool.snforge]
 exit_first = false

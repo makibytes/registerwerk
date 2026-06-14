@@ -230,7 +230,10 @@ public class TradingService {
 
     public TradeExecutionResponse buy(UUID entityId, UUID actorId, UUID listingId, BuyTradingOfferRequest request) {
         ensureTradingEnabled();
-        TradeListing listing = findListing(listingId);
+        // Row-level lock: the availability check and the quantity decrement must be
+        // atomic, or two concurrent buyers of the same units would both be filled.
+        TradeListing listing = tradeListingRepository.findByIdForUpdate(listingId)
+                .orElseThrow(() -> new EntityNotFoundException("TradeListing", listingId));
         if (entityId.equals(listing.getSellerEntityId())) {
             throw new IllegalArgumentException("A company cannot buy its own listing");
         }
@@ -322,7 +325,8 @@ public class TradingService {
 
     public TradeExecutionResponse settlePendingTrade(UUID entityId, UUID actorId, UUID executionId) {
         ensureTradingEnabled();
-        TradeExecution execution = tradeExecutionRepository.findById(executionId)
+        // Row-level lock: prevents concurrent double-settlement crediting the buyer twice.
+        TradeExecution execution = tradeExecutionRepository.findByIdForUpdate(executionId)
                 .orElseThrow(() -> new EntityNotFoundException("TradeExecution", executionId));
         if (!entityId.equals(execution.getBuyerEntityId())) {
             throw new AccessDeniedException("Only the buying company can settle this trade");
@@ -405,6 +409,9 @@ public class TradingService {
         }
         sellerHolder.setNominalAmount(sellerHolder.getNominalAmount().subtract(execution.getExecutedQuantity()));
         assetHolderRepository.save(sellerHolder);
+        // §19(2) no. 2: the seller's register content changed.
+        eventPublisher.publishEvent(
+                new de.makibytes.registerwerk.asset.events.HolderRegisterChangedEvent(sellerHolder.getId()));
 
         AssetHolder buyerHolder = assetHolderRepository.findByAssetIdAndWalletAddress(execution.getAssetId(), execution.getWalletAddress())
                 .filter(holder -> holder.getInvestorId().equals(execution.getBuyerEntityId()))
@@ -418,13 +425,26 @@ public class TradingService {
                     holder.setWhitelisted(false);
                     return holder;
                 });
+        boolean newHolder = buyerHolder.getId() == null;
         buyerHolder.setNominalAmount(buyerHolder.getNominalAmount().add(execution.getExecutedQuantity()));
         buyerHolder.setAcquisitionDate(LocalDate.now());
-        return assetHolderRepository.save(buyerHolder);
+        AssetHolder savedBuyer = assetHolderRepository.save(buyerHolder);
+        // A brand-new buyer position is an initial entry (§19(2) no. 1); an
+        // existing one that grew is a register change (§19(2) no. 2).
+        eventPublisher.publishEvent(newHolder
+                ? new de.makibytes.registerwerk.asset.events.HolderEnteredEvent(savedBuyer.getId())
+                : new de.makibytes.registerwerk.asset.events.HolderRegisterChangedEvent(savedBuyer.getId()));
+        return savedBuyer;
     }
 
     private void updateListingAfterExecution(TradeListing listing, BigDecimal executedQuantity) {
         BigDecimal remaining = listing.getQuantityAvailable().subtract(executedQuantity);
+        if (remaining.compareTo(BigDecimal.ZERO) < 0) {
+            // Invariant guard: must be unreachable with the row lock in buy(); abort
+            // rather than persist a negative (oversold) position in a securities register.
+            throw new IllegalStateException("Listing " + listing.getId()
+                    + " would be oversold by " + remaining.negate() + " units — aborting execution.");
+        }
         listing.setQuantityAvailable(remaining);
         if (remaining.compareTo(BigDecimal.ZERO) == 0) {
             listing.setStatus(ListingStatus.FILLED);

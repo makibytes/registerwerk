@@ -61,8 +61,9 @@ public class KycService {
 
         if (screeningGate.hasUnresolvedHit(entityId)) {
             throw new IllegalStateException(
-                "Cannot approve KYC: entity has an unresolved sanctions screening hit. " +
-                "A compliance officer must review and dismiss the hit first (GwG §10).");
+                "Cannot approve KYC: no clear sanctions screening result exists for this entity. " +
+                "Either the entity was never screened, the latest screening is pending or failed, " +
+                "or there is an unresolved hit that a compliance officer must review first (GwG §10).");
         }
         if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
             throw new IllegalStateException(
@@ -119,6 +120,20 @@ public class KycService {
 
         legalEntityRepository.findById(entityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
+
+        // Sanctions screening blocks are NOT overridable — unlike checklist gaps,
+        // an overrideNote cannot waive EU sanctions law (GwG §10, §11). The block is
+        // lifted by running a screening or by a compliance officer resolving open hits.
+        if (screeningGate.hasUnresolvedHit(entityId)) {
+            throw new IllegalStateException(
+                "Cannot approve KYC for jurisdiction " + jurisdiction.name() + ": no clear sanctions " +
+                "screening result exists for this entity. Run a screening or resolve open hits first (GwG §10).");
+        }
+        if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
+            throw new IllegalStateException(
+                "Cannot approve KYC for jurisdiction " + jurisdiction.name() + ": a beneficial owner has " +
+                "no clear sanctions screening result. Resolve the screening condition first (GwG §11).");
+        }
 
         KycJurisdictionApproval approval = jurisdictionApprovalRepository
             .findByEntityIdAndJurisdiction(entityId, jurisdiction)

@@ -21,6 +21,13 @@ public interface HolderMapper {
     @Mapping(target = "whitelistTxHash", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "entryType", ignore = true)
+    @Mapping(target = "holderReference", ignore = true)
+    @Mapping(target = "isConsumer", ignore = true)
+    @Mapping(target = "thirdPartyRights", ignore = true)
+    @Mapping(target = "disposalRestrictions", ignore = true)
+    @Mapping(target = "legalCapacityNote", ignore = true)
+    @Mapping(target = "lastStatementAt", ignore = true)
     AssetHolder toEntity(HolderCreateRequest request);
 
     /**

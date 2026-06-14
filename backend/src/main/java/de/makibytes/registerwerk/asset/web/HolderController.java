@@ -82,6 +82,51 @@ public class HolderController {
     }
 
     /**
+     * Adds a holder in single entry (Einzeleintragung, §8/§17 eWpG). Generates a
+     * pseudonymous holder reference and records the §17(2) attributes and consumer
+     * flag that govern the §19 register-statement obligation.
+     */
+    @PostMapping("/single-entry")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+    public ResponseEntity<HolderResponse> addSingleEntryHolder(
+            @PathVariable UUID assetId,
+            Authentication authentication,
+            @RequestBody @Valid de.makibytes.registerwerk.asset.web.dto.SingleEntryHolderCreateRequest request) {
+        AssetHolder holder = holderService.addSingleEntryHolder(
+            assetId,
+            request.investorId(),
+            request.walletAddress(),
+            request.nominalAmount(),
+            request.isConsumer(),
+            request.thirdPartyRights(),
+            request.disposalRestrictions(),
+            request.legalCapacityNote()
+        );
+        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(holder, authentication));
+    }
+
+    /**
+     * Updates a single-entry holder's §17(2) attributes on instruction of an
+     * authorised party (§18(1) eWpG).
+     */
+    @PatchMapping("/{holderId}/single-entry-attributes")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+    public ResponseEntity<HolderResponse> updateSingleEntryAttributes(
+            @PathVariable UUID assetId,
+            @PathVariable UUID holderId,
+            Authentication authentication,
+            @RequestBody de.makibytes.registerwerk.asset.web.dto.SingleEntryAttributesUpdateRequest request) {
+        AssetHolder holder = holderService.updateSingleEntryAttributes(
+            holderId,
+            request.isConsumer(),
+            request.thirdPartyRights(),
+            request.disposalRestrictions(),
+            request.legalCapacityNote()
+        );
+        return ResponseEntity.ok(toResponse(holder, authentication));
+    }
+
+    /**
      * Returns a paginated list of holders for an asset.
      */
     @GetMapping
@@ -193,7 +238,13 @@ public class HolderController {
                 base.acquisitionDate(),
                 companyExternalReferenceService
                         .findExternalId(authentication, ExternalReferenceSubjectType.ASSET_HOLDER, holder.getId())
-                        .orElse(null)
+                        .orElse(null),
+                holder.getEntryType() != null ? holder.getEntryType().name() : null,
+                holder.getHolderReference(),
+                holder.getIsConsumer(),
+                holder.getThirdPartyRights(),
+                holder.getDisposalRestrictions(),
+                holder.getLegalCapacityNote()
         );
     }
 }

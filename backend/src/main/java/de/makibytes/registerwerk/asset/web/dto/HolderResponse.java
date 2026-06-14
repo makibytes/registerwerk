@@ -15,5 +15,11 @@ public record HolderResponse(
     Boolean whitelisted,
     BigDecimal nominalAmount,
     LocalDate acquisitionDate,
-    String externalId
+    String externalId,
+    String entryType,
+    String holderReference,
+    Boolean isConsumer,
+    String thirdPartyRights,
+    String disposalRestrictions,
+    String legalCapacityNote
 ) {}

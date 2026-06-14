@@ -61,7 +61,23 @@ public class ClaimSigningService {
      * @return a {@link SignedClaim} containing hex-encoded data and signature
      */
     public SignedClaim signClaim(String identityAddress, long topic, Instant expiresAt) {
-        Credentials credentials = walletSigner.credentialsForAnyEvm();
+        return signClaim(null, identityAddress, topic, expiresAt);
+    }
+
+    /**
+     * Signs a claim with the registry wallet of the given chain. ERC-3643 token
+     * contracts verify claims against the TrustedIssuersRegistry of <em>their</em>
+     * chain — a claim signed by a different chain's wallet (or "any" wallet) would
+     * not match the trusted issuer and the holder's transfers would fail on-chain.
+     *
+     * @param chainConfigId chain whose registry wallet must issue the claim;
+     *                      {@code null} falls back to any configured EVM wallet
+     */
+    public SignedClaim signClaim(java.util.UUID chainConfigId, String identityAddress,
+                                 long topic, Instant expiresAt) {
+        Credentials credentials = chainConfigId != null
+                ? walletSigner.credentialsForChain(chainConfigId)
+                : walletSigner.credentialsForAnyEvm();
         String issuer = credentials.getAddress();
 
         long expiry = expiresAt != null ? expiresAt.getEpochSecond() : 0L;

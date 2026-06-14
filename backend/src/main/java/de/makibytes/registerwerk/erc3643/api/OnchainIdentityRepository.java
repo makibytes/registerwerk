@@ -22,4 +22,7 @@ public interface OnchainIdentityRepository extends JpaRepository<OnchainIdentity
      * Returns all ONCHAINID identities deployed for a legal entity, across all chains.
      */
     List<OnchainIdentity> findByLegalEntityId(UUID legalEntityId);
+
+    /** Pending ONCHAINID deployments awaiting their receipt (placeholder address prefix). */
+    List<OnchainIdentity> findByIdentityAddressStartingWithAndDeployedByTxIsNotNull(String addressPrefix);
 }

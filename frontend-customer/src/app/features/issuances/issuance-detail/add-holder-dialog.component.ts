@@ -1,4 +1,4 @@
-import { Component, inject, Inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA, MatDialog } from '@angular/material/dialog';
@@ -78,6 +78,7 @@ export class AddHolderDialogComponent {
   private readonly issuanceService = inject(IssuanceService);
   private readonly dialogRef = inject<MatDialogRef<AddHolderDialogComponent, AssetHolder>>(MatDialogRef);
   private readonly dialog = inject(MatDialog);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   walletAddress = '';
   nominalAmount: number | null = null;
@@ -90,7 +91,12 @@ export class AddHolderDialogComponent {
     this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
       AddressPickerDialogComponent,
       { data: { mode: 'WALLET', title: 'Select holder wallet' }, width: '560px' }
-    ).afterClosed().subscribe(addr => { if (addr) this.walletAddress = addr; });
+    ).afterClosed().subscribe(addr => {
+      if (addr) {
+        this.walletAddress = addr;
+        this.cdr.markForCheck(); // zoneless: picked address must re-render
+      }
+    });
   }
 
   save(): void {
@@ -108,6 +114,7 @@ export class AddHolderDialogComponent {
         error: (err) => {
           this.saving = false;
           this.error = err?.error?.message ?? 'Failed to add holder.';
+          this.cdr.markForCheck(); // zoneless: error state must re-render
         },
       });
   }

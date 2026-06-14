@@ -21,10 +21,18 @@ abstract contract EwpgCompliance is IEwpgCompliant, IEwpgAdminControls {
     /// @notice The backend registry wallet — sole authority over all admin operations.
     address public registry;
 
+    /// @notice Wallet nominated to take over the registry authority (two-step handover).
+    address public pendingRegistry;
+
     mapping(address => bool) private _whitelisted;
     mapping(address => bool) private _frozenAccounts;
     bool private _paused;
     uint256 private _supplyCap; // 0 = unlimited
+
+    // ── Events (registry handover) ─────────────────────────────────────────────
+
+    event RegistryTransferStarted(address indexed currentRegistry, address indexed pendingRegistry);
+    event RegistryTransferred(address indexed previousRegistry, address indexed newRegistry);
 
     // ── Modifiers ─────────────────────────────────────────────────────────────
 
@@ -39,6 +47,36 @@ abstract contract EwpgCompliance is IEwpgCompliant, IEwpgAdminControls {
     constructor(address _registry) {
         require(_registry != address(0), "EwpgCompliance: zero registry address");
         registry = _registry;
+    }
+
+    // ── Registry handover (key rotation / operator succession) ────────────────
+
+    /// @notice Begins handover of the registry authority to a new wallet.
+    /// @dev Two-step (propose + accept) so a typo'd address cannot brick the
+    ///      contract: without a handover path, rotating or losing the registry
+    ///      key would leave the token permanently without pause/freeze/forced
+    ///      transfer capability — incompatible with the registry operator's
+    ///      duty of perpetual administrability (eWpG §7, KryptoWTransparenzV).
+    /// @param newRegistry The wallet nominated to take over.
+    function transferRegistry(address newRegistry) external onlyRegistry {
+        require(newRegistry != address(0), "EwpgCompliance: zero registry address");
+        pendingRegistry = newRegistry;
+        emit RegistryTransferStarted(registry, newRegistry);
+    }
+
+    /// @notice Cancels a pending handover.
+    function cancelRegistryTransfer() external onlyRegistry {
+        pendingRegistry = address(0);
+        emit RegistryTransferStarted(registry, address(0));
+    }
+
+    /// @notice Completes the handover. Only the nominated wallet can accept,
+    ///         proving it controls its key before authority moves.
+    function acceptRegistry() external {
+        require(msg.sender == pendingRegistry, "EwpgCompliance: caller is not pending registry");
+        emit RegistryTransferred(registry, pendingRegistry);
+        registry = pendingRegistry;
+        pendingRegistry = address(0);
     }
 
     // ── Whitelist (IEwpgCompliant) ─────────────────────────────────────────────

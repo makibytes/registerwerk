@@ -19,15 +19,33 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * Issues short-lived step-up JWTs after RFC 6238 TOTP verification.
  * TOTP: HMAC-SHA1, 30-second window, 6 digits — Google Authenticator compatible.
- * If TOTP is not yet enrolled, any valid 6-digit code passes (dev/onboarding mode).
  * Enrolment: POST /api/v1/auth/step-up/enroll (generates secret + QR-code URL).
+ *
+ * <p>Hardening:
+ * <ul>
+ *   <li>Step-up is refused for users without TOTP enrolment — the step-up token
+ *       gates dual-control actions (forced transfers, hit dismissal); issuing it
+ *       without a second factor would void the Vieraugenprinzip. A dev-only
+ *       escape hatch exists via {@code registerwerk.auth.step-up.allow-unenrolled}.</li>
+ *   <li>Replay protection per RFC 6238 §5.2: each accepted code's time step is
+ *       remembered; a code at or before the last accepted step is rejected.</li>
+ *   <li>Brute-force throttle: 5 failed attempts lock step-up for 15 minutes.</li>
+ *   <li>Constant-time code comparison.</li>
+ * </ul>
  */
 @Component
 public class StepUpTokenIssuer {
@@ -36,12 +54,28 @@ public class StepUpTokenIssuer {
     private static final int TOTP_WINDOW = 1;     // ±1 step = ±30s tolerance
     private static final int TOTP_STEP_SECONDS = 30;
     private static final int TOTP_DIGITS = 6;
+    private static final int MAX_ATTEMPTS = 5;
 
     private final AppUserRepository userRepository;
     private final NimbusJwtEncoder encoder;
+    private final boolean allowUnenrolled;
 
-    StepUpTokenIssuer(AppUserRepository userRepository, RegisterwerkAuthProperties props) {
+    /** userId → last accepted TOTP time step (replay protection, RFC 6238 §5.2). */
+    private final Cache<UUID, Long> lastAcceptedStep = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(5))
+            .maximumSize(100_000)
+            .build();
+
+    /** userId → failed verification attempts (brute-force throttle). */
+    private final Cache<UUID, AtomicInteger> failedAttempts = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(15))
+            .maximumSize(100_000)
+            .build();
+
+    StepUpTokenIssuer(AppUserRepository userRepository, RegisterwerkAuthProperties props,
+                      @Value("${registerwerk.auth.step-up.allow-unenrolled:false}") boolean allowUnenrolled) {
         this.userRepository = userRepository;
+        this.allowUnenrolled = allowUnenrolled;
         byte[] key = props.getDevSecret().getBytes(StandardCharsets.UTF_8);
         this.encoder = new NimbusJwtEncoder(new ImmutableSecret<SecurityContext>(key));
     }
@@ -53,11 +87,22 @@ public class StepUpTokenIssuer {
         if (code == null || !code.matches("\\d{6}")) {
             throw new AccessDeniedException("Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
         }
+        AtomicInteger attempts = failedAttempts.get(userId, k -> new AtomicInteger());
+        if (attempts.get() >= MAX_ATTEMPTS) {
+            throw new AccessDeniedException("Too many failed step-up attempts. Try again later.");
+        }
 
         if (user.isTotpEnabled() && user.getTotpSecret() != null) {
-            verifyTotpCode(user.getTotpSecret(), code);
+            long acceptedStep = verifyTotpCode(userId, user.getTotpSecret(), code, attempts);
+            lastAcceptedStep.put(userId, acceptedStep);
+            failedAttempts.invalidate(userId);
+        } else if (!allowUnenrolled) {
+            // Without a second factor the step-up token is meaningless — refusing
+            // here forces enrolment before any dual-control action can be approved.
+            throw new AccessDeniedException(
+                    "Step-up requires TOTP enrolment. Enrol an authenticator app first " +
+                    "(POST /api/v1/auth/step-up/enroll).");
         }
-        // If TOTP not enrolled: any 6-digit code passes (dev/onboarding flow)
 
         Instant now = Instant.now();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
@@ -72,12 +117,29 @@ public class StepUpTokenIssuer {
         return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
 
-    private void verifyTotpCode(String base32Secret, String code) {
+    /** @return the accepted time step (for replay tracking) */
+    private long verifyTotpCode(UUID userId, String base32Secret, String code, AtomicInteger attempts) {
         long currentStep = Instant.now().getEpochSecond() / TOTP_STEP_SECONDS;
+        Long lastUsed = lastAcceptedStep.getIfPresent(userId);
         for (int delta = -TOTP_WINDOW; delta <= TOTP_WINDOW; delta++) {
-            if (generateTotp(base32Secret, currentStep + delta).equals(code)) return;
+            long step = currentStep + delta;
+            if (constantTimeEquals(generateTotp(base32Secret, step), code)) {
+                // RFC 6238 §5.2: a code at or before the last accepted step is a replay.
+                if (lastUsed != null && step <= lastUsed) {
+                    attempts.incrementAndGet();
+                    throw new AccessDeniedException(
+                            "This TOTP code was already used. Wait for the next code.");
+                }
+                return step;
+            }
         }
+        attempts.incrementAndGet();
         throw new AccessDeniedException("Invalid TOTP code. Check your authenticator app's time sync.");
+    }
+
+    private static boolean constantTimeEquals(String a, String b) {
+        return MessageDigest.isEqual(
+                a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }
 
     /** RFC 6238 / RFC 4226 HOTP — generates a 6-digit code for the given time step. */

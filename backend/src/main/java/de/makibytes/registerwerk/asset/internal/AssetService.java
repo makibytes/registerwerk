@@ -71,7 +71,11 @@ public class AssetService {
     public Asset updateAsset(UUID id, Asset patch, UUID actorId) {
         Asset existing = getAsset(id);
         if (patch.getName() != null) existing.setName(patch.getName());
-        if (patch.getIsin() != null) existing.setIsin(patch.getIsin());
+        if (patch.getIsin() != null) {
+            existing.setIsin(patch.getIsin().isBlank()
+                    ? null
+                    : de.makibytes.registerwerk.shared.IsinValidator.validateOrThrow(patch.getIsin()));
+        }
         if (patch.getPublicData() != null) existing.setPublicData(patch.getPublicData());
         if (patch.getJurisdiction() != null) existing.setJurisdiction(patch.getJurisdiction());
         if (patch.getChain() != null) existing.setChain(patch.getChain());
@@ -84,6 +88,10 @@ public class AssetService {
     private void validateCreate(Asset asset) {
         if (asset.getIssuerId() == null) {
             throw new IllegalArgumentException("issuerId is required to create an asset");
+        }
+        if (asset.getIsin() != null && !asset.getIsin().isBlank()) {
+            // A malformed ISIN would flow into MiFIR RTS 22 filings — reject at the door.
+            asset.setIsin(de.makibytes.registerwerk.shared.IsinValidator.validateOrThrow(asset.getIsin()));
         }
 
         boolean hasEitherDeploymentField = asset.getChain() != null || asset.getNetwork() != null;

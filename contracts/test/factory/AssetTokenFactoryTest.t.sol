@@ -9,7 +9,7 @@ import "../../src/tokens/EwpgERC1155.sol";
 
 contract AssetTokenFactoryTest is Test {
     AssetTokenFactory factory;
-    address registryWallet = address(0xREG);
+    address registryWallet = makeAddr("registry");
     bytes32 constant ASSET_ID = keccak256("asset-factory-1");
     bytes32 constant ASSET_ID_2 = keccak256("asset-factory-2");
 

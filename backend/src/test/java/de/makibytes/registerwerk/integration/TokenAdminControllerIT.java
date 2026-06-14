@@ -76,7 +76,8 @@ class TokenAdminControllerIT {
         assertThat(login.getStatusCode()).isEqualTo(HttpStatus.OK);
         bearerToken = login.getBody().token();
 
-        // Obtain step-up token (TOTP not enrolled for test user → any 6-digit code passes)
+        // Obtain step-up token (test profile sets step-up.allow-unenrolled=true;
+        // production refuses step-up without TOTP enrolment)
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(bearerToken);
         h.setContentType(MediaType.APPLICATION_JSON);

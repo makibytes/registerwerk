@@ -25,6 +25,8 @@ import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 import java.math.BigInteger;
 import java.util.List;
 import java.util.Optional;
@@ -51,6 +53,12 @@ public class EvmContractService {
     private final BlockchainClientRegistry clientRegistry;
     private final ChainConfigRepository    chainConfigRepository;
     private final WalletSigner             walletSigner;
+
+    /** eth_chainId per Web3j client — chain clients are long-lived singletons. */
+    private final ConcurrentHashMap<Web3j, Long> chainIdCache = new ConcurrentHashMap<>();
+
+    /** Per-sender submission locks: nonce fetch + sign + send must be atomic per wallet. */
+    private final ConcurrentHashMap<String, Object> senderLocks = new ConcurrentHashMap<>();
 
     public EvmContractService(BlockchainClientRegistry clientRegistry,
                                ChainConfigRepository chainConfigRepository,
@@ -122,26 +130,30 @@ public class EvmContractService {
      */
     public String submit(Web3j web3j, Credentials creds, String contractAddress,
                          String encodedData, BigInteger gasLimit) {
-        try {
-            BigInteger gasPrice = gasPrice(web3j);
-            BigInteger nonce = nonce(web3j, creds.getAddress());
+        // Per-sender lock: two concurrent submissions would otherwise read the same
+        // pending nonce and one transaction would silently replace the other.
+        synchronized (senderLock(creds.getAddress())) {
+            try {
+                BigInteger gasPrice = gasPrice(web3j);
+                BigInteger nonce = nonce(web3j, creds.getAddress());
 
-            RawTransaction tx = RawTransaction.createTransaction(
-                    nonce, gasPrice, gasLimit, contractAddress, encodedData);
+                RawTransaction tx = RawTransaction.createTransaction(
+                        nonce, gasPrice, gasLimit, contractAddress, encodedData);
 
-            byte[] signed = TransactionEncoder.signMessage(tx, creds);
-            EthSendTransaction sent = web3j
-                    .ethSendRawTransaction(Numeric.toHexString(signed))
-                    .send();
+                byte[] signed = TransactionEncoder.signMessage(tx, resolveChainId(web3j), creds);
+                EthSendTransaction sent = web3j
+                        .ethSendRawTransaction(Numeric.toHexString(signed))
+                        .send();
 
-            if (sent.hasError()) {
-                throw new RuntimeException("Transaction submission error: " + sent.getError().getMessage());
+                if (sent.hasError()) {
+                    throw new RuntimeException("Transaction submission error: " + sent.getError().getMessage());
+                }
+                return sent.getTransactionHash();
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException("EVM transaction submit error: " + e.getMessage(), e);
             }
-            return sent.getTransactionHash();
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException("EVM transaction submit error: " + e.getMessage(), e);
         }
     }
 
@@ -163,21 +175,31 @@ public class EvmContractService {
     public TransactionReceipt send(Web3j web3j, Credentials creds, String contractAddress,
                                    String encodedData, BigInteger gasLimit) {
         try {
-            BigInteger gasPrice = gasPrice(web3j);
-            BigInteger nonce = nonce(web3j, creds.getAddress());
+            EthSendTransaction sent;
+            synchronized (senderLock(creds.getAddress())) {
+                BigInteger gasPrice = gasPrice(web3j);
+                BigInteger nonce = nonce(web3j, creds.getAddress());
 
-            RawTransaction tx = RawTransaction.createTransaction(
-                    nonce, gasPrice, gasLimit, contractAddress, encodedData);
+                RawTransaction tx = RawTransaction.createTransaction(
+                        nonce, gasPrice, gasLimit, contractAddress, encodedData);
 
-            byte[] signed = TransactionEncoder.signMessage(tx, creds);
-            EthSendTransaction sent = web3j
-                    .ethSendRawTransaction(Numeric.toHexString(signed))
-                    .send();
+                byte[] signed = TransactionEncoder.signMessage(tx, resolveChainId(web3j), creds);
+                sent = web3j
+                        .ethSendRawTransaction(Numeric.toHexString(signed))
+                        .send();
+            }
 
             if (sent.hasError()) {
                 throw new RuntimeException("Transaction failed: " + sent.getError().getMessage());
             }
-            return waitForReceipt(web3j, sent.getTransactionHash());
+            TransactionReceipt receipt = waitForReceipt(web3j, sent.getTransactionHash());
+            if (!receipt.isStatusOK()) {
+                // A mined-but-reverted transaction also yields a receipt — callers of
+                // send() expect on-chain success, so a revert must surface as an error.
+                throw new RuntimeException("Transaction reverted on-chain: tx="
+                        + receipt.getTransactionHash() + " status=" + receipt.getStatus());
+            }
+            return receipt;
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -197,16 +219,19 @@ public class EvmContractService {
         String data = Numeric.cleanHexPrefix(binary)
                 + (encodedConstructor != null ? Numeric.cleanHexPrefix(encodedConstructor) : "");
         try {
-            BigInteger gasPrice = gasPrice(web3j);
-            BigInteger nonce = nonce(web3j, creds.getAddress());
+            EthSendTransaction sent;
+            synchronized (senderLock(creds.getAddress())) {
+                BigInteger gasPrice = gasPrice(web3j);
+                BigInteger nonce = nonce(web3j, creds.getAddress());
 
-            RawTransaction tx = RawTransaction.createContractTransaction(
-                    nonce, gasPrice, DEPLOY_GAS_LIMIT, BigInteger.ZERO, data);
+                RawTransaction tx = RawTransaction.createContractTransaction(
+                        nonce, gasPrice, DEPLOY_GAS_LIMIT, BigInteger.ZERO, data);
 
-            byte[] signed = TransactionEncoder.signMessage(tx, creds);
-            EthSendTransaction sent = web3j
-                    .ethSendRawTransaction(Numeric.toHexString(signed))
-                    .send();
+                byte[] signed = TransactionEncoder.signMessage(tx, resolveChainId(web3j), creds);
+                sent = web3j
+                        .ethSendRawTransaction(Numeric.toHexString(signed))
+                        .send();
+            }
 
             if (sent.hasError()) {
                 throw new RuntimeException("Deploy failed: " + sent.getError().getMessage());
@@ -261,6 +286,27 @@ public class EvmContractService {
         }
         // Add 20 % tip to land quickly
         return gp.getGasPrice().multiply(BigInteger.valueOf(12)).divide(BigInteger.TEN);
+    }
+
+    /**
+     * Resolves and caches the chain ID for EIP-155 replay-protected signing.
+     * Legacy (unprotected) signatures would be (a) rejected by chains that enforce
+     * EIP-155 and (b) replayable across every chain where the registry wallet
+     * exists — a forcedTransfer signed for one network must never be valid on another.
+     */
+    private long resolveChainId(Web3j web3j) {
+        return chainIdCache.computeIfAbsent(web3j, client -> {
+            try {
+                return client.ethChainId().send().getChainId().longValue();
+            } catch (Exception e) {
+                throw new RuntimeException("Could not resolve chain ID for EIP-155 signing: "
+                        + e.getMessage(), e);
+            }
+        });
+    }
+
+    private Object senderLock(String address) {
+        return senderLocks.computeIfAbsent(address.toLowerCase(java.util.Locale.ROOT), k -> new Object());
     }
 
     private BigInteger nonce(Web3j web3j, String address) throws Exception {

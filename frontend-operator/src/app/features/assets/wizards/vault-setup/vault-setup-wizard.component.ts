@@ -132,7 +132,7 @@ import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
                 @if (deploying) {
                   <span class="spinner"></span> Deploying…
                 } @else {
-                  <mat-icon>rocket_launch</mat-icon> Deploy vault
+                  <ng-container><mat-icon>rocket_launch</mat-icon> Deploy vault</ng-container>
                 }
               </button>
             </div>

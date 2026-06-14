@@ -173,7 +173,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Issued bond (end-of-lifecycle, fully distributed)
         Asset greenBond = asset("DEMO-BOND-MC-001",
                 "Meridian Green Bond 2024",
-                "DE000A3H2XK2",
+                "DE000A3H2XK1",
                 meridian.getId(),
                 TokenStandard.ERC20,
                 AssetStatus.ISSUED,
@@ -198,7 +198,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Issued equity (ERC-3643 with compliance, being managed)
         Asset equityToken = asset("DEMO-EQ-MC-001",
                 "Meridian Digital Equity Series A",
-                "DE000A3H2XK3",
+                "DE000A3H2XL9",
                 meridian.getId(),
                 TokenStandard.ERC3643,
                 AssetStatus.ISSUED,
@@ -221,7 +221,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Issued fund (Aurora, SPL on Solana)
         Asset solarFund = asset("DEMO-FUND-AF-001",
                 "Aurora Solar Infrastructure Fund",
-                "DE000A3H9PL5",
+                "DE000A3H9PL0",
                 aurora.getId(),
                 TokenStandard.SPL,
                 AssetStatus.ISSUED,
@@ -244,7 +244,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Issued infrastructure note (Aurora, ERC20, active settlement in progress)
         Asset infraNote = asset("DEMO-NOTE-AF-001",
                 "Aurora Infrastructure Note 2025-I",
-                "DE000A3H9PL6",
+                "DE000A3H9PM8",
                 aurora.getId(),
                 TokenStandard.ERC20,
                 AssetStatus.ISSUED,
@@ -269,7 +269,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Asset pending approval (in review, no deployment yet)
         Asset infraBond2025 = asset("DEMO-BOND-MC-002",
                 "Meridian Infrastructure Bond 2025",
-                "DE000A3H2XK9",
+                "DE000A3H2XN5",
                 meridian.getId(),
                 TokenStandard.ERC20,
                 AssetStatus.PENDING_APPROVAL,
@@ -404,7 +404,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Nordbank selling Green Bond — OPEN
         TradeListing listGBNordbank = listing(
                 greenBond.getId(), "DEMO-BOND-MC-001",
-                "Meridian Green Bond 2024", "DE000A3H2XK2",
+                "Meridian Green Bond 2024", "DE000A3H2XK1",
                 TradingAssetType.BOND, TokenStandard.ERC20, Chain.ETHEREUM,
                 nordbank.getId(), gbNordbank.getId(),
                 bd("2000"), bd("2000"), bd("1050.00"),
@@ -414,7 +414,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Elbe selling Equity Token — PARTIALLY_FILLED (3000 of 5000 sold)
         TradeListing listEQElbe = listing(
                 equityToken.getId(), "DEMO-EQ-MC-001",
-                "Meridian Digital Equity Series A", "DE000A3H2XK3",
+                "Meridian Digital Equity Series A", "DE000A3H2XL9",
                 TradingAssetType.EQUITY, TokenStandard.ERC3643, Chain.POLYGON,
                 elbe.getId(), eqElbe.getId(),
                 bd("5000"), bd("2000"), bd("120.00"),
@@ -424,7 +424,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Rheinische selling Solar Fund — OPEN
         TradeListing listSFRheinische = listing(
                 solarFund.getId(), "DEMO-FUND-AF-001",
-                "Aurora Solar Infrastructure Fund", "DE000A3H9PL5",
+                "Aurora Solar Infrastructure Fund", "DE000A3H9PL0",
                 TradingAssetType.FUND, TokenStandard.SPL, Chain.SOLANA,
                 rheinische.getId(), sfRheinische.getId(),
                 bd("4000"), bd("4000"), bd("98.50"),
@@ -434,7 +434,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Wuerttemberg selling Infra Note — OPEN (active settlement showcase)
         listing(
                 infraNote.getId(), "DEMO-NOTE-AF-001",
-                "Aurora Infrastructure Note 2025-I", "DE000A3H9PL6",
+                "Aurora Infrastructure Note 2025-I", "DE000A3H9PM8",
                 TradingAssetType.NOTE, TokenStandard.ERC20, Chain.ETHEREUM,
                 wuerttemberg.getId(), inWuerttemberg.getId(),
                 bd("5000"), bd("5000"), bd("502.50"),
@@ -446,7 +446,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Frankfurt bought 3000 equity from Elbe's partially-filled listing
         execution(listEQElbe.getId(),
                 TradingAssetType.EQUITY, TokenStandard.ERC3643, Chain.POLYGON,
-                equityToken.getId(), "DEMO-EQ-MC-001", "Meridian Digital Equity Series A", "DE000A3H2XK3",
+                equityToken.getId(), "DEMO-EQ-MC-001", "Meridian Digital Equity Series A", "DE000A3H2XL9",
                 elbe.getId(), eqElbe.getId(),
                 frankfurtDigital.getId(), eqFrankfurt.getId(),
                 OrderType.MARKET, bd("3000"), bd("3000"), bd("118.00"),
@@ -457,7 +457,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Nordbank bought 1000 Aurora Solar Fund (past filled listing — simulate history)
         TradeListing pastSFListing = listing(
                 solarFund.getId(), "DEMO-FUND-AF-001",
-                "Aurora Solar Infrastructure Fund", "DE000A3H9PL5",
+                "Aurora Solar Infrastructure Fund", "DE000A3H9PL0",
                 TradingAssetType.FUND, TokenStandard.SPL, Chain.SOLANA,
                 elbe.getId(), sfElbe.getId(),
                 bd("2000"), bd("0"), bd("96.00"),
@@ -466,7 +466,7 @@ public class DemoDataSeeder implements ApplicationRunner {
 
         execution(pastSFListing.getId(),
                 TradingAssetType.FUND, TokenStandard.SPL, Chain.SOLANA,
-                solarFund.getId(), "DEMO-FUND-AF-001", "Aurora Solar Infrastructure Fund", "DE000A3H9PL5",
+                solarFund.getId(), "DEMO-FUND-AF-001", "Aurora Solar Infrastructure Fund", "DE000A3H9PL0",
                 elbe.getId(), sfElbe.getId(),
                 nordbank.getId(), sfNordbank.getId(),
                 OrderType.LIMIT, bd("2000"), bd("2000"), bd("96.00"),
@@ -477,7 +477,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Rheinische bought 1500 Green Bond from a previous (now-filled) listing by Nordbank
         TradeListing pastGBListing = listing(
                 greenBond.getId(), "DEMO-BOND-MC-001",
-                "Meridian Green Bond 2024", "DE000A3H2XK2",
+                "Meridian Green Bond 2024", "DE000A3H2XK1",
                 TradingAssetType.BOND, TokenStandard.ERC20, Chain.ETHEREUM,
                 nordbank.getId(), gbNordbank.getId(),
                 bd("1500"), bd("0"), bd("1020.00"),
@@ -486,7 +486,7 @@ public class DemoDataSeeder implements ApplicationRunner {
 
         execution(pastGBListing.getId(),
                 TradingAssetType.BOND, TokenStandard.ERC20, Chain.ETHEREUM,
-                greenBond.getId(), "DEMO-BOND-MC-001", "Meridian Green Bond 2024", "DE000A3H2XK2",
+                greenBond.getId(), "DEMO-BOND-MC-001", "Meridian Green Bond 2024", "DE000A3H2XK1",
                 nordbank.getId(), gbNordbank.getId(),
                 rheinische.getId(), gbRheinische.getId(),
                 OrderType.MARKET, bd("1500"), bd("1500"), bd("1020.00"),
@@ -497,7 +497,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         // Wuerttemberg bought Aurora Infra Note from Frankfurt (pending settlement — recent)
         execution(listGBNordbank.getId(),
                 TradingAssetType.NOTE, TokenStandard.ERC20, Chain.ETHEREUM,
-                infraNote.getId(), "DEMO-NOTE-AF-001", "Aurora Infrastructure Note 2025-I", "DE000A3H9PL6",
+                infraNote.getId(), "DEMO-NOTE-AF-001", "Aurora Infrastructure Note 2025-I", "DE000A3H9PM8",
                 frankfurtDigital.getId(), inFrankfurt.getId(),
                 wuerttemberg.getId(), inWuerttemberg.getId(),
                 OrderType.MARKET, bd("3000"), bd("3000"), bd("501.00"),

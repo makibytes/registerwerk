@@ -12,6 +12,11 @@ public interface CorporateActionRepository extends JpaRepository<CorporateAction
 
     List<CorporateAction> findByAssetIdAndStatus(UUID assetId, CorporateAction.Status status);
 
+    List<CorporateAction> findByAssetId(UUID assetId);
+
+    /** Idempotency guard: has a corporate action already been created for this coupon payment? */
+    boolean existsByCouponPaymentId(UUID couponPaymentId);
+
     @Query("SELECT ca FROM CorporateAction ca WHERE ca.status NOT IN ('SETTLED','CLOSED','CANCELLED') AND ca.paymentDate <= :date")
     List<CorporateAction> findDueForSettlement(@Param("date") LocalDate date);
 

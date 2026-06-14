@@ -393,6 +393,10 @@ code {
   &.status-dissolved,
   &.status-redeemed     { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
   &.status-whitelisted  { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  // MiCA counterparty authorization (CASP register)
+  &.status-authorized     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-transitional   { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-not-authorized { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
   &.status-not-whitelisted { background: var(--rw-border-subtle); color: var(--rw-text-muted); }
 }
 

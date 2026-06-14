@@ -131,4 +131,59 @@ contract EwpgERC4626Test is Test {
         vm.expectRevert();
         factory.deployToken(4, "Fund", "F", ASSET_ID);
     }
+
+    // ── Regression: NAV must drive ACTUAL flows, not just views ───────────────
+
+    function test_depositMintsSharesAtStruckNav() public {
+        vm.prank(registry);
+        vault.setNavPerShare(2e18, block.timestamp, bytes32(0)); // NAV = 2.0
+
+        vm.startPrank(alice);
+        usdc.approve(address(vault), 1000e6);
+        uint256 shares = vault.deposit(1000e6, alice);
+        vm.stopPrank();
+
+        // 1000 assets at NAV 2.0 -> 500 shares. Before the fix, deposit() used the
+        // naive totalAssets/totalSupply ratio (1:1 on first deposit) -> 1000 shares.
+        assertEq(shares, 500e6, "deposit must settle at struck NAV");
+        assertEq(vault.balanceOf(alice), 500e6);
+    }
+
+    function test_donationDoesNotChangeConversionRate() public {
+        vm.prank(registry);
+        vault.setNavPerShare(1e18, block.timestamp, bytes32(0));
+
+        uint256 before = vault.previewDeposit(1000e6);
+        // Classic ERC-4626 inflation attack: donate underlying directly to the vault
+        vm.prank(bob);
+        usdc.transfer(address(vault), 50_000e6);
+
+        assertEq(vault.previewDeposit(1000e6), before, "NAV conversion must be donation-proof");
+    }
+
+    function test_depositToNonWhitelistedReverts() public {
+        address mallory = makeAddr("mallory");
+        usdc.transfer(mallory, 1000e6);
+        vm.startPrank(mallory);
+        usdc.approve(address(vault), 1000e6);
+        vm.expectRevert("EwpgERC4626: recipient not whitelisted");
+        vault.deposit(1000e6, mallory);
+        vm.stopPrank();
+    }
+
+    function test_depositCapNotBypassableViaMint() public {
+        vm.startPrank(registry);
+        vault.setNavPerShare(1e18, block.timestamp, bytes32(0));
+        vault.setDepositCap(1000e6);
+        vm.stopPrank();
+
+        // maxMint must mirror the remaining asset capacity
+        assertEq(vault.maxMint(alice), 1000e6, "maxMint must reflect deposit cap");
+
+        vm.startPrank(alice);
+        usdc.approve(address(vault), 2000e6);
+        vm.expectRevert(); // ERC4626ExceededMaxMint
+        vault.mint(1001e6, alice);
+        vm.stopPrank();
+    }
 }

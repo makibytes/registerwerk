@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MatDialogRef, MatDialog } from '@angular/material/dialog';
@@ -52,6 +52,7 @@ export interface AddIssuerData {
 export class AddIssuerDialogComponent {
   private readonly dialogRef = inject(MatDialogRef<AddIssuerDialogComponent>);
   private readonly dialog = inject(MatDialog);
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly fb = inject(FormBuilder);
 
   form = this.fb.group({
@@ -65,7 +66,10 @@ export class AddIssuerDialogComponent {
       AddressPickerDialogComponent,
       { data: { mode: 'CONTRACT', title: 'Select claim issuer contract' }, width: '560px' }
     ).afterClosed().subscribe(addr => {
-      if (addr) this.form.patchValue({ issuerAddress: addr });
+      if (addr) {
+        this.form.patchValue({ issuerAddress: addr });
+        this.cdr.markForCheck(); // zoneless: keep view state consistent per project convention
+      }
     });
   }
 

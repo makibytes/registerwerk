@@ -13,8 +13,9 @@ public interface IctIncidentRepository extends JpaRepository<IctIncident, UUID> 
 
     @Query("SELECT i FROM IctIncident i WHERE i.initialReportedAt IS NULL " +
            "AND i.initialReportDeadline IS NOT NULL " +
+           "AND i.initialReportDeadline < :now " +
            "AND i.status NOT IN ('CLOSED','REPORTED_TO_AUTHORITY')")
-    List<IctIncident> findOverdueInitialReports();
+    List<IctIncident> findOverdueInitialReports(Instant now);
 
     @Query("SELECT i FROM IctIncident i WHERE i.finalReportedAt IS NULL " +
            "AND i.finalReportDeadline IS NOT NULL " +

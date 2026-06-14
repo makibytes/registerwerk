@@ -47,11 +47,10 @@ class OnchainIdentityReceiptListener {
     @Scheduled(fixedDelay = 30_000)
     @Transactional
     public void resolvePendingIdentities() {
-        List<OnchainIdentity> pending = identityRepository.findAll().stream()
-                .filter(id -> id.getIdentityAddress() != null
-                        && id.getIdentityAddress().startsWith("0x-PENDING-")
-                        && id.getDeployedByTx() != null)
-                .toList();
+        // Indexed prefix query — this poller runs every 30s; a full-table scan
+        // with in-memory filtering would grow linearly with the identity count.
+        List<OnchainIdentity> pending = identityRepository
+                .findByIdentityAddressStartingWithAndDeployedByTxIsNotNull("0x-PENDING-");
 
         if (pending.isEmpty()) return;
         log.debug("Checking {} pending ONCHAINID deployments", pending.size());

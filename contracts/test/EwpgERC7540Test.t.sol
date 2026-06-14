@@ -164,4 +164,60 @@ contract EwpgERC7540Test is Test {
         EwpgERC7540 deployed = EwpgERC7540(vaultAddr);
         assertEq(deployed.assetId(), ASSET_ID);
     }
+
+    // ── Regression: redemption authorization, NAV requirement, self-custody ───
+
+    function test_strangerCannotRequestRedeemForOthers() public {
+        _depositFor(alice, 1000e6);
+
+        address mallory = makeAddr("mallory");
+        vm.prank(mallory);
+        vm.expectRevert(); // ERC20InsufficientAllowance
+        vault.requestRedeem(100e6, mallory, alice);
+    }
+
+    function test_approvedOperatorCanRequestRedeem() public {
+        _depositFor(alice, 1000e6);
+        uint256 aliceShares = vault.balanceOf(alice);
+
+        address operator = makeAddr("operator");
+        vm.prank(alice);
+        vault.approve(operator, aliceShares);
+
+        vm.prank(operator);
+        uint256 requestId = vault.requestRedeem(aliceShares, alice, alice);
+
+        // Shares moved into vault self-custody (exempt from whitelist)
+        assertEq(vault.balanceOf(alice), 0);
+        assertEq(vault.balanceOf(address(vault)), aliceShares);
+        (, , address owner, bool pending) = vault.redeemRequest(requestId);
+        assertEq(owner, alice);
+        assertTrue(pending);
+    }
+
+    function test_fulfillWithoutNavStrikeReverts() public {
+        // No NAV ever struck — fulfilling a deposit at the implicit 1:1
+        // pre-strike rate must be impossible for a regulated fund.
+        vm.startPrank(alice);
+        usdc.approve(address(vault), 1000e6);
+        uint256 requestId = vault.requestDeposit(1000e6, alice, alice);
+        vm.stopPrank();
+
+        vm.prank(registry);
+        vm.expectRevert("EwpgERC7540: NAV not struck");
+        vault.fulfillDepositRequest(requestId);
+    }
+
+    // ── Helpers for regression tests ──────────────────────────────────────────
+
+    function _depositFor(address investor, uint256 assets) internal {
+        vm.prank(registry);
+        vault.setNavPerShare(1e18, block.timestamp, bytes32(0));
+        vm.startPrank(investor);
+        usdc.approve(address(vault), assets);
+        uint256 requestId = vault.requestDeposit(assets, investor, investor);
+        vm.stopPrank();
+        vm.prank(registry);
+        vault.fulfillDepositRequest(requestId);
+    }
 }

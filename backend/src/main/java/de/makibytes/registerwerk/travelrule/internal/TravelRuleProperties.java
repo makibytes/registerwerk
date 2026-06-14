@@ -8,15 +8,11 @@ import org.springframework.stereotype.Component;
 public class TravelRuleProperties {
 
     private String protocol = "NOOP";
-    private double thresholdEur = 1000.0;
     private Notabene notabene = new Notabene();
     private Trp trp = new Trp();
 
     public String getProtocol() { return protocol; }
     public void setProtocol(String protocol) { this.protocol = protocol; }
-
-    public double getThresholdEur() { return thresholdEur; }
-    public void setThresholdEur(double thresholdEur) { this.thresholdEur = thresholdEur; }
 
     public Notabene getNotabene() { return notabene; }
     public void setNotabene(Notabene notabene) { this.notabene = notabene; }

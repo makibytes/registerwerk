@@ -23,13 +23,17 @@ class ProductionReadinessCheck {
 
     private final String kekProviderName;
 
+    private final boolean stepUpAllowUnenrolled;
+
     ProductionReadinessCheck(
             RegisterwerkAuthProperties authProps,
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri,
-            @Value("${registerwerk.wallet.kek-provider:}") String kekProviderName) {
+            @Value("${registerwerk.wallet.kek-provider:}") String kekProviderName,
+            @Value("${registerwerk.auth.step-up.allow-unenrolled:false}") boolean stepUpAllowUnenrolled) {
         this.authProps = authProps;
         this.issuerUri = issuerUri;
         this.kekProviderName = kekProviderName;
+        this.stepUpAllowUnenrolled = stepUpAllowUnenrolled;
     }
 
     @PostConstruct
@@ -66,6 +70,12 @@ class ProductionReadinessCheck {
                 throw new IllegalStateException(
                         "REGISTERWERK_WALLET_KEK_PROVIDER must be set to AWS_KMS, AZURE_KEY_VAULT, " +
                         "or GCP_KMS in production mode. The EnvVarKekProvider is not safe for production.");
+            }
+            if (stepUpAllowUnenrolled) {
+                throw new IllegalStateException(
+                        "registerwerk.auth.step-up.allow-unenrolled must be false in production mode — " +
+                        "it bypasses the TOTP second factor that the dual-control (Vieraugenprinzip) " +
+                        "actions depend on.");
             }
             log.info("Production readiness checks passed.");
         }

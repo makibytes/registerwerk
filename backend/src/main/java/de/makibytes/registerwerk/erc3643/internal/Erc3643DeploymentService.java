@@ -329,9 +329,6 @@ public class Erc3643DeploymentService {
     public void issueKycClaim(UUID onchainIdentityId, long claimTopic) {
         log.info("Issuing claim topic={} to identity={}", claimTopic, onchainIdentityId);
 
-        identityRepository.findById(onchainIdentityId)
-            .orElseThrow(() -> new EntityNotFoundException("OnchainIdentity", onchainIdentityId));
-
         OnchainIdentity identity = identityRepository.findById(onchainIdentityId)
                 .orElseThrow(() -> new EntityNotFoundException("OnchainIdentity", onchainIdentityId));
 

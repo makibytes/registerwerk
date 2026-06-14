@@ -35,6 +35,30 @@ public class AssetHolder {
     @Column(name = "acquisition_date")
     private LocalDate acquisitionDate;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "entry_type", nullable = false, length = 20)
+    private EntryType entryType = EntryType.COLLECTIVE;
+
+    /** §17(2) eWpG: pseudonymous unique identifier for single-entry holders. */
+    @Column(name = "holder_reference", length = 64)
+    private String holderReference;
+
+    /** §19(2) eWpG: register statements are owed only toward consumer holders. */
+    @Column(name = "is_consumer", nullable = false)
+    private Boolean isConsumer = false;
+
+    @Column(name = "third_party_rights")
+    private String thirdPartyRights;
+
+    @Column(name = "disposal_restrictions")
+    private String disposalRestrictions;
+
+    @Column(name = "legal_capacity_note")
+    private String legalCapacityNote;
+
+    @Column(name = "last_statement_at")
+    private Instant lastStatementAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -72,4 +96,19 @@ public class AssetHolder {
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+
+    public EntryType getEntryType() { return entryType; }
+    public void setEntryType(EntryType entryType) { this.entryType = entryType; }
+    public String getHolderReference() { return holderReference; }
+    public void setHolderReference(String holderReference) { this.holderReference = holderReference; }
+    public Boolean getIsConsumer() { return isConsumer; }
+    public void setIsConsumer(Boolean isConsumer) { this.isConsumer = isConsumer; }
+    public String getThirdPartyRights() { return thirdPartyRights; }
+    public void setThirdPartyRights(String thirdPartyRights) { this.thirdPartyRights = thirdPartyRights; }
+    public String getDisposalRestrictions() { return disposalRestrictions; }
+    public void setDisposalRestrictions(String disposalRestrictions) { this.disposalRestrictions = disposalRestrictions; }
+    public String getLegalCapacityNote() { return legalCapacityNote; }
+    public void setLegalCapacityNote(String legalCapacityNote) { this.legalCapacityNote = legalCapacityNote; }
+    public Instant getLastStatementAt() { return lastStatementAt; }
+    public void setLastStatementAt(Instant lastStatementAt) { this.lastStatementAt = lastStatementAt; }
 }

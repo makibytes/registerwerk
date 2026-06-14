@@ -33,6 +33,7 @@ class TokenAdminServiceTest {
     @Mock private BlockchainClientRegistry clientRegistry;
     @Mock private EvmContractService evmContractService;
     @Mock private BlockchainTransactionService txService;
+    @Mock private de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate;
 
     @InjectMocks
     private TokenAdminService tokenAdminService;

@@ -245,6 +245,9 @@ registerwerk:
   mail:
     from: ${MAIL_USERNAME:noreply@registerwerk.example.com}
   auth:
+    # Built-in login brute-force throttle (operator path bypasses Kong rate limiting)
+    login-max-attempts: ${REGISTERWERK_AUTH_LOGIN_MAX_ATTEMPTS:5}
+    login-lockout-minutes: ${REGISTERWERK_AUTH_LOGIN_LOCKOUT_MINUTES:15}
     entra-enabled: ${ENTRA_ENABLED:false}
     dev-secret: ${JWT_DEV_SECRET:registerwerk-dev-jwt-secret-change-in-production!!}
     token-ttl-seconds: 28800
@@ -252,6 +255,9 @@ registerwerk:
       email: ${DEFAULT_ADMIN_EMAIL:}
       password: ${DEFAULT_ADMIN_PASSWORD:}
   seed-demo-data: ${SEED_DEMO_DATA:false}
+  drift:
+    check-interval-ms: ${REGISTERWERK_DRIFT_CHECK_INTERVAL_MS:900000}
+    batch-size: ${REGISTERWERK_DRIFT_BATCH_SIZE:500}
   trading:
     enabled: ${REGISTERWERK_TRADING_ENABLED:true}
     venues:
@@ -271,7 +277,11 @@ registerwerk:
         api-key: ${REGISTERWERK_TRADING_VENUE_TALOS_API_KEY:}
   travel-rule:
     protocol: ${REGISTERWERK_TRAVEL_RULE_PROTOCOL:NOOP}
-    threshold-eur: ${REGISTERWERK_TRAVEL_RULE_THRESHOLD_EUR:1000}
+    # Art. 14(5) TFR: ownership verification threshold for self-hosted addresses.
+    # NOTE: this is NOT a messaging threshold — TFR has no de minimis for CASP-to-CASP transfers.
+    self-hosted-verification-threshold-eur: ${REGISTERWERK_TRAVEL_RULE_SELF_HOSTED_VERIFICATION_THRESHOLD_EUR:1000}
+    # EU-wide end of the MiCA transitional period (ESMA statement, 17 Apr 2026)
+    mica-enforcement-date: ${REGISTERWERK_TRAVEL_RULE_MICA_ENFORCEMENT_DATE:2026-07-01}
     notabene:
       base-url: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_BASE_URL:https://api.notabene.id}
       api-key: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_API_KEY:}

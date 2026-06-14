@@ -50,6 +50,14 @@ public class CouponPaymentJob implements Job {
 
         for (AssetCouponPayment payment : due) {
             try {
+                // Idempotency: settlement confirms asynchronously (and only some token
+                // standards flip the coupon to PAID), so the SCHEDULED row may still be
+                // visible on the next run. Without this guard every daily run would
+                // create another CorporateAction and pay the coupon to all holders again.
+                if (corporateActionRepository.existsByCouponPaymentId(payment.getId())) {
+                    log.debug("CouponPaymentJob: action already exists for payment id={}, skipping.", payment.getId());
+                    continue;
+                }
                 CorporateAction action = new CorporateAction();
                 action.setAssetId(payment.getAssetId());
                 action.setActionType(CorporateAction.ActionType.COUPON);

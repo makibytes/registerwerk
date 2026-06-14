@@ -208,7 +208,7 @@ public class SolanaTokenAdminService {
         try {
             Transaction tx = new Transaction();
             tx.addInstruction(ix);
-            String blockhash = client.getApi().getRecentBlockhash();
+            String blockhash = client.getApi().getLatestBlockhash().getValue().getBlockhash();
             tx.setRecentBlockHash(blockhash);
             tx.sign(List.of(payer));
             return client.getApi().sendTransaction(tx, List.of(payer), blockhash);

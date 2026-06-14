@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -361,6 +361,7 @@ export class TokenAdminPanelComponent {
   @Output() forceApprove = new EventEmitter<ForceApproveAction>();
 
   private readonly dialog = inject(MatDialog);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   mintForm = {
     recipient: '',
@@ -388,7 +389,12 @@ export class TokenAdminPanelComponent {
     this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
       AddressPickerDialogComponent,
       { data: { mode: 'WALLET', title: 'Select wallet' }, width: '560px' }
-    ).afterClosed().subscribe(addr => { if (addr) setter(addr); });
+    ).afterClosed().subscribe(addr => {
+      if (addr) {
+        setter(addr);
+        this.cdr.markForCheck(); // zoneless: picked address must re-render
+      }
+    });
   }
 
   isValidMintForm(): boolean {

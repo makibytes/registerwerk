@@ -23,11 +23,15 @@ import java.util.UUID;
 /**
  * DORA compliance service — ICT incident lifecycle and third-party provider register.
  *
- * Reporting timelines per DORA Art. 19 para. 4 (major incidents):
- *   4h  — classify and initial notification
- *   24h — initial report to competent authority
- *   72h — detailed (intermediate) report
- *   1 month — final root-cause report
+ * Reporting timelines per DORA Art. 19(4) and RTS (EU) 2025/301 (major incidents):
+ *   initial notification — within 4h of classification, no later than 24h from awareness
+ *   intermediate report  — within 72h of the initial notification
+ *   final report         — within 1 month of the intermediate report
+ *
+ * <p>This service tracks the two report milestones exposed by the API (initial/final).
+ * The final deadline is set conservatively to one month from detection — earlier than
+ * the theoretical latest (24h + 72h + 1 month chained off submissions), so a met
+ * deadline here is always compliant.
  */
 @Service
 public class DoraService {
@@ -61,10 +65,12 @@ public class DoraService {
         incident.setCreatedBy(createdBy);
         incident.setDetectedAt(Instant.now());
 
-        // DORA Art. 19 — compute deadlines for major incidents
+        // DORA Art. 19 / RTS (EU) 2025/301 — compute deadlines for major incidents.
+        // 72h is the INTERMEDIATE report deadline, not the final one; the final
+        // root-cause report is due one month later. Conservative: from detection.
         if (severity == Severity.MAJOR) {
-            incident.setInitialReportDeadline(Instant.now().plus(24, ChronoUnit.HOURS));
-            incident.setFinalReportDeadline(Instant.now().plus(72, ChronoUnit.HOURS));
+            incident.setInitialReportDeadline(incident.getDetectedAt().plus(24, ChronoUnit.HOURS));
+            incident.setFinalReportDeadline(incident.getDetectedAt().plus(30, ChronoUnit.DAYS));
         }
 
         IctIncident saved = incidentRepository.save(incident);
@@ -124,15 +130,16 @@ public class DoraService {
     @Scheduled(cron = "0 0 7 * * *")
     @Transactional(readOnly = true)
     public void checkDeadlines() {
-        List<IctIncident> overdueInitial = incidentRepository.findOverdueInitialReports();
+        Instant now = Instant.now();
+        List<IctIncident> overdueInitial = incidentRepository.findOverdueInitialReports(now);
         if (!overdueInitial.isEmpty()) {
             log.error("DORA DEADLINE BREACH: {} incident(s) have missed the 24h initial report deadline: {}",
                     overdueInitial.size(),
                     overdueInitial.stream().map(i -> i.getId().toString()).toList());
         }
-        List<IctIncident> overdueFinal = incidentRepository.findOverdueFinalReports(Instant.now());
+        List<IctIncident> overdueFinal = incidentRepository.findOverdueFinalReports(now);
         if (!overdueFinal.isEmpty()) {
-            log.error("DORA DEADLINE BREACH: {} incident(s) have missed the 72h detailed report deadline: {}",
+            log.error("DORA DEADLINE BREACH: {} incident(s) have missed the final report deadline (1 month): {}",
                     overdueFinal.size(),
                     overdueFinal.stream().map(i -> i.getId().toString()).toList());
         }

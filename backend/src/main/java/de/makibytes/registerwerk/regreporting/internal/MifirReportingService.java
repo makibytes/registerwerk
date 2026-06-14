@@ -50,11 +50,13 @@ public class MifirReportingService {
     public void generateDailyReport() {
         LocalDate reportingDate = LocalDate.now().minusDays(1);
         log.info("MiFIR RTS 22: generating daily report for date={}", reportingDate);
-        generateForJurisdiction("DE_BAFIN", reportingDate);
-        generateForJurisdiction("FR_AMF", reportingDate);
+        // Each trade is reported once, to the NCA competent for the asset's
+        // jurisdiction (MiFIR Art. 26) — never to multiple authorities.
+        generateForJurisdiction("DE_BAFIN", "DE_EWPG", reportingDate);
+        generateForJurisdiction("FR_AMF", "FR_AMF", reportingDate);
     }
 
-    private void generateForJurisdiction(String jurisdiction, LocalDate reportingDate) {
+    private void generateForJurisdiction(String authority, String assetJurisdiction, LocalDate reportingDate) {
         var rows = jdbc.queryForList("""
             SELECT te.id, te.asset_id, te.buyer_entity_id, te.seller_entity_id,
                    te.unit_price AS price, te.executed_quantity AS quantity,
@@ -63,28 +65,29 @@ public class MifirReportingService {
             JOIN asset a ON a.id = te.asset_id
             WHERE DATE(te.created_at) = ?
               AND a.status = 'ISSUED'
+              AND a.jurisdiction = ?
             ORDER BY te.created_at
-            """, reportingDate);
+            """, reportingDate, assetJurisdiction);
 
         if (rows.isEmpty()) {
-            log.debug("MiFIR RTS 22 {}: no trades on {}", jurisdiction, reportingDate);
+            log.debug("MiFIR RTS 22 {}: no trades on {}", authority, reportingDate);
             return;
         }
 
-        String xml = buildRts22Xml(rows, jurisdiction, reportingDate);
+        String xml = buildRts22Xml(rows, reportingDate);
         byte[] xmlBytes = xml.getBytes(StandardCharsets.UTF_8);
-        UUID submissionId = submissions.persist("MIFIR_RTS22", jurisdiction, reportingDate, reportingDate);
-        documentStore.store(submissionId, "MIFIR_RTS22", jurisdiction, reportingDate, xmlBytes);
+        UUID submissionId = submissions.persist("MIFIR_RTS22", authority, reportingDate, reportingDate);
+        documentStore.store(submissionId, "MIFIR_RTS22", authority, reportingDate, xmlBytes);
 
-        SubmissionResult result = submissionGateway.submit(submissionId, "MIFIR_RTS22", jurisdiction, xmlBytes);
+        SubmissionResult result = submissionGateway.submit(submissionId, "MIFIR_RTS22", authority, xmlBytes);
         applyResult(submissionId, result);
         log.info("MiFIR RTS 22 {}: {} trades filed, submission id={} status={}",
-                jurisdiction, rows.size(), submissionId, result.status());
+                authority, rows.size(), submissionId, result.status());
     }
 
     @SuppressWarnings("unchecked")
     private String buildRts22Xml(java.util.List<java.util.Map<String, Object>> rows,
-                                  String jurisdiction, LocalDate reportingDate) {
+                                  LocalDate reportingDate) {
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         sb.append("<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:auth.016.001.03\">\n");
@@ -101,7 +104,7 @@ public class MifirReportingService {
             sb.append("        <FinInstrm><Id><ISIN>").append(RegReportSubmissions.esc(row.get("isin"))).append("</ISIN></Id></FinInstrm>\n");
             sb.append("        <Qty><Unit>").append(RegReportSubmissions.esc(row.get("quantity"))).append("</Unit></Qty>\n");
             sb.append("        <Pric><Pric><Amt Ccy=\"EUR\">").append(RegReportSubmissions.esc(row.get("price"))).append("</Amt></Pric></Pric>\n");
-            sb.append("        <TradDt>").append(RegReportSubmissions.esc(row.get("executed_at"))).append("</TradDt>\n");
+            sb.append("        <TradDt>").append(toIso8601(row.get("executed_at"))).append("</TradDt>\n");
             sb.append("      </New>\n");
             sb.append("    </Tx>\n");
         }
@@ -109,6 +112,14 @@ public class MifirReportingService {
         sb.append("  </FinInstrmRptgTxRpt>\n");
         sb.append("</Document>");
         return sb.toString();
+    }
+
+    /** RTS 22 requires ISO-8601 UTC timestamps; JDBC Timestamp.toString() is not compliant. */
+    private static String toIso8601(Object executedAt) {
+        if (executedAt instanceof java.sql.Timestamp ts) {
+            return ts.toInstant().toString();
+        }
+        return RegReportSubmissions.esc(executedAt);
     }
 
     private void applyResult(UUID submissionId, SubmissionResult result) {

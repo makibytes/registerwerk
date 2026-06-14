@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.auth.internal.AuthService;
+import de.makibytes.registerwerk.auth.internal.LoginAttemptLimiter;
 import de.makibytes.registerwerk.auth.internal.AuthService.LoginResult;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.shared.InvalidCredentialsException;
@@ -36,13 +37,15 @@ class AuthServiceTest {
     @Mock private JwtMintingService minter;
 
     private RegisterwerkAuthProperties props;
+    private LoginAttemptLimiter attemptLimiter;
     private AuthService service;
 
     @BeforeEach
     void setUp() {
         props = new RegisterwerkAuthProperties();
         props.setEntraEnabled(false);
-        service = new AuthService(users, encoder, minter, props);
+        attemptLimiter = new LoginAttemptLimiter(5, 15);
+        service = new AuthService(users, encoder, minter, props, attemptLimiter);
     }
 
     @Test
@@ -126,5 +129,56 @@ class AuthServiceTest {
         user.setRole(AppUserRole.REGISTRY_ADMIN);
         user.setEnabled(true);
         return user;
+    }
+
+    @Test
+    @DisplayName("Unknown email burns a dummy hash comparison (anti-enumeration)")
+    void unknownEmail_burnsDummyComparison() {
+        when(users.findByEmailIgnoreCase("ghost@local")).thenReturn(Optional.empty());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("ghost@local", "whatever"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
+
+        // The encoder must still be exercised so timing does not reveal account existence.
+        verify(encoder).matches(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("Account locks after max failed attempts — even the correct password is rejected")
+    void bruteForce_locksAccount() {
+        AppUser user = buildUser();
+        when(users.findByEmailIgnoreCase("admin@local")).thenReturn(Optional.of(user));
+        when(encoder.matches("wrong", "hash")).thenReturn(false);
+
+        for (int i = 0; i < 5; i++) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
+        }
+
+        // Locked: correct password is rejected without touching the encoder again.
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "secret"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
+    }
+
+    @Test
+    @DisplayName("Successful login resets the failure counter")
+    void successfulLogin_resetsCounter() {
+        AppUser user = buildUser();
+        when(users.findByEmailIgnoreCase("admin@local")).thenReturn(Optional.of(user));
+        when(encoder.matches("wrong", "hash")).thenReturn(false);
+        when(encoder.matches("secret", "hash")).thenReturn(true);
+        when(minter.mint(user)).thenReturn("jwt-token");
+        when(users.save(any())).thenReturn(user);
+
+        for (int i = 0; i < 4; i++) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
+        }
+        LoginResult result = service.login("admin@local", "secret");
+        assertThat(result.token()).isEqualTo("jwt-token");
+
+        // Counter cleared: more failures allowed before lockout kicks in again.
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
     }
 }
