@@ -7,7 +7,7 @@ eWpG-compliant electronic securities registry. Issues and manages tokenized secu
 ## Monorepo Structure
 
 ```
-backend/              Spring Boot 4 / Java 25 — single API monolith
+backend/              Spring Boot 4.1 / Java 25 — single API monolith (Spring Modulith 2.1)
 contracts/            Foundry smart contracts (EVM + confidential)
 frontend-operator/    Angular 21 — operator admin portal (:4200)
 frontend-customer/    Angular 21 — customer portal (:4201)
@@ -30,8 +30,9 @@ docker-compose.yml    / .env.example
 
 ## Backend
 
-**Stack:** Java 25, Spring Boot 4, Spring Security 7, JPA/Hibernate, Flyway, Caffeine (30s TTL), Web3j (EVM), Solanaj.
-Build: `./mvnw verify` — runs unit + integration tests + JaCoCo (70% line coverage gate).
+**Stack:** Java 25, Spring Boot 4.1, Spring Security 7, Spring Modulith 2.1, JPA/Hibernate, Flyway, Caffeine (30s TTL), Jackson 3 (tools.jackson), Web3j (EVM), Solanaj.
+Build: `./mvnw verify` — runs unit + integration tests + JaCoCo (30% line coverage gate).
+**Lazy datasource:** `spring.datasource.connection-fetch=lazy` — defers physical DB connection until first SQL statement.
 
 **Package root:** `de.makibytes.registerwerk`
 

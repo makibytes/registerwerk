@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal.deploy;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.Network;

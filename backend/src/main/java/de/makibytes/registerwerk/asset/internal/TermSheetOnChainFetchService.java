@@ -37,9 +37,9 @@ import org.web3j.protocol.core.methods.response.EthCall;
 import org.web3j.utils.Numeric;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.URI;
-import java.net.URLConnection;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -49,6 +49,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -97,8 +98,33 @@ public class TermSheetOnChainFetchService {
         this.contractAddressConfig = contractAddressConfig;
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(HTTP_TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
+    }
+
+    private static final Set<String> ALLOWED_SCHEMES = Set.of("https", "http");
+    private static final int MAX_REDIRECTS = 5;
+
+    static void rejectInternalAddress(URI uri) {
+        String host = uri.getHost();
+        if (host == null) {
+            throw new IllegalArgumentException("SSRF blocked: URL has no host — " + uri);
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !ALLOWED_SCHEMES.contains(scheme.toLowerCase())) {
+            throw new IllegalArgumentException("SSRF blocked: disallowed scheme — " + uri);
+        }
+        try {
+            for (InetAddress addr : InetAddress.getAllByName(host)) {
+                if (addr.isLoopbackAddress() || addr.isSiteLocalAddress()
+                        || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()) {
+                    throw new IllegalArgumentException(
+                            "SSRF blocked: resolved to non-routable address " + addr.getHostAddress() + " — " + uri);
+                }
+            }
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException("SSRF blocked: cannot resolve host — " + uri, e);
+        }
     }
 
     /**
@@ -295,19 +321,36 @@ public class TermSheetOnChainFetchService {
             if (resolvedUrl.startsWith("data:")) {
                 return decodeDataUri(resolvedUrl);
             }
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(resolvedUrl))
-                .timeout(HTTP_TIMEOUT)
-                .GET()
-                .build();
-            HttpResponse<byte[]> response = httpClient.send(request,
-                HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException(
-                    "HTTP " + response.statusCode() + " fetching term sheet: " + resolvedUrl);
+            URI target = URI.create(resolvedUrl);
+            rejectInternalAddress(target);
+
+            for (int hops = 0; hops <= MAX_REDIRECTS; hops++) {
+                var request = HttpRequest.newBuilder()
+                        .uri(target)
+                        .timeout(HTTP_TIMEOUT)
+                        .GET()
+                        .build();
+                var response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+                int status = response.statusCode();
+
+                if (status >= 300 && status < 400) {
+                    String location = response.headers().firstValue("Location").orElse(null);
+                    if (location == null) {
+                        throw new IllegalStateException("Redirect " + status + " without Location header");
+                    }
+                    target = target.resolve(location);
+                    rejectInternalAddress(target);
+                    continue;
+                }
+
+                if (status < 200 || status >= 300) {
+                    throw new IllegalStateException(
+                            "HTTP " + status + " fetching term sheet: " + target);
+                }
+                log.info("Downloaded {} bytes from {}", response.body().length, target);
+                return response.body();
             }
-            log.info("Downloaded {} bytes from {}", response.body().length, resolvedUrl);
-            return response.body();
+            throw new IllegalStateException("Too many redirects fetching term sheet: " + resolvedUrl);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while downloading term sheet", e);

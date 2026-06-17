@@ -14,7 +14,6 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 /**
@@ -33,7 +32,8 @@ final class RegisterStatementPdfRenderer {
     private RegisterStatementPdfRenderer() {}
 
     static byte[] render(Asset asset, AssetHolder holder, LegalEntity investor,
-                         StatementTrigger trigger, String registryName, String registryCountry) {
+                         StatementTrigger trigger, String registryName, String registryCountry,
+                         LocalDate issuedDate) {
         try (PDDocument doc = new PDDocument()) {
             PDPage page = new PDPage(PDRectangle.A4);
             doc.addPage(page);
@@ -53,7 +53,7 @@ final class RegisterStatementPdfRenderer {
                 y -= 28;
 
                 write(c, margin, y, fontRegular, 10,
-                        "Ausstellungsdatum / Issued: " + LocalDate.now().format(DATE_FMT));
+                        "Ausstellungsdatum / Issued: " + issuedDate.format(DATE_FMT));
                 y -= 14;
                 write(c, margin, y, fontRegular, 10, "Anlass / Trigger: " + triggerLabel(trigger));
                 y -= 14;
@@ -123,7 +123,7 @@ final class RegisterStatementPdfRenderer {
                 c.stroke();
                 write(c, margin, footerY, fontRegular, 8,
                         "Dieses Dokument wurde elektronisch in Textform erstellt (§19 eWpG). "
-                                + "Registerwerk eWpG-Registry — " + safe(registryCountry));
+                                + safe(registryName) + " — " + safe(registryCountry));
             }
 
             ByteArrayOutputStream bos = new ByteArrayOutputStream();

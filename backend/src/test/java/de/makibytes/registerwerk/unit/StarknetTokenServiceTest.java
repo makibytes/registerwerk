@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.unit;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetTokenService;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.chain.api.ChainConfig;

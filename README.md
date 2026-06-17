@@ -46,7 +46,7 @@ A German Electronic Securities Act (eWpG) compliant crypto asset registry built 
 ### Prerequisites
 
 - Docker & Docker Compose
-- Java 21+ (for local backend development)
+- Java 25+ (for local backend development)
 - Node 20+ / npm (for frontend development)
 - Foundry (`curl -L https://foundry.paradigm.xyz | bash`)
 
@@ -122,7 +122,7 @@ cd backend && ./mvnw verify -Pcontracts
 
 ```
 registerwerk/
-├── backend/                  Spring Boot 4 / Java 25 — Spring Modulith bounded-context architecture
+├── backend/                  Spring Boot 4.1 / Java 25 — Spring Modulith 2.1 bounded-context architecture
 │   └── src/main/java/de/makibytes/registerwerk/
 │       ├── admin/            Operator user management + impersonation
 │       ├── asset/            Securities (assets, deployments, term sheets, holders)

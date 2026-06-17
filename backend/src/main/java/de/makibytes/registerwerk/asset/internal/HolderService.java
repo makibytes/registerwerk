@@ -62,6 +62,7 @@ public class HolderService {
      * Adds a new holder record linking an investor to a specific wallet address and nominal amount.
      */
     public AssetHolder addHolder(UUID assetId, UUID investorId, String walletAddress, BigDecimal nominalAmount) {
+        validateEntryTypeCompatible(assetId, de.makibytes.registerwerk.deployment.api.EntryType.COLLECTIVE);
         AssetHolder holder = new AssetHolder();
         holder.setAssetId(assetId);
         holder.setInvestorId(investorId);

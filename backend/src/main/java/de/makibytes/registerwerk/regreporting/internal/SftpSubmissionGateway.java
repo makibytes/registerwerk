@@ -12,7 +12,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.OutputStream;
-import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.KeyPair;
 import java.time.Instant;
@@ -95,10 +94,9 @@ class SftpSubmissionGateway implements SubmissionGateway {
     }
 
     private static KeyPair loadKeyPair(String privateKeyPath) throws Exception {
-        byte[] keyBytes = Files.readAllBytes(Paths.get(privateKeyPath));
         org.apache.sshd.common.config.keys.loader.KeyPairResourceLoader loader =
                 org.apache.sshd.common.config.keys.loader.openssh.OpenSSHKeyPairResourceParser.INSTANCE;
-        var pairs = loader.loadKeyPairs(null, Paths.get(privateKeyPath), null, null);
+        var pairs = loader.loadKeyPairs(null, Paths.get(privateKeyPath), null);
         return pairs.iterator().next();
     }
 }

@@ -1,4 +1,3 @@
-// Requires Java 25 and Spring Boot 4.0.5
 package de.makibytes.registerwerk;
 
 import org.springframework.boot.SpringApplication;

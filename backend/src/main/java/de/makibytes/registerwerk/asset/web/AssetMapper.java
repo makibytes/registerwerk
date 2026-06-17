@@ -20,6 +20,8 @@ public interface AssetMapper {
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "termsheetDocId", ignore = true)
     @Mapping(target = "publicData", ignore = true)
+    @Mapping(target = "entryType", ignore = true)
+    @Mapping(target = "lastHolderSyncTime", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     Asset toEntity(AssetCreateRequest request);

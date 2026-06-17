@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.travelrule.internal;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.travelrule.api.Ivms101;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleProtocolPort;
 import org.slf4j.Logger;

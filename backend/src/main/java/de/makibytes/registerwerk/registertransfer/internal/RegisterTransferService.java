@@ -11,7 +11,7 @@ import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.registertransfer.api.RegisterTransfer;
 import de.makibytes.registerwerk.registertransfer.api.RegisterTransferRepository;
 import de.makibytes.registerwerk.registertransfer.api.TransferStatus;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;

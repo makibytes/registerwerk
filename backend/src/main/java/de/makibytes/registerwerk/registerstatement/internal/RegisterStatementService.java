@@ -19,9 +19,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -105,8 +108,10 @@ public class RegisterStatementService {
             return Optional.empty();
         }
 
+        Instant issuedAt = Instant.now();
+        LocalDate issuedDate = issuedAt.atZone(ZoneOffset.UTC).toLocalDate();
         byte[] pdf = RegisterStatementPdfRenderer.render(
-                asset, holder, investor, trigger, registryName, registryCountry);
+                asset, holder, investor, trigger, registryName, registryCountry, issuedDate);
 
         RegisterStatement statement = new RegisterStatement();
         statement.setHolderId(holder.getId());
@@ -116,13 +121,18 @@ public class RegisterStatementService {
         statement.setNominalAmount(holder.getNominalAmount());
         statement.setWalletAddress(holder.getWalletAddress());
         statement.setHolderReference(holder.getHolderReference());
-        statement.setContentHash(sha256Hex(pdf));
+        statement.setIssuedAt(issuedAt);
+        // Hash the register inputs, not the PDF bytes: PDFBox embeds a random file
+        // identifier on each save(), making PDF bytes non-deterministic. Hashing the
+        // canonical input fields produces a stable, independently verifiable digest of
+        // the register content disclosed to the holder at issuance.
+        statement.setContentHash(sha256Hex(contentKey(asset, holder, investor, trigger, registryName, issuedDate)));
         statement.setDeliveryStatus(DeliveryStatus.PENDING);
         statement = statementRepository.save(statement);
 
         // Update the holder's annual-statement clock regardless of delivery outcome:
         // the obligation is to issue, and the record now exists.
-        holder.setLastStatementAt(Instant.now());
+        holder.setLastStatementAt(issuedAt);
         holderRepository.save(holder);
 
         deliver(statement, asset, investor, pdf);
@@ -197,15 +207,18 @@ public class RegisterStatementService {
             if (asset == null || investor == null || holder == null) {
                 continue;
             }
-            byte[] pdf = RegisterStatementPdfRenderer.render(
-                    asset, holder, investor, statement.getTrigger(), registryName, registryCountry);
-            // Re-render must reproduce the same content hash; if the register changed
-            // since, that is a new CHANGE statement, not a re-delivery of this one.
-            if (!sha256Hex(pdf).equals(statement.getContentHash())) {
+            LocalDate issuedDate = statement.getIssuedAt().atZone(ZoneOffset.UTC).toLocalDate();
+            // Verify the register content is unchanged since issuance before re-delivering.
+            // If the data changed, a new CHANGE statement must be issued instead.
+            String currentKey = contentKey(asset, holder, investor, statement.getTrigger(), registryName, issuedDate);
+            if (!sha256Hex(currentKey).equals(statement.getContentHash())) {
                 log.info("Statement {} content changed since issuance; skipping stale re-delivery",
                         statement.getId());
                 continue;
             }
+            byte[] pdf = RegisterStatementPdfRenderer.render(
+                    asset, holder, investor, statement.getTrigger(), registryName, registryCountry,
+                    issuedDate);
             deliver(statement, asset, investor, pdf);
         }
     }
@@ -217,6 +230,38 @@ public class RegisterStatementService {
                 .filter(e -> e != null && !e.isBlank())
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * Canonical key over the register fields disclosed in this statement.
+     * Hashing this — rather than the rendered PDF bytes — produces a stable,
+     * independently verifiable digest: PDFBox embeds a random file ID on every
+     * save(), so PDF bytes are non-deterministic even with identical content.
+     */
+    private static String contentKey(Asset asset, AssetHolder holder, LegalEntity investor,
+                                     StatementTrigger trigger, String registryName, LocalDate issuedDate) {
+        return String.join("|",
+                issuedDate.toString(),
+                trigger.name(),
+                nvl(registryName),
+                nvl(asset.getName()),
+                nvl(asset.getIsin()),
+                asset.getEntryType() != null ? asset.getEntryType().name() : "",
+                nvl(investor.getEntityNumber()),
+                nvl(holder.getHolderReference()),
+                holder.getNominalAmount() != null ? holder.getNominalAmount().toPlainString() : "0",
+                nvl(holder.getWalletAddress()),
+                nvl(holder.getThirdPartyRights()),
+                nvl(holder.getDisposalRestrictions()),
+                nvl(holder.getLegalCapacityNote()));
+    }
+
+    private static String nvl(String s) {
+        return s != null ? s : "";
+    }
+
+    private static String sha256Hex(String data) {
+        return sha256Hex(data.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String sha256Hex(byte[] data) {

@@ -20,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -151,6 +152,67 @@ class RegisterStatementServiceTest {
 
         assertThat(result).isPresent();
         assertThat(result.get().getDeliveryStatus()).isEqualTo(DeliveryStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("retry re-renders from statement.issuedAt, not current time — same hash required for re-delivery")
+    void retryUsesOriginalIssuedDate() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+
+        // Use the same objects for both the pre-computed hash and the mocked repositories,
+        // so the render() calls inside retryFailedDeliveries() produce identical bytes.
+        Asset asset = new Asset();
+        asset.setName("Test Bond 2026");
+        asset.setEntryType(EntryType.INDIVIDUAL);
+        LegalEntity investor = new LegalEntity();
+        investor.setId(h.getInvestorId());
+        AppUser user = new AppUser();
+        user.setEmail("investor@example.com");
+
+        Instant issuedAt = Instant.parse("2026-01-10T09:00:00Z");
+        java.time.LocalDate issuedDate = issuedAt.atZone(java.time.ZoneOffset.UTC).toLocalDate();
+
+        // Compute the content hash exactly as RegisterStatementService does.
+        String key = String.join("|",
+                issuedDate.toString(), StatementTrigger.ANNUAL.name(), "Test Registry",
+                "Test Bond 2026", "", EntryType.INDIVIDUAL.name(),
+                "", "RW-REF-0001", "100", "0x1234567890abcdef", "", "", "");
+        String contentHash = sha256Hex(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        RegisterStatement failed = new RegisterStatement();
+        failed.setIssuedAt(issuedAt);
+        failed.setHolderId(h.getId());
+        failed.setAssetId(h.getAssetId());
+        failed.setInvestorId(h.getInvestorId());
+        failed.setTrigger(StatementTrigger.ANNUAL);
+        failed.setNominalAmount(h.getNominalAmount());
+        failed.setWalletAddress(h.getWalletAddress());
+        failed.setHolderReference(h.getHolderReference());
+        failed.setDeliveryStatus(DeliveryStatus.FAILED);
+        failed.setContentHash(contentHash);
+
+        when(statementRepository.findByDeliveryStatus(DeliveryStatus.FAILED)).thenReturn(List.of(failed));
+        when(assetRepository.findById(h.getAssetId())).thenReturn(Optional.of(asset));
+        when(entityRepository.findById(h.getInvestorId())).thenReturn(Optional.of(investor));
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        when(userRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(h.getInvestorId()))
+                .thenReturn(List.of(user));
+        when(statementRepository.save(any(RegisterStatement.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(emailPort.sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn(true);
+
+        newService().retryFailedDeliveries();
+
+        verify(emailPort).sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString());
+    }
+
+    private static String sha256Hex(byte[] data) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(data);
+            return "0x" + java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Test
