@@ -28,7 +28,7 @@ contract DeployTestnet is Script {
 
         vm.stopBroadcast();
 
-        console.log("=== eWpG Registry — Testnet Deployment ===");
+        console.log(unicode"=== eWpG Registry — Testnet Deployment ===");
         console.log("Deployer / registry wallet :", deployer);
         console.log("WhitelistRegistry          :", address(whitelistRegistry));
         console.log("AssetTokenFactory          :", address(factory));

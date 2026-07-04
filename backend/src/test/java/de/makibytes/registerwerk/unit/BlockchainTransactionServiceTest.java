@@ -1,0 +1,293 @@
+package de.makibytes.registerwerk.unit;
+
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
+import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
+import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
+import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Answers;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.methods.response.TransactionReceipt;
+
+import java.math.BigInteger;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+/**
+ * Unit tests for the confirmation-depth / finality logic added to guard against
+ * reorgs: a mined-but-shallow transaction must stay PENDING (never TIMEOUT, never
+ * SUCCESS/FAILED) until it clears the configured confirmation depth.
+ */
+@ExtendWith(MockitoExtension.class)
+class BlockchainTransactionServiceTest {
+
+    @Mock
+    private BlockchainTransactionRepository repository;
+
+    @Mock
+    private BlockchainClientRegistry clientRegistry;
+
+    @Mock
+    private EvmContractService evmContractService;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
+    private Web3j web3j;
+
+    private BlockchainTxProperties txProperties;
+    private BlockchainTransactionService service;
+
+    @BeforeEach
+    void setUp() {
+        txProperties = new BlockchainTxProperties();
+        txProperties.setDefaultConfirmations(12);
+        txProperties.setTimeoutSeconds(900);
+        service = new BlockchainTransactionService(
+                repository, clientRegistry, evmContractService, eventPublisher, txProperties);
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    private static BlockchainTransaction pendingTx(String txHash, String chain, String network, Instant createdAt) {
+        BlockchainTransaction tx = new BlockchainTransaction();
+        tx.setTxHash(txHash);
+        tx.setChain(chain);
+        tx.setNetwork(network);
+        tx.setStatus(BlockchainTransaction.Status.PENDING);
+        ReflectionTestUtils.setField(tx, "createdAt", createdAt);
+        return tx;
+    }
+
+    private void stubPending(BlockchainTransaction... txs) {
+        when(repository.findByStatus(BlockchainTransaction.Status.PENDING)).thenReturn(List.of(txs));
+    }
+
+    // ── pollPendingTransactions — no hash/chain yet ──────────────────────────────
+
+    @Test
+    void pollPendingTransactions_noPending_doesNothing() {
+        stubPending();
+        service.pollPendingTransactions();
+        verifyNoInteractions(clientRegistry);
+    }
+
+    @Test
+    void pollPendingTransactions_missingHashOrChain_notTimedOut_staysPending() {
+        BlockchainTransaction tx = pendingTx(null, null, null, Instant.now());
+        stubPending(tx);
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void pollPendingTransactions_missingHashOrChain_timedOut_marksTimeout() {
+        BlockchainTransaction tx = pendingTx(null, null, null, Instant.now().minusSeconds(1_000));
+        stubPending(tx);
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.TIMEOUT);
+        assertThat(tx.getErrorMessage()).contains("900s");
+        verify(repository).save(tx);
+    }
+
+    // ── pollPendingTransactions — mined but not yet found ────────────────────────
+
+    @Test
+    void pollPendingTransactions_noReceiptYet_notTimedOut_staysPending() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        stubPending(tx);
+        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.empty());
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void pollPendingTransactions_noReceiptYet_timedOut_marksTimeout() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(1_000));
+        stubPending(tx);
+        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.empty());
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.TIMEOUT);
+    }
+
+    // ── pollPendingTransactions — confirmation depth (reorg guard) ───────────────
+
+    @Test
+    void pollPendingTransactions_minedButBelowConfirmationDepth_staysPendingAndIsNeverTimedOut() throws java.io.IOException {
+        // Old enough to time out if the (buggy) code ever applied the timeout to a mined tx.
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(1_000));
+        stubPending(tx);
+        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64"); // block 100
+        receipt.setStatus("0x1");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        // current=105 -> depth = 105-100+1 = 6, below the default 12 required.
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(105));
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void pollPendingTransactions_minedAndAtExactConfirmationThreshold_success() throws java.io.IOException {
+        UUID deploymentId = UUID.randomUUID();
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        tx.setDeploymentId(deploymentId);
+        stubPending(tx);
+        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64"); // block 100
+        receipt.setStatus("0x1");
+        receipt.setGasUsed("0x5208"); // 21000
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        // current=111 -> depth = 111-100+1 = 12, exactly the default required.
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(111));
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.SUCCESS);
+        assertThat(tx.getBlockNumber()).isEqualTo(100L);
+        assertThat(tx.getGasUsed()).isEqualTo(21_000L);
+        verify(repository).save(tx);
+        verify(eventPublisher).publishEvent(any(BlockchainTxStatusEvent.class));
+    }
+
+    @Test
+    void pollPendingTransactions_minedAndConfirmed_revertedOnChain_marksFailed() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        stubPending(tx);
+        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64");
+        receipt.setStatus("0x0"); // reverted
+        receipt.setGasUsed("0x5208"); // getGasUsed() throws if the raw field is left unset
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(200));
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.FAILED);
+        assertThat(tx.getErrorMessage()).isEqualTo("Transaction reverted on-chain");
+    }
+
+    @Test
+    void pollPendingTransactions_perChainConfirmationOverrideIsRespected() throws java.io.IOException {
+        txProperties.setConfirmationsByChain(Map.of("POLYGON", 128));
+        BlockchainTransaction tx = pendingTx("0xabc", "POLYGON", "MAINNET", Instant.now());
+        stubPending(tx);
+        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64"); // block 100
+        receipt.setStatus("0x1");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        // 30 confirmations: comfortably past the 12-block default, nowhere near Polygon's 128.
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(100 + 30 - 1));
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+    }
+
+    @Test
+    void pollPendingTransactions_exceptionForOneTx_doesNotAbortRemaining() {
+        BlockchainTransaction broken = pendingTx("0xbad", "ETHEREUM", "MAINNET", Instant.now());
+        BlockchainTransaction fine = pendingTx(null, null, null, Instant.now().minusSeconds(1_000));
+        stubPending(broken, fine);
+        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenThrow(new RuntimeException("RPC down"));
+
+        service.pollPendingTransactions();
+
+        // "broken" blew up inside the per-tx try/catch and is left untouched...
+        assertThat(broken.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+        // ...but the loop still reached "fine" (no hash/chain -> never calls getEvmClient).
+        assertThat(fine.getStatus()).isEqualTo(BlockchainTransaction.Status.TIMEOUT);
+    }
+
+    // ── record ────────────────────────────────────────────────────────────────
+
+    @Test
+    void record_createsPendingTransactionWithActorFromSecurityContext() {
+        Authentication auth = new UsernamePasswordAuthenticationToken(
+                "alice", null, List.of(new SimpleGrantedAuthority("ROLE_REGISTRY_ADMIN")));
+        SecurityContextHolder.getContext().setAuthentication(auth);
+        when(repository.save(any(BlockchainTransaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        service.record("0xabc", "pause", deploymentId, assetId, "ETHEREUM", "MAINNET", "0xcontract", Map.of("k", "v"));
+
+        ArgumentCaptor<BlockchainTransaction> captor = ArgumentCaptor.forClass(BlockchainTransaction.class);
+        verify(repository).save(captor.capture());
+        BlockchainTransaction tx = captor.getValue();
+        assertThat(tx.getTxHash()).isEqualTo("0xabc");
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+        assertThat(tx.getActorName()).isEqualTo("alice");
+        assertThat(tx.getActorRole()).isEqualTo("REGISTRY_ADMIN");
+        assertThat(tx.getDeploymentId()).isEqualTo(deploymentId);
+        assertThat(tx.getAssetId()).isEqualTo(assetId);
+    }
+
+    @Test
+    void record_noAuthentication_defaultsToSystemActorAndUnknownRole() {
+        when(repository.save(any(BlockchainTransaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.record("0xabc", "pause", null, null, "ETHEREUM", "MAINNET", "0xcontract", Map.of());
+
+        ArgumentCaptor<BlockchainTransaction> captor = ArgumentCaptor.forClass(BlockchainTransaction.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getActorName()).isEqualTo("system");
+        assertThat(captor.getValue().getActorRole()).isEqualTo("UNKNOWN");
+    }
+}

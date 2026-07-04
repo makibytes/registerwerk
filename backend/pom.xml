@@ -393,7 +393,7 @@
             <configuration>
               <!-- Exclude pure data carriers and infrastructure wiring that cannot
                    be meaningfully unit-tested without live external services.
-                   Roadmap: line 0.31 (current floor) → 0.45 (after screening/KYC/audit ITs) → 0.60 (full).
+                   Roadmap: line 0.36 (current floor) → 0.45 (after screening/KYC/audit ITs) → 0.60 (full).
                    The whole-bundle floor is a regression guard; the compliance-critical packages
                    below carry their own, higher floors so the code that matters most cannot erode. -->
               <excludes>
@@ -411,14 +411,14 @@
                     <limit>
                       <counter>LINE</counter>
                       <value>COVEREDRATIO</value>
-                      <minimum>0.31</minimum>
+                      <minimum>0.36</minimum>
                     </limit>
                     <!-- Branch coverage is a distinct dimension: the compliance/financial
                          services are branch-heavy and line coverage alone hides untested paths. -->
                     <limit>
                       <counter>BRANCH</counter>
                       <value>COVEREDRATIO</value>
-                      <minimum>0.17</minimum>
+                      <minimum>0.23</minimum>
                     </limit>
                   </limits>
                 </rule>
@@ -461,6 +461,67 @@
                   <limits>
                     <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.60</minimum></limit>
                     <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.40</minimum></limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <!-- Targeted floors for the previously near-untested financial packages (trading,
+               registertransfer, blockchain.api — measured at ~14%/2%, ~7%/0%, ~17%/2% line/branch
+               respectively before this round). Set just below what unit tests now cover, so the
+               gate ratchets forward without going red on incidental fluctuation. -->
+          <execution>
+            <id>check-trading</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <includes>
+                <include>**/trading/internal/*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.45</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.25</minimum></limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <execution>
+            <id>check-registertransfer</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <includes>
+                <include>**/registertransfer/internal/*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.85</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.70</minimum></limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <execution>
+            <id>check-blockchain-api</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <includes>
+                <include>**/blockchain/api/*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.35</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.20</minimum></limit>
                   </limits>
                 </rule>
               </rules>

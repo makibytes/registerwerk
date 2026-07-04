@@ -77,7 +77,7 @@ contract AssetTokenFactory {
                 new EwpgERC3525{salt: salt}(name, symbol, registryWallet, assetId)
             );
         } else {
-            revert("AssetTokenFactory: unsupported token type — for ERC-4626/7540 use deployVault");
+            revert(unicode"AssetTokenFactory: unsupported token type — for ERC-4626/7540 use deployVault");
         }
 
         emit TokenDeployed(assetId, tokenType, tokenAddress);
@@ -110,7 +110,7 @@ contract AssetTokenFactory {
                 new EwpgERC7540{salt: salt}(IERC20(underlyingAsset), name, symbol, registryWallet, assetId)
             );
         } else {
-            revert("AssetTokenFactory: unsupported vault type — use 4 (ERC4626) or 5 (ERC7540)");
+            revert(unicode"AssetTokenFactory: unsupported vault type — use 4 (ERC4626) or 5 (ERC7540)");
         }
 
         emit VaultDeployed(assetId, tokenType, vaultAddress, underlyingAsset);

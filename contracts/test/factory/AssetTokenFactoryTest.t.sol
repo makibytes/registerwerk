@@ -94,8 +94,11 @@ contract AssetTokenFactoryTest is Test {
     // -------------------------------------------------------------------------
 
     function test_deployToken_revertsForUnsupportedType() public {
-        vm.expectRevert("AssetTokenFactory: unsupported token type");
-        factory.deployToken(3, "X", "X", ASSET_ID);
+        // Type 3 (ERC-3525) is a supported deployToken branch; probe an out-of-range
+        // type instead. 4/5 (vault types) are also unsupported here since they must
+        // go through deployVault, but 6 is unambiguously out of range for both.
+        vm.expectRevert(unicode"AssetTokenFactory: unsupported token type — for ERC-4626/7540 use deployVault");
+        factory.deployToken(6, "X", "X", ASSET_ID);
     }
 
     // -------------------------------------------------------------------------

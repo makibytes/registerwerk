@@ -43,5 +43,12 @@ export const COMPLIANCE_ROUTES: Routes = [
         (m) => m.RegulatoryReportingComponent,
       ),
   },
+  {
+    path: 'dsar',
+    loadComponent: () =>
+      import('./dsar/erasure-queue.component').then(
+        (m) => m.ErasureQueueComponent,
+      ),
+  },
   { path: '', redirectTo: 'screening', pathMatch: 'full' },
 ];

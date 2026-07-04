@@ -43,7 +43,7 @@ contract DeployL2 is Script {
 
         vm.stopBroadcast();
 
-        console.log("=== eWpG Registry — L2 Deployment ===");
+        console.log(unicode"=== eWpG Registry — L2 Deployment ===");
         console.log("Chain ID                   :", block.chainid);
         console.log("Deployer / registry wallet :", deployer);
         console.log("WhitelistRegistry          :", address(whitelistRegistry));

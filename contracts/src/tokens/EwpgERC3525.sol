@@ -87,8 +87,8 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
     function burn(uint256 tokenId, string calldata reason) external onlyRegistry {
         uint256 remaining = balanceOf(tokenId);
         if (remaining > 0) {
-            _transferValue(tokenId, tokenId, 0); // clear value via override
-            _tokenDataClear(tokenId, remaining);
+            _transferValue(tokenId, tokenId, 0); // enforce pause/freeze guards via the override hook
+            _burnValue(tokenId, remaining);
         }
         _burnToken(tokenId);
         emit ForcedValueBurn(tokenId, remaining, reason);
@@ -167,9 +167,59 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
     ) external onlyRegistry {
         _inForceOp = true;
         require(balanceOf(tokenId) >= value, "EwpgERC3525: insufficient balance");
-        _tokenDataClear(tokenId, value);
+        _burnValue(tokenId, value);
         _inForceOp = false;
         emit ForcedValueBurn(tokenId, value, legalBasis);
+    }
+
+    // ── IEwpgAdminControls — whole-token (NFT) admin ops ─────────────────────
+    // ERC-3525 tokens are ERC-721-based (one owner per tokenId), so — matching the
+    // EwpgERC721 convention — `value` here is the tokenId itself, and these functions
+    // operate on token *ownership*. This is distinct from forcedTransferValue /
+    // forceBurnValue above, which move partial *value* between two existing tokens
+    // of the same slot without changing ownership.
+
+    /// @notice Transfers the NFT with id `value` (and the balance it carries) from
+    ///         `from` to `to`, bypassing whitelist/freeze/pause. Legal basis: eWpG §24.
+    function forcedTransfer(
+        address from,
+        address to,
+        uint256 value,
+        string calldata legalBasis
+    ) external override onlyRegistry {
+        _inForceOp = true;
+        _transfer(from, to, value);
+        _inForceOp = false;
+        emit ForcedTransfer(from, to, value, legalBasis);
+    }
+
+    /// @notice Approves `spender` for the NFT with id `value` on behalf of `owner`,
+    ///         bypassing owner consent.
+    function forcedApprove(
+        address owner,
+        address spender,
+        uint256 value,
+        string calldata legalBasis
+    ) external override onlyRegistry {
+        _approve(spender, value, address(0));
+        emit ForcedApprove(owner, spender, value, legalBasis);
+    }
+
+    /// @notice Fully cancels the token with id `value`: burns all remaining balance and
+    ///         deletes the NFT itself. Legal basis: eWpG §26 Einziehung. Unlike
+    ///         forceBurnValue (which reduces a token's balance while keeping it alive),
+    ///         this removes the position entirely.
+    function forceBurn(
+        address from,
+        uint256 value,
+        string calldata legalBasis
+    ) external override onlyRegistry {
+        uint256 remaining = balanceOf(value);
+        if (remaining > 0) {
+            _burnValue(value, remaining);
+        }
+        _burnToken(value);
+        emit ForceBurned(from, value, legalBasis);
     }
 
     // ── Compliance hooks ──────────────────────────────────────────────────────
@@ -189,25 +239,4 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         }
         super._transferValue(fromTokenId, toTokenId, value);
     }
-
-    // ── Internal helper ───────────────────────────────────────────────────────
-
-    function _tokenDataClear(uint256 tokenId, uint256 value) internal {
-        // Direct storage manipulation to subtract balance without triggering event loop
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            // We subtract `value` from the balance stored in _tokenData[tokenId].balance
-            // This avoids the transfer-value compliance hook on forced burns.
-        }
-        // Fallback: use parent's storage directly isn't possible without assembly tricks;
-        // call internal transferValue to a burn address instead.
-        // Since _inForceOp is set, compliance hooks are bypassed.
-        // We destroy the value by reducing the mapping directly via a helper in ERC3525.
-    }
-
-    // Note: _tokenDataClear is a no-op placeholder. In the real implementation, ERC3525
-    // needs to expose a protected _forceReduceBalance(tokenId, value) that decrements
-    // storage without emitting a TransferValue. Keeping the architecture correct; the
-    // burn path in production goes through _burnToken which checks balance == 0 after
-    // the registry first calls transferValue to consolidate remaining balance.
 }

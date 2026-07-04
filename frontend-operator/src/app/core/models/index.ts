@@ -573,3 +573,18 @@ export interface OpenHitView {
   createdAt: string | null;
   startedAt: string | null;
 }
+
+// ─── DSGVO Art. 17 erasure requests ─────────────────────────────────────────
+
+/** A persisted DSAR erasure request, mirrors ErasureRequestResponse on the backend. */
+export interface ErasureRequestView {
+  id: string;
+  entityId: string;
+  requestedByUserId: string | null;
+  status: 'REQUESTED' | 'IN_REVIEW' | 'COMPLETED' | 'REJECTED';
+  requestedAt: string;
+  dueAt: string;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  resolutionNote: string | null;
+}

@@ -40,7 +40,7 @@ contract UpgradeCompliance is Script {
 
         vm.stopBroadcast();
 
-        console.log("=== eWpG Registry — Compliance Upgrade ===");
+        console.log(unicode"=== eWpG Registry — Compliance Upgrade ===");
         console.log("New WhitelistRegistry :", address(newRegistry));
         console.log("Owner                 :", newOwner);
         console.log("");

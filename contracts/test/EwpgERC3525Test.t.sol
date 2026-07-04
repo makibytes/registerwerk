@@ -105,7 +105,7 @@ contract EwpgERC3525Test is Test {
         uint256 tokenA = token.mint(alice, SLOT_BONDS, 1000e18);
         uint256 tokenB = token.mint(bob, SLOT_BONDS, 0);
         token.pauseSlot(SLOT_BONDS);
-        token.forcedTransferValue(tokenA, tokenB, 500e18, "BaFin §24");
+        token.forcedTransferValue(tokenA, tokenB, 500e18, unicode"BaFin §24");
         vm.stopPrank();
         assertEq(token.balanceOf(tokenA), 500e18);
         assertEq(token.balanceOf(tokenB), 500e18);
@@ -118,6 +118,40 @@ contract EwpgERC3525Test is Test {
         vm.expectRevert("EwpgERC3525: tokens in different slots");
         token.forcedTransferValue(tokenA, tokenB, 100e18, "err");
         vm.stopPrank();
+    }
+
+    /// @notice Regression test for the §26 Einziehung no-op bug: forceBurnValue used to
+    ///         emit ForcedValueBurn without ever reducing the token's balance. Assert the
+    ///         balance actually drops by exactly `value`, not just that the event fired.
+    function test_forceBurnValue_reducesBalance() public {
+        vm.startPrank(registry);
+        uint256 tokenId = token.mint(alice, SLOT_BONDS, 1000e18);
+
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EwpgERC3525.ForcedValueBurn(tokenId, 400e18, unicode"BaFin Einziehungsverfügung");
+        token.forceBurnValue(tokenId, 400e18, unicode"BaFin Einziehungsverfügung");
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(tokenId), 600e18);
+    }
+
+    function test_forceBurnValue_revertsOnInsufficientBalance() public {
+        vm.startPrank(registry);
+        uint256 tokenId = token.mint(alice, SLOT_BONDS, 100e18);
+        vm.expectRevert("EwpgERC3525: insufficient balance");
+        token.forceBurnValue(tokenId, 200e18, "err");
+        vm.stopPrank();
+    }
+
+    function test_forceBurnValue_bypassesPauseAndFreeze() public {
+        vm.startPrank(registry);
+        uint256 tokenId = token.mint(alice, SLOT_BONDS, 1000e18);
+        token.pauseSlot(SLOT_BONDS);
+        token.freezeToken(tokenId, "sanctions hold");
+        token.forceBurnValue(tokenId, 300e18, unicode"BaFin Einziehungsverfügung");
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(tokenId), 700e18);
     }
 
     // ── Slot metadata ─────────────────────────────────────────────────────────

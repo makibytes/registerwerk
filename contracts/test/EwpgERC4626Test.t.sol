@@ -111,7 +111,7 @@ contract EwpgERC4626Test is Test {
 
         uint256 aliceShares = vault.balanceOf(alice);
         vm.prank(registry);
-        vault.forcedTransfer(alice, bob, aliceShares / 2, "BaFin §24");
+        vault.forcedTransfer(alice, bob, aliceShares / 2, unicode"BaFin §24");
         assertEq(vault.balanceOf(bob), aliceShares / 2);
     }
 

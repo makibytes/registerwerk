@@ -119,6 +119,16 @@ abstract contract ERC3525 is ERC721, IERC3525 {
         emit TransferValue(fromTokenId, toTokenId, value);
     }
 
+    /// @notice Irrevocably destroys `value` from `tokenId`'s balance without crediting any
+    ///         other token (a burn sink, mirroring `_mintToken`'s `0 -> tokenId` credit).
+    ///         Used by forced-burn (Einziehung) flows where the value must disappear from
+    ///         circulation rather than move to another holder.
+    function _burnValue(uint256 tokenId, uint256 value) internal virtual {
+        require(_tokenData[tokenId].balance >= value, "ERC3525: insufficient balance");
+        _tokenData[tokenId].balance -= value;
+        emit TransferValue(tokenId, 0, value);
+    }
+
     function _requireSenderApproved(uint256 tokenId, uint256 value) internal {
         address owner = ownerOf(tokenId);
         if (msg.sender != owner && !isApprovedForAll(owner, msg.sender)) {

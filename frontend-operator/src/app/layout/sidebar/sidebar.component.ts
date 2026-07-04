@@ -244,6 +244,7 @@ export class SidebarComponent {
         { label: 'CASP Register',  icon: 'verified_user',             route: '/compliance/casp-register' },
         { label: 'DORA',           icon: 'security_update_warning',   route: '/compliance/dora' },
         { label: 'Reporting',      icon: 'assessment',                route: '/compliance/reporting' },
+        { label: 'DSAR Erasure',   icon: 'person_off',                route: '/compliance/dsar' },
         { label: 'Audit Log',      icon: 'receipt_long',              route: '/audit' },
       ],
     },
