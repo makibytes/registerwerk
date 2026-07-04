@@ -52,6 +52,9 @@ jobs:
         uses: crytic/slither-action@v0.4.0
         with:
           target: contracts/
+          # Gate the build on high-severity findings (previously findings were only
+          # uploaded, never enforced). Tighten to `medium` once the medium backlog is triaged.
+          fail-on: high
           slither-args: "--exclude-informational --sarif slither.sarif"
 
       - name: Upload Slither SARIF

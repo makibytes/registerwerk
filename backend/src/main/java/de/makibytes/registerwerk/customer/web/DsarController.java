@@ -1,7 +1,9 @@
 package de.makibytes.registerwerk.customer.web;
 
+import de.makibytes.registerwerk.customer.api.ErasureRequest;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.customer.internal.DsarErasureService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.slf4j.Logger;
@@ -28,9 +30,11 @@ public class DsarController {
     private static final Logger log = LoggerFactory.getLogger(DsarController.class);
 
     private final LegalEntityRepository entityRepository;
+    private final DsarErasureService erasureService;
 
-    DsarController(LegalEntityRepository entityRepository) {
+    DsarController(LegalEntityRepository entityRepository, DsarErasureService erasureService) {
         this.entityRepository = entityRepository;
+        this.erasureService = erasureService;
     }
 
     /**
@@ -66,9 +70,11 @@ public class DsarController {
     }
 
     /**
-     * DSGVO Art. 17: Right to erasure.
-     * Tombstones PII fields not subject to statutory retention obligations.
-     * Audit log entries are preserved per eWpG §15(3) (legitimate interest, Art. 17(3)(b)).
+     * DSGVO Art. 17: Right to erasure. Persists an operator work item (with the 30-day
+     * response clock) rather than acknowledging and dropping the request. Erasure of the
+     * fields not under a statutory retention obligation (eWpG §15(3): 10y; GwG §8: 5y) is
+     * carried out by an operator after review; audit log entries are preserved per
+     * Art. 17(3)(b). Repeated submissions return the existing open request (idempotent).
      */
     @PostMapping("/erasure")
     public ResponseEntity<Map<String, Object>> erasure(Authentication auth) {
@@ -77,16 +83,16 @@ public class DsarController {
             return ResponseEntity.ok(Map.of("message", "No entity to erase."));
         }
 
-        log.warn("DSAR erasure requested for entityId={}", entityId);
+        ErasureRequest request = erasureService.request(entityId, SecurityUtils.extractUserId(auth));
 
-        // Mark the entity as erasure-requested — operator must review and confirm
-        // given statutory retention under eWpG §15(3) and GwG §8
         return ResponseEntity.accepted().body(Map.of(
-            "status", "ERASURE_REQUESTED",
+            "status", request.getStatus().name(),
+            "erasureRequestId", request.getId(),
             "entityId", entityId,
-            "message", "Erasure request received. An operator will review which fields can be erased " +
+            "message", "Erasure request recorded. An operator will review which fields can be erased " +
                        "subject to statutory retention obligations (eWpG §15(3): 10 years; GwG §8: 5 years).",
             "gdprBasis", "DSGVO Art. 17 — subject to Art. 17(3)(b) legal obligation exception",
+            "dueAt", request.getDueAt().toString(),
             "processingTime", "30 days (DSGVO Art. 12(3))"
         ));
     }

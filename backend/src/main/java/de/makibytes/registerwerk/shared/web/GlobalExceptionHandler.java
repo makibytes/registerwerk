@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.shared.api.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -61,6 +62,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage(), request.getRequestURI());
+    }
+
+    /**
+     * A concurrent modification lost the optimistic-lock race (e.g. two writes to the
+     * same holder's nominal amount). The request was valid; the caller should re-read
+     * and retry. Covers both Spring's {@link OptimisticLockingFailureException} and the
+     * JPA {@code jakarta.persistence.OptimisticLockException} it wraps.
+     */
+    @ExceptionHandler({OptimisticLockingFailureException.class, jakarta.persistence.OptimisticLockException.class})
+    public ResponseEntity<ErrorResponse> handleOptimisticLock(Exception ex, HttpServletRequest request) {
+        log.warn("Optimistic lock conflict on {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildResponse(HttpStatus.CONFLICT,
+                "The record was modified concurrently. Please re-read and retry.", request.getRequestURI());
     }
 
     @ExceptionHandler(UnsupportedOperationException.class)

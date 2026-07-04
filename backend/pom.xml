@@ -393,7 +393,9 @@
             <configuration>
               <!-- Exclude pure data carriers and infrastructure wiring that cannot
                    be meaningfully unit-tested without live external services.
-                   Roadmap: 0.30 (current) → 0.45 (after screening/KYC/audit ITs) → 0.60 (full) -->
+                   Roadmap: line 0.31 (current floor) → 0.45 (after screening/KYC/audit ITs) → 0.60 (full).
+                   The whole-bundle floor is a regression guard; the compliance-critical packages
+                   below carry their own, higher floors so the code that matters most cannot erode. -->
               <excludes>
                 <!-- Domain event records — pure data carriers with generated equals/hashCode -->
                 <exclude>**/events/*Event.class</exclude>
@@ -409,8 +411,56 @@
                     <limit>
                       <counter>LINE</counter>
                       <value>COVEREDRATIO</value>
-                      <minimum>0.30</minimum>
+                      <minimum>0.31</minimum>
                     </limit>
+                    <!-- Branch coverage is a distinct dimension: the compliance/financial
+                         services are branch-heavy and line coverage alone hides untested paths. -->
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>0.17</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <!-- Regression floors for the compliance-critical packages that are already well
+               covered (§19 register statements, customer/DSAR lifecycle). These lock in the
+               current coverage so future changes to legally-sensitive logic cannot erode it. -->
+          <execution>
+            <id>check-compliance-critical</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <includes>
+                <include>**/registerstatement/internal/*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.65</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.42</minimum></limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <execution>
+            <id>check-customer-dsar</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <includes>
+                <include>**/customer/internal/*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.60</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.40</minimum></limit>
                   </limits>
                 </rule>
               </rules>

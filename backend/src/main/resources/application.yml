@@ -256,6 +256,23 @@ registerwerk:
       email: ${DEFAULT_ADMIN_EMAIL:}
       password: ${DEFAULT_ADMIN_PASSWORD:}
   seed-demo-data: ${SEED_DEMO_DATA:false}
+  blockchain:
+    tx:
+      # A transaction is only marked SUCCESS/FAILED once its receipt is this many blocks
+      # deep, so a shallow reorg cannot leave the register asserting a dropped state.
+      default-confirmations: ${REGISTERWERK_TX_DEFAULT_CONFIRMATIONS:12}
+      # Un-mined (no receipt) transactions time out after this many seconds. A mined-but-
+      # shallow transaction is never timed out — it waits until it reaches the depth above.
+      timeout-seconds: ${REGISTERWERK_TX_TIMEOUT_SECONDS:900}
+      # Per-chain overrides (keyed by Chain enum name). Deeper for chains with weaker
+      # finality / a history of reorgs.
+      confirmations-by-chain:
+        ETHEREUM: 12
+        POLYGON: 128
+        BASE: 30
+        ARBITRUM: 20
+        OPTIMISM: 30
+        AVALANCHE: 12
   drift:
     check-interval-ms: ${REGISTERWERK_DRIFT_CHECK_INTERVAL_MS:900000}
     batch-size: ${REGISTERWERK_DRIFT_BATCH_SIZE:500}

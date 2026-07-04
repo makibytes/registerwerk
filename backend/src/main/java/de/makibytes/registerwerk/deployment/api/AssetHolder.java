@@ -14,6 +14,17 @@ public class AssetHolder {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    /**
+     * Optimistic-lock guard. The nominal amount is the legally canonical register
+     * balance (eWpG §16) and is mutated by read-modify-write in several concurrent
+     * paths — trade settlement, manual corrections, indexer sync. Without a version
+     * check, two concurrent updates silently lose one another; with it, the losing
+     * write fails and the caller retries (surfaced as HTTP 409).
+     */
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     @Column(name = "asset_id", nullable = false)
     private UUID assetId;
 
@@ -72,6 +83,8 @@ public class AssetHolder {
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
+
+    public long getVersion() { return version; }
 
     public UUID getAssetId() { return assetId; }
     public void setAssetId(UUID assetId) { this.assetId = assetId; }

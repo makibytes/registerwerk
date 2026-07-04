@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../compliance/EwpgCompliance.sol";
 import "../documents/EwpgDocumentManagement.sol";
 
@@ -22,7 +23,7 @@ import "../documents/EwpgDocumentManagement.sol";
 ///
 /// NOTE: IEwpgAdminControls.forcedTransfer / forceBurn operate on a single id/amount pair.
 ///       For multi-id operations use forcedTransferBatch / forceBurnBatch.
-contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement {
+contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement, ReentrancyGuard {
     /// @notice Links this contract to the off-chain registry asset record.
     bytes32 public immutable assetId;
 
@@ -52,7 +53,7 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         uint256 id,
         uint256 amount,
         bytes calldata data
-    ) external onlyRegistry {
+    ) external onlyRegistry nonReentrant {
         require(isWhitelisted(to), "EwpgERC1155: recipient not whitelisted");
         _requireWithinCap(_totalMinted, amount);
         _totalMinted += amount;
@@ -65,7 +66,7 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         uint256[] calldata ids,
         uint256[] calldata amounts,
         bytes calldata data
-    ) external onlyRegistry {
+    ) external onlyRegistry nonReentrant {
         require(isWhitelisted(to), "EwpgERC1155: recipient not whitelisted");
         uint256 total;
         for (uint256 i; i < amounts.length; i++) total += amounts[i];
@@ -87,15 +88,21 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
     /// @dev IEwpgAdminControls.forcedTransfer encodes id in the high 128 bits of `value`
     ///      and amount in the low 128 bits when called generically; but the explicit
     ///      forcedTransferSingle below is preferred for on-chain use.
+    ///
+    ///      Balances are moved through the internal {ERC1155-_update} rather than
+    ///      {_safeTransferFrom}. The safe path invokes {IERC1155Receiver-onERC1155Received}
+    ///      on `to` while {_inForceOp} is still true, which would let a malicious recipient
+    ///      re-enter and move frozen / non-whitelisted tokens with all compliance checks
+    ///      disabled. Going through _update performs no external call, closing that window;
+    ///      nonReentrant is kept as defence-in-depth. A court-ordered §24 correction must
+    ///      also not be defeatable by a recipient contract that reverts in its receiver hook.
     function forcedTransfer(
         address from,
         address to,
         uint256 value,     // interpreted as amount; id defaults to 0 for ABI compat
         string calldata legalBasis
-    ) external override onlyRegistry {
-        _inForceOp = true;
-        _safeTransferFrom(from, to, 0, value, "");
-        _inForceOp = false;
+    ) external override onlyRegistry nonReentrant {
+        _forceMove(from, to, 0, value);
         emit ForcedTransfer(from, to, value, legalBasis);
     }
 
@@ -106,10 +113,8 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         uint256 id,
         uint256 amount,
         string calldata legalBasis
-    ) external onlyRegistry {
-        _inForceOp = true;
-        _safeTransferFrom(from, to, id, amount, "");
-        _inForceOp = false;
+    ) external onlyRegistry nonReentrant {
+        _forceMove(from, to, id, amount);
         emit ForcedTransfer(from, to, amount, legalBasis);
     }
 
@@ -120,13 +125,25 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         uint256[] calldata ids,
         uint256[] calldata amounts,
         string calldata legalBasis
-    ) external onlyRegistry {
+    ) external onlyRegistry nonReentrant {
         _inForceOp = true;
-        _safeBatchTransferFrom(from, to, ids, amounts, "");
+        _update(from, to, ids, amounts);
         _inForceOp = false;
         for (uint256 i; i < ids.length; i++) {
             emit ForcedTransfer(from, to, amounts[i], legalBasis);
         }
+    }
+
+    /// @dev Moves a single (id, amount) between two non-zero addresses without invoking
+    ///      the ERC-1155 acceptance callback. Used only by the forced-operation paths.
+    function _forceMove(address from, address to, uint256 id, uint256 amount) private {
+        uint256[] memory ids = new uint256[](1);
+        uint256[] memory amounts = new uint256[](1);
+        ids[0] = id;
+        amounts[0] = amount;
+        _inForceOp = true;
+        _update(from, to, ids, amounts);
+        _inForceOp = false;
     }
 
     // ── Forced approve — regulatory override ──────────────────────────────────

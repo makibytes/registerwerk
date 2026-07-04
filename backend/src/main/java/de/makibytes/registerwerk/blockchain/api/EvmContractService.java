@@ -57,7 +57,15 @@ public class EvmContractService {
     /** eth_chainId per Web3j client — chain clients are long-lived singletons. */
     private final ConcurrentHashMap<Web3j, Long> chainIdCache = new ConcurrentHashMap<>();
 
-    /** Per-sender submission locks: nonce fetch + sign + send must be atomic per wallet. */
+    /**
+     * Per-sender submission locks: nonce fetch + sign + send must be atomic per wallet.
+     *
+     * <p><strong>Single-instance only.</strong> These locks live in this JVM. With more than
+     * one backend replica submitting from the same operator wallet, two instances can read the
+     * same pending nonce and one transaction silently replaces the other. Before scaling out,
+     * serialise submissions per wallet across instances (a single submitter, an advisory DB
+     * lock, or a shared nonce allocator). The login throttle has the same per-instance caveat.
+     */
     private final ConcurrentHashMap<String, Object> senderLocks = new ConcurrentHashMap<>();
 
     public EvmContractService(BlockchainClientRegistry clientRegistry,

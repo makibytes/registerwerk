@@ -38,23 +38,23 @@ public class BlockchainTransactionService {
 
     private static final Logger log = LoggerFactory.getLogger(BlockchainTransactionService.class);
 
-    /** Mark pending transactions older than this as TIMEOUT. */
-    private static final long TIMEOUT_SECONDS = 300;
-
     private final BlockchainTransactionRepository repository;
     private final BlockchainClientRegistry clientRegistry;
     private final EvmContractService evmContractService;
     private final ApplicationEventPublisher eventPublisher;
+    private final BlockchainTxProperties txProperties;
 
     public BlockchainTransactionService(
             BlockchainTransactionRepository repository,
             BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            BlockchainTxProperties txProperties) {
         this.repository = repository;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
         this.eventPublisher = eventPublisher;
+        this.txProperties = txProperties;
     }
 
     // ── Record creation ───────────────────────────────────────────────────────
@@ -111,11 +111,11 @@ public class BlockchainTransactionService {
 
         for (BlockchainTransaction tx : pending) {
             try {
-                if (isTimedOut(tx)) {
-                    markTimeout(tx);
+                if (tx.getTxHash() == null || tx.getChain() == null) {
+                    // Cannot look up a receipt without a hash/chain — apply the un-mined timeout.
+                    if (isTimedOut(tx)) markTimeout(tx);
                     continue;
                 }
-                if (tx.getTxHash() == null || tx.getChain() == null) continue;
 
                 ChainDescriptor descriptor = new ChainDescriptor(
                 de.makibytes.registerwerk.chain.api.Chain.valueOf(tx.getChain()),
@@ -124,11 +124,39 @@ public class BlockchainTransactionService {
                 Optional<TransactionReceipt> receipt =
                         web3j.ethGetTransactionReceipt(tx.getTxHash()).send().getTransactionReceipt();
 
-                receipt.ifPresent(r -> complete(tx, r));
+                if (receipt.isEmpty()) {
+                    // Still un-mined. Only an un-mined transaction is eligible for TIMEOUT.
+                    if (isTimedOut(tx)) markTimeout(tx);
+                    continue;
+                }
+
+                // Mined: require the receipt to be buried under the configured confirmation
+                // depth before we treat it as final. A mined-but-shallow tx stays PENDING and
+                // is never timed out, so a reorg cannot leave the register asserting a dropped
+                // state.
+                TransactionReceipt r = receipt.get();
+                int required = txProperties.confirmationsFor(tx.getChain());
+                long confirmations = confirmations(web3j, r);
+                if (confirmations < required) {
+                    log.debug("tx={} mined at block {} but only {}/{} confirmations — waiting",
+                            tx.getTxHash(), r.getBlockNumber(), confirmations, required);
+                    continue;
+                }
+                complete(tx, r);
             } catch (Exception e) {
                 log.warn("Error polling tx={}: {}", tx.getTxHash(), e.getMessage());
             }
         }
+    }
+
+    /** Number of blocks mined on top of (and including) the receipt's block. */
+    private long confirmations(Web3j web3j, TransactionReceipt receipt) throws java.io.IOException {
+        if (receipt.getBlockNumber() == null) {
+            return 0;
+        }
+        java.math.BigInteger current = web3j.ethBlockNumber().send().getBlockNumber();
+        java.math.BigInteger depth = current.subtract(receipt.getBlockNumber()).add(java.math.BigInteger.ONE);
+        return depth.signum() < 0 ? 0 : depth.longValueExact();
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -149,9 +177,10 @@ public class BlockchainTransactionService {
 
     @Transactional
     protected void markTimeout(BlockchainTransaction tx) {
+        long timeoutSeconds = txProperties.getTimeoutSeconds();
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         tx.setCompletedAt(Instant.now());
-        tx.setErrorMessage("Transaction not mined within " + TIMEOUT_SECONDS + "s");
+        tx.setErrorMessage("Transaction not mined within " + timeoutSeconds + "s");
         repository.save(tx);
 
         publishCompletionAuditEvent(tx);
@@ -159,7 +188,7 @@ public class BlockchainTransactionService {
     }
 
     private boolean isTimedOut(BlockchainTransaction tx) {
-        return tx.getCreatedAt().plusSeconds(TIMEOUT_SECONDS).isBefore(Instant.now());
+        return tx.getCreatedAt().plusSeconds(txProperties.getTimeoutSeconds()).isBefore(Instant.now());
     }
 
     private void publishCompletionAuditEvent(BlockchainTransaction tx) {

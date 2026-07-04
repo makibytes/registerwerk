@@ -102,6 +102,19 @@ class ChainDriftDetectionJob {
                             OR LOWER(tt.to_address) = LOWER(ah.wallet_address))
                     ), ah.nominal_amount
                 ) AS indexed_balance,
+                -- Net units this holder gained or lost through the SIMULATED venue, which
+                -- settles the register off-chain with no token_transfer. Those legitimately
+                -- move the register ahead of the chain, so they are added to the on-chain
+                -- reconstruction before comparing — otherwise every simulated sale looks like
+                -- drift. Real venues settle on-chain and are deliberately not netted out.
+                COALESCE((SELECT SUM(te.executed_quantity) FROM trade_execution te
+                          WHERE te.buyer_holder_id = ah.id
+                            AND te.venue_code = 'SIMULATED'
+                            AND te.settlement_status = 'SETTLED'), 0)
+                - COALESCE((SELECT SUM(te.executed_quantity) FROM trade_execution te
+                          WHERE te.seller_holder_id = ah.id
+                            AND te.venue_code = 'SIMULATED'
+                            AND te.settlement_status = 'SETTLED'), 0) AS net_simulated,
                 ad.id              AS deployment_id
             FROM asset_holder ah
             JOIN asset a ON a.id = ah.asset_id AND a.status = 'ISSUED'
@@ -125,7 +138,11 @@ class ChainDriftDetectionJob {
         if (dbBalance == null || indexedBalance == null) {
             return false;
         }
-        BigDecimal delta = indexedBalance.subtract(dbBalance).abs();
+        // Off-chain SIMULATED-venue settlements legitimately move the register ahead of the
+        // chain; fold them into the expected on-chain balance so they are not flagged as drift.
+        BigDecimal netSimulated = toBigDecimal(row.get("net_simulated"));
+        BigDecimal effectiveIndexed = netSimulated != null ? indexedBalance.add(netSimulated) : indexedBalance;
+        BigDecimal delta = effectiveIndexed.subtract(dbBalance).abs();
         if (delta.compareTo(BigDecimal.ZERO) == 0) {
             return false;
         }
@@ -141,19 +158,21 @@ class ChainDriftDetectionJob {
 
         try {
             // One OPEN event per (deployment, wallet): refresh if present, insert otherwise.
+            // The recorded on-chain balance is the reconstruction after netting out pending
+            // off-chain settlement, so (db_balance − onchain_balance) equals the flagged delta.
             int refreshed = jdbc.update("""
                 UPDATE chain_drift_event
                 SET db_balance = ?, onchain_balance = ?, severity = ?, detected_at = now()
                 WHERE deployment_id = ? AND LOWER(wallet_address) = LOWER(?) AND status = 'OPEN'
-                """, dbBalance, indexedBalance, severity, deploymentId, wallet);
+                """, dbBalance, effectiveIndexed, severity, deploymentId, wallet);
             if (refreshed == 0) {
                 jdbc.update("""
                     INSERT INTO chain_drift_event
                       (asset_id, deployment_id, wallet_address, db_balance, onchain_balance, severity)
                     VALUES (?,?,?,?,?,?)
-                    """, assetId, deploymentId, wallet, dbBalance, indexedBalance, severity);
+                    """, assetId, deploymentId, wallet, dbBalance, effectiveIndexed, severity);
                 log.warn("Chain drift [{}] asset={} wallet={} db={} indexed={} delta={}",
-                        severity, assetId, wallet, dbBalance, indexedBalance, delta);
+                        severity, assetId, wallet, dbBalance, effectiveIndexed, delta);
             }
             return true;
         } catch (Exception e) {

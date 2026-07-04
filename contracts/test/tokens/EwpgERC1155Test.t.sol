@@ -248,4 +248,106 @@ contract EwpgERC1155Test is Test {
         vm.expectRevert("EwpgCompliance: caller is not registry");
         token.removeFromWhitelist(alice);
     }
+
+    // -------------------------------------------------------------------------
+    // Forced-operation reentrancy / compliance-bypass hardening
+    // -------------------------------------------------------------------------
+
+    /// A malicious recipient of a §24 forced transfer must not be able to piggyback
+    /// on the compliance-bypass window to move its own frozen tokens out. Before the
+    /// fix, _safeTransferFrom invoked onERC1155Received while _inForceOp was still true,
+    /// letting the receiver re-enter and defeat the freeze. The forced path now moves
+    /// balances via _update, so the receiver hook is never called.
+    function test_forcedTransfer_doesNotInvokeReceiverHook_noComplianceBypass() public {
+        ReentrantReceiver attacker = new ReentrantReceiver();
+        address clean = address(0xCAFE);
+
+        vm.startPrank(registry);
+        token.whitelist(alice);
+        token.whitelist(address(attacker));
+        token.mint(alice, ID_A, 100, "");                 // victim's holding to be corrected
+        token.mint(address(attacker), ID_B, 50, "");       // attacker's own holding
+        token.freezeAddress(address(attacker), "sanctions"); // attacker is frozen
+        vm.stopPrank();
+
+        // Arm the attacker to try to escape its frozen ID_B to a clean wallet if its
+        // receiver hook is ever invoked during the forced-op window.
+        attacker.arm(token, clean, ID_B, 50);
+
+        // Registry performs a court-ordered §24 correction crediting the attacker.
+        vm.prank(registry);
+        token.forcedTransferSingle(alice, address(attacker), ID_A, 100, "BaFin Az. 2025-001");
+
+        assertFalse(attacker.reentered(), "receiver hook must not fire during forced transfer");
+        assertEq(token.balanceOf(address(attacker), ID_A), 100, "correction credited");
+        assertEq(token.balanceOf(alice, ID_A), 0, "source debited");
+        // The freeze held: the attacker's own tokens did not escape.
+        assertEq(token.balanceOf(address(attacker), ID_B), 50, "frozen tokens must not move");
+        assertEq(token.balanceOf(clean, ID_B), 0, "no bypass transfer occurred");
+    }
+
+    /// Regression: forced batch transfer still moves balances correctly.
+    function test_forcedTransferBatch_movesBalances() public {
+        vm.startPrank(registry);
+        token.whitelist(alice);
+        token.whitelist(bob);
+        token.mint(alice, ID_A, 100, "");
+        token.mint(alice, ID_B, 40, "");
+
+        uint256[] memory ids = new uint256[](2);
+        uint256[] memory amounts = new uint256[](2);
+        ids[0] = ID_A; ids[1] = ID_B;
+        amounts[0] = 30; amounts[1] = 10;
+        token.forcedTransferBatch(alice, bob, ids, amounts, "BaFin Az. 2025-002");
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(bob, ID_A), 30);
+        assertEq(token.balanceOf(bob, ID_B), 10);
+        assertEq(token.balanceOf(alice, ID_A), 70);
+        assertEq(token.balanceOf(alice, ID_B), 30);
+    }
+}
+
+/// Malicious ERC-1155 recipient that, on receiving tokens, attempts to move a set of
+/// its own (frozen) tokens to a clean wallet — the classic compliance-bypass reentrancy.
+contract ReentrantReceiver {
+    EwpgERC1155 private token;
+    address private clean;
+    uint256 private escapeId;
+    uint256 private escapeAmount;
+    bool private armed;
+    bool public reentered;
+
+    /// Arm the escape after setup mints, so the receiver only tries to re-enter
+    /// during the forced transfer under test — not while it is being funded.
+    function arm(EwpgERC1155 _token, address _clean, uint256 _id, uint256 _amount) external {
+        token = _token;
+        clean = _clean;
+        escapeId = _id;
+        escapeAmount = _amount;
+        armed = true;
+    }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata)
+        external
+        returns (bytes4)
+    {
+        if (armed) {
+            reentered = true;
+            token.safeTransferFrom(address(this), clean, escapeId, escapeAmount, "");
+        }
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
+        external
+        returns (bytes4)
+    {
+        reentered = true;
+        return this.onERC1155BatchReceived.selector;
+    }
+
+    function supportsInterface(bytes4) external pure returns (bool) {
+        return true;
+    }
 }

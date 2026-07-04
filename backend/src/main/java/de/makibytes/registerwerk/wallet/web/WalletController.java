@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.wallet.web;
 import de.makibytes.registerwerk.wallet.api.WalletBalancePort;
 import de.makibytes.registerwerk.wallet.internal.WalletDefaultService;
 import de.makibytes.registerwerk.wallet.internal.WalletService;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import de.makibytes.registerwerk.wallet.api.OperatorWallet;
 import de.makibytes.registerwerk.wallet.api.WalletChainDefault;
 import de.makibytes.registerwerk.wallet.web.dto.*;
@@ -65,6 +66,7 @@ public class WalletController {
     }
 
     @PostMapping("/import-raw")
+    @RequiresStepUp(reason = "WALLET_IMPORT_RAW")
     public ResponseEntity<WalletResponse> importRaw(@RequestBody @Valid WalletImportRawRequest req) {
         OperatorWallet w = walletService.importRaw(
                 req.name(), OperatorWallet.WalletType.valueOf(req.type()), req.privateKey());
@@ -72,6 +74,7 @@ public class WalletController {
     }
 
     @PostMapping(value = "/import-keystore", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @RequiresStepUp(reason = "WALLET_IMPORT_KEYSTORE")
     public ResponseEntity<WalletResponse> importKeystore(
             @RequestParam String name,
             @RequestParam String password,
@@ -81,7 +84,14 @@ public class WalletController {
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(w, defaultService.listAll()));
     }
 
+    /**
+     * Produces a password-encrypted keystore of an operator signing key — an offline-bruteable
+     * export of key material. Guarded by fresh step-up MFA plus a second approver (4-eyes,
+     * GwG §25k / MaRisk AT 4.3.1): a single compromised admin session must not be able to
+     * exfiltrate the keys that control every deployed security.
+     */
     @PostMapping("/{id}/export-keystore")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_KEYSTORE_EXPORT")
     public ResponseEntity<byte[]> exportKeystore(
             @PathVariable UUID id,
             @RequestBody @Valid WalletExportRequest req) {
@@ -115,7 +125,14 @@ public class WalletController {
         return ResponseEntity.ok(toResponse(w, defaultService.listAll()));
     }
 
+    /**
+     * Destroys an operator signing key. Guarded by step-up MFA plus a second approver
+     * (4-eyes): losing the key that controls a deployed security must not be a one-click,
+     * single-actor operation. On-chain authority should be handed over (transferRegistry)
+     * before a still-in-use wallet is deleted.
+     */
     @DeleteMapping("/{id}")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_DELETE")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         walletService.delete(id);
         return ResponseEntity.noContent().build();
