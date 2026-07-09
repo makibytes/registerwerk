@@ -93,7 +93,7 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
                 </td>
                 <td class="notes-cell" [title]="ep.notes || ''">{{ ep.notes || '' }}</td>
                 <td>
-                  <button mat-icon-button [matMenuTriggerFor]="actionMenu"><mat-icon>more_vert</mat-icon></button>
+                  <button mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions"><mat-icon>more_vert</mat-icon></button>
                   <mat-menu #actionMenu>
                     <button mat-menu-item (click)="openEdit(ep)"><mat-icon>edit</mat-icon> Edit</button>
                     <button mat-menu-item (click)="confirmDelete(ep)" style="color:#ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>

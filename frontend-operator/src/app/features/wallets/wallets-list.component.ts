@@ -110,7 +110,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
                 </td>
                 <td style="font-size: 12px; color: var(--rw-text-muted)">{{ wallet.createdAt | date:'mediumDate' }}</td>
                 <td>
-                  <button mat-icon-button [matMenuTriggerFor]="actionMenu">
+                  <button mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions">
                     <mat-icon>more_vert</mat-icon>
                   </button>
                   <mat-menu #actionMenu>
