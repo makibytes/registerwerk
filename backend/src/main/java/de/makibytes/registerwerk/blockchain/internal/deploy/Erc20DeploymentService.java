@@ -1,6 +1,8 @@
 package de.makibytes.registerwerk.blockchain.internal.deploy;
 
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 
 import java.math.BigInteger;
 import java.util.Arrays;
@@ -19,7 +21,6 @@ import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
@@ -74,9 +75,9 @@ public class Erc20DeploymentService {
      * @param chain        target chain descriptor
      * @param ownerAddress on-chain owner/admin address (used for logging only; factory owns the
      *                     contract and the {@code registerwerk.wallet.private-key} is the deployer)
-     * @return future resolving to the deployment transaction hash
+     * @return future resolving to the deployment tx hash and the deployed token address
      */
-    public CompletableFuture<String> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
+    public CompletableFuture<TokenDeploymentResult> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
         log.info("Deploying ERC-20 contract: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
@@ -97,7 +98,7 @@ public class Erc20DeploymentService {
                     Arrays.asList(
                             new Uint8(TOKEN_TYPE_ERC20),
                             new Utf8String(asset.name()),
-                            new Utf8String(asset.tokenStandard().name()),
+                            new Utf8String(EvmUtils.tokenSymbol(asset)),
                             new Bytes32(assetIdBytes)
                     ),
                     Collections.singletonList(new TypeReference<Address>() {})
@@ -105,34 +106,17 @@ public class Erc20DeploymentService {
 
             TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, deployToken);
 
-            String tokenAddress = extractTokenAddress(receipt);
+            String tokenAddress = EvmUtils.extractIndexedAddress(receipt, TOKEN_DEPLOYED_TOPIC, 3)
+                    .orElseThrow(() -> new RuntimeException(
+                            "TokenDeployed event not found in receipt: " + receipt.getTransactionHash()));
             log.info("ERC-20 deployed: assetId={} → tokenAddress={} tx={}",
                     assetId, tokenAddress, receipt.getTransactionHash());
 
-            return receipt.getTransactionHash();
+            return new TokenDeploymentResult(receipt.getTransactionHash(), tokenAddress);
         });
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    /**
-     * Finds the {@code TokenDeployed} event in the receipt logs and returns the token address.
-     */
-    private String extractTokenAddress(TransactionReceipt receipt) {
-        for (Log logEntry : receipt.getLogs()) {
-            if (logEntry.getTopics() != null
-                    && !logEntry.getTopics().isEmpty()
-                    && TOKEN_DEPLOYED_TOPIC.equalsIgnoreCase(logEntry.getTopics().get(0))) {
-                // topics[3] = indexed address (left-padded to 32 bytes)
-                if (logEntry.getTopics().size() >= 3) {
-                    String paddedAddress = logEntry.getTopics().get(2);
-                    return "0x" + paddedAddress.substring(paddedAddress.length() - 40);
-                }
-            }
-        }
-        throw new RuntimeException(
-                "TokenDeployed event not found in receipt: " + receipt.getTransactionHash());
-    }
 
     public static byte[] uuidToBytes32(UUID uuid) {
         byte[] b = new byte[32];

@@ -1,15 +1,20 @@
 package de.makibytes.registerwerk.travelrule.internal;
 
 import de.makibytes.registerwerk.travelrule.api.CaspAuthorizationStatus;
+import de.makibytes.registerwerk.travelrule.events.CaspAuthorizationDeletedEvent;
+import de.makibytes.registerwerk.travelrule.events.CaspAuthorizationUpsertedEvent;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -40,21 +45,23 @@ public class CaspRegistryService {
 
     private final CaspAuthorizationRepository repository;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** EU-wide end of the MiCA transitional period. */
     @Value("${registerwerk.travel-rule.mica-enforcement-date:2026-07-01}")
     private LocalDate micaEnforcementDate;
 
-    CaspRegistryService(CaspAuthorizationRepository repository, Clock clock) {
+    CaspRegistryService(CaspAuthorizationRepository repository, Clock clock, ApplicationEventPublisher eventPublisher) {
         this.repository = repository;
         this.clock = clock;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
      * Verifies that an outbound transfer to the given counterparty VASP is
      * permitted under MiCA.
      *
-     * @throws IllegalStateException if the counterparty must not be transacted with
+     * @throws ComplianceGateException if the counterparty must not be transacted with
      */
     @Transactional(readOnly = true)
     public void assertCounterpartyPermitted(String vaspDid) {
@@ -86,8 +93,8 @@ public class CaspRegistryService {
         }
     }
 
-    private IllegalStateException blocked(CaspAuthorization casp, String reason) {
-        return new IllegalStateException("MiCA check: counterparty CASP " + casp.getLegalName()
+    private ComplianceGateException blocked(CaspAuthorization casp, String reason) {
+        return new ComplianceGateException("MiCA check: counterparty CASP " + casp.getLegalName()
                 + " (" + casp.getVaspDid() + ") " + reason
                 + " — the transfer must not be executed (Reg (EU) 2023/1114).");
     }
@@ -103,6 +110,10 @@ public class CaspRegistryService {
     }
 
     public CaspAuthorization upsert(CaspAuthorization incoming) {
+        return upsert(incoming, null, null);
+    }
+
+    public CaspAuthorization upsert(CaspAuthorization incoming, UUID actorId, String actorRole) {
         CaspAuthorization target = repository.findByVaspDidIgnoreCase(incoming.getVaspDid())
                 .orElse(incoming);
         if (target != incoming) {
@@ -116,10 +127,15 @@ public class CaspRegistryService {
             target.setSource(incoming.getSource());
             target.setNotes(incoming.getNotes());
         }
-        return repository.save(target);
+        CaspAuthorization saved = repository.save(target);
+        eventPublisher.publishEvent(new CaspAuthorizationUpsertedEvent(saved.getId(), actorId, actorRole, Map.of(
+                "vaspDid", saved.getVaspDid(), "status", saved.getStatus().name()
+        )));
+        return saved;
     }
 
-    public void delete(UUID id) {
+    public void delete(UUID id, UUID actorId, String actorRole) {
         repository.deleteById(id);
+        eventPublisher.publishEvent(new CaspAuthorizationDeletedEvent(id, actorId, actorRole, Map.of()));
     }
 }

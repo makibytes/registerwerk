@@ -1,6 +1,9 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.asset.events.MintControlRuleCreatedEvent;
+import de.makibytes.registerwerk.asset.events.MintControlRuleDeactivatedEvent;
+import de.makibytes.registerwerk.asset.events.MintControlRuleUpdatedEvent;
 import de.makibytes.registerwerk.asset.internal.MintControlService;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.MintControlRule;
@@ -12,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -36,6 +40,9 @@ class MintControlServiceTest {
 
     @Mock
     private BlockchainClientRegistry blockchainClientRegistry;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private MintControlService mintControlService;
@@ -62,6 +69,7 @@ class MintControlServiceTest {
     @DisplayName("createRule should save the rule with active set to true")
     void createRule_shouldSaveRuleWithActiveTrue() {
         UUID deploymentId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
         MintControlRule rule = buildRule(deploymentId);
 
         when(assetDeploymentRepository.findById(deploymentId))
@@ -72,11 +80,36 @@ class MintControlServiceTest {
             return r;
         });
 
-        MintControlRule saved = mintControlService.createRule(deploymentId, rule);
+        MintControlRule saved = mintControlService.createRule(deploymentId, rule, actorId, "REGISTRY_ADMIN");
 
         assertThat(saved.getActive()).isTrue();
         assertThat(saved.getAssetDeploymentId()).isEqualTo(deploymentId);
         verify(mintControlRuleRepository).save(rule);
+        verify(eventPublisher).publishEvent(any(MintControlRuleCreatedEvent.class));
+    }
+
+    // ── updateRule ────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("updateRule should publish an audit event with the patched values")
+    void updateRule_shouldPublishAuditEvent() {
+        UUID deploymentId = UUID.randomUUID();
+        UUID ruleId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        MintControlRule rule = buildRule(deploymentId);
+        rule.setId(ruleId);
+        rule.setAssetDeploymentId(deploymentId);
+
+        MintControlRule patch = new MintControlRule();
+        patch.setMaxAmount(BigDecimal.valueOf(2_000_000));
+
+        when(mintControlRuleRepository.findById(ruleId)).thenReturn(Optional.of(rule));
+        when(mintControlRuleRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        MintControlRule updated = mintControlService.updateRule(ruleId, patch, actorId, "REGISTRY_ADMIN");
+
+        assertThat(updated.getMaxAmount()).isEqualByComparingTo(BigDecimal.valueOf(2_000_000));
+        verify(eventPublisher).publishEvent(any(MintControlRuleUpdatedEvent.class));
     }
 
     // ── deactivateRule ────────────────────────────────────────────────────────
@@ -85,6 +118,7 @@ class MintControlServiceTest {
     @DisplayName("deactivateRule should set active to false on the found rule")
     void deactivateRule_shouldSetActiveFalse() {
         UUID ruleId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
         MintControlRule rule = buildRule(UUID.randomUUID());
         rule.setId(ruleId);
         rule.setActive(true);
@@ -92,10 +126,11 @@ class MintControlServiceTest {
         when(mintControlRuleRepository.findById(ruleId)).thenReturn(Optional.of(rule));
         when(mintControlRuleRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        mintControlService.deactivateRule(ruleId);
+        mintControlService.deactivateRule(ruleId, actorId, "REGISTRY_ADMIN");
 
         assertThat(rule.getActive()).isFalse();
         verify(mintControlRuleRepository).save(rule);
+        verify(eventPublisher).publishEvent(any(MintControlRuleDeactivatedEvent.class));
     }
 
     // ── listRules ─────────────────────────────────────────────────────────────

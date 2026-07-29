@@ -84,7 +84,15 @@ public class SecurityConfig {
                     "/swagger-ui.html",
                     "/swagger-ui/**",
                     "/api-docs/**",
-                    "/actuator/health"
+                    // /actuator/health/** (not just the exact /actuator/health path) since
+                    // Kubernetes probes hit /actuator/health/liveness and /.../readiness —
+                    // kubelet sends no JWT, so an exact-path-only matcher makes every pod fail
+                    // its readiness probe and crash-loop under the Helm chart.
+                    "/actuator/health/**",
+                    // Network-restricted to Prometheus/Kong pods only via NetworkPolicy
+                    // (deploy/helm/registerwerk/templates/networkpolicy.yaml) — permitting it
+                    // here too is defense-in-depth, not the only gate.
+                    "/actuator/prometheus"
                 ).permitAll()
                 .requestMatchers("/api/v1/**").authenticated()
                 .anyRequest().denyAll()

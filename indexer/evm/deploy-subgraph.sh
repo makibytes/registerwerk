@@ -1,99 +1,101 @@
 #!/usr/bin/env bash
-# Deploys the eWpG subgraph to graph-node for all configured EVM chains.
-# Run this after:
-#   1. graph-node + IPFS are up (docker compose -f indexer/evm/docker-compose.yml up -d)
-#   2. The AssetTokenFactory is deployed on the target chain
-#   3. FACTORY_ADDRESS_<CHAIN> env vars are set (see .env.example)
-#
-# Usage:
-#   ./deploy-subgraph.sh                  — deploy to all chains
-#   ./deploy-subgraph.sh sepolia          — deploy to a single chain
+# Deploys the Registerwerk EVM subgraph with independently configured component provenance.
+# Each static data source needs COMPONENT_ADDRESS_<CHAIN_SUFFIX>; component-specific start blocks
+# are optional and default to 0 via COMPONENT_START_BLOCK_<CHAIN_SUFFIX>.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUBGRAPH_DIR="$SCRIPT_DIR/subgraph"
+RENDER_SCRIPT="$SCRIPT_DIR/render-subgraph-manifest.sh"
 GRAPH_NODE="${GRAPH_NODE_ADMIN:-http://localhost:8020}"
-SUBGRAPH_DIR="$(dirname "$0")/subgraph"
+GRAPH_CLI="${GRAPH_CLI:-$SUBGRAPH_DIR/node_modules/.bin/graph}"
+TMP_FILES=()
+
+if [[ ! -x "$GRAPH_CLI" ]]; then
+  echo "Graph CLI is unavailable at $GRAPH_CLI; run npm install in $SUBGRAPH_DIR or set GRAPH_CLI" >&2
+  exit 1
+fi
+if [[ "${SUBGRAPH_VALIDATE_ONLY:-false}" != "true" && -z "${SUBGRAPH_VERSION_LABEL:-}" ]]; then
+  echo "SUBGRAPH_VERSION_LABEL is required for deployment and must be new for each target graph" >&2
+  exit 1
+fi
+
+cleanup() {
+  if ((${#TMP_FILES[@]} > 0)); then
+    rm -f "${TMP_FILES[@]}"
+  fi
+}
+trap cleanup EXIT
 
 deploy_chain() {
-  local NETWORK="$1"
-  local SUBGRAPH_NAME="$2"
-  local FACTORY_ADDR="$3"
-  local START_BLOCK="${4:-0}"
+  local network="$1"
+  local subgraph_name="$2"
+  local env_suffix="$3"
+  local manifest
+  # Keep the rendered file beside subgraph.yaml so its relative schema, ABI and
+  # mapping paths resolve identically during Graph CLI validation and deployment.
+  manifest="$(mktemp "$SUBGRAPH_DIR/subgraph.rendered.XXXXXX")"
+  TMP_FILES+=("$manifest")
 
-  echo "▶ Deploying to network=$NETWORK subgraph=$SUBGRAPH_NAME factory=$FACTORY_ADDR"
+  bash "$RENDER_SCRIPT" "$network" "$env_suffix" "$manifest"
+  echo "Deploying network=$network subgraph=$subgraph_name with independently configured component addresses"
 
-  # Patch factory address into a temporary manifest
-  TMP=$(mktemp)
-  sed "s|address: \"0x0000000000000000000000000000000000000000\"|address: \"$FACTORY_ADDR\"|g;
-       s|startBlock: 0|startBlock: $START_BLOCK|g;
-       s|network: mainnet|network: $NETWORK|g" \
-    "$SUBGRAPH_DIR/subgraph.yaml" > "$TMP"
+  (
+    cd "$SUBGRAPH_DIR"
+    npm run validate:abi
+    npm run codegen
+    "$GRAPH_CLI" build "$manifest"
+  )
 
-  cd "$SUBGRAPH_DIR"
-  npm run codegen
-  graph build --manifest "$TMP"
+  if [[ "${SUBGRAPH_VALIDATE_ONLY:-false}" == "true" ]]; then
+    echo "Validated rendered manifest for $network (deployment skipped)"
+    return
+  fi
 
-  # Create subgraph on graph-node if it doesn't exist yet
   curl -sf -X POST "$GRAPH_NODE" \
     -H "Content-Type: application/json" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"subgraph_create\",\"params\":{\"name\":\"$SUBGRAPH_NAME\"}}" \
-    || true  # ignore if already exists
+    -d "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"subgraph_create\",\"params\":{\"name\":\"$subgraph_name\"}}" \
+    || true
 
-  graph deploy \
-    --node "$GRAPH_NODE" \
-    --ipfs "${IPFS_API:-http://localhost:5001}" \
-    --version-label "v0.1.0" \
-    --manifest "$TMP" \
-    "$SUBGRAPH_NAME"
-
-  rm "$TMP"
-  echo "✓ $SUBGRAPH_NAME deployed"
+  (
+    cd "$SUBGRAPH_DIR"
+    "$GRAPH_CLI" deploy "$subgraph_name" "$manifest" \
+      --node "$GRAPH_NODE" \
+      --ipfs "${IPFS_API:-http://localhost:5001}" \
+      --version-label "$SUBGRAPH_VERSION_LABEL"
+  )
 }
 
-TARGET="${1:-all}"
+run_target() {
+  case "$1" in
+    mainnet) deploy_chain "mainnet" "ewpg/ethereum-mainnet" "MAINNET" ;;
+    sepolia) deploy_chain "sepolia" "ewpg/ethereum-sepolia" "SEPOLIA" ;;
+    polygon) deploy_chain "polygon" "ewpg/polygon-mainnet" "POLYGON" ;;
+    polygon-amoy) deploy_chain "polygon-amoy" "ewpg/polygon-amoy" "POLYGON_AMOY" ;;
+    base) deploy_chain "base" "ewpg/base-mainnet" "BASE" ;;
+    base-sepolia) deploy_chain "base-sepolia" "ewpg/base-sepolia" "BASE_SEPOLIA" ;;
+    arbitrum-one) deploy_chain "arbitrum-one" "ewpg/arbitrum-mainnet" "ARBITRUM" ;;
+    arbitrum-sepolia) deploy_chain "arbitrum-sepolia" "ewpg/arbitrum-sepolia" "ARBITRUM_SEPOLIA" ;;
+    avalanche) deploy_chain "avalanche" "ewpg/avalanche-mainnet" "AVALANCHE" ;;
+    avalanche-fuji) deploy_chain "avalanche-fuji" "ewpg/avalanche-fuji" "AVALANCHE_FUJI" ;;
+    optimism) deploy_chain "optimism" "ewpg/optimism-mainnet" "OPTIMISM" ;;
+    optimism-sepolia) deploy_chain "optimism-sepolia" "ewpg/optimism-sepolia" "OPTIMISM_SEPOLIA" ;;
+    *)
+      echo "Unknown target: $1" >&2
+      echo "Usage: $0 [mainnet|sepolia|polygon|polygon-amoy|base|base-sepolia|arbitrum-one|arbitrum-sepolia|avalanche|avalanche-fuji|optimism|optimism-sepolia|all]" >&2
+      exit 1
+      ;;
+  esac
+}
 
-case "$TARGET" in
-  mainnet|all)
-    deploy_chain "mainnet"      "ewpg/ethereum-mainnet"  "${FACTORY_ADDRESS_MAINNET:-0x0}"  "${START_BLOCK_MAINNET:-0}"
-    ;;&
-  sepolia|all)
-    deploy_chain "sepolia"      "ewpg/ethereum-sepolia"  "${FACTORY_ADDRESS_SEPOLIA:-0x0}"  "${START_BLOCK_SEPOLIA:-0}"
-    ;;&
-  polygon|all)
-    deploy_chain "polygon"      "ewpg/polygon-mainnet"   "${FACTORY_ADDRESS_POLYGON:-0x0}"  "${START_BLOCK_POLYGON:-0}"
-    ;;&
-  polygon-amoy|all)
-    deploy_chain "polygon-amoy" "ewpg/polygon-amoy"      "${FACTORY_ADDRESS_POLYGON_AMOY:-0x0}" "0"
-    ;;&
-  base|all)
-    deploy_chain "base"         "ewpg/base-mainnet"      "${FACTORY_ADDRESS_BASE:-0x0}"     "${START_BLOCK_BASE:-0}"
-    ;;&
-  base-sepolia|all)
-    deploy_chain "base-sepolia"      "ewpg/base-sepolia"      "${FACTORY_ADDRESS_BASE_SEPOLIA:-0x0}"      "0"
-    ;;&
-  arbitrum-one|all)
-    deploy_chain "arbitrum-one"      "ewpg/arbitrum-mainnet"   "${FACTORY_ADDRESS_ARBITRUM:-0x0}"          "${START_BLOCK_ARBITRUM:-0}"
-    ;;&
-  arbitrum-sepolia|all)
-    deploy_chain "arbitrum-sepolia"  "ewpg/arbitrum-sepolia"   "${FACTORY_ADDRESS_ARBITRUM_SEPOLIA:-0x0}"  "0"
-    ;;&
-  avalanche|all)
-    deploy_chain "avalanche"         "ewpg/avalanche-mainnet"  "${FACTORY_ADDRESS_AVALANCHE:-0x0}"         "${START_BLOCK_AVALANCHE:-0}"
-    ;;&
-  avalanche-fuji|all)
-    deploy_chain "avalanche-fuji"    "ewpg/avalanche-fuji"     "${FACTORY_ADDRESS_AVALANCHE_FUJI:-0x0}"    "0"
-    ;;&
-  optimism|all)
-    deploy_chain "optimism"          "ewpg/optimism-mainnet"   "${FACTORY_ADDRESS_OPTIMISM:-0x0}"          "${START_BLOCK_OPTIMISM:-0}"
-    ;;&
-  optimism-sepolia|all)
-    deploy_chain "optimism-sepolia"  "ewpg/optimism-sepolia"   "${FACTORY_ADDRESS_OPTIMISM_SEPOLIA:-0x0}"  "0"
-    ;;
-  *)
-    echo "Unknown target: $TARGET"
-    echo "Usage: $0 [mainnet|sepolia|polygon|polygon-amoy|base|base-sepolia|arbitrum-one|arbitrum-sepolia|avalanche|avalanche-fuji|optimism|optimism-sepolia|all]"
-    exit 1
-    ;;
-esac
+target="${1:-all}"
+if [[ "$target" == "all" ]]; then
+  for network in mainnet sepolia polygon polygon-amoy base base-sepolia arbitrum-one arbitrum-sepolia avalanche avalanche-fuji optimism optimism-sepolia; do
+    run_target "$network"
+  done
+else
+  run_target "$target"
+fi
 
-echo ""
-echo "All done. Query at: http://localhost:8000/subgraphs/name/<subgraph-name>"
+echo "Subgraph operation complete. Query at http://localhost:8000/subgraphs/name/<subgraph-name>"

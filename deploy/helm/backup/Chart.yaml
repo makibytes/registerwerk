@@ -1,6 +1,9 @@
 apiVersion: v2
 name: registerwerk-backup
-description: PostgreSQL WAL-G backup CronJob for Registerwerk (eWpRV §6 + DORA Art. 12)
+description: >-
+  Backup CronJobs for Registerwerk (eWpRV §6 + DORA Art. 12): PostgreSQL via WAL-G, and the
+  wallet-keystore volume (on-chain deployer wallets) via restic — losing the latter with no
+  backup means permanent loss of the ability to administer already-deployed on-chain assets.
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "0.1.0"

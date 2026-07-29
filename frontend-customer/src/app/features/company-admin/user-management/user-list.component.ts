@@ -54,6 +54,9 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
         <a mat-tab-link routerLink="/company-admin/external-ids" routerLinkActive #rla3="routerLinkActive" [active]="rla3.isActive">
           <mat-icon>tag</mat-icon>&nbsp;External IDs
         </a>
+        <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #rla4="routerLinkActive" [active]="rla4.isActive">
+          <mat-icon>fingerprint</mat-icon>&nbsp;Organization
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 

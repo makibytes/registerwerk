@@ -1,8 +1,6 @@
 -- | Shared types for Registerwerk eWpG bond instruments.
 module Registerwerk.Bond.Types where
 
-import DA.Date (Date)
-import DA.Decimal (Decimal)
 
 -- | Links the Canton instrument to the off-chain Registerwerk asset record.
 type AssetId = Text

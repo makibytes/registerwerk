@@ -1,5 +1,9 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
+import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPayment;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
@@ -31,13 +35,19 @@ public class CouponPaymentJob implements Job {
     private final AssetCouponPaymentRepository couponPaymentRepository;
     private final CorporateActionRepository corporateActionRepository;
     private final CorporateActionService corporateActionService;
+    private final AssetBondTermsRepository bondTermsRepository;
+    private final AssetRepository assetRepository;
 
     CouponPaymentJob(AssetCouponPaymentRepository couponPaymentRepository,
                      CorporateActionRepository corporateActionRepository,
-                     CorporateActionService corporateActionService) {
+                     CorporateActionService corporateActionService,
+                     AssetBondTermsRepository bondTermsRepository,
+                     AssetRepository assetRepository) {
         this.couponPaymentRepository = couponPaymentRepository;
         this.corporateActionRepository = corporateActionRepository;
         this.corporateActionService = corporateActionService;
+        this.bondTermsRepository = bondTermsRepository;
+        this.assetRepository = assetRepository;
     }
 
     @Override
@@ -58,14 +68,33 @@ public class CouponPaymentJob implements Job {
                     log.debug("CouponPaymentJob: action already exists for payment id={}, skipping.", payment.getId());
                     continue;
                 }
+                if (isTransferredOut(payment.getAssetId())) {
+                    log.info("Coupon payment id={} due for assetId={} but its register was transferred to a "
+                            + "successor operator — not auto-raising a coupon action here.",
+                            payment.getId(), payment.getAssetId());
+                    continue;
+                }
                 CorporateAction action = new CorporateAction();
                 action.setAssetId(payment.getAssetId());
                 action.setActionType(CorporateAction.ActionType.COUPON);
                 action.setAnnouncementDate(today);
+                // Record date defaults to the payment date itself for auto-created coupons —
+                // there is no separate "ex-date" concept configured per bond today; this at
+                // least lets the daily record-date job pick the action up and snapshot holder
+                // entitlements instead of it sitting in ANNOUNCED forever.
+                action.setRecordDate(payment.getScheduledDate());
                 action.setPaymentDate(payment.getScheduledDate());
                 action.setCouponPaymentId(payment.getId());
                 action.setInitiatedBy(SYSTEM_ACTOR);
                 action.setNotes("Auto-created from coupon_payment id=" + payment.getId());
+
+                // AssetCouponPayment.amountPerUnit is known at coupon-schedule creation time;
+                // copy it onto the CorporateAction so the Steuerbescheinigung/position-statement
+                // income columns aren't null placeholders.
+                action.setAmountPerUnit(payment.getAmountPerUnit());
+                bondTermsRepository.findById(payment.getAssetId())
+                        .map(AssetBondTerms::getCurrencyIso)
+                        .ifPresent(action::setCurrency);
 
                 corporateActionService.announce(action);
                 log.info("CouponPaymentJob: created CorporateAction for coupon payment id={}", payment.getId());
@@ -74,5 +103,11 @@ public class CouponPaymentJob implements Job {
             }
         }
         log.info("CouponPaymentJob: processed {} due coupon payments.", due.size());
+    }
+
+    private boolean isTransferredOut(UUID assetId) {
+        return assetRepository.findById(assetId)
+                .map(asset -> asset.getStatus() == AssetStatus.TRANSFERRED_OUT)
+                .orElse(false);
     }
 }

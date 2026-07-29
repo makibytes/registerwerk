@@ -1,0 +1,24 @@
+{
+  "$comment": "Shared strict/target compiler options for both frontend-operator and frontend-customer. Lives here (not repo root) so it stays inside both apps' Docker build contexts alongside the rest of frontend-shared/. Keeps the code shared via @registerwerk/ui type-checked identically in both apps. Each app's own tsconfig.json owns baseUrl/paths/outDir, which are relative to that app's directory.",
+  "compilerOptions": {
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "sourceMap": true,
+    "declaration": false,
+    "downlevelIteration": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "experimentalDecorators": true,
+    "moduleResolution": "bundler",
+    "importHelpers": true,
+    "target": "ES2022",
+    "module": "ES2022",
+    "useDefineForClassFields": false,
+    "lib": ["ES2022", "dom"]
+  }
+}

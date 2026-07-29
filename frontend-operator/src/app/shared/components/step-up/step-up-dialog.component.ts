@@ -6,17 +6,28 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
 import { StepUpService } from '../../../core/api/step-up.service';
+import {
+  ApprovalTokenGeneratorDialogComponent,
+} from './approval-token-generator-dialog.component';
+import { submitTotpForStepUpToken } from './step-up-totp-submit';
 
 export interface StepUpDialogData {
   /** Whether the action requires a second approver (4-eyes principle). */
   requireDualControl: boolean;
   /** Human-readable reason shown to the user (e.g. "Accept false-positive screening hit"). */
   reason: string;
+  /**
+   * The exact `@RequiresStepUp(reason=...)` value of the backend action this token will be used
+   * to approve. The backend's StepUpTokenValidator requires every
+   * dual-control approver token to carry a matching `stepup_scope` claim — without this, the
+   * approver's token is unconditionally rejected with 403, regardless of a valid TOTP code.
+   */
+  action: string;
 }
 
 export interface StepUpDialogResult {
@@ -91,6 +102,17 @@ export interface StepUpDialogResult {
       border: 1px solid rgba(59, 130, 246, 0.18);
     }
 
+    .generate-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      margin-bottom: 10px;
+      padding: 0;
+
+      mat-icon { font-size: 15px; width: 15px; height: 15px; }
+    }
+
     .full-width {
       width: 100%;
     }
@@ -150,10 +172,13 @@ export interface StepUpDialogResult {
       @if (data.requireDualControl) {
         <div class="section-label">Second approver</div>
         <div class="dual-control-note">
-          A second REGISTRY_ADMIN must separately authenticate via
-          <code>/api/v1/auth/step-up</code> and paste their step-up token below.
-          Both tokens must be from different users.
+          A second REGISTRY_ADMIN must separately authenticate and paste their scoped step-up
+          token below. Both tokens must be from different users.
         </div>
+        <button mat-button color="primary" class="generate-link" (click)="openTokenGenerator()">
+          <mat-icon>open_in_new</mat-icon>
+          Generate approver token…
+        </button>
         <mat-form-field class="full-width" appearance="outline">
           <mat-label>Second approver's step-up token (JWT)</mat-label>
           <mat-icon matPrefix>verified_user</mat-icon>
@@ -186,6 +211,7 @@ export class StepUpDialogComponent {
   protected readonly data = inject<StepUpDialogData>(MAT_DIALOG_DATA);
   private readonly dialogRef = inject(MatDialogRef<StepUpDialogComponent>);
   private readonly stepUpService = inject(StepUpService);
+  private readonly dialog = inject(MatDialog);
   private readonly cdr = inject(ChangeDetectorRef);
 
   totpCode = '';
@@ -197,16 +223,28 @@ export class StepUpDialogComponent {
     this.dialogRef.close(undefined);
   }
 
+  openTokenGenerator(): void {
+    this.dialog
+      .open(ApprovalTokenGeneratorDialogComponent, {
+        width: '480px',
+        data: { action: this.data.action },
+      })
+      .afterClosed()
+      .subscribe((token: string | undefined) => {
+        if (token) {
+          this.approverToken = token;
+          this.cdr.markForCheck();
+        }
+      });
+  }
+
   submit(): void {
     if (!this.totpCode || this.totpCode.length < 6) return;
     if (this.data.requireDualControl && !this.approverToken.trim()) return;
 
-    this.loading = true;
-    this.errorMessage = null;
-    this.cdr.markForCheck();
-
-    this.stepUpService.issueToken(this.totpCode.trim()).subscribe({
-      next: (res) => {
+    submitTotpForStepUpToken(
+      this.stepUpService, this.cdr, this, this.totpCode, this.data.action,
+      (res) => {
         const result: StepUpDialogResult = {
           stepUpToken: res.stepUpToken,
           dualControlToken: this.data.requireDualControl
@@ -215,12 +253,6 @@ export class StepUpDialogComponent {
         };
         this.dialogRef.close(result);
       },
-      error: (err) => {
-        this.loading = false;
-        this.errorMessage = err?.error?.message
-          ?? 'Step-up verification failed. Please check your TOTP code and try again.';
-        this.cdr.markForCheck();
-      },
-    });
+    );
   }
 }

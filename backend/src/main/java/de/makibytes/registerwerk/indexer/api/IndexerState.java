@@ -19,7 +19,7 @@ import java.util.UUID;
 )
 public class IndexerState {
 
-    public enum IndexerType { GRAPH_NODE, SOLANA_GEYSER, SOLANA_POLL, CANTON_STREAM }
+    public enum IndexerType { GRAPH_NODE, SOLANA_GEYSER, SOLANA_POLL, CANTON_STREAM, STARKNET_POLL, STELLAR_HORIZON }
 
     public enum IndexerStatus { ACTIVE, PAUSED, ERROR }
 
@@ -34,11 +34,14 @@ public class IndexerState {
     @Column(name = "indexer_type", nullable = false, length = 30)
     private IndexerType indexerType;
 
-    /** Last successfully processed EVM block number. Null before first sync. */
+    /** Last successfully processed block number (EVM or Starknet). Null before first sync. */
     @Column(name = "last_synced_block")
     private Long lastSyncedBlock;
 
-    /** Last successfully processed Solana transaction signature. Null before first sync. */
+    /**
+     * Last successfully processed cursor as a string: Solana transaction signature, Canton
+     * ledger offset, or Stellar Horizon paging token. Null before first sync.
+     */
     @Column(name = "last_synced_signature", length = 200)
     private String lastSyncedSignature;
 

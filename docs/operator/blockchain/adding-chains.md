@@ -6,7 +6,8 @@ sidebar_position: 4
 
 # Adding New Chains
 
-New blockchains can be added at runtime — no code changes or redeployments required.
+Backend chain clients can be registered at runtime. EVM indexing also requires graph-node network
+configuration and a supported deploy target with explicit contract sources.
 
 ## Supported chain types
 
@@ -49,14 +50,29 @@ forge script script/Deploy.s.sol \
 
 See [Indexer Configuration](../configuration/indexers) for the TOML and docker-compose changes.
 
-### 4. Deploy and start subgraph
+### 4. Restart graph-node with the new network
+
+The deployment admin API cannot accept a manifest for the new network until graph-node has
+reloaded its chain configuration:
 
 ```bash
-FACTORY_ADDRESS_OPTIMISM=0xYourFactory \
-  ./indexer/evm/deploy-subgraph.sh optimism-mainnet
+docker compose -f indexer/evm/docker-compose.yml up -d --force-recreate graph-node
 ```
 
-### 5. Trigger client refresh
+Verify graph-node is healthy before continuing.
+
+### 5. Configure and deploy the subgraph
+
+Configure every `*_OPTIMISM` source described in [The Graph](../indexers/the-graph), then:
+
+```bash
+SUBGRAPH_VERSION_LABEL=optimism-20260729-01 ./indexer/evm/deploy-subgraph.sh optimism
+```
+
+The subgraph is a provisional event projection. It does not establish chain finality, legal
+effect, authoritative register state, or deployed-code identity.
+
+### 6. Trigger client refresh
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \

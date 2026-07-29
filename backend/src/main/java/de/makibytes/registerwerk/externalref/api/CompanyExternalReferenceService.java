@@ -207,11 +207,13 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
         if (ownerEntityId.equals(entity.getId())) {
             return;
         }
+        // Active-only: eligibility to assign an external ID follows current holder/issuer
+        // relationships, not ones closed out by a removed register entry.
         List<UUID> ownerAssetIds = assetLookupPort.findByIssuerId(ownerEntityId).stream().map(AssetLookupPort.AssetInfo::id).toList();
-        if (!ownerAssetIds.isEmpty() && assetHolderRepository.existsByInvestorIdAndAssetIdIn(subjectId, ownerAssetIds)) {
+        if (!ownerAssetIds.isEmpty() && assetHolderRepository.existsActiveByInvestorIdAndAssetIdIn(subjectId, ownerAssetIds)) {
             return;
         }
-        if (assetHolderRepository.existsByInvestorIdAndIssuerId(ownerEntityId, subjectId)) {
+        if (assetHolderRepository.existsActiveByInvestorIdAndIssuerId(ownerEntityId, subjectId)) {
             return;
         }
         throw new IllegalArgumentException("The authenticated company cannot assign an external ID to this legal entity");
@@ -221,7 +223,7 @@ public class CompanyExternalReferenceService implements de.makibytes.registerwer
         AssetLookupPort.AssetInfo asset = assetLookupPort.findById(subjectId)
                 .orElseThrow(() -> new EntityNotFoundException("Asset", subjectId));
         if (ownerEntityId.equals(asset.issuerId())
-                || assetHolderRepository.existsByAssetIdAndInvestorId(subjectId, ownerEntityId)) {
+                || assetHolderRepository.existsActiveByAssetIdAndInvestorId(subjectId, ownerEntityId)) {
             return;
         }
         throw new IllegalArgumentException("The authenticated company cannot assign an external ID to this asset");

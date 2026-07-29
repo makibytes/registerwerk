@@ -1,5 +1,8 @@
 package de.makibytes.registerwerk.asset.internal;
 
+import de.makibytes.registerwerk.asset.events.MintControlRuleCreatedEvent;
+import de.makibytes.registerwerk.asset.events.MintControlRuleDeactivatedEvent;
+import de.makibytes.registerwerk.asset.events.MintControlRuleUpdatedEvent;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.MintControlRule;
@@ -7,6 +10,7 @@ import de.makibytes.registerwerk.deployment.api.MintControlRuleRepository;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,23 +31,29 @@ public class MintControlService {
     private final MintControlRuleRepository mintControlRuleRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final BlockchainClientRegistry blockchainClientRegistry;
+    private final ApplicationEventPublisher eventPublisher;
 
     public MintControlService(
             MintControlRuleRepository mintControlRuleRepository,
             AssetDeploymentRepository assetDeploymentRepository,
-            BlockchainClientRegistry blockchainClientRegistry) {
+            BlockchainClientRegistry blockchainClientRegistry,
+            ApplicationEventPublisher eventPublisher) {
         this.mintControlRuleRepository = mintControlRuleRepository;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.blockchainClientRegistry = blockchainClientRegistry;
+        this.eventPublisher = eventPublisher;
     }
 
-    public MintControlRule createRule(UUID deploymentId, MintControlRule rule) {
+    public MintControlRule createRule(UUID deploymentId, MintControlRule rule, UUID actorId, String actorRole) {
         assetDeploymentRepository.findById(deploymentId)
             .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
         rule.setAssetDeploymentId(deploymentId);
         rule.setActive(true);
         MintControlRule saved = mintControlRuleRepository.save(rule);
         log.info("Created MintControlRule: id={}, deployment={}", saved.getId(), deploymentId);
+        eventPublisher.publishEvent(new MintControlRuleCreatedEvent(saved.getId(), deploymentId, actorId, actorRole,
+                saved.getTargetAddress(), saved.getRuleType() != null ? saved.getRuleType().name() : null,
+                saved.getMaxAmount()));
         return saved;
     }
 
@@ -51,7 +61,7 @@ public class MintControlService {
      * Patches a mint control rule's target address, type, or max amount.
      * Null fields in the patch are ignored (partial update semantics).
      */
-    public MintControlRule updateRule(UUID ruleId, MintControlRule patch) {
+    public MintControlRule updateRule(UUID ruleId, MintControlRule patch, UUID actorId, String actorRole) {
         MintControlRule rule = mintControlRuleRepository.findById(ruleId)
             .orElseThrow(() -> new EntityNotFoundException("MintControlRule", ruleId));
         if (patch.getTargetAddress() != null) rule.setTargetAddress(patch.getTargetAddress());
@@ -59,15 +69,20 @@ public class MintControlService {
         if (patch.getMaxAmount()     != null) rule.setMaxAmount(patch.getMaxAmount());
         MintControlRule saved = mintControlRuleRepository.save(rule);
         log.info("Updated MintControlRule: id={}", ruleId);
+        eventPublisher.publishEvent(new MintControlRuleUpdatedEvent(saved.getId(), saved.getAssetDeploymentId(),
+                actorId, actorRole, saved.getTargetAddress(),
+                saved.getRuleType() != null ? saved.getRuleType().name() : null, saved.getMaxAmount()));
         return saved;
     }
 
-    public void deactivateRule(UUID ruleId) {
+    public void deactivateRule(UUID ruleId, UUID actorId, String actorRole) {
         MintControlRule rule = mintControlRuleRepository.findById(ruleId)
             .orElseThrow(() -> new EntityNotFoundException("MintControlRule", ruleId));
         rule.setActive(false);
         mintControlRuleRepository.save(rule);
         log.info("Deactivated MintControlRule: id={}", ruleId);
+        eventPublisher.publishEvent(new MintControlRuleDeactivatedEvent(ruleId, rule.getAssetDeploymentId(),
+                actorId, actorRole));
     }
 
     @Transactional(readOnly = true)

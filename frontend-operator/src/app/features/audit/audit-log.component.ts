@@ -10,9 +10,12 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatNativeDateModule } from '@angular/material/core';
+import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { DatePipe, JsonPipe } from '@angular/common';
 import { AuditService } from '../../core/api/audit.service';
-import { AuditEvent } from '../../core/models';
+import { AuditEvent, ChainVerificationResult } from '../../core/models';
+
+type ReportMode = 'all' | 'kyc-overrides';
 
 @Component({
   selector: 'app-audit-log',
@@ -29,10 +32,15 @@ import { AuditEvent } from '../../core/models';
     MatProgressSpinnerModule,
     MatDatepickerModule,
     MatNativeDateModule,
+    MatButtonToggleModule,
     DatePipe,
     JsonPipe,
   ],
   styles: [`
+    .report-toggle {
+      margin-bottom: 16px;
+    }
+
     .filter-row {
       display: flex;
       gap: 16px;
@@ -72,6 +80,46 @@ import { AuditEvent } from '../../core/models';
       font-size: 12px;
       color: var(--rw-text-muted);
     }
+
+    .chain-status-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+
+      mat-icon.status-icon { flex-shrink: 0; }
+
+      .chain-status-text {
+        flex: 1;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      .chain-status-detail {
+        font-size: 12px;
+        color: var(--rw-text-muted);
+      }
+    }
+
+    .chain-status-card.valid {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.22);
+      mat-icon.status-icon { color: #10B981; }
+    }
+
+    .chain-status-card.broken {
+      background: rgba(220, 38, 38, 0.08);
+      border: 1px solid rgba(220, 38, 38, 0.25);
+      mat-icon.status-icon { color: #DC2626; }
+    }
+
+    .chain-status-card.unknown {
+      background: var(--rw-bg);
+      border: 1px solid var(--rw-border);
+      mat-icon.status-icon { color: var(--rw-text-muted); }
+    }
   `],
   template: `
     <div class="page-header">
@@ -82,29 +130,70 @@ import { AuditEvent } from '../../core/models';
       </button>
     </div>
 
+    <div class="chain-status-card" [class.valid]="chainStatus?.valid === true"
+         [class.broken]="chainStatus?.valid === false"
+         [class.unknown]="!chainStatus">
+      <mat-icon class="status-icon">
+        {{ chainStatus == null ? 'help_outline' : chainStatus.valid ? 'verified' : 'gpp_bad' }}
+      </mat-icon>
+      <div class="chain-status-text">
+        @if (chainStatus == null) {
+          Hash-chain integrity has not been checked yet in this session.
+        } @else if (chainStatus.valid) {
+          <strong>Audit hash chain intact</strong> — {{ chainStatus.rowsChecked }} rows verified.
+          <div class="chain-status-detail">Last checked {{ chainStatus.checkedAt | date:'short' }}</div>
+        } @else {
+          <strong>Audit hash chain BROKEN</strong> at sequence_no={{ chainStatus.firstBrokenSequenceNo }}.
+          <div class="chain-status-detail">{{ chainStatus.rowsChecked }} rows checked before failure — checked {{ chainStatus.checkedAt | date:'short' }}</div>
+        }
+      </div>
+      <button mat-stroked-button (click)="verifyChainNow()" [disabled]="verifyingChain">
+        <mat-icon>{{ verifyingChain ? 'hourglass_empty' : 'refresh' }}</mat-icon>
+        {{ verifyingChain ? 'Verifying…' : 'Verify now' }}
+      </button>
+    </div>
+
     <div class="content-card">
+      <mat-button-toggle-group class="report-toggle" [(ngModel)]="reportMode" (change)="onReportModeChange()">
+        <mat-button-toggle value="all">All Events</mat-button-toggle>
+        <mat-button-toggle value="kyc-overrides">KYC Overrides Report</mat-button-toggle>
+      </mat-button-toggle-group>
+
       <div class="filter-row">
-        <mat-form-field appearance="outline" subscriptSizing="dynamic">
-          <mat-label>Event Type</mat-label>
-          <input matInput [(ngModel)]="filterEventType" (ngModelChange)="onFilterChange()" placeholder="ENTITY_CREATED..." />
-        </mat-form-field>
+        @if (reportMode === 'all') {
+          <mat-form-field appearance="outline" subscriptSizing="dynamic">
+            <mat-label>Event Type</mat-label>
+            <input matInput [(ngModel)]="filterEventType" (ngModelChange)="onFilterChange()" placeholder="ENTITY_CREATED..." />
+          </mat-form-field>
 
-        <mat-form-field appearance="outline" subscriptSizing="dynamic">
-          <mat-label>Subject Type</mat-label>
-          <mat-select [(ngModel)]="filterSubjectType" (ngModelChange)="onFilterChange()">
-            <mat-option value="">All</mat-option>
-            <mat-option value="LEGAL_ENTITY">Legal Entity</mat-option>
-            <mat-option value="ASSET">Asset</mat-option>
-            <mat-option value="DEPLOYMENT">Deployment</mat-option>
-            <mat-option value="KYC_DOCUMENT">KYC Document</mat-option>
-            <mat-option value="ONBOARDING_TOKEN">Onboarding Token</mat-option>
-          </mat-select>
-        </mat-form-field>
+          <mat-form-field appearance="outline" subscriptSizing="dynamic">
+            <mat-label>Subject Type</mat-label>
+            <mat-select [(ngModel)]="filterSubjectType" (ngModelChange)="onFilterChange()">
+              <mat-option value="">All</mat-option>
+              <mat-option value="LEGAL_ENTITY">Legal Entity</mat-option>
+              <mat-option value="ASSET">Asset</mat-option>
+              <mat-option value="DEPLOYMENT">Deployment</mat-option>
+              <mat-option value="KYC_DOCUMENT">KYC Document</mat-option>
+              <mat-option value="ONBOARDING_TOKEN">Onboarding Token</mat-option>
+            </mat-select>
+          </mat-form-field>
 
-        <mat-form-field appearance="outline" subscriptSizing="dynamic">
-          <mat-label>Subject ID</mat-label>
-          <input matInput [(ngModel)]="filterSubjectId" (ngModelChange)="onFilterChange()" placeholder="UUID..." />
-        </mat-form-field>
+          <mat-form-field appearance="outline" subscriptSizing="dynamic">
+            <mat-label>Subject ID</mat-label>
+            <input matInput [(ngModel)]="filterSubjectId" (ngModelChange)="onFilterChange()" placeholder="UUID..." />
+          </mat-form-field>
+        } @else {
+          <mat-form-field appearance="outline" subscriptSizing="dynamic">
+            <mat-label>Jurisdiction</mat-label>
+            <mat-select [(ngModel)]="filterJurisdiction" (ngModelChange)="onFilterChange()">
+              <mat-option value="">All</mat-option>
+              <mat-option value="DE_EWPG">Germany — eWpG / BaFin</mat-option>
+              <mat-option value="LU_CSSF">Luxembourg — CSSF</mat-option>
+              <mat-option value="FR_AMF">France — AMF</mat-option>
+              <mat-option value="LI_TVTG">Liechtenstein — TVTG / FMA</mat-option>
+            </mat-select>
+          </mat-form-field>
+        }
 
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
           <mat-label>From Date</mat-label>
@@ -200,42 +289,92 @@ export class AuditLogComponent implements OnInit {
   pageSize = 25;
   pageIndex = 0;
 
+  reportMode: ReportMode = 'all';
   filterEventType = '';
   filterSubjectType = '';
   filterSubjectId = '';
+  filterJurisdiction = '';
   filterFrom = '';
   filterTo = '';
+
+  chainStatus: ChainVerificationResult | null = null;
+  verifyingChain = false;
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
 
   ngOnInit(): void {
     this.loadData();
+    this.auditService.chainStatus().subscribe({
+      next: (result) => {
+        this.chainStatus = result;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        // Leave chainStatus null on request failure — rendered as "not checked yet".
+      },
+    });
+  }
+
+  verifyChainNow(): void {
+    this.verifyingChain = true;
+    this.cdr.detectChanges();
+    this.auditService.verifyChainNow().subscribe({
+      next: (result) => {
+        this.chainStatus = result;
+        this.verifyingChain = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.verifyingChain = false;
+        this.cdr.detectChanges();
+      },
+    });
   }
 
   loadData(): void {
     this.loading = true;
-    this.auditService
-      .searchEvents({
-        eventType: this.filterEventType || undefined,
-        subjectType: this.filterSubjectType || undefined,
-        subjectId: this.filterSubjectId || undefined,
-        from: this.filterFrom || undefined,
-        to: this.filterTo || undefined,
-        page: this.pageIndex,
-        size: this.pageSize,
-      })
-      .subscribe({
-        next: (resp) => {
-          this.dataSource.data = resp.content;
-          this.totalElements = resp.totalElements;
-          this.loading = false;
-          this.cdr.detectChanges();
-        },
-        error: () => {
-          this.loading = false;
-          this.cdr.detectChanges();
-        },
-      });
+    const request$ = this.reportMode === 'kyc-overrides'
+      ? this.auditService.kycOverrideReport({
+          jurisdiction: this.filterJurisdiction || undefined,
+          from: this.toIsoDateTime(this.filterFrom, 'start'),
+          to: this.toIsoDateTime(this.filterTo, 'end'),
+          page: this.pageIndex,
+          size: this.pageSize,
+        })
+      : this.auditService.searchEvents({
+          eventType: this.filterEventType || undefined,
+          subjectType: this.filterSubjectType || undefined,
+          subjectId: this.filterSubjectId || undefined,
+          from: this.filterFrom || undefined,
+          to: this.filterTo || undefined,
+          page: this.pageIndex,
+          size: this.pageSize,
+        });
+
+    request$.subscribe({
+      next: (resp) => {
+        this.dataSource.data = resp.content;
+        this.totalElements = resp.totalElements;
+        this.loading = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.loading = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  /** The backend's KYC-overrides report expects full ISO date-times, unlike the plain
+   *  yyyy-MM-dd the "From/To Date" inputs produce — anchor to the start/end of that day. */
+  private toIsoDateTime(date: string, bound: 'start' | 'end'): string | undefined {
+    if (!date) return undefined;
+    return bound === 'start' ? `${date}T00:00:00Z` : `${date}T23:59:59Z`;
+  }
+
+  onReportModeChange(): void {
+    this.pageIndex = 0;
+    this.loadData();
   }
 
   onFilterChange(): void {
@@ -253,6 +392,7 @@ export class AuditLogComponent implements OnInit {
     this.filterEventType = '';
     this.filterSubjectType = '';
     this.filterSubjectId = '';
+    this.filterJurisdiction = '';
     this.filterFrom = '';
     this.filterTo = '';
     this.pageIndex = 0;

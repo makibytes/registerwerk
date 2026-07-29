@@ -4,6 +4,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.customer.internal.EntityNumberGenerator;
 import de.makibytes.registerwerk.customer.internal.LegalEntityService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.customer.api.EntityMergeRecord;
+import de.makibytes.registerwerk.customer.api.EntityMergeRecordRepository;
 import de.makibytes.registerwerk.customer.api.EntityNameHistory;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
@@ -39,6 +41,9 @@ class LegalEntityServiceTest {
 
     @Mock
     private EntityNameHistoryRepository entityNameHistoryRepository;
+
+    @Mock
+    private EntityMergeRecordRepository entityMergeRecordRepository;
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
@@ -169,5 +174,60 @@ class LegalEntityServiceTest {
         assertThat(saved.getNewName()).isEqualTo("New Name AG");
         assertThat(saved.getEffectiveDate()).isEqualTo(effectiveDate);
         assertThat(entity.getCurrentName()).isEqualTo("New Name AG");
+    }
+
+    @Test
+    @DisplayName("mergeEntities dissolves the source entity and persists an EntityMergeRecord")
+    void mergeEntities_dissolvesSourceAndPersistsRecord() {
+        LegalEntity source = buildEntity();
+        source.setStatus(EntityStatus.ACTIVE);
+        LegalEntity target = buildEntity();
+        UUID actorId = UUID.randomUUID();
+        LocalDate effectiveDate = LocalDate.of(2026, 6, 1);
+
+        when(legalEntityRepository.findById(source.getId())).thenReturn(Optional.of(source));
+        when(legalEntityRepository.findById(target.getId())).thenReturn(Optional.of(target));
+        when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(entityMergeRecordRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        EntityMergeRecord result = legalEntityService.mergeEntities(
+                source.getId(), target.getId(), EntityMergeRecord.MergeType.ABSORPTION,
+                effectiveDate, "Absorbed via share purchase agreement", actorId);
+
+        assertThat(source.getStatus()).isEqualTo(EntityStatus.DISSOLVED);
+        assertThat(result.getSourceEntityId()).isEqualTo(source.getId());
+        assertThat(result.getTargetEntityId()).isEqualTo(target.getId());
+        assertThat(result.getMergeType()).isEqualTo(EntityMergeRecord.MergeType.ABSORPTION);
+        assertThat(result.getRecordedBy()).isEqualTo(actorId);
+        verify(eventPublisher).publishEvent(any(Object.class));
+    }
+
+    @Test
+    @DisplayName("mergeEntities rejects a dissolved target as the surviving entity")
+    void mergeEntities_rejectsDissolvedTarget() {
+        LegalEntity source = buildEntity();
+        source.setStatus(EntityStatus.ACTIVE);
+        LegalEntity target = buildEntity();
+        target.setStatus(EntityStatus.DISSOLVED);
+
+        when(legalEntityRepository.findById(source.getId())).thenReturn(Optional.of(source));
+        when(legalEntityRepository.findById(target.getId())).thenReturn(Optional.of(target));
+
+        assertThatThrownBy(() -> legalEntityService.mergeEntities(
+                source.getId(), target.getId(), EntityMergeRecord.MergeType.ABSORPTION,
+                LocalDate.now(), null, UUID.randomUUID()))
+            .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
+            .hasMessageContaining("dissolved");
+        assertThat(source.getStatus()).isEqualTo(EntityStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("mergeEntities rejects merging an entity into itself")
+    void mergeEntities_rejectsSelfMerge() {
+        UUID id = UUID.randomUUID();
+        assertThatThrownBy(() -> legalEntityService.mergeEntities(
+                id, id, EntityMergeRecord.MergeType.ABSORPTION, LocalDate.now(), null, UUID.randomUUID()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("cannot be merged into itself");
     }
 }

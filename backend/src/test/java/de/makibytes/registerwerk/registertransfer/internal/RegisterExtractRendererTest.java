@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.EntryType;
 import de.makibytes.registerwerk.registertransfer.api.InspectionLegalBasis;
+import de.makibytes.registerwerk.shared.DocumentSigningService;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -15,6 +16,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests the §10 eWpG disclosure boundary rendered into the extract PDF: Berechtigte
@@ -25,7 +31,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class RegisterExtractRendererTest {
 
-    private final RegisterExtractRenderer renderer = new RegisterExtractRenderer();
+    private final DocumentSigningService signingService = mock(DocumentSigningService.class);
+    private final RegisterExtractRenderer renderer = new RegisterExtractRenderer(signingService);
 
     private static Asset asset(String name, String isin) {
         Asset asset = new Asset();
@@ -118,7 +125,7 @@ class RegisterExtractRendererTest {
     }
 
     @Test
-    void render_manyHolders_truncatesPageWithGekuerztMarker() throws IOException {
+    void render_manyHolders_paginatesInsteadOfTruncating() throws IOException {
         List<AssetHolder> holders = new ArrayList<>();
         for (int i = 0; i < 80; i++) {
             holders.add(holder("HREF-" + i, "1", null));
@@ -128,8 +135,25 @@ class RegisterExtractRendererTest {
                 InspectionLegalBasis.HOLDER, "Requester");
 
         String text = extractText(pdf);
-        assertThat(text).contains("gekürzt");
-        // The overflow marker means not every holder fit on the single page.
-        assertThat(text).doesNotContain("HREF-79");
+        // §10 must disclose every holder of record (finding #12) — overflow now continues on
+        // additional pages instead of silently truncating past the first page's capacity.
+        assertThat(text).doesNotContain("gekürzt");
+        assertThat(text).contains("HREF-0").contains("HREF-79");
+        assertThat(text).contains("Fortsetzung");
+        try (org.apache.pdfbox.pdmodel.PDDocument doc = Loader.loadPDF(pdf)) {
+            assertThat(doc.getNumberOfPages()).isGreaterThan(1);
+        }
+    }
+
+    @Test
+    void render_isSignedWhenSigningIsConfigured() throws IOException {
+        when(signingService.isConfigured()).thenReturn(true);
+        when(signingService.signPdf(any(), anyString())).thenReturn("signed-bytes".getBytes());
+
+        byte[] pdf = renderer.render(asset("Test Bond", "DE0001"), List.of(),
+                InspectionLegalBasis.HOLDER, "Jane Doe");
+
+        assertThat(pdf).isEqualTo("signed-bytes".getBytes());
+        verify(signingService).signPdf(any(), anyString());
     }
 }

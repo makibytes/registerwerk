@@ -2,11 +2,13 @@
 --
 -- Floating-rate bonds require a rate-fixing step before each coupon payment
 -- (EURIBOR, SONIA, etc.). The registryAdmin exercises FixRate on each rate-fixing date.
+--
+-- As with 'Registerwerk.Bond.FixedBond', this template tracks lifecycle status only —
+-- the cash leg is settled by the backend against the Canton Token Standard, a
+-- runtime-only dependency of this participant (see daml.yaml).
 module Registerwerk.Bond.FloatingBond where
 
 import Registerwerk.Bond.Types
-import DA.Date (Date)
-import DA.Decimal (Decimal)
 
 -- | A floating-rate bond instrument registered under eWpG.
 template FloatingRateBond with
@@ -31,6 +33,7 @@ template FloatingRateBond with
           rate       : Decimal
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — rate cannot be fixed" (status == "ACTIVE")
         create this with latestFixedRate = Some rate
 
     -- | Pay the coupon for the current period using the previously fixed rate.
@@ -40,12 +43,19 @@ template FloatingRateBond with
           txRef         : Text
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — coupon cannot be paid" (status == "ACTIVE")
+        assertMsg "Coupon amount must be positive" (amountPerUnit > 0.0)
+        assertMsg "Rate must be fixed before the coupon can be paid" (latestFixedRate /= None)
+        assertMsg "Coupon payment date cannot be after maturity" (paymentDate <= terms.maturityDate)
         create this with status = status
 
     -- | Redeem at maturity.
     choice Redeem : ()
+        with redemptionDate : Date
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — cannot redeem" (status == "ACTIVE")
+        assertMsg "Redemption date must be on or after maturity" (redemptionDate >= terms.maturityDate)
         return ()
 
     -- | Early call.
@@ -53,6 +63,10 @@ template FloatingRateBond with
         with callDate : Date; callPrice : Decimal
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — cannot call" (status == "ACTIVE")
+        assertMsg "Bond terms do not permit early call" terms.callable
+        assertMsg "callDate/callPrice do not match an entry in the call schedule"
+          (any (\c -> c.callDate == callDate && c.callPrice == callPrice) terms.callSchedule)
         return ()
 
     -- | Regulatory suspension.

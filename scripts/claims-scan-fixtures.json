@@ -1,0 +1,36 @@
+{
+  "unsafe": [
+    "Registerwerk is fully compliant with eWpG in Germany.",
+    "Registerwerk is fully-compliant with DORA.",
+    "Choose the compliant alternative for MiCAR payment rails.",
+    "The service is compliant with GDPR.",
+    "This is not legal advice. Registerwerk is fully compliant with GDPR.",
+    "The DvP contract will settle atomically.",
+    "Every trade is settled atomically.",
+    "The contract atomically settles both legs.",
+    "The platform supports all major EVM chains.",
+    "The reporting integration is production-ready.",
+    "The reporting integration is ready for production.",
+    "Natural-person fields are encrypted at rest.",
+    "Reports are automatically submitted to the authority.",
+    "Registerwerk is not a bank but is fully compliant with eWpG.",
+    "The platform is not audited, although it is production-ready.",
+    "The DvP is not externally reviewed but settles atomically.",
+    "The module does not establish legal advice and ensures compliance.",
+    "The implementation satisfies GwG and MiCAR obligations.",
+    "Registerwerk is fully compliant with GDPR, but this paragraph is not legal advice.",
+    "Not legal advice: Registerwerk is fully compliant with GDPR.",
+    "Not audited — the module is ready for production.",
+    "The platform is not audited though it is production-ready.",
+    "The platform is not audited despite being production-ready.",
+    "| The platform is production-ready | Status unknown | False |",
+    "| False | Registerwerk is fully compliant with eWpG | Approved |"
+  ],
+  "qualified": [
+    "Registerwerk is not fully compliant with eWpG.",
+    "The reporting integration is not production-ready.",
+    "This code does not prove a legally effective register entry.",
+    "Atomic DvP is valid only for exact-transfer tokens within one successful transaction.",
+    "| MiCAR-compliant payment rails | False | Operator attestations are not legal verification. |"
+  ]
+}

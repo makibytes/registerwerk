@@ -18,4 +18,8 @@ public interface RpcNodeRepository extends JpaRepository<RpcNode, UUID> {
     /** Eagerly joins chain_config to avoid N+1 during health checks. */
     @Query("SELECT n FROM RpcNode n JOIN FETCH n.chainConfig")
     List<RpcNode> findAllWithChainConfig();
+
+    /** Backs the RPC-node-health alerting gauge — checkAllNodes() already persists this
+     *  status every ~30s via saveAll(), but nothing ever counted it. */
+    long countByHealthyFalse();
 }

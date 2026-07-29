@@ -13,11 +13,14 @@ import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
 import de.makibytes.registerwerk.shared.api.AsyncDataStatus;
 import de.makibytes.registerwerk.erc3643.web.dto.ClaimInfo;
 import de.makibytes.registerwerk.erc3643.web.dto.OnchainIdentityResponse;
+import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -84,7 +87,8 @@ public class OnChainIdController {
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<OnchainIdentityResponse> deployIdentity(
             @PathVariable UUID entityId,
-            @RequestBody Map<String, String> body) {
+            @RequestBody Map<String, String> body,
+            Authentication auth) {
         String chainConfigIdStr = body.get("chainConfigId");
         if (chainConfigIdStr == null || chainConfigIdStr.isBlank()) {
             return ResponseEntity.badRequest().build();
@@ -92,7 +96,8 @@ public class OnChainIdController {
         UUID chainConfigId = UUID.fromString(chainConfigIdStr);
         log.info("POST deploy-identity for entityId={} on chainConfigId={}", entityId, chainConfigId);
 
-        OnchainIdentity identity = onChainIdService.getOrCreate(entityId, chainConfigId);
+        OnchainIdentity identity = onChainIdService.getOrCreate(
+                entityId, chainConfigId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
 
         List<OnchainClaim> activeClaims = claimIssuanceService.getActiveClaims(entityId, chainConfigId);
 
@@ -124,17 +129,20 @@ public class OnChainIdController {
      */
     @PostMapping("/{identityId}/claims/kyc")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "CLAIM_ISSUANCE")
     public ResponseEntity<ClaimInfo> issueKycClaim(
             @PathVariable UUID entityId,
             @PathVariable UUID identityId,
-            @RequestBody(required = false) Map<String, String> body) {
+            @RequestBody(required = false) Map<String, String> body,
+            Authentication auth) {
         log.info("POST KYC claim for entityId={} identityId={}", entityId, identityId);
 
         OnchainIdentity identity = requireIdentity(identityId);
         Instant expiresAt = parseExpiresAt(body);
 
         OnchainClaim claim = claimIssuanceService.issueKycClaim(
-            entityId, identity.getChainConfigId(), expiresAt);
+            entityId, identity.getChainConfigId(), expiresAt,
+            actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toClaimInfo(claim));
     }
 
@@ -143,13 +151,16 @@ public class OnChainIdController {
      */
     @PostMapping("/{identityId}/claims/aml")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "CLAIM_ISSUANCE")
     public ResponseEntity<ClaimInfo> issueAmlClaim(
             @PathVariable UUID entityId,
-            @PathVariable UUID identityId) {
+            @PathVariable UUID identityId,
+            Authentication auth) {
         log.info("POST AML claim for entityId={} identityId={}", entityId, identityId);
 
         OnchainIdentity identity = requireIdentity(identityId);
-        OnchainClaim claim = claimIssuanceService.issueAmlClaim(entityId, identity.getChainConfigId());
+        OnchainClaim claim = claimIssuanceService.issueAmlClaim(entityId, identity.getChainConfigId(),
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toClaimInfo(claim));
     }
 
@@ -159,17 +170,20 @@ public class OnChainIdController {
      */
     @PostMapping("/{identityId}/claims/custom")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "CLAIM_ISSUANCE")
     public ResponseEntity<ClaimInfo> issueCustomClaim(
             @PathVariable UUID entityId,
             @PathVariable UUID identityId,
-            @RequestBody Map<String, String> body) {
+            @RequestBody Map<String, String> body,
+            Authentication auth) {
         log.info("POST custom claim for entityId={} identityId={}", entityId, identityId);
         OnchainIdentity identity = requireIdentity(identityId);
         long topic = Long.parseLong(body.getOrDefault("topic", "0"));
         String topicLabel = body.getOrDefault("topicLabel", "TOPIC_" + topic);
         Instant expiresAt = parseExpiresAt(body);
         OnchainClaim claim = claimIssuanceService.issueCustomClaim(
-            entityId, identity.getChainConfigId(), topic, topicLabel, expiresAt);
+            entityId, identity.getChainConfigId(), topic, topicLabel, expiresAt,
+            actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toClaimInfo(claim));
     }
 
@@ -178,16 +192,22 @@ public class OnChainIdController {
      */
     @DeleteMapping("/{identityId}/claims/{claimId}")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "CLAIM_REVOCATION")
     public ResponseEntity<Void> revokeClaim(
             @PathVariable UUID entityId,
             @PathVariable UUID identityId,
-            @PathVariable UUID claimId) {
+            @PathVariable UUID claimId,
+            Authentication auth) {
         log.info("DELETE (revoke) claim={} on identityId={}", claimId, identityId);
-        claimIssuanceService.revokeClaim(claimId);
+        claimIssuanceService.revokeClaim(claimId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static UUID actorId(Authentication auth) {
+        return SecurityUtils.extractUserId(auth);
+    }
 
     private OnchainIdentity requireIdentity(UUID identityId) {
         return identityRepository.findById(identityId)

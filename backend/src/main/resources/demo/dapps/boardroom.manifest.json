@@ -1,0 +1,52 @@
+{
+  "slug": "boardroom",
+  "name": "Boardroom Governance",
+  "version": "1.0.0",
+  "description": "Board-level governance and voting for a tokenised entity. Reference implementation of the Registerwerk ONCHAINID permission-management framework: org membership, operator permission grants, org-admin role delegation with role restriction, and per-action ONCHAINID claim checks (KYC, Accreditation) — all enforced onchain via RegisterwerkGated and the PermissionOracle, without the dApp ever touching ONCHAINID or the permission registries directly.",
+  "category": "governance",
+  "contracts": [
+    {
+      "name": "BoardroomGovernance",
+      "abiSha256": "537581ec847ddd1b634e5b771cf4c57e6fe9170a46a31e42ff4b3b59c0571a2e",
+      "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/examples/BoardroomGovernance.sol"
+    }
+  ],
+  "requiredPermissions": [
+    {
+      "code": "boardroom.propose",
+      "rationale": "Open a new board resolution for a vote"
+    },
+    {
+      "code": "boardroom.vote",
+      "rationale": "Cast a vote on an open board resolution"
+    },
+    {
+      "code": "boardroom.tally",
+      "rationale": "Close voting and record the resolution outcome — the reference role-restriction/delegation flow"
+    }
+  ],
+  "requiredClaimTopics": [
+    1,
+    3
+  ],
+  "images": [
+    {
+      "name": "backend",
+      "role": "backend",
+      "ref": "ghcr.io/registerwerk/examples/boardroom-backend@sha256:9e1ad76930e45db117c6815fa796c90d182dc193d9c6f48d8f7d988f99c9cdbd"
+    },
+    {
+      "name": "frontend",
+      "role": "frontend",
+      "ref": "ghcr.io/registerwerk/examples/boardroom-frontend@sha256:6812fc21e7256194a5762c1279bf58e33d535d0716ba0e0cf77024ef7b1ac851"
+    }
+  ],
+  "deployment": {
+    "composeUrl": "https://github.com/registerwerk/registerwerk/blob/main/examples/dapps/boardroom/docker-compose.yml",
+    "composeSha256": "edab084b3ceb5ac648e91288b64d07be0e5be3a2a491a3b7cb71d5169ab593db"
+  },
+  "docsUrl": "https://docs.registerwerk.de/platform/dapp-development",
+  "contact": "dapps@registerwerk.de",
+  "license": "MIT",
+  "pricingNote": "Reference implementation — free, self-hosted"
+}

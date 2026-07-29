@@ -8,6 +8,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -102,6 +103,7 @@ public class BlockchainTransactionService {
 
     // ── Scheduled polling ─────────────────────────────────────────────────────
 
+    @SchedulerLock(name = "blockchainTxPoller", lockAtMostFor = "PT1M", lockAtLeastFor = "PT4S")
     @Scheduled(fixedDelay = 5_000)
     public void pollPendingTransactions() {
         List<BlockchainTransaction> pending = repository.findByStatus(BlockchainTransaction.Status.PENDING);

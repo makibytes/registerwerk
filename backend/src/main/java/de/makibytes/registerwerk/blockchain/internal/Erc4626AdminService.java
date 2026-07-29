@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.deployment.api.VaultNavStrikeRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;
@@ -81,7 +82,7 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
      * @return Blockchain transaction tracking ID.
      */
     public UUID strikeNav(UUID deploymentId, BigDecimal navPerShare, Instant effectiveAt,
-                          byte[] reportHash, UUID reportDocId, UUID actorId) {
+                          byte[] reportHash, UUID reportDocId, UUID actorId, String actorRole) {
         log.info("NAV strike: deploymentId={} navPerShare={} effectiveAt={}", deploymentId, navPerShare, effectiveAt);
 
         AssetDeployment dep = requireDeployment(deploymentId);
@@ -105,7 +106,7 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
 
         UUID txId = submitEvm(dep, fn, "setNavPerShare",
                 Map.of("navPerShare", navPerShare.toPlainString(),
-                        "effectiveAt", effectiveAt.toString()));
+                        "effectiveAt", effectiveAt.toString()), actorId, actorRole);
 
         // Update off-chain mirrors
         AssetVaultState state = vaultStateRepository.findById(assetId)
@@ -133,7 +134,7 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
 
     // ── Deposit cap ───────────────────────────────────────────────────────────
 
-    public UUID setDepositCap(UUID deploymentId, java.math.BigInteger newCap) {
+    public UUID setDepositCap(UUID deploymentId, java.math.BigInteger newCap, UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
         log.info("ERC-4626 setDepositCap={} on deployment={}", newCap, deploymentId);
 
@@ -141,7 +142,7 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
                 Collections.singletonList(new Uint256(newCap)),
                 Collections.emptyList());
 
-        UUID txId = submitEvm(dep, fn, "setDepositCap", Map.of("newCap", newCap.toString()));
+        UUID txId = submitEvm(dep, fn, "setDepositCap", Map.of("newCap", newCap.toString()), actorId, actorRole);
 
         vaultStateRepository.findById(dep.getAssetId()).ifPresent(state -> {
             state.setDepositCap(newCap);
@@ -162,11 +163,17 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
         return dep;
     }
 
-    private UUID submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params) {
+    /** Submits the on-chain transaction and publishes a {@link TokenAdminActionEvent} to the
+     *  audit log, so both strikeNav and setDepositCap reach the audit trail. */
+    private UUID submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
+                            UUID actorId, String actorRole) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
         Credentials creds = evmContractService.credentials(descriptor);
         String txHash = evmContractService.submit(web3j, creds, dep.getContractAddress(), fn);
+
+        eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
+
         return txService.record(txHash, methodName, dep.getId(), dep.getAssetId(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
     }

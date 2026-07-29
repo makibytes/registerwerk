@@ -1,13 +1,15 @@
-sdk-version: 3.2.0
+sdk-version: 3.5.2
 name: registerwerk-canton
 version: 0.1.0
 source: daml
 dependencies:
-  # Canton Token Standard (CIP-0056) — pre-deployed on Canton Network public infrastructure.
-  # The package ID resolves from the participant at runtime; no DAR upload needed on CN.
-  # For private participants, upload the token-standard DAR during bootstrap.
+  # No compile-time dependency on the Canton Token Standard (CIP-0056): these bond
+  # templates reference it only at runtime through the participant, where the standard
+  # is pre-deployed on Canton Network public infrastructure. If a template ever imports
+  # token-standard modules directly, add its DAR here as a data-dependency instead.
   - daml-stdlib
-  - daml-script
-  - canton-token-standard
 build-options:
-  - --target=1.15
+  # Daml-LF 2.1 — the lowest LF version Daml 3 emits, and the one Canton Network
+  # protocol versions currently accept broadly. (LF 1.x was Daml 2.x-era; SDK 3.x
+  # only targets 2.1+.)
+  - --target=2.1

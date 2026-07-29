@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
 import de.makibytes.registerwerk.asset.internal.AssetLifecycleService;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -9,6 +8,7 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ class AssetLifecycleServiceTest {
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private AssetDeploymentService assetDeploymentService;
+    private AssetBondTermsRepository bondTermsRepository;
 
     @InjectMocks
     private AssetLifecycleService assetLifecycleService;
@@ -147,6 +147,32 @@ class AssetLifecycleServiceTest {
         verify(eventPublisher).publishEvent(any(Object.class));
     }
 
+    // ── reactivate ────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("reactivate should transition a SUSPENDED asset back to ISSUED")
+    void reactivate_shouldTransitionBackToIssued() {
+        Asset asset = buildAsset(AssetStatus.SUSPENDED);
+        UUID actorId = UUID.randomUUID();
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assetLifecycleService.reactivate(asset.getId(), actorId);
+
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.ISSUED);
+        verify(eventPublisher).publishEvent(any(Object.class));
+    }
+
+    @Test
+    @DisplayName("reactivate should throw InvalidStateTransitionException when asset is not SUSPENDED")
+    void reactivate_shouldThrowOnInvalidStatus() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> assetLifecycleService.reactivate(asset.getId(), UUID.randomUUID()))
+            .isInstanceOf(InvalidStateTransitionException.class);
+    }
+
     // ── redeem ────────────────────────────────────────────────────────────────
 
     @Test
@@ -161,5 +187,23 @@ class AssetLifecycleServiceTest {
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.REDEEMED);
         verify(eventPublisher).publishEvent(any(Object.class));
+    }
+
+    @Test
+    @DisplayName("redeem reconciles AssetBondTerms.bondStatus to REDEEMED when bond terms exist")
+    void redeem_reconcilesBondStatus() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        de.makibytes.registerwerk.deployment.api.AssetBondTerms terms =
+                new de.makibytes.registerwerk.deployment.api.AssetBondTerms();
+        terms.setAssetId(asset.getId());
+        terms.setBondStatus(de.makibytes.registerwerk.deployment.api.BondStatus.ACTIVE);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(bondTermsRepository.findById(asset.getId())).thenReturn(Optional.of(terms));
+
+        assetLifecycleService.redeem(asset.getId(), UUID.randomUUID());
+
+        assertThat(terms.getBondStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.BondStatus.REDEEMED);
+        verify(bondTermsRepository).save(terms);
     }
 }

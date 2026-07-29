@@ -1,4 +1,9 @@
 # Data Protection Impact Assessment — LU_CSSF Jurisdiction
+
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This is a repository draft, not an approved DPIA. The deployment controller and DPO must
+    establish scope, necessity, proportionality, risks, mitigations, consultation requirements,
+    ownership, approval, and review evidence before relying on it.
 # Évaluation d'Impact sur la Protection des Données (RGPD Art. 35)
 
 **System:** Registerwerk  
@@ -40,7 +45,8 @@
 
 - **Registre des Bénéficiaires Effectifs (RBE):** UBO extract stored and refreshed per AML Law 2004 Art. 3.
 - **CSSF Circular 19/732:** AML questionnaire collected per issuer; stored as KYC document type `AML_QUESTIONNAIRE`.
-- **CSSF Circular 22/811:** DLT-based instrument registry satisfies registrar requirements; CSSF notified before go-live.
+- **CSSF Circular 22/811:** The repository contains DLT-oriented registry components, but no
+  instrument-specific registrar determination or CSSF notification evidence. Both are go-live blockers.
 - **Retention:** 5 years post-relationship end per AML Law 2004 Art. 4 (KYC); 10 years for registry (eWpG/CSSF equivalence policy).
 - **Data subject rights:** GDPR applies directly in Luxembourg. DSAR endpoint: `GET /api/v1/me/dsar/export`, erasure: `POST /api/v1/me/dsar/erasure`.
 

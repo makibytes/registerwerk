@@ -1,4 +1,6 @@
 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/
 forge-std/=lib/forge-std/src/
 @erc3643/=lib/erc3643/contracts/
+@onchain-id/solidity/=lib/onchain-id/
 @fhevm/=lib/fhevm/

@@ -8,8 +8,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -29,6 +31,9 @@ class CaspRegisterImportServiceTest {
     @Mock
     private CaspAuthorizationRepository repository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     @InjectMocks
     private CaspRegisterImportService importService;
 
@@ -41,7 +46,7 @@ class CaspRegisterImportServiceTest {
             Beispiel CASP GmbH;did:example:casp1;529900T8BM49AURSDO55;de;Authorised;2026-01-15
             """;
 
-        var result = importService.importCsv(csv, "test");
+        var result = importService.importCsv(csv, "test", UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(result.created()).isEqualTo(1);
         assertThat(result.failed()).isZero();
@@ -62,7 +67,7 @@ class CaspRegisterImportServiceTest {
             Other CASP S.A.,724500A4FBF8B1FE7G53,Withdrawn
             """;
 
-        var result = importService.importCsv(csv, "test");
+        var result = importService.importCsv(csv, "test", UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(result.created()).isEqualTo(1);
         ArgumentCaptor<CaspAuthorization> captor = ArgumentCaptor.forClass(CaspAuthorization.class);
@@ -82,7 +87,7 @@ class CaspRegisterImportServiceTest {
             Bad Status CASP;did:example:bad;Banana
             """;
 
-        var result = importService.importCsv(csv, "test");
+        var result = importService.importCsv(csv, "test", UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(result.created()).isEqualTo(1);
         assertThat(result.failed()).isEqualTo(2);
@@ -101,7 +106,7 @@ class CaspRegisterImportServiceTest {
             Beispiel CASP GmbH;did:example:casp1;Authorised
             """;
 
-        var result = importService.importCsv(csv, "test");
+        var result = importService.importCsv(csv, "test", UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(result.updated()).isEqualTo(1);
         assertThat(result.created()).isZero();
@@ -110,7 +115,7 @@ class CaspRegisterImportServiceTest {
     @Test
     @DisplayName("missing required header columns aborts the import")
     void missingHeader_aborts() {
-        var result = importService.importCsv("name;state\nFoo;DE\n", "test");
+        var result = importService.importCsv("name;state\nFoo;DE\n", "test", UUID.randomUUID(), "REGISTRY_ADMIN");
         assertThat(result.created()).isZero();
         assertThat(result.errors().get(0)).contains("Missing required columns");
         verify(registryService, never()).upsert(any());

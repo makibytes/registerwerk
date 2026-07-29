@@ -7,13 +7,16 @@ import de.makibytes.registerwerk.registertransfer.api.InspectionLegalBasis;
 import de.makibytes.registerwerk.registertransfer.api.InspectionStatus;
 import de.makibytes.registerwerk.registertransfer.api.RegisterInspectionRequest;
 import de.makibytes.registerwerk.registertransfer.api.RegisterInspectionRequestRepository;
+import de.makibytes.registerwerk.registertransfer.events.RegisterInspectionEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 
@@ -38,6 +41,7 @@ class RegisterInspectionServiceTest {
     @Mock private AssetRepository assetRepository;
     @Mock private AssetHolderRepository holderRepository;
     @Mock private RegisterExtractRenderer extractRenderer;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     private RegisterInspectionService service;
 
@@ -45,7 +49,7 @@ class RegisterInspectionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RegisterInspectionService(requestRepository, assetRepository, holderRepository, extractRenderer);
+        service = new RegisterInspectionService(requestRepository, assetRepository, holderRepository, extractRenderer, eventPublisher);
         lenient().when(requestRepository.save(any(RegisterInspectionRequest.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -74,6 +78,20 @@ class RegisterInspectionServiceTest {
 
         assertThat(request.getStatus()).isEqualTo(InspectionStatus.REQUESTED);
         assertThat(request.getDecidedAt()).isNull();
+        verify(eventPublisher, never()).publishEvent(any(RegisterInspectionEvent.class));
+    }
+
+    @Test
+    void submit_autoApprovalPublishesAuditEvent() {
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(new Asset()));
+
+        service.submit(ASSET_ID, UUID.randomUUID(), "Jane Doe", "jane@example.com",
+                InspectionLegalBasis.HOLDER, null);
+
+        ArgumentCaptor<RegisterInspectionEvent> captor = ArgumentCaptor.forClass(RegisterInspectionEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().stage()).isEqualTo("AUTO_APPROVED");
+        assertThat(captor.getValue().assetId()).isEqualTo(ASSET_ID);
     }
 
     @Test
@@ -94,10 +112,16 @@ class RegisterInspectionServiceTest {
         request.setStatus(InspectionStatus.REQUESTED);
         when(requestRepository.findById(requestId)).thenReturn(Optional.of(request));
 
-        RegisterInspectionRequest result = service.approve(requestId, UUID.randomUUID(), "legitimate interest confirmed");
+        UUID operatorId = UUID.randomUUID();
+        RegisterInspectionRequest result = service.approve(requestId, operatorId, "legitimate interest confirmed");
 
         assertThat(result.getStatus()).isEqualTo(InspectionStatus.APPROVED);
         assertThat(result.getDecidedAt()).isNotNull();
+
+        ArgumentCaptor<RegisterInspectionEvent> captor = ArgumentCaptor.forClass(RegisterInspectionEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().stage()).isEqualTo("APPROVED");
+        assertThat(captor.getValue().actorId()).isEqualTo(operatorId);
     }
 
     @Test
@@ -121,6 +145,10 @@ class RegisterInspectionServiceTest {
         RegisterInspectionRequest result = service.reject(requestId, UUID.randomUUID(), "no legitimate interest shown");
 
         assertThat(result.getStatus()).isEqualTo(InspectionStatus.REJECTED);
+
+        ArgumentCaptor<RegisterInspectionEvent> captor = ArgumentCaptor.forClass(RegisterInspectionEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().stage()).isEqualTo("REJECTED");
     }
 
     @Test
@@ -147,7 +175,7 @@ class RegisterInspectionServiceTest {
         when(requestRepository.findById(requestId)).thenReturn(Optional.of(request));
         when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(new Asset()));
         Page<de.makibytes.registerwerk.deployment.api.AssetHolder> holders = new PageImpl<>(List.of());
-        when(holderRepository.findByAssetId(eq(ASSET_ID), any())).thenReturn(holders);
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any())).thenReturn(holders);
         when(extractRenderer.render(any(), any(), eq(InspectionLegalBasis.HOLDER), eq("Jane Doe")))
                 .thenReturn("pdf-bytes".getBytes());
 

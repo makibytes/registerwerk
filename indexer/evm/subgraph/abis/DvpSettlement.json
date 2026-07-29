@@ -1,0 +1,46 @@
+[
+  {
+    "type": "event",
+    "name": "LegLocked",
+    "inputs": [
+      { "name": "tradeId",       "type": "bytes32", "indexed": true },
+      { "name": "seller",        "type": "address", "indexed": true },
+      { "name": "buyer",         "type": "address", "indexed": true },
+      { "name": "lockedLeg",     "type": "uint8",   "indexed": false },
+      { "name": "assetToken",    "type": "address", "indexed": false },
+      { "name": "assetAmount",   "type": "uint256", "indexed": false },
+      { "name": "paymentToken",  "type": "address", "indexed": false },
+      { "name": "paymentAmount", "type": "uint256", "indexed": false },
+      { "name": "expiry",        "type": "uint64",  "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TradeSettled",
+    "inputs": [
+      { "name": "tradeId", "type": "bytes32", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TradeCancelled",
+    "inputs": [
+      { "name": "tradeId", "type": "bytes32", "indexed": true },
+      { "name": "by",      "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Paused",
+    "inputs": [
+      { "name": "by", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Unpaused",
+    "inputs": [
+      { "name": "by", "type": "address", "indexed": true }
+    ]
+  }
+]

@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +32,7 @@ class KycMonitoringJob {
         this.events = events;
     }
 
+    @SchedulerLock(name = "kycMonitoring", lockAtMostFor = "PT30M")
     @Scheduled(cron = "0 0 2 * * *")
     @Transactional
     public void run() {

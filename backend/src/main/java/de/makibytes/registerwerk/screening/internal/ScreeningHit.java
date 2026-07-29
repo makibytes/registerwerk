@@ -19,6 +19,10 @@ public class ScreeningHit {
     @Column(name = "list_source", nullable = false)
     private String listSource;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "category", nullable = false)
+    private HitCategory category = HitCategory.SANCTIONS;
+
     @Column(name = "matched_field", nullable = false)
     private String matchedField;
 
@@ -54,6 +58,8 @@ public class ScreeningHit {
     public void setRunId(UUID runId) { this.runId = runId; }
     public String getListSource() { return listSource; }
     public void setListSource(String listSource) { this.listSource = listSource; }
+    public HitCategory getCategory() { return category; }
+    public void setCategory(HitCategory category) { this.category = category; }
     public String getMatchedField() { return matchedField; }
     public void setMatchedField(String matchedField) { this.matchedField = matchedField; }
     public String getMatchedValue() { return matchedValue; }

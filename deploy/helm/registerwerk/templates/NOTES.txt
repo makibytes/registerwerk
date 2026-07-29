@@ -1,0 +1,54 @@
+Registerwerk has been installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+IMPORTANT — this chart will NOT start correctly until you complete the following. None of
+these are automated by `helm install`, and skipping them fails silently or late (a crash-loop
+with no obvious cause, or a real gap discovered only during an actual incident) rather than
+failing the install itself.
+
+1. Create the "registerwerk-secrets" Secret.
+   templates/secret.yaml is deliberately commented out — this chart ships no plaintext secret
+   defaults. Either install the external-secrets.io operator and uncomment that template, or
+   create the Secret yourself:
+
+     kubectl create secret generic registerwerk-secrets -n {{ .Release.Namespace }} \
+       --from-literal=DB_USER=... \
+       --from-literal=DB_PASSWORD=... \
+       --from-literal=JWT_DEV_SECRET=... \
+       --from-literal=REGISTERWERK_WALLET_MASTER_KEY=... \
+       --from-literal=S3_ACCESS_KEY=... \
+       --from-literal=S3_SECRET_KEY=... \
+       --from-literal=MAIL_PASSWORD=... \
+       --from-literal=DEFAULT_ADMIN_EMAIL=... \
+       --from-literal=DEFAULT_ADMIN_PASSWORD=... \
+       --from-literal=WALLETS_BACKUP_RESTIC_PASSWORD=...
+
+   See templates/secret.yaml for the full ExternalSecret reference.
+
+2. Configure a production KEK provider for the wallet-keystore volume.
+   REGISTERWERK_PRODUCTION_MODE is "{{ .Values.env.REGISTERWERK_PRODUCTION_MODE }}" — if true,
+   the backend fails closed at startup (ProductionReadinessCheck) unless
+   registerwerk.wallet.kek-provider is set to AWS_KMS, GCP_KMS, or AZURE_KEY_VAULT. Add the
+   corresponding env vars (registerwerk.wallet.kms.key-id, etc.) to values.yaml's `env:` block.
+
+3. Install the companion backup chart — SEPARATELY, as its own release.
+   deploy/helm/backup is not a dependency of this chart (a different release, potentially a
+   different namespace, is a deliberate choice — see its own values.yaml comments). It backs
+   up both PostgreSQL (WAL-G) and the wallet-keystore volume (restic) — the latter has NO other
+   backup mechanism, and losing it means permanently losing the ability to administer
+   already-deployed on-chain assets. Install it with the two required cross-release values:
+
+     helm install registerwerk-backup deploy/helm/backup \
+       --set postgresql.host={{ .Release.Name }}-postgresql \
+       --set postgresql.pvcName=data-{{ .Release.Name }}-postgresql-0 \
+       --set wallets.pvcName={{ include "registerwerk.fullname" . }}-wallets
+
+4. (Optional but recommended) Configure a KMS-backed audit-chain signing key.
+   registerwerk.audit.signing.provider is blank by default — the hash chain is still
+   WORM-protected and verified, just without a signature anchored outside the database. Set
+   it to GCP_KMS (only cloud with Ed25519 KMS support — see GcpKmsEd25519SigningKeyProvider's
+   Javadoc) for a real external chain-of-custody anchor.
+
+Check chart status:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} --tail=100

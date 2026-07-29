@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<body style="font-family: Arial, sans-serif; color: #111827;">
+  <p>Hello <span th:text="${adminName}">there</span>,</p>
+  <p>
+    The onchain organization of <strong th:text="${entityName}">your company</strong>
+    has been <strong>suspended</strong> by the registry operator.
+  </p>
+  <p>
+    Reason: <span th:text="${reason}">–</span>
+  </p>
+  <p>
+    While suspended, your organization's wallets lose their active-member status in the
+    Registerwerk ecosystem and organization self-administration is disabled. Please
+    contact the registry operator for details.
+  </p>
+</body>
+</html>

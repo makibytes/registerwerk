@@ -1,0 +1,13 @@
+[
+  {
+    "type": "event",
+    "name": "MarketCreated",
+    "inputs": [
+      { "name": "market",          "type": "address", "indexed": true },
+      { "name": "loanToken",       "type": "address", "indexed": true },
+      { "name": "collateralToken", "type": "address", "indexed": true },
+      { "name": "lltvBps",         "type": "uint256", "indexed": false },
+      { "name": "priceOracle",     "type": "address", "indexed": false }
+    ]
+  }
+]

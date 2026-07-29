@@ -28,10 +28,12 @@ Open `.env` and fill in at minimum:
 
 ```dotenv
 DB_PASSWORD=registerwerk
-KONG_DB_PASSWORD=kong
 JWT_ISSUER_URI=https://login.microsoftonline.com/<tenant>/v2.0
 ETH_SEPOLIA_RPC=https://rpc.sepolia.org
 ```
+
+Kong runs DB-less (its declarative config is `gateway/kong.yml`), so no separate Kong
+database credentials are needed.
 
 ## 2 — Start infrastructure
 
@@ -45,12 +47,16 @@ docker compose up -d
 # Backend
 curl http://localhost:8080/actuator/health
 
-# Kong proxy
+# Kong proxy (customer-API path only — the operator frontend bypasses Kong entirely)
 curl http://localhost:8000/api/v1/public/chains
 
-# Konga UI
-open http://localhost:1337
+# Kong runs DB-less with no admin GUI. Its admin API is bound to the host's loopback
+# only (127.0.0.1:8001) — reach it via docker exec, never expose it publicly:
+docker compose exec kong kong health
 ```
+
+Both frontends are already up too: http://localhost:4200 (operator) and
+http://localhost:4201 (customer) — `docker compose up -d` starts them alongside the backend.
 
 ## 4 — Deploy contracts to Sepolia testnet
 
@@ -61,7 +67,8 @@ export DEPLOYER_PRIVATE_KEY=0x<your-key>
 forge script script/DeployTestnet.s.sol --rpc-url $ETH_SEPOLIA_RPC --broadcast
 ```
 
-Note the printed `AssetTokenFactory` address.
+Record every deployed static contract address and its deployment block, including the factories,
+DvP settlement, and any BondDesk, AMM, or RepoVault instances.
 
 ## 5 — Register the chain in the backend
 
@@ -84,14 +91,25 @@ curl -X POST http://localhost:8000/api/v1/admin/chains \
 
 ## 6 — Start the indexer
 
+Configure all `*_SEPOLIA` variables and explicit instance lists documented in
+[The Graph](indexers/the-graph), then:
+
 ```bash
-FACTORY_ADDRESS_SEPOLIA=0xYourFactory ./indexer/evm/deploy-subgraph.sh sepolia
+# graph-node and IPFS must be ready before the deployment command submits anything
 docker compose -f indexer/evm/docker-compose.yml up -d
+SUBGRAPH_VERSION_LABEL=sepolia-20260729-01 ./indexer/evm/deploy-subgraph.sh sepolia
 ```
+
+The index is a provisional event-derived projection, not a chain-finality, legal-register,
+settlement, or deployed-code-identity attestation.
 
 ## 7 — Open the operator frontend
 
+Already running from step 2 at http://localhost:4200. For hot-reload during frontend
+development instead, stop that container and run it locally:
+
 ```bash
+docker compose stop frontend-operator
 cd frontend-operator && npm install && npm start
 open http://localhost:4200
 ```

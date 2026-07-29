@@ -10,10 +10,10 @@ import java.util.UUID;
 /** Public port for ERC-7540 async vault admin operations. Used by asset/web/VaultController. */
 public interface Erc7540AdminPort {
     UUID fulfillDepositRequest(UUID deploymentId, BigInteger onChainRequestId,
-                               BigDecimal navAtFulfill, UUID actorId);
+                               BigDecimal navAtFulfill, UUID actorId, String actorRole);
     UUID fulfillRedeemRequest(UUID deploymentId, BigInteger onChainRequestId,
-                              BigDecimal navAtFulfill, UUID actorId);
-    UUID cancelDepositRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId);
-    UUID cancelRedeemRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId);
+                              BigDecimal navAtFulfill, UUID actorId, String actorRole);
+    UUID cancelDepositRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId, String actorRole);
+    UUID cancelRedeemRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId, String actorRole);
     List<VaultRequest> listPendingRequests(UUID assetId);
 }

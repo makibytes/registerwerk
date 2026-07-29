@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.travelrule.api.CaspAuthorizationStatus;
 import de.makibytes.registerwerk.travelrule.internal.CaspAuthorization;
 import de.makibytes.registerwerk.travelrule.internal.CaspRegisterImportService;
 import de.makibytes.registerwerk.travelrule.internal.CaspRegistryService;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -11,6 +12,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -50,7 +52,7 @@ public class CaspRegisterController {
 
     /** Idempotent upsert keyed by {@code vaspDid}. */
     @PutMapping
-    public CaspAuthorizationResponse upsert(@RequestBody @Valid CaspAuthorizationRequest request) {
+    public CaspAuthorizationResponse upsert(@RequestBody @Valid CaspAuthorizationRequest request, Authentication auth) {
         CaspAuthorization entry = new CaspAuthorization();
         entry.setVaspDid(request.vaspDid().trim());
         entry.setLegalName(request.legalName().trim());
@@ -62,7 +64,8 @@ public class CaspRegisterController {
         entry.setValidUntil(request.validUntil());
         entry.setSource(trimToNull(request.source()));
         entry.setNotes(trimToNull(request.notes()));
-        return CaspAuthorizationResponse.from(service.upsert(entry));
+        return CaspAuthorizationResponse.from(service.upsert(entry,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     /**
@@ -71,14 +74,14 @@ public class CaspRegisterController {
      * Best-effort: valid rows are upserted, bad rows are reported per line.
      */
     @PostMapping(value = "/import", consumes = {"text/csv", "text/plain"})
-    public CaspRegisterImportService.ImportResult importCsv(@RequestBody String csv) {
-        return importService.importCsv(csv,
-                "CSV import " + LocalDate.now());
+    public CaspRegisterImportService.ImportResult importCsv(@RequestBody String csv, Authentication auth) {
+        return importService.importCsv(csv, "CSV import " + LocalDate.now(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        service.delete(id);
+    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication auth) {
+        service.delete(id, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 

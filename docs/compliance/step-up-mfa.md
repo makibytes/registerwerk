@@ -5,6 +5,12 @@ description: Step-up authentication and dual-control (4-eyes) for high-risk regu
 
 # Step-Up MFA & 4-Eyes
 
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page describes intended control mappings. It is not evidence that the configured MFA or
+    dual-control flow satisfies a particular legal, regulatory, security, or segregation-of-duties
+    requirement. Roles, protected actions, assurance level, recovery, and audit evidence require
+    deployment-specific review.
+
 Certain operations in Registerwerk are so consequential — or so clearly required to have dual oversight by regulation — that a normal login session is not sufficient. **Step-up authentication** requires the operator to re-prove their identity at the moment of executing the operation. The **4-eyes principle** (Vier-Augen-Prinzip) further requires a second, independent approver to confirm before the action executes.
 
 ---
@@ -55,7 +61,9 @@ On step-up challenge, the frontend prompts for the configured second factor. On 
 
 ## 4-Eyes implementation
 
-The 4-eyes flow requires two distinct `REGISTRY_ADMIN` or `COMPLIANCE_OFFICER` users to authorise an action:
+The current dual-control enforcement requires two distinct `REGISTRY_ADMIN` users. There is no
+`SECOND_APPROVER` application role, and a `COMPLIANCE_OFFICER` is not accepted as a substitute
+unless the implementation is changed and separately reviewed.
 
 ```mermaid
 sequenceDiagram

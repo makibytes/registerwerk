@@ -3,9 +3,15 @@ package de.makibytes.registerwerk.travelrule.internal;
 import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.travelrule.api.Ivms101;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleProtocolPort;
+import de.makibytes.registerwerk.travelrule.events.TravelRuleMessageReceivedEvent;
+import de.makibytes.registerwerk.travelrule.events.TravelRuleMessageSentEvent;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -63,13 +70,22 @@ public class TravelRuleService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final CaspRegistryService caspRegistry;
+    private final ApplicationEventPublisher eventPublisher;
 
     TravelRuleService(List<TravelRuleProtocolPort> protocols, JdbcTemplate jdbc,
-                      ObjectMapper objectMapper, CaspRegistryService caspRegistry) {
+                      ObjectMapper objectMapper, CaspRegistryService caspRegistry,
+                      ApplicationEventPublisher eventPublisher, MeterRegistry meterRegistry) {
         this.protocols = protocols;
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.caspRegistry = caspRegistry;
+        this.eventPublisher = eventPublisher;
+
+        // Live-queried at scrape time — send() sets STATUS_FAILED on the async completion
+        // callback's failure path, but nothing ever counted it (repo-wide alerting-gap follow-up).
+        Gauge.builder("registerwerk_travelrule_failed_messages_recent_total", jdbc, TravelRuleService::countRecentFailures)
+                .description("Count of travel_rule_message rows with status=FAILED in the last 24h")
+                .register(meterRegistry);
     }
 
     /**
@@ -84,6 +100,21 @@ public class TravelRuleService {
     @Transactional
     public boolean checkAndSend(UUID assetId, String fromWallet, String toWallet,
                                 BigDecimal amountEur, Ivms101.TravelRuleMessage payload) {
+        return checkAndSend(assetId, fromWallet, toWallet, amountEur, null, null, payload);
+    }
+
+    /**
+     * Same as {@link #checkAndSend(UUID, String, String, BigDecimal, Ivms101.TravelRuleMessage)},
+     * plus the transfer's real amount in its own native denomination when no EUR-equivalent
+     * valuation is available (e.g. a decrypted confidential-transfer amount).
+     * {@code nativeAmount}/{@code nativeSymbol} are only ever used as a fallback for the
+     * persisted record when {@code amountEur} is null; they never affect the Art. 14(5)
+     * self-hosted-verification threshold check, which stays EUR-denominated and — absent a real
+     * EUR value — conservatively fails closed exactly as before.
+     */
+    @Transactional
+    public boolean checkAndSend(UUID assetId, String fromWallet, String toWallet, BigDecimal amountEur,
+                                BigDecimal nativeAmount, String nativeSymbol, Ivms101.TravelRuleMessage payload) {
         Optional<TravelRuleProtocolPort.VaspInfo> vasp = resolveVasp(toWallet);
         if (vasp.isEmpty()) {
             // Self-hosted (unhosted) beneficiary: no counterpart CASP to message.
@@ -92,7 +123,7 @@ public class TravelRuleService {
             boolean verificationRequired = amountEur == null
                     || amountEur.compareTo(selfHostedVerificationThresholdEur) > 0;
             String status = verificationRequired ? STATUS_UNHOSTED_VERIFY_REQUIRED : STATUS_UNHOSTED_RECORDED;
-            recordMessage(UUID.randomUUID(), assetId, fromWallet, toWallet, amountEur,
+            recordMessage(UUID.randomUUID(), assetId, fromWallet, toWallet, amountEur, nativeAmount, nativeSymbol,
                     "OUTBOUND", status, null, null, payload);
             if (verificationRequired) {
                 log.warn("Travel Rule: transfer of {} EUR to self-hosted wallet {} exceeds the " +
@@ -110,7 +141,7 @@ public class TravelRuleService {
         try {
             caspRegistry.assertCounterpartyPermitted(vasp.get().vaspId());
         } catch (IllegalStateException micaBlock) {
-            recordMessage(UUID.randomUUID(), assetId, fromWallet, toWallet, amountEur,
+            recordMessage(UUID.randomUUID(), assetId, fromWallet, toWallet, amountEur, nativeAmount, nativeSymbol,
                     "OUTBOUND", STATUS_BLOCKED_MICA, vasp.get().vaspId(),
                     micaBlock.getMessage(), payload);
             throw micaBlock;
@@ -119,10 +150,10 @@ public class TravelRuleService {
         if (protocols.isEmpty()) {
             // Fail closed: a CASP-to-CASP transfer without the required information
             // would breach TFR Art. 14 — there is no de minimis exemption.
-            recordMessage(UUID.randomUUID(), assetId, fromWallet, toWallet, amountEur,
+            recordMessage(UUID.randomUUID(), assetId, fromWallet, toWallet, amountEur, nativeAmount, nativeSymbol,
                     "OUTBOUND", STATUS_FAILED, vasp.get().vaspId(),
                     "No Travel Rule protocol adapter configured", payload);
-            throw new IllegalStateException(
+            throw new ComplianceGateException(
                     "Travel Rule: beneficiary wallet belongs to VASP " + vasp.get().vaspId() +
                     " but no protocol adapter is configured (registerwerk.travel-rule.protocol). " +
                     "TFR Reg (EU) 2023/1113 requires originator/beneficiary information on every " +
@@ -131,7 +162,7 @@ public class TravelRuleService {
 
         TravelRuleProtocolPort protocol = protocols.get(0);
         UUID messageId = UUID.randomUUID();
-        recordMessage(messageId, assetId, fromWallet, toWallet, amountEur,
+        recordMessage(messageId, assetId, fromWallet, toWallet, amountEur, nativeAmount, nativeSymbol,
                 "OUTBOUND", STATUS_PENDING_SEND, vasp.get().vaspId(), null, payload);
 
         protocol.send(messageId, payload).whenComplete((protocolMessageId, ex) -> {
@@ -143,6 +174,9 @@ public class TravelRuleService {
                 log.info("Travel Rule: message sent. protocol={} protocolMsgId={}",
                         protocol.protocolName(), protocolMessageId);
                 markSent(messageId, protocol.protocolName(), protocolMessageId);
+                eventPublisher.publishEvent(new TravelRuleMessageSentEvent(messageId, null, "SYSTEM", Map.of(
+                        "protocol", protocol.protocolName(), "beneficiaryVaspId", vasp.get().vaspId()
+                )));
             }
         });
         return true;
@@ -157,14 +191,19 @@ public class TravelRuleService {
         String fromWallet = payload.originator() != null && !payload.originator().isEmpty()
                 ? payload.originator().get(0).accountNumber() : null;
 
+        UUID messageId = UUID.randomUUID();
         jdbc.update("""
             INSERT INTO travel_rule_message
               (id, direction, status, originator_vasp_did, originator_wallet, beneficiary_wallet,
                ivms101_payload, received_at, created_at, updated_at)
             VALUES (?,?,?,?,?,?,?::jsonb,?,now(),now())
             """,
-            UUID.randomUUID(), "INBOUND", STATUS_RECEIVED, fromVaspId, fromWallet, toWallet,
+            messageId, "INBOUND", STATUS_RECEIVED, fromVaspId, fromWallet, toWallet,
             serializePayload(payload), Instant.now());
+
+        eventPublisher.publishEvent(new TravelRuleMessageReceivedEvent(messageId, null, "SYSTEM", Map.of(
+                "originatorVaspId", fromVaspId != null ? fromVaspId : ""
+        )));
     }
 
     private Optional<TravelRuleProtocolPort.VaspInfo> resolveVasp(String walletAddress) {
@@ -176,9 +215,16 @@ public class TravelRuleService {
     }
 
     private void recordMessage(UUID messageId, UUID assetId, String fromWallet, String toWallet,
-                               BigDecimal amount, String direction, String status,
+                               BigDecimal amountEur, BigDecimal nativeAmount, String nativeSymbol,
+                               String direction, String status,
                                String beneficiaryVaspId, String errorMessage,
                                Ivms101.TravelRuleMessage payload) {
+        // Prefer a real EUR valuation when one is ever available; otherwise fall back to the
+        // transfer's own native denomination rather than leave both
+        // columns silently null — e.g. a decrypted confidential-transfer amount, which this
+        // codebase has no FX/price-oracle infrastructure to convert to EUR.
+        BigDecimal amount = amountEur != null ? amountEur : nativeAmount;
+        String currencySymbol = amountEur != null ? "EUR" : nativeSymbol;
         jdbc.update("""
             INSERT INTO travel_rule_message
               (id, direction, status, asset_id, beneficiary_vasp_did, originator_wallet,
@@ -187,7 +233,7 @@ public class TravelRuleService {
             VALUES (?,?,?,?,?,?,?,?,?,?,?::jsonb,now(),now())
             """,
             messageId, direction, status, assetId, beneficiaryVaspId, fromWallet, toWallet,
-            amount, "EUR", errorMessage, serializePayload(payload));
+            amount, currencySymbol, errorMessage, serializePayload(payload));
     }
 
     private void updateStatus(UUID messageId, String status, String errorMessage) {
@@ -210,5 +256,13 @@ public class TravelRuleService {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    private static double countRecentFailures(JdbcTemplate jdbc) {
+        Long count = jdbc.queryForObject("""
+            SELECT count(*) FROM travel_rule_message
+            WHERE status = ? AND updated_at > now() - interval '24 hours'
+            """, Long.class, STATUS_FAILED);
+        return count == null ? 0.0 : count;
     }
 }

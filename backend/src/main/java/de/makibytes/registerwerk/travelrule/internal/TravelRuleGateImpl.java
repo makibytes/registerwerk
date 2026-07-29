@@ -32,6 +32,12 @@ class TravelRuleGateImpl implements TravelRuleGate {
 
     @Override
     public void enforceOutbound(UUID assetId, String fromWallet, String toWallet, BigDecimal amountEur) {
+        enforceOutbound(assetId, fromWallet, toWallet, amountEur, null, null);
+    }
+
+    @Override
+    public void enforceOutbound(UUID assetId, String fromWallet, String toWallet, BigDecimal amountEur,
+                                BigDecimal nativeAmount, String nativeSymbol) {
         Ivms101.IdentityPayload originatorIdentity =
                 identityResolver.resolve(assetId, fromWallet).orElse(null);
         Ivms101.IdentityPayload beneficiaryIdentity =
@@ -43,6 +49,6 @@ class TravelRuleGateImpl implements TravelRuleGate {
                 null,
                 List.of(new Ivms101.Beneficiary(beneficiaryIdentity, toWallet)),
                 null);
-        service.checkAndSend(assetId, fromWallet, toWallet, amountEur, payload);
+        service.checkAndSend(assetId, fromWallet, toWallet, amountEur, nativeAmount, nativeSymbol, payload);
     }
 }

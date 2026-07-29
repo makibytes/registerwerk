@@ -393,7 +393,9 @@ public class TermSheetOnChainFetchService {
                 if (lp.endsWith(".md"))   return "text/markdown";
                 if (lp.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
             }
-        } catch (Exception ignored) { /* fall through */ }
+        } catch (IllegalArgumentException e) {
+            log.debug("Could not parse URI for MIME-type detection by extension: {}", uri, e);
+        }
 
         if (content.length >= 4) {
             if (content[0] == 0x25 && content[1] == 0x50 && content[2] == 0x44 && content[3] == 0x46) {
@@ -450,7 +452,9 @@ public class TermSheetOnChainFetchService {
                 String name = path.substring(path.lastIndexOf('/') + 1);
                 if (!name.isBlank()) return name;
             }
-        } catch (Exception ignored) { /* fall through */ }
+        } catch (IllegalArgumentException e) {
+            log.debug("Could not parse URI to derive file name: {}", uri, e);
+        }
         return switch (mimeType) {
             case "application/pdf" -> "term_sheet.pdf";
             case "text/html" -> "term_sheet.html";

@@ -10,11 +10,11 @@ sidebar_label: FAQ
 
 ### What is the eWpG Registry?
 
-The eWpG Registry is a blockchain-based digital securities registry compliant with the German Electronic Securities Act (Elektronisches Wertpapiergesetz — eWpG). It allows issuers to create, deploy, and manage tokenized securities that are legally recognized under German law.
+Registerwerk is a reference implementation for creating and administering electronic-securities records and related blockchain tokens. Whether an instrument is legally recognized under the German Electronic Securities Act (Elektronisches Wertpapiergesetz — eWpG) depends on the instrument, register model, operator, and deployment and must be reviewed externally.
 
 ### Is the registry regulated?
 
-Yes. The registry operates under the eWpG framework. The registry operator holds the required regulatory authorizations to operate a securities register (Wertpapierregister) under German law.
+Authorisation is deployment- and operator-specific. This repository contains no evidence that a particular operator holds a required regulatory authorisation. Verify the intended activities, operator permissions, and instrument structure with qualified counsel and the relevant operator before use.
 
 ### Can I self-register?
 
@@ -26,7 +26,7 @@ No. Onboarding is operator-initiated. Contact the registry operator to request o
 
 ### How long does the approval process take?
 
-Typically 1–3 business days for initial review. Additional time may be required if the operator requests supplementary documentation.
+Review time is operator- and case-specific. This repository does not define or guarantee a 1–3 business-day service level; ask the responsible operator for the applicable process and timing.
 
 ### Can I change the token parameters after approval?
 
@@ -45,7 +45,7 @@ Currently, each issuance is deployed to one network. To issue the same security 
 
 ### What happens to my token if the registry goes offline?
 
-Once a token is deployed to the blockchain, it exists independently of the registry. Investors can always verify their balances and transact on-chain. The registry is an indexing and administration layer; the blockchain is the authoritative source.
+Once a token is deployed, the contract may continue to exist independently of this application, subject to the selected network and contract controls. Registerwerk stores an operational holder record and projects or reconciles selected state on-chain. Which record has legal authority is instrument-, register-model-, and jurisdiction-specific and requires an approved perimeter decision; an indexed or on-chain balance alone is not proof of legal title or legal effect.
 
 ---
 

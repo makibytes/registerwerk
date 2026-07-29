@@ -10,9 +10,12 @@ import de.makibytes.registerwerk.blockchain.web.dto.FreezeTokenRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.MintIntoSlotRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.TxSubmissionResponse;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigInteger;
@@ -22,6 +25,15 @@ import java.util.UUID;
 /**
  * ERC-3525 slot and token administration endpoints.
  * Moved from blockchain/web to asset/web to resolve the asset ↔ blockchain modulith cycle.
+ *
+ * <p>Every state-mutating endpoint threads {@code actorId}/{@code actorRole} through to the
+ * service, so these admin actions are audited.
+ * {@code forcedValueTransfer} additionally requires step-up dual-control —
+ * the direct EVM/Canton equivalent of an eWpG §24 forced correction requires it everywhere else
+ * in this codebase, but this one lacked it. Freeze/unfreeze deliberately do NOT gain step-up here:
+ * neither the EVM nor Canton equivalents of freeze/unfreeze require it either (freeze is
+ * repo-wide treated as reversible/lighter-weight), so adding it only to ERC-3525 would be a new
+ * inconsistency, not a fix.
  */
 @RestController
 @RequestMapping("/api/v1/deployments/{depId}")
@@ -43,9 +55,11 @@ public class Erc3525SlotController {
     @PostMapping("/slots")
     public ResponseEntity<TxSubmissionResponse> createSlot(
             @PathVariable UUID depId,
-            @Valid @RequestBody CreateSlotRequest request) {
+            @Valid @RequestBody CreateSlotRequest request,
+            Authentication auth) {
         UUID txId = erc3525AdminService.createSlot(
-                depId, request.slotId(), request.name(), request.metadata(), request.supplyCap());
+                depId, request.slotId(), request.name(), request.metadata(), request.supplyCap(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
@@ -58,43 +72,54 @@ public class Erc3525SlotController {
 
     @PostMapping("/slots/{slotId}/pause")
     public ResponseEntity<TxSubmissionResponse> pauseSlot(
-            @PathVariable UUID depId, @PathVariable BigInteger slotId) {
-        return ResponseEntity.ok(new TxSubmissionResponse(erc3525AdminService.pauseSlot(depId, slotId)));
+            @PathVariable UUID depId, @PathVariable BigInteger slotId, Authentication auth) {
+        UUID txId = erc3525AdminService.pauseSlot(depId, slotId,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
     @PostMapping("/slots/{slotId}/unpause")
     public ResponseEntity<TxSubmissionResponse> unpauseSlot(
-            @PathVariable UUID depId, @PathVariable BigInteger slotId) {
-        return ResponseEntity.ok(new TxSubmissionResponse(erc3525AdminService.unpauseSlot(depId, slotId)));
+            @PathVariable UUID depId, @PathVariable BigInteger slotId, Authentication auth) {
+        UUID txId = erc3525AdminService.unpauseSlot(depId, slotId,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
     @PostMapping("/slots/{slotId}/mint")
     public ResponseEntity<TxSubmissionResponse> mintIntoSlot(
             @PathVariable UUID depId, @PathVariable BigInteger slotId,
-            @Valid @RequestBody MintIntoSlotRequest request) {
-        UUID txId = erc3525AdminService.mintIntoSlot(depId, slotId, request.toAddress(), request.value());
+            @Valid @RequestBody MintIntoSlotRequest request, Authentication auth) {
+        UUID txId = erc3525AdminService.mintIntoSlot(depId, slotId, request.toAddress(), request.value(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
     @PostMapping("/tokens/{tokenId}/freeze")
     public ResponseEntity<TxSubmissionResponse> freezeToken(
             @PathVariable UUID depId, @PathVariable BigInteger tokenId,
-            @Valid @RequestBody FreezeTokenRequest request) {
-        return ResponseEntity.ok(new TxSubmissionResponse(erc3525AdminService.freezeToken(depId, tokenId, request.reason())));
+            @Valid @RequestBody FreezeTokenRequest request, Authentication auth) {
+        UUID txId = erc3525AdminService.freezeToken(depId, tokenId, request.reason(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
     @PostMapping("/tokens/{tokenId}/unfreeze")
     public ResponseEntity<TxSubmissionResponse> unfreezeToken(
-            @PathVariable UUID depId, @PathVariable BigInteger tokenId) {
-        return ResponseEntity.ok(new TxSubmissionResponse(erc3525AdminService.unfreezeToken(depId, tokenId)));
+            @PathVariable UUID depId, @PathVariable BigInteger tokenId, Authentication auth) {
+        UUID txId = erc3525AdminService.unfreezeToken(depId, tokenId,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
     @PostMapping("/tokens/{tokenId}/forced-value-transfer")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ERC3525_FORCED_VALUE_TRANSFER_EWG24")
     public ResponseEntity<TxSubmissionResponse> forcedValueTransfer(
             @PathVariable UUID depId, @PathVariable BigInteger tokenId,
-            @Valid @RequestBody ForcedValueTransferRequest request) {
+            @Valid @RequestBody ForcedValueTransferRequest request, Authentication auth) {
         UUID txId = erc3525AdminService.forcedValueTransfer(
-                depId, tokenId, request.toTokenId(), request.value(), request.legalBasis());
+                depId, tokenId, request.toTokenId(), request.value(), request.legalBasis(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 }

@@ -12,11 +12,39 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { firstValueFrom } from 'rxjs';
+import { numberToHex } from 'viem';
 import { InvestmentService } from '../../../core/api/investment.service';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { Erc3643Service, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
 import { IdentityRequestService } from '../../../core/api/identity-request.service';
-import { AssetDeployment, InvestmentRecord } from '../../../core/models';
+import { RegisterDocumentService } from '../../../core/api/register-document.service';
+import { AssetDeployment, InvestmentRecord, RegisterDocumentMeta } from '../../../core/models';
+import { WalletService } from '../../../core/wallet/wallet.service';
+import { FheClientService } from '../../../core/fhe/fhe-client.service';
+import { environment } from '../../../../environments/environment';
+
+/** Minimal ABI fragments for the two confidential-token calls this component makes directly
+ *  on-chain — reading a balance handle and submitting an investor-initiated confidential
+ *  transfer, both entirely client-side (see `FheClientService`'s class-level note). */
+const CONFIDENTIAL_BALANCE_ABI = [
+  {
+    name: 'confidentialBalanceOf', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
+const CONFIDENTIAL_TRANSFER_ABI = [
+  {
+    name: 'confidentialTransfer', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'encryptedAmount', type: 'bytes32' },
+      { name: 'inputProof', type: 'bytes' },
+    ],
+    outputs: [{ name: 'transferred', type: 'uint256' }],
+  },
+] as const;
 import {
   AsyncSection,
   beginAsyncSection,
@@ -124,6 +152,53 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                   (valueChange)="record.externalId = $event"
                 />
               </div>
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        @if (lendingEnabled) {
+        <mat-card class="section-card liquidity-hint-card">
+          <mat-card-content>
+            <div class="liquidity-hint">
+              <mat-icon class="liquidity-icon">water_drop</mat-icon>
+              <div class="liquidity-body">
+                <strong>Need liquidity without selling this position?</strong>
+                <span>
+                  Registerwerk doesn't run a secondary-market order book — instead, pledge
+                  holdings like this one as collateral to borrow a stablecoin against them,
+                  keeping the position (and its coupon or redemption rights) intact. Repay any
+                  time to reclaim your collateral.
+                </span>
+              </div>
+              <a mat-flat-button color="primary" [routerLink]="['/lending', 'borrow', record.id]">
+                <mat-icon>arrow_forward</mat-icon>
+                Pledge &amp; borrow
+              </a>
+            </div>
+          </mat-card-content>
+        </mat-card>
+        }
+
+        <mat-card class="section-card register-doc-card">
+          <mat-card-content>
+            <div class="register-doc-row">
+              <mat-icon class="register-doc-icon">description</mat-icon>
+              <div class="register-doc-body">
+                <strong>{{ registerDocMeta?.title ?? 'Register document' }}</strong>
+                <span>
+                  @if (registerDocMeta?.statutory) {
+                    Your statutory register statement for this holding, issued in text form.
+                  } @else {
+                    A holding confirmation for this position. The registered holder of
+                    record is the custodian (nominee); this document is not a § 19 eWpG
+                    register statement.
+                  }
+                </span>
+              </div>
+              <button mat-stroked-button [disabled]="downloadingRegisterDoc" (click)="downloadRegisterDocument()">
+                <mat-icon>picture_as_pdf</mat-icon>
+                @if (downloadingRegisterDoc) { Preparing… } @else { Download }
+              </button>
             </div>
           </mat-card-content>
         </mat-card>
@@ -258,6 +333,72 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
           </mat-card>
         }
 
+        @if (isConfidential) {
+          <mat-card class="section-card confidential-card">
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon class="confidential-icon">lock</mat-icon>
+                Confidential Balance
+              </mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <p class="confidential-intro">
+                This holding's balance and transfer amounts are encrypted on-chain (Zama fhEVM) —
+                only you, the issuer, the registry operator, and an auditor can decrypt them.
+                Revealing your balance and submitting a transfer both happen entirely in your
+                browser: your wallet signs the request directly to Zama's relayer, this backend
+                never sees the plaintext amount.
+              </p>
+
+              @if (!walletService.isConnected()) {
+                <button mat-stroked-button color="primary" (click)="connectWallet()" [disabled]="connecting">
+                  <mat-icon>account_balance_wallet</mat-icon>
+                  {{ connecting ? 'Connecting…' : 'Connect Wallet' }}
+                </button>
+              } @else {
+                <div class="confidential-reveal-row">
+                  <button mat-flat-button color="primary" (click)="revealMyBalance()" [disabled]="revealing || deploymentsSection.data.length === 0">
+                    <mat-icon>visibility</mat-icon>
+                    {{ revealing ? 'Decrypting…' : 'Reveal My Balance' }}
+                  </button>
+                  @if (revealedBalance !== null) {
+                    <span class="revealed-balance">{{ revealedBalance }}</span>
+                  }
+                </div>
+                @if (revealError) {
+                  <p class="confidential-error">{{ revealError }}</p>
+                }
+
+                <mat-divider style="margin: 20px 0"></mat-divider>
+
+                <h3 class="confidential-transfer-title">Confidential Transfer</h3>
+                <div class="confidential-transfer-form">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Recipient address</mat-label>
+                    <input matInput [(ngModel)]="transferTo" placeholder="0x…" />
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Amount</mat-label>
+                    <input matInput type="number" [(ngModel)]="transferAmount" min="0" />
+                  </mat-form-field>
+                  <button mat-flat-button color="primary"
+                          (click)="submitConfidentialTransfer()"
+                          [disabled]="transferring || !transferTo || transferAmount === null || deploymentsSection.data.length === 0">
+                    <mat-icon>send</mat-icon>
+                    {{ transferring ? 'Encrypting & submitting…' : 'Transfer' }}
+                  </button>
+                </div>
+                @if (transferError) {
+                  <p class="confidential-error">{{ transferError }}</p>
+                }
+                @if (transferSuccess) {
+                  <p class="confidential-success">{{ transferSuccess }}</p>
+                }
+              }
+            </mat-card-content>
+          </mat-card>
+        }
+
         <mat-card class="section-card">
           <mat-card-header>
             <mat-card-title>Chain Deployments</mat-card-title>
@@ -315,6 +456,18 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     .detail-value { font-size: 15px; color: var(--rw-text-primary); }
     .detail-value.large { font-size: 28px; font-weight: 700; color: var(--rw-accent); }
     code { word-break: break-all; }
+    .liquidity-hint-card { border-left: 4px solid var(--rw-accent); }
+    .liquidity-hint { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .liquidity-icon { color: var(--rw-accent); font-size: 28px; width: 28px; height: 28px; flex-shrink: 0; }
+    .liquidity-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 240px; }
+    .liquidity-body strong { color: var(--rw-text-primary); font-size: 14px; }
+    .liquidity-body span { color: var(--rw-text-secondary); font-size: 13px; }
+    .register-doc-card { border-left: 4px solid #6366f1; }
+    .register-doc-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .register-doc-icon { color: #6366f1; font-size: 26px; width: 26px; height: 26px; flex-shrink: 0; }
+    .register-doc-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 240px; }
+    .register-doc-body strong { color: var(--rw-text-primary); font-size: 14px; }
+    .register-doc-body span { color: var(--rw-text-secondary); font-size: 13px; }
     .identity-card { border-left: 4px solid #5e35b1; }
     .identity-icon { vertical-align: middle; margin-right: 6px; color: #5e35b1; }
     .identity-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
@@ -331,6 +484,17 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     .claim-status { display: block; font-size: 14px; color: var(--rw-text-primary); }
     .identity-external-id { margin-top: 16px; }
     .empty-text { color: var(--rw-text-muted); }
+
+    .confidential-card { border-left: 4px solid var(--rw-accent); }
+    .confidential-icon { vertical-align: middle; margin-right: 6px; color: var(--rw-accent); }
+    .confidential-intro { color: var(--rw-text-secondary); font-size: 13px; margin: 0 0 16px; max-width: 640px; }
+    .confidential-reveal-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .revealed-balance { font-size: 22px; font-weight: 700; color: var(--rw-accent); }
+    .confidential-error { color: var(--rw-text-danger); font-size: 13px; margin-top: 8px; }
+    .confidential-success { color: var(--rw-text-success); font-size: 13px; margin-top: 8px; }
+    .confidential-transfer-title { font-size: 14px; margin: 0 0 12px; color: var(--rw-text-primary); }
+    .confidential-transfer-form { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+    .confidential-transfer-form mat-form-field { flex: 1; min-width: 220px; }
 
     /* ── Identity not registered: actionable flow ──────────────────────────── */
     .identity-not-registered { display: flex; flex-direction: column; gap: 20px; }
@@ -362,28 +526,48 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
   `],
 })
 export class InvestmentDetailComponent implements OnInit {
+  readonly lendingEnabled = environment.lendingEnabled;
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly investmentService = inject(InvestmentService);
   private readonly issuanceService = inject(IssuanceService);
   private readonly erc3643Service = inject(Erc3643Service);
   private readonly identityRequestService = inject(IdentityRequestService);
+  private readonly registerDocumentService = inject(RegisterDocumentService);
   private readonly snackBar = inject(MatSnackBar);
+  protected readonly walletService = inject(WalletService);
+  private readonly fheService = inject(FheClientService);
 
   record: InvestmentRecord | null = null;
   loading = true;
   deploymentsSection: AsyncSection<AssetDeployment[]> = createAsyncSection<AssetDeployment[]>([]);
   identitySection: AsyncSection<IdentityRegistryEntry | null> = createAsyncSection<IdentityRegistryEntry | null>(null);
+  registerDocMeta: RegisterDocumentMeta | null = null;
+  downloadingRegisterDoc = false;
 
   showRegistrationForm = false;
   registrationNote = '';
   registrationSubmitting = false;
   registrationRequested = false;
 
+  connecting = false;
+  revealing = false;
+  revealedBalance: string | null = null;
+  revealError: string | null = null;
+  transferTo = '';
+  transferAmount: number | null = null;
+  transferring = false;
+  transferError: string | null = null;
+  transferSuccess: string | null = null;
+
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status'];
 
   get isErc3643(): boolean {
     return this.record?.tokenStandard === 'ERC3643' || this.record?.tokenStandard === 'CONF_ERC3643';
+  }
+
+  get isConfidential(): boolean {
+    return this.record?.tokenStandard === 'CONF_ERC20' || this.record?.tokenStandard === 'CONF_ERC3643';
   }
 
   ngOnInit(): void {
@@ -394,9 +578,44 @@ export class InvestmentDetailComponent implements OnInit {
         this.loading = false;
         this.cdr.detectChanges();
         this.loadDeployments(record.assetId, record.walletAddress);
+        this.loadRegisterDocMeta(record.assetId);
       },
       error: () => {
         this.loading = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  private loadRegisterDocMeta(assetId: string): void {
+    this.registerDocumentService.listAvailable().subscribe({
+      next: (docs) => {
+        this.registerDocMeta = docs.find((d) => d.assetId === assetId) ?? null;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        // Non-critical: the download button falls back to a generic label.
+      },
+    });
+  }
+
+  downloadRegisterDocument(): void {
+    if (!this.record) return;
+    this.downloadingRegisterDoc = true;
+    this.registerDocumentService.download(this.record.assetId).subscribe({
+      next: (pdf) => {
+        const url = URL.createObjectURL(pdf);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `registerauszug-${this.record!.assetId}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+        this.downloadingRegisterDoc = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.downloadingRegisterDoc = false;
+        this.snackBar.open('Failed to generate the register document. Please try again.', 'Dismiss', { duration: 5000 });
         this.cdr.detectChanges();
       },
     });
@@ -469,5 +688,80 @@ export class InvestmentDetailComponent implements OnInit {
         this.cdr.detectChanges();
       },
     });
+  }
+
+  // ── Confidential balance reveal + transfer (fully client-side — see FheClientService) ────
+
+  async connectWallet(): Promise<void> {
+    this.connecting = true;
+    this.cdr.detectChanges();
+    try {
+      await this.walletService.connect();
+    } catch (err: unknown) {
+      this.snackBar.open((err as Error)?.message ?? 'Wallet connection failed.', 'Dismiss', { duration: 5000 });
+    } finally {
+      this.connecting = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async revealMyBalance(): Promise<void> {
+    if (!this.record || this.deploymentsSection.data.length === 0) return;
+    this.revealing = true;
+    this.revealError = null;
+    this.cdr.detectChanges();
+    try {
+      const dep = this.deploymentsSection.data[0];
+      const ctx = await firstValueFrom(this.issuanceService.getConfidentialContext(this.record.assetId, dep.id));
+      const handleValue = await this.walletService.readContract<bigint>({
+        address: ctx.contractAddress as `0x${string}`,
+        abi: CONFIDENTIAL_BALANCE_ABI,
+        functionName: 'confidentialBalanceOf',
+        args: [this.record.walletAddress as `0x${string}`],
+      });
+      const handle = numberToHex(handleValue, { size: 32 });
+      const cleartext = await this.fheService.userDecrypt(handle, ctx.contractAddress as `0x${string}`, ctx.chainId);
+      this.revealedBalance = cleartext.toString();
+    } catch (err: unknown) {
+      this.revealError = (err as Error)?.message ?? 'Failed to reveal balance.';
+    } finally {
+      this.revealing = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async submitConfidentialTransfer(): Promise<void> {
+    if (!this.record || this.deploymentsSection.data.length === 0
+        || !this.transferTo || this.transferAmount === null) {
+      return;
+    }
+    this.transferring = true;
+    this.transferError = null;
+    this.transferSuccess = null;
+    this.cdr.detectChanges();
+    try {
+      const dep = this.deploymentsSection.data[0];
+      const ctx = await firstValueFrom(this.issuanceService.getConfidentialContext(this.record.assetId, dep.id));
+      const userAddress = this.walletService.address();
+      if (!userAddress) {
+        throw new Error('Wallet not connected.');
+      }
+      const { handle, inputProof } = await this.fheService.encrypt64(
+        ctx.contractAddress as `0x${string}`, userAddress, BigInt(this.transferAmount), ctx.chainId);
+      const txHash = await this.walletService.writeContract({
+        address: ctx.contractAddress as `0x${string}`,
+        abi: CONFIDENTIAL_TRANSFER_ABI,
+        functionName: 'confidentialTransfer',
+        args: [this.transferTo as `0x${string}`, handle, inputProof],
+      });
+      this.transferSuccess = `Transfer submitted: ${txHash}`;
+      this.transferTo = '';
+      this.transferAmount = null;
+    } catch (err: unknown) {
+      this.transferError = (err as Error)?.message ?? 'Confidential transfer failed.';
+    } finally {
+      this.transferring = false;
+      this.cdr.detectChanges();
+    }
   }
 }

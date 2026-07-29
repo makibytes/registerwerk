@@ -2,5 +2,7 @@ export const environment = {
   production: true,
   testEnvironment: false,
   apiUrl: '/api/v1',
-  operatorUrl: ''
+  operatorUrl: '',
+  lendingEnabled: false,
+  bundlerUrl: ''
 };

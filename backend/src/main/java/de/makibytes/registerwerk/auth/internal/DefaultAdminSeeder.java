@@ -43,7 +43,14 @@ public class DefaultAdminSeeder implements ApplicationRunner {
                 existing.setPasswordHash(encoder.encode(admin.getPassword()));
                 existing.setEnabled(true);
                 existing.setAuthProvider(UserAuthProvider.LOCAL);
-                existing.setRole(AppUserRole.REGISTRY_ADMIN);
+                // Ensure REGISTRY_ADMIN without wiping any additional roles an operator may
+                // have granted this account since it was first seeded — setRole(...) would
+                // replace the whole roles set with a singleton on every boot.
+                if (!existing.hasRole(AppUserRole.REGISTRY_ADMIN)) {
+                    java.util.Set<AppUserRole> roles = new java.util.LinkedHashSet<>(existing.getRoles());
+                    roles.add(AppUserRole.REGISTRY_ADMIN);
+                    existing.setRoles(roles);
+                }
                 users.save(existing);
                 log.info("Default admin user refreshed: {}", admin.getEmail());
             },

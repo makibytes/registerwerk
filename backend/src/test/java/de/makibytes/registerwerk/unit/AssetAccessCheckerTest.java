@@ -1,8 +1,10 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetTokenAdminGrantRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.web.AssetAccessChecker;
 import de.makibytes.registerwerk.blockchain.BlockchainApi;
@@ -21,6 +23,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -28,7 +32,9 @@ class AssetAccessCheckerTest {
 
     AssetRepository assetRepository;
     AssetDeploymentRepository deploymentRepository;
+    AssetHolderRepository holderRepository;
     BlockchainApi blockchainApi;
+    AssetTokenAdminGrantRepository tokenAdminGrantRepository;
     AssetAccessChecker checker;
 
     static final UUID ISSUER_A = UUID.randomUUID();
@@ -41,8 +47,11 @@ class AssetAccessCheckerTest {
     void setUp() {
         assetRepository      = mock(AssetRepository.class);
         deploymentRepository = mock(AssetDeploymentRepository.class);
+        holderRepository     = mock(AssetHolderRepository.class);
         blockchainApi        = mock(BlockchainApi.class);
-        checker = new AssetAccessChecker(assetRepository, deploymentRepository, blockchainApi);
+        tokenAdminGrantRepository = mock(AssetTokenAdminGrantRepository.class);
+        checker = new AssetAccessChecker(
+                assetRepository, deploymentRepository, holderRepository, blockchainApi, tokenAdminGrantRepository);
 
         Asset asset = new Asset();
         asset.setIssuerId(ISSUER_A);
@@ -123,6 +132,67 @@ class AssetAccessCheckerTest {
     void nullAuthentication_returnsFalse() {
         assertThat(checker.canRead(ASSET_ID, null)).isFalse();
         assertThat(checker.canActAsIssuer(ASSET_ID, null)).isFalse();
+    }
+
+    // ── canForceAdmin (ASSET_TOKEN_ADMIN delegation) ──────────────────────────
+
+    @Test
+    void canForceAdmin_activeGrant_returnsTrue() {
+        when(tokenAdminGrantRepository.existsActiveForEntityAndAsset(eq(ISSUER_A), eq(ASSET_ID), any()))
+                .thenReturn(true);
+        assertThat(checker.canForceAdmin(ASSET_ID, jwtAuth(ISSUER_A, "ISSUER"))).isTrue();
+    }
+
+    @Test
+    void canForceAdmin_noGrant_returnsFalse() {
+        when(tokenAdminGrantRepository.existsActiveForEntityAndAsset(eq(ISSUER_A), eq(ASSET_ID), any()))
+                .thenReturn(false);
+        assertThat(checker.canForceAdmin(ASSET_ID, jwtAuth(ISSUER_A, "ISSUER"))).isFalse();
+    }
+
+    @Test
+    void canForceAdmin_owningIssuerWithoutGrant_stillReturnsFalse() {
+        // Confirms the tightening: asset ownership alone is no longer sufficient.
+        when(tokenAdminGrantRepository.existsActiveForEntityAndAsset(any(), any(), any())).thenReturn(false);
+        assertThat(checker.canForceAdmin(ASSET_ID, jwtAuth(ISSUER_A, "ISSUER"))).isFalse();
+    }
+
+    @Test
+    void canForceAdmin_nullAuthentication_returnsFalse() {
+        assertThat(checker.canForceAdmin(ASSET_ID, null)).isFalse();
+    }
+
+    // ── isHolderOfAsset (confidential-context read access) ────────────────────
+
+    @Test
+    void isHolderOfAsset_holderWithPosition_returnsTrue() {
+        UUID investor = UUID.randomUUID();
+        when(holderRepository.existsActiveByAssetIdAndInvestorId(ASSET_ID, investor)).thenReturn(true);
+        assertThat(checker.isHolderOfAsset(ASSET_ID, jwtAuth(investor, "INVESTOR"))).isTrue();
+    }
+
+    @Test
+    void isHolderOfAsset_noPosition_returnsFalse() {
+        UUID investor = UUID.randomUUID();
+        when(holderRepository.existsActiveByAssetIdAndInvestorId(ASSET_ID, investor)).thenReturn(false);
+        assertThat(checker.isHolderOfAsset(ASSET_ID, jwtAuth(investor, "INVESTOR"))).isFalse();
+    }
+
+    @Test
+    void isHolderOfAsset_nullAuthentication_returnsFalse() {
+        assertThat(checker.isHolderOfAsset(ASSET_ID, null)).isFalse();
+    }
+
+    @Test
+    void canForceAdmin_noEntityId_returnsFalse() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .claim("sub", UUID.randomUUID().toString())
+                .build();
+        Authentication auth = new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_REGISTRY_ADMIN")));
+        assertThat(checker.canForceAdmin(ASSET_ID, auth)).isFalse();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -83,7 +83,7 @@ class TokenAdminControllerIT {
         h.setContentType(MediaType.APPLICATION_JSON);
         ResponseEntity<StepUpResponse> stepUp = rest.postForEntity(
                 "/api/v1/auth/step-up",
-                new HttpEntity<>(new StepUpRequest("123456", "TOTP"), h),
+                new HttpEntity<>(new StepUpRequest("123456", "TOTP", null), h),
                 StepUpResponse.class);
         assertThat(stepUp.getStatusCode()).isEqualTo(HttpStatus.OK);
         stepUpToken = stepUp.getBody().stepUpToken();

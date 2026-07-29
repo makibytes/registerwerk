@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.travelrule.internal;
 import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.travelrule.api.Ivms101;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleProtocolPort;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -44,13 +46,17 @@ class TravelRuleServiceTest {
     @Mock
     private CaspRegistryService caspRegistry;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final UUID assetId = UUID.randomUUID();
     private final Ivms101.TravelRuleMessage payload = new Ivms101.TravelRuleMessage(null, null, null, null, null);
 
     private TravelRuleService serviceWith(List<TravelRuleProtocolPort> protocols) {
-        TravelRuleService service = new TravelRuleService(protocols, jdbc, objectMapper, caspRegistry);
+        TravelRuleService service = new TravelRuleService(
+                protocols, jdbc, objectMapper, caspRegistry, eventPublisher, new SimpleMeterRegistry());
         ReflectionTestUtils.setField(service, "selfHostedVerificationThresholdEur", new BigDecimal("1000"));
         return service;
     }
@@ -174,5 +180,18 @@ class TravelRuleServiceTest {
         // The blocked attempt must appear in the message log (audit trail).
         assertThat(capturedStatuses()).contains(TravelRuleService.STATUS_BLOCKED_MICA);
         verify(protocol, org.mockito.Mockito.never()).send(any(), any());
+    }
+
+    @Test
+    @DisplayName("failed-messages gauge reflects a live count (repo-wide alerting follow-up)")
+    void failedMessagesGauge_reflectsLiveCount() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        when(jdbc.queryForObject(anyString(), org.mockito.ArgumentMatchers.eq(Long.class), any()))
+                .thenReturn(2L);
+        new TravelRuleService(List.of(), jdbc, objectMapper, caspRegistry, eventPublisher, registry);
+
+        double value = registry.get("registerwerk_travelrule_failed_messages_recent_total").gauge().value();
+
+        assertThat(value).isEqualTo(2.0);
     }
 }

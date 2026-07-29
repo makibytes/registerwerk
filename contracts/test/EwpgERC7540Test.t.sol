@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.36;
 
 import "forge-std/Test.sol";
 import "../src/tokens/EwpgERC7540.sol";
@@ -206,6 +206,33 @@ contract EwpgERC7540Test is Test {
         vm.prank(registry);
         vm.expectRevert("EwpgERC7540: NAV not struck");
         vault.fulfillDepositRequest(requestId);
+    }
+
+    function test_synchronousErc4626EntryPointsRevert() public {
+        vm.startPrank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        vm.expectRevert(EwpgERC7540.AsyncOnly.selector);
+        vault.deposit(1000e6, alice);
+        vm.expectRevert(EwpgERC7540.AsyncOnly.selector);
+        vault.mint(1000e6, alice);
+        vm.stopPrank();
+
+        _depositFor(alice, 1000e6);
+
+        vm.startPrank(alice);
+        vm.expectRevert(EwpgERC7540.AsyncOnly.selector);
+        vault.withdraw(1, alice, alice);
+        vm.expectRevert(EwpgERC7540.AsyncOnly.selector);
+        vault.redeem(1, alice, alice);
+        vm.stopPrank();
+    }
+
+    function test_synchronousErc4626MaximumsAreZero() public view {
+        assertEq(vault.maxDeposit(alice), 0);
+        assertEq(vault.maxMint(alice), 0);
+        assertEq(vault.maxWithdraw(alice), 0);
+        assertEq(vault.maxRedeem(alice), 0);
     }
 
     // ── Helpers for regression tests ──────────────────────────────────────────

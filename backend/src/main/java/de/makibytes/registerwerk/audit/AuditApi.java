@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.audit;
 
 import de.makibytes.registerwerk.audit.api.AuditEventView;
+import de.makibytes.registerwerk.audit.api.ChainVerificationView;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -22,4 +23,10 @@ public interface AuditApi {
     Optional<AuditEventView> findById(UUID id);
 
     Page<AuditEventView> findKycOverrideApprovals(String jurisdiction, Instant from, Instant to, Pageable pageable);
+
+    /** Most recently computed hash-chain verification result, without triggering a new scan. */
+    ChainVerificationView chainVerificationStatus();
+
+    /** Runs a full hash-chain verification scan now and returns the result. */
+    ChainVerificationView verifyChainNow();
 }

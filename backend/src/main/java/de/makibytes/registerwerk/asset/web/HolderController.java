@@ -13,6 +13,7 @@ import de.makibytes.registerwerk.asset.web.dto.HolderResponse;
 import de.makibytes.registerwerk.asset.web.dto.LiveHolderResponse;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.asset.web.HolderMapper;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,7 +77,9 @@ public class HolderController {
             assetId,
             request.investorId(),
             request.walletAddress(),
-            request.nominalAmount()
+            request.nominalAmount(),
+            extractActorId(authentication),
+            SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN")
         );
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(holder, authentication));
     }
@@ -100,7 +103,9 @@ public class HolderController {
             request.isConsumer(),
             request.thirdPartyRights(),
             request.disposalRestrictions(),
-            request.legalCapacityNote()
+            request.legalCapacityNote(),
+            extractActorId(authentication),
+            SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN")
         );
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(holder, authentication));
     }
@@ -121,7 +126,9 @@ public class HolderController {
             request.isConsumer(),
             request.thirdPartyRights(),
             request.disposalRestrictions(),
-            request.legalCapacityNote()
+            request.legalCapacityNote(),
+            extractActorId(authentication),
+            SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN")
         );
         return ResponseEntity.ok(toResponse(holder, authentication));
     }
@@ -149,7 +156,7 @@ public class HolderController {
             @PathVariable UUID holderId,
             Authentication auth) {
         UUID actorId = extractActorId(auth);
-        holderService.removeHolder(holderId, actorId);
+        holderService.removeHolder(holderId, actorId, SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 

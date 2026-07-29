@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/auth/auth.guard';
 import { roleGuard } from './core/auth/role.guard';
+import { lendingFeatureGuard } from './core/feature/lending-feature.guard';
 import { ShellComponent } from './layout/shell/shell.component';
 
 export const routes: Routes = [
@@ -34,6 +35,15 @@ export const routes: Routes = [
         loadComponent: () => import('./features/dashboard/dashboard.component').then(m => m.DashboardComponent)
       },
       {
+        path: 'positions',
+        loadComponent: () => import('./features/positions/positions.component').then(m => m.PositionsComponent)
+      },
+      {
+        path: 'lending',
+        canMatch: [lendingFeatureGuard],
+        loadChildren: () => import('./features/lending/lending.routes').then(m => m.LENDING_ROUTES)
+      },
+      {
         path: 'issuances',
         canActivate: [roleGuard(['ISSUER', 'REGISTRY_ADMIN'])],
         loadChildren: () => import('./features/issuances/issuances.routes').then(m => m.ISSUANCE_ROUTES)
@@ -47,6 +57,15 @@ export const routes: Routes = [
         path: 'trading',
         canActivate: [roleGuard(['TRADER', 'REGISTRY_ADMIN'])],
         loadComponent: () => import('./features/trading/trading-desk.component').then(m => m.TradingDeskComponent)
+      },
+      {
+        path: 'marketplace',
+        loadChildren: () => import('./features/marketplace/marketplace.routes').then(m => m.MARKETPLACE_ROUTES)
+      },
+      {
+        path: 'publisher',
+        canActivate: [roleGuard(['DAPP_PUBLISHER', 'COMPANY_ADMIN', 'REGISTRY_ADMIN'])],
+        loadChildren: () => import('./features/publisher/publisher.routes').then(m => m.PUBLISHER_ROUTES)
       },
       {
         path: 'company-admin',

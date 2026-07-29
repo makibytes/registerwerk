@@ -31,7 +31,9 @@ import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
 import de.makibytes.registerwerk.erc3643.internal.Erc3643LifecycleService;
 import de.makibytes.registerwerk.erc3643.internal.IdentityRegistryService;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.api.AsyncDataStatus;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import de.makibytes.registerwerk.blockchain.web.dto.FreezePartialRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.TxSubmissionResponse;
 import de.makibytes.registerwerk.erc3643.web.dto.AddClaimTopicRequest;
@@ -90,7 +92,7 @@ public class Erc3643Controller {
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId) {
         log.debug("GET suite for assetId={} deploymentId={}", assetId, deploymentId);
-        Erc3643Suite suite = lifecycleService.getSuiteDetails(deploymentId);
+        Erc3643Suite suite = lifecycleService.getSuiteDetails(assetId, deploymentId);
         return ResponseEntity.ok(toSuiteResponse(suite));
     }
 
@@ -104,14 +106,16 @@ public class Erc3643Controller {
     public ResponseEntity<Void> addComplianceModule(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            Authentication auth) {
         log.info("POST compliance-module for deploymentId={}", deploymentId);
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         String moduleAddress = (String) body.get("moduleAddress");
         String moduleType = (String) body.get("moduleType");
         @SuppressWarnings("unchecked")
         Map<String, Object> parameters = (Map<String, Object>) body.getOrDefault("parameters", Map.of());
-        lifecycleService.addComplianceModule(suiteId, moduleAddress, moduleType, parameters);
+        lifecycleService.addComplianceModule(suiteId, moduleAddress, moduleType, parameters,
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
@@ -123,10 +127,11 @@ public class Erc3643Controller {
     public ResponseEntity<Void> removeComplianceModule(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
-            @PathVariable UUID moduleId) {
+            @PathVariable UUID moduleId,
+            Authentication auth) {
         log.info("DELETE compliance-module={} for deploymentId={}", moduleId, deploymentId);
-        UUID suiteId = resolveSuiteId(deploymentId);
-        lifecycleService.removeComplianceModule(suiteId, moduleId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
+        lifecycleService.removeComplianceModule(suiteId, moduleId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 
@@ -140,7 +145,7 @@ public class Erc3643Controller {
     public ResponseEntity<List<TrustedIssuerResponse>> listTrustedIssuers(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId) {
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         List<TrustedIssuerResponse> result = trustedIssuerRepo.findBySuiteIdAndRemovedAtIsNull(suiteId)
                 .stream()
                 .map(this::toTrustedIssuerResponse)
@@ -156,10 +161,12 @@ public class Erc3643Controller {
     public ResponseEntity<Void> addTrustedIssuer(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
-            @RequestBody @Valid AddTrustedIssuerRequest request) {
+            @RequestBody @Valid AddTrustedIssuerRequest request,
+            Authentication auth) {
         log.info("POST trusted-issuer for deploymentId={}", deploymentId);
-        UUID suiteId = resolveSuiteId(deploymentId);
-        lifecycleService.addTrustedIssuer(suiteId, request.issuerAddress(), request.claimTopics(), request.legalEntityId());
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
+        lifecycleService.addTrustedIssuer(suiteId, request.issuerAddress(), request.claimTopics(), request.legalEntityId(),
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
@@ -171,10 +178,11 @@ public class Erc3643Controller {
     public ResponseEntity<Void> removeTrustedIssuer(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
-            @PathVariable UUID issuerId) {
+            @PathVariable UUID issuerId,
+            Authentication auth) {
         log.info("DELETE trusted-issuer={} for deploymentId={}", issuerId, deploymentId);
-        UUID suiteId = resolveSuiteId(deploymentId);
-        lifecycleService.removeTrustedIssuer(suiteId, issuerId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
+        lifecycleService.removeTrustedIssuer(suiteId, issuerId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 
@@ -188,7 +196,7 @@ public class Erc3643Controller {
     public ResponseEntity<List<ClaimTopicResponse>> listClaimTopics(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId) {
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         List<ClaimTopicResponse> result = claimTopicRepo.findBySuiteId(suiteId)
                 .stream()
                 .map(this::toClaimTopicResponse)
@@ -204,11 +212,12 @@ public class Erc3643Controller {
     public ResponseEntity<Void> addClaimTopic(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
-            @RequestBody @Valid AddClaimTopicRequest request) {
+            @RequestBody @Valid AddClaimTopicRequest request,
+            Authentication auth) {
         log.info("POST claim-topic for deploymentId={}", deploymentId);
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         String label = (request.label() != null) ? request.label() : "TOPIC_" + request.topic();
-        lifecycleService.addRequiredClaimTopic(suiteId, request.topic(), label);
+        lifecycleService.addRequiredClaimTopic(suiteId, request.topic(), label, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
@@ -223,7 +232,7 @@ public class Erc3643Controller {
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
             Authentication authentication) {
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         var entries = identityRegistryService.getRegisteredInvestors(suiteId);
         return ResponseEntity.ok(entries.stream()
                 .map(entry -> toRegistryEntryResponse(entry, authentication))
@@ -236,15 +245,18 @@ public class Erc3643Controller {
      */
     @PostMapping("/{deploymentId}/identity-registry")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "IDENTITY_REGISTRATION")
     public ResponseEntity<IdentityRegistryEntryResponse> registerInvestor(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
-            @RequestBody @Valid RegisterInvestorRequest request) {
+            @RequestBody @Valid RegisterInvestorRequest request,
+            Authentication auth) {
         log.info("POST identity-registry for deploymentId={} wallet={}", deploymentId, request.walletAddress());
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         var entry = identityRegistryService.registerInvestor(
                 suiteId, request.walletAddress(), request.legalEntityId(),
-                request.chainConfigId(), request.countryCode());
+                request.chainConfigId(), request.countryCode(),
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toRegistryEntryResponse(entry, null));
     }
 
@@ -253,13 +265,16 @@ public class Erc3643Controller {
      */
     @DeleteMapping("/{deploymentId}/identity-registry/{registryEntryId}")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "IDENTITY_REGISTRATION")
     public ResponseEntity<Void> removeInvestor(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
-            @PathVariable UUID registryEntryId) {
+            @PathVariable UUID registryEntryId,
+            Authentication auth) {
         log.info("DELETE identity-registry entry={} for deploymentId={}", registryEntryId, deploymentId);
-        UUID suiteId = resolveSuiteId(deploymentId);
-        identityRegistryService.removeInvestor(suiteId, registryEntryId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
+        identityRegistryService.removeInvestor(suiteId, registryEntryId,
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 
@@ -272,33 +287,35 @@ public class Erc3643Controller {
     public ResponseEntity<ComplianceStatusResponse> getComplianceStatus(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId) {
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         return ResponseEntity.ok(lifecycleService.getComplianceStatus(suiteId));
     }
 
     // ── Agent operations ──────────────────────────────────────────────────────
 
     @PostMapping("/{deploymentId}/forced-transfer")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
     public ResponseEntity<TxSubmissionResponse> forcedTransfer(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody Map<String, String> body, Authentication auth) {
         log.info("POST forced-transfer on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         UUID txId = lifecycleService.forcedTransfer(suiteId, body.get("from"), body.get("to"),
-                new BigDecimal(body.get("amount")), body.getOrDefault("reason", ""));
+                new BigDecimal(body.get("amount")), body.getOrDefault("reason", ""), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return accepted(txId);
     }
 
     @PostMapping("/{deploymentId}/forced-approve")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_APPROVE_OVERRIDE")
     public ResponseEntity<TxSubmissionResponse> forcedApprove(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody Map<String, String> body, Authentication auth) {
         log.info("POST forced-approve on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         UUID txId = lifecycleService.forcedApprove(suiteId, body.get("owner"), body.get("spender"),
-                new BigDecimal(body.get("amount")), body.getOrDefault("reason", ""));
+                new BigDecimal(body.get("amount")), body.getOrDefault("reason", ""), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return accepted(txId);
     }
 
@@ -308,7 +325,8 @@ public class Erc3643Controller {
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody Map<String, String> body, Authentication auth) {
         log.info("POST freeze on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        return accepted(lifecycleService.freezeAddress(resolveSuiteId(deploymentId), body.get("address")));
+        return accepted(lifecycleService.freezeAddress(resolveSuiteId(assetId, deploymentId), body.get("address"),
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{deploymentId}/unfreeze")
@@ -317,7 +335,8 @@ public class Erc3643Controller {
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody Map<String, String> body, Authentication auth) {
         log.info("POST unfreeze on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        return accepted(lifecycleService.unfreezeAddress(resolveSuiteId(deploymentId), body.get("address")));
+        return accepted(lifecycleService.unfreezeAddress(resolveSuiteId(assetId, deploymentId), body.get("address"),
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{deploymentId}/freeze-partial")
@@ -328,7 +347,7 @@ public class Erc3643Controller {
         log.info("POST freeze-partial address={} amount={} on deploymentId={} by actor={}",
                 request.address(), request.amount(), deploymentId, actorName(auth));
         return accepted(lifecycleService.freezePartialTokens(
-                resolveSuiteId(deploymentId), request.address(), request.amount()));
+                resolveSuiteId(assetId, deploymentId), request.address(), request.amount(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{deploymentId}/unfreeze-partial")
@@ -339,7 +358,7 @@ public class Erc3643Controller {
         log.info("POST unfreeze-partial address={} amount={} on deploymentId={} by actor={}",
                 request.address(), request.amount(), deploymentId, actorName(auth));
         return accepted(lifecycleService.unfreezePartialTokens(
-                resolveSuiteId(deploymentId), request.address(), request.amount()));
+                resolveSuiteId(assetId, deploymentId), request.address(), request.amount(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{deploymentId}/pause")
@@ -347,7 +366,7 @@ public class Erc3643Controller {
     public ResponseEntity<TxSubmissionResponse> pause(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId, Authentication auth) {
         log.info("POST pause on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        return accepted(lifecycleService.pause(resolveSuiteId(deploymentId)));
+        return accepted(lifecycleService.pause(resolveSuiteId(assetId, deploymentId), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{deploymentId}/unpause")
@@ -355,23 +374,25 @@ public class Erc3643Controller {
     public ResponseEntity<TxSubmissionResponse> unpause(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId, Authentication auth) {
         log.info("POST unpause on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        return accepted(lifecycleService.unpause(resolveSuiteId(deploymentId)));
+        return accepted(lifecycleService.unpause(resolveSuiteId(assetId, deploymentId), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{deploymentId}/force-burn")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> forceBurn(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody Map<String, String> body, Authentication auth) {
         log.info("POST force-burn on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        UUID suiteId = resolveSuiteId(deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
         UUID txId = lifecycleService.forceBurn(suiteId, body.get("from"),
-                new BigDecimal(body.get("amount")), body.getOrDefault("legalBasis", ""));
+                new BigDecimal(body.get("amount")), body.getOrDefault("legalBasis", ""), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return accepted(txId);
     }
 
     @PostMapping("/{deploymentId}/batch-forced-transfer")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
     public ResponseEntity<TxSubmissionResponse> batchForcedTransfer(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody Map<String, Object> body, Authentication auth) {
@@ -383,7 +404,8 @@ public class Erc3643Controller {
         @SuppressWarnings("unchecked")
         List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
                 .stream().map(BigDecimal::new).toList();
-        return accepted(lifecycleService.batchForcedTransfer(resolveSuiteId(deploymentId), froms, tos, amounts));
+        return accepted(lifecycleService.batchForcedTransfer(resolveSuiteId(assetId, deploymentId), froms, tos, amounts,
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{deploymentId}/batch-mint")
@@ -397,11 +419,13 @@ public class Erc3643Controller {
         @SuppressWarnings("unchecked")
         List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
                 .stream().map(BigDecimal::new).toList();
-        return accepted(lifecycleService.batchMint(resolveSuiteId(deploymentId), addresses, amounts));
+        return accepted(lifecycleService.batchMint(resolveSuiteId(assetId, deploymentId), addresses, amounts,
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{deploymentId}/batch-burn")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> batchBurn(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody Map<String, Object> body, Authentication auth) {
@@ -411,13 +435,14 @@ public class Erc3643Controller {
         @SuppressWarnings("unchecked")
         List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
                 .stream().map(BigDecimal::new).toList();
-        return accepted(lifecycleService.batchBurn(resolveSuiteId(deploymentId), addresses, amounts));
+        return accepted(lifecycleService.batchBurn(resolveSuiteId(assetId, deploymentId), addresses, amounts,
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private UUID resolveSuiteId(UUID deploymentId) {
-        return lifecycleService.getSuiteDetails(deploymentId).getId();
+    private UUID resolveSuiteId(UUID assetId, UUID deploymentId) {
+        return lifecycleService.getSuiteDetails(assetId, deploymentId).getId();
     }
 
     private static ResponseEntity<TxSubmissionResponse> accepted(UUID txId) {
@@ -426,6 +451,10 @@ public class Erc3643Controller {
 
     private static String actorName(Authentication auth) {
         return auth != null ? auth.getName() : "unknown";
+    }
+
+    private static UUID actorId(Authentication auth) {
+        return SecurityUtils.extractUserId(auth);
     }
 
     private TrustedIssuerResponse toTrustedIssuerResponse(Erc3643TrustedIssuer issuer) {

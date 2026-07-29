@@ -145,6 +145,10 @@ registerwerk:
         rpc-url: ${SOLANA_MAINNET_RPC:https://api.mainnet-beta.solana.com}
       testnet:
         rpc-url: ${SOLANA_DEVNET_RPC:https://api.devnet.solana.com}
+      # SPL Token-2022 BOND/CONFIDENTIAL presets refuse to deploy until both are set (finding #12,
+      # Phase 10) — see SolanaTokenService.createSplToken2022's fail-fast gate.
+      transfer-hook-program-id: ${SOLANA_TRANSFER_HOOK_PROGRAM_ID:}
+      confidential-transfer-auditor-elgamal-pubkey: ${SOLANA_CONFIDENTIAL_AUDITOR_ELGAMAL_PUBKEY:}
     canton:
       mainnet:
         ledger-api-url: ${CANTON_MAINNET_LEDGER_URL:}
@@ -226,11 +230,111 @@ registerwerk:
       avalanche-testnet: ${ID_FACTORY_AVALANCHE_TESTNET:}
       optimism-mainnet:  ${ID_FACTORY_OPTIMISM_MAINNET:}
       optimism-testnet:  ${ID_FACTORY_OPTIMISM_TESTNET:}
+    # EwpgConfidentialFactory (Zama fhEVM) — gated to Chain.ETHEREUM/Chain.BASE
+    # (AssetDeploymentService.FHEVM_CHAINS); Fhenix/Inco are separate, non-Zama FHE stacks and are
+    # NOT valid confidential-deployment targets (see docs/blockchains/confidential-evm.md). These
+    # keys previously (wrongly) targeted fhenix-*/inco-* — dead config since the deployment gate
+    # only ever asks for ethereum-*/base-* identifiers.
     confidential-factory:
-      fhenix-mainnet: ${CONFIDENTIAL_FACTORY_FHENIX_MAINNET:}
-      fhenix-testnet: ${CONFIDENTIAL_FACTORY_FHENIX_TESTNET:}
-      inco-mainnet:   ${CONFIDENTIAL_FACTORY_INCO_MAINNET:}
-      inco-testnet:   ${CONFIDENTIAL_FACTORY_INCO_TESTNET:}
+      ethereum-mainnet: ${CONFIDENTIAL_FACTORY_ETH_MAINNET:}
+      ethereum-testnet: ${CONFIDENTIAL_FACTORY_ETH_TESTNET:}
+      base-mainnet:     ${CONFIDENTIAL_FACTORY_BASE_MAINNET:}
+      base-testnet:     ${CONFIDENTIAL_FACTORY_BASE_TESTNET:}
+    # Shared T-REX IdentityRegistry used by CONF_ERC3643 deployments on this chain — required;
+    # deployment fails loudly if unset for the target chain (see ConfidentialErc3643Service).
+    confidential-identity-registry:
+      ethereum-mainnet: ${CONFIDENTIAL_IDENTITY_REGISTRY_ETH_MAINNET:}
+      ethereum-testnet: ${CONFIDENTIAL_IDENTITY_REGISTRY_ETH_TESTNET:}
+      base-mainnet:     ${CONFIDENTIAL_IDENTITY_REGISTRY_BASE_MAINNET:}
+      base-testnet:     ${CONFIDENTIAL_IDENTITY_REGISTRY_BASE_TESTNET:}
+    # Optional confidential compliance module for CONF_ERC3643 — zero address (no extra
+    # transfer-rule module) if unset.
+    confidential-compliance:
+      ethereum-mainnet: ${CONFIDENTIAL_COMPLIANCE_ETH_MAINNET:}
+      ethereum-testnet: ${CONFIDENTIAL_COMPLIANCE_ETH_TESTNET:}
+      base-mainnet:     ${CONFIDENTIAL_COMPLIANCE_BASE_MAINNET:}
+      base-testnet:     ${CONFIDENTIAL_COMPLIANCE_BASE_TESTNET:}
+    # Registry operator's / an auditor's dedicated decrypt-only viewer addresses, granted as
+    # initialViewers at confidential-token deploy time (see ConfidentialERC20's viewer-ACL note).
+    # NOT on-chain transaction-signing wallets — the corresponding private keys live only in the
+    # zama-relayer sidecar's OPERATOR_DECRYPT_PRIVATE_KEY, never in this backend.
+    confidential-operator-viewer:
+      ethereum-mainnet: ${CONFIDENTIAL_OPERATOR_VIEWER_ETH_MAINNET:}
+      ethereum-testnet: ${CONFIDENTIAL_OPERATOR_VIEWER_ETH_TESTNET:}
+      base-mainnet:     ${CONFIDENTIAL_OPERATOR_VIEWER_BASE_MAINNET:}
+      base-testnet:     ${CONFIDENTIAL_OPERATOR_VIEWER_BASE_TESTNET:}
+    confidential-auditor-viewer:
+      ethereum-mainnet: ${CONFIDENTIAL_AUDITOR_VIEWER_ETH_MAINNET:}
+      ethereum-testnet: ${CONFIDENTIAL_AUDITOR_VIEWER_ETH_TESTNET:}
+      base-mainnet:     ${CONFIDENTIAL_AUDITOR_VIEWER_BASE_MAINNET:}
+      base-testnet:     ${CONFIDENTIAL_AUDITOR_VIEWER_BASE_TESTNET:}
+    # Ecosystem: org identity + permission framework + dApp marketplace anchoring.
+    # Deployed once per chain via `forge script script/DeployEcosystem.s.sol`.
+    org-registry:
+      ethereum-mainnet:  ${ORG_REGISTRY_ETH_MAINNET:}
+      ethereum-testnet:  ${ORG_REGISTRY_ETH_TESTNET:}
+      polygon-mainnet:   ${ORG_REGISTRY_POLYGON_MAINNET:}
+      polygon-testnet:   ${ORG_REGISTRY_POLYGON_TESTNET:}
+      base-mainnet:      ${ORG_REGISTRY_BASE_MAINNET:}
+      base-testnet:      ${ORG_REGISTRY_BASE_TESTNET:}
+      arbitrum-mainnet:  ${ORG_REGISTRY_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${ORG_REGISTRY_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${ORG_REGISTRY_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${ORG_REGISTRY_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${ORG_REGISTRY_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${ORG_REGISTRY_OPTIMISM_TESTNET:}
+    permission-registry:
+      ethereum-mainnet:  ${PERMISSION_REGISTRY_ETH_MAINNET:}
+      ethereum-testnet:  ${PERMISSION_REGISTRY_ETH_TESTNET:}
+      polygon-mainnet:   ${PERMISSION_REGISTRY_POLYGON_MAINNET:}
+      polygon-testnet:   ${PERMISSION_REGISTRY_POLYGON_TESTNET:}
+      base-mainnet:      ${PERMISSION_REGISTRY_BASE_MAINNET:}
+      base-testnet:      ${PERMISSION_REGISTRY_BASE_TESTNET:}
+      arbitrum-mainnet:  ${PERMISSION_REGISTRY_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${PERMISSION_REGISTRY_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${PERMISSION_REGISTRY_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${PERMISSION_REGISTRY_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${PERMISSION_REGISTRY_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${PERMISSION_REGISTRY_OPTIMISM_TESTNET:}
+    permission-oracle:
+      ethereum-mainnet:  ${PERMISSION_ORACLE_ETH_MAINNET:}
+      ethereum-testnet:  ${PERMISSION_ORACLE_ETH_TESTNET:}
+      polygon-mainnet:   ${PERMISSION_ORACLE_POLYGON_MAINNET:}
+      polygon-testnet:   ${PERMISSION_ORACLE_POLYGON_TESTNET:}
+      base-mainnet:      ${PERMISSION_ORACLE_BASE_MAINNET:}
+      base-testnet:      ${PERMISSION_ORACLE_BASE_TESTNET:}
+      arbitrum-mainnet:  ${PERMISSION_ORACLE_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${PERMISSION_ORACLE_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${PERMISSION_ORACLE_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${PERMISSION_ORACLE_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${PERMISSION_ORACLE_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${PERMISSION_ORACLE_OPTIMISM_TESTNET:}
+    dapp-registry:
+      ethereum-mainnet:  ${DAPP_REGISTRY_ETH_MAINNET:}
+      ethereum-testnet:  ${DAPP_REGISTRY_ETH_TESTNET:}
+      polygon-mainnet:   ${DAPP_REGISTRY_POLYGON_MAINNET:}
+      polygon-testnet:   ${DAPP_REGISTRY_POLYGON_TESTNET:}
+      base-mainnet:      ${DAPP_REGISTRY_BASE_MAINNET:}
+      base-testnet:      ${DAPP_REGISTRY_BASE_TESTNET:}
+      arbitrum-mainnet:  ${DAPP_REGISTRY_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${DAPP_REGISTRY_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${DAPP_REGISTRY_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${DAPP_REGISTRY_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${DAPP_REGISTRY_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${DAPP_REGISTRY_OPTIMISM_TESTNET:}
+    ecosystem-tir:
+      ethereum-mainnet:  ${ECOSYSTEM_TIR_ETH_MAINNET:}
+      ethereum-testnet:  ${ECOSYSTEM_TIR_ETH_TESTNET:}
+      polygon-mainnet:   ${ECOSYSTEM_TIR_POLYGON_MAINNET:}
+      polygon-testnet:   ${ECOSYSTEM_TIR_POLYGON_TESTNET:}
+      base-mainnet:      ${ECOSYSTEM_TIR_BASE_MAINNET:}
+      base-testnet:      ${ECOSYSTEM_TIR_BASE_TESTNET:}
+      arbitrum-mainnet:  ${ECOSYSTEM_TIR_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${ECOSYSTEM_TIR_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${ECOSYSTEM_TIR_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${ECOSYSTEM_TIR_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${ECOSYSTEM_TIR_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${ECOSYSTEM_TIR_OPTIMISM_TESTNET:}
   documents:
     max-inline-bytes: 5242880
     s3:
@@ -276,6 +380,12 @@ registerwerk:
   drift:
     check-interval-ms: ${REGISTERWERK_DRIFT_CHECK_INTERVAL_MS:900000}
     batch-size: ${REGISTERWERK_DRIFT_BATCH_SIZE:500}
+  lending:
+    # Fail closed until legal, custody, oracle, liquidation, and operating controls have
+    # completed release review. Both flags are required; enabling only one refuses startup
+    # or endpoint/service access.
+    enabled: ${REGISTERWERK_LENDING_ENABLED:false}
+    release-approved: ${REGISTERWERK_LENDING_RELEASE_APPROVED:false}
   trading:
     enabled: ${REGISTERWERK_TRADING_ENABLED:true}
     venues:
@@ -310,6 +420,9 @@ registerwerk:
       mtls-key-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY:}
       directory-url: ${REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL:https://trp.notabene.id/directory}
   reporting:
+    # Non-production prototype only. Outputs are DRAFT_UNVALIDATED; SFTP proves transport,
+    # not filing or authority acceptance. Production readiness guard rejects enabling this.
+    prototype-enabled: ${REGISTERWERK_REPORTING_PROTOTYPE_ENABLED:false}
     operator-tin: ${REGISTERWERK_OPERATOR_TIN:}
     operator-lei: ${REGISTERWERK_OPERATOR_LEI:}
     document-bucket: ${REGISTERWERK_REPORTING_S3_BUCKET:registerwerk-reports}
@@ -334,3 +447,14 @@ registerwerk:
     batch-size: ${SYNC_BATCH_SIZE:50}
     # Enable verbose logging for sync operations
     log-sync-operations: ${SYNC_LOG_OPERATIONS:false}
+  audit:
+    signing:
+      # Blank (default) = no signing provider active; the audit_event hash chain is still
+      # WORM-protected and verified, just without a signature anchored outside the database.
+      # ENV_VAR = dev/test-only (EnvVarEd25519SigningKeyProvider, opt-in, not for production).
+      # GCP_KMS = real KMS-backed signing (GcpKmsEd25519SigningKeyProvider) — see its Javadoc
+      # for why AWS KMS/Azure Key Vault aren't offered (neither supports Ed25519 signing keys).
+      provider: ${REGISTERWERK_AUDIT_SIGNING_PROVIDER:}
+      seed: ${REGISTERWERK_AUDIT_SIGNING_SEED:}
+      gcp-kms:
+        key-version: ${REGISTERWERK_AUDIT_SIGNING_GCP_KMS_KEY_VERSION:}

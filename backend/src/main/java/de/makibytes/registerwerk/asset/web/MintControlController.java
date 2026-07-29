@@ -5,12 +5,14 @@ import de.makibytes.registerwerk.asset.internal.MintControlSyncJob;
 import de.makibytes.registerwerk.deployment.api.MintControlRule;
 import de.makibytes.registerwerk.asset.web.dto.MintControlRuleCreateRequest;
 import de.makibytes.registerwerk.asset.web.dto.MintControlRuleResponse;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -39,15 +41,19 @@ public class MintControlController {
      * Creates a new mint control rule for the given deployment.
      */
     @PostMapping
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<MintControlRuleResponse> createRule(
             @PathVariable UUID assetId,
             @PathVariable UUID depId,
-            @RequestBody @Valid MintControlRuleCreateRequest request) {
+            @RequestBody @Valid MintControlRuleCreateRequest request,
+            Authentication auth) {
         MintControlRule rule = new MintControlRule();
         rule.setTargetAddress(request.targetAddress());
         rule.setRuleType(request.ruleType());
         rule.setMaxAmount(request.maxAmount());
-        MintControlRule created = mintControlService.createRule(depId, rule);
+        UUID actorId = SecurityUtils.extractUserId(auth);
+        String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
+        MintControlRule created = mintControlService.createRule(depId, rule, actorId, actorRole);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
     }
 
@@ -55,6 +61,7 @@ public class MintControlController {
      * Lists all active mint control rules for the given deployment.
      */
     @GetMapping
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
     public ResponseEntity<List<MintControlRuleResponse>> listRules(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {
@@ -67,16 +74,20 @@ public class MintControlController {
      * Null request fields are ignored (PATCH semantics).
      */
     @PatchMapping("/{ruleId}")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<MintControlRuleResponse> updateRule(
             @PathVariable UUID assetId,
             @PathVariable UUID depId,
             @PathVariable UUID ruleId,
-            @RequestBody MintControlRuleCreateRequest request) {
+            @RequestBody MintControlRuleCreateRequest request,
+            Authentication auth) {
         MintControlRule patch = new MintControlRule();
         patch.setTargetAddress(request.targetAddress());
         patch.setRuleType(request.ruleType());
         patch.setMaxAmount(request.maxAmount());
-        MintControlRule updated = mintControlService.updateRule(ruleId, patch);
+        UUID actorId = SecurityUtils.extractUserId(auth);
+        String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
+        MintControlRule updated = mintControlService.updateRule(ruleId, patch, actorId, actorRole);
         return ResponseEntity.ok(toResponse(updated));
     }
 
@@ -84,11 +95,15 @@ public class MintControlController {
      * Deactivates (soft-deletes) a mint control rule.
      */
     @DeleteMapping("/{ruleId}")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<Void> deactivateRule(
             @PathVariable UUID assetId,
             @PathVariable UUID depId,
-            @PathVariable UUID ruleId) {
-        mintControlService.deactivateRule(ruleId);
+            @PathVariable UUID ruleId,
+            Authentication auth) {
+        UUID actorId = SecurityUtils.extractUserId(auth);
+        String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
+        mintControlService.deactivateRule(ruleId, actorId, actorRole);
         return ResponseEntity.noContent().build();
     }
 

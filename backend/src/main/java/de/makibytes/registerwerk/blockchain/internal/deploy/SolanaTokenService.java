@@ -11,6 +11,7 @@ import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.SolanaProperties;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import org.slf4j.Logger;
@@ -62,13 +63,31 @@ public class SolanaTokenService {
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final WalletSigner             walletSigner;
     private final ChainConfigRepository    chainConfigRepository;
+    private final SolanaProperties         solanaProperties;
 
     public SolanaTokenService(BlockchainClientRegistry blockchainClientRegistry,
                                WalletSigner walletSigner,
-                               ChainConfigRepository chainConfigRepository) {
+                               ChainConfigRepository chainConfigRepository,
+                               SolanaProperties solanaProperties) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.walletSigner             = walletSigner;
         this.chainConfigRepository    = chainConfigRepository;
+        this.solanaProperties         = solanaProperties;
+    }
+
+    /** Fails fast with a clear message when a required SPL Token-2022 extension config value is
+     *  missing — without this, {@code BOND}/{@code CONFIDENTIAL} presets could deploy with
+     *  non-functional placeholders (the System Program as the transfer-hook program; a zeroed
+     *  ElGamal auditor key), silently producing tokens whose transfer-hook or
+     *  confidential-transfer behavior could never actually work. Mirrors {@code
+     *  StarknetTokenService.requireClassHash}'s convention. */
+    private static String requireConfigured(String value, String what, String property) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(
+                    what + " is not configured. Deploy the transfer-hook program / generate the "
+                    + "ElGamal auditor keypair per operator policy, then set " + property + ".");
+        }
+        return value;
     }
 
     /**
@@ -125,6 +144,18 @@ public class SolanaTokenService {
     public CompletableFuture<String> createSplToken2022(
             UUID assetId, Network network, String ownerAddress, SplExtensionSet extensions) {
         log.info("Creating SPL Token-2022 mint: assetId={} network={} extensions={}", assetId, network, extensions);
+
+        // Fail fast, before any account is created or RPC call made, if a required extension
+        // config value is missing.
+        if (extensions == SplExtensionSet.BOND || extensions == SplExtensionSet.CONFIDENTIAL) {
+            requireConfigured(solanaProperties.getTransferHookProgramId(), "Transfer-hook program ID",
+                    "registerwerk.chains.solana.transfer-hook-program-id");
+        }
+        if (extensions == SplExtensionSet.CONFIDENTIAL) {
+            requireConfigured(solanaProperties.getConfidentialTransferAuditorElgamalPubkey(),
+                    "Confidential-transfer auditor ElGamal public key",
+                    "registerwerk.chains.solana.confidential-transfer-auditor-elgamal-pubkey");
+        }
 
         return CompletableFuture.supplyAsync(() -> {
             ChainDescriptor descriptor = new ChainDescriptor(Chain.SOLANA, network);
@@ -468,14 +499,13 @@ public class SolanaTokenService {
      *             [COption for hook program — Some = 1] [32-byte hook program id]
      *
      * <p>The hook program is the Registerwerk transfer-hook Anchor program (whitelist + AML).
-     * Its program ID must be configured and deployed before bond mints can be created.
-     * The hook program ID is read from {@code registerwerk.chains.solana.transfer-hook-program}.
+     * Its program ID must be configured and deployed before bond mints can be created (enforced
+     * by {@link #createSplToken2022}'s fail-fast gate before this method is ever reached, so
+     * {@code solanaProperties.getTransferHookProgramId()} is guaranteed non-blank here).
      */
     private org.p2p.solanaj.core.TransactionInstruction buildTransferHookIx(
             PublicKey mint, PublicKey authority) {
-        // Hook program ID — configured externally; use system program as placeholder until deployed.
-        // In production: read from SolanaProperties.getTransferHookProgramId()
-        String hookProgramId = "11111111111111111111111111111111"; // SystemProgram — placeholder only
+        String hookProgramId = solanaProperties.getTransferHookProgramId();
         byte[] authBytes = authority.toByteArray();
         byte[] hookBytes = new PublicKey(hookProgramId).toByteArray();
 
@@ -502,24 +532,26 @@ public class SolanaTokenService {
      *             [auto_approve_new_accounts: bool (1 byte)]
      *
      * <p>The auditor ElGamal public key is the registry's auditing key that can decrypt all transfers.
-     * <b>Important:</b> The ElGamal key pair must be generated and its public key stored in
-     * {@code SolanaProperties.getConfidentialTransferAuditorElgamalPubkey()}.
-     * This is a deployment blocker — the key must be generated and operator policy signed before
-     * any CONFIDENTIAL mint can be created.
-     *
-     * <p>This implementation uses a zeroed 64-byte key as a placeholder. Replace with the
-     * actual ElGamal public key from operator configuration before mainnet use.
+     * Enforced by {@link #createSplToken2022}'s fail-fast gate before this method is ever reached,
+     * so {@code solanaProperties.getConfidentialTransferAuditorElgamalPubkey()} is guaranteed
+     * non-blank here.
      */
     private org.p2p.solanaj.core.TransactionInstruction buildConfidentialTransferMintIx(
             PublicKey mint, PublicKey authority) {
-        byte[] zeroElgamal = new byte[64]; // placeholder — must be replaced with real ElGamal pubkey
+        byte[] auditorElgamal = java.util.HexFormat.of().parseHex(
+                solanaProperties.getConfidentialTransferAuditorElgamalPubkey());
+        if (auditorElgamal.length != 64) {
+            throw new IllegalStateException(
+                    "registerwerk.chains.solana.confidential-transfer-auditor-elgamal-pubkey must "
+                    + "decode to exactly 64 bytes, got " + auditorElgamal.length);
+        }
         java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(1 + 1 + 1 + 64 + 1 + 64 + 1);
         buf.put((byte) 27);   // ConfidentialTransferInstruction outer discriminator
         buf.put((byte) 0);    // InitializeMint sub-instruction
         buf.put((byte) 1);    // COption::Some for auditor key
-        buf.put(zeroElgamal); // auditor ElGamal pubkey (64 bytes) — replace with real key
+        buf.put(auditorElgamal); // auditor ElGamal pubkey (64 bytes)
         buf.put((byte) 1);    // COption::Some for withdraw_withheld authority key
-        buf.put(zeroElgamal); // withdraw withheld authority ElGamal pubkey
+        buf.put(auditorElgamal); // withdraw withheld authority ElGamal pubkey (same key)
         buf.put((byte) 0);    // auto_approve_new_accounts = false (explicit approval required)
         return new org.p2p.solanaj.core.TransactionInstruction(
                 new PublicKey(TOKEN_2022_PROGRAM_ID),

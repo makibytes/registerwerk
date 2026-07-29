@@ -31,6 +31,8 @@ public interface SanctionsScreeningPort {
             String matchedField,
             String matchedValue,
             double matchScore,
-            String details
+            String details,
+            /** "SANCTIONS" | "PEP" | "ADVERSE_MEDIA"; null if the provider can't tell — treated as SANCTIONS. */
+            String category
     ) {}
 }

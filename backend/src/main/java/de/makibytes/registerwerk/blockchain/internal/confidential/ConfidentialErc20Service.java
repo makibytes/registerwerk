@@ -4,14 +4,17 @@ import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
@@ -28,11 +31,14 @@ import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 
 /**
  * Deploys ERC-7984 confidential fungible tokens (Zama fhEVM) via
- * {@code EwpgConfidentialFactory.deployConfidentialErc20(bytes32, string, string)}.
+ * {@code EwpgConfidentialFactory.deployConfidentialErc20(bytes32, string, string, address[])}.
  *
  * <p>Confidential tokens encrypt balances and transfer amounts with Fully
- * Homomorphic Encryption. The factory must be pre-deployed on an fhEVM-capable
- * chain (Fhenix or Inco) and its address stored in
+ * Homomorphic Encryption. The factory must be pre-deployed on a chain with real
+ * Zama FHEVM host contracts configured (Ethereum/Sepolia today, or T-REX Chain
+ * once it publishes its own FHEVM infrastructure addresses — NOT Fhenix or Inco,
+ * which are separate, non-Zama confidential-EVM stacks with incompatible
+ * libraries) and its address stored in
  * {@code registerwerk.contracts.confidential-factory.{chain-identifier}}.
  */
 @Service
@@ -70,12 +76,24 @@ public class ConfidentialErc20Service {
 
             byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
 
+            // Registerwerk's own operator/auditor viewer roles (see ConfidentialERC20's
+            // viewer-ACL note) — provisioned at construction so no separate post-deploy
+            // addViewer transaction is needed before the first mint is reconcilable.
+            List<Address> initialViewers = contractAddressConfig.confidentialInitialViewers(chainId).stream()
+                    .map(Address::new)
+                    .collect(Collectors.toList());
+            if (initialViewers.isEmpty()) {
+                log.warn("No confidential viewers configured for chain={} — deploying assetId={} with no "
+                        + "operator/auditor decrypt access until addViewer is called explicitly.", chainId, assetId);
+            }
+
             Function deploy = new Function(
                     "deployConfidentialErc20",
                     Arrays.asList(
                             new Bytes32(assetIdBytes),
                             new Utf8String(asset.name()),
-                            new Utf8String(asset.tokenStandard().name())
+                            new Utf8String(EvmUtils.tokenSymbol(asset)),
+                            new DynamicArray<>(Address.class, initialViewers)
                     ),
                     Collections.singletonList(new TypeReference<Address>() {})
             );

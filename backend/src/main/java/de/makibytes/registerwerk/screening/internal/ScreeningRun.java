@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.screening.internal;
 
+import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;

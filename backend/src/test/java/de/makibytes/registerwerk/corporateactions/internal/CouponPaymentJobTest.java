@@ -1,7 +1,11 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
+import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPayment;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
@@ -14,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -39,6 +44,12 @@ class CouponPaymentJobTest {
 
     @Mock
     private CorporateActionService corporateActionService;
+
+    @Mock
+    private AssetBondTermsRepository bondTermsRepository;
+
+    @Mock
+    private AssetRepository assetRepository;
 
     @InjectMocks
     private CouponPaymentJob job;
@@ -73,6 +84,23 @@ class CouponPaymentJobTest {
         when(couponPaymentRepository.findByCouponStatusAndScheduledDateLessThanEqual(
                 eq(CouponStatus.SCHEDULED), any(LocalDate.class))).thenReturn(List.of(payment));
         when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(true);
+
+        job.execute(null);
+
+        verify(corporateActionService, never()).announce(any());
+    }
+
+    @Test
+    @DisplayName("due payment for an asset whose register was transferred to a successor operator does not create an action")
+    void duePayment_skipsActionWhenAssetTransferredOut() throws Exception {
+        AssetCouponPayment payment = duePayment();
+        Asset transferredAsset = new Asset();
+        transferredAsset.setStatus(AssetStatus.TRANSFERRED_OUT);
+
+        when(couponPaymentRepository.findByCouponStatusAndScheduledDateLessThanEqual(
+                eq(CouponStatus.SCHEDULED), any(LocalDate.class))).thenReturn(List.of(payment));
+        when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(false);
+        when(assetRepository.findById(payment.getAssetId())).thenReturn(Optional.of(transferredAsset));
 
         job.execute(null);
 

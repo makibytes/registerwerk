@@ -150,7 +150,7 @@ class StellarAssetServiceTest {
         when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STELLAR))
                 .thenReturn(List.of());
 
-        CompletableFuture<String> future = stellarAssetService.createStellarAsset(
+        CompletableFuture<StellarAssetService.StellarDeployment> future = stellarAssetService.createStellarAsset(
                 UUID.randomUUID(), Network.TESTNET, "");
 
         assertThatThrownBy(() -> {
@@ -173,7 +173,7 @@ class StellarAssetServiceTest {
         when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STELLAR))
                 .thenReturn(List.of(mainnetConfig));
 
-        CompletableFuture<String> future = stellarAssetService.createStellarAsset(
+        CompletableFuture<StellarAssetService.StellarDeployment> future = stellarAssetService.createStellarAsset(
                 UUID.randomUUID(), Network.TESTNET, "");
 
         assertThatThrownBy(() -> {

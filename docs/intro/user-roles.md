@@ -20,7 +20,6 @@ Registerwerk is multi-tenant: one operator deployment serves many customer legal
 | `INVESTOR` | Customer | Token holders / investors | |
 | `COMPANY_ADMIN` | Customer | Issuer's admin users | |
 | `TRADER` | Customer | Execution access for trading venue integrations | MiFIR Art. 26 reporting |
-| `SECOND_APPROVER` | Operator | Dual-control approver for [4-eyes operations](../compliance/step-up-mfa.md) | GwG §6(2) internal controls |
 
 ---
 
@@ -40,7 +39,7 @@ The highest-privilege role. A `REGISTRY_ADMIN` can:
 - Trigger [MiFIR](../compliance/mifir.md) and [DAC8](../compliance/dac8.md) regulatory exports
 
 !!! warning "Force operations require dual control"
-    Force-transfer, force-burn, and force-approve are irreversible on-chain operations. They require both a step-up token (TOTP or WebAuthn) **and** a confirmation from a second `SECOND_APPROVER`. This implements the Vier-Augen-Prinzip required by GwG §6(2) for high-risk operations.
+    Force-transfer, force-burn, and force-approve are irreversible on-chain operations. The current implementation requires a second, distinct `REGISTRY_ADMIN` to provide the dual-control token; there is no `SECOND_APPROVER` application role. Its legal and policy adequacy requires external review.
 
 ### COMPLIANCE_OFFICER
 
@@ -62,9 +61,9 @@ Read-only access to the full audit trail:
 - Export audit records for external review
 - Access screening run history and KYC document versions
 
-### SECOND_APPROVER
+### Dual-control approver
 
-A special role activated for the [4-eyes principle](../compliance/step-up-mfa.md). Users with this role can confirm dual-control operations initiated by a `REGISTRY_ADMIN`. The second approver must be a different user from the initiator.
+Dual-control approval is currently a capability of a second, distinct `REGISTRY_ADMIN`, not a separate application role. The approver must be different from the initiator and must satisfy the configured step-up checks.
 
 ---
 

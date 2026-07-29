@@ -5,7 +5,10 @@ description: Tamper-evident hash chain audit log — schema, integrity verificat
 
 # Audit Log
 
-Every state-mutating operation in Registerwerk emits an `AuditEvent`. The `audit_event` table is append-only, hash-chained, and PostgreSQL-partitioned by month. This satisfies **eWpG §15** registry integrity requirements and the audit trail obligations of GwG, DORA, and GDPR Art. 32.
+Audited application paths emit an `AuditEvent`; coverage is not yet proven for every state mutation.
+The `audit_event` table is append-only, hash-chained, and PostgreSQL-partitioned by month. These are
+technical controls only: completeness, retention, operational monitoring, and legal adequacy under
+eWpG, GwG, DORA, or GDPR require separate evidence and external review.
 
 ---
 

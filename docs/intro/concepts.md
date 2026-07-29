@@ -52,7 +52,7 @@ This glossary defines the terms used across Registerwerk's documentation, code, 
 : A discrepancy between the on-chain token balance and the Registerwerk database's `AssetHolder.nominalAmount`. The `ChainDriftDetectionJob` checks for drift every 15 minutes per issued asset.
 
 **Canonical registry**
-: Under [eWpG §16](../legal/ewpg.md), the central register (Registerwerk's database) is the authoritative source of truth; the blockchain is a projection. This inverts the usual "blockchain-as-source" assumption.
+: Registerwerk stores an operational holder record in PostgreSQL and projects or reconciles selected state on-chain. Which record has legal authority is instrument-, register-model-, operator-, and jurisdiction-specific and requires an approved perimeter decision. Neither the database nor the blockchain is universally authoritative.
 
 **Wallet**
 : A cryptographic key pair used to sign on-chain transactions. Registerwerk manages operator wallets (key material encrypted at rest) via the `wallet` module.
@@ -111,7 +111,7 @@ This glossary defines the terms used across Registerwerk's documentation, code, 
 : The core data model for a customer's company. Holds jurisdiction, registration number, LEI, KYC status, and links to beneficial owners and KYC documents.
 
 **Natural person (`NaturalPerson`)**
-: An individual — a director, UBO, or investor. Holds PII (name, DOB, nationality, tax ID) that is encrypted at rest.
+: An individual — a director, UBO, or investor. The current entity maps PII such as name, date of birth, nationality, and tax ID to ordinary database columns; application-level field encryption is not implemented.
 
 **Beneficial owner (`BeneficialOwner`)**
 : Bridges a `LegalEntity` to a `NaturalPerson` with ownership percentage and control type.

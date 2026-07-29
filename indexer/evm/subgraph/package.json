@@ -2,19 +2,22 @@
   "name": "registerwerk-subgraph",
   "version": "0.1.0",
   "scripts": {
+    "validate:abi": "node ./scripts/validate-abi-parity.mjs",
+    "test": "npm run validate:abi && bash ../test-render-subgraph-manifest.sh && npm run codegen && npm run build",
     "codegen": "graph codegen",
     "build":   "graph build",
-    "deploy:mainnet":      "graph deploy --node http://localhost:8020 makibytes/ethereum-mainnet  --network mainnet",
-    "deploy:sepolia":      "graph deploy --node http://localhost:8020 makibytes/ethereum-sepolia   --network sepolia",
-    "deploy:polygon":      "graph deploy --node http://localhost:8020 makibytes/polygon-mainnet    --network polygon",
-    "deploy:polygon-amoy": "graph deploy --node http://localhost:8020 makibytes/polygon-amoy       --network polygon-amoy",
-    "deploy:base":         "graph deploy --node http://localhost:8020 makibytes/base-mainnet       --network base",
-    "deploy:base-sepolia": "graph deploy --node http://localhost:8020 makibytes/base-sepolia       --network base-sepolia"
+    "deploy:mainnet":      "bash ../deploy-subgraph.sh mainnet",
+    "deploy:sepolia":      "bash ../deploy-subgraph.sh sepolia",
+    "deploy:polygon":      "bash ../deploy-subgraph.sh polygon",
+    "deploy:polygon-amoy": "bash ../deploy-subgraph.sh polygon-amoy",
+    "deploy:base":         "bash ../deploy-subgraph.sh base",
+    "deploy:base-sepolia": "bash ../deploy-subgraph.sh base-sepolia"
   },
   "dependencies": {
     "@graphprotocol/graph-ts": "^0.35.1"
   },
   "devDependencies": {
-    "@graphprotocol/graph-cli": "^0.81.0"
+    "@graphprotocol/graph-cli": "^0.81.0",
+    "graphql": "15.5.0"
   }
 }

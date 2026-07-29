@@ -11,10 +11,15 @@ permissions:
   packages: write
   id-token: write  # for Cosign OIDC keyless signing
 
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-backend:
     name: Backend Container
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -28,8 +33,37 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Build locally (no push yet) so the Trivy gate below runs BEFORE anything reaches the
+      # registry or gets a valid Cosign signature — previously the scan ran after push+sign,
+      # so a HIGH/CRITICAL image could already be pullable and validly signed before the job
+      # failed (Phase 12, finding #13).
+      - name: Build (local, pre-scan)
         id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          load: true
+          tags: ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy image scan (gate — must pass before push)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
+          format: sarif
+          output: trivy-backend.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-backend.sarif
+
+      - name: Push
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: backend
@@ -45,25 +79,23 @@ jobs:
 
       - name: Sign image with Cosign (keyless OIDC)
         run: |
-          cosign sign --yes ghcr.io/${{ github.repository }}/backend@${{ steps.build.outputs.digest }}
+          cosign sign --yes ghcr.io/${{ github.repository }}/backend@${{ steps.push.outputs.digest }}
 
-      - name: Trivy image scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
-          format: sarif
-          output: trivy-backend.sarif
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-backend.sarif
+      # Gives operators a real, reproducible tag matching a cut release (rather than only
+      # :latest/:<sha>) — points at the exact same manifest digest already pushed above,
+      # no rebuild (Phase 12, finding #3: Chart.yaml's appVersion had no corresponding
+      # published image at all).
+      - name: Tag release version
+        if: github.event_name == 'release'
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository }}/backend:${{ github.event.release.tag_name }} \
+            ghcr.io/${{ github.repository }}/backend@${{ steps.push.outputs.digest }}
 
   release-sbom:
     name: Attach SBOM + Provenance
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     if: github.event_name == 'release'
     needs: build-backend
     steps:

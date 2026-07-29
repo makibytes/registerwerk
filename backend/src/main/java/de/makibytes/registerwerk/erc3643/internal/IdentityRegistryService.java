@@ -5,13 +5,18 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopic;
+import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopicRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistry;
 import de.makibytes.registerwerk.erc3643.api.Erc3643Suite;
+import de.makibytes.registerwerk.erc3643.events.InvestorRegisteredEvent;
+import de.makibytes.registerwerk.erc3643.events.InvestorRemovedEvent;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistryRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643SuiteRepository;
 import jakarta.transaction.Transactional;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
@@ -37,26 +42,32 @@ public class IdentityRegistryService {
 
     private final Erc3643IdentityRegistryRepository registryRepo;
     private final Erc3643SuiteRepository suiteRepo;
+    private final Erc3643ClaimTopicRepository claimTopicRepo;
     private final AssetDeploymentRepository deploymentRepo;
     private final OnChainIdService onChainIdService;
     private final EvmContractService evmContractService;
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final BlockchainTransactionService blockchainTransactionService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public IdentityRegistryService(Erc3643IdentityRegistryRepository registryRepo,
                                    Erc3643SuiteRepository suiteRepo,
+                                    Erc3643ClaimTopicRepository claimTopicRepo,
                                     AssetDeploymentRepository deploymentRepo,
                                     OnChainIdService onChainIdService,
                                     EvmContractService evmContractService,
                                     BlockchainClientRegistry blockchainClientRegistry,
-                                    BlockchainTransactionService blockchainTransactionService) {
+                                    BlockchainTransactionService blockchainTransactionService,
+                                    ApplicationEventPublisher eventPublisher) {
         this.registryRepo = registryRepo;
         this.suiteRepo = suiteRepo;
+        this.claimTopicRepo = claimTopicRepo;
         this.deploymentRepo = deploymentRepo;
         this.onChainIdService = onChainIdService;
         this.evmContractService = evmContractService;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.blockchainTransactionService = blockchainTransactionService;
+        this.eventPublisher = eventPublisher;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -88,6 +99,8 @@ public class IdentityRegistryService {
      * @param legalEntityId  investor's legal entity UUID
      * @param chainConfigId  chain_config row ID (determines which chain ONCHAINID is deployed on)
      * @param countryCode    ISO-3166-1 numeric country code; null if unknown
+     * @param actorId        ID of the user registering the investor (for audit)
+     * @param actorRole      role of the user registering the investor (for audit)
      * @return persisted registry entry
      */
     @Transactional
@@ -95,12 +108,14 @@ public class IdentityRegistryService {
                                                      String walletAddress,
                                                      UUID legalEntityId,
                                                      UUID chainConfigId,
-                                                     Short countryCode) {
+                                                     Short countryCode,
+                                                     UUID actorId,
+                                                     String actorRole) {
         suiteRepo.findById(suiteId)
                 .orElseThrow(() -> new IllegalArgumentException("Suite not found: " + suiteId));
 
         // Ensure ONCHAINID exists for this entity on the target chain
-        OnchainIdentity identity = onChainIdService.getOrCreate(legalEntityId, chainConfigId);
+        OnchainIdentity identity = onChainIdService.getOrCreate(legalEntityId, chainConfigId, actorId, actorRole);
 
         // IIdentityRegistry.registerIdentity(address _userAddress, address _identity, uint16 _country)
         Erc3643Suite suite = suiteRepo.findById(suiteId)
@@ -149,7 +164,10 @@ public class IdentityRegistryService {
                 entry.setOnchainIdentityId(identity.getId());
                 entry.setCountryCode(countryCode);
                 entry.setRegisteredByTx(txHash);
-                return registryRepo.save(entry);
+                Erc3643IdentityRegistry saved = registryRepo.save(entry);
+                eventPublisher.publishEvent(new InvestorRegisteredEvent(suiteId, actorId, actorRole,
+                        java.util.Map.of("walletAddress", walletAddress, "legalEntityId", legalEntityId.toString())));
+                return saved;
             } catch (Exception e) {
                 throw new RuntimeException("registerIdentity submission failed: " + e.getMessage(), e);
             }
@@ -161,14 +179,20 @@ public class IdentityRegistryService {
         entry.setWalletAddress(walletAddress.toLowerCase());
         entry.setOnchainIdentityId(identity.getId());
         entry.setCountryCode(countryCode);
-        return registryRepo.save(entry);
+        Erc3643IdentityRegistry saved = registryRepo.save(entry);
+        eventPublisher.publishEvent(new InvestorRegisteredEvent(suiteId, actorId, actorRole,
+                java.util.Map.of("walletAddress", walletAddress, "legalEntityId", legalEntityId.toString())));
+        return saved;
     }
 
     /**
      * Removes an investor from the on-chain IdentityRegistry and soft-deletes the DB entry.
+     *
+     * @param actorId   ID of the user removing the investor (for audit)
+     * @param actorRole role of the user removing the investor (for audit)
      */
     @Transactional
-    public void removeInvestor(UUID suiteId, UUID registryEntryId) {
+    public void removeInvestor(UUID suiteId, UUID registryEntryId, UUID actorId, String actorRole) {
         Erc3643IdentityRegistry entry = registryRepo.findById(registryEntryId)
                 .orElseThrow(() -> new IllegalArgumentException("Registry entry not found: " + registryEntryId));
 
@@ -198,6 +222,8 @@ public class IdentityRegistryService {
 
         entry.setRemovedAt(Instant.now());
         registryRepo.save(entry);
+        eventPublisher.publishEvent(new InvestorRemovedEvent(suiteId, actorId, actorRole,
+                java.util.Map.of("registryEntryId", registryEntryId.toString(), "walletAddress", entry.getWalletAddress())));
     }
 
     /** All currently active (non-removed) registry entries for a suite. */
@@ -217,8 +243,10 @@ public class IdentityRegistryService {
     }
 
     /**
-     * Whether a wallet is verified: registered AND holds all required claims.
-     * Uses the local DB mirror; for an authoritative result use an on-chain
+     * Whether a wallet is verified: registered AND holds all of this suite's required claims
+     * (its {@code Erc3643ClaimTopic} rows) — checking against the suite's actual requirements
+     * rather than just KYC means a revoked AML/Accreditation claim is caught too. Uses the local
+     * DB mirror; for an authoritative result use an on-chain
      * {@code IIdentityRegistry.isVerified(walletAddress)} call.
      */
     public boolean isVerified(UUID suiteId, String walletAddress) {
@@ -230,6 +258,9 @@ public class IdentityRegistryService {
                 .findIdentityById(entry.get().getOnchainIdentityId()).orElse(null);
         if (identity == null) return false;
 
-        return onChainIdService.isVerified(identity.getLegalEntityId(), identity.getChainConfigId());
+        List<Long> requiredTopics = claimTopicRepo.findBySuiteId(suiteId).stream()
+                .map(Erc3643ClaimTopic::getTopic)
+                .toList();
+        return onChainIdService.isVerified(identity.getLegalEntityId(), identity.getChainConfigId(), requiredTopics);
     }
 }

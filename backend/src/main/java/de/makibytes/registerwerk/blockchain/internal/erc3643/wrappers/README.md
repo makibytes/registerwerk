@@ -30,7 +30,7 @@ web3j generate solidity \
 ```
 
 4. Update `Erc3643DeploymentService.java` to use the generated wrappers instead of the
-   current placeholder implementations (search for `// TODO: Web3j`).
+   current placeholder implementation (search for `deployConfidential`).
 
 ## Contracts to wrap
 

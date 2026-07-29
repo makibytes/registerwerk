@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,11 +15,13 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * MiFIR Art. 26 / Commission Delegated Regulation (EU) 2017/590 (RTS 22) transaction reporting.
- * Applies to: DE_EWPG and FR_AMF jurisdictions where eWpG tokens qualify as MiFID II instruments.
- * Reporting destinations: BaFin MeldewesenPortal (DE), AMF ROSA (FR), CSSF (LU via ESMA ARM).
+ * Draft/unvalidated MiFIR-like transaction export prototype.
  *
- * Flow: TradeExecutedEvent → daily XML export → persist to S3 → file via gateway → record submission ref.
+ * <p>The population, fields and XML are not an official RTS 22 implementation. Instrument
+ * classification, reporting-entity responsibility, competent-authority routing, official-schema
+ * validation, corrections and authenticated receipts remain external release blockers.
+ *
+ * <p>Flow: trade projection → draft XML → persist → optional transport → transport-only status.
  */
 @Service
 public class MifirReportingService {
@@ -42,21 +45,33 @@ public class MifirReportingService {
     }
 
     /**
-     * Daily T+1 export of trade executions for MiFIR RTS 22 reporting.
-     * Runs at 06:00 UTC; covers T-1 executions (settlement date basis for eWpG tokens).
+     * Daily draft projection of trade rows created on the previous calendar date.
+     * This is not an RTS 22 population or a settlement-date report.
      */
+    @SchedulerLock(name = "mifirReporting", lockAtMostFor = "PT30M")
     @Scheduled(cron = "0 0 6 * * *")
-    @Transactional(readOnly = true)
+    @Transactional
     public void generateDailyReport() {
-        LocalDate reportingDate = LocalDate.now().minusDays(1);
-        log.info("MiFIR RTS 22: generating daily report for date={}", reportingDate);
-        // Each trade is reported once, to the NCA competent for the asset's
-        // jurisdiction (MiFIR Art. 26) — never to multiple authorities.
-        generateForJurisdiction("DE_BAFIN", "DE_EWPG", reportingDate);
-        generateForJurisdiction("FR_AMF", "FR_AMF", reportingDate);
+        if (!reportingProperties.isPrototypeEnabled()) {
+            log.debug("MiFIR draft export skipped because the reporting prototype is disabled");
+            return;
+        }
+        generateDailyReport(LocalDate.now().minusDays(1), null, "SYSTEM");
     }
 
-    private void generateForJurisdiction(String authority, String assetJurisdiction, LocalDate reportingDate) {
+    /** On-demand generation for an explicit date — previously the date parameter a caller
+     *  supplied was silently discarded and this always ran for {@code now().minusDays(1)}. */
+    @Transactional
+    public void generateDailyReport(LocalDate reportingDate, UUID actorId, String actorRole) {
+        requirePrototypeEnabled();
+        log.info("MiFIR-like DRAFT_UNVALIDATED export: generating for date={}", reportingDate);
+        // These are prototype routing labels, not a verified competent-authority decision.
+        generateForJurisdiction("DE_BAFIN", "DE_EWPG", reportingDate, actorId, actorRole);
+        generateForJurisdiction("FR_AMF", "FR_AMF", reportingDate, actorId, actorRole);
+    }
+
+    private void generateForJurisdiction(String authority, String assetJurisdiction, LocalDate reportingDate,
+                                          UUID actorId, String actorRole) {
         var rows = jdbc.queryForList("""
             SELECT te.id, te.asset_id, te.buyer_entity_id, te.seller_entity_id,
                    te.unit_price AS price, te.executed_quantity AS quantity,
@@ -70,18 +85,18 @@ public class MifirReportingService {
             """, reportingDate, assetJurisdiction);
 
         if (rows.isEmpty()) {
-            log.debug("MiFIR RTS 22 {}: no trades on {}", authority, reportingDate);
+            log.debug("MiFIR-like draft {}: no projected trade rows on {}", authority, reportingDate);
             return;
         }
 
         String xml = buildRts22Xml(rows, reportingDate);
         byte[] xmlBytes = xml.getBytes(StandardCharsets.UTF_8);
-        UUID submissionId = submissions.persist("MIFIR_RTS22", authority, reportingDate, reportingDate);
+        UUID submissionId = submissions.persist("MIFIR_RTS22", authority, reportingDate, reportingDate, actorId);
         documentStore.store(submissionId, "MIFIR_RTS22", authority, reportingDate, xmlBytes);
 
         SubmissionResult result = submissionGateway.submit(submissionId, "MIFIR_RTS22", authority, xmlBytes);
-        applyResult(submissionId, result);
-        log.info("MiFIR RTS 22 {}: {} trades filed, submission id={} status={}",
+        applyResult(submissionId, result, actorId, actorRole);
+        log.info("MiFIR-like draft {}: {} projected trades processed, export id={} transportStatus={}",
                 authority, rows.size(), submissionId, result.status());
     }
 
@@ -90,7 +105,8 @@ public class MifirReportingService {
                                   LocalDate reportingDate) {
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        sb.append("<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:auth.016.001.03\">\n");
+        sb.append("<!-- DRAFT_UNVALIDATED: not validated against an official RTS 22 schema; not filing evidence. -->\n");
+        sb.append("<Document xmlns=\"urn:registerwerk:prototype:mifir:draft-unvalidated:v1\" validationStatus=\"DRAFT_UNVALIDATED\">\n");
         sb.append("  <FinInstrmRptgTxRpt>\n");
         sb.append("    <RptHdr>\n");
         sb.append("      <RptgNtty><LEI>").append(RegReportSubmissions.esc(reportingProperties.getOperatorLei())).append("</LEI></RptgNtty>\n");
@@ -114,7 +130,7 @@ public class MifirReportingService {
         return sb.toString();
     }
 
-    /** RTS 22 requires ISO-8601 UTC timestamps; JDBC Timestamp.toString() is not compliant. */
+    /** Preserve unambiguous UTC timestamps in the draft output. */
     private static String toIso8601(Object executedAt) {
         if (executedAt instanceof java.sql.Timestamp ts) {
             return ts.toInstant().toString();
@@ -122,11 +138,21 @@ public class MifirReportingService {
         return RegReportSubmissions.esc(executedAt);
     }
 
-    private void applyResult(UUID submissionId, SubmissionResult result) {
+    private void applyResult(UUID submissionId, SubmissionResult result, UUID actorId, String actorRole) {
         switch (result.status()) {
-            case ACCEPTED -> submissions.markSubmitted(submissionId, result.submissionRef());
-            case PENDING_ACKNOWLEDGEMENT -> submissions.markPendingAck(submissionId, result.submissionRef());
-            case REJECTED -> submissions.markRejected(submissionId, result.errorMessage());
+            case TRANSPORTED_UNVERIFIED -> submissions.markTransportedUnverified(
+                    submissionId, result.transportRef(), actorId, actorRole);
+            case NOT_TRANSPORTED -> submissions.markNotTransported(
+                    submissionId, result.errorMessage(), actorId, actorRole);
+            case TRANSPORT_FAILED -> submissions.markTransportFailed(
+                    submissionId, result.errorMessage(), actorId, actorRole);
+        }
+    }
+
+    private void requirePrototypeEnabled() {
+        if (!reportingProperties.isPrototypeEnabled()) {
+            throw new IllegalStateException("Regulatory reporting prototype is disabled. "
+                    + "Generated documents would be DRAFT_UNVALIDATED and are not filing evidence.");
         }
     }
 }

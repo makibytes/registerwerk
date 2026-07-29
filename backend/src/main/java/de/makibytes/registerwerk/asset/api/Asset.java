@@ -23,6 +23,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -33,6 +34,16 @@ public class Asset {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    /**
+     * Optimistic-lock guard. {@code AssetLifecycleService}'s submit/approve/reject/issue/
+     * suspend/reactivate/redeem methods all do a read-modify-write on {@link #status}; without
+     * a version check, two concurrent transitions can both pass their precondition check and
+     * both commit. With it, the losing write fails and the caller retries (surfaced as HTTP 409).
+     */
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     @Column(name = "asset_number", nullable = false, unique = true, length = 30)
     @NotBlank
@@ -105,6 +116,8 @@ public class Asset {
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
+
+    public long getVersion() { return version; }
 
     public String getAssetNumber() { return assetNumber; }
     public void setAssetNumber(String assetNumber) { this.assetNumber = assetNumber; }

@@ -50,6 +50,15 @@ contracts/out/
 contracts/cache/
 contracts/.forge-cache/
 
+# Starknet Foundry / Cairo
+contracts/cairo/.snfoundry_cache/
+
+# Daml
+daml/.daml/
+
+# Graph Node subgraph (codegen output)
+indexer/evm/subgraph/generated/
+
 # Docker
 *.log
 

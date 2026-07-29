@@ -14,12 +14,25 @@ public class TradingProperties {
     private boolean enabled = true;
     private Map<TradingVenueCode, VenueProperties> venues = new EnumMap<>(TradingVenueCode.class);
 
+    /** Hours a trade may sit PENDING before {@code TradingService.timeoutStuckPendingTrades}
+     *  marks it FAILED. Previously there was no timeout at all — a stuck PENDING trade stayed
+     *  PENDING forever with no signal that it needed attention. */
+    private long pendingTimeoutHours = 72;
+
     public boolean isEnabled() {
         return enabled;
     }
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public long getPendingTimeoutHours() {
+        return pendingTimeoutHours;
+    }
+
+    public void setPendingTimeoutHours(long pendingTimeoutHours) {
+        this.pendingTimeoutHours = pendingTimeoutHours;
     }
 
     public Map<TradingVenueCode, VenueProperties> getVenues() {

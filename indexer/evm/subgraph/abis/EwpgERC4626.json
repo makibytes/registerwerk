@@ -33,9 +33,13 @@
     "type": "event",
     "name": "AddressFrozen",
     "inputs": [
-      { "name": "addr",    "type": "address", "indexed": true },
-      { "name": "frozen",  "type": "bool",    "indexed": false },
-      { "name": "imposer", "type": "address", "indexed": true }
+      { "name": "account", "type": "address", "indexed": true },
+      { "name": "reason",  "type": "string",  "indexed": false }
     ]
+  },
+  {
+    "type": "event",
+    "name": "AddressUnfrozen",
+    "inputs": [{ "name": "account", "type": "address", "indexed": true }]
   }
 ]

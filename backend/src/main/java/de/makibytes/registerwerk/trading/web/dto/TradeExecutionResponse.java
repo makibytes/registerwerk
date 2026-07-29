@@ -30,5 +30,7 @@ public record TradeExecutionResponse(
         UUID walletEndpointId,
         String walletAddress,
         Instant createdAt,
-        Instant settledAt) {
+        Instant settledAt,
+        String failureReason,
+        String paymentReference) {
 }

@@ -4,3 +4,54 @@ backup:
   retainFullBackups: 14   # days
   # Ensure S3 bucket has object-lock (WORM) enabled for immutable backups
   # per eWpRV §6 and DORA Art. 12 immutability requirement
+
+postgresql:
+  # REQUIRED — this chart is installed as its own Helm release, separate from the main
+  # registerwerk chart, so it has no template-level way to see that release's name at all.
+  # Set this to the Bitnami postgresql subchart's actual Service name from the main
+  # installation: "<main-chart-release-name>-postgresql" (its default naming convention
+  # when no fullnameOverride is set — confirm against your actual release).
+  # Previously this was derived as "{{ .Release.Namespace }}-postgresql", which is wrong on
+  # both counts: it used this chart's own namespace, not the main chart's release name.
+  host: ""
+  port: 5432
+  database: registerwerk
+  # Same PVC the main chart's postgresql subchart provisions for its primary pod — must be
+  # set explicitly for the same cross-release-visibility reason as postgresql.host above.
+  pvcName: ""
+
+s3Credentials:
+  # Preferred: leave this true and rely on IRSA/Workload Identity via the ServiceAccount's
+  # cloud annotation below — no static keys to leak or rotate. Set to false only on
+  # non-EKS/GKE/AKS clusters where workload identity federation isn't available, and provide
+  # awsAccessKeyIdSecretKey/awsSecretAccessKeySecretKey pointing at keys in registerwerk-secrets.
+  useIrsa: true
+  awsAccessKeyIdSecretKey: S3_ACCESS_KEY
+  awsSecretAccessKeySecretKey: S3_SECRET_KEY
+
+serviceAccount:
+  # e.g. "eks.amazonaws.com/role-arn": "arn:aws:iam::<account>:role/registerwerk-backup"
+  annotations: {}
+
+monitoring:
+  # Optional Prometheus Pushgateway URL — CronJob pods are ephemeral and can't be scraped
+  # directly, so a successful run pushes backup_last_success_timestamp here. Leave blank to
+  # skip (the job still runs; you just lose the BackupStale alert's data source).
+  pushgatewayUrl: ""
+
+wallets:
+  # Previously nothing backed up this volume at all — permanent, unrecoverable loss of every
+  # on-chain deployer wallet's signing capability if it were ever lost (Phase 12, finding #7).
+  # restic (not WAL-G, which is Postgres-specific) backs up the encrypted keystore files
+  # directly; the master key that decrypts them is a separate concern (KMS-backed in
+  # production — see wallet.api.KekProvider — or escrowed yourself for the dev env-var path).
+  enabled: true
+  # REQUIRED if enabled — the main registerwerk chart's wallets PVC, which follows the pattern
+  # "<main-chart-release-name>-wallets" (registerwerk.fullname helper + "-wallets" suffix).
+  pvcName: ""
+  # Separate prefix, same bucket as the Postgres backup by default — override to split them.
+  s3Prefix: "wallets-restic"
+  retainDaily: 30
+  # Encrypts the restic repository itself (on top of the AES-256-GCM keystore encryption
+  # already applied to each wallet) — required by restic, sourced from registerwerk-secrets.
+  resticPasswordSecretKey: WALLETS_BACKUP_RESTIC_PASSWORD

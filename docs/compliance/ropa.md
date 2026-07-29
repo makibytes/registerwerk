@@ -1,4 +1,9 @@
 # Verzeichnis von Verarbeitungstätigkeiten (DSGVO Art. 30)
+
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This repository document is a draft inventory, not an approved or complete Article 30 record.
+    The deployment controller/processor must establish scope, purposes, lawful bases, recipients,
+    transfers, retention, security measures, ownership, approval, and review evidence.
 # Records of Processing Activities (GDPR Art. 30)
 
 **Controller:** [Operator name to fill in]  

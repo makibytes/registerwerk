@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,12 +15,11 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * DAC8 / Crypto-Asset Reporting Framework (CARF) annual export.
- * Council Directive (EU) 2023/2226 — applies to EU CASPs from 2026-01-01.
- * OECD CARF schema: https://www.oecd.org/tax/exchange-of-tax-information/crypto-asset-reporting-framework.htm
+ * Draft/unvalidated DAC8/CARF-like annual export prototype.
  *
- * Filing destinations: DE BZSt-Portal, LU ACD (Administration des Contributions Directes),
- * FR DGFiP, LI Steuerverwaltung.
+ * <p>The current holdings query is not a reportable-user diligence or transaction-flow model,
+ * the XML is not an official schema, and the jurisdiction labels are not verified routing
+ * decisions. This service must not be represented as a DAC8/KStTG filing integration.
  */
 @Service
 public class Dac8ExportService {
@@ -42,25 +42,37 @@ public class Dac8ExportService {
     }
 
     /**
-     * Annual CARF export — runs on Jan 31 for the prior tax year (covers all CY holdings).
-     * Per jurisdiction: one XML file per reporting country.
+     * Annual scheduled draft of the current holder projection, labelled with the prior year.
+     * It is not a CARF/DAC8/KStTG reportable-user or transaction-flow population.
      */
+    @SchedulerLock(name = "dac8Export", lockAtMostFor = "PT1H")
     @Scheduled(cron = "0 0 4 31 1 *")
-    @Transactional(readOnly = true)
+    @Transactional
     public void generateAnnualCarf() {
-        int reportingYear = LocalDate.now().getYear() - 1;
-        log.info("DAC8/CARF: generating annual export for tax year {}", reportingYear);
+        if (!reportingProperties.isPrototypeEnabled()) {
+            log.debug("DAC8/CARF-like draft export skipped because the reporting prototype is disabled");
+            return;
+        }
+        generateAnnualCarf(LocalDate.now().getYear() - 1, null, "SYSTEM");
+    }
+
+    /** On-demand generation for an explicit tax year — previously the year parameter a caller
+     *  supplied was silently discarded and this always ran for {@code now().getYear() - 1}. */
+    @Transactional
+    public void generateAnnualCarf(int reportingYear, UUID actorId, String actorRole) {
+        requirePrototypeEnabled();
+        log.info("DAC8/CARF-like DRAFT_UNVALIDATED export: generating for tax year {}", reportingYear);
 
         for (String jurisdiction : new String[]{"DE_BAFIN", "LU_CSSF", "FR_AMF", "LI_FMA"}) {
             try {
-                generateCarfForJurisdiction(jurisdiction, reportingYear);
+                generateCarfForJurisdiction(jurisdiction, reportingYear, actorId, actorRole);
             } catch (Exception e) {
                 log.error("DAC8/CARF {}: export failed for year {}: {}", jurisdiction, reportingYear, e.getMessage());
             }
         }
     }
 
-    private void generateCarfForJurisdiction(String jurisdiction, int year) {
+    private void generateCarfForJurisdiction(String jurisdiction, int year, UUID actorId, String actorRole) {
         LocalDate yearStart = LocalDate.of(year, 1, 1);
         LocalDate yearEnd = LocalDate.of(year, 12, 31);
 
@@ -81,18 +93,18 @@ public class Dac8ExportService {
             """, yearStart, yearEnd);
 
         if (holdings.isEmpty()) {
-            log.debug("DAC8/CARF {}: no reportable holdings for year {}", jurisdiction, year);
+            log.debug("DAC8/CARF-like draft {}: no projected holder rows for label year {}", jurisdiction, year);
             return;
         }
 
         String xml = buildCarfXml(holdings, jurisdiction, year);
         byte[] xmlBytes = xml.getBytes(StandardCharsets.UTF_8);
-        UUID submissionId = submissions.persist("DAC8_CARF", jurisdiction, yearStart, yearEnd);
+        UUID submissionId = submissions.persist("DAC8_CARF", jurisdiction, yearStart, yearEnd, actorId);
         documentStore.store(submissionId, "DAC8_CARF", jurisdiction, yearEnd, xmlBytes);
 
         SubmissionResult result = submissionGateway.submit(submissionId, "DAC8_CARF", jurisdiction, xmlBytes);
-        applyResult(submissionId, result);
-        log.info("DAC8/CARF {}: {} holders filed, submission id={} status={}",
+        applyResult(submissionId, result, actorId, actorRole);
+        log.info("DAC8/CARF-like draft {}: {} projected holders processed, export id={} transportStatus={}",
                 jurisdiction, holdings.size(), submissionId, result.status());
     }
 
@@ -101,7 +113,8 @@ public class Dac8ExportService {
                                  String jurisdiction, int year) {
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        sb.append("<CARFMessage xmlns=\"urn:oecd:ties:carf:v1\">\n");
+        sb.append("<!-- DRAFT_UNVALIDATED: not validated against an official DAC8/CARF/KStTG schema; not filing evidence. -->\n");
+        sb.append("<CARFMessage xmlns=\"urn:registerwerk:prototype:carf:draft-unvalidated:v1\" validationStatus=\"DRAFT_UNVALIDATED\">\n");
         sb.append("  <MessageSpec>\n");
         sb.append("    <SendingEntityIN>").append(RegReportSubmissions.esc(reportingProperties.getOperatorTin())).append("</SendingEntityIN>\n");
         sb.append("    <MessageRefId>CARF-").append(jurisdiction).append("-").append(year).append("</MessageRefId>\n");
@@ -122,11 +135,21 @@ public class Dac8ExportService {
         return sb.toString();
     }
 
-    private void applyResult(UUID submissionId, SubmissionResult result) {
+    private void applyResult(UUID submissionId, SubmissionResult result, UUID actorId, String actorRole) {
         switch (result.status()) {
-            case ACCEPTED -> submissions.markSubmitted(submissionId, result.submissionRef());
-            case PENDING_ACKNOWLEDGEMENT -> submissions.markPendingAck(submissionId, result.submissionRef());
-            case REJECTED -> submissions.markRejected(submissionId, result.errorMessage());
+            case TRANSPORTED_UNVERIFIED -> submissions.markTransportedUnverified(
+                    submissionId, result.transportRef(), actorId, actorRole);
+            case NOT_TRANSPORTED -> submissions.markNotTransported(
+                    submissionId, result.errorMessage(), actorId, actorRole);
+            case TRANSPORT_FAILED -> submissions.markTransportFailed(
+                    submissionId, result.errorMessage(), actorId, actorRole);
+        }
+    }
+
+    private void requirePrototypeEnabled() {
+        if (!reportingProperties.isPrototypeEnabled()) {
+            throw new IllegalStateException("Regulatory reporting prototype is disabled. "
+                    + "Generated documents would be DRAFT_UNVALIDATED and are not filing evidence.");
         }
     }
 }

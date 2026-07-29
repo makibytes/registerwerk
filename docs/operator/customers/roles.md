@@ -9,7 +9,7 @@ sidebar_position: 3
 | Role | Description |
 | --- | --- |
 | `ROLE_REGISTRY_ADMIN` | Full access — manages all entities, assets, chains, and audit log |
-| `ROLE_COMPLIANCE_OFFICER` | KYC/KYB decision authority for compliant approvals and rejections |
+| `ROLE_COMPLIANCE_OFFICER` | KYC/KYB workflow role for approvals without configured checklist gaps and for rejections; not a legal compliance determination |
 | `ROLE_ISSUER` | Can create and manage own assets; view own entity |
 | `ROLE_INVESTOR` | Can view own holdings; read-only on public asset data |
 | `ROLE_COMPANY_ADMIN` | Can manage users and IdP settings for own entity |
@@ -31,8 +31,8 @@ Cross-entity access requires `ROLE_REGISTRY_ADMIN`.
 
 ## Compliance override policy
 
-- `ROLE_COMPLIANCE_OFFICER` can approve jurisdiction KYC only when the checklist is fully compliant.
-- Non-compliant approvals require an explicit `overrideNote` and are restricted to `ROLE_REGISTRY_ADMIN`.
+- `ROLE_COMPLIANCE_OFFICER` can approve jurisdiction KYC only when the configured checklist reports no gaps.
+- Approvals with configured checklist gaps require an explicit `overrideNote` and are restricted to `ROLE_REGISTRY_ADMIN`.
 - Every override is written to the audit trail with compliance gap counters (`missingCount`, `expiredCount`, `tooOldCount`).
 
 ## Fine-grained authorization

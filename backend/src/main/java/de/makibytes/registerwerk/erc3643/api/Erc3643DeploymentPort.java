@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.erc3643.api;
 
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 
 import java.util.UUID;
@@ -15,7 +16,7 @@ public interface Erc3643DeploymentPort {
     /**
      * Deploys a standard T-REX (ERC-3643) suite of six contracts for the given asset.
      */
-    CompletableFuture<String> deployStandard(UUID assetId, ChainDescriptor chain, String ownerAddress);
+    CompletableFuture<TokenDeploymentResult> deployStandard(UUID assetId, ChainDescriptor chain, String ownerAddress);
 
     /**
      * Deploys a Confidential ERC-3643 (Zama fhEVM + T-REX) suite for the given asset.

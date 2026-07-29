@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -11,6 +11,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { KycService } from '../../core/api/kyc.service';
 import { AuthService } from '../../core/auth/auth.service';
 import {
@@ -51,6 +52,7 @@ const ALL_DOC_TYPES = [
     MatFormFieldModule,
     MatSelectModule,
     MatTooltipModule,
+    MatDialogModule,
   ],
   template: `
     <div class="page-container">
@@ -208,7 +210,10 @@ const ALL_DOC_TYPES = [
                         <button mat-icon-button matTooltip="Download" (click)="download(d)">
                           <mat-icon>download</mat-icon>
                         </button>
-                        <button mat-icon-button color="warn" matTooltip="Delete" (click)="deleteDoc(d)">
+                        <button mat-icon-button color="warn"
+                                [matTooltip]="d.status === 'APPROVED' ? 'Approved documents are part of the compliance record and cannot be deleted here' : 'Delete'"
+                                [disabled]="d.status === 'APPROVED'"
+                                (click)="deleteDoc(d)">
                           <mat-icon>delete_outline</mat-icon>
                         </button>
                       </td>
@@ -224,6 +229,17 @@ const ALL_DOC_TYPES = [
 
       </mat-tab-group>
     </div>
+
+    <ng-template #deleteConfirmDialog let-doc>
+      <h2 mat-dialog-title>Delete document</h2>
+      <mat-dialog-content>
+        <p>Delete <strong>{{ doc.fileName }}</strong>? This cannot be undone.</p>
+      </mat-dialog-content>
+      <mat-dialog-actions align="end">
+        <button mat-button mat-dialog-close>Cancel</button>
+        <button mat-flat-button color="warn" [mat-dialog-close]="true">Delete</button>
+      </mat-dialog-actions>
+    </ng-template>
   `,
   styles: [`
     .page-container { max-width: 960px; margin: 0 auto; padding: 16px; }
@@ -274,6 +290,9 @@ export class KycStatusComponent implements OnInit {
   private readonly kycService = inject(KycService);
   private readonly authService = inject(AuthService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
+
+  @ViewChild('deleteConfirmDialog') deleteConfirmDialogTpl!: TemplateRef<{ $implicit: KycDocument }>;
 
   entityId: string | null = null;
   documents: KycDocument[] = [];
@@ -375,14 +394,21 @@ export class KycStatusComponent implements OnInit {
   }
 
   deleteDoc(doc: KycDocument): void {
-    if (!this.entityId || !confirm(`Delete ${doc.fileName}?`)) return;
-    this.kycService.deleteDocument(this.entityId, doc.id).subscribe({
-      next: () => {
-        this.documents = this.documents.filter(d => d.id !== doc.id);
-        this.cdr.detectChanges();
-        this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
-      },
-    });
+    if (!this.entityId || doc.status === 'APPROVED') return;
+
+    this.dialog
+      .open(this.deleteConfirmDialogTpl, { width: '420px', data: doc })
+      .afterClosed()
+      .subscribe((confirmed: boolean | undefined) => {
+        if (!confirmed || !this.entityId) return;
+        this.kycService.deleteDocument(this.entityId, doc.id).subscribe({
+          next: () => {
+            this.documents = this.documents.filter(d => d.id !== doc.id);
+            this.cdr.detectChanges();
+            this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
+          },
+        });
+      });
   }
 
   formatDocType(type: string): string {

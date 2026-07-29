@@ -2,7 +2,7 @@
 // Minimal ERC-3525 base implementation.
 // Based on the EIP-3525 authored by Solv Protocol (MIT licensed).
 // Vendored to avoid external dependency. Only core functions included.
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.36;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "./IERC3525.sol";
@@ -84,13 +84,12 @@ abstract contract ERC3525 is ERC721, IERC3525 {
         returns (uint256 newTokenId)
     {
         _requireSenderApproved(fromTokenId, value);
-        newTokenId = _mintToken(to, _tokenData[fromTokenId].slot, value);
+        // Create the destination position without issuing value, then move the
+        // requested value through the same transfer hook used by token-to-token
+        // transfers. Minting with `value` here would credit the destination before
+        // `_transferValue` and make it impossible to conserve value with one debit.
+        newTokenId = _mintToken(to, _tokenData[fromTokenId].slot, 0);
         _transferValue(fromTokenId, newTokenId, value);
-        // Undo the double-credit: _mintToken already allocated the balance
-        _tokenData[newTokenId].balance = 0;
-        _tokenData[newTokenId].balance = value;
-        _tokenData[fromTokenId].balance -= value;
-        emit TransferValue(fromTokenId, newTokenId, value);
         return newTokenId;
     }
 

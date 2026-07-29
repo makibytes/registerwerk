@@ -40,7 +40,8 @@ public final class SecurityUtils {
     }
 
     public static UUID extractUserId(Authentication auth) {
-        if (!(auth.getPrincipal() instanceof Jwt jwt)) return tryParseUuid(auth != null ? auth.getName() : null);
+        if (auth == null) return null;
+        if (!(auth.getPrincipal() instanceof Jwt jwt)) return tryParseUuid(auth.getName());
         return tryParseUuid(claim(jwt, "sub"));
     }
 
@@ -55,9 +56,19 @@ public final class SecurityUtils {
     }
 
     public static List<String> extractRoles(Authentication auth) {
-        if (!(auth.getPrincipal() instanceof Jwt jwt)) return Collections.emptyList();
+        if (auth == null || !(auth.getPrincipal() instanceof Jwt jwt)) return Collections.emptyList();
         List<String> roles = jwt.getClaimAsStringList("roles");
         return roles == null ? Collections.emptyList() : roles;
+    }
+
+    /**
+     * The actor's first JWT role, or {@code fallback} when the token carries none (or
+     * {@code auth} is null — e.g. an unauthenticated rejected request). Centralizes a
+     * one-line helper that was independently copy-pasted into ~12 controllers.
+     */
+    public static String primaryRole(Authentication auth, String fallback) {
+        List<String> roles = extractRoles(auth);
+        return roles.isEmpty() ? fallback : roles.get(0);
     }
 
     private static UUID tryParseUuid(String value) {

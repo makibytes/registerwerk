@@ -1,21 +1,34 @@
 package de.makibytes.registerwerk.registerstatement.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetDocument;
+import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
+import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.EntryType;
+import de.makibytes.registerwerk.kyc.api.HolderBlock;
+import de.makibytes.registerwerk.kyc.api.HolderBlockRepository;
+import de.makibytes.registerwerk.kyc.api.JurisdictionRequirementConfig;
+import de.makibytes.registerwerk.kyc.api.RegisterDocumentProfile;
 import de.makibytes.registerwerk.notification.api.EmailPort;
 import de.makibytes.registerwerk.registerstatement.api.DeliveryStatus;
 import de.makibytes.registerwerk.registerstatement.api.RegisterStatement;
 import de.makibytes.registerwerk.registerstatement.api.RegisterStatementRepository;
 import de.makibytes.registerwerk.registerstatement.api.StatementTrigger;
+import de.makibytes.registerwerk.registerstatement.events.RegisterStatementIssuedEvent;
+import de.makibytes.registerwerk.shared.DocumentSigningService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,7 +75,13 @@ public class RegisterStatementService {
     private final AssetRepository assetRepository;
     private final LegalEntityRepository entityRepository;
     private final AppUserRepository userRepository;
+    private final HolderBlockRepository blockRepository;
+    private final AssetBondTermsRepository bondTermsRepository;
+    private final AssetDocumentRepository documentRepository;
+    private final JurisdictionRequirementConfig jurisdictionConfig;
     private final EmailPort emailService;
+    private final DocumentSigningService signingService;
+    private final ApplicationEventPublisher eventPublisher;
     private final String registryName;
     private final String registryCountry;
 
@@ -72,7 +91,13 @@ public class RegisterStatementService {
             AssetRepository assetRepository,
             LegalEntityRepository entityRepository,
             AppUserRepository userRepository,
+            HolderBlockRepository blockRepository,
+            AssetBondTermsRepository bondTermsRepository,
+            AssetDocumentRepository documentRepository,
+            JurisdictionRequirementConfig jurisdictionConfig,
             EmailPort emailService,
+            DocumentSigningService signingService,
+            ApplicationEventPublisher eventPublisher,
             @Value("${registerwerk.registry.name:Registerwerk eWpG-Registry}") String registryName,
             @Value("${registerwerk.registry.country:DE}") String registryCountry) {
         this.statementRepository = statementRepository;
@@ -80,9 +105,102 @@ public class RegisterStatementService {
         this.assetRepository = assetRepository;
         this.entityRepository = entityRepository;
         this.userRepository = userRepository;
+        this.blockRepository = blockRepository;
+        this.bondTermsRepository = bondTermsRepository;
+        this.documentRepository = documentRepository;
+        this.jurisdictionConfig = jurisdictionConfig;
         this.emailService = emailService;
+        this.signingService = signingService;
+        this.eventPublisher = eventPublisher;
         this.registryName = registryName;
         this.registryCountry = registryCountry;
+    }
+
+    /**
+     * Everything the renderer and the content hash need beyond the holder/asset/investor
+     * triple, gathered once per render so {@link #issueForHolder}, {@link #retryFailedDeliveries}
+     * and {@link #renderForDownload} don't each re-query it independently.
+     */
+    private record DocumentContext(LegalEntity issuer, List<HolderBlock> blocks, AssetBondTerms bondTerms,
+                                   AssetDocument termSheet, RegisterDocumentProfile profile) {}
+
+    private DocumentContext buildContext(Asset asset, AssetHolder holder) {
+        LegalEntity issuer = entityRepository.findById(asset.getIssuerId()).orElse(null);
+        List<HolderBlock> blocks = blockRepository
+                .findByWalletAddressAndStatus(holder.getWalletAddress(), HolderBlock.Status.ACTIVE);
+        AssetBondTerms bondTerms = bondTermsRepository.findById(asset.getId()).orElse(null);
+        AssetDocument termSheet = documentRepository
+                .findByAssetIdAndDocumentTypeAndDeletedAtIsNull(asset.getId(), AssetDocumentType.TERM_SHEET)
+                .stream().findFirst().orElse(null);
+        boolean individualEntry = holder.getEntryType() == EntryType.INDIVIDUAL;
+        RegisterDocumentProfile profile = jurisdictionConfig
+                .resolveRegisterDocumentProfile(asset.getJurisdiction(), individualEntry);
+        return new DocumentContext(issuer, blocks, bondTerms, termSheet, profile);
+    }
+
+    private byte[] renderStatement(Asset asset, AssetHolder holder, LegalEntity investor,
+                                   StatementTrigger trigger, LocalDate issuedDate, DocumentContext ctx) {
+        byte[] unsigned = RegisterStatementPdfRenderer.render(
+                asset, holder, investor, ctx.issuer(), ctx.blocks(), ctx.bondTerms(), ctx.termSheet(),
+                trigger, ctx.profile(), registryName, registryCountry, issuedDate);
+        return signingService.isConfigured()
+                ? signingService.signPdf(unsigned, "Registerauszug — " + holder.getHolderReference())
+                : unsigned;
+    }
+
+    /**
+     * Self-service on-demand download for the holder's own holding (§19(1) for
+     * individual entries; a jurisdiction-labeled holding confirmation for collective /
+     * nominee entries — never the same document). Unlike {@link #issueForHolder}, both
+     * entry types are eligible: the document rendered simply differs by type. Each
+     * download is logged as an ON_DEMAND issuance (so the register can later show what
+     * was disclosed and when), but same-day repeat downloads are deduped rather than
+     * spamming the register with identical rows.
+     */
+    @Transactional
+    public Optional<byte[]> renderForDownload(UUID holderId) {
+        AssetHolder holder = holderRepository.findById(holderId).orElse(null);
+        if (holder == null) {
+            return Optional.empty();
+        }
+        Asset asset = assetRepository.findById(holder.getAssetId()).orElse(null);
+        LegalEntity investor = entityRepository.findById(holder.getInvestorId()).orElse(null);
+        if (asset == null || investor == null) {
+            return Optional.empty();
+        }
+
+        Instant issuedAt = Instant.now();
+        LocalDate issuedDate = issuedAt.atZone(ZoneOffset.UTC).toLocalDate();
+        DocumentContext ctx = buildContext(asset, holder);
+        byte[] pdf = renderStatement(asset, holder, investor, StatementTrigger.ON_DEMAND, issuedDate, ctx);
+
+        boolean alreadyIssuedToday = statementRepository.findByHolderIdOrderByIssuedAtDesc(holderId).stream()
+                .filter(s -> s.getTrigger() == StatementTrigger.ON_DEMAND)
+                .anyMatch(s -> s.getIssuedAt().atZone(ZoneOffset.UTC).toLocalDate().equals(issuedDate));
+        if (!alreadyIssuedToday) {
+            RegisterStatement statement = new RegisterStatement();
+            statement.setHolderId(holder.getId());
+            statement.setAssetId(holder.getAssetId());
+            statement.setInvestorId(holder.getInvestorId());
+            statement.setTrigger(StatementTrigger.ON_DEMAND);
+            statement.setNominalAmount(holder.getNominalAmount());
+            statement.setWalletAddress(holder.getWalletAddress());
+            statement.setHolderReference(holder.getHolderReference());
+            statement.setIssuedAt(issuedAt);
+            statement.setContentHash(sha256Hex(
+                    contentKey(asset, holder, investor, StatementTrigger.ON_DEMAND, registryName, issuedDate, ctx)));
+            statement.setDeliveryStatus(DeliveryStatus.DELIVERED);
+            statement.setDeliveryChannel("DOWNLOAD");
+            statement.setDeliveredAt(issuedAt);
+            statement = statementRepository.save(statement);
+
+            holder.setLastStatementAt(issuedAt);
+            holderRepository.save(holder);
+
+            eventPublisher.publishEvent(new RegisterStatementIssuedEvent(
+                    statement.getId(), holder.getId(), holder.getAssetId(), holder.getInvestorId(), StatementTrigger.ON_DEMAND));
+        }
+        return Optional.of(pdf);
     }
 
     /**
@@ -110,8 +228,8 @@ public class RegisterStatementService {
 
         Instant issuedAt = Instant.now();
         LocalDate issuedDate = issuedAt.atZone(ZoneOffset.UTC).toLocalDate();
-        byte[] pdf = RegisterStatementPdfRenderer.render(
-                asset, holder, investor, trigger, registryName, registryCountry, issuedDate);
+        DocumentContext ctx = buildContext(asset, holder);
+        byte[] pdf = renderStatement(asset, holder, investor, trigger, issuedDate, ctx);
 
         RegisterStatement statement = new RegisterStatement();
         statement.setHolderId(holder.getId());
@@ -126,7 +244,7 @@ public class RegisterStatementService {
         // identifier on each save(), making PDF bytes non-deterministic. Hashing the
         // canonical input fields produces a stable, independently verifiable digest of
         // the register content disclosed to the holder at issuance.
-        statement.setContentHash(sha256Hex(contentKey(asset, holder, investor, trigger, registryName, issuedDate)));
+        statement.setContentHash(sha256Hex(contentKey(asset, holder, investor, trigger, registryName, issuedDate, ctx)));
         statement.setDeliveryStatus(DeliveryStatus.PENDING);
         statement = statementRepository.save(statement);
 
@@ -134,6 +252,9 @@ public class RegisterStatementService {
         // the obligation is to issue, and the record now exists.
         holder.setLastStatementAt(issuedAt);
         holderRepository.save(holder);
+
+        eventPublisher.publishEvent(new RegisterStatementIssuedEvent(
+                statement.getId(), holder.getId(), holder.getAssetId(), holder.getInvestorId(), trigger));
 
         deliver(statement, asset, investor, pdf);
         return Optional.of(statement);
@@ -149,8 +270,7 @@ public class RegisterStatementService {
     }
 
     private boolean isEligible(AssetHolder holder, StatementTrigger trigger) {
-        boolean singleEntry = holder.getEntryType()
-                == de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL;
+        boolean singleEntry = holder.getEntryType() == EntryType.INDIVIDUAL;
         if (!singleEntry) {
             return false;
         }
@@ -208,17 +328,16 @@ public class RegisterStatementService {
                 continue;
             }
             LocalDate issuedDate = statement.getIssuedAt().atZone(ZoneOffset.UTC).toLocalDate();
+            DocumentContext ctx = buildContext(asset, holder);
             // Verify the register content is unchanged since issuance before re-delivering.
             // If the data changed, a new CHANGE statement must be issued instead.
-            String currentKey = contentKey(asset, holder, investor, statement.getTrigger(), registryName, issuedDate);
+            String currentKey = contentKey(asset, holder, investor, statement.getTrigger(), registryName, issuedDate, ctx);
             if (!sha256Hex(currentKey).equals(statement.getContentHash())) {
                 log.info("Statement {} content changed since issuance; skipping stale re-delivery",
                         statement.getId());
                 continue;
             }
-            byte[] pdf = RegisterStatementPdfRenderer.render(
-                    asset, holder, investor, statement.getTrigger(), registryName, registryCountry,
-                    issuedDate);
+            byte[] pdf = renderStatement(asset, holder, investor, statement.getTrigger(), issuedDate, ctx);
             deliver(statement, asset, investor, pdf);
         }
     }
@@ -239,21 +358,35 @@ public class RegisterStatementService {
      * save(), so PDF bytes are non-deterministic even with identical content.
      */
     private static String contentKey(Asset asset, AssetHolder holder, LegalEntity investor,
-                                     StatementTrigger trigger, String registryName, LocalDate issuedDate) {
-        return String.join("|",
+                                     StatementTrigger trigger, String registryName, LocalDate issuedDate,
+                                     DocumentContext ctx) {
+        StringBuilder key = new StringBuilder(String.join("|",
                 issuedDate.toString(),
                 trigger.name(),
                 nvl(registryName),
+                nvl(ctx.profile().docType()),
+                asset.getJurisdiction() != null ? asset.getJurisdiction().name() : "",
                 nvl(asset.getName()),
                 nvl(asset.getIsin()),
-                asset.getEntryType() != null ? asset.getEntryType().name() : "",
+                // Holder-level entry type, not the asset's — see the renderer's own note:
+                // an asset in Mischbestand can have both individual and collective holders.
+                holder.getEntryType() != null ? holder.getEntryType().name() : "",
                 nvl(investor.getEntityNumber()),
+                ctx.issuer() != null ? nvl(ctx.issuer().getEntityNumber()) : "",
                 nvl(holder.getHolderReference()),
                 holder.getNominalAmount() != null ? holder.getNominalAmount().toPlainString() : "0",
                 nvl(holder.getWalletAddress()),
                 nvl(holder.getThirdPartyRights()),
                 nvl(holder.getDisposalRestrictions()),
-                nvl(holder.getLegalCapacityNote()));
+                nvl(holder.getLegalCapacityNote()),
+                ctx.bondTerms() != null && ctx.bondTerms().getFaceValue() != null
+                        ? ctx.bondTerms().getFaceValue().toPlainString() + nvl(ctx.bondTerms().getCurrencyIso()) : "",
+                ctx.termSheet() != null ? nvl(ctx.termSheet().getContentHash()) : ""));
+        for (HolderBlock b : ctx.blocks()) {
+            key.append("|BLOCK:").append(b.getBlockType()).append(':')
+                    .append(nvl(b.getLegalBasis())).append(':').append(nvl(b.getCourtRef()));
+        }
+        return key.toString();
     }
 
     private static String nvl(String s) {

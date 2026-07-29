@@ -40,6 +40,7 @@ public class DeploymentController {
      * Initiates a new on-chain deployment for the asset.
      */
     @PostMapping
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<DeploymentResponse> deployToChain(
             @PathVariable UUID assetId,
             @RequestBody @Valid DeploymentCreateRequest request,
@@ -54,6 +55,7 @@ public class DeploymentController {
      * Lists all deployments for an asset.
      */
     @GetMapping
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
     public ResponseEntity<List<DeploymentResponse>> listDeployments(@PathVariable UUID assetId) {
         List<AssetDeployment> deployments = assetDeploymentService.listDeployments(assetId);
         return ResponseEntity.ok(deployments.stream().map(deploymentMapper::toResponse).toList());
@@ -63,6 +65,7 @@ public class DeploymentController {
      * Returns a single deployment by ID.
      */
     @GetMapping("/{depId}")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
     public ResponseEntity<DeploymentResponse> getDeployment(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {

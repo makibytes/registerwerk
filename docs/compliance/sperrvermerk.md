@@ -5,6 +5,12 @@ description: Registry-layer trading restrictions — implementation of the §16 
 
 # Sperrvermerk — Registry-Layer Trading Restrictions
 
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records an intended legal/control mapping. It is not evidence that a database flag
+    or smart-contract restriction creates, records, lifts, or proves a restriction with legal effect
+    Sperrvermerk. Instrument terms, instruction authority, register authority, evidence, and
+    jurisdiction-specific procedure require qualified external review.
+
 The **Sperrvermerk** is a blocking notation in the securities register that restricts a holder's ability to transfer, pledge, or otherwise dispose of their tokens. It is mandated by **eWpG §16** for the crypto securities register and is the registry-layer equivalent of a court freeze or pledge notation in traditional securities clearing.
 
 Although the concept originates in German law, all four [supported jurisdictions](../legal/index.md) recognise equivalent blocking mechanisms. Registerwerk implements a single `HolderBlock` entity that covers all block types across jurisdictions.
@@ -99,4 +105,5 @@ Every block creation, modification, and lifting generates an `AuditEvent` of typ
 - The full `HolderBlock` snapshot at the time of the event
 - The step-up token reference (TOTP timestamp or WebAuthn assertion ID)
 
-This audit trail satisfies eWpG §15 requirements for registry entry documentation and is tamper-protected by the [audit hash chain](../platform/audit-log.md).
+This audit trail is intended to support registry-entry documentation and is tamper-evident through
+the [audit hash chain](../platform/audit-log.md); its completeness and eWpG §15 treatment require external review.

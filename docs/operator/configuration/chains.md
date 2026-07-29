@@ -73,17 +73,26 @@ url = "${ARBITRUM_RPC}"
 features = []
 ```
 
-### Step 3 — Deploy and index subgraph
+### Step 3 — Restart graph-node
 
-```bash
-FACTORY_ADDRESS_ARBITRUM=0xYourFactory ./indexer/evm/deploy-subgraph.sh arbitrum-one
-```
-
-### Step 4 — Restart indexer
+Reload the new network configuration before submitting a subgraph deployment:
 
 ```bash
 docker compose -f indexer/evm/docker-compose.yml up -d --force-recreate graph-node
 ```
+
+Wait until graph-node reports healthy.
+
+### Step 4 — Deploy and index subgraph
+
+Configure every `*_ARBITRUM` static source described in [The Graph](../indexers/the-graph), then:
+
+```bash
+SUBGRAPH_VERSION_LABEL=arbitrum-20260729-01 ./indexer/evm/deploy-subgraph.sh arbitrum-one
+```
+
+Registering a backend chain does not discover subgraph data sources or prove their code identity.
+The resulting entities remain provisional event-derived projections.
 
 ## FHE chains (Fhenix / Inco)
 

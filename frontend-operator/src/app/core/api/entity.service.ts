@@ -5,6 +5,7 @@ import { environment } from '../../../environments/environment';
 import {
   LegalEntity,
   LegalEntityNameHistory,
+  EntityMergeRecordView,
   PageResponse,
   EntityFilterParams,
 } from '../models';
@@ -51,7 +52,16 @@ export class EntityService {
     return this.http.post<LegalEntity>(`${this.base}/${id}/reactivate`, {});
   }
 
-  getEntityHistory(id: string): Observable<LegalEntityNameHistory[]> {
-    return this.http.get<LegalEntityNameHistory[]>(`${this.base}/${id}/name-history`);
+  getEntityHistory(id: string): Observable<{ nameHistory: LegalEntityNameHistory[]; mergeRecords: EntityMergeRecordView[] }> {
+    return this.http.get<{ nameHistory: LegalEntityNameHistory[]; mergeRecords: EntityMergeRecordView[] }>(`${this.base}/${id}/history`);
+  }
+
+  mergeEntity(sourceId: string, body: {
+    targetEntityId: string;
+    mergeType: 'ABSORPTION' | 'CONSOLIDATION';
+    effectiveDate: string;
+    notes?: string;
+  }): Observable<EntityMergeRecordView> {
+    return this.http.post<EntityMergeRecordView>(`${this.base}/${sourceId}/merge`, body);
   }
 }

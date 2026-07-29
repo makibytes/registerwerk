@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.36;
 
 import "forge-std/Test.sol";
 import "../src/tokens/EwpgERC3525.sol";
@@ -98,6 +98,171 @@ contract EwpgERC3525Test is Test {
         assertEq(token.balanceOf(tokenB), 200e18);
     }
 
+    function test_transferValueToAddress_conservesValueExactlyOnce() public {
+        vm.prank(registry);
+        uint256 sourceTokenId = token.mint(alice, SLOT_BONDS, 1000e18);
+
+        vm.prank(alice);
+        uint256 destinationTokenId = token.transferFrom(sourceTokenId, bob, 400e18);
+
+        assertEq(token.ownerOf(destinationTokenId), bob);
+        assertEq(token.slotOf(destinationTokenId), SLOT_BONDS);
+        assertEq(token.balanceOf(sourceTokenId), 600e18);
+        assertEq(token.balanceOf(destinationTokenId), 400e18);
+        assertEq(token.balanceOf(sourceTokenId) + token.balanceOf(destinationTokenId), 1000e18);
+    }
+
+    function test_transferValueToAddress_canMoveFullBalance() public {
+        vm.prank(registry);
+        uint256 sourceTokenId = token.mint(alice, SLOT_BONDS, 1000e18);
+
+        vm.prank(alice);
+        uint256 destinationTokenId = token.transferFrom(sourceTokenId, bob, 1000e18);
+
+        assertEq(token.balanceOf(sourceTokenId), 0);
+        assertEq(token.balanceOf(destinationTokenId), 1000e18);
+    }
+
+    function test_transferValueToAddress_revertsAtomicallyForUnwhitelistedDestination() public {
+        vm.prank(registry);
+        uint256 sourceTokenId = token.mint(alice, SLOT_BONDS, 1000e18);
+
+        vm.prank(registry);
+        token.removeFromWhitelist(bob);
+
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: recipient not whitelisted");
+        token.transferFrom(sourceTokenId, bob, 400e18);
+
+        assertEq(token.ownerOf(sourceTokenId), alice);
+        assertEq(token.balanceOf(sourceTokenId), 1000e18);
+        vm.expectRevert();
+        token.ownerOf(sourceTokenId + 1);
+
+        // The failed destination mint must not consume a token ID or leave an orphan.
+        vm.startPrank(registry);
+        token.whitelist(bob);
+        uint256 nextTokenId = token.mint(bob, SLOT_BONDS, 0);
+        vm.stopPrank();
+        assertEq(nextTokenId, sourceTokenId + 1);
+    }
+
+    // ── Whole-token ownership transfer compliance ─────────────────────────────
+
+    function test_wholeTransferFrom_succeedsAndConservesPosition() public {
+        uint256 tokenId = _mintWholeToken();
+
+        vm.prank(alice);
+        token.transferFrom(alice, bob, tokenId);
+
+        _assertWholePosition(tokenId, bob);
+    }
+
+    function test_safeWholeTransferFrom_succeedsAndConservesPosition() public {
+        uint256 tokenId = _mintWholeToken();
+
+        vm.prank(alice);
+        token.safeTransferFrom(alice, bob, tokenId);
+
+        _assertWholePosition(tokenId, bob);
+    }
+
+    function test_wholeTransferFrom_revertsWhenGloballyPaused() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.pause();
+
+        _expectWholeTransferRevert(tokenId, false, "EwpgCompliance: transfers are paused");
+    }
+
+    function test_safeWholeTransferFrom_revertsWhenGloballyPaused() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.pause();
+
+        _expectWholeTransferRevert(tokenId, true, "EwpgCompliance: transfers are paused");
+    }
+
+    function test_wholeTransferFrom_revertsWhenSourceAddressFrozen() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeAddress(alice, "sanctions hold");
+
+        _expectWholeTransferRevert(tokenId, false, "EwpgCompliance: sender is frozen");
+    }
+
+    function test_safeWholeTransferFrom_revertsWhenSourceAddressFrozen() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeAddress(alice, "sanctions hold");
+
+        _expectWholeTransferRevert(tokenId, true, "EwpgCompliance: sender is frozen");
+    }
+
+    function test_wholeTransferFrom_revertsWhenDestinationAddressFrozen() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeAddress(bob, "sanctions hold");
+
+        _expectWholeTransferRevert(tokenId, false, "EwpgCompliance: recipient is frozen");
+    }
+
+    function test_safeWholeTransferFrom_revertsWhenDestinationAddressFrozen() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeAddress(bob, "sanctions hold");
+
+        _expectWholeTransferRevert(tokenId, true, "EwpgCompliance: recipient is frozen");
+    }
+
+    function test_wholeTransferFrom_revertsWhenTokenFrozen() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeToken(tokenId, "sanctions hold");
+
+        _expectWholeTransferRevert(tokenId, false, "EwpgERC3525: token is frozen");
+    }
+
+    function test_safeWholeTransferFrom_revertsWhenTokenFrozen() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeToken(tokenId, "sanctions hold");
+
+        _expectWholeTransferRevert(tokenId, true, "EwpgERC3525: token is frozen");
+    }
+
+    function test_wholeTransferFrom_revertsWhenSlotPaused() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.pauseSlot(SLOT_BONDS);
+
+        _expectWholeTransferRevert(tokenId, false, "EwpgERC3525: slot is paused");
+    }
+
+    function test_safeWholeTransferFrom_revertsWhenSlotPaused() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.pauseSlot(SLOT_BONDS);
+
+        _expectWholeTransferRevert(tokenId, true, "EwpgERC3525: slot is paused");
+    }
+
+    function test_wholeTransferFrom_revertsWhenDestinationNotWhitelisted() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.removeFromWhitelist(bob);
+
+        _expectWholeTransferRevert(tokenId, false, "EwpgERC3525: recipient not whitelisted");
+    }
+
+    function test_safeWholeTransferFrom_revertsWhenDestinationNotWhitelisted() public {
+        uint256 tokenId = _mintWholeToken();
+        vm.prank(registry);
+        token.removeFromWhitelist(bob);
+
+        _expectWholeTransferRevert(tokenId, true, "EwpgERC3525: recipient not whitelisted");
+    }
+
     // ── Forced operations ─────────────────────────────────────────────────────
 
     function test_forcedTransferValue_bypassesCompliance() public {
@@ -154,6 +319,43 @@ contract EwpgERC3525Test is Test {
         assertEq(token.balanceOf(tokenId), 700e18);
     }
 
+    function test_forcedWholeTransfer_bypassesAllOwnershipGuardsAndConservesPosition() public {
+        uint256 tokenId = _mintWholeToken();
+
+        vm.startPrank(registry);
+        token.pauseSlot(SLOT_BONDS);
+        token.freezeToken(tokenId, "sanctions hold");
+        token.freezeAddress(alice, "source hold");
+        token.freezeAddress(mallory, "destination hold");
+        token.pause();
+        token.forcedTransfer(alice, mallory, tokenId, unicode"BaFin §24");
+        vm.stopPrank();
+
+        _assertWholePosition(tokenId, mallory);
+
+        // A subsequent normal move still sees the controls: the force bypass is call-scoped.
+        vm.prank(mallory);
+        vm.expectRevert("EwpgCompliance: transfers are paused");
+        token.transferFrom(mallory, bob, tokenId);
+    }
+
+    function test_forcedWholeBurn_bypassesPauseAndFreeze() public {
+        uint256 tokenId = _mintWholeToken();
+
+        vm.startPrank(registry);
+        token.pauseSlot(SLOT_BONDS);
+        token.freezeToken(tokenId, "sanctions hold");
+        token.freezeAddress(alice, "source hold");
+        token.pause();
+        token.forceBurn(alice, tokenId, unicode"BaFin §26");
+        vm.stopPrank();
+
+        vm.expectRevert();
+        token.ownerOf(tokenId);
+        vm.expectRevert();
+        token.balanceOf(tokenId);
+    }
+
     // ── Slot metadata ─────────────────────────────────────────────────────────
 
     function test_setSlotMetadataHash_emitsEvent() public {
@@ -183,5 +385,27 @@ contract EwpgERC3525Test is Test {
         assertFalse(tokenAddr == address(0));
         EwpgERC3525 deployed = EwpgERC3525(tokenAddr);
         assertEq(deployed.assetId(), ASSET_ID);
+    }
+
+    function _mintWholeToken() private returns (uint256 tokenId) {
+        vm.prank(registry);
+        tokenId = token.mint(alice, SLOT_BONDS, 1000e18);
+    }
+
+    function _expectWholeTransferRevert(uint256 tokenId, bool safe, bytes memory reason) private {
+        vm.prank(alice);
+        vm.expectRevert(reason);
+        if (safe) {
+            token.safeTransferFrom(alice, bob, tokenId);
+        } else {
+            token.transferFrom(alice, bob, tokenId);
+        }
+        _assertWholePosition(tokenId, alice);
+    }
+
+    function _assertWholePosition(uint256 tokenId, address expectedOwner) private view {
+        assertEq(token.ownerOf(tokenId), expectedOwner);
+        assertEq(token.slotOf(tokenId), SLOT_BONDS);
+        assertEq(token.balanceOf(tokenId), 1000e18);
     }
 }

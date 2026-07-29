@@ -21,8 +21,12 @@ import de.makibytes.registerwerk.blockchain.events.CantonBondRedeemedEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonCouponPaidEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonFloatingRateFixedEvent;
 import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.wallet.api.WalletSigner;
+import de.makibytes.registerwerk.wallet.api.WalletStorage.CantonContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -47,6 +51,14 @@ import java.util.concurrent.CompletableFuture;
  *
  * <p>DAML templates are defined in {@code daml/daml/Registerwerk/Bond/}. Run
  * {@code daml/build.sh} to regenerate Java bindings when templates change.
+ *
+ * <p><b>Known gap (untestable without {@code -Pcanton} JFrog credentials and a live
+ * participant):</b> {@code bondRecord()} below does not include the template's required
+ * {@code terms : EwpgBondTerms} field, and every {@code Date}-typed choice argument
+ * (paymentDate/fixingDate/callDate/redemptionDate) is sent as {@link Text} rather than a
+ * proper Daml {@code Date} value. Both need fixing against the real
+ * {@code com.daml.ledger.javaapi.data} value-encoding rules before this profile is
+ * activated in production — flagging explicitly rather than guessing at an unverifiable fix.
  */
 @Service
 public class CantonBondService implements CantonBondOperations {
@@ -61,25 +73,32 @@ public class CantonBondService implements CantonBondOperations {
     private final AssetLookupPort assetLookupPort;
     private final AssetBondTermsRepository bondTermsRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final ChainConfigRepository chainConfigRepository;
+    private final WalletSigner walletSigner;
 
     public CantonBondService(
             BlockchainClientRegistry registry,
             AssetDeploymentRepository assetDeploymentRepository,
             AssetLookupPort assetLookupPort,
             AssetBondTermsRepository bondTermsRepository,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            ChainConfigRepository chainConfigRepository,
+            WalletSigner walletSigner) {
         this.registry                 = registry;
         this.assetDeploymentRepository = assetDeploymentRepository;
-        this.assetRepository          = assetRepository;
+        this.assetLookupPort          = assetLookupPort;
         this.bondTermsRepository      = bondTermsRepository;
         this.eventPublisher            = eventPublisher;
+        this.chainConfigRepository    = chainConfigRepository;
+        this.walletSigner             = walletSigner;
     }
 
     // ── Bond instrument creation ──────────────────────────────────────────────
 
     @Override
     public CompletableFuture<String> createFixedBond(
-            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms) {
+            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
+            UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             log.info("Creating DAML FixedRateBond: assetId={} network={}", assetId, network);
             AssetBondTerms bt = requireBondTerms(assetId, terms);
@@ -91,7 +110,7 @@ public class CantonBondService implements CantonBondOperations {
             String updateId = client.submitAndWait(issuerPartyId, List.of(
                     new CreateCommand(id("FixedRateBond"), createArgs)));
 
-            eventPublisher.publishEvent(new CantonBondCreatedEvent(null, null, "FIXED",
+            eventPublisher.publishEvent(new CantonBondCreatedEvent(null, actorId, actorRole, "FIXED",
                     Map.of("assetId", assetId.toString(), "network", network.name(), "updateId", updateId)));
             log.info("FixedRateBond created: assetId={} updateId={}", assetId, updateId);
             return updateId;
@@ -100,7 +119,8 @@ public class CantonBondService implements CantonBondOperations {
 
     @Override
     public CompletableFuture<String> createFloatingBond(
-            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms) {
+            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
+            UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             log.info("Creating DAML FloatingRateBond: assetId={}", assetId);
             AssetBondTerms bt = requireBondTerms(assetId, terms);
@@ -114,7 +134,7 @@ public class CantonBondService implements CantonBondOperations {
             String updateId = client.submitAndWait(issuerPartyId, List.of(
                     new CreateCommand(id("FloatingRateBond"), createArgs)));
 
-            eventPublisher.publishEvent(new CantonBondCreatedEvent(null, null, "FLOATING",
+            eventPublisher.publishEvent(new CantonBondCreatedEvent(null, actorId, actorRole, "FLOATING",
                     Map.of("assetId", assetId.toString(), "updateId", updateId)));
             return updateId;
         });
@@ -122,19 +142,23 @@ public class CantonBondService implements CantonBondOperations {
 
     @Override
     public CompletableFuture<String> createZeroBond(
-            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms) {
+            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
+            UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             log.info("Creating DAML ZeroCouponBond: assetId={}", assetId);
-            requireBondTerms(assetId, terms);
+            AssetBondTerms bt = requireBondTerms(assetId, terms);
             CantonLedgerClient client = resolveClient(network);
 
+            // Falls back to BigDecimal.ONE (100% of face value) only when issuePrice is unset —
+            // a genuine discount-priced zero-coupon bond, the entire point of the instrument,
+            // must be recorded at its real issue price.
             DamlRecord createArgs = bondRecord(assetId, issuerPartyId,
-                    f("issuePrice", new Numeric(BigDecimal.ONE)));
+                    f("issuePrice", new Numeric(bt.getIssuePrice() != null ? bt.getIssuePrice() : BigDecimal.ONE)));
 
             String updateId = client.submitAndWait(issuerPartyId, List.of(
                     new CreateCommand(id("ZeroCouponBond"), createArgs)));
 
-            eventPublisher.publishEvent(new CantonBondCreatedEvent(null, null, "ZERO_COUPON",
+            eventPublisher.publishEvent(new CantonBondCreatedEvent(null, actorId, actorRole, "ZERO_COUPON",
                     Map.of("assetId", assetId.toString(), "updateId", updateId)));
             return updateId;
         });
@@ -148,6 +172,7 @@ public class CantonBondService implements CantonBondOperations {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment dep = loadDeployment(deploymentId);
             CantonLedgerClient client = resolveClient(dep.getNetwork());
+            CantonContext ctx = resolveContext(dep);
             log.info("CantonBond PayCoupon: deploymentId={} paymentDate={}", deploymentId, paymentDate);
 
             DamlRecord args = rec(
@@ -156,7 +181,7 @@ public class CantonBondService implements CantonBondOperations {
                     f("txRef",         new Text(deploymentId + "-coupon-" + paymentDate.getEpochSecond())));
 
             Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "PayCoupon", args);
-            String updateId = client.submitAndWait(client.registryPartyId(), List.of(cmd));
+            String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
 
             LocalDate pd = LocalDate.ofInstant(paymentDate, ZoneOffset.UTC);
             eventPublisher.publishEvent(new CantonCouponPaidEvent(deploymentId, actorId, pd, amountPerUnit, updateId));
@@ -170,13 +195,14 @@ public class CantonBondService implements CantonBondOperations {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment dep = loadDeployment(deploymentId);
             CantonLedgerClient client = resolveClient(dep.getNetwork());
+            CantonContext ctx = resolveContext(dep);
 
             DamlRecord args = rec(
                     f("fixingDate", new Text(fixingDate.toString())),
                     f("rate",       new Numeric(rate)));
 
             Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "FixRate", args);
-            String updateId = client.submitAndWait(client.registryPartyId(), List.of(cmd));
+            String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
 
             eventPublisher.publishEvent(new CantonFloatingRateFixedEvent(deploymentId, actorId, rate, fixingDate));
             return updateId;
@@ -188,9 +214,11 @@ public class CantonBondService implements CantonBondOperations {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment dep = loadDeployment(deploymentId);
             CantonLedgerClient client = resolveClient(dep.getNetwork());
+            CantonContext ctx = resolveContext(dep);
 
-            Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "Redeem", rec());
-            String updateId = client.submitAndWait(client.registryPartyId(), List.of(cmd));
+            DamlRecord args = rec(f("redemptionDate", new Text(maturityDate.toString())));
+            Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "Redeem", args);
+            String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
 
             bondTermsRepository.findById(dep.getAssetId()).ifPresent(bt -> {
                 bt.setBondStatus(BondStatus.REDEEMED);
@@ -207,13 +235,14 @@ public class CantonBondService implements CantonBondOperations {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment dep = loadDeployment(deploymentId);
             CantonLedgerClient client = resolveClient(dep.getNetwork());
+            CantonContext ctx = resolveContext(dep);
 
             DamlRecord args = rec(
                     f("callDate",  new Text(callDate.toString())),
                     f("callPrice", new Numeric(callPrice)));
 
             Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "EarlyCall", args);
-            String updateId = client.submitAndWait(client.registryPartyId(), List.of(cmd));
+            String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
 
             bondTermsRepository.findById(dep.getAssetId()).ifPresent(bt -> {
                 bt.setBondStatus(BondStatus.CALLED);
@@ -229,6 +258,20 @@ public class CantonBondService implements CantonBondOperations {
     private CantonLedgerClient resolveClient(Network network) {
         String identifier = "CANTON_" + (network == Network.MAINNET ? "MAINNET" : "DEVNET");
         return (CantonLedgerClient) registry.getCantonClientByIdentifier(identifier);
+    }
+
+    /** Resolves the acting party for lifecycle-choice exercises — this
+     *  previously called a {@code client.registryPartyId()} method that doesn't exist on {@link
+     *  CantonLedgerClient}/{@code CantonLedgerEndpoint} (a genuine compile break, invisible to
+     *  default CI since this class only compiles under {@code -Pcanton}). Mirrors {@code
+     *  CantonTokenService.resolveContext}'s existing pattern exactly: the party ID + JWT come
+     *  from the chain_config-linked default wallet via {@link WalletSigner}, the same
+     *  default-wallet mechanism every other chain (EVM, Solana) uses. */
+    private CantonContext resolveContext(AssetDeployment dep) {
+        String identifier = "CANTON_" + (dep.getNetwork() == Network.MAINNET ? "MAINNET" : "DEVNET");
+        ChainConfig chainConfig = chainConfigRepository.findByIdentifier(identifier)
+                .orElseThrow(() -> new EntityNotFoundException("ChainConfig", "identifier", identifier));
+        return walletSigner.cantonContextForChain(chainConfig.getId());
     }
 
     private AssetDeployment loadDeployment(UUID deploymentId) {
@@ -248,6 +291,7 @@ public class CantonBondService implements CantonBondOperations {
             if (override.couponRate()   != null) bt.setCouponRate(override.couponRate());
             if (override.referenceRate()!= null) bt.setReferenceRate(override.referenceRate());
             if (override.spread()       != null) bt.setSpread(override.spread());
+            if (override.issuePrice()   != null) bt.setIssuePrice(override.issuePrice());
             return bondTermsRepository.save(bt);
         }
         return bondTermsRepository.findById(assetId)
@@ -257,9 +301,9 @@ public class CantonBondService implements CantonBondOperations {
     }
 
     private Identifier bondTemplateId(AssetDeployment dep) {
-        TokenStandard std = assetRepository.findById(dep.getAssetId())
+        TokenStandard std = assetLookupPort.findById(dep.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()))
-                .getTokenStandard();
+                .tokenStandard();
         String entity = switch (std) {
             case DAML_BOND_FIXED    -> "FixedRateBond";
             case DAML_BOND_FLOATING -> "FloatingRateBond";

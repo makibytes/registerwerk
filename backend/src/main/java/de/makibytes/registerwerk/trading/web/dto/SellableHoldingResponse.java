@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.trading.web.dto;
 
 import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.trading.api.TradingAssetType;
 
@@ -18,5 +19,6 @@ public record SellableHoldingResponse(
         Chain chain,
         BigDecimal ownedQuantity,
         BigDecimal availableQuantity,
-        String walletAddress) {
+        String walletAddress,
+        Jurisdiction jurisdiction) {
 }

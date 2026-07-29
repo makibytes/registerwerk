@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.audit.internal;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,6 +17,14 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
     Page<AuditEvent> findByEventType(String eventType, Pageable pageable);
 
     Page<AuditEvent> findByActorId(UUID actorId, Pageable pageable);
+
+    /**
+     * {@link Slice}, not {@link Page} — used by the nightly chain verification scan, which
+     * only needs {@code isLast()} and never displays a total count. A {@code Page} return
+     * type forces Spring Data to run an extra {@code COUNT(*)} query per batch; over a
+     * multi-million-row table scanned nightly, that's thousands of wasted count queries.
+     */
+    Slice<AuditEvent> findAllSliceBy(Pageable pageable);
 
     @Query(
         value = """

@@ -13,10 +13,10 @@ Registerwerk supports eight blockchain types across mainnet and testnet networks
 
 | Chain type | Token standard(s) | Client library | Networks | Status |
 |---|---|---|---|---|
-| [Ethereum & EVM](evm.md) | ERC-20/721/1155/3525/3643/4626/7540 | Web3j | Ethereum, Polygon, Base, Arbitrum, Avalanche, Optimism | ✅ Production |
-| [Confidential EVM](confidential-evm.md) | CONF_ERC20, CONF_ERC3643 | Web3j + Zama SDK | Fhenix, Inco | ✅ Production |
-| [Solana](solana.md) | SPL, SPL_2022, SPL_2022_BOND, SPL_2022_CONFIDENTIAL | Solanaj | mainnet-beta, devnet | ✅ Production |
-| [Canton / DAML](canton.md) | DAML_BOND_*, CANTON_TOKEN | DAML Java client | Canton Network, devnet | ✅ (`-Pcanton`) |
+| [Ethereum & EVM](evm.md) | ERC-20/721/1155/3525/3643/4626/7540 | Web3j | Ethereum, Polygon, Base, Arbitrum, Avalanche, Optimism | Implementation present; production readiness unverified |
+| [Confidential EVM](confidential-evm.md) | CONF_ERC20, CONF_ERC3643 | Web3j + Zama SDK | Fhenix, Inco | Implementation present; production readiness unverified |
+| [Solana](solana.md) | SPL, SPL_2022, SPL_2022_BOND, SPL_2022_CONFIDENTIAL | Solanaj | mainnet-beta, devnet | Integration present; production readiness unverified |
+| [Canton / DAML](canton.md) | DAML_BOND_*, CANTON_TOKEN | DAML Java client | Canton Network, devnet | Optional implementation (`-Pcanton`); production readiness unverified |
 | [StarkNet](starknet-stellar.md) | STARKNET_ERC20, STARKNET_ERC3525 | Custom Starknet4j | mainnet, sepolia | ⚠️ Placeholder |
 | [Stellar](starknet-stellar.md) | STELLAR_ASSET | Horizon Java SDK | mainnet, testnet | ⚠️ Placeholder |
 

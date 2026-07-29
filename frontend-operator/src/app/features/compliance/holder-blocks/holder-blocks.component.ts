@@ -225,6 +225,7 @@ export class HolderBlocksComponent implements OnInit {
       data: {
         requireDualControl: true,
         reason: `Create Sperrvermerk on wallet ${this.createForm.walletAddress} (§16 eWpG)`,
+        action: 'SPERRVERMERK_CREATE',
       },
       width: '500px',
       disableClose: true,
@@ -257,6 +258,7 @@ export class HolderBlocksComponent implements OnInit {
       data: {
         requireDualControl: true,
         reason: `Lift Sperrvermerk on wallet ${block.walletAddress} (§16 eWpG)`,
+        action: 'SPERRVERMERK_LIFT',
       },
       width: '500px',
       disableClose: true,

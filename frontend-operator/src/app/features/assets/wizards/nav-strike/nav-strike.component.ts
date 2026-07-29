@@ -7,7 +7,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe, SlicePipe } from '@angular/common';
 import { VaultService } from '../../../../core/api/vault.service';
 import { VaultNavStrike } from '../../../../core/models';
 
@@ -15,7 +15,7 @@ import { VaultNavStrike } from '../../../../core/models';
   selector: 'app-nav-strike',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, MatButtonModule, MatFormFieldModule, MatInputModule, MatIconModule, DatePipe],
+  imports: [FormsModule, MatButtonModule, MatFormFieldModule, MatInputModule, MatIconModule, DatePipe, DecimalPipe, SlicePipe],
   template: `
     <div class="nav-shell">
       <header class="nav-header">
@@ -48,7 +48,7 @@ import { VaultNavStrike } from '../../../../core/models';
             @if (striking) {
               <span class="spinner"></span> Striking…
             } @else {
-              <mat-icon>price_change</mat-icon> Confirm NAV strike
+              <ng-container><mat-icon>price_change</mat-icon> Confirm NAV strike</ng-container>
             }
           </button>
         </div>
@@ -249,7 +249,10 @@ export class NavStrikeComponent implements OnInit {
         this.latestNav = strikes[0] ?? null;
         this.cdr.markForCheck();
       },
-      error: () => {},
+      error: () => {
+        this.snackBar.open('Failed to load NAV strike history', 'Dismiss', { duration: 5000 });
+        this.cdr.markForCheck();
+      },
     });
   }
 

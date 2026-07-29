@@ -1,0 +1,66 @@
+{
+  "slug": "bond-desk",
+  "name": "eWpG Bond Desk",
+  "version": "1.0.0",
+  "description": "Paying agent for a German eWpG-registered bond issued as a full ERC-3643 (T-REX) security token. Demonstrates the two authority layers a real eWpG instrument stacks on Registerwerk: T-REX agent rights (mint/burn on the bond token itself) plus ecosystem permission gating (which org/human may trigger issuance, coupon payment, or redemption), with independent ONCHAINID claim checks (KYC, AML) enforced through RegisterwerkGated and the PermissionOracle.",
+  "category": "capital-markets",
+  "contracts": [
+    {
+      "name": "EwpgBondDesk",
+      "abiSha256": "8bde3212e6f165f5ec0750613a74a6851c691008a262c8ad6cd3422a8aafb3ff",
+      "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/examples/EwpgBondDesk.sol"
+    }
+  ],
+  "requiredPermissions": [
+    {
+      "code": "bond-desk.issue",
+      "rationale": "Sell new bond units to a KYC'd investor against a stablecoin payment (primary-market DvP)"
+    },
+    {
+      "code": "bond-desk.pay-coupon",
+      "rationale": "Pay the current coupon period to each holder in the payment-rail stablecoin"
+    },
+    {
+      "code": "bond-desk.redeem",
+      "rationale": "Pay principal and burn a matured holder's position at redemption"
+    }
+  ],
+  "requiredClaimTopics": [
+    1,
+    2
+  ],
+  "paymentMethods": [
+    {
+      "rail": "aueur",
+      "note": "Primary-market subscription plus coupon and redemption payouts in AllUnity Euro"
+    },
+    {
+      "rail": "usdc",
+      "note": "Alternative settlement currency for USD-denominated investors"
+    },
+    {
+      "rail": "erc7573-dvp",
+      "note": "Atomic delivery-versus-payment of bond units against the stablecoin leg for secondary-market transfers"
+    }
+  ],
+  "images": [
+    {
+      "name": "backend",
+      "role": "backend",
+      "ref": "ghcr.io/registerwerk/examples/bond-desk-backend@sha256:e252d4fa4ae879fbe44ff1cbb7aef54d419b11eed2c64ee6e3e14110d54c95ca"
+    },
+    {
+      "name": "frontend",
+      "role": "frontend",
+      "ref": "ghcr.io/registerwerk/examples/bond-desk-frontend@sha256:1c3a3afa2aaee02376049a7b5346b16152eaf2066f4f07bb560a4048bc493a4b"
+    }
+  ],
+  "deployment": {
+    "composeUrl": "https://github.com/registerwerk/registerwerk/blob/main/examples/dapps/bond-desk/docker-compose.yml",
+    "composeSha256": "c224a0f57bef4cf48c40c7a0abcf062859f8b366043876063fd4fa1030b8ac10"
+  },
+  "docsUrl": "https://docs.registerwerk.de/platform/dapp-development",
+  "contact": "dapps@registerwerk.de",
+  "license": "MIT",
+  "pricingNote": "Reference implementation — free, self-hosted"
+}

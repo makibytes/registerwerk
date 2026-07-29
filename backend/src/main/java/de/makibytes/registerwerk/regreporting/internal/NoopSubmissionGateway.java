@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 
 /**
- * No-op gateway: logs submission intent but does not transmit. Active when no real
+ * No-op gateway: logs transport intent but does not transmit. Active when no real
  * gateway is configured (REGISTERWERK_REPORTING_GATEWAY != SFTP).
  */
 @Component
@@ -22,9 +22,9 @@ class NoopSubmissionGateway implements SubmissionGateway {
     @Override
     public SubmissionResult submit(UUID submissionId, String reportType,
                                    String jurisdiction, byte[] xmlDocument) {
-        log.warn("NoopSubmissionGateway: report NOT filed — configure REGISTERWERK_REPORTING_GATEWAY=SFTP " +
-                 "for production. submissionId={} reportType={} jurisdiction={} bytes={}",
+        log.warn("NoopSubmissionGateway: draft NOT transported. SFTP, if enabled outside production, " +
+                 "would prove transport only. submissionId={} reportType={} jurisdiction={} bytes={}",
                  submissionId, reportType, jurisdiction, xmlDocument.length);
-        return SubmissionResult.pending("noop-" + submissionId);
+        return SubmissionResult.notTransported("NOOP adapter: no transport attempted");
     }
 }

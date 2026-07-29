@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
@@ -35,6 +36,7 @@ public class BlockchainConfig {
     private final Web3jClientFactory web3jClientFactory;
     private final SolanaClientFactory solanaClientFactory;
     private final CantonClientProvider cantonClientFactory;
+    private final ChainConfigRepository chainConfigRepository;
 
     @Autowired
     public BlockchainConfig(
@@ -43,13 +45,15 @@ public class BlockchainConfig {
             CantonProperties cantonProperties,
             Web3jClientFactory web3jClientFactory,
             SolanaClientFactory solanaClientFactory,
-            @Nullable CantonClientProvider cantonClientFactory) {
+            @Nullable CantonClientProvider cantonClientFactory,
+            ChainConfigRepository chainConfigRepository) {
         this.evmProperties = evmProperties;
         this.solanaProperties = solanaProperties;
         this.cantonProperties = cantonProperties;
         this.web3jClientFactory = web3jClientFactory;
         this.solanaClientFactory = solanaClientFactory;
         this.cantonClientFactory = cantonClientFactory;
+        this.chainConfigRepository = chainConfigRepository;
     }
 
     @Bean
@@ -110,9 +114,15 @@ public class BlockchainConfig {
             registerCantonClient(cantonClients, cantonProperties.getDevnet(), Chain.CANTON, Network.TESTNET);
         }
 
+        // Wire the real beans (already available in this class) so refreshFromNodes()/refresh()
+        // (called by RpcNodeHealthService after every health-check round) can actually maintain
+        // the node-pool/failover tier, instead of every chain permanently falling back to this
+        // single static-properties client with no failover if it degrades.
         return new BlockchainClientRegistry(evmClients, solanaClients, cantonClients,
-                java.util.Optional.empty(), java.util.Optional.empty(),
-                java.util.Optional.empty(), java.util.Optional.empty());
+                java.util.Optional.of(chainConfigRepository),
+                java.util.Optional.of(web3jClientFactory),
+                java.util.Optional.of(solanaClientFactory),
+                java.util.Optional.ofNullable(cantonClientFactory));
     }
 
     private void registerCantonClient(

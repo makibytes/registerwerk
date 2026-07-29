@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.customer.internal;
 
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.customer.api.ErasureRequest;
 import de.makibytes.registerwerk.customer.api.ErasureRequestRepository;
 import de.makibytes.registerwerk.customer.api.ErasureRequestStatus;
@@ -38,10 +40,13 @@ public class DsarErasureService {
             List.of(ErasureRequestStatus.REQUESTED, ErasureRequestStatus.IN_REVIEW);
 
     private final ErasureRequestRepository repository;
+    private final AppUserRepository userRepository;
     private final ApplicationEventPublisher eventPublisher;
 
-    public DsarErasureService(ErasureRequestRepository repository, ApplicationEventPublisher eventPublisher) {
+    public DsarErasureService(ErasureRequestRepository repository, AppUserRepository userRepository,
+                               ApplicationEventPublisher eventPublisher) {
         this.repository = repository;
+        this.userRepository = userRepository;
         this.eventPublisher = eventPublisher;
     }
 
@@ -77,17 +82,57 @@ public class DsarErasureService {
         return repository.findByStatusInOrderByRequestedAtAsc(OPEN);
     }
 
-    /** Marks a request COMPLETED (erasable fields were erased, or none were erasable). */
-    public ErasureRequest complete(UUID requestId, UUID operatorId, String note) {
-        return resolve(requestId, ErasureRequestStatus.COMPLETED, operatorId, note);
+    /**
+     * Marks a request COMPLETED and actually tombstones the erasable personal-data fields —
+     * previously {@code complete} only flipped the status; no field was ever erased or
+     * anonymized, which is not what Art. 17 erasure means.
+     *
+     * <p>Scope is deliberately narrow: only the natural-person contact fields on each
+     * {@code AppUser} tied to the entity (full name, email, password hash) are tombstoned, and
+     * the users are disabled. {@code LegalEntity}'s own registration data (LEI, registration
+     * number, entity number, incorporation date) is NOT erased — eWpG/GwG retention obligations
+     * require keeping the register and KYC/AML trail; DSGVO Art. 17(3)(b) exempts erasure where
+     * processing is necessary for compliance with a legal obligation. This is exactly the
+     * "weighed against statutory retention" judgment the operator note field already existed to
+     * document — this method makes the KEPT/ERASED split concrete rather than leaving both
+     * fully intact.
+     */
+    public ErasureRequest complete(UUID requestId, UUID operatorId, String note, UUID approverId) {
+        ErasureRequest req = repository.findById(requestId)
+                .orElseThrow(() -> new EntityNotFoundException("ErasureRequest", requestId));
+        if (req.getStatus() == ErasureRequestStatus.COMPLETED || req.getStatus() == ErasureRequestStatus.REJECTED) {
+            // Guard BEFORE tombstoning anything — resolve() re-checks this too, but only after
+            // the loop below would already have run; an already-resolved request (in particular
+            // one already REJECTED, i.e. explicitly NOT to be erased) must not be tombstoned as
+            // a side effect of a call that is about to fail anyway.
+            throw new IllegalStateException("Erasure request " + requestId + " is already resolved");
+        }
+        int erasedCount = 0;
+        for (AppUser user : userRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(req.getEntityId())) {
+            if (isAlreadyErased(user)) {
+                continue;
+            }
+            user.setFullName("[ERASED]");
+            user.setEmail("erased-" + user.getId() + "@erased.invalid");
+            user.setPasswordHash(null);
+            user.setEnabled(false);
+            userRepository.save(user);
+            erasedCount++;
+        }
+        log.warn("DSAR erasure {} tombstoned {} AppUser(s) for entityId={}", requestId, erasedCount, req.getEntityId());
+        return resolve(requestId, ErasureRequestStatus.COMPLETED, operatorId, note, approverId);
+    }
+
+    private static boolean isAlreadyErased(AppUser user) {
+        return user.getEmail() != null && user.getEmail().endsWith("@erased.invalid");
     }
 
     /** Marks a request REJECTED (everything falls under a retention obligation). */
     public ErasureRequest reject(UUID requestId, UUID operatorId, String note) {
-        return resolve(requestId, ErasureRequestStatus.REJECTED, operatorId, note);
+        return resolve(requestId, ErasureRequestStatus.REJECTED, operatorId, note, null);
     }
 
-    private ErasureRequest resolve(UUID requestId, ErasureRequestStatus target, UUID operatorId, String note) {
+    private ErasureRequest resolve(UUID requestId, ErasureRequestStatus target, UUID operatorId, String note, UUID approverId) {
         ErasureRequest req = repository.findById(requestId)
                 .orElseThrow(() -> new EntityNotFoundException("ErasureRequest", requestId));
         if (req.getStatus() == ErasureRequestStatus.COMPLETED || req.getStatus() == ErasureRequestStatus.REJECTED) {
@@ -103,7 +148,8 @@ public class DsarErasureService {
         details.put("erasureRequestId", requestId.toString());
         details.put("resolution", target.name());
         if (note != null && !note.isBlank()) details.put("note", note);
-        eventPublisher.publishEvent(new DsarErasureResolvedEvent(req.getEntityId(), operatorId, "REGISTRY_ADMIN", details));
+        eventPublisher.publishEvent(
+                new DsarErasureResolvedEvent(req.getEntityId(), operatorId, "REGISTRY_ADMIN", approverId, details));
         log.info("DSAR erasure request {} resolved as {} by {}", requestId, target, operatorId);
         return saved;
     }

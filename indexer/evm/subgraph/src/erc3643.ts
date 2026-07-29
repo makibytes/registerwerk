@@ -4,18 +4,16 @@ import {
   TokensFrozen,
   Paused,
   Unpaused,
-  IdentityRegistered as IdentityRegisteredEvent,
-  IdentityRemoved as IdentityRemovedEvent,
   ComplianceAdded,
 } from '../generated/templates/EwpgERC3643/EwpgERC3643'
 import {
-  Token, Transfer, WhitelistChange, HolderBalance,
-  IdentityRegistered, ComplianceChange,
+  Token, Transfer, WhitelistChange, HolderBalance, ComplianceChange,
 } from '../generated/schema'
 import { BigInt, Bytes } from '@graphprotocol/graph-ts'
 
 const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000'
 const TOKEN_TYPE   = 6  // ERC-3643 (T-REX) — deployed via TREXFactory, outside the numeric range of AssetTokenFactory types
+const EVENT_DERIVED = 'EVENT_DERIVED'
 
 function getOrCreateHolderBalance(tokenAddress: string, holder: Bytes): HolderBalance {
   let id = tokenAddress + '-' + holder.toHexString()
@@ -25,6 +23,7 @@ function getOrCreateHolderBalance(tokenAddress: string, holder: Bytes): HolderBa
     hb.token   = tokenAddress
     hb.holder  = holder
     hb.balance = BigInt.fromI32(0)
+    hb.projectionStatus = EVENT_DERIVED
     hb.lastUpdatedBlock     = BigInt.fromI32(0)
     hb.lastUpdatedTimestamp = BigInt.fromI32(0)
   }
@@ -48,6 +47,7 @@ export function handleTransfer(event: TransferEvent): void {
   transfer.to              = event.params.to
   transfer.amount          = event.params.value
   transfer.eventType       = eventType
+  transfer.projectionStatus = EVENT_DERIVED
   transfer.blockNumber     = event.block.number
   transfer.blockTimestamp  = event.block.timestamp
   transfer.transactionHash = event.transaction.hash
@@ -82,6 +82,7 @@ export function handleAddressFrozen(event: AddressFrozen): void {
   change.token           = event.address.toHexString()
   change.account         = event.params.addr
   change.added           = !event.params.frozen
+  change.projectionStatus = EVENT_DERIVED
   change.blockNumber     = event.block.number
   change.blockTimestamp  = event.block.timestamp
   change.transactionHash = event.transaction.hash
@@ -96,6 +97,7 @@ export function handleTokensFrozen(event: TokensFrozen): void {
   change.token           = event.address.toHexString()
   change.account         = event.params.addr
   change.added           = false   // frozen = not freely tradeable
+  change.projectionStatus = EVENT_DERIVED
   change.blockNumber     = event.block.number
   change.blockTimestamp  = event.block.timestamp
   change.transactionHash = event.transaction.hash
@@ -109,6 +111,7 @@ export function handlePaused(event: Paused): void {
   change.token           = event.address.toHexString()
   change.account         = event.params.account
   change.added           = false
+  change.projectionStatus = EVENT_DERIVED
   change.blockNumber     = event.block.number
   change.blockTimestamp  = event.block.timestamp
   change.transactionHash = event.transaction.hash
@@ -121,36 +124,11 @@ export function handleUnpaused(event: Unpaused): void {
   change.token           = event.address.toHexString()
   change.account         = event.params.account
   change.added           = true
+  change.projectionStatus = EVENT_DERIVED
   change.blockNumber     = event.block.number
   change.blockTimestamp  = event.block.timestamp
   change.transactionHash = event.transaction.hash
   change.save()
-}
-
-export function handleIdentityRegistered(event: IdentityRegisteredEvent): void {
-  let id = event.transaction.hash.toHexString() + '-' + event.logIndex.toString()
-  let entry = new IdentityRegistered(id)
-  entry.token            = event.address.toHexString()
-  entry.investorAddress  = event.params.investorAddress
-  entry.identity         = event.params.identity
-  entry.eventKind        = 'REGISTERED'
-  entry.blockNumber      = event.block.number
-  entry.blockTimestamp   = event.block.timestamp
-  entry.transactionHash  = event.transaction.hash
-  entry.save()
-}
-
-export function handleIdentityRemoved(event: IdentityRemovedEvent): void {
-  let id = event.transaction.hash.toHexString() + '-' + event.logIndex.toString()
-  let entry = new IdentityRegistered(id)
-  entry.token            = event.address.toHexString()
-  entry.investorAddress  = event.params.investorAddress
-  entry.identity         = event.params.identity
-  entry.eventKind        = 'REMOVED'
-  entry.blockNumber      = event.block.number
-  entry.blockTimestamp   = event.block.timestamp
-  entry.transactionHash  = event.transaction.hash
-  entry.save()
 }
 
 export function handleComplianceAdded(event: ComplianceAdded): void {
@@ -158,6 +136,7 @@ export function handleComplianceAdded(event: ComplianceAdded): void {
   let change = new ComplianceChange(id)
   change.token           = event.address.toHexString()
   change.compliance      = event.params.compliance
+  change.projectionStatus = EVENT_DERIVED
   change.blockNumber     = event.block.number
   change.blockTimestamp  = event.block.timestamp
   change.transactionHash = event.transaction.hash

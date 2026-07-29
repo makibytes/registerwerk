@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -44,6 +45,7 @@ class AnnualRegisterStatementJob {
     }
 
     /** Daily at 03:00 UTC. */
+    @SchedulerLock(name = "annualRegisterStatement", lockAtMostFor = "PT30M")
     @Scheduled(cron = "${registerwerk.register-statement.annual-cron:0 0 3 * * *}")
     public void issueAnnualStatements() {
         // A statement is "annual" once a year has elapsed since the last one.
@@ -81,6 +83,7 @@ class AnnualRegisterStatementJob {
     }
 
     /** Hourly retry of failed deliveries. */
+    @SchedulerLock(name = "annualRegisterStatementRetry", lockAtMostFor = "PT30M")
     @Scheduled(cron = "${registerwerk.register-statement.retry-cron:0 30 * * * *}")
     public void retryFailedDeliveries() {
         try {

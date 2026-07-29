@@ -79,7 +79,7 @@ class CompanyExternalReferenceServiceTest {
 
         AssetLookupPort.AssetInfo asset = buildAsset(assetId, issuerCompanyId, "Green Bond 2028");
         when(assetLookupPort.findById(assetId)).thenReturn(Optional.of(asset));
-        when(assetHolderRepository.existsByAssetIdAndInvestorId(assetId, investorCompanyId)).thenReturn(true);
+        when(assetHolderRepository.existsActiveByAssetIdAndInvestorId(assetId, investorCompanyId)).thenReturn(true);
         when(referenceRepository.findByOwnerLegalEntityIdAndSubjectTypeAndSubjectId(issuerCompanyId, ExternalReferenceSubjectType.ASSET, assetId))
                 .thenReturn(Optional.empty());
         when(referenceRepository.findByOwnerLegalEntityIdAndSubjectTypeAndSubjectId(investorCompanyId, ExternalReferenceSubjectType.ASSET, assetId))

@@ -1,0 +1,208 @@
+# SYNC NOTE: this is a copy of ../../../../gateway/kong.yml — Helm can only read files inside
+# its own chart directory (.Files.Get), so this copy is what templates/kong-configmap.yaml
+# actually deploys. Previously the k8s/Helm path had NO wiring to this hardened config at all
+# (Phase 12, finding #8) — the Kong subchart ran its own stock defaults instead, silently
+# losing the admin-API scoping/header-stripping/rate-limiting verified in the Compose path.
+# Keep this file identical to the original whenever that one changes.
+_format_version: "3.0"
+
+# ─── Registerwerk API Gateway (Kong OSS, DB-less) ─────────────────────────────
+#
+# Loaded via KONG_DECLARATIVE_CONFIG (see docker-compose.kong.yml). Kong's
+# declarative format performs NO environment substitution — deployment-specific
+# values (CORS origins, admin IP allowlist) are edited here or rendered by your
+# deployment tooling before start.
+#
+# Authentication model: JWT validation and role enforcement happen in the
+# Spring backend (OAuth2 resource server, issuer = Entra ID or local auth).
+# Gateway-level OIDC termination requires the Kong Enterprise `openid-connect`
+# plugin — a ready-made snippet is provided in plugins/oidc-entra.yml; merge it
+# into this file only when running Kong Enterprise/Konnect. Never forward
+# identity headers from clients: the backend derives identity from the JWT.
+
+services:
+  - name: registerwerk-backend
+    url: http://backend:8080
+    connect_timeout: 10000
+    read_timeout: 60000
+    write_timeout: 60000
+    retries: 3
+
+    routes:
+      # Public endpoints — no auth required
+      - name: api-public
+        paths:
+          - /api/v1/public
+          - /api/v1/onboarding/token-info
+          - /api/v1/onboarding/complete
+        strip_path: false
+        methods: [GET, POST]
+
+      # OpenAPI docs + liveness — no auth
+      - name: api-docs
+        paths:
+          - /swagger-ui.html
+          - /api-docs
+          - /actuator/health
+        strip_path: false
+        methods: [GET]
+
+      # Admin API — additionally IP-restricted (see plugin below)
+      - name: api-admin
+        paths:
+          - /api/v1/admin
+        strip_path: false
+        methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+
+      # Protected API — all other endpoints (JWT enforced by the backend)
+      - name: api-protected
+        paths:
+          - /api/v1
+        strip_path: false
+        methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+
+# ─── Plugins ───────────────────────────────────────────────────────────────────
+plugins:
+  # Response caching — PUBLIC routes only. Caching authenticated registry data
+  # at the gateway would serve stale compliance state (and, mis-keyed, another
+  # user's responses); an eWpG register must always read current state.
+  - name: proxy-cache
+    route: api-public
+    config:
+      response_code:
+        - 200
+      request_method:
+        - GET
+        - HEAD
+      content_type:
+        - application/json
+        - application/json; charset=utf-8
+      cache_ttl: 30
+      strategy: memory
+      cache_control: false
+
+  - name: proxy-cache
+    route: api-docs
+    config:
+      response_code:
+        - 200
+      request_method:
+        - GET
+      content_type:
+        - application/json
+        - application/json; charset=utf-8
+        - text/html
+      cache_ttl: 60
+      strategy: memory
+      cache_control: false
+
+  # Identity-header hygiene on the unauthenticated surface: clients must never
+  # be able to smuggle the headers a gateway OIDC layer would set upstream.
+  # Scoped to the public routes — service-wide, this plugin (priority 801)
+  # would run AFTER an Enterprise openid-connect plugin (priority 1050) and
+  # strip the very headers it just set. On protected routes the backend
+  # derives identity exclusively from the JWT.
+  - name: request-transformer
+    route: api-public
+    config:
+      remove:
+        headers:
+          - X-Entity-Id
+          - X-Entity-Roles
+
+  - name: request-transformer
+    route: api-docs
+    config:
+      remove:
+        headers:
+          - X-Entity-Id
+          - X-Entity-Roles
+
+  # Rate limiting. `local` works on a single node out of the box; for multiple
+  # Kong replicas switch to policy: redis (see plugins/rate-limiting.yml).
+  - name: rate-limiting
+    service: registerwerk-backend
+    config:
+      minute: 300
+      hour: 10000
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # Bot detection — blocks common crawler / attack user-agents
+  - name: bot-detection
+    service: registerwerk-backend
+    config:
+      deny:
+        - "(Googlebot|bingbot|Baiduspider|YandexBot|DotBot|AhrefsBot|SemrushBot)"
+
+  # IP restriction on ADMIN endpoints only. Replace with your operator
+  # network's CIDR ranges per deployment. Attaching this to all protected
+  # routes would lock out every investor.
+  #
+  # INVARIANT: the operator frontend bypasses Kong entirely (nginx proxies /api/ straight to
+  # backend:8080 — see frontend-operator/nginx.conf and CLAUDE.md). Nothing that the operator
+  # portal itself calls should ever need to satisfy this allowlist. If an operator-console call
+  # starts failing with "Access denied by IP restriction policy.", the bug is almost always that
+  # something got pointed at Kong (:8000) instead of the backend directly — check
+  # frontend-operator/src/environments/*.ts's apiUrl first, not this list.
+  #
+  # Endpoints the CUSTOMER portal legitimately calls (which DOES go through Kong) must live
+  # outside /api/v1/admin/**, e.g. impersonation lives at /api/v1/impersonation, not
+  # /api/v1/admin/impersonation, specifically so it isn't caught by this plugin.
+  #
+  # 172.16.0.0/12 is included as defense-in-depth for Docker's default bridge-network range —
+  # it does NOT make it safe to point the operator frontend at Kong; the invariant above still
+  # applies. Restrict this list to your real operator-network CIDRs before production use.
+  - name: ip-restriction
+    route: api-admin
+    config:
+      allow:
+        - 127.0.0.1
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+      message: "Access denied by IP restriction policy."
+
+  # CORS — set the deployed frontend origins here per environment.
+  - name: cors
+    service: registerwerk-backend
+    config:
+      origins:
+        - http://localhost:4200
+        - http://localhost:4201
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - X-Requested-With
+      exposed_headers:
+        - X-Total-Count
+      credentials: true
+      max_age: 3600
+
+  # Request size limiting (max 20 MB for document uploads)
+  - name: request-size-limiting
+    service: registerwerk-backend
+    config:
+      allowed_payload_size: 20
+      size_unit: megabytes
+
+  # Security headers
+  - name: response-transformer
+    service: registerwerk-backend
+    config:
+      add:
+        headers:
+          - "X-Content-Type-Options:nosniff"
+          - "X-Frame-Options:DENY"
+          - "Strict-Transport-Security:max-age=31536000; includeSubDomains"
+          - "Content-Security-Policy:default-src 'self'; frame-ancestors 'none'"
+          - "Permissions-Policy:geolocation=(), camera=(), microphone=()"
+          - "Referrer-Policy:strict-origin-when-cross-origin"

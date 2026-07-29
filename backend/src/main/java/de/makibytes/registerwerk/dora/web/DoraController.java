@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.dora.web;
 
 import de.makibytes.registerwerk.dora.api.IctIncident;
+import de.makibytes.registerwerk.dora.api.ResilienceTest;
 import de.makibytes.registerwerk.dora.api.ThirdPartyProvider;
 import de.makibytes.registerwerk.dora.internal.DoraService;
 import jakarta.validation.Valid;
@@ -13,6 +14,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -67,8 +69,10 @@ public class DoraController {
     @PostMapping("/incidents/{id}/report-to-authority")
     public ResponseEntity<IctIncidentResponse> markReported(
             @PathVariable UUID id,
-            @RequestBody @Valid ReportToAuthorityRequest req) {
-        IctIncident incident = doraService.markReportedToAuthority(id, req.authorityRef(), req.isFinalReport());
+            @RequestBody @Valid ReportToAuthorityRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID actorId = UUID.fromString(jwt.getSubject());
+        IctIncident incident = doraService.markReportedToAuthority(id, req.authorityRef(), req.isFinalReport(), actorId);
         return ResponseEntity.ok(IctIncidentResponse.from(incident));
     }
 
@@ -82,6 +86,32 @@ public class DoraController {
     @GetMapping("/providers/expiring")
     public ResponseEntity<List<ThirdPartyProviderResponse>> listExpiringContracts() {
         return ResponseEntity.ok(doraService.listExpiringContracts().stream().map(ThirdPartyProviderResponse::from).toList());
+    }
+
+    // ── Resilience Testing ─────────────────────────────────────────────────────
+
+    @GetMapping("/resilience-tests")
+    public ResponseEntity<List<ResilienceTestResponse>> listResilienceTests() {
+        return ResponseEntity.ok(doraService.listResilienceTests().stream().map(ResilienceTestResponse::from).toList());
+    }
+
+    @GetMapping("/resilience-tests/overdue")
+    public ResponseEntity<List<ResilienceTestResponse>> listOverdueResilienceTests() {
+        return ResponseEntity.ok(doraService.listOverdueResilienceTests().stream().map(ResilienceTestResponse::from).toList());
+    }
+
+    @PostMapping("/resilience-tests")
+    public ResponseEntity<ResilienceTestResponse> recordResilienceTest(
+            @RequestBody @Valid RecordResilienceTestRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID actorId = UUID.fromString(jwt.getSubject());
+        ResilienceTest test = doraService.recordResilienceTest(
+                ResilienceTest.TestType.valueOf(req.testType()), req.scope(),
+                Boolean.TRUE.equals(req.tlptRequired()), req.thirdPartyProviderId(),
+                req.performedAt(), req.nextDueDate(),
+                ResilienceTest.Result.valueOf(req.result()), req.findings(),
+                req.testerName(), req.reportRef(), actorId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ResilienceTestResponse.from(test));
     }
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
@@ -134,6 +164,34 @@ public class DoraController {
                     p.getCountry(),
                     p.getContractEnd() != null ? p.getContractEnd().toString() : null,
                     p.isNotifiedAuthority());
+        }
+    }
+
+    public record RecordResilienceTestRequest(
+            @NotBlank String testType,
+            @NotBlank String scope,
+            Boolean tlptRequired,
+            UUID thirdPartyProviderId,
+            @NotNull LocalDate performedAt,
+            LocalDate nextDueDate,
+            @NotBlank String result,
+            String findings,
+            String testerName,
+            String reportRef
+    ) {}
+
+    public record ResilienceTestResponse(
+            UUID id, String testType, String scope, boolean tlptRequired,
+            UUID thirdPartyProviderId, String performedAt, String nextDueDate,
+            String result, String findings, String testerName, String reportRef
+    ) {
+        static ResilienceTestResponse from(ResilienceTest t) {
+            return new ResilienceTestResponse(
+                    t.getId(), t.getTestType().name(), t.getScope(), t.isTlptRequired(),
+                    t.getThirdPartyProviderId(),
+                    t.getPerformedAt() != null ? t.getPerformedAt().toString() : null,
+                    t.getNextDueDate() != null ? t.getNextDueDate().toString() : null,
+                    t.getResult().name(), t.getFindings(), t.getTesterName(), t.getReportRef());
         }
     }
 }

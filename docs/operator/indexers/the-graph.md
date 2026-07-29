@@ -5,63 +5,113 @@ sidebar_label: The Graph
 sidebar_position: 1
 ---
 
-# The Graph — EVM Indexing
+# The Graph — EVM indexing
 
-The eWpG Registry uses The Graph Protocol's `graph-node` to index on-chain events from all EVM chains.
+Registerwerk uses `graph-node` to build provisional, event-derived projections for configured
+EVM contracts. Subgraph entities are not chain-finality attestations, legal register entries,
+legal settlement evidence, or proof of deployed-code identity. Reconcile the configured chain,
+confirmations, contract deployment and authoritative legal register before relying on them.
 
-## Architecture
-
-```
-EVM Chain (Ethereum, Polygon, Base, etc.)
-        |
-        | (eth_getLogs via RPC)
-        v
-  graph-node (Docker)
-        |
-        | (writes indexed data)
-        v
-  PostgreSQL (graph-node schema)
-        |
-        | (GraphQL)
-        v
-  Backend Spring Boot
-```
-
-## Subgraph structure
-
-```
-indexer/evm/subgraph/
-  subgraph.template.yaml   # network names substituted at deploy time
-  schema.graphql           # GraphQL entity schema
-  src/handlers/
-    factory.ts             # AssetTokenFactory event handlers
-    token.ts               # Transfer, Mint, Burn handlers
-    identity.ts            # IdentityRegistry event handlers
-    compliance.ts          # Compliance module event handlers
-  abis/                    # Contract ABIs
-```
-
-## Deploying the subgraph
+## Install and verify
 
 ```bash
-cd indexer/evm/subgraph && npm install
-
-# Sepolia
-FACTORY_ADDRESS_SEPOLIA=0xYourFactory ../deploy-subgraph.sh sepolia
-
-# Polygon Mainnet
-FACTORY_ADDRESS_POLYGON=0xYourFactory ../deploy-subgraph.sh matic
-
-# Base Mainnet
-FACTORY_ADDRESS_BASE=0xYourFactory ../deploy-subgraph.sh base
+cd indexer/evm/subgraph
+npm install
+npm test
 ```
 
-The deploy script:
-1. Substitutes addresses and network names into `subgraph.template.yaml`
-2. Runs `graph codegen` then `graph build` (compiles WASM handlers)
-3. Runs `graph create` and `graph deploy` against the local graph-node
+`npm test` checks checked-in ABI/event parity against Forge artifacts, tests manifest rendering,
+runs Graph code generation and compiles every mapping.
 
-## Monitoring subgraph health
+## Required deployment configuration
+
+The deploy target selects an environment suffix:
+
+| Target | Graph network | Suffix |
+|---|---|---|
+| `mainnet` | `mainnet` | `MAINNET` |
+| `sepolia` | `sepolia` | `SEPOLIA` |
+| `polygon` | `polygon` | `POLYGON` |
+| `polygon-amoy` | `polygon-amoy` | `POLYGON_AMOY` |
+| `base` | `base` | `BASE` |
+| `base-sepolia` | `base-sepolia` | `BASE_SEPOLIA` |
+| `arbitrum-one` | `arbitrum-one` | `ARBITRUM` |
+| `arbitrum-sepolia` | `arbitrum-sepolia` | `ARBITRUM_SEPOLIA` |
+| `avalanche` | `avalanche` | `AVALANCHE` |
+| `avalanche-fuji` | `avalanche-fuji` | `AVALANCHE_FUJI` |
+| `optimism` | `optimism` | `OPTIMISM` |
+| `optimism-sepolia` | `optimism-sepolia` | `OPTIMISM_SEPOLIA` |
+
+For each suffix, configure the four singleton sources below. Their start block defaults to zero,
+but operators should always use the actual deployment block to make replay scope explicit. Each
+source has independent provenance: do not copy one factory's block into the other source fields
+unless the deployment receipts actually prove they share that block.
+
+```dotenv
+ASSET_TOKEN_FACTORY_ADDRESS_SEPOLIA=0x...
+ASSET_TOKEN_FACTORY_START_BLOCK_SEPOLIA=120
+REPO_MARKET_FACTORY_ADDRESS_SEPOLIA=0x...
+REPO_MARKET_FACTORY_START_BLOCK_SEPOLIA=130
+DVP_SETTLEMENT_ADDRESS_SEPOLIA=0x...
+DVP_SETTLEMENT_START_BLOCK_SEPOLIA=140
+CONFIDENTIAL_FACTORY_ADDRESS_SEPOLIA=0x...
+CONFIDENTIAL_FACTORY_START_BLOCK_SEPOLIA=150
+```
+
+BondDesk, Stablecoin AMM, and RepoVault deployments are not reliably factory-discoverable. List
+every instance explicitly as `address@deploymentBlock`, separated by commas:
+
+```dotenv
+BOND_DESK_INSTANCES_SEPOLIA=0xDesk1@123,0xDesk2@456
+STABLECOIN_AMM_INSTANCES_SEPOLIA=0xAmm1@123,0xAmm2@456
+REPO_VAULT_INSTANCES_SEPOLIA=0xVault1@123,0xVault2@456
+```
+
+If the operator configures zero instances for a role, set its list to exactly `NONE`. This is an
+operator assertion about configuration, not evidence that no deployment exists on-chain. An unset
+or empty list fails closed. The renderer also rejects zero addresses, malformed blocks, and an
+address reused by any other static source.
+
+## Deploy
+
+```bash
+SUBGRAPH_VERSION_LABEL=sepolia-20260729-01 ./indexer/evm/deploy-subgraph.sh sepolia
+```
+
+Use `SUBGRAPH_VALIDATE_ONLY=true` to render, generate and compile without submitting a graph-node
+deployment. `all` processes every target in the table and therefore requires configuration for
+every suffix. A real deployment also requires `SUBGRAPH_VERSION_LABEL`; choose a new label for
+every deployment to that graph name. The wrapper rejects an absent label; the operator must ensure
+that the supplied label is new. Keep the previous version available until the replacement has
+caught up and passed independent event-range reconciliation.
+
+The AssetTokenFactory creates dynamic token data sources from `TokenDeployed` and `VaultDeployed`.
+The RepoMarketFactory similarly creates RepoMarket sources from `MarketCreated`. New instances of
+the three explicitly listed contract types require a list update and subgraph redeployment.
+Factory-emitted addresses, asset IDs, token references, oracle parameters, and observation blocks
+are stored as event claims. They do not verify deployed bytecode, deployment provenance, or
+linkage to an application database record.
+
+## Projection migration and replay
+
+The ERC-3525 owner/slot notional and ERC-7540 request lifecycle entities require event order from
+contract deployment. Existing `HolderBalance` rows for ERC-3525 counted token IDs and cannot be
+converted into notional. Do not copy them into `Erc3525OwnerSlotBalance`.
+
+For this schema revision, deploy a fresh subgraph version and replay each source from its true
+deployment block. An `INCOMPLETE` projection cannot reconstruct missing owners, slots, values,
+request types, or prior RepoVault market configuration. Every RepoVault projection remains
+`INCOMPLETE` unless deployment provenance and full replay are proven outside this subgraph; merely
+observing the first event at a configured static address does not provide that proof. Keep the old
+deployment available for rollback until the new projection has reached the chain head and has been
+reconciled independently.
+
+RepoVault `Allocated` and `Deallocated` amounts are projected only as signed net cash flow.
+Deallocation can exceed earlier allocation because of interest or loss realization, so this value
+is not outstanding principal, scaled market position, or NAV, and a negative total is not by itself
+an inconsistency.
+
+## Monitor and query
 
 ```bash
 curl -s http://localhost:8030/graphql \
@@ -69,139 +119,8 @@ curl -s http://localhost:8030/graphql \
   | jq '.data.indexingStatuses[]'
 ```
 
-A healthy subgraph shows `"synced": true` and `"health": "healthy"`.
+`synced: true` describes graph-node progress only; it is not a finality or legal-effect signal.
+Query a deployment at `http://localhost:8000/subgraphs/name/<subgraph-name>`.
 
-## Adding a new chain to the subgraph
-
-Add a new data source in `subgraph.template.yaml`:
-
-```yaml
-dataSources:
-  - kind: ethereum
-    name: AssetTokenFactory_arbitrum
-    network: arbitrum-one
-    source:
-      address: "${FACTORY_ADDRESS_ARBITRUM}"
-      abi: AssetTokenFactory
-      startBlock: ${START_BLOCK_ARBITRUM}
-    mapping:
-      kind: ethereum/events
-      apiVersion: 0.0.7
-      language: wasm/assemblyscript
-      entities: [Asset, Transfer]
-      abis:
-        - name: AssetTokenFactory
-          file: ./abis/AssetTokenFactory.json
-      eventHandlers:
-        - event: AssetDeployed(indexed address,indexed address,uint8)
-          handler: handleAssetDeployed
-      file: ./src/handlers/factory.ts
-```
-
-Then deploy:
-
-```bash
-FACTORY_ADDRESS_ARBITRUM=0xYourFactory \
-  START_BLOCK_ARBITRUM=200000000 \
-  ../deploy-subgraph.sh arbitrum-one
-```
-
-## Re-indexing after contract upgrade
-
-```bash
-FACTORY_ADDRESS_SEPOLIA=0xNewFactory \
-  START_BLOCK=12345678 \
-  ../deploy-subgraph.sh sepolia
-```
-
-Setting `START_BLOCK` re-indexes from that block onward.
-
-## Troubleshooting
-
-### Subgraph shows "failed" health
-
-```bash
-curl -s http://localhost:8030/graphql \
-  -d '{"query":"{indexingStatuses{subgraph health fatalError{message}}}"}' \
-  | jq '.data.indexingStatuses[] | select(.health != "healthy")'
-```
-
-Common causes:
-- RPC rate limiting — reduce `GRAPH_ETHEREUM_TARGET_TRIGGERS_PER_BLOCK_RANGE`
-- ABI mismatch — ensure ABI files match deployed contracts
-- OOM — increase graph-node memory limit in docker-compose
-
-### Subgraph far behind chain head
-
-Check graph-node logs:
-
-```bash
-docker compose logs -f graph-node | grep "indexing blocks"
-```
-
-If processing is slow, the RPC provider may be throttling. Switch to a paid tier or add a fallback provider in `graph-node.toml`.
-
-# The Graph — EVM Indexer
-
-The Graph's `graph-node` indexes all EVM chains. Each token's full transfer history is available via GraphQL.
-
-## Starting graph-node
-
-```bash
-docker compose -f indexer/evm/docker-compose.yml up -d
-```
-
-This starts:
-- `graph-node` — the indexer (port 8000 GraphQL, 8020 admin)
-- `ipfs` — required for subgraph deployment
-- `postgres` — graph-node's own database (separate from app DB)
-
-## Deploying a subgraph
-
-Deploy to a single chain:
-```bash
-FACTORY_ADDRESS_SEPOLIA=0xYourFactory \
-  ./indexer/evm/deploy-subgraph.sh sepolia
-```
-
-Deploy to all configured chains:
-```bash
-FACTORY_ADDRESS_SEPOLIA=0x... \
-FACTORY_ADDRESS_POLYGON_AMOY=0x... \
-  ./indexer/evm/deploy-subgraph.sh all
-```
-
-## Auto-registration of new tokens
-
-When `AssetTokenFactory` deploys a new token, it emits `TokenDeployed(address token, string standard, bytes32 assetId)`. The subgraph's `handleTokenDeployed` function automatically creates a new dynamic data source for the token — no subgraph redeployment needed.
-
-```typescript
-// factory.ts
-export function handleTokenDeployed(event: TokenDeployed): void {
-  if (event.params.standard == 'ERC20') {
-    EwpgERC20.create(event.params.token);
-  } else if (event.params.standard == 'ERC721') {
-    EwpgERC721.create(event.params.token);
-  }
-  // …
-}
-```
-
-## Syncing to backend
-
-`GraphNodeSyncService` in the backend polls every 30 seconds:
-1. Queries GraphQL from the cursor stored in `indexer_state.last_synced_block`
-2. Upserts new transfers into `token_transfer` (UNIQUE constraint deduplicates)
-3. Updates `indexer_state.last_synced_block` and `last_synced_at`
-
-## Querying directly
-
-```bash
-curl -X POST http://localhost:8000/subgraphs/name/ewpg/ethereum-sepolia \
-  -H "Content-Type: application/json" \
-  -d '{"query": "{ transfers(orderBy: blockNumber, first: 10) { id from to amount eventType transactionHash blockTimestamp } }"}'
-```
-
-## Adding a new EVM chain
-
-See [Chain Configuration](../configuration/chains) for step-by-step instructions.
+Common failures are RPC throttling, insufficient memory, stale Forge artifacts, ABI drift, or a
+missing static-source configuration. Run `npm test` before diagnosing a deployment failure.

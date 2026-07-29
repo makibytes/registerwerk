@@ -1,4 +1,4 @@
-// EwpgERC3525 — eWpG-compliant semi-fungible token (slot + value) on Starknet.
+// EwpgERC3525 — semi-fungible token (slot + value) with eWpG-oriented controls on Starknet.
 //
 // Self-contained implementation of the EIP-3525 surface declared in
 // interface.cairo, extended with the Registerwerk regulatory controls:

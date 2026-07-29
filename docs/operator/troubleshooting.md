@@ -91,13 +91,9 @@ This page covers the most common issues encountered when operating the eWpG Regi
      | jq '.[].latestIndexedBlock'
    ```
 
-2. If the indexer has caught up and the event is still missing, run the consistency checker:
-
-   ```bash
-   curl -X POST http://localhost:8080/api/v1/admin/verify-consistency \
-     -H "Authorization: Bearer $OPERATOR_JWT" \
-     -d '{"chainId": 1, "fromBlock": X, "toBlock": Y}'
-   ```
+2. If the indexer has caught up and the event is still missing, perform an independently
+   controlled comparison of subgraph events against `eth_getLogs` for the affected range. The
+   planned `verify-consistency` admin endpoint is not implemented.
 
 3. If a gap is confirmed, re-deploy the subgraph from a block before the missing event
 

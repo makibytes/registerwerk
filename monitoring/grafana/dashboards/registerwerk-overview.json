@@ -9,7 +9,7 @@
     {
       "id": 1, "type": "stat", "title": "Audit Chain Status",
       "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
-      "targets": [{"expr": "spring_boot_actuator_health_status{component=\"auditChainVerificationService\"}", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_audit_chain_valid", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"1": {"text": "UP", "color": "green"}, "0": {"text": "BROKEN", "color": "red"}}}]}}
     },
     {
@@ -27,7 +27,7 @@
     {
       "id": 4, "type": "stat", "title": "Open Sanctions Hits",
       "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
-      "targets": [{"expr": "registerwerk_sanctions_hit_open_seconds > 0", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_sanctions_oldest_open_hit_seconds > 0", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}, {"value": 14400, "color": "red"}]}}}
     },
     {
@@ -48,7 +48,7 @@
     {
       "id": 7, "type": "timeseries", "title": "Indexer Lag",
       "gridPos": {"h": 6, "w": 12, "x": 0, "y": 12},
-      "targets": [{"expr": "time() - registerwerk_indexer_last_sync_seconds", "legendFormat": "{{chain}}", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "time() - registerwerk_indexer_last_sync_timestamp_seconds", "legendFormat": "{{indexer_type}}", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"steps": [{"value": 1800, "color": "orange"}, {"value": 7200, "color": "red"}]}}}
     },
     {
@@ -59,6 +59,75 @@
         {"expr": "jvm_memory_max_bytes{job=\"registerwerk-backend\",area=\"heap\"}", "legendFormat": "Heap Max", "datasource": "${DS_PROMETHEUS}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+
+    {
+      "id": 9, "type": "stat", "title": "Confidential Reconciliation Mismatches",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 18},
+      "targets": [{"expr": "registerwerk_confidential_reconciliation_mismatch_total", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
+    },
+    {
+      "id": 10, "type": "stat", "title": "Org Chain Drift", "description": "OrgRegistry (org registrations + member wallets)",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 18},
+      "targets": [{"expr": "registerwerk_org_chain_drift_open_total", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
+    },
+    {
+      "id": 11, "type": "stat", "title": "Permission Chain Drift", "description": "PermissionRegistry grants, incl. role-restriction flips",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 18},
+      "targets": [{"expr": "registerwerk_permission_chain_drift_open_total", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
+    },
+    {
+      "id": 12, "type": "stat", "title": "DORA Deadline Breaches", "description": "Summed across classification/initial/final report + resilience-test breach types",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 18},
+      "targets": [{"expr": "sum(registerwerk_dora_deadline_breaches)", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
+    },
+
+    {
+      "id": 13, "type": "stat", "title": "Screening Errors (24h)", "description": "Provider-call failures, distinct from unresolved hits",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 22},
+      "targets": [{"expr": "registerwerk_screening_errors_recent_total", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}, {"value": 6, "color": "red"}]}}}
+    },
+    {
+      "id": 14, "type": "stat", "title": "Screening Refresh Failures", "description": "Last daily periodic re-screen run",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 22},
+      "targets": [{"expr": "registerwerk_screening_periodic_refresh_last_failures", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}]}}}
+    },
+    {
+      "id": 15, "type": "stat", "title": "Stale RegReport Submissions",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 22},
+      "targets": [{"expr": "registerwerk_regreport_stale_submissions_total", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
+    },
+    {
+      "id": 16, "type": "stat", "title": "Travel Rule Send Failures (24h)",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 22},
+      "targets": [{"expr": "registerwerk_travelrule_failed_messages_recent_total", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
+    },
+
+    {
+      "id": 17, "type": "stat", "title": "Confidential Reconciliation Age",
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 26},
+      "targets": [{"expr": "time() - registerwerk_confidential_reconciliation_last_run_timestamp_seconds", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 3600, "color": "orange"}]}}}
+    },
+    {
+      "id": 18, "type": "stat", "title": "Email Delivery Failures (1h)",
+      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 26},
+      "targets": [{"expr": "sum(increase(registerwerk_notification_email_send_failures_total[1h]))", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}, {"value": 6, "color": "red"}]}}}
+    },
+    {
+      "id": 19, "type": "stat", "title": "Unhealthy RPC Nodes",
+      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 26},
+      "targets": [{"expr": "registerwerk_rpc_nodes_unhealthy_total", "datasource": "${DS_PROMETHEUS}"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}]}}}
     }
   ]
 }

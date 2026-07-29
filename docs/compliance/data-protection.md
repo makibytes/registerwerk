@@ -1,9 +1,16 @@
 ---
 title: Data Protection (DSGVO / GDPR)
-description: GDPR/DSGVO compliance — PII handling, encryption, ROPA, and data subject rights.
+description: Personal-data inventory and partial DSAR workflows, with current encryption and coverage gaps.
 ---
 
 # Data Protection (DSGVO / GDPR)
+
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended privacy-control mappings and current repository behavior. It is
+    not a GDPR/DSGVO compliance assessment, approved ROPA, DPIA, retention decision, or legal
+    basis determination. The controller/processor roles, purposes, lawful bases, data inventory,
+    retention, rights handling, and security measures require deployment-specific review by the
+    controller, DPO, security owners, and qualified counsel.
 
 **Regulation (EU) 2016/679** (GDPR, or DSGVO in German) applies to all personal data processed by Registerwerk operators. As a securities registry that processes names, dates of birth, tax IDs, passport numbers, and financial data of natural persons, Registerwerk is a data controller (and sometimes processor) subject to GDPR's full obligations.
 
@@ -25,22 +32,15 @@ The primary location of personal data is the `NaturalPerson` entity. This includ
 
 ---
 
-## Encryption at rest
+## Encryption at rest — not implemented for `NaturalPerson` fields
 
-All PII fields in `NaturalPerson` are **encrypted at the column level** before storage. The encryption uses envelope encryption:
-
-1. Each `NaturalPerson` record has a unique **Data Encryption Key (DEK)** (AES-256-GCM)
-2. The DEK is wrapped with the operator's **Key Encryption Key (KEK)** (from the `wallet` module's KMS/HSM integration)
-3. The encrypted DEK is stored alongside the record
-4. Decryption only occurs in memory when the field is accessed; the plaintext never hits disk
-
-S3 document files use **server-side encryption (SSE-S3 or SSE-KMS)** at the object store level.
+`NaturalPerson` PII is currently mapped to ordinary database columns. The repository does not implement application-level column encryption, per-record DEKs, KEK wrapping, or cryptographic erasure for these fields. Database-volume and object-store encryption may be configured externally, but must be verified in each deployment and does not replace application-level controls where those are required.
 
 ---
 
 ## Art. 30 — Records of Processing Activities (ROPA)
 
-Registerwerk maintains a complete ROPA covering all processing activities. Key activities documented:
+The repository contains a draft ROPA document and an initial processing-activity inventory. Completeness, legal bases, retention periods, ownership, and approval are not established by the repository:
 
 | Activity | Legal basis | Retention |
 |---|---|---|
@@ -52,20 +52,20 @@ Registerwerk maintains a complete ROPA covering all processing activities. Key a
 | Customer support communication | Legitimate interest | 3 years after last contact |
 | Audit log | Legal obligation | Per jurisdiction |
 
-The ROPA is maintained as a compliance document at `docs/compliance/ropa.md` and reviewed annually by the DPO.
+The draft is stored at `docs/compliance/ropa.md`. A deployment must assign an owner, complete and approve it, record review evidence, and set a review cadence.
 
 ---
 
 ## Art. 35 — Data Protection Impact Assessment (DPIA)
 
-Given the sensitivity of the data and the novel technology involved, a **DPIA** is required under Art. 35. Per-jurisdiction DPIAs are maintained at:
+The repository contains per-jurisdiction DPIA drafts. Whether a DPIA is required, and whether a draft is complete and approved, must be determined for the deployment:
 
 - `docs/compliance/dpia-DE.md` — German eWpG deployment
 - `docs/compliance/dpia-LU.md` — Luxembourg CSSF deployment
 - `docs/compliance/dpia-FR.md` — French AMF deployment
 - `docs/compliance/dpia-LI.md` — Liechtenstein TVTG deployment
 
-Each DPIA addresses: processing purposes, necessity and proportionality, risks to data subjects, and mitigating measures.
+These files are review inputs, not evidence of an approved DPIA.
 
 ---
 
@@ -75,12 +75,13 @@ GDPR Art. 17 gives data subjects the right to request deletion of their personal
 
 - Securities register entries **cannot be deleted** during the retention period (eWpG §15, TVTG Art. 10) — the legal obligation exemption applies
 - KYC documents must be retained for the duration of the business relationship plus the retention period
-- After the retention period, records are **tombstoned**: PII is permanently deleted, but the audit hash chain preserves the existence of the event (the hash of the deleted data, not the data itself)
+- The current erasure service tombstones selected `AppUser` contact/authentication fields after operator review; it does not erase all personal data associated with an entity
 
-The tombstoning process:
-1. `NaturalPerson` PII fields are overwritten with `[REDACTED]` and the DEK is destroyed
-2. A `NaturalPersonRedactionEvent` is written to the audit log
-3. The audit hash chain continues — the hash of the redacted record proves the redaction happened at a specific time without revealing what was redacted
+Current behavior:
+1. An erasure request creates an operator work item.
+2. Completion replaces selected `AppUser` name/email values, clears the password hash, and disables the user.
+3. `NaturalPerson`, KYC-document, holding, transaction, and other linked-data coverage is incomplete; no DEK is destroyed because per-record DEK encryption is not implemented.
+4. Request/resolution events are emitted, but this alone does not prove complete erasure or legal handling of the request.
 
 ---
 
@@ -88,12 +89,11 @@ The tombstoning process:
 
 | Right | Endpoint |
 |---|---|
-| Art. 15 — Access | `GET /api/v1/me/dsar/export` — full JSON export of all personal data |
-| Art. 16 — Rectification | `PATCH /api/v1/me/profile` — correct name, address, etc. |
-| Art. 17 — Erasure | `POST /api/v1/me/dsar/erasure` — triggers tombstoning if legally permitted |
-| Art. 20 — Portability | `GET /api/v1/me/dsar/export?format=json` — machine-readable export |
+| Art. 15/20 — Access/portability | `GET /api/v1/me/dsar/export` — partial legal-entity/KYC-status export; not a complete personal-data export |
+| Art. 16 — Rectification | No complete DSAR rectification workflow is documented here |
+| Art. 17 — Erasure | `POST /api/v1/me/dsar/erasure` — records a request for operator review; completed requests currently tombstone selected `AppUser` fields only |
 
-All DSAR (Data Subject Access Request) actions are recorded in the audit log.
+The request and resolution flows emit audit events. End-to-end DSAR coverage and audit completeness remain to be verified.
 
 ---
 
@@ -104,12 +104,12 @@ Technical measures implemented:
 | Measure | Implementation |
 |---|---|
 | Encryption in transit | TLS 1.3 on all endpoints (Kong + backend) |
-| Encryption at rest | Column-level DEK/KEK for PII; SSE for S3 |
+| Encryption at rest | `NaturalPerson` field encryption is not implemented; deployment-level database/object-store encryption must be separately configured and verified |
 | Access control | Role-based (`@PreAuthorize`) + step-up for sensitive reads |
 | Audit logging | Tamper-evident hash chain for all operations |
 | MFA | WebAuthn / TOTP for all operator accounts |
 | Pseudonymisation | `NaturalPerson.id` (UUID) used in cross-module references instead of name |
-| Incident response | [DORA](dora.md) incident management + GDPR Art. 33/34 breach notification |
+| Incident response | Manual incident records and deadline monitoring exist; authority/data-subject notification automation is not implemented |
 
 ---
 
@@ -120,4 +120,4 @@ If a personal data breach occurs:
 - Art. 33: Notify the **supervisory authority** within 72 hours of becoming aware
 - Art. 34: Notify **affected data subjects** without undue delay if the breach is high-risk
 
-The `DoraService` `MAJOR` incident classification automatically triggers a parallel GDPR breach notification workflow when the `IctIncident.category = DATA_BREACH`.
+No automatic GDPR authority or data-subject breach-notification workflow is implemented. Operators must establish, test, and evidence a deployment-specific process.

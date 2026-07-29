@@ -5,7 +5,9 @@ description: EVM-compatible blockchain support — Ethereum, Polygon, Base, Arbi
 
 # Ethereum & EVM Chains
 
-Registerwerk supports all major EVM-compatible chains using a single codebase. The [ERC token standards](../token-standards/index.md) deploy identically across all EVM chains; only the RPC endpoint and chain ID change.
+Registerwerk contains configuration targets for the EVM networks listed below. Production support
+is not established by sharing bytecode: RPC behavior, finality, deployed code/admin identity,
+indexing, operations, fees, and legal applicability require per-network verification.
 
 ---
 

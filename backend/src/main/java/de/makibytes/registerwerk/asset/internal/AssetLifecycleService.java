@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.events.AssetApprovedEvent;
 import de.makibytes.registerwerk.asset.events.AssetRejectedEvent;
 import de.makibytes.registerwerk.asset.events.AssetIssuedEvent;
 import de.makibytes.registerwerk.asset.events.AssetSuspendedEvent;
+import de.makibytes.registerwerk.asset.events.AssetReactivatedEvent;
 import de.makibytes.registerwerk.asset.events.AssetRedeemedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -13,6 +14,9 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
+import de.makibytes.registerwerk.deployment.api.BondStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -24,9 +28,9 @@ import java.util.UUID;
  * Manages asset state transitions through the approval and issuance workflow.
  *
  * <pre>
- *   DRAFT → PENDING_APPROVAL → APPROVED → ISSUED → SUSPENDED
- *                           ↘ DRAFT (rejected)     ↓
- *                                              REDEEMED
+ *   DRAFT → PENDING_APPROVAL → APPROVED → ISSUED ⇄ SUSPENDED
+ *                           ↘ DRAFT (rejected)  ↓      ↓
+ *                                             REDEEMED ┘
  * </pre>
  */
 @Service
@@ -37,15 +41,15 @@ public class AssetLifecycleService {
 
     private final AssetRepository assetRepository;
     private final ApplicationEventPublisher eventPublisher;
-    private final AssetDeploymentService assetDeploymentService;
+    private final AssetBondTermsRepository bondTermsRepository;
 
     public AssetLifecycleService(
             AssetRepository assetRepository,
             ApplicationEventPublisher eventPublisher,
-            AssetDeploymentService assetDeploymentService) {
+            AssetBondTermsRepository bondTermsRepository) {
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
-        this.assetDeploymentService = assetDeploymentService;
+        this.bondTermsRepository = bondTermsRepository;
     }
 
     /** Submits a DRAFT asset for approval → PENDING_APPROVAL. */
@@ -77,7 +81,12 @@ public class AssetLifecycleService {
 
     /**
      * Issues an APPROVED asset → ISSUED.
-     * If onchainLevel != NONE, a deployment is triggered via {@link AssetDeploymentService}.
+     *
+     * <p>This method only owns the DB status transition. On-chain deployment is a separate,
+     * explicit operator action — {@code AssetDeploymentService.deploy(...)}, invoked via
+     * {@code POST /api/v1/assets/{id}/deploy} ({@code AssetController.deployAsset}) or the
+     * equivalent {@code POST /api/v1/assets/{assetId}/deployments} ({@code
+     * DeploymentController.deployToChain}) — and is not triggered automatically here.
      */
     public void issue(UUID assetId, UUID actorId) {
         Asset asset = getAndRequireStatus(assetId, AssetStatus.APPROVED);
@@ -96,7 +105,25 @@ public class AssetLifecycleService {
         log.info("Asset suspended: id={}", assetId);
     }
 
-    /** Redeems an ISSUED or SUSPENDED asset → REDEEMED. */
+    /**
+     * Reactivates a SUSPENDED asset back to ISSUED — the correction path for a wrongful
+     * suspend, mirroring customer/org entities' own suspend ↔ reactivate. Without this, a
+     * mis-clicked suspend is permanent short of a manual DB fix.
+     */
+    public void reactivate(UUID assetId, UUID actorId) {
+        Asset asset = getAndRequireStatus(assetId, AssetStatus.SUSPENDED);
+        asset.setStatus(AssetStatus.ISSUED);
+        assetRepository.save(asset);
+        eventPublisher.publishEvent(new AssetReactivatedEvent(assetId, actorId, null));
+        log.info("Asset reactivated: id={}", assetId);
+    }
+
+    /**
+     * Redeems an ISSUED or SUSPENDED asset → REDEEMED. Publishes {@link AssetRedeemedEvent},
+     * which {@link AssetRedemptionListener} uses to dispatch the actual on-chain burn/retire for
+     * standards it can automate — this method itself only owns the DB status transition and,
+     * for bonds, reconciling {@link BondStatus}.
+     */
     public void redeem(UUID assetId, UUID actorId) {
         Asset asset = assetRepository.findById(assetId)
             .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
@@ -106,6 +133,18 @@ public class AssetLifecycleService {
         }
         asset.setStatus(AssetStatus.REDEEMED);
         assetRepository.save(asset);
+
+        // Asset.status and AssetBondTerms.bondStatus were two independent fields with no
+        // reconciliation between them — a bond could show Asset.REDEEMED while its own
+        // BondStatus stayed ACTIVE (or vice-versa via CantonBondOperations.redeem). Keep them
+        // in sync from whichever side redeems first.
+        bondTermsRepository.findById(assetId).ifPresent(terms -> {
+            if (terms.getBondStatus() != BondStatus.REDEEMED) {
+                terms.setBondStatus(BondStatus.REDEEMED);
+                bondTermsRepository.save(terms);
+            }
+        });
+
         eventPublisher.publishEvent(new AssetRedeemedEvent(assetId, actorId, null));
         log.info("Asset redeemed: id={}", assetId);
     }

@@ -70,20 +70,21 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
   `],
   template: `
     <app-page-header
-      title="Regulatory Reporting"
-      subtitle="MiFIR Art. 26 / RTS 22 — Daily trade reporting · DAC8 / CARF — Annual crypto-asset reporting">
+      title="Regulatory Reporting (Prototype)"
+      subtitle="Opt-in, non-production draft exports. Output is DRAFT_UNVALIDATED and transport state is not authority filing state.">
     </app-page-header>
 
     <div class="generate-grid">
       <!-- DAC8/CARF Card -->
       <mat-card class="gen-card">
         <mat-card-header>
-          <mat-card-title style="font-size:14px;font-weight:600">DAC8 / CARF Annual Export</mat-card-title>
+          <mat-card-title style="font-size:14px;font-weight:600">DAC8 / CARF-like Draft Export</mat-card-title>
         </mat-card-header>
         <mat-card-content>
           <div class="card-desc">
-            Generates the annual crypto-asset reporting XML for DAC8 (EU Council Directive 2023/2226)
-            and CARF (OECD). Submitted to the tax authority via the configured gateway.
+            Builds a DRAFT_UNVALIDATED annual export from the current holder projection. It is not
+            validated against an official DAC8/CARF/KStTG schema and must not be filed. Requires the
+            reporting prototype to be enabled.
           </div>
           <div class="card-actions">
             <mat-form-field appearance="outline" subscriptSizing="dynamic" style="width:100px">
@@ -103,12 +104,12 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       <!-- MiFIR Card -->
       <mat-card class="gen-card">
         <mat-card-header>
-          <mat-card-title style="font-size:14px;font-weight:600">MiFIR RTS 22 — Trade Report</mat-card-title>
+          <mat-card-title style="font-size:14px;font-weight:600">MiFIR-like Draft Export</mat-card-title>
         </mat-card-header>
         <mat-card-content>
           <div class="card-desc">
-            Generates the MiFIR Art. 26 daily trade-by-trade transaction report (RTS 22 format).
-            Normally scheduled T+1; this trigger re-generates on demand.
+            Builds a DRAFT_UNVALIDATED daily projection of trade rows. It is not an RTS 22 population
+            or schema and must not be filed. Requires the reporting prototype to be enabled.
           </div>
           <div class="card-actions">
             <mat-form-field appearance="outline" subscriptSizing="dynamic" style="width:150px">
@@ -182,16 +183,21 @@ export class RegulatoryReportingComponent implements OnInit {
       type: 'date',
     },
     {
-      key: 'submitted_at',
-      header: 'Submitted',
-      cell: (s: RegulatorySubmission) => s.submitted_at,
+      key: 'transported_at',
+      header: 'Transported',
+      cell: (s: RegulatorySubmission) => s.transported_at,
       type: 'date',
     },
     {
-      key: 'submission_ref',
-      header: 'Reference',
-      cell: (s: RegulatorySubmission) => s.submission_ref ?? '—',
+      key: 'transport_ref',
+      header: 'Transport Ref',
+      cell: (s: RegulatorySubmission) => s.transport_ref ?? '—',
       type: 'mono',
+    },
+    {
+      key: 'transport_error',
+      header: 'Transport Error',
+      cell: (s: RegulatorySubmission) => s.transport_error ?? '—',
     },
   ];
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.36;
 
 import "./EwpgERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -71,6 +71,8 @@ contract EwpgERC7540 is EwpgERC4626 {
     event RequestCancelled(uint256 indexed requestId, address indexed by);
     event MinSettlementDelayUpdated(uint256 oldDelay, uint256 newDelay);
 
+    error AsyncOnly();
+
     // ── Constructor ───────────────────────────────────────────────────────────
 
     constructor(
@@ -80,6 +82,43 @@ contract EwpgERC7540 is EwpgERC4626 {
         address registryWallet,
         bytes32 _assetId
     ) EwpgERC4626(underlying, name, symbol, registryWallet, _assetId) {}
+
+    // ── Async-only ERC-4626 surface ───────────────────────────────────────────
+
+    /// @dev Assets and shares may move only through the request lifecycle below.
+    ///      Leaving the inherited synchronous entry points enabled would bypass
+    ///      operator review and the configured settlement delay entirely.
+    function deposit(uint256, address) public pure override returns (uint256) {
+        revert AsyncOnly();
+    }
+
+    function mint(uint256, address) public pure override returns (uint256) {
+        revert AsyncOnly();
+    }
+
+    function withdraw(uint256, address, address) public pure override returns (uint256) {
+        revert AsyncOnly();
+    }
+
+    function redeem(uint256, address, address) public pure override returns (uint256) {
+        revert AsyncOnly();
+    }
+
+    function maxDeposit(address) public pure override returns (uint256) {
+        return 0;
+    }
+
+    function maxMint(address) public pure override returns (uint256) {
+        return 0;
+    }
+
+    function maxWithdraw(address) public pure override returns (uint256) {
+        return 0;
+    }
+
+    function maxRedeem(address) public pure override returns (uint256) {
+        return 0;
+    }
 
     // ── Settlement delay ──────────────────────────────────────────────────────
 

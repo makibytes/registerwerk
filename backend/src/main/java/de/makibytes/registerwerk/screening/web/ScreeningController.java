@@ -5,9 +5,10 @@ import de.makibytes.registerwerk.screening.internal.ScreeningHitRepository;
 import de.makibytes.registerwerk.screening.internal.ScreeningRun;
 import de.makibytes.registerwerk.screening.internal.ScreeningRunRepository;
 import de.makibytes.registerwerk.screening.internal.ScreeningService;
-import de.makibytes.registerwerk.screening.internal.ScreeningTrigger;
+import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.ResponseEntity;
@@ -118,9 +119,16 @@ public class ScreeningController {
     public ResponseEntity<ScreeningHitResponse> acceptHit(
             @PathVariable UUID hitId,
             @RequestBody @Valid AcceptHitRequest req,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
             @AuthenticationPrincipal Jwt jwt) {
         UUID actorId = UUID.fromString(jwt.getSubject());
-        ScreeningHit hit = screeningService.acceptHit(hitId, actorId, req.approverActorId(), req.reason());
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        String actorRole = (roles != null && !roles.isEmpty()) ? roles.get(0) : "COMPLIANCE_OFFICER";
+        // approverId comes from the request attribute StepUpEnforcementAspect populates after
+        // cryptographically validating the X-Dual-Control-Token header — previously this took
+        // a client-supplied req.approverActorId() from the JSON body instead, letting a caller
+        // forge who "approved" a sanctions-hit dismissal (defeating the self-approval check).
+        ScreeningHit hit = screeningService.acceptHit(hitId, actorId, actorRole, approverId, req.reason());
         return ResponseEntity.ok(ScreeningHitResponse.from(hit));
     }
 
@@ -138,8 +146,7 @@ public class ScreeningController {
     ) {}
 
     public record AcceptHitRequest(
-            @NotBlank String reason,
-            UUID approverActorId
+            @NotBlank String reason
     ) {}
 
     /** Enriched open-hit DTO combining hit + run context for the global work-queue. */
@@ -149,6 +156,7 @@ public class ScreeningController {
             UUID entityId,
             UUID naturalPersonId,
             String listSource,
+            String category,
             String matchedField,
             String matchedValue,
             Double matchScore,
@@ -163,7 +171,7 @@ public class ScreeningController {
                     h.getId(), h.getRunId(),
                     r != null ? r.getEntityId() : null,
                     r != null ? r.getNaturalPersonId() : null,
-                    h.getListSource(), h.getMatchedField(), h.getMatchedValue(),
+                    h.getListSource(), h.getCategory().name(), h.getMatchedField(), h.getMatchedValue(),
                     h.getMatchScore() != null ? h.getMatchScore().doubleValue() : null,
                     r != null ? r.getTriggerType().name() : null,
                     r != null ? r.getStatus().name() : null,
@@ -196,6 +204,7 @@ public class ScreeningController {
             UUID id,
             UUID runId,
             String listSource,
+            String category,
             String matchedField,
             String matchedValue,
             Double matchScore,
@@ -205,7 +214,7 @@ public class ScreeningController {
     ) {
         static ScreeningHitResponse from(ScreeningHit h) {
             return new ScreeningHitResponse(
-                    h.getId(), h.getRunId(), h.getListSource(),
+                    h.getId(), h.getRunId(), h.getListSource(), h.getCategory().name(),
                     h.getMatchedField(), h.getMatchedValue(),
                     h.getMatchScore() != null ? h.getMatchScore().doubleValue() : null,
                     h.getAccepted(), h.getAcceptReason(),

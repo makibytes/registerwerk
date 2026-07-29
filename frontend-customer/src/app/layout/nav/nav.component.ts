@@ -5,17 +5,12 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { AuthService } from '../../core/auth/auth.service';
+import { WorkspaceKey, WorkspaceService } from '../../core/workspace/workspace.service';
 import { environment } from '../../../environments/environment';
 
 const { operatorUrl } = environment;
-
-interface NavLink {
-  label: string;
-  route: string;
-  icon: string;
-  roles: string[];
-}
 
 @Component({
   selector: 'app-nav',
@@ -28,6 +23,7 @@ interface NavLink {
     MatIconModule,
     MatMenuModule,
     MatDividerModule,
+    MatTooltipModule,
   ],
   template: `
     @if (isImpersonating || canImpersonate) {
@@ -65,8 +61,31 @@ interface NavLink {
 
       <div class="divider-v"></div>
 
+      @if (eligibleWorkspaces.length > 1) {
+        <button class="workspace-switch" mat-button [matMenuTriggerFor]="workspaceMenu">
+          <mat-icon>{{ activeWorkspace.icon }}</mat-icon>
+          <span>{{ activeWorkspace.label }}</span>
+          <mat-icon class="chevron">expand_more</mat-icon>
+        </button>
+        <mat-menu #workspaceMenu="matMenu">
+          @for (ws of eligibleWorkspaces; track ws.key) {
+            <button mat-menu-item (click)="switchWorkspace(ws.key)" [class.active-item]="ws.key === activeWorkspace.key">
+              <mat-icon>{{ ws.icon }}</mat-icon>
+              <span>{{ ws.label }}</span>
+            </button>
+          }
+        </mat-menu>
+        <div class="divider-v"></div>
+      } @else if (activeWorkspace) {
+        <span class="workspace-label">
+          <mat-icon>{{ activeWorkspace.icon }}</mat-icon>
+          {{ activeWorkspace.label }}
+        </span>
+        <div class="divider-v"></div>
+      }
+
       <nav class="nav-links" aria-label="Main navigation">
-        @for (link of visibleLinks; track link.route) {
+        @for (link of workspaceLinks; track link.route) {
           <a
             class="nav-link"
             [routerLink]="link.route"
@@ -79,6 +98,13 @@ interface NavLink {
       </nav>
 
       <div class="spacer"></div>
+
+      <a mat-icon-button routerLink="/kyc" routerLinkActive="active" matTooltip="KYC status" class="utility-icon">
+        <mat-icon>verified_user</mat-icon>
+      </a>
+      <a mat-icon-button routerLink="/endpoints" routerLinkActive="active" matTooltip="Endpoints" class="utility-icon">
+        <mat-icon>contacts</mat-icon>
+      </a>
 
       @if (isTestEnv) {
         <span class="env-badge">Test</span>
@@ -112,8 +138,8 @@ interface NavLink {
       align-items: center;
       gap: 10px;
       padding: 7px 20px;
-      background: #92400e;
-      color: #FEF3C7;
+      background: var(--rw-pending-fg);
+      color: var(--rw-surface);
       font-size: 13px;
       font-weight: 600;
       position: relative;
@@ -127,7 +153,7 @@ interface NavLink {
         background: rgba(255,255,255,0.15);
         border: 1px solid rgba(255,255,255,0.25);
         border-radius: 5px;
-        color: #FEF3C7;
+        color: var(--rw-surface);
         font-size: 11px;
         font-weight: 700;
         padding: 3px 10px;
@@ -148,7 +174,7 @@ interface NavLink {
         margin-left: 6px;
         background: rgba(13,148,136,0.18);
         border-color: rgba(13,148,136,0.35);
-        color: #2DD4BF;
+        color: var(--rw-nav-accent);
         text-decoration: none;
 
         &:hover { background: rgba(13,148,136,0.3); }
@@ -221,6 +247,56 @@ interface NavLink {
       background: var(--rw-nav-border);
       margin: 0 12px;
       flex-shrink: 0;
+    }
+
+    .workspace-switch {
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      padding: 4px 10px 4px 8px !important;
+      border-radius: 8px !important;
+      color: var(--rw-nav-fg) !important;
+      height: auto !important;
+      font-weight: 600 !important;
+      transition: background 0.15s ease !important;
+
+      mat-icon:not(.chevron) {
+        font-size: 17px;
+        width: 17px;
+        height: 17px;
+        color: var(--rw-nav-accent);
+      }
+
+      &:hover { background: var(--rw-nav-hover-bg) !important; }
+    }
+
+    .workspace-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--rw-nav-fg);
+
+      mat-icon {
+        font-size: 17px;
+        width: 17px;
+        height: 17px;
+        color: var(--rw-nav-accent);
+      }
+    }
+
+    .active-item {
+      background: var(--rw-nav-active-bg);
+    }
+
+    .utility-icon {
+      color: var(--rw-nav-fg) !important;
+
+      &.active {
+        color: var(--rw-nav-accent) !important;
+      }
     }
 
     .nav-links {
@@ -364,36 +440,37 @@ interface NavLink {
 export class NavComponent implements OnInit {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly workspaceService = inject(WorkspaceService);
   readonly isTestEnv = environment.testEnvironment;
   readonly operatorUrl = operatorUrl;
 
   userName: string | null = null;
   userEmail: string | null = null;
-  visibleLinks: NavLink[] = [];
   isImpersonating = false;
   canImpersonate = false;
   impersonationEntityName = '';
 
-  private readonly allLinks: NavLink[] = [
-    { label: 'Dashboard',      route: '/dashboard',     icon: 'grid_view',       roles: [] },
-    { label: 'Issuances',      route: '/issuances',     icon: 'description',     roles: ['ISSUER', 'REGISTRY_ADMIN'] },
-    { label: 'Investments',    route: '/investments',   icon: 'savings',         roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
-    { label: 'Trading',        route: '/trading',       icon: 'candlestick_chart', roles: ['TRADER', 'REGISTRY_ADMIN'] },
-    { label: 'Company Admin',  route: '/company-admin', icon: 'manage_accounts', roles: ['COMPANY_ADMIN'] },
-    { label: 'KYC',            route: '/kyc',           icon: 'verified_user',   roles: [] },
-    { label: 'Endpoints',      route: '/endpoints',     icon: 'contacts',        roles: [] },
-  ];
+  eligibleWorkspaces = this.workspaceService.eligibleWorkspaces();
+  activeWorkspace = this.workspaceService.activeWorkspace();
+
+  get workspaceLinks() {
+    return this.activeWorkspace?.links ?? [];
+  }
 
   ngOnInit(): void {
     this.userName = this.auth.getUserName();
     this.userEmail = this.auth.getUserEmail();
-    this.visibleLinks = this.allLinks.filter(link =>
-      link.roles.length === 0 || link.roles.some(r => this.auth.hasRole(r))
-    );
     this.isImpersonating = this.auth.isImpersonating();
     this.canImpersonate = this.auth.hasRole('REGISTRY_ADMIN');
     const meta = this.auth.getImpersonationMeta();
     this.impersonationEntityName = meta?.entityName ?? '';
+    this.eligibleWorkspaces = this.workspaceService.eligibleWorkspaces();
+    this.activeWorkspace = this.workspaceService.activeWorkspace();
+  }
+
+  switchWorkspace(key: WorkspaceKey): void {
+    this.workspaceService.setWorkspace(key);
+    this.activeWorkspace = this.workspaceService.activeWorkspace();
   }
 
   selectCompany(): void {

@@ -8,7 +8,8 @@ import java.util.UUID;
 /**
  * Represents a natural person (individual) for KYC / beneficial-owner purposes.
  * Required by GwG §11 and EU 2024/1624 AMLR.
- * PII fields should be pgcrypto-encrypted at rest in prod (envelope key from KMS).
+ * WARNING: the current mapped PII columns are ordinary plaintext database fields. Production
+ * use requires an approved encryption/key-lifecycle design and a tested data migration.
  */
 @Entity
 @Table(name = "natural_person")

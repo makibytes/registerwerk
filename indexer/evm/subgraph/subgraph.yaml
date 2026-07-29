@@ -1,13 +1,14 @@
 specVersion: 1.0.0
-description: Registerwerk — indexes all token deployments and transfers across EVM chains
+description: Registerwerk — provisional event-derived projections across configured EVM sources
 repository: https://github.com/makibytes/registerwerk
 
 schema:
   file: ./schema.graphql
 
 # ── Data Sources (static) ────────────────────────────────────────────────────
-# The AssetTokenFactory is the only static data source.
-# Every TokenDeployed event spawns a new dynamic data source via templates below.
+# Each independently deployed factory/payment component is a distinct static data source.
+# deploy-subgraph.sh renders every address and start block independently and fails closed when
+# any component is missing; TokenDeployed/VaultDeployed events then spawn token templates below.
 dataSources:
   - kind: ethereum
     name: AssetTokenFactory
@@ -31,6 +32,185 @@ dataSources:
       eventHandlers:
         - event: TokenDeployed(indexed bytes32,indexed uint8,indexed address)
           handler: handleTokenDeployed
+        - event: VaultDeployed(indexed bytes32,indexed uint8,indexed address,address)
+          handler: handleVaultDeployed
+
+  # EwpgRepoMarketFactory (finding #7, Phase 7) — a separate factory from AssetTokenFactory
+  # above (repo/lending markets are not securities-token deployments), same auto-registration
+  # pattern: MarketCreated spawns a new EwpgRepoMarket dynamic data source.
+  - kind: ethereum
+    name: EwpgRepoMarketFactory
+    network: mainnet
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: EwpgRepoMarketFactory
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/repoMarketFactory.ts
+      entities:
+        - RepoMarket
+      abis:
+        - name: EwpgRepoMarketFactory
+          file: ./abis/EwpgRepoMarketFactory.json
+      eventHandlers:
+        - event: MarketCreated(indexed address,indexed address,indexed address,uint256,address)
+          handler: handleMarketCreated
+
+  # ── Payment-leg contracts (finding #6, Phase 8) ────────────────────────────
+  # These contracts are not all discoverable via an on-chain factory. The renderer expands the
+  # EwpgBondDesk, StablecoinAmm and EwpgRepoVault prototypes for every explicitly configured
+  # address/start-block pair and fails closed when the operator neither lists instances nor says
+  # NONE. DvpSettlement remains one explicitly configured shared deployment.
+
+  - kind: ethereum
+    name: DvpSettlement
+    network: mainnet
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: DvpSettlement
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/dvpSettlement.ts
+      entities:
+        - DvpSettlementEvent
+      abis:
+        - name: DvpSettlement
+          file: ./abis/DvpSettlement.json
+      eventHandlers:
+        - event: LegLocked(indexed bytes32,indexed address,indexed address,uint8,address,uint256,address,uint256,uint64)
+          handler: handleLegLocked
+        - event: TradeSettled(indexed bytes32)
+          handler: handleTradeSettled
+        - event: TradeCancelled(indexed bytes32,indexed address)
+          handler: handleTradeCancelled
+        - event: Paused(indexed address)
+          handler: handlePaused
+        - event: Unpaused(indexed address)
+          handler: handleUnpaused
+
+  - kind: ethereum
+    name: EwpgBondDesk
+    network: mainnet
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: EwpgBondDesk
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/bondDesk.ts
+      entities:
+        - BondDeskEvent
+      abis:
+        - name: EwpgBondDesk
+          file: ./abis/EwpgBondDesk.json
+      eventHandlers:
+        - event: BondSubscribed(indexed address,uint256,uint256)
+          handler: handleBondSubscribed
+        - event: CouponPaid(indexed uint256,indexed address,uint256)
+          handler: handleCouponPaid
+        - event: BondRedeemed(indexed address,uint256,uint256)
+          handler: handleBondRedeemed
+        - event: DeskPaused(indexed address)
+          handler: handleDeskPaused
+        - event: DeskUnpaused(indexed address)
+          handler: handleDeskUnpaused
+
+  - kind: ethereum
+    name: StablecoinAmm
+    network: mainnet
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: StablecoinAmm
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/stablecoinAmm.ts
+      entities:
+        - StablecoinAmmEvent
+      abis:
+        - name: StablecoinAmm
+          file: ./abis/StablecoinAmm.json
+      eventHandlers:
+        - event: LiquidityAdded(indexed address,uint256,uint256,uint256)
+          handler: handleLiquidityAdded
+        - event: LiquidityRemoved(indexed address,uint256,uint256,uint256)
+          handler: handleLiquidityRemoved
+        - event: Swapped(indexed address,indexed address,uint256,uint256)
+          handler: handleSwapped
+
+  # EwpgRepoVault has no deployment factory event. This prototype is expanded into every
+  # explicitly configured instance by render-subgraph-manifest.mjs.
+  - kind: ethereum
+    name: EwpgRepoVault
+    network: mainnet
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: EwpgRepoVault
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/repoVault.ts
+      entities:
+        - RepoVault
+        - RepoVaultMarketAllocation
+        - RepoVaultEvent
+      abis:
+        - name: EwpgRepoVault
+          file: ./abis/EwpgRepoVault.json
+      eventHandlers:
+        - event: MarketAdded(indexed address,uint256)
+          handler: handleMarketAdded
+        - event: MarketCapUpdated(indexed address,uint256)
+          handler: handleMarketCapUpdated
+        - event: MarketRemoved(indexed address)
+          handler: handleMarketRemoved
+        - event: Allocated(indexed address,uint256)
+          handler: handleAllocated
+        - event: Deallocated(indexed address,uint256)
+          handler: handleDeallocated
+        - event: Deposit(indexed address,indexed address,uint256,uint256)
+          handler: handleDeposit
+        - event: Withdraw(indexed address,indexed address,indexed address,uint256,uint256)
+          handler: handleWithdraw
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransfer
+
+  # EwpgConfidentialFactory (finding #8, Phase 9) — a separate factory from AssetTokenFactory,
+  # same auto-registration pattern: ConfidentialTokenDeployed spawns a new ConfidentialERC20
+  # dynamic data source (shared by both CONFIDENTIAL_ERC20 and CONFIDENTIAL_ERC3643 — the latter
+  # inherits the former and emits identical Transfer/Mint/Burn events).
+  - kind: ethereum
+    name: EwpgConfidentialFactory
+    network: mainnet
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: EwpgConfidentialFactory
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/confidentialFactory.ts
+      entities:
+        - ConfidentialToken
+      abis:
+        - name: EwpgConfidentialFactory
+          file: ./abis/EwpgConfidentialFactory.json
+      eventHandlers:
+        - event: ConfidentialTokenDeployed(indexed bytes32,indexed uint8,indexed address)
+          handler: handleConfidentialTokenDeployed
 
 # ── Templates (dynamic) ──────────────────────────────────────────────────────
 # These are instantiated by handleTokenDeployed for each newly deployed contract.
@@ -125,6 +305,10 @@ templates:
         - Transfer
         - SlotTransfer
         - ValueTransfer
+        - Erc3525Position
+        - Erc3525OwnerSlotBalance
+        - WhitelistChange
+        - AddressFreezeChange
       abis:
         - name: EwpgERC3525
           file: ./abis/EwpgERC3525.json
@@ -137,8 +321,12 @@ templates:
           handler: handleSlotChanged
         - event: Whitelisted(indexed address)
           handler: handleWhitelisted
-        - event: AddressFrozen(indexed address,bool,indexed address)
+        - event: RemovedFromWhitelist(indexed address)
+          handler: handleRemovedFromWhitelist
+        - event: AddressFrozen(indexed address,string)
           handler: handleAddressFrozen
+        - event: AddressUnfrozen(indexed address)
+          handler: handleAddressUnfrozen
 
   # ── ERC-3643 T-REX (compliance-gated security token) ────────────────────────
   - kind: ethereum
@@ -153,7 +341,6 @@ templates:
       file: ./src/erc3643.ts
       entities:
         - Transfer
-        - IdentityRegistered
         - ComplianceChange
       abis:
         - name: EwpgERC3643
@@ -169,10 +356,6 @@ templates:
           handler: handlePaused
         - event: Unpaused(address)
           handler: handleUnpaused
-        - event: IdentityRegistered(indexed address,indexed address)
-          handler: handleIdentityRegistered
-        - event: IdentityRemoved(indexed address,indexed address)
-          handler: handleIdentityRemoved
         - event: ComplianceAdded(indexed address)
           handler: handleComplianceAdded
 
@@ -191,6 +374,7 @@ templates:
         - Transfer
         - VaultDeposit
         - VaultWithdraw
+        - AddressFreezeChange
       abis:
         - name: EwpgERC4626
           file: ./abis/EwpgERC4626.json
@@ -201,8 +385,10 @@ templates:
           handler: handleDeposit
         - event: Withdraw(indexed address,indexed address,indexed address,uint256,uint256)
           handler: handleWithdraw
-        - event: AddressFrozen(indexed address,bool,indexed address)
+        - event: AddressFrozen(indexed address,string)
           handler: handleAddressFrozen
+        - event: AddressUnfrozen(indexed address)
+          handler: handleAddressUnfrozen
 
   # ── ERC-7540 Async Vault (capital-call / redemption window) ─────────────────
   - kind: ethereum
@@ -217,19 +403,87 @@ templates:
       file: ./src/erc7540.ts
       entities:
         - Transfer
-        - DepositRequest
-        - RedeemRequest
+        - AsyncVaultRequest
+        - AsyncVaultRequestEvent
+        - AddressFreezeChange
       abis:
         - name: EwpgERC7540
           file: ./abis/EwpgERC7540.json
       eventHandlers:
         - event: Transfer(indexed address,indexed address,uint256)
           handler: handleTransfer
-        - event: DepositRequest(indexed address,indexed address,indexed uint256,address,uint256)
-          handler: handleDepositRequest
-        - event: RedeemRequest(indexed address,indexed address,indexed uint256,address,uint256)
-          handler: handleRedeemRequest
-        - event: DepositClaimable(indexed address,indexed uint256,uint256,uint256)
-          handler: handleDepositClaimable
-        - event: RedeemClaimable(indexed address,indexed uint256,uint256,uint256)
-          handler: handleRedeemClaimable
+        - event: DepositRequested(indexed uint256,indexed address,indexed address,uint256)
+          handler: handleDepositRequested
+        - event: RedeemRequested(indexed uint256,indexed address,indexed address,uint256)
+          handler: handleRedeemRequested
+        - event: DepositRequestFulfilled(indexed uint256,uint256,uint256,uint256)
+          handler: handleDepositRequestFulfilled
+        - event: RedeemRequestFulfilled(indexed uint256,uint256,uint256,uint256)
+          handler: handleRedeemRequestFulfilled
+        - event: RequestCancelled(indexed uint256,indexed address)
+          handler: handleRequestCancelled
+        - event: AddressFrozen(indexed address,string)
+          handler: handleAddressFrozen
+        - event: AddressUnfrozen(indexed address)
+          handler: handleAddressUnfrozen
+
+  # ── EwpgRepoMarket (isolated repo/lending market) ────────────────────────────
+  # finding #7, Phase 7 — instantiated by EwpgRepoMarketFactory.handleMarketCreated, not by
+  # AssetTokenFactory (this is not a securities-token deployment).
+  - kind: ethereum
+    name: EwpgRepoMarket
+    network: mainnet
+    source:
+      abi: EwpgRepoMarket
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/repoMarket.ts
+      entities:
+        - RepoMarketEvent
+      abis:
+        - name: EwpgRepoMarket
+          file: ./abis/EwpgRepoMarket.json
+      eventHandlers:
+        - event: Supplied(indexed address,uint256,uint256)
+          handler: handleSupplied
+        - event: Withdrawn(indexed address,uint256,uint256)
+          handler: handleWithdrawn
+        - event: Borrowed(indexed address,uint256,uint256)
+          handler: handleBorrowed
+        - event: Repaid(indexed address,uint256,uint256)
+          handler: handleRepaid
+        - event: Liquidated(indexed address,indexed address,uint256,uint256)
+          handler: handleLiquidated
+        - event: BadDebtRecognized(indexed address,uint256,uint256)
+          handler: handleBadDebtRecognized
+        - event: CollateralReconciled(indexed address,uint256,uint256)
+          handler: handleCollateralReconciled
+
+  # ── Confidential (Zama fhEVM) token (finding #8, Phase 9) ────────────────────
+  # Instantiated by EwpgConfidentialFactory.handleConfidentialTokenDeployed for each newly
+  # deployed CONFIDENTIAL_ERC20 or CONFIDENTIAL_ERC3643 instance — both share this one template
+  # since ConfidentialERC3643 inherits ConfidentialERC20's Transfer/Mint/Burn events unchanged.
+  - kind: ethereum
+    name: ConfidentialERC20
+    network: mainnet
+    source:
+      abi: ConfidentialERC20
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/confidentialToken.ts
+      entities:
+        - ConfidentialTokenEvent
+      abis:
+        - name: ConfidentialERC20
+          file: ./abis/ConfidentialERC20.json
+      eventHandlers:
+        - event: ConfidentialTransfer(indexed address,indexed address,uint256)
+          handler: handleConfidentialTransfer
+        - event: ConfidentialMint(indexed address,uint256)
+          handler: handleConfidentialMint
+        - event: ConfidentialBurn(indexed address,uint256)
+          handler: handleConfidentialBurn

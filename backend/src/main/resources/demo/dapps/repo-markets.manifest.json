@@ -1,0 +1,71 @@
+{
+  "slug": "repo-markets",
+  "name": "eWpG Isolated Repo Markets & Vault",
+  "version": "1.0.0",
+  "description": "Technical isolated repo-market and curator-vault reference. Each configured collateral has separate cash, rate curve and liquidation LTV, while a vault routes deposits using operator caps. Borrowing checks the configured ecosystem permission and token transfer controls. Those mechanisms do not establish legal, custody, licensing, collateral, insolvency, oracle, liquidation, or KYC sufficiency. Lending and liquidation are not approved for production use pending jurisdiction-specific legal and risk decisions.",
+  "category": "lending",
+  "contracts": [
+    {
+      "name": "EwpgRepoMarket",
+      "abiSha256": "fd5ba70bb76f22df3f51481bb2100aea6f674378799dc122a1713586ce7e7a27",
+      "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/lending/EwpgRepoMarket.sol"
+    },
+    {
+      "name": "EwpgRepoMarketFactory",
+      "abiSha256": "db6e849c11ebe05576aa40e99d6efdd6e8b1caef3c0d02d64315a4e860dfa723",
+      "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/lending/EwpgRepoMarketFactory.sol"
+    },
+    {
+      "name": "EwpgRepoVault",
+      "abiSha256": "22eb93076665e61a9c53591e1a0fb79f9cf54751939ee4050983ea00960afa9c",
+      "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/lending/EwpgRepoVault.sol"
+    }
+  ],
+  "requiredPermissions": [
+    {
+      "code": "repo-markets.create-market",
+      "rationale": "Operator-only: deploy a new isolated market for a security via the CREATE2 factory"
+    },
+    {
+      "code": "repo-markets.curate-vault",
+      "rationale": "Curator-only: add/remove markets the vault allocates into, set per-market caps, and move idle cash into/out of a market"
+    },
+    {
+      "code": "repo-markets.push-price",
+      "rationale": "Operator or delegated NAV administrator: push a fresh collateral price mark shared across every market referencing it"
+    }
+  ],
+  "requiredClaimTopics": [
+    1
+  ],
+  "paymentMethods": [
+    {
+      "rail": "aueur",
+      "note": "Lender supply/withdrawal and borrower draws/repayments denominated in AllUnity Euro"
+    },
+    {
+      "rail": "usdc",
+      "note": "Alternative USD-denominated liquidity for lenders and borrowers"
+    }
+  ],
+  "images": [
+    {
+      "name": "backend",
+      "role": "backend",
+      "ref": "ghcr.io/registerwerk/examples/repo-markets-backend@sha256:e8aa5dd8731d20b0ae577bd0d4b43160e2378739409e3e4293327abe8ef3cc63"
+    },
+    {
+      "name": "frontend",
+      "role": "frontend",
+      "ref": "ghcr.io/registerwerk/examples/repo-markets-frontend@sha256:a9fc90ee42fc5beeb3716d03249002caa0700427e23941c5e1b7c11cc1dc0e6f"
+    }
+  ],
+  "deployment": {
+    "composeUrl": "https://github.com/registerwerk/registerwerk/blob/main/examples/dapps/repo-markets/docker-compose.yml",
+    "composeSha256": "9df5de1b16b57d9484982b4ce0d2fba9ee13e35294f241446fb2ab893ec738d5"
+  },
+  "docsUrl": "https://docs.registerwerk.de/platform/defi-interoperability",
+  "contact": "dapps@registerwerk.de",
+  "license": "MIT",
+  "pricingNote": "Reference implementation — free, self-hosted"
+}

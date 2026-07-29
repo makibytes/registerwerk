@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.wallet.web;
 
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.wallet.api.WalletBalancePort;
 import de.makibytes.registerwerk.wallet.internal.WalletDefaultService;
 import de.makibytes.registerwerk.wallet.internal.WalletService;
@@ -14,12 +15,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -60,16 +63,19 @@ public class WalletController {
     }
 
     @PostMapping("/generate")
-    public ResponseEntity<WalletResponse> generate(@RequestBody @Valid WalletGenerateRequest req) {
-        OperatorWallet w = walletService.generate(req.name(), OperatorWallet.WalletType.valueOf(req.type()));
+    public ResponseEntity<WalletResponse> generate(@RequestBody @Valid WalletGenerateRequest req, Authentication auth) {
+        OperatorWallet w = walletService.generate(
+                req.name(), OperatorWallet.WalletType.valueOf(req.type()),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(w, defaultService.listAll()));
     }
 
     @PostMapping("/import-raw")
     @RequiresStepUp(reason = "WALLET_IMPORT_RAW")
-    public ResponseEntity<WalletResponse> importRaw(@RequestBody @Valid WalletImportRawRequest req) {
+    public ResponseEntity<WalletResponse> importRaw(@RequestBody @Valid WalletImportRawRequest req, Authentication auth) {
         OperatorWallet w = walletService.importRaw(
-                req.name(), OperatorWallet.WalletType.valueOf(req.type()), req.privateKey());
+                req.name(), OperatorWallet.WalletType.valueOf(req.type()), req.privateKey(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(w, defaultService.listAll()));
     }
 
@@ -78,9 +84,11 @@ public class WalletController {
     public ResponseEntity<WalletResponse> importKeystore(
             @RequestParam String name,
             @RequestParam String password,
-            @RequestParam("file") MultipartFile file) throws IOException {
+            @RequestParam("file") MultipartFile file,
+            Authentication auth) throws IOException {
         String keystoreJson = new String(file.getBytes(), StandardCharsets.UTF_8);
-        OperatorWallet w = walletService.importKeystore(name, keystoreJson, password);
+        OperatorWallet w = walletService.importKeystore(name, keystoreJson, password,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(w, defaultService.listAll()));
     }
 
@@ -94,8 +102,10 @@ public class WalletController {
     @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_KEYSTORE_EXPORT")
     public ResponseEntity<byte[]> exportKeystore(
             @PathVariable UUID id,
-            @RequestBody @Valid WalletExportRequest req) {
-        String json = walletService.exportKeystore(id, req.password());
+            @RequestBody @Valid WalletExportRequest req,
+            Authentication auth) {
+        String json = walletService.exportKeystore(id, req.password(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
         String filename = "wallet-" + id + ".json";
 
@@ -120,8 +130,10 @@ public class WalletController {
     @PatchMapping("/{id}")
     public ResponseEntity<WalletResponse> rename(
             @PathVariable UUID id,
-            @RequestBody @Valid WalletRenameRequest req) {
-        OperatorWallet w = walletService.rename(id, req.name());
+            @RequestBody @Valid WalletRenameRequest req,
+            Authentication auth) {
+        OperatorWallet w = walletService.rename(id, req.name(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(toResponse(w, defaultService.listAll()));
     }
 
@@ -133,9 +145,35 @@ public class WalletController {
      */
     @DeleteMapping("/{id}")
     @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_DELETE")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        walletService.delete(id);
+    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication auth) {
+        walletService.delete(id, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Re-wraps a single wallet's DEK under whatever KEK version is currently active — this is
+     * the caller for {@code KekProvider.rewrap()}, for deliberate rotation (e.g. after a
+     * suspected KEK compromise), not a key-material change.
+     */
+    @PostMapping("/{id}/rotate-kek")
+    @RequiresStepUp(reason = "WALLET_KEK_ROTATION")
+    public ResponseEntity<Map<String, Boolean>> rotateKek(@PathVariable UUID id, Authentication auth) {
+        boolean rotated = walletService.rotateKek(
+                id, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(Map.of("rotated", rotated));
+    }
+
+    /**
+     * Rotates every wallet's DEK in one pass — for an operator responding to a suspected
+     * KEK compromise across the whole fleet. Second-approver gated: this touches every
+     * wallet's storage in a single call, a materially larger blast radius than one wallet.
+     */
+    @PostMapping("/rotate-kek-all")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_KEK_ROTATION_ALL")
+    public ResponseEntity<Map<String, Object>> rotateAllKeks(Authentication auth) {
+        List<UUID> rotated = walletService.rotateAllKeks(
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(Map.of("rotatedWalletIds", rotated, "rotatedCount", rotated.size()));
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { IctIncident, ThirdPartyProvider } from '../models';
+import { IctIncident, ResilienceTest, ThirdPartyProvider } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class DoraService {
@@ -45,5 +45,28 @@ export class DoraService {
 
   listExpiringProviders(): Observable<ThirdPartyProvider[]> {
     return this.http.get<ThirdPartyProvider[]>(`${this.base}/providers/expiring`);
+  }
+
+  listResilienceTests(): Observable<ResilienceTest[]> {
+    return this.http.get<ResilienceTest[]>(`${this.base}/resilience-tests`);
+  }
+
+  listOverdueResilienceTests(): Observable<ResilienceTest[]> {
+    return this.http.get<ResilienceTest[]>(`${this.base}/resilience-tests/overdue`);
+  }
+
+  recordResilienceTest(body: {
+    testType: string;
+    scope: string;
+    tlptRequired?: boolean;
+    thirdPartyProviderId?: string;
+    performedAt: string;
+    nextDueDate?: string;
+    result: string;
+    findings?: string;
+    testerName?: string;
+    reportRef?: string;
+  }): Observable<ResilienceTest> {
+    return this.http.post<ResilienceTest>(`${this.base}/resilience-tests`, body);
   }
 }

@@ -227,8 +227,14 @@ export class ScreeningRunDetailComponent implements OnInit {
 
   readonly hitColumns: TableColumn[] = [
     {
+      key: 'category',
+      header: 'Category',
+      cell: (h: ScreeningHit) => h.category === 'PEP' ? 'PEP' : h.category === 'ADVERSE_MEDIA' ? 'Adverse Media' : 'Sanctions',
+      type: 'badge',
+    },
+    {
       key: 'listSource',
-      header: 'Sanctions List',
+      header: 'List Source',
       cell: (h: ScreeningHit) => h.listSource,
     },
     {
@@ -290,6 +296,7 @@ export class ScreeningRunDetailComponent implements OnInit {
       data: {
         requireDualControl: true,
         reason: `Accept false-positive screening hit (${hit.listSource} / ${hit.matchedValue})`,
+        action: 'SCREENING_HIT_ACCEPT',
       },
       width: '500px',
       disableClose: true,

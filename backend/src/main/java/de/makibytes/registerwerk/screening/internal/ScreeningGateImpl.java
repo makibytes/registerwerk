@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.screening.internal;
 
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -19,11 +20,19 @@ class ScreeningGateImpl implements ScreeningGate {
 
     private final ScreeningRunRepository runRepository;
     private final ScreeningHitRepository hitRepository;
+    private final ScreeningService screeningService;
 
     ScreeningGateImpl(ScreeningRunRepository runRepository,
-                      ScreeningHitRepository hitRepository) {
+                      ScreeningHitRepository hitRepository,
+                      ScreeningService screeningService) {
         this.runRepository = runRepository;
         this.hitRepository = hitRepository;
+        this.screeningService = screeningService;
+    }
+
+    @Override
+    public void screenNaturalPerson(UUID naturalPersonId, String fullName, String countryCode, ScreeningTrigger trigger) {
+        screeningService.screenNaturalPerson(naturalPersonId, fullName, countryCode, trigger);
     }
 
     @Override

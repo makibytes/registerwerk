@@ -1,23 +1,23 @@
--- | Fixed-rate eWpG bond instrument backed by Daml Finance FixedRate bond.
+-- | Fixed-rate eWpG bond instrument.
 --
--- This module wraps Daml.Finance.Instrument.Bond.FixedRate.T with registry-specific
--- controls required under eWpG (assetId link, registryAdmin party, regulator observer).
---
--- Prerequisites:
---   - The participant must have the daml-finance-instrument-bond DAR loaded.
---   - The DAML Finance FixedRate instrument template must be pre-deployed.
+-- This template tracks the on-ledger lifecycle status of a fixed-rate bond
+-- (assetId link, registryAdmin party, regulator observer, coupon terms). It does
+-- **not** move cash: the actual coupon/redemption/call payment leg is orchestrated
+-- by the Registerwerk backend against the Canton Token Standard (CIP-0056), which
+-- is a runtime-only dependency of this participant (see daml.yaml) — not composed
+-- into these choices. Exercising a lifecycle choice here is the on-ledger record
+-- of registry authorization for that payment, kept separately auditable from the
+-- backend's own `corporate_action` / `audit_event` tables.
 --
 -- Lifecycle:
 --   1. Registry creates a FixedRateBond instrument via Create choice.
---   2. DAML Finance lifecycle engine generates coupon events on each pay date.
---   3. Registry exercises PayCoupon choice to settle each coupon.
---   4. At maturity, registry exercises Redeem.
---   5. If callable, registry exercises EarlyCall on any scheduled call date.
+--   2. On each pay date, the backend computes the coupon and the registry
+--      exercises PayCoupon to authorize/record its settlement.
+--   3. At maturity, registry exercises Redeem.
+--   4. If callable, registry exercises EarlyCall on a date/price from callSchedule.
 module Registerwerk.Bond.FixedBond where
 
 import Registerwerk.Bond.Types
-import DA.Date (Date)
-import DA.Decimal (Decimal)
 
 -- | A fixed-rate bond instrument registered under eWpG.
 template FixedRateBond with
@@ -41,12 +41,18 @@ template FixedRateBond with
           txRef         : Text
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — coupon cannot be paid" (status == "ACTIVE")
+        assertMsg "Coupon amount must be positive" (amountPerUnit > 0.0)
+        assertMsg "Coupon payment date cannot be after maturity" (paymentDate <= terms.maturityDate)
         create this with status = status
 
     -- | Redeem at maturity. Terminal choice — archives the instrument.
     choice Redeem : ()
+        with redemptionDate : Date
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — cannot redeem" (status == "ACTIVE")
+        assertMsg "Redemption date must be on or after maturity" (redemptionDate >= terms.maturityDate)
         return ()
 
     -- | Early call at a scheduled call date. Terminal choice.
@@ -54,6 +60,10 @@ template FixedRateBond with
         with callDate : Date; callPrice : Decimal
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — cannot call" (status == "ACTIVE")
+        assertMsg "Bond terms do not permit early call" terms.callable
+        assertMsg "callDate/callPrice do not match an entry in the call schedule"
+          (any (\c -> c.callDate == callDate && c.callPrice == callPrice) terms.callSchedule)
         return ()
 
     -- | Regulatory freeze (AWG §17 / GwG §40) — suspends the instrument.

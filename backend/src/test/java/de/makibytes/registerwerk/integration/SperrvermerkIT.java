@@ -55,7 +55,7 @@ class SperrvermerkIT {
         block.setBlockType(HolderBlock.BlockType.GERICHTSBESCHLUSS);
         block.setLegalBasis("Court order ref: LG Frankfurt Az. 2-04 O 123/26");
 
-        HolderBlock saved = service.create(block, createdBy);
+        HolderBlock saved = service.create(block, createdBy, "REGISTRY_ADMIN", null);
 
         assertThat(saved.getId()).isNotNull();
         assertThat(saved.getStatus()).isEqualTo(HolderBlock.Status.ACTIVE);
@@ -72,7 +72,7 @@ class SperrvermerkIT {
         block.setWalletAddress(wallet);
         block.setBlockType(HolderBlock.BlockType.PFANDRECHT);
         block.setLegalBasis("Pledge agreement ref: P-2026-001");
-        service.create(block, createdBy);
+        service.create(block, createdBy, "REGISTRY_ADMIN", null);
 
         List<HolderBlock> active = service.findActiveByWallet(wallet);
         assertThat(active).hasSize(1);
@@ -90,9 +90,9 @@ class SperrvermerkIT {
         block.setWalletAddress(wallet);
         block.setBlockType(HolderBlock.BlockType.PFAENDUNG);
         block.setLegalBasis("Attachment by creditor — court ref: AG München 1 M 5678/26");
-        HolderBlock saved = service.create(block, createdBy);
+        HolderBlock saved = service.create(block, createdBy, "REGISTRY_ADMIN", null);
 
-        HolderBlock lifted = service.lift(saved.getId(), createdBy, "Debt settled", approver);
+        HolderBlock lifted = service.lift(saved.getId(), createdBy, "REGISTRY_ADMIN", "Debt settled", approver);
 
         assertThat(lifted.getStatus()).isEqualTo(HolderBlock.Status.LIFTED);
         assertThat(lifted.getLiftReason()).isEqualTo("Debt settled");

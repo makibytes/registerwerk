@@ -41,5 +41,9 @@ class AssetApiImpl implements AssetApi {
     public Optional<AssetHolder> findHolder(UUID id) { return holderRepo.findById(id); }
 
     @Override
-    public List<AssetHolder> findHoldersByInvestor(UUID investorId) { return holderRepo.findByInvestorId(investorId); }
+    public List<AssetHolder> findHoldersByInvestor(UUID investorId) {
+        // Public cross-module port: callers expect the investor's current holdings, not
+        // register entries closed out by a soft-delete removal.
+        return holderRepo.findActiveByInvestorId(investorId);
+    }
 }

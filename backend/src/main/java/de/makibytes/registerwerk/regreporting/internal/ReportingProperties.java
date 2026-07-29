@@ -10,11 +10,22 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "registerwerk.reporting")
 public class ReportingProperties {
 
+    /**
+     * Enables the draft/unvalidated reporting prototype outside production. This remains
+     * false by default because the generated documents are not validated against an official
+     * filing schema and the gateway supplies transport evidence, not authority acceptance.
+     */
+    private boolean prototypeEnabled = false;
     private String operatorTin;
     private String operatorLei;
     private String documentBucket = "registerwerk-reports";
     private String gateway = "NOOP";
     private Map<String, SftpEndpoint> sftp = new HashMap<>();
+    /** Transported drafts lacking verified authority evidence longer than this are flagged. */
+    private int staleSubmissionThresholdDays = 5;
+
+    public boolean isPrototypeEnabled() { return prototypeEnabled; }
+    public void setPrototypeEnabled(boolean prototypeEnabled) { this.prototypeEnabled = prototypeEnabled; }
 
     public String getOperatorTin() { return operatorTin; }
     public void setOperatorTin(String operatorTin) { this.operatorTin = operatorTin; }
@@ -30,6 +41,9 @@ public class ReportingProperties {
 
     public Map<String, SftpEndpoint> getSftp() { return sftp; }
     public void setSftp(Map<String, SftpEndpoint> sftp) { this.sftp = sftp; }
+
+    public int getStaleSubmissionThresholdDays() { return staleSubmissionThresholdDays; }
+    public void setStaleSubmissionThresholdDays(int v) { this.staleSubmissionThresholdDays = v; }
 
     public SftpEndpoint sftpForJurisdiction(String jurisdiction) {
         return sftp.get(jurisdiction);

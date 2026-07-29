@@ -121,9 +121,15 @@ Responses include a `X-Total-Count` header with the total record count (before p
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/dora/incidents` | List ICT incidents |
-| `POST` | `/api/v1/dora/incidents` | Create incident manually |
-| `GET` | `/api/v1/dora/third-party-providers` | List ICT third-party register |
+| `GET` | `/api/v1/dora/incidents` | List open ICT incidents |
+| `POST` | `/api/v1/dora/incidents` | Report an ICT incident (Art. 17) |
+| `PATCH` | `/api/v1/dora/incidents/{id}/status` | Update incident status / root cause |
+| `POST` | `/api/v1/dora/incidents/{id}/report-to-authority` | Record initial/final authority report (Art. 19) |
+| `GET` | `/api/v1/dora/providers` | List ICT third-party register (Art. 28) |
+| `GET` | `/api/v1/dora/providers/expiring` | List providers with contracts expiring soon |
+| `GET` | `/api/v1/dora/resilience-tests` | List resilience test results (Art. 24/25) |
+| `GET` | `/api/v1/dora/resilience-tests/overdue` | List overdue resilience tests |
+| `POST` | `/api/v1/dora/resilience-tests` | Record a resilience test result |
 
 ---
 

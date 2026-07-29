@@ -1,11 +1,17 @@
 ---
 title: KYC & AML
-description: Know Your Customer and Anti-Money Laundering implementation across all four jurisdictions.
+description: KYC/KYB data, checklist, approval, screening, and monitoring workflows, with important enforcement gaps.
 ---
 
 # KYC & AML
 
-Know Your Customer (KYC) / Know Your Business (KYB) is the foundation of Registerwerk's compliance stack. Every legal entity must pass KYC before it can issue or receive tokens. The implementation covers document collection, beneficial owner verification, ongoing monitoring, and per-jurisdiction requirements.
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and current repository behavior. It is not legal
+    advice or evidence of AML/KYC compliance. Customer-due-diligence requirements, evidence,
+    cadence, retention, escalation, and permitted overrides require an operator-, customer-,
+    service-, transaction-, and jurisdiction-specific review by qualified counsel and control owners.
+
+Registerwerk contains KYC/KYB document, beneficial-owner, screening, approval, and monitoring workflows. Issuance, deployment, and transfer paths do not yet uniformly enforce an approved KYC state, so these modules must not be described as a complete production compliance gate.
 
 ---
 
@@ -24,7 +30,7 @@ stateDiagram-v2
     REJECTED --> PENDING : Customer resubmits corrected documents
 ```
 
-A `LegalEntity` is blocked from all token issuance and transfer if its KYC status is not `APPROVED`.
+The state machine records customer status, but an unapproved `LegalEntity` is not currently blocked from every issuance, deployment, or transfer path. A central, fail-closed operation gate remains required.
 
 ---
 
@@ -50,7 +56,7 @@ A per-jurisdiction sign-off record. One `LegalEntity` can hold separate approval
 
 ### `NaturalPerson`
 
-Stores PII for directors, signatories, and beneficial owners. All personally identifiable fields (`givenName`, `familyName`, `dateOfBirth`, `taxId`, `address*`) are **encrypted at rest** using a per-entity DEK wrapped by the operator's KEK.
+Stores PII for directors, signatories, and beneficial owners. These fields are currently mapped to ordinary database columns; application-level field encryption and a per-record DEK/KEK lifecycle are not implemented. Do not enter production PII until the required encryption, migration, key-management, backup, and recovery controls are implemented and verified.
 
 ### `BeneficialOwner`
 
@@ -115,14 +121,16 @@ Links a `LegalEntity` to a `NaturalPerson` with:
 
 ---
 
-## KYC approval gate
+## KYC approval checks
 
-A `LegalEntity` can only reach `APPROVED` status when:
+A complete approval policy is not enforced centrally. The repository currently provides separate controls:
 
-1. All required documents for the jurisdiction are present and individually approved
-2. All `BeneficialOwner` → `NaturalPerson` records are complete (ownership ≥ 25% covered)
-3. The latest [sanctions screening](sanctions-screening.md) run returns no open hits
-4. The [step-up authentication](step-up-mfa.md) of the approving `COMPLIANCE_OFFICER` is current
+1. `KycComplianceService` calculates presence, age, and expiry results for configured document requirements.
+2. `KycService` blocks approval when entity or linked beneficial-owner screening is unresolved.
+3. Per-jurisdiction approvals can record checklist gaps and an operator override note.
+4. Enforcement at the relevant HTTP endpoint is separate from enforcement in domain services.
+
+These checks do not yet form a uniform issue/receive/deploy/transfer gate, and configured document lists or thresholds are not legal conclusions.
 
 The `ScreeningGate` interface in the `screening` module is called by `KycService.approveKyc()`:
 

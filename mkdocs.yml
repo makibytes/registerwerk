@@ -125,3 +125,4 @@ nav:
     - Security & Authentication: platform/security.md
     - Audit Log: platform/audit-log.md
     - REST API Overview: platform/api.md
+    - dApp Development & Marketplace: platform/dapp-development.md

@@ -5,176 +5,83 @@ sidebar_label: Confidential Tokens
 sidebar_position: 3
 ---
 
-# Confidential Token Setup (Fhenix / Inco)
+# Confidential Token Setup (Zama fhEVM)
 
-This guide covers deploying Confidential ERC-3643 tokens using Zama's fhEVM. Confidential tokens encrypt balances and transfer amounts on-chain while preserving full compliance enforcement.
+This guide covers deploying and administering Confidential ERC-20/ERC-3643 tokens using Zama's
+fhEVM.
 
-## Choosing between Fhenix and Inco
+## Prerequisites
 
-Both Fhenix and Inco are FHE-enabled EVM chains powered by Zama's fhEVM technology. Key differences:
+1. A chain with **real Zama fhEVM infrastructure** — Ethereum Sepolia today (documented addresses
+   are vendored in `contracts/lib/fhevm/config/`, and bundled in `@zama-fhe/relayer-sdk` as
+   `SepoliaConfig`), or Ethereum/Base mainnet once Zama publishes final addresses there.
+   Confidential deployment is gated to `Chain.ETHEREUM`/`Chain.BASE` — **not** Fhenix/Inco.
+2. `EwpgConfidentialFactory` deployed and configured with that chain's real FHEVM addresses
+   (`setFhevmInfra`) — see `docs/blockchains/confidential-evm.md` in the repository.
+3. For `CONF_ERC3643` only: a real T-REX `IdentityRegistry` provisioned for confidential assets on
+   that chain, configured via `registerwerk.contracts.confidential-identity-registry.<chain>`.
+   Deployment fails loudly if this is unset.
+4. The operator's and an auditor's dedicated decrypt-only viewer addresses configured via
+   `registerwerk.contracts.confidential-operator-viewer.<chain>` /
+   `.confidential-auditor-viewer.<chain>` — these become viewers on every confidential token
+   deployed on that chain from block one.
+5. `zama-relayer` running (`docker compose --profile confidential up`) with
+   `OPERATOR_DECRYPT_PRIVATE_KEY` set to the private key matching the operator-viewer address
+   above, and the backend's `registerwerk.zama.relayer-url` pointed at it.
 
-| Feature | Fhenix | Inco |
-|---------|--------|------|
-| Mainnet Chain ID | 21888 | 9090 |
-| fhEVM version | Zama TFHE-rs | Zama TFHE-rs |
-| KMS Gateway | Fhenix Gateway | Inco Gateway |
-| Testnet | Fhenix Helium (8008135) | Inco Rivest (21097) |
-| Token bridge | Available | Available |
+## Deploying
 
-For most new deployments, either chain is suitable. Both are pre-configured in the registry (Flyway migration V15).
-
-## Step 1 — Enable the chain
-
-Fhenix and Inco are pre-seeded. Verify they are enabled:
+Standard asset-deployment flow, same as any other standard:
 
 ```bash
-curl http://localhost:8080/api/v1/admin/chains \
+curl -X POST http://localhost:8080/api/v1/assets/{assetId}/deploy \
   -H "Authorization: Bearer $OPERATOR_JWT" \
-  | jq '.[] | select(.identifier | contains("FHENIX"))'
+  -d '{ "chain": "ETHEREUM", "network": "TESTNET" }'
 ```
 
-Set the RPC URLs in `.env`:
+The backend routes `CONF_ERC20`/`CONF_ERC3643` to `ConfidentialErc20Service`/
+`ConfidentialErc3643Service`, which call `EwpgConfidentialFactory.deployConfidentialErc20`/
+`deployConfidentialErc3643` — real Web3j transactions, passing the configured operator/auditor
+viewer addresses as `initialViewers`.
 
-```bash
-FHENIX_MAINNET_RPC=https://api.fhenix.zone
-FHENIX_HELIUM_RPC=https://api.helium.fhenix.zone
-INCO_MAINNET_RPC=https://mainnet.inco.org
-INCO_RIVEST_RPC=https://testnet.inco.org
-```
+## Operator actions available today
 
-## Step 2 — Deploy the ConfidentialERC3643 contract
-
-```bash
-cd contracts
-forge script script/Deploy.s.sol \
-  --rpc-url $FHENIX_MAINNET_RPC \
-  --broadcast \
-  --private-key $DEPLOYER_PRIVATE_KEY
-```
-
-The confidential token stores balances as `euint64` (Zama TFHE encrypted uint64). The script deploys:
-- `ConfidentialERC3643` token contract
-- `FHEIdentityRegistry`
-- `FHEModularCompliance`
-
-:::note
-Confidential contracts are a separate deployment from standard ERC-3643. They use FHE-aware versions of each T-REX component.
-:::
-
-## Step 3 — Zama KMS Gateway
-
-The KMS Gateway handles decryption key derivation for authorized parties (investors, auditors, and the registry operator).
-
-### Hosted gateways (recommended)
-
-Both chains provide managed KMS Gateways:
-
-```bash
-FHENIX_KMS_GATEWAY_URL=https://gateway.fhenix.zone
-INCO_KMS_GATEWAY_URL=https://gateway.inco.org
-```
-
-The backend uses these endpoints automatically for decryption operations.
-
-### Self-hosted KMS (advanced)
-
-For on-premises key management, refer to the [Zama KMS documentation](https://docs.zama.ai/). Only recommended for deployments with strict data sovereignty requirements.
-
-## Step 4 — Investor decryption flow
-
-When an investor views their confidential balance:
-
-1. The portal sends a signed decryption request to the KMS Gateway
-2. The KMS validates the investor owns the balance slot
-3. The KMS returns a decryption key scoped to that slot
-4. The portal decrypts and displays the balance — it is never sent to the registry servers
-
-## Limitations
-
-- Gas costs are 10–50x higher than standard ERC-3643
-- Maximum encrypted balance: `uint64` (~18.4 quadrillion)
-- Block explorer support is limited — encrypted amounts appear as opaque bytes
-- Not all standard Foundry/Hardhat tooling supports FHE opcodes; use the fhEVM-flavored tooling for tests
-
-## Testing on testnet
-
-```bash
-forge script script/Deploy.s.sol \
-  --rpc-url https://api.helium.fhenix.zone \
-  --broadcast \
-  --private-key $DEPLOYER_PRIVATE_KEY
-```
-
-Faucets: [faucet.fhenix.zone](https://faucet.fhenix.zone) | [faucet.inco.org](https://faucet.inco.org)
-
-# Confidential Tokens (Zama fhEVM)
-
-Confidential tokens use Zama's Fully Homomorphic Encryption (FHE) to encrypt balances and transfer amounts on-chain. Even the node operators cannot see individual holdings.
-
-## Supported chains
-
-| Chain | Type | Notes |
+| Action | Endpoint | Notes |
 |---|---|---|
-| Fhenix Mainnet (21888) | Production FHE L2 | Full fhEVM |
-| Fhenix Helium (8008135) | Testnet | Recommended for testing |
-| Inco Mainnet (9090) | Confidentiality-as-a-Service | Uses Inco's FHE co-processor |
-| Inco Rivest (21097) | Testnet | |
+| Confidential mint (issuer/operator issuance) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Encrypts the amount server-side via the `zama-relayer` sidecar — no browser/wallet needed |
+| Confidential forced burn (§26 Einziehung) | `POST .../admin/force-burn-confidential` | Same server-side encrypt path; already agent/owner-gated — that gating IS the forced-burn authority |
+| Add a confidential viewer | `POST .../admin/confidential-add-viewer` | Grants decrypt rights on every holder's balance going forward — e.g. adding an auditor or the issuer's own wallet after deployment |
+| Remove a confidential viewer | `POST .../admin/confidential-remove-viewer` | Stops future grants — does NOT retroactively revoke already-decryptable historical handles (Zama's ACL has no revoke primitive) |
+| Register-vs-on-chain reconciliation | `GET /api/v1/assets/{id}/confidential-reconciliation` | Headless: decrypts every holder's on-chain balance via the backend's own operator-decrypt key and compares it against the register's plaintext `nominalAmount`. `REGISTRY_ADMIN` or `AUDIT` role. |
+| Reveal + reconcile via your own wallet | Operator Portal → Asset → **Confidential Balances** tab | Connect a viewer wallet in the browser and decrypt directly against Zama's relayer — an independent cross-check of the headless reconciliation above |
+| Public/oracle supply disclosure | `ConfidentialERC20.requestSupplyDisclosure()` (on-chain call; no operator API endpoint wraps it yet) | For a regulator-triggered aggregate disclosure, not a specific holder's balance |
 
-## How it works
+Freeze/pause/forced-transfer on `CONF_ERC3643` are **not yet wired** through the operator API —
+the existing ERC-3643 admin controller targets the plaintext `EwpgERC3643` contract's ABI, which
+does not match `ConfidentialERC3643`'s encrypted-amount signatures.
 
-Standard ERC-3643 stores balances as `uint256` — visible to everyone. The confidential variant:
+## The relayer sidecar
 
-1. Replaces `uint256` balances with `euint64` (encrypted 64-bit integer)
-2. Transfer amounts are passed as `einput` (encrypted input from the client)
-3. The FHE co-processor evaluates compliance checks on encrypted values (balance ≤ max, etc.)
-4. Result: transfers are valid or rejected without revealing amounts
-
-```solidity
-// ConfidentialERC3643.sol (simplified)
-mapping(address => euint64) private _encryptedBalances;
-
-function confidentialTransfer(
-    address to,
-    einput encryptedAmount,
-    bytes calldata inputProof
-) external {
-    euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
-    // compliance checks run on encrypted values
-    _transferEncrypted(msg.sender, to, amount);
-}
-```
-
-## Deploying a confidential suite
+`zama-relayer` (repo root `zama-relayer/`) is Registerwerk's own service wrapping the real
+`@zama-fhe/relayer-sdk` — built and shipped in this monorepo, not something you need to write.
+Zama publishes no Java/JVM client, which is the only reason this sidecar exists; every
+browser-initiated confidential action (investor/issuer/auditor revealing a balance, an investor's
+confidential transfer) talks to Zama's relayer directly from the browser and never touches this
+sidecar. Enable it with:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/assets/{assetId}/deployments \
-  -H "Authorization: Bearer $OPERATOR_TOKEN" \
-  -d '{
-    "chain": "FHENIX_HELIUM",
-    "tokenStandard": "CONF_ERC3643",
-    "tokenName": "Confidential Bond",
-    "tokenSymbol": "cBOND",
-    "decimals": 0
-  }'
+docker compose --profile confidential up
 ```
 
-The backend uses `ConfidentialErc3643Service` which interacts with `ConfidentialERC3643.sol`.
+See its `.env.example` section ("Confidential tokens (Zama fhEVM)") for the environment
+variables — `ZAMA_CONFIG_PRESET=sepolia`, `ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY`, and
+`REGISTERWERK_ZAMA_RELAYER_URL` on the backend side.
 
-## Client-side encryption
+## Investor/issuer/auditor balance decryption
 
-Investors use Zama's [fhevmjs](https://docs.zama.ai/fhevm) library to encrypt transfer amounts before submitting:
-
-```typescript
-import { createInstance } from 'fhevmjs';
-
-const fhevm = await createInstance({ chainId: 8008135, publicKey });
-const encrypted = fhevm.encrypt64(transferAmount);
-await token.confidentialTransfer(recipient, encrypted.data, encrypted.inputProof);
-```
-
-## Limitations
-
-- Confidential tokens are only available on Fhenix and Inco chains
-- The indexer does not see transfer amounts (privacy by design)
-- Token history shows `from`/`to` addresses but amounts are encrypted
-- Gas costs are higher (~3–10×) due to FHE computation
+Revealing a confidential balance (or encrypting a confidential-transfer amount) is a **client-side**
+operation in both frontends: the connected wallet signs an EIP-712 request and the browser's own
+`@zama-fhe/relayer-sdk` instance talks to Zama's Relayer directly — see `FheClientService` in
+`frontend-customer` (investor self-reveal + confidential transfer; issuer reveal-all-holders) and
+`frontend-operator` (operator/auditor `ConfidentialViewerPanelComponent`). None of this routes
+through this backend.

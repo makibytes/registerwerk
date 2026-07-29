@@ -8,6 +8,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.web3j.abi.FunctionEncoder;
+import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.DynamicBytes;
+import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.Hash;
 import org.web3j.crypto.Keys;
@@ -18,6 +23,7 @@ import java.math.BigInteger;
 import java.security.SignatureException;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -74,14 +80,21 @@ class ClaimSigningServiceTest {
 
         SignedClaim signed = service.signClaim(identity, topic, null);
 
-        // Rebuild claimHash exactly as the service does, then recover the signer's public
-        // key from the signature and confirm it maps back to the reported issuer address.
+        // Rebuild claimHash exactly as the service does — real abi.encode(address,uint256,bytes),
+        // not a flat byte concatenation — then recover the signer's public key from the signature
+        // and confirm it maps back to the reported issuer address. This is the regression test
+        // for the fix that replaced an abi.encodePacked-style concatenation (which never matched
+        // OnchainID's real ClaimIssuer.isClaimValid encoding, making every issued claim
+        // permanently unverifiable on-chain) with Web3j's FunctionEncoder-based real ABI encoding.
         byte[] data = Numeric.hexStringToByteArray(signed.claimData());
-        byte[] packed = concat(
-                Numeric.hexStringToByteArray(identity),
-                toBigEndian32(BigInteger.valueOf(topic)),
-                data);
-        byte[] claimHash = Hash.sha3(packed);
+        Function claimHashInputFn = new Function(
+                "",
+                Arrays.asList(new Address(identity), new Uint256(BigInteger.valueOf(topic)), new DynamicBytes(data)),
+                Collections.emptyList()
+        );
+        String encodedWithSelector = FunctionEncoder.encode(claimHashInputFn);
+        byte[] hashInput = Numeric.hexStringToByteArray(encodedWithSelector.substring(10));
+        byte[] claimHash = Hash.sha3(hashInput);
 
         byte[] sigBytes = Numeric.hexStringToByteArray(signed.claimSignature());
         assertThat(sigBytes).hasSize(65);
@@ -94,6 +107,38 @@ class ClaimSigningServiceTest {
         String recoveredAddress = "0x" + Keys.getAddress(recoveredKey);
 
         assertThat(recoveredAddress).isEqualToIgnoringCase(signed.issuerAddress());
+    }
+
+    @Test
+    void signClaim_claimHashUsesRealAbiEncodeNotPacked() throws SignatureException {
+        // A flat concatenation (the previous, broken approach) omits the address's left-padding
+        // to 32 bytes and the dynamic `data` parameter's offset/length words entirely — so
+        // reconstructing the OLD (wrong) way must NOT recover the same signer, proving the fix
+        // actually changed what gets signed rather than merely refactoring the call site.
+        when(walletSigner.credentialsForAnyEvm()).thenReturn(credentials);
+        String identity = "0x" + "66".repeat(20);
+        long topic = 1L;
+
+        SignedClaim signed = service.signClaim(identity, topic, null);
+        byte[] data = Numeric.hexStringToByteArray(signed.claimData());
+
+        byte[] packed = new byte[20 + 32 + data.length];
+        System.arraycopy(Numeric.hexStringToByteArray(identity), 0, packed, 0, 20);
+        byte[] topicWord = new byte[32];
+        topicWord[31] = (byte) topic;
+        System.arraycopy(topicWord, 0, packed, 20, 32);
+        System.arraycopy(data, 0, packed, 52, data.length);
+        byte[] wrongHash = Hash.sha3(packed);
+
+        byte[] sigBytes = Numeric.hexStringToByteArray(signed.claimSignature());
+        byte[] r = Arrays.copyOfRange(sigBytes, 0, 32);
+        byte[] s = Arrays.copyOfRange(sigBytes, 32, 64);
+        byte[] v = new byte[] { sigBytes[64] };
+        Sign.SignatureData sig = new Sign.SignatureData(v, r, s);
+
+        BigInteger recoveredKey = Sign.signedPrefixedMessageToKey(wrongHash, sig);
+        String recoveredAddress = "0x" + Keys.getAddress(recoveredKey);
+        assertThat(recoveredAddress).isNotEqualToIgnoringCase(signed.issuerAddress());
     }
 
     @Test
@@ -118,22 +163,5 @@ class ClaimSigningServiceTest {
         SignedClaim withoutExpiry = service.signClaim(identity, 1L, null);
 
         assertThat(withExpiry.claimData()).isNotEqualTo(withoutExpiry.claimData());
-    }
-
-    private static byte[] toBigEndian32(BigInteger value) {
-        byte[] raw = value.toByteArray();
-        byte[] padded = new byte[32];
-        int srcPos = Math.max(0, raw.length - 32);
-        System.arraycopy(raw, srcPos, padded, 32 - (raw.length - srcPos), raw.length - srcPos);
-        return padded;
-    }
-
-    private static byte[] concat(byte[]... arrays) {
-        int len = 0;
-        for (byte[] a : arrays) len += a.length;
-        byte[] result = new byte[len];
-        int pos = 0;
-        for (byte[] a : arrays) { System.arraycopy(a, 0, result, pos, a.length); pos += a.length; }
-        return result;
     }
 }

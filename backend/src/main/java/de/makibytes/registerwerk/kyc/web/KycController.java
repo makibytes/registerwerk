@@ -38,6 +38,8 @@ import de.makibytes.registerwerk.kyc.web.dto.JurisdictionApprovalRequest;
 import de.makibytes.registerwerk.kyc.web.dto.KycComplianceResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycDocumentResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycJurisdictionApprovalResponse;
+import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 
 /**
  * REST controller for KYC document management and KYC status operations.
@@ -83,7 +85,8 @@ public class KycController {
             file.getOriginalFilename(),
             file.getContentType(),
             documentType,
-            uploadedBy
+            uploadedBy,
+            primaryRole(auth)
         );
         if (jurisdiction != null) {
             doc.setJurisdiction(jurisdiction);
@@ -128,7 +131,7 @@ public class KycController {
             @PathVariable UUID entityId,
             @PathVariable UUID docId,
             Authentication auth) {
-        documentService.softDeleteDocument(docId, extractActorId(auth));
+        documentService.softDeleteDocument(docId, extractActorId(auth), primaryRole(auth));
         return ResponseEntity.noContent().build();
     }
 
@@ -137,6 +140,7 @@ public class KycController {
      */
     @PostMapping("/approve")
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "KYC_APPROVE")
     public ResponseEntity<Void> approveKyc(
             @PathVariable UUID entityId,
             @RequestBody Map<String, String> body,
@@ -153,6 +157,7 @@ public class KycController {
      */
     @PostMapping("/reject")
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "KYC_REJECT")
     public ResponseEntity<Void> rejectKyc(
             @PathVariable UUID entityId,
             @RequestBody Map<String, String> body,
@@ -202,6 +207,7 @@ public class KycController {
      */
     @PostMapping("/jurisdictions/{jurisdiction}/approve")
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "KYC_JURISDICTION_APPROVE")
     public ResponseEntity<KycJurisdictionApprovalResponse> approveJurisdiction(
             @PathVariable UUID entityId,
             @PathVariable Jurisdiction jurisdiction,
@@ -245,6 +251,7 @@ public class KycController {
      */
     @PostMapping("/jurisdictions/{jurisdiction}/reject")
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "KYC_JURISDICTION_REJECT")
     public ResponseEntity<KycJurisdictionApprovalResponse> rejectJurisdiction(
             @PathVariable UUID entityId,
             @PathVariable Jurisdiction jurisdiction,
@@ -309,6 +316,10 @@ public class KycController {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    private static String primaryRole(Authentication auth) {
+        return SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
     }
 
     private boolean isRegistryAdmin(Authentication auth) {

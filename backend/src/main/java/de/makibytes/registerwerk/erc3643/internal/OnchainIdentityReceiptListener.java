@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.protocol.Web3j;
@@ -44,6 +45,7 @@ class OnchainIdentityReceiptListener {
         this.clientRegistry = clientRegistry;
     }
 
+    @SchedulerLock(name = "onchainIdentityReceiptListener", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
     @Scheduled(fixedDelay = 30_000)
     @Transactional
     public void resolvePendingIdentities() {

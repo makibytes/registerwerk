@@ -27,5 +27,8 @@ public record TradingVenueOfferResponse(
         BigDecimal pricePerUnit,
         List<PaymentOption> allowedPaymentOptions,
         List<OrderType> supportedOrderTypes,
-        Instant createdAt) {
+        Instant createdAt,
+        // Most recent settled trade price for this asset, if any — a benchmark for the quoted
+        // offer price; null when the asset has never settled a trade yet.
+        BigDecimal lastTradePrice) {
 }

@@ -23,11 +23,11 @@ The root `docker-compose.yml` defines all services:
 
 ```yaml
 services:
-  postgres:         # Application database
-  backend:          # Spring Boot 4 API
-  kong-migrations:  # Runs once to migrate Kong DB
-  kong:             # API gateway
-  konga:            # Kong Admin UI
+  postgres:           # Application database
+  backend:            # Spring Boot 4 API
+  kong:               # API gateway — DB-less, routes from gateway/kong.yml
+  frontend-operator:  # Operator portal (nginx, direct to backend)
+  frontend-customer:  # Customer portal (nginx, proxied through Kong)
 ```
 
 ### Starting services
@@ -36,13 +36,10 @@ services:
 docker compose up -d
 ```
 
-On the first start of a fresh `pgdata` volume, Postgres runs the init scripts in `docker/postgres/init/` and creates:
-
-- `registerwerk` owned by `${DB_USER}` with `${DB_PASSWORD}`
-- `kong` owned by `${KONG_DB_USER}` with `${KONG_DB_PASSWORD}`
-- `konga` owned by `${KONGA_DB_USER}` with `${KONGA_DB_PASSWORD}`
-
-If `pgdata` already exists, those init scripts do not run again.
+Kong runs in DB-less (declarative) mode: `gateway/kong.yml` is mounted read-only and is
+the single source of truth for routes and plugins, so there is no separate Kong database
+to migrate or bootstrap — only the `registerwerk` application database is created on
+Postgres' first start, owned by `${DB_USER}` with `${DB_PASSWORD}`.
 
 ### Logs
 

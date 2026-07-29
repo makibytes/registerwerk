@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.wallet.events.WalletExportedKeystoreEvent;
 import de.makibytes.registerwerk.wallet.events.WalletExportedRawEvent;
 import de.makibytes.registerwerk.wallet.events.WalletRenamedEvent;
 import de.makibytes.registerwerk.wallet.events.WalletDeletedEvent;
+import de.makibytes.registerwerk.wallet.events.WalletKekRotatedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.wallet.api.OperatorWallet;
@@ -80,7 +81,7 @@ public class WalletService {
      * @param name wallet display name (must be unique)
      * @param type EVM or SOLANA
      */
-    public OperatorWallet generate(String name, WalletType type) {
+    public OperatorWallet generate(String name, WalletType type, UUID actorId, String actorRole) {
         requireUniqueName(name);
         UUID id = UUID.randomUUID();
         String address;
@@ -99,14 +100,14 @@ public class WalletService {
         OperatorWallet wallet = persist(id, name, type, address, relativePath);
         defaultService.autoPromoteIfFirstOfType(wallet);
 
-        eventPublisher.publishEvent(new WalletGeneratedEvent(wallet.getId(), null, null));
+        eventPublisher.publishEvent(new WalletGeneratedEvent(wallet.getId(), actorId, actorRole));
         log.info("Generated {} wallet '{}': address={}", type, name, address);
         return wallet;
     }
 
     // ── Import raw ────────────────────────────────────────────────────────────
 
-    public OperatorWallet importRaw(String name, WalletType type, String privateKeyHex) {
+    public OperatorWallet importRaw(String name, WalletType type, String privateKeyHex, UUID actorId, String actorRole) {
         requireUniqueName(name);
         UUID id = UUID.randomUUID();
         String address;
@@ -128,7 +129,7 @@ public class WalletService {
         OperatorWallet wallet = persist(id, name, type, address, relativePath);
         defaultService.autoPromoteIfFirstOfType(wallet);
 
-        eventPublisher.publishEvent(new WalletImportedRawEvent(wallet.getId(), null, null));
+        eventPublisher.publishEvent(new WalletImportedRawEvent(wallet.getId(), actorId, actorRole));
         log.info("Imported raw {} key as wallet '{}': address={}", type, name, address);
         return wallet;
     }
@@ -139,7 +140,7 @@ public class WalletService {
      * Imports a Web3 Secret Storage v3 keystore JSON (EVM only) supplied by the operator.
      * The file is decrypted with {@code userPassword}, then re-encrypted under the master KEK.
      */
-    public OperatorWallet importKeystore(String name, String keystoreJson, String userPassword) {
+    public OperatorWallet importKeystore(String name, String keystoreJson, String userPassword, UUID actorId, String actorRole) {
         requireUniqueName(name);
         UUID id = UUID.randomUUID();
         String relativePath = walletStorage.importEvmKeystore(id, keystoreJson, userPassword);
@@ -150,7 +151,7 @@ public class WalletService {
         OperatorWallet wallet = persist(id, name, WalletType.EVM, address, relativePath);
         defaultService.autoPromoteIfFirstOfType(wallet);
 
-        eventPublisher.publishEvent(new WalletImportedKeystoreEvent(wallet.getId(), null, null));
+        eventPublisher.publishEvent(new WalletImportedKeystoreEvent(wallet.getId(), actorId, actorRole));
         log.info("Imported keystore as wallet '{}': address={}", name, address);
         return wallet;
     }
@@ -161,13 +162,13 @@ public class WalletService {
      * Exports the wallet as a Web3 Secret Storage v3 JSON encrypted with {@code exportPassword}.
      * Returns the JSON string; controller writes it as a file download.
      */
-    public String exportKeystore(UUID walletId, String exportPassword) {
+    public String exportKeystore(UUID walletId, String exportPassword, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
         if (wallet.getType() != WalletType.EVM) {
             throw new UnsupportedOperationException("Keystore export is only supported for EVM wallets");
         }
         String json = walletStorage.exportEvmKeystore(wallet.getKeystorePath(), exportPassword);
-        eventPublisher.publishEvent(new WalletExportedKeystoreEvent(walletId, null, null));
+        eventPublisher.publishEvent(new WalletExportedKeystoreEvent(walletId, actorId, actorRole));
         log.info("Exported keystore for wallet '{}'", wallet.getName());
         return json;
     }
@@ -176,26 +177,26 @@ public class WalletService {
      * Returns the raw private key hex. This is a dangerous operation; caller must
      * gate it behind an explicit confirmation and the result is audit-logged.
      */
-    public String exportRaw(UUID walletId) {
+    public String exportRaw(UUID walletId, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
         String raw = wallet.getType() == WalletType.EVM
                 ? walletStorage.exportEvmRaw(wallet.getKeystorePath())
                 : java.util.HexFormat.of().formatHex(walletStorage.loadSolana(wallet.getKeystorePath()));
 
-        eventPublisher.publishEvent(new WalletExportedRawEvent(walletId, null, null));
+        eventPublisher.publishEvent(new WalletExportedRawEvent(walletId, actorId, actorRole));
         log.warn("RAW private key exported for wallet '{}' ({})", wallet.getName(), walletId);
         return raw;
     }
 
     // ── Rename ────────────────────────────────────────────────────────────────
 
-    public OperatorWallet rename(UUID walletId, String newName) {
+    public OperatorWallet rename(UUID walletId, String newName, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
         String oldName = wallet.getName();
         requireUniqueName(newName);
         wallet.setName(newName);
         OperatorWallet saved = walletRepository.save(wallet);
-        eventPublisher.publishEvent(new WalletRenamedEvent(walletId, null, null));
+        eventPublisher.publishEvent(new WalletRenamedEvent(walletId, actorId, actorRole));
         return saved;
     }
 
@@ -205,14 +206,48 @@ public class WalletService {
      * Deletes a wallet. Removes all chain defaults pointing to it first (the operator
      * is responsible for setting a replacement default before any chain operation runs).
      */
-    public void delete(UUID walletId) {
+    public void delete(UUID walletId, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
         defaultService.removeDefaultsForWallet(walletId);
         walletSigner.evict(walletId);
         walletStorage.delete(wallet.getKeystorePath());
         walletRepository.delete(wallet);
-        eventPublisher.publishEvent(new WalletDeletedEvent(walletId, null, null));
+        eventPublisher.publishEvent(new WalletDeletedEvent(walletId, actorId, actorRole));
         log.info("Deleted wallet '{}' ({})", wallet.getName(), walletId);
+    }
+
+    // ── KEK rotation ──────────────────────────────────────────────────────────
+
+    /**
+     * Re-wraps a single wallet's DEK under whatever KEK version {@link WalletStorage}'s
+     * provider currently resolves to. Intended for deliberate rotation (e.g. after a suspected
+     * KEK compromise), not routine key-version bumps a KMS already handles transparently.
+     *
+     * @return true if a DEK was re-wrapped, false for a legacy wallet with no wrapped DEK
+     */
+    public boolean rotateKek(UUID walletId, UUID actorId, String actorRole) {
+        OperatorWallet wallet = getById(walletId);
+        boolean rotated = walletStorage.rewrapDek(wallet.getKeystorePath(), wallet.getType() == WalletType.EVM);
+        eventPublisher.publishEvent(new WalletKekRotatedEvent(walletId, actorId, actorRole, rotated));
+        log.info("KEK rotation for wallet '{}' ({}): {}", wallet.getName(), walletId,
+                rotated ? "rewrapped" : "skipped (legacy keystore, no wrapped DEK)");
+        return rotated;
+    }
+
+    /**
+     * Rotates every wallet's DEK in one pass — the bulk counterpart to {@link #rotateKek},
+     * for an operator responding to a suspected KEK compromise across the whole fleet.
+     *
+     * @return the IDs of wallets that were actually rewrapped (excludes legacy wallets skipped)
+     */
+    public List<UUID> rotateAllKeks(UUID actorId, String actorRole) {
+        List<UUID> rotatedIds = new java.util.ArrayList<>();
+        for (OperatorWallet wallet : walletRepository.findAll()) {
+            if (rotateKek(wallet.getId(), actorId, actorRole)) {
+                rotatedIds.add(wallet.getId());
+            }
+        }
+        return rotatedIds;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

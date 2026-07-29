@@ -43,9 +43,25 @@ public class AuditEvent {
     @Column(name = "occurred_at", nullable = false, updatable = false)
     private Instant occurredAt = Instant.now();
 
-    // ── Hash chain fields (V10__audit_chain.sql) ──────────────────────────────
-    /** Monotonically increasing sequence number; populated by DB sequence. */
-    @Column(name = "sequence_no", insertable = false, updatable = false)
+    /**
+     * audit_event.id of the entry this one reverses/corrects (V2 migration). Null for
+     * ordinary events. No FK by design, matching the rest of this table.
+     */
+    @Column(name = "reverses_event_id", updatable = false)
+    private UUID reversesEventId;
+
+    /** Free-form grouping id for audit entries belonging to one logical operation. */
+    @Column(name = "correlation_id", updatable = false)
+    private UUID correlationId;
+
+    // ── Hash chain fields (V2__audit_chain_and_correction_linkage.sql) ────────
+    /**
+     * Monotonically increasing sequence number. Reserved explicitly by
+     * {@code AuditEventRecorder} (via {@code nextval('audit_event_seq')}) before insert
+     * so it is known when the hash chain entry is computed; the column DEFAULT remains
+     * as a fallback for any other insert path.
+     */
+    @Column(name = "sequence_no", updatable = false)
     private Long sequenceNo;
 
     /** SHA-256 of the previous row's entry_hash; NULL for the genesis row. */
@@ -84,7 +100,14 @@ public class AuditEvent {
 
     public Instant getOccurredAt() { return occurredAt; }
 
+    public UUID getReversesEventId() { return reversesEventId; }
+    public void setReversesEventId(UUID reversesEventId) { this.reversesEventId = reversesEventId; }
+
+    public UUID getCorrelationId() { return correlationId; }
+    public void setCorrelationId(UUID correlationId) { this.correlationId = correlationId; }
+
     public Long getSequenceNo() { return sequenceNo; }
+    public void setSequenceNo(Long sequenceNo) { this.sequenceNo = sequenceNo; }
 
     public byte[] getPrevHash() { return prevHash; }
     public void setPrevHash(byte[] prevHash) { this.prevHash = prevHash; }
@@ -102,7 +125,24 @@ public class AuditEvent {
         ae.setSubjectId(e.subjectId());
         ae.setActorId(e.actorId());
         ae.setActorRole(e.actorRole());
-        ae.setPayload(e.payload());
+        ae.setPayload(withDualControlApprover(e.payload(), e.dualControlApproverId()));
+        ae.setReversesEventId(e.reversesEventId());
+        ae.setCorrelationId(e.correlationId());
         return ae;
+    }
+
+    /**
+     * Folds the validated second approver (if any) into the payload under a fixed key —
+     * every dual-control-gated event's approver ends up in the same, queryable JSON path
+     * regardless of which module published it, instead of each call site inventing its own
+     * ad-hoc map key.
+     */
+    private static Map<String, Object> withDualControlApprover(Map<String, Object> payload, UUID approverId) {
+        if (approverId == null) {
+            return payload;
+        }
+        Map<String, Object> merged = payload != null ? new java.util.LinkedHashMap<>(payload) : new java.util.LinkedHashMap<>();
+        merged.put("dualControlApproverId", approverId.toString());
+        return merged;
     }
 }

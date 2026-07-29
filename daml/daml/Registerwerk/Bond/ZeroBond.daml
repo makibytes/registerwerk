@@ -5,8 +5,6 @@
 module Registerwerk.Bond.ZeroBond where
 
 import Registerwerk.Bond.Types
-import DA.Date (Date)
-import DA.Decimal (Decimal)
 
 -- | A zero-coupon bond instrument registered under eWpG.
 template ZeroCouponBond with
@@ -22,12 +20,15 @@ template ZeroCouponBond with
     observer regulatorObserver
 
     ensure terms.assetId == assetId
-    ensure terms.paymentFrequency == Monthly || True  -- zero-coupon uses ZERO frequency in off-chain
 
-    -- | Redeem at maturity — pays face value to holders.
+    -- | Redeem at maturity — authorizes the backend to pay face value to holders
+    -- via the Canton Token Standard (see 'Registerwerk.Bond.FixedBond' module docs).
     choice Redeem : ()
+        with redemptionDate : Date
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — cannot redeem" (status == "ACTIVE")
+        assertMsg "Redemption date must be on or after maturity" (redemptionDate >= terms.maturityDate)
         return ()
 
     -- | Early call (only for callable zero-coupon bonds).
@@ -35,6 +36,10 @@ template ZeroCouponBond with
         with callDate : Date; callPrice : Decimal
         controller registryAdmin
       do
+        assertMsg "Bond is not ACTIVE — cannot call" (status == "ACTIVE")
+        assertMsg "Bond terms do not permit early call" terms.callable
+        assertMsg "callDate/callPrice do not match an entry in the call schedule"
+          (any (\c -> c.callDate == callDate && c.callPrice == callPrice) terms.callSchedule)
         return ()
 
     -- | Regulatory suspension.

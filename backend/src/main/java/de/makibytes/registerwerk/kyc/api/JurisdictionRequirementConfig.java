@@ -45,8 +45,8 @@ public class JurisdictionRequirementConfig {
         Duration kycRefreshCadence,            // how often ongoing monitoring re-screens
         double beneficialOwnerThresholdPct,    // 25.0 = GwG §3 standard
         Duration dataRetentionPeriod,          // regulatory retention (GwG §8: 5y; eWpG §15: 10y)
-        String travelRuleThresholdCurrency,    // "EUR"
-        double travelRuleThresholdAmount       // 1000.0 per TFR / TVTG
+        DefiInteropModel defiInteropModel,     // permitted DeFi bridge model, see DefiInteropModel
+        boolean permissionlessAmmAllowed       // explicit, not implicit — always false today
     ) {}
 
     public record JurisdictionProfile(
@@ -77,6 +77,80 @@ public class JurisdictionRequirementConfig {
         return List.copyOf(profiles.values());
     }
 
+    // ── Register-document labeling (§19 eWpG + cross-jurisdiction analogues) ───
+
+    /**
+     * Standard nominee-custody disclaimer shown on every collectively-held
+     * (Sammeleintragung) holding confirmation, regardless of jurisdiction: the
+     * registered holder of record is the custodian, not the investor, so the
+     * document is a beneficial-holding confirmation, never a register statement.
+     */
+    private static final String NOMINEE_DISCLAIMER =
+        "Der eingetragene Registerinhaber ist die depotführende Verwahrstelle (nominee), nicht der Anleger. "
+        + "Dieses Dokument bestätigt den wirtschaftlichen Bestand im Rahmen der Sammelverwahrung / Sammeleintragung "
+        + "und ersetzt keinen individuellen Registerauszug bzw. keine individuelle Bestandsbescheinigung. / "
+        + "The registered holder of record is the custodian (nominee), not the investor. This document confirms "
+        + "the beneficial holding under collective custody and does not substitute for an individual register "
+        + "statement or holding confirmation.";
+
+    private static final String LOCAL_COUNSEL_REVIEW_NOTE_LU =
+        "Dieses Dokument ist eine Bestätigung nach luxemburgischem Recht und keine mit dem deutschen §19-eWpG-"
+        + "Registerauszug identische gesetzliche Form; eine Prüfung durch luxemburgische Rechtsberater wird "
+        + "empfohlen. / This document is a Luxembourg-law confirmation, not a document identical to the German "
+        + "statutory §19 eWpG Registerauszug; review by Luxembourg counsel is recommended.";
+
+    private static final String LOCAL_COUNSEL_REVIEW_NOTE_LI =
+        "Dieses Dokument ist eine Bestätigung nach liechtensteinischem Recht (TVTG) und keine deutsche eWpG-"
+        + "Registerauszug-Entsprechung; eine Prüfung durch liechtensteinische Rechtsberater wird empfohlen. / "
+        + "This document is a Liechtenstein-law (TVTG) confirmation, not an equivalent of the German eWpG "
+        + "Registerauszug; review by Liechtenstein counsel is recommended.";
+
+    /**
+     * Resolves the register-document profile (title / legal basis / labeling) for a
+     * holder's self-service register-document download, given the asset's jurisdiction
+     * and whether this specific holder entry is individual (Einzeleintragung, §17(2)
+     * eWpG) or collective (Sammeleintragung / nominee custody). A null jurisdiction
+     * (legacy/incomplete asset data) defaults to DE_EWPG, the registry's home
+     * jurisdiction.
+     *
+     * <p>Only DE_EWPG-individual and FR_AMF-individual are wired as {@code statutory}
+     * — see {@link RegisterDocumentProfile}.
+     */
+    public RegisterDocumentProfile resolveRegisterDocumentProfile(Jurisdiction jurisdiction, boolean individualEntry) {
+        Jurisdiction effective = jurisdiction != null ? jurisdiction : Jurisdiction.DE_EWPG;
+        return switch (effective) {
+            case DE_EWPG -> individualEntry
+                    ? new RegisterDocumentProfile("REGISTERAUSZUG", "Registerauszug",
+                        "Register statement pursuant to § 19 eWpG (Gesetz über elektronische Wertpapiere)",
+                        null, true)
+                    : new RegisterDocumentProfile("BESTANDSBESTAETIGUNG", "Bestandsbestätigung / Holding confirmation",
+                        "Holding confirmation for a collectively held (Sammeleintragung) position — "
+                        + "not a § 19 eWpG register statement",
+                        NOMINEE_DISCLAIMER, false);
+            case FR_AMF -> individualEntry
+                    ? new RegisterDocumentProfile("ATTESTATION_INSCRIPTION_COMPTE", "Attestation d'inscription en compte",
+                        "Attestation pursuant to Art. L211-3 et seq. Code monétaire et financier (régime DEEP, Loi PACTE)",
+                        null, true)
+                    : new RegisterDocumentProfile("CONFIRMATION_DETENTION", "Confirmation de détention / Holding confirmation",
+                        "Holding confirmation for a collectively held (nominee) position — "
+                        + "not an individual account-registration attestation",
+                        NOMINEE_DISCLAIMER, false);
+            case LU_CSSF -> new RegisterDocumentProfile(
+                    individualEntry ? "ATTESTATION_DETENTION_LU" : "CONFIRMATION_DETENTION_COLLECTIVE_LU",
+                    individualEntry ? "Attestation de détention de titres" : "Confirmation de détention (dépôt collectif)",
+                    "Confirmation based on the loi du 6 avril 2013 relative à la dématérialisation and applicable "
+                    + "Luxembourg DLT laws",
+                    individualEntry ? LOCAL_COUNSEL_REVIEW_NOTE_LU : LOCAL_COUNSEL_REVIEW_NOTE_LU + " " + NOMINEE_DISCLAIMER,
+                    false);
+            case LI_TVTG -> new RegisterDocumentProfile(
+                    individualEntry ? "TOKEN_BESTAETIGUNG_LI" : "TOKEN_BESTAETIGUNG_COLLECTIVE_LI",
+                    individualEntry ? "Token-Bestätigung / Confirmation of token holding" : "Token-Bestätigung (Sammelverwahrung)",
+                    "Confirmation under the Liechtenstein TVTG (Token- und VT-Dienstleister-Gesetz) token-container model",
+                    individualEntry ? LOCAL_COUNSEL_REVIEW_NOTE_LI : LOCAL_COUNSEL_REVIEW_NOTE_LI + " " + NOMINEE_DISCLAIMER,
+                    false);
+        };
+    }
+
     // ── Germany — eWpG / BaFin ────────────────────────────────────────────────
 
     private static final ComplianceMetadata DE_EWPG_COMPLIANCE = new ComplianceMetadata(
@@ -88,7 +162,11 @@ public class JurisdictionRequirementConfig {
         Duration.ofDays(365),
         25.0,   // GwG §3 Abs. 2 — 25% beneficial owner threshold
         Duration.ofDays(365 * 10), // eWpG §15(3) — 10-year retention for registry entries
-        "EUR", 1000.0
+        // eWpG's Sammelverwahrung (collective custody) concept already recognizes a custodian
+        // holding electronic securities in one account on behalf of tracked beneficial owners —
+        // the natural basis for a nominee/omnibus DeFi bridge. No MiFID II exemption exists for
+        // an anonymous, unlicensed pool holding the security directly.
+        DefiInteropModel.NOMINEE_POOL, false
     );
 
     private static final ComplianceMetadata LU_CSSF_COMPLIANCE = new ComplianceMetadata(
@@ -100,7 +178,10 @@ public class JurisdictionRequirementConfig {
         Duration.ofDays(365),
         25.0,
         Duration.ofDays(365 * 5), // AML Law 2004 Art. 4 — 5 years minimum
-        "EUR", 1000.0
+        // Luxembourg custodian/depositary structures (CSSF-supervised) can hold securities in
+        // omnibus form on behalf of underlying clients; same nominee basis as DE_EWPG. No
+        // permissionless-pool exemption under MiFID II.
+        DefiInteropModel.NOMINEE_POOL, false
     );
 
     private static final ComplianceMetadata FR_AMF_COMPLIANCE = new ComplianceMetadata(
@@ -112,7 +193,9 @@ public class JurisdictionRequirementConfig {
         Duration.ofDays(365),
         25.0,
         Duration.ofDays(365 * 5), // LCB-FT — 5 years
-        "EUR", 1000.0
+        // French custodian-account holder (teneur de compte-conservation) regime already
+        // supports nominee/omnibus holding under the CMF; same basis as DE_EWPG/LU_CSSF.
+        DefiInteropModel.NOMINEE_POOL, false
     );
 
     private static final ComplianceMetadata LI_TVTG_COMPLIANCE = new ComplianceMetadata(
@@ -124,7 +207,10 @@ public class JurisdictionRequirementConfig {
         Duration.ofDays(365),
         25.0,   // SPG (Due Diligence Act) — 25% threshold
         Duration.ofDays(365 * 10), // TVTG §33 — 10-year retention
-        "EUR", 1000.0  // TVTG adopts EU TFR threshold
+        // TVTG's token-container model separates the legal right from the token and explicitly
+        // contemplates a licensed VT Service Provider acting as an intermediary/custodian —
+        // the same nominee basis as the other three jurisdictions.
+        DefiInteropModel.NOMINEE_POOL, false
     );
 
     private JurisdictionProfile buildDeEwpg() {

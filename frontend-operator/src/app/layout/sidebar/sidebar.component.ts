@@ -1,8 +1,9 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { environment } from '../../../environments/environment';
+import { AuthService } from '../../core/auth/auth.service';
 
 interface NavItem {
   label: string;
@@ -13,6 +14,8 @@ interface NavItem {
 interface NavSection {
   label: string;
   items: NavItem[];
+  /** Section is shown if the user has ANY of these roles; omit to show to everyone. */
+  roles?: string[];
 }
 
 @Component({
@@ -53,7 +56,7 @@ interface NavSection {
         font-size: 18px;
         width: 18px;
         height: 18px;
-        color: #07091A;
+        color: var(--rw-accent-contrast);
       }
     }
 
@@ -172,7 +175,7 @@ interface NavSection {
       &:hover {
         background: rgba(245,158,11,0.16);
         border-color: rgba(245,158,11,0.4);
-        color: #F59E0B;
+        color: var(--rw-accent);
       }
     }
   `],
@@ -190,7 +193,7 @@ interface NavSection {
     </div>
 
     <nav class="nav-section">
-      @for (section of navSections; track section.label) {
+      @for (section of visibleSections; track section.label) {
         <div class="nav-section-label">{{ section.label }}</div>
         @for (item of section.items; track item.route) {
           <a
@@ -219,6 +222,8 @@ interface NavSection {
   `,
 })
 export class SidebarComponent {
+  private readonly auth = inject(AuthService);
+
   readonly customerUrl = environment.customerUrl;
   readonly navSections: NavSection[] = [
     {
@@ -229,6 +234,7 @@ export class SidebarComponent {
     },
     {
       label: 'Registry',
+      roles: ['REGISTRY_ADMIN', 'AUDIT'],
       items: [
         { label: 'Assets',     icon: 'account_balance_wallet', route: '/assets' },
         { label: 'Customers',  icon: 'people_outline',         route: '/customers' },
@@ -238,9 +244,11 @@ export class SidebarComponent {
     },
     {
       label: 'Compliance',
+      roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'],
       items: [
         { label: 'Screening',      icon: 'policy',                    route: '/compliance/screening' },
         { label: 'Holder Blocks',  icon: 'gavel',                     route: '/compliance/holder-blocks' },
+        { label: 'Token Admin Grants', icon: 'admin_panel_settings',  route: '/compliance/token-admin-grants' },
         { label: 'CASP Register',  icon: 'verified_user',             route: '/compliance/casp-register' },
         { label: 'DORA',           icon: 'security_update_warning',   route: '/compliance/dora' },
         { label: 'Reporting',      icon: 'assessment',                route: '/compliance/reporting' },
@@ -249,7 +257,19 @@ export class SidebarComponent {
       ],
     },
     {
+      label: 'Ecosystem',
+      roles: ['REGISTRY_ADMIN'],
+      items: [
+        { label: 'Organizations', icon: 'domain',        route: '/organizations' },
+        { label: 'Permissions',   icon: 'verified_user', route: '/permissions' },
+        { label: 'Payment Rails', icon: 'payments',      route: '/payment-rails' },
+        { label: 'dApp Review',   icon: 'rate_review',   route: '/dapp-review' },
+        { label: 'dApp Catalog',  icon: 'storefront',    route: '/dapp-catalog' },
+      ],
+    },
+    {
       label: 'Infrastructure',
+      roles: ['REGISTRY_ADMIN'],
       items: [
         { label: 'Wallets',       icon: 'wallet',    route: '/wallets' },
         { label: 'Network Nodes', icon: 'cable',     route: '/network-nodes' },
@@ -258,4 +278,10 @@ export class SidebarComponent {
       ],
     },
   ];
+
+  get visibleSections(): NavSection[] {
+    return this.navSections.filter(
+      (section) => !section.roles || section.roles.some((role) => this.auth.hasRole(role)),
+    );
+  }
 }

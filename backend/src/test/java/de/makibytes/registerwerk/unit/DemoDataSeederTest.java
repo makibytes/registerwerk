@@ -7,6 +7,15 @@ import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.GasSponsorshipPolicyRepository;
+import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
+import de.makibytes.registerwerk.dora.api.IctIncidentRepository;
+import de.makibytes.registerwerk.dora.api.ThirdPartyProviderRepository;
+import de.makibytes.registerwerk.dora.api.ResilienceTestRepository;
+import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
+import de.makibytes.registerwerk.kyc.api.KycDocumentContentRepository;
+import de.makibytes.registerwerk.kyc.api.KycJurisdictionApprovalRepository;
+import de.makibytes.registerwerk.kyc.api.HolderBlockRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
@@ -50,7 +59,16 @@ class DemoDataSeederTest {
     @Mock private TradeExecutionRepository tradeExecutionRepository;
     @Mock private ChainConfigRepository chainConfigRepository;
     @Mock private RpcNodeRepository rpcNodeRepository;
+    @Mock private GasSponsorshipPolicyRepository gasSponsorshipPolicyRepository;
+    @Mock private TokenTransferRepository tokenTransferRepository;
+    @Mock private IctIncidentRepository ictIncidentRepository;
+    @Mock private ThirdPartyProviderRepository thirdPartyProviderRepository;
+    @Mock private ResilienceTestRepository resilienceTestRepository;
     @Mock private PasswordEncoder passwordEncoder;
+    @Mock private KycDocumentRepository kycDocumentRepository;
+    @Mock private KycDocumentContentRepository kycDocumentContentRepository;
+    @Mock private KycJurisdictionApprovalRepository kycJurisdictionApprovalRepository;
+    @Mock private HolderBlockRepository holderBlockRepository;
 
     private DemoDataSeeder seeder;
 
@@ -66,7 +84,16 @@ class DemoDataSeederTest {
                 tradeExecutionRepository,
                 chainConfigRepository,
                 rpcNodeRepository,
-                passwordEncoder
+                gasSponsorshipPolicyRepository,
+                tokenTransferRepository,
+                ictIncidentRepository,
+                thirdPartyProviderRepository,
+                resilienceTestRepository,
+                passwordEncoder,
+                kycDocumentRepository,
+                kycDocumentContentRepository,
+                kycJurisdictionApprovalRepository,
+                holderBlockRepository
         );
     }
 

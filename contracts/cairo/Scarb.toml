@@ -13,8 +13,9 @@ sierra = true
 starknet = ">=2.8.0"
 
 [dev-dependencies]
-# snforge >= 0.31 supports Cairo 2.8 and the cheat_caller_address / DeclareResultTrait API.
-snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.31.0" }
+# Keep in lockstep with the installed snforge runner (`snforge --version`); the registry
+# package replaces the old git-tag pin, which pulled in the whole starknet-foundry workspace.
+snforge_std = "0.61.0"
 
 [tool.snforge]
 exit_first = false

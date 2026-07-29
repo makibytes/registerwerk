@@ -1,3 +1,9 @@
+{{- if not .Values.postgresql.host }}
+{{- fail "postgresql.host is required — set it to the main registerwerk chart's postgresql Service name (typically \"<release-name>-postgresql\"). See values.yaml for why this can't be derived automatically." }}
+{{- end }}
+{{- if not .Values.postgresql.pvcName }}
+{{- fail "postgresql.pvcName is required — set it to the main chart's postgresql data PVC name." }}
+{{- end }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -16,6 +22,7 @@ spec:
       backoffLimit: 2
       template:
         spec:
+          serviceAccountName: registerwerk-backup
           restartPolicy: OnFailure
           containers:
             - name: wal-g-backup
@@ -26,15 +33,24 @@ spec:
                 - |
                   set -e
                   echo "Starting WAL-G backup $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                  wal-g backup-push /var/lib/postgresql/data
-                  echo "Backup complete. Purging old backups (retain 14 days)..."
-                  wal-g delete retain FULL 14 --confirm
+                  # Bitnami's postgresql subchart mounts its data PVC at /bitnami/postgresql
+                  # (PGDATA=/bitnami/postgresql/data) — previously this pointed at
+                  # /var/lib/postgresql/data, one directory level above the actual PGDATA,
+                  # which would have failed at runtime even once PGHOST/DB_USER were fixed.
+                  wal-g backup-push /bitnami/postgresql/data
+                  echo "Backup complete. Purging old backups (retain {{ .Values.backup.retainFullBackups }} days)..."
+                  wal-g delete retain FULL {{ .Values.backup.retainFullBackups }} --confirm
                   echo "Done."
+                  {{- if .Values.monitoring.pushgatewayUrl }}
+                  curl -s -X POST --data-binary "backup_last_success_timestamp $(date +%s)" \
+                    "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_pg_backup" \
+                    || echo "WARNING: backup succeeded but pushing the success metric failed"
+                  {{- end }}
               env:
                 - name: PGHOST
-                  value: "{{ .Release.Namespace }}-postgresql"
+                  value: {{ .Values.postgresql.host | quote }}
                 - name: PGPORT
-                  value: "5432"
+                  value: {{ .Values.postgresql.port | quote }}
                 - name: PGUSER
                   valueFrom:
                     secretKeyRef:
@@ -46,7 +62,7 @@ spec:
                       name: registerwerk-secrets
                       key: DB_PASSWORD
                 - name: PGDATABASE
-                  value: registerwerk
+                  value: {{ .Values.postgresql.database | quote }}
                 - name: WALG_S3_PREFIX
                   value: "s3://{{ .Values.backup.s3Bucket }}/wal-g"
                 - name: AWS_REGION
@@ -55,6 +71,22 @@ spec:
                   value: lz4
                 - name: WALG_DELTA_MAX_STEPS
                   value: "6"
+                {{- if not .Values.s3Credentials.useIrsa }}
+                # Static credentials — only used when useIrsa is false (non-EKS/GKE/AKS
+                # clusters without workload identity federation). Previously WALG_S3_PREFIX
+                # was set with no credentials path at all, so this job had no way to
+                # authenticate to S3 either way.
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: registerwerk-secrets
+                      key: {{ .Values.s3Credentials.awsAccessKeyIdSecretKey }}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: registerwerk-secrets
+                      key: {{ .Values.s3Credentials.awsSecretAccessKeySecretKey }}
+                {{- end }}
               resources:
                 requests:
                   cpu: 100m
@@ -64,9 +96,16 @@ spec:
                   memory: 512Mi
               volumeMounts:
                 - name: pgdata
-                  mountPath: /var/lib/postgresql/data
+                  mountPath: /bitnami/postgresql
                   readOnly: true
+          # WAL-G reads PGDATA directly off this PVC while also talking to the live Postgres
+          # over PGHOST/PGPORT to coordinate the backup — both must be the SAME underlying
+          # data. A ReadWriteOnce PVC (the Bitnami chart's default) can only attach to pods on
+          # the same node, so this CronJob's pod must land on whichever node the postgresql
+          # primary pod is already scheduled to; nothing here pins that automatically. If your
+          # cluster's CSI driver doesn't support multi-attach even read-only on one node,
+          # add a nodeSelector/podAffinity here matching the postgresql primary pod's node.
           volumes:
             - name: pgdata
               persistentVolumeClaim:
-                claimName: data-registerwerk-postgresql-0
+                claimName: {{ .Values.postgresql.pvcName }}

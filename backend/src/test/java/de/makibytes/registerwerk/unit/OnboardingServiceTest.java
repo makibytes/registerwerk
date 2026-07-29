@@ -2,10 +2,13 @@ package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.onboarding.internal.OnboardingService;
 import de.makibytes.registerwerk.auth.AuthApi;
+import de.makibytes.registerwerk.auth.api.AppUser;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.onboarding.api.OnboardingToken;
+import de.makibytes.registerwerk.onboarding.events.OnboardingCompletedEvent;
+import de.makibytes.registerwerk.onboarding.events.OnboardingTokenIssuedEvent;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
@@ -23,12 +26,14 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -94,6 +99,12 @@ class OnboardingServiceTest {
         return token;
     }
 
+    private static AppUser buildAdmin() {
+        AppUser admin = new AppUser();
+        admin.setId(UUID.randomUUID());
+        return admin;
+    }
+
     // ── generateToken ─────────────────────────────────────────────────────────
 
     @Test
@@ -134,6 +145,20 @@ class OnboardingServiceTest {
         assertThat(expiresAt)
             .isAfter(now.plus(47, ChronoUnit.HOURS))
             .isBefore(now.plus(49, ChronoUnit.HOURS));
+    }
+
+    @Test
+    @DisplayName("generateToken refuses to issue a token for a CLOSED or DISSOLVED legal entity (finding #14)")
+    void generateToken_refusesForWoundDownEntity() {
+        for (EntityStatus status : List.of(EntityStatus.CLOSED, EntityStatus.DISSOLVED)) {
+            LegalEntity entity = buildEntity();
+            entity.setStatus(status);
+            when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
+
+            assertThatThrownBy(() -> onboardingService.generateToken(entity.getId(), UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class);
+        }
+        verify(onboardingTokenRepository, org.mockito.Mockito.never()).save(any());
     }
 
     // ── validateToken ─────────────────────────────────────────────────────────
@@ -196,6 +221,7 @@ class OnboardingServiceTest {
         when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
         when(onboardingTokenRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(authApi.createInitialCompanyAdmin(any(), any(), any(), any(), anyBoolean())).thenReturn(buildAdmin());
 
         onboardingService.completeOnboarding(cleartext, "admin@test.local", "Jane Admin", "Sup3rSecret!", UUID.randomUUID());
 
@@ -221,10 +247,88 @@ class OnboardingServiceTest {
         when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
         when(onboardingTokenRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(authApi.createInitialCompanyAdmin(any(), any(), any(), any(), anyBoolean())).thenReturn(buildAdmin());
 
         onboardingService.completeOnboarding(cleartext, "admin@test.local", "Jane Admin", "Sup3rSecret!", UUID.randomUUID());
 
         assertThat(entity.getStatus()).isEqualTo(EntityStatus.ACTIVE);
         verify(legalEntityRepository).save(entity);
+    }
+
+    @Test
+    @DisplayName("completeOnboarding publishes OnboardingCompletedEvent with the newly created admin's user id (finding #8)")
+    void completeOnboarding_publishesEventWithAdminUserId() {
+        UUID entityId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        String cleartext = "eventtoken";
+        String hash = sha256Hex(cleartext);
+
+        OnboardingToken token = buildValidToken(entityId);
+        token.setTokenHash(hash);
+
+        LegalEntity entity = buildEntity();
+        entity.setId(entityId);
+
+        AppUser admin = buildAdmin();
+
+        when(onboardingTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(token));
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+        when(onboardingTokenRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(authApi.createInitialCompanyAdmin(any(), any(), any(), any(), anyBoolean())).thenReturn(admin);
+
+        onboardingService.completeOnboarding(cleartext, "admin@test.local", "Jane Admin", "Sup3rSecret!", actorId);
+
+        ArgumentCaptor<OnboardingCompletedEvent> captor = ArgumentCaptor.forClass(OnboardingCompletedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().entityId()).isEqualTo(entityId);
+        assertThat(captor.getValue().adminUserId()).isEqualTo(admin.getId());
+        assertThat(captor.getValue().actorId()).isEqualTo(actorId);
+    }
+
+    @Test
+    @DisplayName("completeOnboarding refuses to reactivate an entity that is not PENDING_ONBOARDING (finding #14)")
+    void completeOnboarding_refusesWhenEntityNotPendingOnboarding() {
+        UUID entityId = UUID.randomUUID();
+        String cleartext = "staletoken";
+        String hash = sha256Hex(cleartext);
+
+        OnboardingToken token = buildValidToken(entityId);
+        token.setTokenHash(hash);
+
+        LegalEntity entity = buildEntity();
+        entity.setId(entityId);
+        entity.setStatus(EntityStatus.CLOSED);
+
+        when(onboardingTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(token));
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+        when(onboardingTokenRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThatThrownBy(() -> onboardingService.completeOnboarding(
+                cleartext, "admin@test.local", "Jane Admin", "Sup3rSecret!", UUID.randomUUID()))
+            .isInstanceOf(IllegalStateException.class);
+
+        assertThat(entity.getStatus()).isEqualTo(EntityStatus.CLOSED);
+        verify(legalEntityRepository, org.mockito.Mockito.never()).save(any());
+    }
+
+    // ── generateToken audit event ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("generateToken publishes OnboardingTokenIssuedEvent (finding #8 — previously dead code)")
+    void generateToken_publishesTokenIssuedEvent() {
+        LegalEntity entity = buildEntity();
+        UUID issuedBy = UUID.randomUUID();
+        when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
+        when(onboardingTokenRepository.findByLegalEntityIdAndUsedAtIsNull(entity.getId()))
+            .thenReturn(Optional.empty());
+        when(onboardingTokenRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        onboardingService.generateToken(entity.getId(), issuedBy);
+
+        ArgumentCaptor<OnboardingTokenIssuedEvent> captor = ArgumentCaptor.forClass(OnboardingTokenIssuedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().entityId()).isEqualTo(entity.getId());
+        assertThat(captor.getValue().actorId()).isEqualTo(issuedBy);
     }
 }

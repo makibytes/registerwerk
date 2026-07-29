@@ -4,13 +4,20 @@ import de.makibytes.registerwerk.dora.api.IctIncident;
 import de.makibytes.registerwerk.dora.api.IctIncident.Category;
 import de.makibytes.registerwerk.dora.api.IctIncident.Severity;
 import de.makibytes.registerwerk.dora.api.IctIncidentRepository;
+import de.makibytes.registerwerk.dora.api.ResilienceTest;
+import de.makibytes.registerwerk.dora.api.ResilienceTestRepository;
 import de.makibytes.registerwerk.dora.api.ThirdPartyProvider;
 import de.makibytes.registerwerk.dora.api.ThirdPartyProviderRepository;
+import de.makibytes.registerwerk.dora.events.IctIncidentReportedEvent;
+import de.makibytes.registerwerk.dora.events.IctIncidentStatusChangedEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +25,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -28,7 +36,9 @@ import java.util.UUID;
  *   intermediate report  — within 72h of the initial notification
  *   final report         — within 1 month of the intermediate report
  *
- * <p>This service tracks the two report milestones exposed by the API (initial/final).
+ * <p>This service tracks all three deadlines: the 4h-from-classification and 24h-from-
+ * awareness sub-deadlines (both gate the same initial notification — whichever falls due
+ * first is binding) and the final report milestone.
  * The final deadline is set conservatively to one month from detection — earlier than
  * the theoretical latest (24h + 72h + 1 month chained off submissions), so a met
  * deadline here is always compliant.
@@ -40,14 +50,33 @@ public class DoraService {
 
     private final IctIncidentRepository incidentRepository;
     private final ThirdPartyProviderRepository providerRepository;
+    private final ResilienceTestRepository resilienceTestRepository;
     private final ApplicationEventPublisher events;
 
-    DoraService(IctIncidentRepository incidentRepository,
+    public DoraService(IctIncidentRepository incidentRepository,
                 ThirdPartyProviderRepository providerRepository,
-                ApplicationEventPublisher events) {
+                ResilienceTestRepository resilienceTestRepository,
+                ApplicationEventPublisher events,
+                MeterRegistry meterRegistry) {
         this.incidentRepository = incidentRepository;
         this.providerRepository = providerRepository;
+        this.resilienceTestRepository = resilienceTestRepository;
         this.events = events;
+
+        // Live-queried at scrape time (all 4 are cheap indexed lookups the checkDeadlines() job
+        // already runs daily) rather than only updated once a day.
+        registerBreachGauge(meterRegistry, "classification", () -> incidentRepository.findOverdueClassificationReports(Instant.now()).size());
+        registerBreachGauge(meterRegistry, "initial_report", () -> incidentRepository.findOverdueInitialReports(Instant.now()).size());
+        registerBreachGauge(meterRegistry, "final_report", () -> incidentRepository.findOverdueFinalReports(Instant.now()).size());
+        registerBreachGauge(meterRegistry, "resilience_test", () -> resilienceTestRepository.findByNextDueDateBeforeOrderByNextDueDateAsc(LocalDate.now()).size());
+    }
+
+    private static void registerBreachGauge(MeterRegistry meterRegistry, String breachType,
+                                             java.util.function.Supplier<Integer> counter) {
+        Gauge.builder("registerwerk_dora_deadline_breaches", counter, c -> (double) c.get())
+                .tag("breach_type", breachType)
+                .description("Count of overdue DORA reporting deadlines/resilience tests, tagged by breach_type")
+                .register(meterRegistry);
     }
 
     @Transactional
@@ -68,7 +97,14 @@ public class DoraService {
         // DORA Art. 19 / RTS (EU) 2025/301 — compute deadlines for major incidents.
         // 72h is the INTERMEDIATE report deadline, not the final one; the final
         // root-cause report is due one month later. Conservative: from detection.
+        //
+        // Classification happens at report time in this model (there is no separate
+        // reclassification workflow yet) — so classifiedAt == detectedAt here, and the 4h
+        // deadline is the STRICTER of the two initial-notification sub-deadlines: it falls
+        // due 20 hours before the 24h-from-detection deadline below.
         if (severity == Severity.MAJOR) {
+            incident.setClassifiedAt(incident.getDetectedAt());
+            incident.setClassificationDeadline(incident.getDetectedAt().plus(4, ChronoUnit.HOURS));
             incident.setInitialReportDeadline(incident.getDetectedAt().plus(24, ChronoUnit.HOURS));
             incident.setFinalReportDeadline(incident.getDetectedAt().plus(30, ChronoUnit.DAYS));
         }
@@ -83,6 +119,7 @@ public class DoraService {
                                     String rootCause, String remediationSteps, UUID actorId) {
         IctIncident incident = incidentRepository.findById(incidentId)
                 .orElseThrow(() -> new EntityNotFoundException("IctIncident", incidentId));
+        IctIncident.Status previousStatus = incident.getStatus();
         incident.setStatus(newStatus);
         if (rootCause != null) incident.setRootCause(rootCause);
         if (remediationSteps != null) incident.setRemediationSteps(remediationSteps);
@@ -91,22 +128,33 @@ public class DoraService {
         if (newStatus == IctIncident.Status.REPORTED_TO_AUTHORITY && incident.getInitialReportedAt() == null) {
             incident.setInitialReportedAt(Instant.now());
         }
-        return incidentRepository.save(incident);
+        IctIncident saved = incidentRepository.save(incident);
+        events.publishEvent(new IctIncidentStatusChangedEvent(saved.getId(), actorId, "REGISTRY_ADMIN", Map.of(
+                "previousStatus", previousStatus.name(),
+                "newStatus", newStatus.name()
+        )));
+        return saved;
     }
 
     @Transactional
     public IctIncident markReportedToAuthority(UUID incidentId, String authorityRef,
-                                                boolean isFinalReport) {
+                                                boolean isFinalReport, UUID actorId) {
         IctIncident incident = incidentRepository.findById(incidentId)
                 .orElseThrow(() -> new EntityNotFoundException("IctIncident", incidentId));
         incident.setAuthorityRef(authorityRef);
+        incident.setReportedBy(actorId);
         if (!isFinalReport) {
             incident.setInitialReportedAt(Instant.now());
         } else {
             incident.setFinalReportedAt(Instant.now());
             incident.setStatus(IctIncident.Status.REPORTED_TO_AUTHORITY);
         }
-        return incidentRepository.save(incident);
+        IctIncident saved = incidentRepository.save(incident);
+        events.publishEvent(new IctIncidentReportedEvent(saved.getId(), actorId, "REGISTRY_ADMIN", Map.of(
+                "authorityRef", authorityRef != null ? authorityRef : "",
+                "isFinalReport", isFinalReport
+        )));
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -126,11 +174,54 @@ public class DoraService {
                 LocalDate.now().plusDays(90));
     }
 
+    // ── Resilience Testing (Art. 24/25) ───────────────────────────────────────
+
+    @Transactional
+    public ResilienceTest recordResilienceTest(ResilienceTest.TestType testType, String scope,
+                                                boolean tlptRequired, UUID thirdPartyProviderId,
+                                                LocalDate performedAt, LocalDate nextDueDate,
+                                                ResilienceTest.Result result, String findings,
+                                                String testerName, String reportRef, UUID createdBy) {
+        ResilienceTest test = new ResilienceTest();
+        test.setTestType(testType);
+        test.setScope(scope);
+        test.setTlptRequired(tlptRequired);
+        test.setThirdPartyProviderId(thirdPartyProviderId);
+        test.setPerformedAt(performedAt);
+        test.setNextDueDate(nextDueDate);
+        test.setResult(result);
+        test.setFindings(findings);
+        test.setTesterName(testerName);
+        test.setReportRef(reportRef);
+        test.setCreatedBy(createdBy);
+        ResilienceTest saved = resilienceTestRepository.save(test);
+        log.info("DORA resilience test recorded: id={} type={} scope={} result={}",
+                saved.getId(), testType, scope, result);
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public List<ResilienceTest> listResilienceTests() {
+        return resilienceTestRepository.findAllByOrderByPerformedAtDesc();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ResilienceTest> listOverdueResilienceTests() {
+        return resilienceTestRepository.findByNextDueDateBeforeOrderByNextDueDateAsc(LocalDate.now());
+    }
+
     /** Daily check for overdue DORA reporting deadlines. */
+    @SchedulerLock(name = "doraOverdueCheck", lockAtMostFor = "PT30M")
     @Scheduled(cron = "0 0 7 * * *")
     @Transactional(readOnly = true)
     public void checkDeadlines() {
         Instant now = Instant.now();
+        List<IctIncident> overdueClassification = incidentRepository.findOverdueClassificationReports(now);
+        if (!overdueClassification.isEmpty()) {
+            log.error("DORA DEADLINE BREACH: {} incident(s) have missed the 4h classification-to-report deadline: {}",
+                    overdueClassification.size(),
+                    overdueClassification.stream().map(i -> i.getId().toString()).toList());
+        }
         List<IctIncident> overdueInitial = incidentRepository.findOverdueInitialReports(now);
         if (!overdueInitial.isEmpty()) {
             log.error("DORA DEADLINE BREACH: {} incident(s) have missed the 24h initial report deadline: {}",
@@ -142,6 +233,13 @@ public class DoraService {
             log.error("DORA DEADLINE BREACH: {} incident(s) have missed the final report deadline (1 month): {}",
                     overdueFinal.size(),
                     overdueFinal.stream().map(i -> i.getId().toString()).toList());
+        }
+        List<ResilienceTest> overdueTests = resilienceTestRepository
+                .findByNextDueDateBeforeOrderByNextDueDateAsc(LocalDate.now());
+        if (!overdueTests.isEmpty()) {
+            log.error("DORA DEADLINE BREACH: {} resilience test(s) are overdue for re-testing (Art. 24/25): {}",
+                    overdueTests.size(),
+                    overdueTests.stream().map(t -> t.getId().toString()).toList());
         }
     }
 }

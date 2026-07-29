@@ -76,10 +76,13 @@ public class ClaimIssuanceService {
      * @param legalEntityId ID of the legal entity to receive the claim
      * @param chainConfigId ID of the chain configuration
      * @param expiresAt     optional expiry; {@code null} means no expiry
+     * @param actorId       ID of the user issuing the claim (for audit)
+     * @param actorRole     role of the user issuing the claim (for audit)
      * @return the persisted {@link OnchainClaim}
      */
-    public OnchainClaim issueKycClaim(UUID legalEntityId, UUID chainConfigId, Instant expiresAt) {
-        return issueClaim(legalEntityId, chainConfigId, CLAIM_TOPIC_KYC, "KYC", expiresAt);
+    public OnchainClaim issueKycClaim(UUID legalEntityId, UUID chainConfigId, Instant expiresAt,
+                                      UUID actorId, String actorRole) {
+        return issueClaim(legalEntityId, chainConfigId, CLAIM_TOPIC_KYC, "KYC", expiresAt, actorId, actorRole);
     }
 
     /**
@@ -90,10 +93,12 @@ public class ClaimIssuanceService {
      *
      * @param legalEntityId ID of the legal entity to receive the claim
      * @param chainConfigId ID of the chain configuration
+     * @param actorId       ID of the user issuing the claim (for audit)
+     * @param actorRole     role of the user issuing the claim (for audit)
      * @return the persisted {@link OnchainClaim}
      */
-    public OnchainClaim issueAmlClaim(UUID legalEntityId, UUID chainConfigId) {
-        return issueClaim(legalEntityId, chainConfigId, CLAIM_TOPIC_AML, "AML", null);
+    public OnchainClaim issueAmlClaim(UUID legalEntityId, UUID chainConfigId, UUID actorId, String actorRole) {
+        return issueClaim(legalEntityId, chainConfigId, CLAIM_TOPIC_AML, "AML", null, actorId, actorRole);
     }
 
     /**
@@ -105,15 +110,19 @@ public class ClaimIssuanceService {
      * @param topic         claim topic number
      * @param topicLabel    human-readable label (e.g. "ACCREDITATION")
      * @param expiresAt     optional expiry; {@code null} means no expiry
+     * @param actorId       ID of the user issuing the claim (for audit)
+     * @param actorRole     role of the user issuing the claim (for audit)
      * @return the persisted {@link OnchainClaim}
      */
     public OnchainClaim issueCustomClaim(
-            UUID legalEntityId, UUID chainConfigId, long topic, String topicLabel, Instant expiresAt) {
-        return issueClaim(legalEntityId, chainConfigId, topic, topicLabel, expiresAt);
+            UUID legalEntityId, UUID chainConfigId, long topic, String topicLabel, Instant expiresAt,
+            UUID actorId, String actorRole) {
+        return issueClaim(legalEntityId, chainConfigId, topic, topicLabel, expiresAt, actorId, actorRole);
     }
 
     private OnchainClaim issueClaim(
-            UUID legalEntityId, UUID chainConfigId, long topic, String topicLabel, Instant expiresAt) {
+            UUID legalEntityId, UUID chainConfigId, long topic, String topicLabel, Instant expiresAt,
+            UUID actorId, String actorRole) {
         log.info("Issuing claim (topic={}, label={}) for entity={} on chain={}",
             topic, topicLabel, legalEntityId, chainConfigId);
 
@@ -122,12 +131,12 @@ public class ClaimIssuanceService {
             .orElseThrow(() -> new EntityNotFoundException(
                 "OnchainIdentity for entity " + legalEntityId + " on chain", chainConfigId));
 
-        deploymentService.issueKycClaim(identity.getId(), topic);
+        deploymentService.issueKycClaim(identity.getId(), topic, expiresAt);
 
         OnchainClaim claim = buildClaimRecord(identity, chainConfigId, topic, topicLabel, expiresAt);
         OnchainClaim saved = claimRepository.save(claim);
 
-        eventPublisher.publishEvent(new ClaimIssuedEvent(saved.getId(), null, "REGISTRY_ADMIN", java.util.Map.of()));
+        eventPublisher.publishEvent(new ClaimIssuedEvent(saved.getId(), actorId, actorRole, java.util.Map.of()));
 
         return saved;
     }
@@ -139,8 +148,10 @@ public class ClaimIssuanceService {
      * and transfers will be blocked until a new valid claim is issued.
      *
      * @param claimId ID of the {@link OnchainClaim} to revoke
+     * @param actorId   ID of the user revoking the claim (for audit)
+     * @param actorRole role of the user revoking the claim (for audit)
      */
-    public void revokeClaim(UUID claimId) {
+    public void revokeClaim(UUID claimId, UUID actorId, String actorRole) {
         log.info("Revoking claim={}", claimId);
 
         OnchainClaim claim = claimRepository.findById(claimId)
@@ -156,7 +167,7 @@ public class ClaimIssuanceService {
         claim.setRevokedAt(Instant.now());
         claimRepository.save(claim);
 
-        eventPublisher.publishEvent(new ClaimRevokedEvent(claimId, null, "REGISTRY_ADMIN", java.util.Map.of()));
+        eventPublisher.publishEvent(new ClaimRevokedEvent(claimId, actorId, actorRole, java.util.Map.of()));
     }
 
     /**

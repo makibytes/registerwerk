@@ -222,7 +222,13 @@ interface BuyForm {
                               </div>
                             </td>
                             <td>
-                              <button mat-flat-button color="primary" (click)="selectOffer(offer)">Buy</button>
+                              @if (isExecutable(offer)) {
+                                <button mat-flat-button color="primary" (click)="selectOffer(offer)">Buy</button>
+                              } @else {
+                                <span class="readiness-only" matTooltip="This venue is connected for price discovery only — Registerwerk cannot yet execute an order against it.">
+                                  Readiness only
+                                </span>
+                              }
                             </td>
                           </tr>
                         }
@@ -596,6 +602,7 @@ interface BuyForm {
     .asset-cell, .venue-cell { display: flex; flex-direction: column; gap: 2px; }
     .asset-cell span, .venue-cell span { color: var(--rw-text-secondary); font-size: 12px; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .readiness-only { font-size: 11.5px; color: var(--rw-text-muted); cursor: help; white-space: nowrap; }
     .action-card, .filter-card, .summary-card { border: 1px solid var(--rw-border); }
     .warning-card { border-left: 4px solid var(--rw-accent); }
     .warning-line { display: flex; gap: 12px; align-items: flex-start; }
@@ -728,6 +735,19 @@ export class TradingDeskComponent implements OnInit {
 
   get connectedVenueCount(): number {
     return this.venues.filter(venue => venue.connected).length;
+  }
+
+  /**
+   * Whether `offer` can actually be bought through Registerwerk. Read-only venues (Archax,
+   * Talos, …) are only connected for price-discovery aggregation in the marketplace table —
+   * `buy()` has no corresponding TradeListing row for their offers and would reject the
+   * request. Also gates IOC/FOK order types out of reach in the UI: only the executable
+   * SIMULATED venue is wired to `TradingService.buy()`, and it only ever advertises
+   * MARKET/LIMIT — external venues' own IOC/FOK support was otherwise selectable here despite
+   * never being executable.
+   */
+  isExecutable(offer: TradingOffer): boolean {
+    return this.venues.some(venue => venue.code === offer.venueCode && venue.executable);
   }
 
   selectOffer(offer: TradingOffer): void {

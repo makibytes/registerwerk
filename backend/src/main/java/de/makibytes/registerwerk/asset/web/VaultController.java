@@ -10,6 +10,7 @@ import de.makibytes.registerwerk.deployment.api.VaultNavStrikeRepository;
 import de.makibytes.registerwerk.deployment.api.VaultRequest;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -52,7 +53,7 @@ public class VaultController {
         UUID actorId = actorIdFrom(auth);
         UUID txId = erc4626AdminService.strikeNav(
                 depId, request.navPerShare(), request.effectiveAt(),
-                null, request.reportDocId(), actorId);
+                null, request.reportDocId(), actorId, SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
@@ -78,7 +79,8 @@ public class VaultController {
             @PathVariable BigInteger requestId,
             @Valid @RequestBody FulfillVaultRequestBody body,
             Authentication auth) {
-        UUID txId = erc7540AdminService.fulfillDepositRequest(depId, requestId, body.navAtFulfill(), actorIdFrom(auth));
+        UUID txId = erc7540AdminService.fulfillDepositRequest(depId, requestId, body.navAtFulfill(),
+                actorIdFrom(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
@@ -87,7 +89,7 @@ public class VaultController {
             @PathVariable UUID depId,
             @PathVariable BigInteger requestId,
             Authentication auth) {
-        UUID txId = erc7540AdminService.cancelDepositRequest(depId, requestId, actorIdFrom(auth));
+        UUID txId = erc7540AdminService.cancelDepositRequest(depId, requestId, actorIdFrom(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
@@ -98,4 +100,5 @@ public class VaultController {
             return UUID.nameUUIDFromBytes(auth.getName().getBytes());
         }
     }
+
 }

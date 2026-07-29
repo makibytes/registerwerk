@@ -1,0 +1,131 @@
+{
+  "$schema": "./registry.schema.json",
+  "schemaVersion": 1,
+  "registryRevision": 3,
+  "generatedAt": "2026-07-29",
+  "historyPath": "docs/claims/registry.history.json",
+  "suppressionsPath": "docs/claims/suppressions.json",
+  "externalApprovalEnabled": false,
+  "claims": [
+    {
+      "id": "RW-CLAIM-0001",
+      "statement": "In the reviewed EVM contract version, an ERC-3525 address-form value transfer decreases the source exactly once and creates an equal destination value; this technical result does not establish indexed or legal-register reconciliation.",
+      "path": "docs/claims/README.md",
+      "textSha256": "cdb9b11eee71b84e85766204363e55a731d5dbe8db1a1796950e80af6daec305",
+      "recordSha256": "827a033e9f250c855d945feeff1e4070b8e23bd6d5ea6eaba81568079b93bcd3",
+      "category": "SETTLEMENT",
+      "status": "SELF_ASSESSED_UNREVIEWED",
+      "scope": "Current Solidity implementation and regression test only.",
+      "owner": "Protocol engineering",
+      "reviewedBy": "UNREVIEWED — automated self-assessment, no human or panel review",
+      "reviewedAt": "2026-07-29",
+      "expiresAt": "2026-10-29",
+      "evidence": [
+        {
+          "type": "REPOSITORY",
+          "reference": "contracts/src/standards/erc3525/ERC3525.sol",
+          "sha256": "f8d52330e66876f3393ae899aec47a0acd104cff766bb378892c7558505bc408"
+        },
+        {
+          "type": "TEST",
+          "reference": "contracts/test/EwpgERC3525Test.t.sol",
+          "sha256": "ed9fc1571f522fe96c266ec6e3b75a1c06ee3a03f09022d9b5dbdfa9412f873d",
+          "ciCommandId": "contract-erc3525"
+        }
+      ],
+      "limitations": [
+        "Does not prove indexed state, finality, deployed bytecode identity, or legal-register reconciliation."
+      ]
+    },
+    {
+      "id": "RW-CLAIM-0002",
+      "statement": "The regulatory-reporting module produces only opt-in, non-production DRAFT_UNVALIDATED prototype documents; a successful SFTP write is transport evidence, not authority filing or acceptance.",
+      "path": "docs/claims/README.md",
+      "textSha256": "0587035f080dfa5b3d79c3f57ebecac43cda757ae567ccc9ebf5c7d2913c0190",
+      "recordSha256": "550217ff70bc1f5c42138cad906ecbc83581dc1019286270d10632f0c84a3440",
+      "category": "OPERATIONS",
+      "status": "SELF_ASSESSED_UNREVIEWED",
+      "scope": "Repository defaults, readiness guard, draft payload marker, and transport-state model.",
+      "owner": "Backend engineering",
+      "reviewedBy": "UNREVIEWED — automated self-assessment, no human or panel review",
+      "reviewedAt": "2026-07-29",
+      "expiresAt": "2026-10-29",
+      "evidence": [
+        {
+          "type": "REPOSITORY",
+          "reference": "backend/src/main/resources/application.yml",
+          "sha256": "304a0e573d28383f9a9f78594f925aa5d60d5c12861f7e9718cbba5cc488672e"
+        },
+        {
+          "type": "TEST",
+          "reference": "backend/src/test/java/de/makibytes/registerwerk/regreporting/internal/MifirReportingServiceTest.java",
+          "sha256": "a5f384c3a4b77711befda738314af0bd627694154886c6a3b7d346e43539153a",
+          "ciCommandId": "backend-regreporting"
+        },
+        {
+          "type": "TEST",
+          "reference": "backend/src/test/java/de/makibytes/registerwerk/regreporting/internal/Dac8ExportServiceTest.java",
+          "sha256": "b3990c2bf81f31e85cddbc66c31f7a318e8c2dc0d03354b3a755ae7cd6373866",
+          "ciCommandId": "backend-regreporting"
+        },
+        {
+          "type": "TEST",
+          "reference": "backend/src/test/java/de/makibytes/registerwerk/regreporting/internal/RegReportingProductionReadinessCheckTest.java",
+          "sha256": "120c8f72dbc27ec9944b2835532e5f0b7bf6bb975065787ab3f28e8708636b67",
+          "ciCommandId": "backend-regreporting"
+        },
+        {
+          "type": "TEST",
+          "reference": "backend/src/test/java/de/makibytes/registerwerk/regreporting/internal/RegReportSubmissionsTest.java",
+          "sha256": "62492db0165b461648866cde1b0d356bc8b7df3147bf3ac1b4abcfc059ce9882",
+          "ciCommandId": "backend-regreporting"
+        },
+        {
+          "type": "TEST",
+          "reference": "backend/src/test/java/de/makibytes/registerwerk/regreporting/internal/RegReportingTransportStatusMigrationIT.java",
+          "sha256": "3a35b1c816bddad301b16831346b8815f0792393b5e7f0fa221669a05bd25f50",
+          "ciCommandId": "backend-regreporting"
+        }
+      ],
+      "limitations": [
+        "No official schema, reportable population, reporting-entity decision, authority routing, authenticated receipt, corrections flow, or legal sign-off."
+      ]
+    },
+    {
+      "id": "RW-CLAIM-0003",
+      "statement": "The EVM subgraph gate validates configured ABI handler signatures and compiles every mapping; it does not prove deployed bytecode identity, chain finality, replay correctness, or legal effect.",
+      "path": "docs/claims/README.md",
+      "textSha256": "11aa4589b9d1f86d75771c1c6a7efa5ec085f5d6aee9c18c2b6f3fd0530c5fd6",
+      "recordSha256": "2022617bb0c62564880d42eb1598ab2d0d800039fdcc9a34e718344d83468847",
+      "category": "OPERATIONS",
+      "status": "SELF_ASSESSED_UNREVIEWED",
+      "scope": "Static EVM subgraph manifest, ABI, renderer, code generation, and mapping build gate.",
+      "owner": "Indexer engineering",
+      "reviewedBy": "UNREVIEWED — automated self-assessment, no human or panel review",
+      "reviewedAt": "2026-07-29",
+      "expiresAt": "2026-10-29",
+      "evidence": [
+        {
+          "type": "TEST",
+          "reference": "indexer/evm/subgraph/scripts/validate-abi-parity.mjs",
+          "sha256": "6b3fa5f4a4c68272f1932d5718f94bdbb7272aa465fe1ac05898315ab7a3dda0",
+          "ciCommandId": "indexer-subgraph"
+        },
+        {
+          "type": "TEST",
+          "reference": "indexer/evm/test-render-subgraph-manifest.sh",
+          "sha256": "99a34902852f491540165d15c20005a4ceee5c5da68c02c995b941f4afeee19a",
+          "ciCommandId": "indexer-subgraph"
+        },
+        {
+          "type": "REPOSITORY",
+          "reference": "indexer/evm/subgraph/package.json",
+          "sha256": "b6071cd19e7c4662bca37cebb4961cc05c388e7c8c543e38a4f25e5878299faf"
+        }
+      ],
+      "limitations": [
+        "No graph-node replay fixture, reorg test, RPC bytecode check, or approved deployment inventory."
+      ]
+    }
+  ]
+}

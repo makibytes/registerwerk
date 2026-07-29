@@ -2,11 +2,15 @@ package de.makibytes.registerwerk.blockchain.internal.deploy;
 
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetVaultState;
 import de.makibytes.registerwerk.deployment.api.AssetVaultStateRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +23,6 @@ import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.math.BigInteger;
@@ -51,20 +54,23 @@ public class Erc4626DeploymentService {
     private final ContractAddressConfig contractAddressConfig;
     private final AssetLookupPort assetLookupPort;
     private final AssetVaultStateRepository vaultStateRepository;
+    private final AssetDeploymentRepository assetDeploymentRepository;
 
     public Erc4626DeploymentService(BlockchainClientRegistry blockchainClientRegistry,
                                     EvmContractService evmContractService,
                                     ContractAddressConfig contractAddressConfig,
                                     AssetLookupPort assetLookupPort,
-                                    AssetVaultStateRepository vaultStateRepository) {
+                                    AssetVaultStateRepository vaultStateRepository,
+                                    AssetDeploymentRepository assetDeploymentRepository) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
         this.assetLookupPort = assetLookupPort;
         this.vaultStateRepository = vaultStateRepository;
+        this.assetDeploymentRepository = assetDeploymentRepository;
     }
 
-    public CompletableFuture<String> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
+    public CompletableFuture<TokenDeploymentResult> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
         log.info("Deploying ERC-4626 (sync vault) contract: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
@@ -89,7 +95,7 @@ public class Erc4626DeploymentService {
                     Arrays.asList(
                             new Uint8(TOKEN_TYPE_ERC4626),
                             new Utf8String(asset.name()),
-                            new Utf8String(asset.tokenStandard().name()),
+                            new Utf8String(EvmUtils.tokenSymbol(asset)),
                             new Bytes32(Erc20DeploymentService.uuidToBytes32(assetId)),
                             new Address(underlyingAddress)
                     ),
@@ -97,11 +103,13 @@ public class Erc4626DeploymentService {
             );
 
             TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, deployVault);
-            String vaultAddress = extractVaultAddress(receipt);
+            String vaultAddress = EvmUtils.extractIndexedAddress(receipt, VAULT_DEPLOYED_TOPIC, 3)
+                    .orElseThrow(() -> new RuntimeException(
+                            "VaultDeployed event not found in receipt: " + receipt.getTransactionHash()));
             log.info("ERC-4626 vault deployed: assetId={} → vaultAddress={} tx={}",
                     assetId, vaultAddress, receipt.getTransactionHash());
 
-            return receipt.getTransactionHash();
+            return new TokenDeploymentResult(receipt.getTransactionHash(), vaultAddress);
         });
     }
 
@@ -109,22 +117,13 @@ public class Erc4626DeploymentService {
         if (vaultState.getUnderlyingAssetId() == null) {
             throw new IllegalStateException("underlyingAssetId not set on AssetVaultState — configure it via the vault-setup wizard before deploying.");
         }
-        // Placeholder: in production, look up the AssetDeployment for the underlying asset on this chain
-        // and return its contractAddress. For now, we require it to be set as publicData on the vault state.
-        throw new UnsupportedOperationException(
-                "Underlying asset address resolution requires cross-referencing AssetDeployment for the underlying asset. " +
-                "Set the underlying contract address via the vault-setup API before deploying ERC-4626.");
-    }
-
-    private String extractVaultAddress(TransactionReceipt receipt) {
-        for (Log logEntry : receipt.getLogs()) {
-            if (logEntry.getTopics() != null && !logEntry.getTopics().isEmpty()
-                    && VAULT_DEPLOYED_TOPIC.equalsIgnoreCase(logEntry.getTopics().get(0))
-                    && logEntry.getTopics().size() >= 3) {
-                String padded = logEntry.getTopics().get(2);
-                return "0x" + padded.substring(padded.length() - 40);
-            }
-        }
-        throw new RuntimeException("VaultDeployed event not found in receipt: " + receipt.getTransactionHash());
+        return assetDeploymentRepository.findByAssetId(vaultState.getUnderlyingAssetId()).stream()
+                .filter(d -> d.getChain() == chain.chain() && d.getNetwork() == chain.network())
+                .filter(d -> d.getContractAddress() != null && !d.getContractAddress().isBlank())
+                .findFirst()
+                .map(AssetDeployment::getContractAddress)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Underlying asset " + vaultState.getUnderlyingAssetId() + " has no confirmed deployment on " +
+                        chain.chain() + "/" + chain.network() + ". Deploy the underlying asset on the same chain first."));
     }
 }

@@ -8,6 +8,8 @@ import de.makibytes.registerwerk.chain.api.CantonLedgerEndpoint;
 import de.makibytes.registerwerk.blockchain.api.Web3jClientFactory;
 import de.makibytes.registerwerk.blockchain.api.SolanaClientFactory;
 import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
 import org.slf4j.Logger;
@@ -71,14 +73,28 @@ public class RpcNodeHealthService {
             Web3jClientFactory web3jClientFactory,
             SolanaClientFactory solanaClientFactory,
             @Nullable CantonClientProvider cantonClientFactory,
-            BlockchainClientRegistry registry) {
+            BlockchainClientRegistry registry,
+            MeterRegistry meterRegistry) {
         this.rpcNodeRepository    = rpcNodeRepository;
         this.web3jClientFactory   = web3jClientFactory;
         this.solanaClientFactory  = solanaClientFactory;
         this.cantonClientFactory  = cantonClientFactory;
         this.registry             = registry;
+
+        // Live-queried at scrape time over the real persisted health state — checkAllNodes()
+        // already saveAll()s this every ~30s, but nothing ever counted it (repo-wide
+        // alerting-gap follow-up).
+        Gauge.builder("registerwerk_rpc_nodes_unhealthy_total", rpcNodeRepository, RpcNodeRepository::countByHealthyFalse)
+                .description("Count of RpcNode rows currently marked unhealthy")
+                .register(meterRegistry);
     }
 
+    // Deliberately NOT @SchedulerLock'd: the tail of this method calls
+    // registry.refreshFromNodes(allNodes) to refresh THIS instance's in-memory
+    // BlockchainClientRegistry, which every instance needs independently to route its
+    // own outbound RPC calls away from unhealthy nodes. Serializing this job across
+    // instances would leave all-but-one instance routing through stale/dead RPC nodes.
+    // The RpcNode row writes are idempotent last-writer-wins health metrics, safe to race.
     @Scheduled(fixedDelayString = "${registerwerk.rpc.health-check-interval-ms:30000}",
                initialDelayString = "${registerwerk.rpc.health-check-initial-delay-ms:10000}")
     public void checkAll() {

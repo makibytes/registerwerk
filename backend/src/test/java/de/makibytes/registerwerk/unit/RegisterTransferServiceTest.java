@@ -20,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 import tools.jackson.databind.ObjectMapper;
 
@@ -48,6 +49,7 @@ class RegisterTransferServiceTest {
     @Mock private AssetHolderRepository holderRepository;
     @Mock private AssetDeploymentRepository deploymentRepository;
     @Mock private AuditApi auditApi;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     private RegisterTransferService service;
 
@@ -57,7 +59,7 @@ class RegisterTransferServiceTest {
     void setUp() {
         service = new RegisterTransferService(
                 transferRepository, assetRepository, holderRepository, deploymentRepository,
-                auditApi, new ObjectMapper());
+                auditApi, new ObjectMapper(), eventPublisher);
         lenient().when(transferRepository.save(any(RegisterTransfer.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -117,13 +119,13 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.INITIATED);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
         when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
-        when(holderRepository.findByAssetId(eq(ASSET_ID), any(Pageable.class)))
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(holder())));
         when(deploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of(deployment()));
         when(auditApi.findBySubject(eq("Asset"), eq(ASSET_ID), any()))
                 .thenReturn(new PageImpl<>(List.of(), Pageable.ofSize(500), 0));
 
-        byte[] json = service.export(transferId);
+        byte[] json = service.export(transferId, UUID.randomUUID());
 
         assertThat(json).isNotEmpty();
         assertThat(new String(json)).contains("eWpRV").contains("Test Bond").contains("DE000TESTBND1");
@@ -141,13 +143,13 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.EXPORTED);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
         when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
-        when(holderRepository.findByAssetId(eq(ASSET_ID), any(Pageable.class)))
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
         when(deploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of());
         when(auditApi.findBySubject(eq("Asset"), eq(ASSET_ID), any()))
                 .thenReturn(new PageImpl<>(List.of(), Pageable.ofSize(500), 0));
 
-        assertThat(service.export(transferId)).isNotEmpty();
+        assertThat(service.export(transferId, UUID.randomUUID())).isNotEmpty();
     }
 
     @Test
@@ -157,7 +159,7 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.HANDED_OVER);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
 
-        assertThatThrownBy(() -> service.export(transferId))
+        assertThatThrownBy(() -> service.export(transferId, UUID.randomUUID()))
                 .isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(assetRepository);
     }
@@ -170,7 +172,7 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.INITIATED);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
         when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
-        when(holderRepository.findByAssetId(eq(ASSET_ID), any(Pageable.class)))
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
         when(deploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of());
 
@@ -182,7 +184,7 @@ class RegisterTransferServiceTest {
         when(auditApi.findBySubject(eq("Asset"), eq(ASSET_ID), argThat(p -> p.getPageNumber() == 1)))
                 .thenReturn(new PageImpl<>(List.of(), org.springframework.data.domain.PageRequest.of(1, 500), 501));
 
-        byte[] json = service.export(transferId);
+        byte[] json = service.export(transferId, UUID.randomUUID());
 
         assertThat(new String(json)).contains("ASSET_CREATED");
         verify(auditApi, times(2)).findBySubject(eq("Asset"), eq(ASSET_ID), any());
@@ -197,7 +199,7 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.INITIATED);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
 
-        assertThatThrownBy(() -> service.recordOnchainHandover(transferId, "0xhash"))
+        assertThatThrownBy(() -> service.recordOnchainHandover(transferId, "0xhash", UUID.randomUUID()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Export must precede");
     }
@@ -209,7 +211,7 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.EXPORTED);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
 
-        RegisterTransfer result = service.recordOnchainHandover(transferId, "0xabc");
+        RegisterTransfer result = service.recordOnchainHandover(transferId, "0xabc", UUID.randomUUID());
 
         assertThat(result.getStatus()).isEqualTo(TransferStatus.HANDED_OVER);
         assertThat(result.getOnchainTxHash()).isEqualTo("0xabc");
@@ -222,7 +224,7 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.EXPORTED);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
 
-        assertThatThrownBy(() -> service.complete(transferId))
+        assertThatThrownBy(() -> service.complete(transferId, UUID.randomUUID()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("HANDED_OVER");
     }
@@ -234,7 +236,7 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.HANDED_OVER);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
 
-        RegisterTransfer result = service.complete(transferId);
+        RegisterTransfer result = service.complete(transferId, UUID.randomUUID());
 
         assertThat(result.getStatus()).isEqualTo(TransferStatus.COMPLETED);
         assertThat(result.getCompletedAt()).isNotNull();
@@ -247,7 +249,7 @@ class RegisterTransferServiceTest {
         transfer.setStatus(TransferStatus.COMPLETED);
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
 
-        assertThatThrownBy(() -> service.cancel(transferId, "changed mind"))
+        assertThatThrownBy(() -> service.cancel(transferId, "changed mind", UUID.randomUUID()))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -259,7 +261,7 @@ class RegisterTransferServiceTest {
         transfer.setReason("§22 handover");
         when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
 
-        RegisterTransfer result = service.cancel(transferId, "successor withdrew");
+        RegisterTransfer result = service.cancel(transferId, "successor withdrew", UUID.randomUUID());
 
         assertThat(result.getStatus()).isEqualTo(TransferStatus.CANCELLED);
         assertThat(result.getReason()).isEqualTo("§22 handover | cancelled: successor withdrew");
@@ -270,7 +272,7 @@ class RegisterTransferServiceTest {
         UUID transferId = UUID.randomUUID();
         when(transferRepository.findById(transferId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.complete(transferId))
+        assertThatThrownBy(() -> service.complete(transferId, UUID.randomUUID()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unknown register transfer");
     }

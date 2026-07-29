@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.36;
 
 import "../standards/erc3525/ERC3525.sol";
 import "../compliance/EwpgCompliance.sol";
@@ -72,6 +72,8 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         external onlyRegistry
         returns (uint256 tokenId)
     {
+        require(!isPaused(), "EwpgERC3525: global transfers are paused");
+        require(!isFrozen(to), "EwpgERC3525: destination address is frozen");
         require(!_slots[slot].paused, "EwpgERC3525: slot is paused");
         require(isWhitelisted(to), "EwpgERC3525: recipient not whitelisted");
         SlotConfig storage cfg = _slots[slot];
@@ -214,15 +216,47 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         uint256 value,
         string calldata legalBasis
     ) external override onlyRegistry {
+        _inForceOp = true;
         uint256 remaining = balanceOf(value);
         if (remaining > 0) {
             _burnValue(value, remaining);
         }
         _burnToken(value);
+        _inForceOp = false;
         emit ForceBurned(from, value, legalBasis);
     }
 
     // ── Compliance hooks ──────────────────────────────────────────────────────
+
+    /// @dev Address-form value transfers create a new ERC-721 destination token before moving
+    ///      value into it. Check the recipient before that mint so an unwhitelisted address can
+    ///      never acquire a position; a revert also rolls the token-id counter back atomically.
+    ///      The zero address is left to ERC-721's normal invalid-receiver handling.
+    function transferFrom(uint256 fromTokenId, address to, uint256 value)
+        public payable virtual override returns (uint256 newTokenId)
+    {
+        if (!_inForceOp && to != address(0)) {
+            require(isWhitelisted(to), "EwpgERC3525: recipient not whitelisted");
+        }
+        return super.transferFrom(fromTokenId, to, value);
+    }
+
+    /// @dev ERC-3525 token IDs are ERC-721 NFTs. Guard ownership moves independently from
+    ///      value transfers so transferring the whole token cannot bypass the series or holder
+    ///      controls below. Mint and burn retain their existing zero-address semantics; their
+    ///      dedicated entry points perform the applicable issuance/burn checks.
+    function _update(address to, uint256 tokenId, address auth)
+        internal virtual override returns (address)
+    {
+        address from = _ownerOf(tokenId);
+        if (!_inForceOp && from != address(0) && to != address(0)) {
+            _requireTransferable(from, to);
+            require(!_frozenTokens[tokenId], "EwpgERC3525: token is frozen");
+            require(!_slots[slotOf(tokenId)].paused, "EwpgERC3525: slot is paused");
+            require(isWhitelisted(to), "EwpgERC3525: recipient not whitelisted");
+        }
+        return super._update(to, tokenId, auth);
+    }
 
     function _transferValue(uint256 fromTokenId, uint256 toTokenId, uint256 value)
         internal virtual override

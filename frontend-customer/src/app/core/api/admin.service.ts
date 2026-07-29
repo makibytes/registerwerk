@@ -33,6 +33,11 @@ export class AdminService {
   private readonly http = inject(HttpClient);
   private readonly base = `${environment.apiUrl}/admin`;
   private readonly entitiesBase = `${environment.apiUrl}/entities`;
+  // Not under `base` — impersonation deliberately lives outside the IP-restricted
+  // /api/v1/admin/** prefix (see AdminImpersonationController's Javadoc). This route is
+  // requested through Kong from the customer portal, so it must NOT carry the operator-network
+  // ip-restriction plugin applied to /api/v1/admin/**.
+  private readonly impersonationUrl = `${environment.apiUrl}/impersonation`;
 
   listEntities(search?: string, page = 0, size = 50): Observable<EntityPage> {
     let params = new HttpParams()
@@ -43,6 +48,6 @@ export class AdminService {
   }
 
   impersonate(entityId: string): Observable<ImpersonateResponse> {
-    return this.http.post<ImpersonateResponse>(`${this.base}/impersonation`, { entityId });
+    return this.http.post<ImpersonateResponse>(this.impersonationUrl, { entityId });
   }
 }

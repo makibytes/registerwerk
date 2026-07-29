@@ -4,9 +4,12 @@ groups:
     rules:
 
       # ── Audit chain integrity (eWpRV §6) ─────────────────────────────────
+      # registerwerk_audit_chain_valid is a real gauge (AuditChainVerificationService, Phase 12
+      # finding #5) — the previous query referenced spring_boot_actuator_health_status, a metric
+      # Spring Boot Actuator has never emitted; this alert could never have fired.
       - alert: AuditChainBroken
         expr: |
-          spring_boot_actuator_health_status{job="registerwerk-backend", component="auditChainVerificationService"} == 0
+          registerwerk_audit_chain_valid{job="registerwerk-backend"} == 0
         for: 0m
         labels:
           severity: critical
@@ -16,43 +19,48 @@ groups:
           description: "The SHA-256 hash chain of audit_event has been violated. Immediate investigation required. DORA Art. 17 major incident."
 
       # ── Indexer liveness ──────────────────────────────────────────────────
+      # registerwerk_indexer_last_sync_timestamp_seconds is a Unix-epoch timestamp gauge
+      # (IndexerMonitorService), not a precomputed age — time() - metric is the idiomatic
+      # Prometheus pattern and stays accurate between the job's 5-minute updates.
       - alert: IndexerStaleCritical
         expr: |
-          time() - registerwerk_indexer_last_sync_seconds > 7200
+          time() - registerwerk_indexer_last_sync_timestamp_seconds > 7200
         for: 2m
         labels:
           severity: critical
           dora_category: INDEXER_STALE
         annotations:
           summary: "Indexer stale > 2h"
-          description: "Indexer {{ $labels.chain }} has not synced for more than 2 hours."
+          description: "Indexer type {{ $labels.indexer_type }} (chain_config_id={{ $labels.chain_config_id }}) has not synced for more than 2 hours."
 
       - alert: IndexerStaleWarning
         expr: |
-          time() - registerwerk_indexer_last_sync_seconds > 1800
+          time() - registerwerk_indexer_last_sync_timestamp_seconds > 1800
         for: 2m
         labels:
           severity: warning
         annotations:
           summary: "Indexer stale > 30 min"
-          description: "Indexer {{ $labels.chain }} has not synced for more than 30 minutes."
+          description: "Indexer type {{ $labels.indexer_type }} (chain_config_id={{ $labels.chain_config_id }}) has not synced for more than 30 minutes."
 
       # ── Chain drift ───────────────────────────────────────────────────────
+      # registerwerk_chain_drift_open_total (ChainDriftDetectionJob) is a live COUNT of OPEN
+      # rows, not a counter — alerts on the count being nonzero rather than increase().
       - alert: ChainDriftDetected
         expr: |
-          increase(registerwerk_chain_drift_total[15m]) > 0
+          registerwerk_chain_drift_open_total{job="registerwerk-backend"} > 0
         for: 0m
         labels:
           severity: critical
           dora_category: CHAIN_DRIFT
         annotations:
           summary: "Chain ↔ DB balance drift detected"
-          description: "On-chain balances diverge from the registry DB (canonical per eWpG §16). Asset {{ $labels.asset_id }} auto-paused pending investigation."
+          description: "{{ $value }} OPEN chain_drift_event row(s) — on-chain balances diverge from the registry DB (canonical per eWpG §16)."
 
       # ── Sanctions hits ────────────────────────────────────────────────────
       - alert: SanctionsHitOpenTooLong
         expr: |
-          registerwerk_sanctions_hit_open_seconds > 14400
+          registerwerk_sanctions_oldest_open_hit_seconds{job="registerwerk-backend"} > 14400
         for: 0m
         labels:
           severity: critical
@@ -71,16 +79,36 @@ groups:
           summary: "DB connection pool > 80% utilized"
           description: "HikariCP pool is {{ $value | humanizePercentage }} utilized. Consider increasing maximum-pool-size."
 
-      # ── JWT signing key age ───────────────────────────────────────────────
-      - alert: JwtSigningKeyAgeWarning
+      # ── Audit signing key age ─────────────────────────────────────────────
+      # Renamed from "JwtSigningKeyAgeWarning": the JWT decoder's HS256 secret is a static
+      # config value with no real "created at" concept to track. registerwerk_audit_signing_key
+      # _age_seconds (AuditChainVerificationService) tracks the audit hash-chain's Ed25519
+      # signing key instead — a real rotatable key where "hasn't been rotated in 90+ days" is
+      # meaningful (Phase 12, finding #5 + #9).
+      - alert: AuditSigningKeyAgeWarning
         expr: |
-          (time() - registerwerk_auth_signing_key_created_seconds) > 7776000
+          registerwerk_audit_signing_key_age_seconds{job="registerwerk-backend"} > 7776000
         for: 0m
         labels:
           severity: warning
         annotations:
-          summary: "JWT signing key older than 90 days"
-          description: "The HS256 / RSA signing key has not been rotated in 90+ days. Rotate per security policy."
+          summary: "Audit-chain signing key older than 90 days"
+          description: "The Ed25519 audit-chain signing key has not been rotated in 90+ days. Rotate per security policy."
+
+      # ── Backup staleness (eWpRV §6 / DORA Art. 12) ────────────────────────
+      # backup_last_success_timestamp is pushed to a Pushgateway by the backup CronJob/cron
+      # script on success (see docs/operator/maintenance/backups.md) — it only exists if a
+      # Pushgateway is actually deployed and configured; this rule has no effect otherwise.
+      - alert: BackupStale
+        expr: |
+          time() - backup_last_success_timestamp > 86400
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "PostgreSQL backup has not run in over 24 hours"
+          description: "No successful backup reported in the last 24h. Verify the backup CronJob/cron script and its Pushgateway connectivity."
 
   - name: registerwerk.availability
     interval: 1m
@@ -95,3 +123,139 @@ groups:
         annotations:
           summary: "Registerwerk backend is down"
           description: "The backend has been unreachable for 1 minute. eWpRV §6 availability ≥99.5% SLO at risk."
+
+  # Every rule below closes a "detected but never alerted" gap: each of these jobs already
+  # existed and already found real problems, but only ever log.warn'd/log.error'd them — no
+  # metric, no alert. Follow-up to the repo-wide alerting-infrastructure gap (confidential
+  # reconciliation + orgidentity reconciliation named explicitly, screening failures + 5 more
+  # instances of the identical pattern found on a full repo sweep).
+  - name: registerwerk.reconciliation
+    interval: 1m
+    rules:
+
+      # ── Confidential-token reconciliation (eWpG §16) ───────────────────────
+      # ConfidentialBalanceReconciliationService — no dedicated table records mismatches
+      # (unlike chain_drift_event), so this is an in-memory last-run snapshot, not a live query.
+      - alert: ConfidentialReconciliationMismatchDetected
+        expr: |
+          registerwerk_confidential_reconciliation_mismatch_total{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: CHAIN_DRIFT
+        annotations:
+          summary: "Confidential-token register/chain mismatch detected"
+          description: "{{ $value }} confidential-asset holder(s) mismatched in the most recent reconciliation run — decrypted on-chain balance disagrees with the eWpG §16 register."
+
+      - alert: ConfidentialReconciliationStale
+        expr: |
+          time() - registerwerk_confidential_reconciliation_last_run_timestamp_seconds{job="registerwerk-backend"} > 3600
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Confidential reconciliation hasn't run in over an hour"
+          description: "reconcileAll() runs every 5 minutes but no-ops silently if the Zama relayer sidecar isn't configured — this usually means that."
+
+      # ── OrgIdentity onchain reconciliation ──────────────────────────────────
+      # OrgChainReconciliationService / PermissionChainReconciliationService — no dedicated
+      # table either; reset-then-recount-per-sweep gauges, same rationale as above.
+      - alert: OrgChainDriftDetected
+        expr: |
+          registerwerk_org_chain_drift_open_total{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Org registration/wallet drift vs. onchain OrgRegistry"
+          description: "{{ $value }} org registration(s)/member wallet(s) disagree with onchain OrgRegistry state in the most recent reconciliation sweep."
+
+      - alert: PermissionChainDriftDetected
+        expr: |
+          registerwerk_permission_chain_drift_open_total{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Permission-grant drift vs. onchain PermissionRegistry"
+          description: "{{ $value }} permission grant(s) disagree with onchain PermissionRegistry state — includes role-restriction flips, the most dangerous drift this job watches for."
+
+      # ── Screening failures (distinct from SanctionsHitOpenTooLong above, which tracks
+      # unresolved HITS, not provider-call failures) ──────────────────────────
+      - alert: ScreeningErrorsElevated
+        expr: |
+          registerwerk_screening_errors_recent_total{job="registerwerk-backend"} > 5
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Elevated sanctions/PEP screening provider errors"
+          description: "{{ $value }} ScreeningRun(s) failed (status=ERROR) in the last 24h. ScreeningGateImpl fails closed on this — new-entity approvals may be silently blocked."
+
+      - alert: ScreeningPeriodicRefreshFailures
+        expr: |
+          registerwerk_screening_periodic_refresh_last_failures{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Daily periodic re-screening had failures"
+          description: "{{ $value }} entit(y/ies) failed re-screening in the most recent daily periodic refresh (GwG §10 ongoing monitoring)."
+
+      # ── DORA deadline breaches (Art. 19) ─────────────────────────────────────
+      - alert: DoraDeadlineBreach
+        expr: |
+          sum(registerwerk_dora_deadline_breaches{job="registerwerk-backend"}) > 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "DORA reporting deadline breach"
+          description: "{{ $value }} overdue DORA deadline(s)/resilience test(s) across classification/initial/final report and resilience-test breach types — see the breach_type label to identify which."
+
+      # ── Regulatory-report staleness ──────────────────────────────────────────
+      - alert: RegReportSubmissionsStale
+        expr: |
+          registerwerk_regreport_stale_submissions_total{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Regulatory report submissions stuck without acknowledgement"
+          description: "{{ $value }} submission(s) have had no acknowledgement beyond the configured staleness threshold."
+
+      # ── Travel Rule (TFR Art. 14) ─────────────────────────────────────────────
+      - alert: TravelRuleMessageSendFailures
+        expr: |
+          registerwerk_travelrule_failed_messages_recent_total{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Travel Rule message send failures"
+          description: "{{ $value }} travel_rule_message(s) FAILED to send in the last 24h — TFR Art. 14 requires originator/beneficiary information on every CASP-to-CASP transfer."
+
+      # ── Notification delivery ────────────────────────────────────────────────
+      # A Counter (not a gauge, unlike everything else in this group) — no persisted state
+      # backs email delivery at all, so increase() over a window is the only viable query.
+      - alert: EmailDeliveryFailuresElevated
+        expr: |
+          increase(registerwerk_notification_email_send_failures_total{job="registerwerk-backend"}[1h]) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated email delivery failures"
+          description: "More than 5 email send failures in the last hour (see context label: generic vs. statement_pdf)."
+
+      # ── RPC node health ───────────────────────────────────────────────────────
+      - alert: RpcNodesUnhealthy
+        expr: |
+          registerwerk_rpc_nodes_unhealthy_total{job="registerwerk-backend"} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "One or more RPC nodes unhealthy"
+          description: "{{ $value }} RpcNode(s) currently marked unhealthy. May have automatic failover — escalate if a whole chain's nodes are affected."

@@ -5,7 +5,7 @@ sidebar_label: KYC Process
 sidebar_position: 2
 ---
 
-This page describes the operator workflow for jurisdiction-aware KYC and how it is enforced by the backend.
+This page describes the operator workflow for jurisdiction-aware KYC records and checklist decisions. These controls are not yet enforced uniformly across every issuance, deployment, receipt, or transfer path.
 
 ## Scope and model
 
@@ -46,17 +46,17 @@ The response includes:
 - `missingCount`
 - `expiredCount`
 - `tooOldCount`
-- `fullyCompliant`
+- `fullyCompliant` (a code-level name meaning no configured checklist gap, not legal compliance)
 
 ## Approving jurisdiction KYC
 
 Authorization model:
 
-- `ROLE_COMPLIANCE_OFFICER`: may approve only if `fullyCompliant=true`.
-- `ROLE_REGISTRY_ADMIN`: may approve compliant and non-compliant cases.
-- Non-compliant approval requires `overrideNote` and is rejected for non-admin users.
+- `ROLE_COMPLIANCE_OFFICER`: may approve only if `fullyCompliant=true` for the configured checklist.
+- `ROLE_REGISTRY_ADMIN`: may approve cases with or without configured checklist gaps.
+- Approval with checklist gaps requires `overrideNote` and is rejected for non-admin users.
 
-Normal approval (fully compliant):
+Approval with no configured checklist gaps:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
@@ -87,11 +87,12 @@ curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/
 
 ## On-chain claims and token controls
 
-Jurisdiction approval controls issuer eligibility in backend workflows. Token-level transfer restrictions continue to be enforced by ERC-3643 compliance contracts and ONCHAINID claims.
+Jurisdiction approval is available to backend workflows, but a central fail-closed operation gate is not yet applied uniformly. ERC-3643 contracts and ONCHAINID claims provide separate contract-level restrictions where configured; they do not prove complete KYC enforcement or legal eligibility.
 
 ## Regulatory note
 
-This feature set supports evidencing KYC controls and auditability. It does not by itself satisfy all legal obligations (for example licensing, suspicious activity reporting, travel rule obligations, or local supervisory reporting).
+This feature set supports evidencing KYC controls and auditability. It does not by itself discharge
+licensing, suspicious-activity reporting, travel-rule, or local supervisory duties.
 
 ## Override reporting
 

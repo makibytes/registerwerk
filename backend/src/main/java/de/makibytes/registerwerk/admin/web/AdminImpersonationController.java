@@ -12,8 +12,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+// Deliberately NOT under /api/v1/admin/** — that prefix is IP-restricted at the Kong gateway
+// (see gateway/kong.yml) for genuinely operator-network-only endpoints. Impersonation, unlike
+// those, is legitimately invoked by the CUSTOMER portal (the operator's "view as this customer"
+// handoff goes through Kong), so it must live on a path Kong routes without the IP allowlist.
+// Authorization is unchanged: still REGISTRY_ADMIN-only, enforced by the JWT role check below.
 @RestController
-@RequestMapping("/api/v1/admin/impersonation")
+@RequestMapping("/api/v1/impersonation")
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
 public class AdminImpersonationController {
 

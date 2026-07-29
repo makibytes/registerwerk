@@ -30,9 +30,9 @@ class CantonBondDisabledStubTest {
             return CompletableFuture.failedFuture(
                     new UnsupportedOperationException("Canton is not enabled. Rebuild with -Pcanton."));
         }
-        @Override public CompletableFuture<String> createFixedBond(UUID a, Network n, String p, BondCreationTerms t) { return disabled(); }
-        @Override public CompletableFuture<String> createFloatingBond(UUID a, Network n, String p, BondCreationTerms t) { return disabled(); }
-        @Override public CompletableFuture<String> createZeroBond(UUID a, Network n, String p, BondCreationTerms t) { return disabled(); }
+        @Override public CompletableFuture<String> createFixedBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
+        @Override public CompletableFuture<String> createFloatingBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
+        @Override public CompletableFuture<String> createZeroBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
         @Override public CompletableFuture<String> payCoupon(UUID dep, Instant date, BigDecimal amt, UUID actor) { return disabled(); }
         @Override public CompletableFuture<String> fixFloatingRate(UUID dep, BigDecimal rate, Instant date, UUID actor) { return disabled(); }
         @Override public CompletableFuture<String> redeem(UUID dep, Instant date, UUID actor) { return disabled(); }
@@ -43,7 +43,7 @@ class CantonBondDisabledStubTest {
 
     @Test
     void createFixedBond_failsWithUnsupported() {
-        var future = stub.createFixedBond(UUID.randomUUID(), Network.TESTNET, "party", null);
+        var future = stub.createFixedBond(UUID.randomUUID(), Network.TESTNET, "party", null, null, "SYSTEM");
         assertThat(future.isCompletedExceptionally()).isTrue();
         assertThatThrownBy(future::get)
                 .isInstanceOf(ExecutionException.class)
@@ -52,12 +52,12 @@ class CantonBondDisabledStubTest {
 
     @Test
     void createFloatingBond_failsWithUnsupported() {
-        assertThat(stub.createFloatingBond(UUID.randomUUID(), Network.TESTNET, "p", null).isCompletedExceptionally()).isTrue();
+        assertThat(stub.createFloatingBond(UUID.randomUUID(), Network.TESTNET, "p", null, null, "SYSTEM").isCompletedExceptionally()).isTrue();
     }
 
     @Test
     void createZeroBond_failsWithUnsupported() {
-        assertThat(stub.createZeroBond(UUID.randomUUID(), Network.TESTNET, "p", null).isCompletedExceptionally()).isTrue();
+        assertThat(stub.createZeroBond(UUID.randomUUID(), Network.TESTNET, "p", null, null, "SYSTEM").isCompletedExceptionally()).isTrue();
     }
 
     @Test

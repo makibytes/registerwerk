@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.indexer.api.HolderDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -45,6 +46,10 @@ public class HolderSyncScheduler {
         this.syncConfig = syncConfig;
     }
 
+    // syncInProgress is a per-JVM guard only — harmless as a fast local re-entrancy check,
+    // but it does NOT prevent two backend instances from running this concurrently. The
+    // @SchedulerLock below is what actually serializes it across instances.
+    @SchedulerLock(name = "holderSyncScheduler", lockAtMostFor = "PT30M")
     @Scheduled(fixedDelayString = "#{@syncConfig.autoRefreshIntervalMinutes * 60000}", initialDelayString = "60000")
     public void syncAllActiveIssuances() {
         if (!syncConfig.isAutoRefreshEnabled() || syncInProgress) return;

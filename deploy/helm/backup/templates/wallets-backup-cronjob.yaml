@@ -1,0 +1,83 @@
+{{- if .Values.wallets.enabled }}
+{{- if not .Values.wallets.pvcName }}
+{{- fail "wallets.pvcName is required when wallets.enabled=true — set it to the main registerwerk chart's wallets PVC name (\"<main-chart-release-name>-wallets\")." }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: registerwerk-wallets-backup
+  labels:
+    app.kubernetes.io/name: registerwerk-backup
+    app.kubernetes.io/component: wallets-backup
+spec:
+  # Same daily cadence as the Postgres backup — the wallet keystore volume is exactly as
+  # critical (losing it means permanently losing on-chain asset-admin capability) and had no
+  # backup mechanism at all before this (Phase 12, finding #7).
+  schedule: "45 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: registerwerk-backup
+          restartPolicy: OnFailure
+          containers:
+            - name: restic-backup
+              image: restic/restic:0.17.3
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "Starting wallets restic backup $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  restic snapshots || restic init
+                  restic backup /data/wallets --tag wallets
+                  echo "Backup complete. Purging snapshots older than {{ .Values.wallets.retainDaily }} days..."
+                  restic forget --keep-daily {{ .Values.wallets.retainDaily }} --prune
+                  echo "Done."
+                  {{- if .Values.monitoring.pushgatewayUrl }}
+                  curl -s -X POST --data-binary "wallets_backup_last_success_timestamp $(date +%s)" \
+                    "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_wallets_backup" \
+                    || echo "WARNING: backup succeeded but pushing the success metric failed"
+                  {{- end }}
+              env:
+                - name: RESTIC_REPOSITORY
+                  value: "s3:s3.{{ .Values.backup.awsRegion }}.amazonaws.com/{{ .Values.backup.s3Bucket }}/{{ .Values.wallets.s3Prefix }}"
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: registerwerk-secrets
+                      key: {{ .Values.wallets.resticPasswordSecretKey }}
+                - name: AWS_REGION
+                  value: "{{ .Values.backup.awsRegion }}"
+                {{- if not .Values.s3Credentials.useIrsa }}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: registerwerk-secrets
+                      key: {{ .Values.s3Credentials.awsAccessKeyIdSecretKey }}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: registerwerk-secrets
+                      key: {{ .Values.s3Credentials.awsSecretAccessKeySecretKey }}
+                {{- end }}
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: wallets
+                  mountPath: /data/wallets
+                  readOnly: true
+          volumes:
+            - name: wallets
+              persistentVolumeClaim:
+                claimName: {{ .Values.wallets.pvcName }}
+{{- end }}

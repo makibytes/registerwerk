@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.asset.internal;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -11,11 +12,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.events.HolderEnteredEvent;
 import de.makibytes.registerwerk.asset.events.HolderRegisterChangedEvent;
+import de.makibytes.registerwerk.asset.events.HolderRemovedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 
 /**
@@ -61,19 +64,20 @@ public class HolderService {
     /**
      * Adds a new holder record linking an investor to a specific wallet address and nominal amount.
      */
-    public AssetHolder addHolder(UUID assetId, UUID investorId, String walletAddress, BigDecimal nominalAmount) {
+    public AssetHolder addHolder(UUID assetId, UUID investorId, String walletAddress, BigDecimal nominalAmount,
+                                  UUID actorId, String actorRole) {
         validateEntryTypeCompatible(assetId, de.makibytes.registerwerk.deployment.api.EntryType.COLLECTIVE);
         AssetHolder holder = new AssetHolder();
         holder.setAssetId(assetId);
         holder.setInvestorId(investorId);
-        holder.setWalletAddress(walletAddress);
+        holder.setWalletAddress(EvmUtils.normalizeAddress(walletAddress));
         holder.setNominalAmount(nominalAmount != null ? nominalAmount : BigDecimal.ZERO);
         holder.setAcquisitionDate(LocalDate.now());
         AssetHolder saved = assetHolderRepository.save(holder);
         log.info("Added holder: assetId={}, investorId={}, wallet={}", assetId, investorId, walletAddress);
         // §19(2) no. 1: the §19 service decides whether this holder is actually
         // eligible (single entry + consumer); we signal every entry.
-        eventPublisher.publishEvent(new HolderEnteredEvent(saved.getId()));
+        eventPublisher.publishEvent(new HolderEnteredEvent(saved.getId(), actorId, actorRole));
         return saved;
     }
 
@@ -91,12 +95,12 @@ public class HolderService {
     public AssetHolder addSingleEntryHolder(
             UUID assetId, UUID investorId, String walletAddress, BigDecimal nominalAmount,
             boolean isConsumer, String thirdPartyRights, String disposalRestrictions,
-            String legalCapacityNote) {
+            String legalCapacityNote, UUID actorId, String actorRole) {
         validateEntryTypeCompatible(assetId, de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL);
         AssetHolder holder = new AssetHolder();
         holder.setAssetId(assetId);
         holder.setInvestorId(investorId);
-        holder.setWalletAddress(walletAddress);
+        holder.setWalletAddress(EvmUtils.normalizeAddress(walletAddress));
         holder.setNominalAmount(nominalAmount != null ? nominalAmount : BigDecimal.ZERO);
         holder.setAcquisitionDate(LocalDate.now());
         holder.setEntryType(de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL);
@@ -108,7 +112,7 @@ public class HolderService {
         AssetHolder saved = assetHolderRepository.save(holder);
         log.info("Added single-entry holder: assetId={}, ref={}, consumer={}",
                 assetId, saved.getHolderReference(), isConsumer);
-        eventPublisher.publishEvent(new HolderEnteredEvent(saved.getId()));
+        eventPublisher.publishEvent(new HolderEnteredEvent(saved.getId(), actorId, actorRole));
         return saved;
     }
 
@@ -119,7 +123,7 @@ public class HolderService {
      */
     public AssetHolder updateSingleEntryAttributes(
             UUID holderId, Boolean isConsumer, String thirdPartyRights,
-            String disposalRestrictions, String legalCapacityNote) {
+            String disposalRestrictions, String legalCapacityNote, UUID actorId, String actorRole) {
         AssetHolder holder = assetHolderRepository.findById(holderId)
             .orElseThrow(() -> new EntityNotFoundException("AssetHolder", holderId));
         if (holder.getEntryType() != de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL) {
@@ -131,7 +135,7 @@ public class HolderService {
         if (disposalRestrictions != null) holder.setDisposalRestrictions(disposalRestrictions);
         if (legalCapacityNote != null) holder.setLegalCapacityNote(legalCapacityNote);
         AssetHolder saved = assetHolderRepository.save(holder);
-        eventPublisher.publishEvent(new HolderRegisterChangedEvent(saved.getId()));
+        eventPublisher.publishEvent(new HolderRegisterChangedEvent(saved.getId(), actorId, actorRole));
         return saved;
     }
 
@@ -150,28 +154,35 @@ public class HolderService {
      * Updates the nominal amount of an existing holding (e.g. after a settled
      * transfer) and signals a §19(2) no. 2 register change.
      */
-    public AssetHolder updateNominalAmount(UUID holderId, BigDecimal newNominalAmount) {
+    public AssetHolder updateNominalAmount(UUID holderId, BigDecimal newNominalAmount, UUID actorId, String actorRole) {
         AssetHolder holder = assetHolderRepository.findById(holderId)
             .orElseThrow(() -> new EntityNotFoundException("AssetHolder", holderId));
         holder.setNominalAmount(newNominalAmount != null ? newNominalAmount : BigDecimal.ZERO);
         AssetHolder saved = assetHolderRepository.save(holder);
-        eventPublisher.publishEvent(new HolderRegisterChangedEvent(saved.getId()));
+        eventPublisher.publishEvent(new HolderRegisterChangedEvent(saved.getId(), actorId, actorRole));
         return saved;
     }
 
     /**
-     * Removes a holder record (hard delete).
+     * Removes a holder record. Soft-delete: a §16 eWpG register entry must not simply
+     * disappear (retention/tamper-evidence obligations), so this sets {@code removedAt}
+     * rather than issuing a hard {@code DELETE} — the row, and its history, remain in the
+     * table but are excluded from compliance-facing reads (see
+     * {@code AssetHolderRepository.findActive*}).
      */
-    public void removeHolder(UUID holderId, UUID actorId) {
+    public void removeHolder(UUID holderId, UUID actorId, String actorRole) {
         AssetHolder holder = assetHolderRepository.findById(holderId)
             .orElseThrow(() -> new EntityNotFoundException("AssetHolder", holderId));
-        assetHolderRepository.delete(holder);
+        holder.setRemovedAt(Instant.now());
+        assetHolderRepository.save(holder);
         log.info("Removed holder: holderId={}, by={}", holderId, actorId);
+        eventPublisher.publishEvent(new HolderRemovedEvent(holderId, actorId, actorRole));
     }
 
     @Transactional(readOnly = true)
     public Page<AssetHolder> listHolders(UUID assetId, Pageable pageable) {
-        return assetHolderRepository.findByAssetId(assetId, pageable);
+        // Compliance-facing holder list: a removed holder is no longer part of the register.
+        return assetHolderRepository.findActiveByAssetId(assetId, pageable);
     }
 
     @Transactional(readOnly = true)
@@ -182,6 +193,9 @@ public class HolderService {
 
     @Transactional(readOnly = true)
     public java.util.Optional<AssetHolder> findByAssetIdAndWalletAddress(UUID assetId, String walletAddress) {
-        return assetHolderRepository.findByAssetIdAndWalletAddress(assetId, walletAddress);
+        // Active-only: used by LiveHolderService to attribute on-chain balances to a register
+        // identity. A wallet whose only prior link was a removed holder should surface as
+        // "unknown", not silently resurrect the closed-out register entry.
+        return assetHolderRepository.findActiveByAssetIdAndWalletAddress(assetId, EvmUtils.normalizeAddress(walletAddress));
     }
 }

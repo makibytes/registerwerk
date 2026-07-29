@@ -8,10 +8,15 @@ on:
     branches: [main]
     paths: [contracts/**, .github/workflows/contracts.yml]
 
+concurrency:
+  group: contracts-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   foundry-test:
     name: Foundry Tests & Coverage
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +48,7 @@ jobs:
   slither:
     name: Slither Static Analysis
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:

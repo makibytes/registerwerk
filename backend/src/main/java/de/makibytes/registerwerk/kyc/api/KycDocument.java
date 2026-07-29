@@ -35,7 +35,13 @@ public class KycDocument {
         REGULATORY_LICENSE,
         TOKEN_WHITEPAPER,
         SMART_CONTRACT_AUDIT,
-        PEP_SANCTIONS_SCREENING
+        PEP_SANCTIONS_SCREENING,
+        /** Customer-uploaded evidence of pre-existing ownership of a position — e.g. a
+         *  Depotauszug/statement from a departing competitor registrar, submitted when an
+         *  investor migrates a portfolio in. No prior document type covered this: KYC docs
+         *  prove the ENTITY's identity/legitimacy, AssetDocument covers issuer offering
+         *  documents — neither covers "prove you already own this position." */
+        PROOF_OF_HOLDING
     }
 
     @Id

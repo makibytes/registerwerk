@@ -63,7 +63,8 @@ public class WalletDefaultService {
      *
      * <p>Validates that the wallet type matches the chain type (EVM↔EVM, SOLANA↔SOLANA).
      */
-    public WalletChainDefault setDefault(UUID chainConfigId, UUID walletId) {
+    public WalletChainDefault setDefault(
+            UUID chainConfigId, UUID walletId, UUID actorId, String actorRole, UUID dualControlApproverId) {
         ChainConfig chain = chainConfigRepository.findById(chainConfigId)
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
         OperatorWallet wallet = walletRepository.findById(walletId)
@@ -94,7 +95,8 @@ public class WalletDefaultService {
             walletSigner.evict(previousWalletId);
         }
 
-        eventPublisher.publishEvent(new WalletDefaultChangedEvent(walletId, null, null, chainConfigId));
+        eventPublisher.publishEvent(
+                new WalletDefaultChangedEvent(walletId, actorId, actorRole, chainConfigId, dualControlApproverId));
         log.info("Set default wallet for chain '{}' → '{}' ({})",
                 chain.getIdentifier(), wallet.getName(), walletId);
         return saved;

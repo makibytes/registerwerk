@@ -3,7 +3,14 @@ replicaCount: 3
 image:
   repository: ghcr.io/makibytes/registerwerk/backend
   pullPolicy: IfNotPresent
-  tag: ""  # defaults to .Chart.AppVersion
+  # .github/workflows/container.yml only ever publishes :<git-sha> and :latest — it never
+  # publishes a tag matching Chart.yaml's appVersion (no release has been cut yet), so
+  # defaulting here to .Chart.AppVersion made a fresh `helm install` ImagePullBackOff
+  # (Phase 12, finding #3). `latest` is the one tag CI guarantees exists after every push
+  # to main. Pin to a specific `:<sha>` (or a real release tag, once one is cut) for any
+  # deployment that needs reproducibility — `latest` is a safe-to-try-it default, not a
+  # production recommendation.
+  tag: "latest"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -40,6 +47,12 @@ ingress:
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: 20m
+  # Set to a real ClusterIssuer name (e.g. "letsencrypt-prod") to have cert-manager's
+  # ingress-shim automatically provision/renew the "registerwerk-tls" secret referenced below.
+  # Requires cert-manager and that ClusterIssuer to already be installed cluster-wide — this
+  # chart doesn't install either. Leave blank to keep provisioning that secret out-of-band
+  # yourself (e.g. a pre-existing wildcard cert), same as before this option existed.
+  certManagerClusterIssuer: ""
   hosts:
     - host: api.registerwerk.example.com
       paths:
@@ -68,6 +81,11 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 2
 
+# Spreads replicas across nodes to back the HA story implied by replicaCount/autoscaling and
+# podDisruptionBudget above. Previously templates/deployment.yaml never referenced
+# .Values.affinity at all — this rendered as inert configuration that looked load-bearing but
+# had zero effect; all replicas could land on the same node with nothing to stop it
+# (Phase 12, finding #13).
 affinity:
   podAntiAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
@@ -81,18 +99,6 @@ env:
   SWAGGER_ENABLED: "false"
   OTEL_SAMPLING_PROBABILITY: "0.10"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4318/v1/traces"
-
-envFromSecrets:
-  - name: registerwerk-secrets
-    keys:
-      - DB_PASSWORD
-      - JWT_DEV_SECRET
-      - REGISTERWERK_WALLET_MASTER_KEY
-      - S3_ACCESS_KEY
-      - S3_SECRET_KEY
-      - MAIL_PASSWORD
-      - DEFAULT_ADMIN_EMAIL
-      - DEFAULT_ADMIN_PASSWORD
 
 wallets:
   persistence:
@@ -134,11 +140,29 @@ postgresql:
 
 kong:
   enabled: true
+  # The chart's own default (true) runs Kong as a Kubernetes Ingress Controller instead of a
+  # plain declarative-config gateway — and silently suppresses ALL of its dbless auto-env
+  # logic when true (see charts/kong templates/_helpers.tpl's "KONG_DECLARATIVE_CONFIG"
+  # block, gated on `not .Values.ingressController.enabled`). Registerwerk uses Kong purely
+  # as a declarative API gateway (matching the Docker Compose usage), not as a k8s Ingress
+  # controller — without this explicit override, dblessConfig.configMap below would render
+  # with no error but never actually take effect (Phase 12, finding #8).
+  ingressController:
+    enabled: false
   proxy:
     tls:
       enabled: true
   admin:
     enabled: false  # access via kubectl port-forward only
+  # Wires the same hardened declarative config (files/kong.yml, a copy of gateway/kong.yml)
+  # into the k8s Kong subchart — previously nothing set this, so Kong ran its own stock
+  # defaults in the Helm/k8s path with none of the admin-API scoping, header-stripping, or
+  # rate-limiting verified in the Docker Compose path (Phase 12, finding #8). Name must match
+  # templates/kong-configmap.yaml's fixed "registerwerk-kong-config" — subchart values.yaml
+  # entries aren't Go-templated, so this can't be computed per-release; update both together
+  # if you ever need more than one registerwerk release in the same namespace.
+  dblessConfig:
+    configMap: "registerwerk-kong-config"
 
 networkPolicy:
   enabled: true

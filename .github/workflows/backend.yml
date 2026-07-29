@@ -8,10 +8,15 @@ on:
     branches: [main]
     paths: [backend/**, .github/workflows/backend.yml]
 
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     name: Build & Test
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17-alpine
@@ -57,6 +62,7 @@ jobs:
   sast:
     name: SAST & SCA
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: build-test
     defaults:
       run:

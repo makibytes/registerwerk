@@ -340,6 +340,57 @@ public class WalletStorage {
         }
     }
 
+    // ── KEK rotation ──────────────────────────────────────────────────────────
+
+    /**
+     * Re-wraps a wallet's DEK under whatever KEK version {@link KekProvider} currently
+     * resolves to (deliberate rotation, e.g. after a suspected KEK compromise — not KMS's
+     * own transparent key-version rotation, which needs no action here since the ciphertext
+     * self-describes its key version). No-op for legacy (version-1 / no-sidecar) wallets:
+     * they predate envelope encryption and have no wrapped DEK to rotate.
+     *
+     * @return true if a DEK was re-wrapped, false if this wallet has no rotatable DEK
+     */
+    public boolean rewrapDek(String relativePath, boolean isEvm) {
+        try {
+            if (isEvm) {
+                Path dekPath = storagePath(relativePath.replace(".json", ".dek.bin"));
+                if (!Files.exists(dekPath)) {
+                    return false; // legacy keystore, no sidecar to rotate
+                }
+                byte[] rewrapped = kekProvider.rewrap(Files.readAllBytes(dekPath));
+                writeAtomically(dekPath, rewrapped);
+                return true;
+            }
+
+            Path path = storagePath(relativePath);
+            @SuppressWarnings("unchecked")
+            Map<String, String> envelope = MAPPER.readValue(Files.readString(path, StandardCharsets.UTF_8), Map.class);
+            if (!"2".equals(envelope.get("version"))) {
+                return false; // legacy PBKDF2 envelope, no wrapped DEK to rotate
+            }
+            HexFormat hex = HexFormat.of();
+            byte[] rewrapped = kekProvider.rewrap(hex.parseHex(envelope.get("wrappedDek")));
+            Map<String, String> updated = Map.of(
+                    "version", envelope.get("version"),
+                    "type", envelope.get("type"),
+                    "wrappedDek", hex.formatHex(rewrapped),
+                    "iv", envelope.get("iv"),
+                    "ciphertext", envelope.get("ciphertext"));
+            writeAtomically(path, MAPPER.writeValueAsString(updated).getBytes(StandardCharsets.UTF_8));
+            return true;
+        } catch (Exception e) {
+            throw new WalletStorageException("Failed to rotate KEK for keystore at " + relativePath, e);
+        }
+    }
+
+    /** Writes via a temp file + atomic rename so a crash mid-write cannot corrupt the original. */
+    private void writeAtomically(Path target, byte[] content) throws IOException {
+        Path tmp = target.resolveSibling(target.getFileName().toString() + ".tmp-" + UUID.randomUUID());
+        Files.write(tmp, content);
+        Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private Path storagePath(String relativePath) {

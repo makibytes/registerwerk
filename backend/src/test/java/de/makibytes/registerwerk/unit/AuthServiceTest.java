@@ -35,16 +35,19 @@ class AuthServiceTest {
     @Mock private AppUserRepository users;
     @Mock private PasswordEncoder encoder;
     @Mock private JwtMintingService minter;
+    // LoginAttemptLimiter is now DB-backed (V4 migration) — mocked here since these tests
+    // exercise AuthService's login/lockout INTERACTION with the limiter, not the limiter's
+    // own SQL. Default mock behaviour (isBlocked=false, no-op record*) matches the
+    // happy-path "not currently locked out" case these tests need.
+    @Mock private LoginAttemptLimiter attemptLimiter;
 
     private RegisterwerkAuthProperties props;
-    private LoginAttemptLimiter attemptLimiter;
     private AuthService service;
 
     @BeforeEach
     void setUp() {
         props = new RegisterwerkAuthProperties();
         props.setEntraEnabled(false);
-        attemptLimiter = new LoginAttemptLimiter(5, 15);
         service = new AuthService(users, encoder, minter, props, attemptLimiter);
     }
 

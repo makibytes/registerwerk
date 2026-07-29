@@ -5,6 +5,8 @@ import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +19,6 @@ import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.math.BigInteger;
@@ -63,9 +64,9 @@ public class Erc1155DeploymentService {
      * @param assetId      ID of the asset to deploy
      * @param chain        target chain descriptor
      * @param ownerAddress on-chain owner address (logged only)
-     * @return future resolving to the deployment transaction hash
+     * @return future resolving to the deployment tx hash and the deployed token address
      */
-    public CompletableFuture<String> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
+    public CompletableFuture<TokenDeploymentResult> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
         log.info("Deploying ERC-1155 contract: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
@@ -83,31 +84,20 @@ public class Erc1155DeploymentService {
                     Arrays.asList(
                             new Uint8(TOKEN_TYPE_ERC1155),
                             new Utf8String(""),                                                   // name ignored by ERC-1155
-                            new Utf8String(asset.tokenStandard().name()),
+                            new Utf8String(EvmUtils.tokenSymbol(asset)),
                             new Bytes32(Erc20DeploymentService.uuidToBytes32(assetId))
                     ),
                     Collections.singletonList(new TypeReference<Address>() {})
             );
 
             TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, deployToken);
-            String tokenAddress = extractTokenAddress(receipt);
+            String tokenAddress = EvmUtils.extractIndexedAddress(receipt, TOKEN_DEPLOYED_TOPIC, 3)
+                    .orElseThrow(() -> new RuntimeException(
+                            "TokenDeployed event not found in receipt: " + receipt.getTransactionHash()));
             log.info("ERC-1155 deployed: assetId={} → tokenAddress={} tx={}",
                     assetId, tokenAddress, receipt.getTransactionHash());
 
-            return receipt.getTransactionHash();
+            return new TokenDeploymentResult(receipt.getTransactionHash(), tokenAddress);
         });
-    }
-
-    private String extractTokenAddress(TransactionReceipt receipt) {
-        for (Log logEntry : receipt.getLogs()) {
-            if (logEntry.getTopics() != null && !logEntry.getTopics().isEmpty()
-                    && TOKEN_DEPLOYED_TOPIC.equalsIgnoreCase(logEntry.getTopics().get(0))
-                    && logEntry.getTopics().size() >= 3) {
-                String padded = logEntry.getTopics().get(2);
-                return "0x" + padded.substring(padded.length() - 40);
-            }
-        }
-        throw new RuntimeException(
-                "TokenDeployed event not found in receipt: " + receipt.getTransactionHash());
     }
 }

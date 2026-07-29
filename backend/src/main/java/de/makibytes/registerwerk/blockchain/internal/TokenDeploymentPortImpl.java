@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.blockchain.internal;
 import de.makibytes.registerwerk.blockchain.api.CantonBondOperations;
 import de.makibytes.registerwerk.blockchain.api.CantonTokenOperations;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.blockchain.internal.confidential.ConfidentialErc20Service;
 import de.makibytes.registerwerk.blockchain.internal.deploy.Erc1155DeploymentService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.Erc20DeploymentService;
@@ -72,44 +73,57 @@ public class TokenDeploymentPortImpl implements TokenDeploymentPort {
     }
 
     @Override
-    public CompletableFuture<String> deploy(
+    public CompletableFuture<TokenDeploymentResult> deploy(
             UUID assetId, TokenStandard standard, Chain chain, Network network, String ownerAddress) {
 
         ChainDescriptor descriptor = new ChainDescriptor(chain, network);
 
-        if (chain == Chain.SOLANA) {
-            return switch (standard) {
-                case SPL -> solanaTokenService.createSplToken(assetId, network, ownerAddress);
-                case SPL_2022 -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress);
-                case SPL_2022_BOND -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress, SplExtensionSet.BOND);
-                case SPL_2022_CONFIDENTIAL -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress, SplExtensionSet.CONFIDENTIAL);
-                default -> throw new UnsupportedOperationException("Solana does not support token standard: " + standard);
-            };
-        }
-
-        if (chain == Chain.CANTON) {
-            return switch (standard) {
-                case CANTON_TOKEN -> cantonTokenOperations.createInstrument(assetId, network, ownerAddress, 0);
-                case DAML_BOND_FIXED -> cantonBondOperations.createFixedBond(assetId, network, ownerAddress, null);
-                case DAML_BOND_FLOATING -> cantonBondOperations.createFloatingBond(assetId, network, ownerAddress, null);
-                case DAML_BOND_ZERO -> cantonBondOperations.createZeroBond(assetId, network, ownerAddress, null);
-                default -> throw new UnsupportedOperationException("Canton does not support token standard: " + standard);
-            };
-        }
-
         if (chain == Chain.STARKNET) {
             return switch (standard) {
-                case STARKNET_ERC20 -> starknetTokenService.createCairoErc20(assetId, network, ownerAddress);
-                case STARKNET_ERC3525 -> starknetTokenService.createCairoErc3525(assetId, network, ownerAddress);
+                case STARKNET_ERC20 -> starknetTokenService.createCairoErc20(assetId, network, ownerAddress)
+                        .thenApply(r -> new TokenDeploymentResult(r.txHash(), r.contractAddress()));
+                case STARKNET_ERC3525 -> starknetTokenService.createCairoErc3525(assetId, network, ownerAddress)
+                        .thenApply(r -> new TokenDeploymentResult(r.txHash(), r.contractAddress()));
                 default -> throw new UnsupportedOperationException("Starknet does not support token standard: " + standard);
             };
         }
 
         if (chain == Chain.STELLAR) {
             return switch (standard) {
-                case STELLAR_ASSET -> stellarAssetService.createStellarAsset(assetId, network, ownerAddress);
+                case STELLAR_ASSET -> stellarAssetService.createStellarAsset(assetId, network, ownerAddress)
+                        .thenApply(r -> new TokenDeploymentResult(r.txHash(), r.issuerAddress()));
                 default -> throw new UnsupportedOperationException("Stellar does not support token standard: " + standard);
             };
+        }
+
+        // Solana and Canton report only a tx hash at submission time (no address known before
+        // mining/confirmation) — wrapped in txOnly. EVM's standard token/vault standards
+        // (ERC20/721/1155/3525/4626/7540) resolve the real deployed address themselves (from the
+        // factory's TokenDeployed/VaultDeployed event, since EvmContractService.send() already
+        // waits for a mined, non-reverted receipt) and are returned as-is, not wrapped.
+        if (chain == Chain.SOLANA) {
+            CompletableFuture<String> txHash = switch (standard) {
+                case SPL -> solanaTokenService.createSplToken(assetId, network, ownerAddress);
+                case SPL_2022 -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress);
+                case SPL_2022_BOND -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress, SplExtensionSet.BOND);
+                case SPL_2022_CONFIDENTIAL -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress, SplExtensionSet.CONFIDENTIAL);
+                default -> throw new UnsupportedOperationException("Solana does not support token standard: " + standard);
+            };
+            return txHash.thenApply(TokenDeploymentResult::txOnly);
+        }
+
+        if (chain == Chain.CANTON) {
+            CompletableFuture<String> txHash = switch (standard) {
+                // actorId is not threaded through AssetDeploymentPort.deploy(...) — it is shared
+                // uniformly across every chain/standard in this switch, and deployment itself is
+                // a creation event already covered elsewhere (asset lifecycle), not a correction.
+                case CANTON_TOKEN -> cantonTokenOperations.createInstrument(assetId, network, ownerAddress, 0, null, "SYSTEM");
+                case DAML_BOND_FIXED -> cantonBondOperations.createFixedBond(assetId, network, ownerAddress, null, null, "SYSTEM");
+                case DAML_BOND_FLOATING -> cantonBondOperations.createFloatingBond(assetId, network, ownerAddress, null, null, "SYSTEM");
+                case DAML_BOND_ZERO -> cantonBondOperations.createZeroBond(assetId, network, ownerAddress, null, null, "SYSTEM");
+                default -> throw new UnsupportedOperationException("Canton does not support token standard: " + standard);
+            };
+            return txHash.thenApply(TokenDeploymentResult::txOnly);
         }
 
         // EVM chains (Ethereum, Polygon, Base, Arbitrum, Avalanche, Optimism, Fhenix, Inco)
@@ -120,11 +134,12 @@ public class TokenDeploymentPortImpl implements TokenDeploymentPort {
             case ERC3525 -> erc3525DeploymentService.deploy(assetId, descriptor, ownerAddress);
             case ERC4626 -> erc4626DeploymentService.deploy(assetId, descriptor, ownerAddress);
             case ERC7540 -> erc7540DeploymentService.deploy(assetId, descriptor, ownerAddress);
-            case CONF_ERC20 -> confidentialErc20Service.deploy(assetId, descriptor, ownerAddress);
+            case CONF_ERC20 -> confidentialErc20Service.deploy(assetId, descriptor, ownerAddress)
+                    .thenApply(TokenDeploymentResult::txOnly);
             default -> {
                 org.slf4j.LoggerFactory.getLogger(TokenDeploymentPortImpl.class)
                         .warn("No EVM deployment service for token standard: {}", standard);
-                yield CompletableFuture.completedFuture("UNSUPPORTED_" + standard);
+                yield CompletableFuture.completedFuture(TokenDeploymentResult.txOnly("UNSUPPORTED_" + standard));
             }
         };
     }

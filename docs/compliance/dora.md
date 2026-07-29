@@ -1,132 +1,84 @@
 ---
 title: DORA — ICT Risk Management
-description: Digital Operational Resilience Act implementation — incident management and ICT third-party register.
+description: Prototype ICT incident, resilience-test, and third-party-provider records; not a complete DORA implementation.
 ---
 
 # DORA — Digital Operational Resilience Act
 
-**Regulation (EU) 2022/2554** (DORA) has applied since 17 January 2025. It requires financial entities — including securities register operators — to implement robust ICT risk management, classify and report major incidents, and maintain a register of ICT third-party providers.
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and current repository behavior. It is not legal
+    advice or evidence that DORA applies to a particular operator, that a complete DORA control
+    framework exists, or that an incident has been validly classified or reported. Applicability,
+    classification, deadlines, competent authorities, forms, channels, and evidence require a
+    current operator-, service-, incident-, jurisdiction-, and deployment-specific review by
+    qualified counsel and the responsible resilience and compliance owners.
 
----
+The repository contains a manual operational record for ICT incidents, resilience tests, and
+third-party providers. It is not an authority-reporting implementation.
 
-## Scope of DORA for Registerwerk
+## Scope and applicability
 
-Registerwerk qualifies as a "financial entity" under DORA Art. 2 as:
-- A securities register operator (eWpG)
-- A DLT-based market infrastructure operator
+DORA applicability cannot be inferred from the repository name, an `eWpG` jurisdiction value, a
+token standard, or the presence of a `dora` module. The operator's regulated capacities and the
+services actually performed must be classified externally before relying on any control mapping.
 
-The applicable requirements are:
+Current-law statements about DORA articles, technical standards, classification thresholds, and
+reporting deadlines must be checked against current official sources as part of that review.
 
-| DORA Article | Obligation |
-|---|---|
-| Art. 5-10 | ICT risk management framework |
-| Art. 11 | Business continuity and disaster recovery |
-| Art. 17-19 | ICT incident classification and reporting |
-| Art. 28-30 | ICT third-party risk and register |
+## Current incident record
 
----
+An authorised operator can manually create an `IctIncident` through
+`POST /api/v1/dora/incidents`. The current entity records:
 
-## ICT incident classification
+- category: `DATA_BREACH`, `SYSTEM_OUTAGE`, `RANSOMWARE`, `THIRD_PARTY_FAILURE`, or `OTHER`;
+- severity: `LOW`, `MEDIUM`, `HIGH`, or `MAJOR`;
+- status: `DETECTED`, `INVESTIGATING`, `CONTAINED`, `RESOLVED`,
+  `REPORTED_TO_AUTHORITY`, or `CLOSED`;
+- description, source-event labels, timestamps, root cause, remediation, assignment, and an
+  operator-entered authority reference;
+- application-calculated reminder timestamps for incidents entered as `MAJOR`.
 
-The `IctIncident` entity in `dora/api/` classifies incidents by category and severity:
+These values are operator-entered operational data. A status such as `REPORTED_TO_AUTHORITY` or
+an `authorityRef` records an operator assertion; the application does not independently verify an
+authority receipt or acceptance.
 
-### Categories
+## Deadline monitoring
 
-| Category | Description | Example triggers |
-|---|---|---|
-| `DATA_BREACH` | Unauthorised access to or exfiltration of data | Failed authentication spike, API abuse |
-| `AVAILABILITY` | Service downtime exceeding SLA | Backend unreachable, DB connection exhausted |
-| `INTEGRITY` | Data corruption or audit chain breach | `AuditChainBrokenEvent`, `ChainDriftDetectedEvent` |
-| `CONFIDENTIALITY` | Sensitive data exposed | Misconfigured S3 bucket, JWT secret leak |
-| `THIRD_PARTY` | Failure of an ICT third-party provider | RPC node offline, screening service unreachable |
+`DoraService` runs a daily job that queries overdue application deadlines and writes log messages.
+It also exposes gauges for overdue records. The job does not submit a notification, create an
+authority-formatted report, prove that the configured deadline is legally correct, or notify all
+responsible personnel.
 
-### Severity levels
+The current model does not represent a complete initial/intermediate/final reporting workflow.
+Operators must not use its timestamps as statutory deadlines without current legal and regulatory
+review.
 
-| Severity | Criteria | DORA reporting obligation |
-|---|---|---|
-| `INFORMATIONAL` | No impact on operations | Internal log only |
-| `LOW` | Minor, contained, auto-recovered | Internal ticket |
-| `MEDIUM` | Service degradation < 2 hours | Internal escalation |
-| `HIGH` | Material service disruption | Internal escalation + senior management notification |
-| `MAJOR` | Criteria below | Regulatory notification required |
+## Automatic incident detection — not implemented
 
-**MAJOR classification criteria (DORA RTS 2024/1772):**
-- Downtime > 2 hours affecting core services
-- Data breach affecting > 0 customers
-- Transaction loss or corruption (any amount)
-- Integrity breach in the audit chain
-- Loss of access to critical ICT third-party service > 2 hours
+Internal audit, chain-drift, indexer, RPC, or screening events are not automatically classified
+and converted into `IctIncident` records. `sourceEventType` and `sourceEventRef` are manually
+supplied correlation fields, not evidence of an automated detection pipeline.
 
----
+## ICT third-party records
 
-## Incident lifecycle
+The `ThirdPartyProvider` entity stores operational fields including name, category, criticality,
+LEI, country, contract dates, sub-outsourcing notes, contact, SLA, RTO/RPO, and an
+operator-maintained notification flag. Records are listed through:
 
-```mermaid
-stateDiagram-v2
-    [*] --> DETECTED
-    DETECTED --> CLASSIFIED : DoraService classifies based on category + criteria
-    CLASSIFIED --> INITIAL_NOTIFIED : MAJOR — 4h deadline triggers notification
-    INITIAL_NOTIFIED --> INTERMEDIATE_NOTIFIED : 72h deadline
-    INTERMEDIATE_NOTIFIED --> RESOLVED : Incident contained
-    RESOLVED --> FINAL_REPORTED : 30-day final report filed
-    FINAL_REPORTED --> [*]
-    CLASSIFIED --> RESOLVED : LOW / MEDIUM / HIGH — no regulatory filing required
-```
+- `GET /api/v1/dora/providers`
+- `GET /api/v1/dora/providers/expiring`
 
-For `MAJOR` incidents, `DoraService` sets two deadline fields on creation:
+This table is not a complete or authority-approved DORA register of information. No
+authority-ready, schema-validated Art. 28 export is implemented.
 
-```java
-if (severity == MAJOR) {
-    incident.setInitialNotificationDeadline(detectedAt.plus(4, HOURS));
-    incident.setIntermediateReportDeadline(detectedAt.plus(72, HOURS));
-}
-```
+## Resilience-test records
 
-A `@Scheduled` job runs every 15 minutes and checks whether any `MAJOR` incident has missed its notification deadline. If so, it emits an escalation `AuditEvent` and notifies all `REGISTRY_ADMIN` users.
+The module can record and list resilience-test metadata and highlight records whose configured
+next-due date has passed. It does not execute a resilience test, validate its evidence, establish
+TLPT scope, or certify the result.
 
----
+## Authority routing and filing — not implemented
 
-## Automatic incident detection
-
-Registerwerk auto-creates `IctIncident` records from internal events:
-
-| Internal event | Incident category | Auto-severity |
-|---|---|---|
-| `AuditChainBrokenEvent` | `INTEGRITY` | `MAJOR` |
-| `ChainDriftDetectedEvent` (> 0 affected holders) | `INTEGRITY` | `HIGH` |
-| `IndexerStaleEvent` (> 2 hours) | `AVAILABILITY` | `HIGH` |
-| `IndexerStaleEvent` (> 30 minutes) | `AVAILABILITY` | `MEDIUM` |
-| `RpcNodeFailedEvent` (all nodes for chain) | `AVAILABILITY` | `HIGH` |
-| `ScreeningServiceUnavailableEvent` | `THIRD_PARTY` | `MEDIUM` |
-
----
-
-## ICT third-party register
-
-DORA Art. 28 requires a register of all ICT third-party providers. The `ThirdPartyProvider` entity tracks:
-
-| Field | Description |
-|---|---|
-| `name` | Provider name |
-| `providerType` | `CLOUD`, `DATA_ANALYTICS`, `SECURITY`, `BLOCKCHAIN_RPC`, `SCREENING`, `COMMUNICATION` |
-| `serviceDescription` | What service they provide |
-| `criticalOrImportant` | Boolean — critical = substitution plan required |
-| `contractStartDate` | Date of first engagement |
-| `contractExpiryDate` | Current contract expiry |
-| `dataLocations` | Countries where data is processed/stored |
-| `subProviders` | Nested third-party chains (e.g., AWS under a SaaS) |
-
-The register is viewable via `GET /api/v1/dora/third-party-providers` and can be exported as DORA Art. 28 XML for submission to the competent authority.
-
----
-
-## Incident reporting by jurisdiction
-
-| Jurisdiction | Authority | Channel |
-|---|---|---|
-| DE_EWPG | BaFin | BaFin Meldewesen portal |
-| LU_CSSF | CSSF | CSSF secure messaging |
-| FR_AMF | AMF + ACPR | AMF/ACPR incident notification form |
-| LI_TVTG | FMA | FMA incident reporting portal |
-
-The `dora` module stores the authority contact and submission method in the `JurisdictionProfile`. When an incident reaches the notification deadline, `DoraService` emits a `DoraIncidentNotificationDueEvent` → the `notification` module triggers the configured channel.
+The repository does not implement jurisdiction-specific DORA authority routing, official forms or
+schemas, authenticated transmission, delivery receipts, corrections, rejection handling, or
+authority acceptance. Recording that an incident was reported is not filing evidence.

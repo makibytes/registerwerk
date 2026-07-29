@@ -6,8 +6,12 @@ import de.makibytes.registerwerk.customer.events.EntitySuspendedEvent;
 import de.makibytes.registerwerk.customer.events.EntityDissolvedEvent;
 import de.makibytes.registerwerk.customer.events.EntityReactivatedEvent;
 import de.makibytes.registerwerk.customer.events.EntityRenamedEvent;
+import de.makibytes.registerwerk.customer.events.EntityMergedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
+import de.makibytes.registerwerk.customer.api.EntityMergeRecord;
+import de.makibytes.registerwerk.customer.api.EntityMergeRecordRepository;
 import de.makibytes.registerwerk.customer.api.EntityNameHistory;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
@@ -36,16 +40,19 @@ public class LegalEntityService {
 
     private final LegalEntityRepository legalEntityRepository;
     private final EntityNameHistoryRepository entityNameHistoryRepository;
+    private final EntityMergeRecordRepository entityMergeRecordRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final EntityNumberGenerator entityNumberGenerator;
 
     public LegalEntityService(
             LegalEntityRepository legalEntityRepository,
             EntityNameHistoryRepository entityNameHistoryRepository,
+            EntityMergeRecordRepository entityMergeRecordRepository,
             ApplicationEventPublisher eventPublisher,
             EntityNumberGenerator entityNumberGenerator) {
         this.legalEntityRepository = legalEntityRepository;
         this.entityNameHistoryRepository = entityNameHistoryRepository;
+        this.entityMergeRecordRepository = entityMergeRecordRepository;
         this.eventPublisher = eventPublisher;
         this.entityNumberGenerator = entityNumberGenerator;
     }
@@ -159,5 +166,49 @@ public class LegalEntityService {
 
         eventPublisher.publishEvent(new EntityRenamedEvent(id, actorId, null, java.util.Map.of("previousName", previousName, "newName", newName, "effectiveDate", effectiveDate.toString())));
         log.info("Renamed entity: id={}, from='{}' to='{}'", id, previousName, newName);
+    }
+
+    /**
+     * Records an entity merge (M&A event): the source entity is absorbed into (or consolidated
+     * with) the target entity and marked {@link EntityStatus#DISSOLVED} — it ceases independent
+     * legal existence but its record, name history, and audit trail are retained (German
+     * commercial law retention requirements), consistent with how {@link #dissolveEntity} treats
+     * other entities that stop being an active legal person.
+     */
+    public EntityMergeRecord mergeEntities(UUID sourceEntityId, UUID targetEntityId,
+                                            EntityMergeRecord.MergeType mergeType,
+                                            LocalDate effectiveDate, String notes, UUID actorId) {
+        if (sourceEntityId.equals(targetEntityId)) {
+            throw new IllegalArgumentException("An entity cannot be merged into itself.");
+        }
+        LegalEntity source = getEntity(sourceEntityId);
+        LegalEntity target = getEntity(targetEntityId);
+        if (source.getStatus() == EntityStatus.DISSOLVED) {
+            throw new InvalidStateTransitionException(
+                    "Source entity " + sourceEntityId + " is already dissolved and cannot be merged again.");
+        }
+        if (target.getStatus() == EntityStatus.DISSOLVED) {
+            throw new InvalidStateTransitionException(
+                    "Target entity " + targetEntityId + " is dissolved and cannot absorb another entity.");
+        }
+
+        EntityMergeRecord record = new EntityMergeRecord();
+        record.setSourceEntityId(sourceEntityId);
+        record.setTargetEntityId(targetEntityId);
+        record.setMergeType(mergeType);
+        record.setEffectiveDate(effectiveDate);
+        record.setNotes(notes);
+        record.setRecordedBy(actorId);
+        EntityMergeRecord saved = entityMergeRecordRepository.save(record);
+
+        source.setStatus(EntityStatus.DISSOLVED);
+        legalEntityRepository.save(source);
+
+        eventPublisher.publishEvent(new EntityMergedEvent(sourceEntityId, actorId, null, Map.of(
+                "targetEntityId", targetEntityId.toString(),
+                "mergeType", mergeType.name(),
+                "effectiveDate", effectiveDate.toString())));
+        log.info("Merged entity: source={} into target={} type={}", sourceEntityId, targetEntityId, mergeType);
+        return saved;
     }
 }

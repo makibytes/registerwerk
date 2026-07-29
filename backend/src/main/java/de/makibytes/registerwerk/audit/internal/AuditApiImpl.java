@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.audit.internal;
 
 import de.makibytes.registerwerk.audit.AuditApi;
 import de.makibytes.registerwerk.audit.api.AuditEventView;
+import de.makibytes.registerwerk.audit.api.ChainVerificationView;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -16,9 +17,11 @@ import java.util.UUID;
 class AuditApiImpl implements AuditApi {
 
     private final AuditEventRepository repository;
+    private final AuditChainVerificationService chainVerificationService;
 
-    AuditApiImpl(AuditEventRepository repository) {
+    AuditApiImpl(AuditEventRepository repository, AuditChainVerificationService chainVerificationService) {
         this.repository = repository;
+        this.chainVerificationService = chainVerificationService;
     }
 
     @Override
@@ -49,6 +52,20 @@ class AuditApiImpl implements AuditApi {
     @Override
     public Page<AuditEventView> findKycOverrideApprovals(String jurisdiction, Instant from, Instant to, Pageable pageable) {
         return repository.findKycOverrideApprovals(jurisdiction, from, to, pageable).map(this::toView);
+    }
+
+    @Override
+    public ChainVerificationView chainVerificationStatus() {
+        return toView(chainVerificationService.lastResult());
+    }
+
+    @Override
+    public ChainVerificationView verifyChainNow() {
+        return toView(chainVerificationService.verifyNow());
+    }
+
+    private ChainVerificationView toView(AuditChainVerificationService.VerificationResult r) {
+        return new ChainVerificationView(r.valid(), r.rowsChecked(), r.firstBrokenSeq(), r.checkedAt());
     }
 
     private AuditEventView toView(AuditEvent e) {

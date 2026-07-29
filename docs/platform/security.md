@@ -89,6 +89,33 @@ The `SecurityConfig` class (`auth/internal/`) configures Spring Security with:
 - All other `/api/v1/**` → JWT required
 - Everything else → deny
 
+Note that the filter chain only enforces **authentication**, not roles or tenancy — every
+`/api/v1/**` endpoint is reachable by any authenticated user unless it also carries its own
+`@PreAuthorize`. A missing method-level check is a real gap, not a defence-in-depth nicety.
+
+---
+
+## Multi-tenant scoping (not just role checks)
+
+A `@PreAuthorize("hasRole(...)")` check alone is not enough on an endpoint that also accepts
+a resource identifier from the caller — a role check confirms *what kind* of actor is calling,
+not *which tenant's data* they may touch. Two patterns enforce the second half:
+
+- **Reads/writes on an existing resource** — gate with the resource's own access-checker bean
+  (e.g. `@assetAccessChecker.canRead(#assetId, authentication)` /
+  `canActAsIssuer(#assetId, authentication)`), which looks up the resource and compares its
+  owning entity against `SecurityUtils.extractEntityId(auth)`. `AssetController`,
+  `DeploymentController`, and `MintControlController` all follow this pattern for every
+  asset-scoped endpoint.
+- **List/create endpoints that take a tenant identifier as a request parameter** — never trust
+  a client-supplied `issuerId`/`entityId` for a non-admin caller. `AssetController.listAssets`
+  forces the query to the caller's own entity unless `SecurityUtils.isAdminOrAudit(auth)`;
+  `AssetController.createAsset`'s `resolveIssuerId` only honours an explicit `issuerId` in the
+  request body for REGISTRY_ADMIN, otherwise it is silently overridden with the caller's own
+  entity. Skipping this step lets any authenticated customer enumerate or attribute records to
+  a different company by simply passing a different id — the role check alone would not have
+  caught it.
+
 ---
 
 ## Production fail-fast guard

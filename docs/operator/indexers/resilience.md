@@ -7,7 +7,8 @@ sidebar_position: 3
 
 # Indexer Resilience
 
-This page describes how the registry detects indexer gaps, recovers from outages, and ensures on-chain data integrity.
+This page describes how the registry detects indexer gaps, recovers from outages, and compares
+provisional event ranges. These procedures do not establish chain finality or legal correctness.
 
 ## Indexer state tracking
 
@@ -64,18 +65,20 @@ If the graph-node falls behind due to RPC downtime:
 
 ### Subgraph re-indexing
 
-If a subgraph has fatal errors and cannot recover automatically:
+If a subgraph has fatal errors and cannot recover automatically, do not remove the active
+deployment. Render and deploy a fresh version under the configured mainnet graph name:
 
 ```bash
-# Remove the failed subgraph
-curl -X POST http://localhost:8020 \
-  -d '{"jsonrpc":"2.0","method":"subgraph_remove","params":{"name":"ewpg/mainnet"},"id":1}'
-
-# Re-deploy from the correct start block
-FACTORY_ADDRESS_MAINNET=0xYourFactory \
-  START_BLOCK=18000000 \
-  ../deploy-subgraph.sh mainnet
+# Configure every *_MAINNET singleton and multi-instance list with its deployment block,
+# then render, validate and deploy a uniquely labelled fresh version. Graph Node retains
+# the prior version while ewpg/ethereum-mainnet indexes the replacement.
+SUBGRAPH_VERSION_LABEL=recovery-YYYYMMDDHHMM ./indexer/evm/deploy-subgraph.sh mainnet
 ```
+
+Wait for the new version to reach the chain head, then compare its event range independently
+before allowing downstream reliance. Keep the prior configuration and artifacts. If rollback is
+required, redeploy that previously approved configuration under a new version label; this creates
+a fresh version instead of destructively deleting either history.
 
 ### Solana indexer recovery
 
@@ -122,23 +125,19 @@ groups:
           severity: critical
 ```
 
-## Data consistency verification
+## Planned event-range comparison (not implemented)
 
-To verify that registry data matches what is on-chain, use the built-in consistency checker:
+Registerwerk does not currently expose a `verify-consistency` admin endpoint. A planned recovery
+control will:
 
-```bash
-curl -X POST http://localhost:8080/api/v1/admin/verify-consistency \
-  -H "Authorization: Bearer $OPERATOR_JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"chainId": 1, "fromBlock": 18000000, "toBlock": 18100000}'
-```
-
-The consistency checker:
 1. Queries the subgraph for all transfer events in the block range
 2. Directly fetches the same events from the chain via `eth_getLogs`
 3. Compares the two sets and reports any discrepancies
 
-Run this after any indexer recovery to confirm data integrity before resuming normal operations.
+Until that control is implemented and tested, operators must perform an independently controlled
+event-range comparison before resuming reliance. Even then, matching event sets would establish
+agreement for the checked range only—not chain finality, legal register state, legal effect,
+settlement, or deployed-code identity.
 
 # Resilience and Recovery
 

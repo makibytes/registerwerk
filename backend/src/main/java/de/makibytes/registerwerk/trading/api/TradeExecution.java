@@ -106,8 +106,38 @@ public class TradeExecution {
     @Column(name = "settled_at")
     private Instant settledAt;
 
+    /** Populated for FAILED/CANCELLED/REFUNDED executions — previously a venue rejection threw
+     *  and rolled back the whole method, leaving no record at all of the attempt. */
+    @Column(name = "failure_reason")
+    private String failureReason;
+
+    /**
+     * Evidence of payment supplied by the buyer when settling a PENDING trade — a stablecoin tx
+     * hash, a SEPA transfer reference, etc., depending on {@link #paymentOption}. Gives a later
+     * reconciliation something concrete to check, though this is not yet independently verified
+     * against chain/bank state.
+     */
+    @Column(name = "payment_reference", length = 255)
+    private String paymentReference;
+
     public UUID getId() {
         return id;
+    }
+
+    public String getFailureReason() {
+        return failureReason;
+    }
+
+    public void setFailureReason(String failureReason) {
+        this.failureReason = failureReason;
+    }
+
+    public String getPaymentReference() {
+        return paymentReference;
+    }
+
+    public void setPaymentReference(String paymentReference) {
+        this.paymentReference = paymentReference;
     }
 
     public UUID getListingId() {

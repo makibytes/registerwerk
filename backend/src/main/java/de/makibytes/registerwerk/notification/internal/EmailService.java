@@ -1,6 +1,8 @@
 package de.makibytes.registerwerk.notification.internal;
 
 import de.makibytes.registerwerk.notification.internal.SmtpEmailAdapter;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.mail.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,10 +23,12 @@ public class EmailService implements de.makibytes.registerwerk.notification.api.
 
     private final SmtpEmailAdapter smtpEmailAdapter;
     private final TemplateEngine templateEngine;
+    private final MeterRegistry meterRegistry;
 
-    public EmailService(SmtpEmailAdapter smtpEmailAdapter, TemplateEngine templateEngine) {
+    public EmailService(SmtpEmailAdapter smtpEmailAdapter, TemplateEngine templateEngine, MeterRegistry meterRegistry) {
         this.smtpEmailAdapter = smtpEmailAdapter;
         this.templateEngine = templateEngine;
+        this.meterRegistry = meterRegistry;
     }
 
     /**
@@ -46,6 +50,7 @@ public class EmailService implements de.makibytes.registerwerk.notification.api.
             smtpEmailAdapter.sendHtml(to, subject, htmlBody);
         } catch (Exception e) {
             log.error("Failed to send email to={}, template={} — SMTP error is non-fatal", to, templateName, e);
+            incrementFailureCounter("generic");
         }
     }
 
@@ -69,7 +74,21 @@ public class EmailService implements de.makibytes.registerwerk.notification.api.
             return true;
         } catch (Exception e) {
             log.error("Failed to send statement email to={} — {}", to, e.getMessage());
+            incrementFailureCounter("statement_pdf");
             return false;
         }
+    }
+
+    /** No persisted state backs email delivery at all (not even a fire-and-forget audit event),
+     *  so a Counter — not a gauge — is the only thing to expose (repo-wide alerting-gap
+     *  follow-up). Tagged by context to keep the fire-and-forget path (sendHtml) distinguishable
+     *  from the §19-statement-delivery path (sendHtmlWithPdf), whose caller actually needs the
+     *  boolean outcome. */
+    private void incrementFailureCounter(String context) {
+        Counter.builder("registerwerk_notification_email_send_failures_total")
+                .tag("context", context)
+                .description("Count of email send failures since startup, tagged by context (generic/statement_pdf)")
+                .register(meterRegistry)
+                .increment();
     }
 }

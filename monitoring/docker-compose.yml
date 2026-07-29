@@ -1,3 +1,15 @@
+# This stack is intentionally separate from the root docker-compose.yml (started via
+# `docker compose -f monitoring/docker-compose.yml up -d`, per docs/operator/maintenance/
+# monitoring.md) — but it must run ON the main stack's network to reach backend:8080/
+# kong:8001, and the main stack must already be up first (registerwerk_default must exist).
+# Previously this file declared no network at all, so Compose gave it its own separate
+# "monitoring_default" network and every scrape target in prometheus.yml was unreachable
+# by construction (Phase 12, finding #4).
+networks:
+  default:
+    name: registerwerk_default
+    external: true
+
 services:
   # ─── Prometheus ────────────────────────────────────────────────────────────
   prometheus:
@@ -69,6 +81,34 @@ services:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
       - "127.0.0.1:9093:9093"
+    restart: unless-stopped
+
+  # ─── Postgres exporter ─────────────────────────────────────────────────────
+  # prometheus.yml's "postgres" scrape job referenced this target already; the service
+  # itself was never defined anywhere (Phase 12, finding #4).
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${DB_USER:-registerwerk}:${DB_PASSWORD:-registerwerk}@postgres:5432/registerwerk?sslmode=disable"
+    ports:
+      - "127.0.0.1:9187:9187"
+    restart: unless-stopped
+
+  # ─── Node exporter ──────────────────────────────────────────────────────────
+  # Same gap as postgres-exporter — referenced by prometheus.yml's "node" job, never defined.
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    ports:
+      - "127.0.0.1:9100:9100"
     restart: unless-stopped
 
 volumes:

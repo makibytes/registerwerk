@@ -53,7 +53,8 @@ public class InvestmentController {
             Pageable pageable,
             Authentication auth) {
         UUID investorId = extractEntityId(auth);
-        Page<AssetHolder> page = assetHolderRepository.findByInvestorId(investorId, pageable);
+        // A removed holder no longer holds the position and must not appear in the customer's list.
+        Page<AssetHolder> page = assetHolderRepository.findActiveByInvestorId(investorId, pageable);
         Map<UUID, Asset> assetCache = loadAssetCache(page.getContent());
         return ResponseEntity.ok(PageResponse.of(page.map(h -> toResponse(auth, h, assetCache.get(h.getAssetId())))));
     }
@@ -93,7 +94,8 @@ public class InvestmentController {
                 h.getUpdatedAt(),
                 companyExternalReferenceService
                         .findExternalId(authentication, ExternalReferenceSubjectType.ASSET_HOLDER, h.getId())
-                        .orElse(null)
+                        .orElse(null),
+                a != null ? a.getChain() : null
         );
     }
 

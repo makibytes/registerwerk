@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -29,7 +30,9 @@ import java.util.concurrent.CompletableFuture;
  *
  * <p>Token contracts are deployed via the Universal Deployer Contract (UDC), which performs
  * a deterministic CREATE2-style deployment of a pre-declared Cairo class.  The service
- * submits Invoke v1 transactions signed with the STARK curve ECDSA algorithm.
+ * submits Invoke <b>v3</b> transactions (SNIP-8) signed with the STARK curve ECDSA algorithm —
+ * Starknet 0.14 removed v0–v2 support entirely, so v3 with STRK-denominated resource bounds
+ * is the only transaction version current sequencers accept.
  *
  * <h3>Signing</h3>
  * The STARK curve is a Weierstrass elliptic curve over the Starkware prime field.  Private-key
@@ -37,10 +40,13 @@ import java.util.concurrent.CompletableFuture;
  * Deterministic k-nonce generation uses RFC 6979 with SHA-256.
  *
  * <h3>Transaction hash</h3>
- * Starknet Invoke v1 hashes are computed with the canonical {@code hash_on_elements} over the
- * Pedersen hash function — see {@link StarkPedersenHash}, whose constant points are taken from
- * cairo-lang {@code pedersen_params.json} and pinned by unit test against the official
- * Starkware test vector.
+ * Invoke v3 hashes are computed with {@code poseidon_hash_many} (SNIP-8) — see
+ * {@link StarkPoseidonHash}, pinned by unit test against independent starknet-rs vectors; the
+ * full v3 layout (fee-field sub-hash, DA-mode packing) is pinned by
+ * {@code StarknetInvokeV3HashTest} against a starknet.py reference vector.  The Pedersen hash
+ * ({@link StarkPedersenHash}) remains in use for the deterministic UDC contract-address
+ * precomputation ({@code compute_contract_address} is Pedersen-based in every protocol
+ * version, including 0.14).
  *
  * <h3>Regulatory admin controls</h3>
  * <ul>
@@ -53,6 +59,13 @@ import java.util.concurrent.CompletableFuture;
 public class StarknetTokenService {
 
     private static final Logger log = LoggerFactory.getLogger(StarknetTokenService.class);
+
+    /**
+     * Result of a Cairo token deployment. {@code contractAddress} is the UDC-precomputed
+     * felt address (see {@link #computeUdcContractAddress}) — known and persisted at
+     * submission time, unlike EVM where the address is only known once the tx is mined.
+     */
+    public record StarknetDeployment(String txHash, String contractAddress) {}
 
     // ── STARK curve constants ────────────────────────────────────────────────
 
@@ -83,43 +96,62 @@ public class StarknetTokenService {
             "0x041a78e741e5af2fec34b695679bc6891742439f7afb8484ecd7766661ad02bf";
 
     /**
-     * keccak252 selector for UDC.deployContract.
-     * Equals starknet_keccak("deployContract") & ((1<<250)-1).
+     * keccak252 selector for UDC.deployContract — derived via {@link #starknetKeccak(String)}
+     * the same way every other entry-point selector in this file is (see {@link #invokeContract}),
+     * rather than hardcoded, so it can't silently diverge from the actual selector.
      */
-    private static final String UDC_DEPLOY_SELECTOR =
-            "0x026ef43612aca2d99cebbf98c43cbe8af9c5af7213e4da6e19c0a6b14e3a3b7";
+    private static final BigInteger UDC_DEPLOY_SELECTOR = starknetKeccak("deployContract");
 
     /**
-     * Class hash of the OpenZeppelin Cairo ERC-20 (v0.14.0) as declared on Starknet Sepolia
-     * and Mainnet.  Operators must ensure this class is declared on the target network before
-     * the first deployment.  Override via STARKNET_ERC20_CLASS_HASH environment variable.
+     * Class hash of the Registerwerk EwpgERC20 Cairo contract ({@code contracts/cairo/src/erc20.cairo}).
+     * Operators must ensure this class is declared on the target network before the first
+     * deployment.  Override via the {@code registerwerk.chains.starknet.erc20-class-hash} property.
      */
     static final String DEFAULT_ERC20_CLASS_HASH =
             "0x0000000000000000000000000000000000000000000000000000000000000000"; // declare contracts/cairo EwpgERC20, then configure
 
     /**
-     * Class hash of the Registerwerk EwpgERC3525 Cairo contract.
-     * Must be declared on the target network before the first ERC-3525 deployment.
-     * This placeholder must be replaced with the actual Sierra class hash after the contract is compiled
-     * and declared ({@code starkli declare}) on the target network.
-     *
-     * <p>Corresponding source: {@code contracts/cairo/src/erc3525/EwpgERC3525.cairo}
+     * Class hash of the Registerwerk EwpgERC3525 Cairo contract ({@code contracts/cairo/src/erc3525/EwpgERC3525.cairo}).
+     * Must be declared ({@code starkli declare}) on the target network before the first ERC-3525
+     * deployment. Override via the {@code registerwerk.chains.starknet.erc3525-class-hash}
+     * property (same override mechanism as {@link #DEFAULT_ERC20_CLASS_HASH}).
      */
     static final String DEFAULT_ERC3525_CLASS_HASH =
-            "0x0000000000000000000000000000000000000000000000000000000000000000"; // TODO: replace after declare
+            "0x0000000000000000000000000000000000000000000000000000000000000000";
 
     /**
-     * Starknet Invoke v1 transaction type prefix: the ASCII bytes of "invoke"
-     * interpreted as a big-endian integer (0x696e766f6b65) — per the Starknet
-     * transaction-hash specification. Not a keccak selector.
+     * Starknet transaction type prefix: the ASCII bytes of "invoke" interpreted as a
+     * big-endian integer (0x696e766f6b65) — per the Starknet transaction-hash
+     * specification. Not a keccak selector.
      */
     private static final BigInteger INVOKE_PREFIX = new BigInteger("696e766f6b65", 16);
 
-    /** Invoke v1 version. */
-    private static final BigInteger INVOKE_VERSION = BigInteger.ONE;
+    /** Invoke v3 — the only version Starknet ≥ 0.14 sequencers accept. */
+    private static final BigInteger INVOKE_VERSION = BigInteger.valueOf(3);
 
-    /** Max fee in fri: 10^15 = 0.001 STRK — sufficient for a simple deploy invoke. */
-    private static final BigInteger MAX_FEE = new BigInteger("1000000000000000");
+    /** One resource bound of an Invoke v3 transaction: name is "L1_GAS", "L2_GAS" or "L1_DATA". */
+    record ResourceBound(String name, BigInteger maxAmount, BigInteger maxPricePerUnit) {
+
+        /** SNIP-8 packing: {@code name << 192 | max_amount << 128 | max_price_per_unit}. */
+        BigInteger toFelt() {
+            BigInteger nameFelt = new BigInteger(1, name.getBytes(StandardCharsets.US_ASCII));
+            return nameFelt.shiftLeft(128 + 64).add(maxAmount.shiftLeft(128)).add(maxPricePerUnit);
+        }
+    }
+
+    /**
+     * Static worst-case resource bounds (fri = 10⁻¹⁸ STRK). These are caps, not charges —
+     * the sequencer bills actual consumption; a bound only rejects the transaction if
+     * execution would exceed it. Sized for a UDC deploy or admin invoke: no L1 gas
+     * (no L2→L1 messages), up to 1 STRK of L2 computation, 0.001 STRK of L1 data
+     * availability. Same spirit as the fixed {@code max_fee} the v1 client used.
+     */
+    private static final ResourceBound L1_GAS_BOUND =
+            new ResourceBound("L1_GAS", BigInteger.ZERO, new BigInteger("10000000000000"));
+    private static final ResourceBound L2_GAS_BOUND =
+            new ResourceBound("L2_GAS", new BigInteger("50000000"), new BigInteger("20000000000"));
+    private static final ResourceBound L1_DATA_GAS_BOUND =
+            new ResourceBound("L1_DATA", BigInteger.valueOf(10_000), new BigInteger("100000000000"));
 
     // ── Dependencies ─────────────────────────────────────────────────────────
 
@@ -129,6 +161,7 @@ public class StarknetTokenService {
     private final HttpClient httpClient;
     private final String erc20ClassHash;
     private final String erc3525ClassHash;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     public StarknetTokenService(
             ChainConfigRepository chainConfigRepository,
@@ -139,12 +172,14 @@ public class StarknetTokenService {
             String erc20ClassHash,
             @org.springframework.beans.factory.annotation.Value(
                     "${registerwerk.chains.starknet.erc3525-class-hash:" + DEFAULT_ERC3525_CLASS_HASH + "}")
-            String erc3525ClassHash) {
+            String erc3525ClassHash,
+            org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.chainConfigRepository = chainConfigRepository;
         this.walletSigner = walletSigner;
         this.objectMapper = objectMapper;
         this.erc20ClassHash = erc20ClassHash;
         this.erc3525ClassHash = erc3525ClassHash;
+        this.eventPublisher = eventPublisher;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
@@ -175,7 +210,7 @@ public class StarknetTokenService {
      * @param ownerAddress felt252 account address that will own the minted supply
      * @return future resolving to the Starknet invoke transaction hash (0x-prefixed)
      */
-    public CompletableFuture<String> createCairoErc20(UUID assetId, Network network, String ownerAddress) {
+    public CompletableFuture<StarknetDeployment> createCairoErc20(UUID assetId, Network network, String ownerAddress) {
         log.info("Creating Cairo ERC-20: assetId={}, network={}", assetId, network);
 
         return CompletableFuture.supplyAsync(() -> {
@@ -197,16 +232,19 @@ public class StarknetTokenService {
 
             // Build UDC deployContract calldata
             BigInteger salt = generateSalt(assetId);
-            List<BigInteger> calldata = buildUdcCalldata(assetId, salt, ownerAddress);
+            UdcCallBuild udcCall = buildUdcCalldata(assetId, salt, ownerAddress);
 
-            BigInteger txHash = computeInvokeV1Hash(
-                    senderFelt, calldata, MAX_FEE, chainId, nonce);
+            BigInteger txHash = computeInvokeV3Hash(
+                    senderFelt, udcCall.invokeCalldata(), chainId, nonce,
+                    L1_GAS_BOUND, L2_GAS_BOUND, L1_DATA_GAS_BOUND);
 
             BigInteger[] sig = starkSign(privKey, txHash);
 
-            String txHashHex = submitInvokeV1(rpcUrl, accountAddress, calldata, nonce, sig);
-            log.info("Cairo ERC-20 deployment submitted: assetId={} txHash={}", assetId, txHashHex);
-            return txHashHex;
+            String txHashHex = submitInvokeV3(rpcUrl, accountAddress, udcCall.invokeCalldata(), nonce, sig);
+            String contractAddress = "0x" + udcCall.contractAddress().toString(16);
+            log.info("Cairo ERC-20 deployment submitted: assetId={} txHash={} contractAddress={}",
+                    assetId, txHashHex, contractAddress);
+            return new StarknetDeployment(txHashHex, contractAddress);
         });
     }
 
@@ -225,7 +263,7 @@ public class StarknetTokenService {
      * @param ownerAddress felt252 address of the initial owner
      * @return future resolving to the UDC deployment transaction hash
      */
-    public CompletableFuture<String> createCairoErc3525(UUID assetId, Network network, String ownerAddress) {
+    public CompletableFuture<StarknetDeployment> createCairoErc3525(UUID assetId, Network network, String ownerAddress) {
         log.info("Creating Cairo ERC-3525 (SFT): assetId={}, network={}", assetId, network);
 
         return CompletableFuture.supplyAsync(() -> {
@@ -247,14 +285,17 @@ public class StarknetTokenService {
 
             // ERC-3525 calldata uses the same UDC pattern as ERC-20
             BigInteger salt = generateSalt(assetId);
-            List<BigInteger> calldata = buildErc3525UdcCalldata(assetId, salt, ownerAddress);
+            UdcCallBuild udcCall = buildErc3525UdcCalldata(assetId, salt, ownerAddress);
 
-            BigInteger txHash = computeInvokeV1Hash(senderFelt, calldata, MAX_FEE, chainId, nonce);
+            BigInteger txHash = computeInvokeV3Hash(senderFelt, udcCall.invokeCalldata(), chainId, nonce,
+                    L1_GAS_BOUND, L2_GAS_BOUND, L1_DATA_GAS_BOUND);
             BigInteger[] sig = starkSign(privKey, txHash);
 
-            String txHashHex = submitInvokeV1(rpcUrl, accountAddress, calldata, nonce, sig);
-            log.info("Cairo ERC-3525 deployment submitted: assetId={} txHash={}", assetId, txHashHex);
-            return txHashHex;
+            String txHashHex = submitInvokeV3(rpcUrl, accountAddress, udcCall.invokeCalldata(), nonce, sig);
+            String contractAddress = "0x" + udcCall.contractAddress().toString(16);
+            log.info("Cairo ERC-3525 deployment submitted: assetId={} txHash={} contractAddress={}",
+                    assetId, txHashHex, contractAddress);
+            return new StarknetDeployment(txHashHex, contractAddress);
         });
     }
 
@@ -268,15 +309,26 @@ public class StarknetTokenService {
      *
      * @param contractAddress felt252 address of the deployed ERC-20 contract
      * @param holderAddress   felt252 address of the account to freeze
+     * @param reason          short-string reason recorded on-chain alongside the freeze
      * @param network         MAINNET or TESTNET
+     * @param deploymentId    Registerwerk deployment ID, for the audit record
+     * @param actorId         operator who triggered this freeze
+     * @param actorRole       the triggering actor's role, for the audit record
      * @return future resolving to the transaction hash
      */
     public CompletableFuture<String> freezeAccount(
-            String contractAddress, String holderAddress, Network network) {
+            String contractAddress, String holderAddress, String reason, Network network,
+            UUID deploymentId, UUID actorId, String actorRole) {
         log.info("ADMIN freeze Starknet account={} contract={} network={}",
                 holderAddress, contractAddress, network);
-        return invokeContract(network, contractAddress,
-                "freeze_address", List.of(parseHexFelt(holderAddress)));
+        // Cairo's freeze_address(account, reason) takes two felts; unfreeze_address takes one.
+        return invokeContract(network, contractAddress, "freeze_address",
+                        List.of(parseHexFelt(holderAddress), shortStringToFelt(reason)))
+                .thenApply(txHash -> {
+                    publishAdminAction(deploymentId, "freezeAccount",
+                            Map.of("holderAddress", holderAddress, "reason", reason), actorId, actorRole);
+                    return txHash;
+                });
     }
 
     /**
@@ -286,14 +338,30 @@ public class StarknetTokenService {
      * @param contractAddress felt252 address of the deployed ERC-20 contract
      * @param holderAddress   felt252 address of the account to unfreeze
      * @param network         MAINNET or TESTNET
+     * @param deploymentId    Registerwerk deployment ID, for the audit record
+     * @param actorId         operator who triggered this unfreeze
+     * @param actorRole       the triggering actor's role, for the audit record
      * @return future resolving to the transaction hash
      */
     public CompletableFuture<String> unfreezeAccount(
-            String contractAddress, String holderAddress, Network network) {
+            String contractAddress, String holderAddress, Network network,
+            UUID deploymentId, UUID actorId, String actorRole) {
         log.info("ADMIN unfreeze Starknet account={} contract={} network={}",
                 holderAddress, contractAddress, network);
-        return invokeContract(network, contractAddress,
-                "unfreeze_address", List.of(parseHexFelt(holderAddress)));
+        return invokeContract(network, contractAddress, "unfreeze_address", List.of(parseHexFelt(holderAddress)))
+                .thenApply(txHash -> {
+                    publishAdminAction(deploymentId, "unfreezeAccount",
+                            Map.of("holderAddress", holderAddress), actorId, actorRole);
+                    return txHash;
+                });
+    }
+
+    /** Publishes the same {@code TokenAdminActionEvent} every EVM admin service uses, so freeze
+     *  and unfreeze reach the audit trail. */
+    private void publishAdminAction(UUID deploymentId, String methodName, Map<String, Object> params,
+                                     UUID actorId, String actorRole) {
+        eventPublisher.publishEvent(new de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent(
+                deploymentId, methodName, actorId, actorRole, params));
     }
 
     // ── Core invoke helper ────────────────────────────────────────────────────
@@ -323,22 +391,23 @@ public class StarknetTokenService {
             BigInteger nonce = nonceFuture.join();
             BigInteger chainId = chainIdFuture.join();
 
-            // Single-call calldata: [to, selector, calldataLen, ...calldata]
+            // SNIP-6 (Cairo 1 account) single-call calldata:
+            // [calls_len, to, selector, calldata_len, ...calldata]
             BigInteger contractFelt = parseHexFelt(contractAddress);
             BigInteger selectorFelt = starknetKeccak(entryPointName);
             List<BigInteger> calldata = new ArrayList<>();
             calldata.add(BigInteger.ONE);     // calls_len
             calldata.add(contractFelt);
             calldata.add(selectorFelt);
-            calldata.add(BigInteger.ZERO);    // calldata_offset (unused in v1)
             calldata.add(BigInteger.valueOf(args.size()));
             calldata.addAll(args);
 
-            BigInteger txHash = computeInvokeV1Hash(
-                    senderFelt, calldata, MAX_FEE, chainId, nonce);
+            BigInteger txHash = computeInvokeV3Hash(
+                    senderFelt, calldata, chainId, nonce,
+                    L1_GAS_BOUND, L2_GAS_BOUND, L1_DATA_GAS_BOUND);
             BigInteger[] sig = starkSign(privKey, txHash);
 
-            return submitInvokeV1(rpcUrl, accountAddress, calldata, nonce, sig);
+            return submitInvokeV3(rpcUrl, accountAddress, calldata, nonce, sig);
         });
     }
 
@@ -373,7 +442,7 @@ public class StarknetTokenService {
         }
     }
 
-    private String submitInvokeV1(
+    private String submitInvokeV3(
             String rpcUrl, String senderAddress, List<BigInteger> calldata,
             BigInteger nonce, BigInteger[] signature) {
         try {
@@ -386,12 +455,21 @@ public class StarknetTokenService {
 
             ObjectNode tx = objectMapper.createObjectNode();
             tx.put("type", "INVOKE");
-            tx.put("version", "0x1");
+            tx.put("version", "0x3");
             tx.put("sender_address", senderAddress);
             tx.set("calldata", calldataArr);
-            tx.put("max_fee", "0x" + MAX_FEE.toString(16));
             tx.put("nonce", "0x" + nonce.toString(16));
             tx.set("signature", sigArr);
+            ObjectNode bounds = objectMapper.createObjectNode();
+            bounds.set("l1_gas", boundNode(L1_GAS_BOUND));
+            bounds.set("l2_gas", boundNode(L2_GAS_BOUND));
+            bounds.set("l1_data_gas", boundNode(L1_DATA_GAS_BOUND));
+            tx.set("resource_bounds", bounds);
+            tx.put("tip", "0x0");
+            tx.set("paymaster_data", objectMapper.createArrayNode());
+            tx.set("account_deployment_data", objectMapper.createArrayNode());
+            tx.put("nonce_data_availability_mode", "L1");
+            tx.put("fee_data_availability_mode", "L1");
 
             ArrayNode params = objectMapper.createArrayNode().add(tx);
             ObjectNode req = buildRpcRequest("starknet_addInvokeTransaction", params);
@@ -401,6 +479,13 @@ public class StarknetTokenService {
         } catch (Exception e) {
             throw new RuntimeException("Failed to submit Starknet invoke transaction: " + e.getMessage(), e);
         }
+    }
+
+    private ObjectNode boundNode(ResourceBound bound) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("max_amount", "0x" + bound.maxAmount().toString(16));
+        node.put("max_price_per_unit", "0x" + bound.maxPricePerUnit().toString(16));
+        return node;
     }
 
     private JsonNode callRpc(String rpcUrl, ObjectNode request) throws Exception {
@@ -434,7 +519,14 @@ public class StarknetTokenService {
 
     // ── Calldata builders ─────────────────────────────────────────────────────
 
-    private List<BigInteger> buildUdcCalldata(UUID assetId, BigInteger salt, String ownerAddress) {
+    /**
+     * Bundles the SNIP-6 {@code __execute__} calldata for a UDC deploy call together with the
+     * address the UDC will deploy to, so callers don't have to recompute
+     * {@link #computeUdcContractAddress} a second time from scratch.
+     */
+    private record UdcCallBuild(List<BigInteger> invokeCalldata, BigInteger contractAddress) {}
+
+    private UdcCallBuild buildUdcCalldata(UUID assetId, BigInteger salt, String ownerAddress) {
         // UDC.deployContract(classHash, salt, unique, calldata_len, ...constructorCalldata)
         BigInteger classHash = requireClassHash(erc20ClassHash, "EwpgERC20",
                 "registerwerk.chains.starknet.erc20-class-hash");
@@ -449,11 +541,23 @@ public class StarknetTokenService {
         BigInteger symbolFelt = shortStringToFelt(symbol);
 
         List<BigInteger> constructorCalldata = List.of(nameFelt, symbolFelt, ownerFelt);
+        BigInteger contractAddress = computeUdcContractAddress(salt, classHash, constructorCalldata);
 
-        // Full calldata for the ACCOUNT to call UDC:
-        // [calls_len=1, to=UDC, selector=deployContract, calldata_len, ...udcArgs]
+        log.info("Precomputed Starknet ERC-20 address for asset {}: 0x{}",
+                assetId, contractAddress.toString(16));
+
+        return new UdcCallBuild(wrapUdcCall(classHash, salt, constructorCalldata), contractAddress);
+    }
+
+    /**
+     * Wraps a UDC {@code deployContract(classHash, salt, unique = false, calldata)} call in
+     * SNIP-6 (Cairo 1 account) {@code __execute__} calldata:
+     * {@code [calls_len = 1, to = UDC, selector, calldata_len, ...udcArgs]}.
+     */
+    private static List<BigInteger> wrapUdcCall(
+            BigInteger classHash, BigInteger salt, List<BigInteger> constructorCalldata) {
         BigInteger udcFelt = parseHexFelt(UDC_ADDRESS);
-        BigInteger selectorFelt = new BigInteger(UDC_DEPLOY_SELECTOR.substring(2), 16);
+        BigInteger selectorFelt = UDC_DEPLOY_SELECTOR;
 
         List<BigInteger> udcArgs = new ArrayList<>();
         udcArgs.add(classHash);
@@ -466,7 +570,6 @@ public class StarknetTokenService {
         fullCalldata.add(BigInteger.ONE);   // calls_len
         fullCalldata.add(udcFelt);
         fullCalldata.add(selectorFelt);
-        fullCalldata.add(BigInteger.ZERO);  // calldata_offset
         fullCalldata.add(BigInteger.valueOf(udcArgs.size()));
         fullCalldata.addAll(udcArgs);
         return fullCalldata;
@@ -479,7 +582,7 @@ public class StarknetTokenService {
      * {@code (name: felt252, symbol: felt252, value_decimals: u8, registry_admin: ContractAddress,
      * asset_id: u256)} — six felts on the wire, since u256 serializes as (low, high).
      */
-    private List<BigInteger> buildErc3525UdcCalldata(UUID assetId, BigInteger salt, String ownerAddress) {
+    private UdcCallBuild buildErc3525UdcCalldata(UUID assetId, BigInteger salt, String ownerAddress) {
         BigInteger classHash = requireClassHash(erc3525ClassHash, "EwpgERC3525",
                 "registerwerk.chains.starknet.erc3525-class-hash");
         BigInteger ownerFelt = ownerAddress.isBlank() ? BigInteger.ZERO : parseHexFelt(ownerAddress);
@@ -490,32 +593,26 @@ public class StarknetTokenService {
         BigInteger symbolFelt = shortStringToFelt(symbol);
         BigInteger decimalsFelt = BigInteger.valueOf(18);
 
-        // Encode assetId as two felts (hi/lo 128 bits) since Cairo u256 = (low: u128, high: u128)
+        // Encode assetId as a Cairo u256 (low: u128, high: u128): combine the UUID into one
+        // unsigned 128-bit BigInteger, then split with the same mask convention
+        // StarknetErc3525AdminService.slotFelts() uses elsewhere in this module.
+        byte[] assetIdBytes = new byte[16];
         long hiLong = assetId.getMostSignificantBits();
         long loLong = assetId.getLeastSignificantBits();
-        BigInteger assetIdLow  = BigInteger.valueOf(loLong & Long.MAX_VALUE).add(loLong < 0 ? BigInteger.ONE.shiftLeft(63) : BigInteger.ZERO);
-        BigInteger assetIdHigh = BigInteger.valueOf(hiLong & Long.MAX_VALUE).add(hiLong < 0 ? BigInteger.ONE.shiftLeft(63) : BigInteger.ZERO);
+        for (int i = 7; i >= 0; i--) { assetIdBytes[8 + i] = (byte) (loLong & 0xFF); loLong >>= 8; }
+        for (int i = 7; i >= 0; i--) { assetIdBytes[i]     = (byte) (hiLong & 0xFF); hiLong >>= 8; }
+        BigInteger assetIdValue = new BigInteger(1, assetIdBytes);
+        BigInteger mask128 = BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE);
+        BigInteger assetIdLow  = assetIdValue.and(mask128);
+        BigInteger assetIdHigh = assetIdValue.shiftRight(128).and(mask128);
 
         List<BigInteger> constructorCalldata = List.of(nameFelt, symbolFelt, decimalsFelt, ownerFelt, assetIdLow, assetIdHigh);
+        BigInteger contractAddress = computeUdcContractAddress(salt, classHash, constructorCalldata);
 
-        BigInteger udcFelt = parseHexFelt(UDC_ADDRESS);
-        BigInteger selectorFelt = new BigInteger(UDC_DEPLOY_SELECTOR.substring(2), 16);
+        log.info("Precomputed Starknet ERC-3525 address for asset {}: 0x{}",
+                assetId, contractAddress.toString(16));
 
-        List<BigInteger> udcArgs = new ArrayList<>();
-        udcArgs.add(classHash);
-        udcArgs.add(salt);
-        udcArgs.add(BigInteger.ZERO);  // unique = false
-        udcArgs.add(BigInteger.valueOf(constructorCalldata.size()));
-        udcArgs.addAll(constructorCalldata);
-
-        List<BigInteger> fullCalldata = new ArrayList<>();
-        fullCalldata.add(BigInteger.ONE);
-        fullCalldata.add(udcFelt);
-        fullCalldata.add(selectorFelt);
-        fullCalldata.add(BigInteger.ZERO);
-        fullCalldata.add(BigInteger.valueOf(udcArgs.size()));
-        fullCalldata.addAll(udcArgs);
-        return fullCalldata;
+        return new UdcCallBuild(wrapUdcCall(classHash, salt, constructorCalldata), contractAddress);
     }
 
     private BigInteger generateSalt(UUID assetId) {
@@ -528,39 +625,66 @@ public class StarknetTokenService {
         return new BigInteger(1, uuidBytes).mod(N);
     }
 
-    // ── Transaction hash (Invoke v1) ──────────────────────────────────────────
+    // ── Transaction hash (Invoke v3, SNIP-8) ─────────────────────────────────
 
     /**
-     * Computes the Starknet Invoke v1 transaction hash.
-     *
-     * <p>The canonical formula uses {@code hash_on_elements} (Pedersen-based) or Poseidon (v3).
-     * This implementation uses a keccak252-based approximation (see class-level javadoc).
+     * Computes the Starknet Invoke v3 transaction hash per SNIP-8, with tip = 0, empty
+     * paymaster / account-deployment data, and L1 data-availability for both nonce and fee
+     * (the packed DA-modes felt is therefore 0). A sequencer recomputes exactly this hash
+     * before verifying the signature — any deviation invalidates every transaction this
+     * service submits. Package-visible so {@code StarknetInvokeV3HashTest} can pin it
+     * against the starknet.py reference vector.
      */
-    private static BigInteger computeInvokeV1Hash(
+    static BigInteger computeInvokeV3Hash(
             BigInteger senderAddress, List<BigInteger> calldata,
-            BigInteger maxFee, BigInteger chainId, BigInteger nonce) {
+            BigInteger chainId, BigInteger nonce,
+            ResourceBound l1Gas, ResourceBound l2Gas, ResourceBound l1DataGas) {
 
-        BigInteger calldataHash = hashOnElements(calldata);
+        BigInteger tip = BigInteger.ZERO;
+        BigInteger feeFieldsHash = StarkPoseidonHash.hashMany(List.of(
+                tip, l1Gas.toFelt(), l2Gas.toFelt(), l1DataGas.toFelt()));
+        BigInteger emptyHash = StarkPoseidonHash.hashMany(List.of()); // paymaster / deployment data
 
-        return hashOnElements(List.of(
+        return StarkPoseidonHash.hashMany(List.of(
                 INVOKE_PREFIX,
                 INVOKE_VERSION,
                 senderAddress,
-                BigInteger.ZERO,   // entry_point_selector (not used for invoke v1)
-                calldataHash,
-                maxFee,
+                feeFieldsHash,
+                emptyHash,          // paymaster_data
                 chainId,
-                nonce));
+                nonce,
+                BigInteger.ZERO,    // (nonce_da_mode << 32) | fee_da_mode — both L1 (0)
+                emptyHash,          // account_deployment_data
+                StarkPoseidonHash.hashMany(calldata)));
     }
 
+    // ── Deterministic contract address ────────────────────────────────────────
+
+    /** Pedersen prefix felt: ASCII "STARKNET_CONTRACT_ADDRESS". */
+    private static final BigInteger CONTRACT_ADDRESS_PREFIX =
+            new BigInteger(1, "STARKNET_CONTRACT_ADDRESS".getBytes(StandardCharsets.US_ASCII));
+
+    /** Contract addresses live below 2^251 − 256. */
+    private static final BigInteger ADDR_BOUND =
+            BigInteger.ONE.shiftLeft(251).subtract(BigInteger.valueOf(256));
+
     /**
-     * Canonical Starknet {@code hash_on_elements}: a Pedersen chain seeded with 0
-     * and finalized with the element count. A sequencer recomputes exactly this
-     * hash before verifying the signature — any deviation invalidates every
-     * transaction this service submits.
+     * Precomputes the address the UDC will deploy to ({@code compute_contract_address},
+     * Pedersen-based in every protocol version). With {@code unique = false} the deployer
+     * felt is 0, so the address depends only on (salt, classHash, constructor calldata) —
+     * the Starknet equivalent of the CREATE2 precomputation {@code AssetTokenFactory}
+     * does on EVM chains. Logged at deploy time so operators know the token address
+     * before the transaction is even confirmed.
      */
-    private static BigInteger hashOnElements(List<BigInteger> elements) {
-        return StarkPedersenHash.hashOnElements(elements);
+    static BigInteger computeUdcContractAddress(
+            BigInteger salt, BigInteger classHash, List<BigInteger> constructorCalldata) {
+        return StarkPedersenHash.hashOnElements(List.of(
+                CONTRACT_ADDRESS_PREFIX,
+                BigInteger.ZERO,   // deployer (UDC unique = false → origin-independent)
+                salt,
+                classHash,
+                StarkPedersenHash.hashOnElements(constructorCalldata)))
+                .mod(ADDR_BOUND);
     }
 
     // ── STARK ECDSA ───────────────────────────────────────────────────────────
@@ -681,8 +805,7 @@ public class StarknetTokenService {
     // ── Utilities ─────────────────────────────────────────────────────────────
 
     public static BigInteger parseHexFelt(String hex) {
-        String h = hex.startsWith("0x") ? hex.substring(2) : hex;
-        return new BigInteger(h, 16);
+        return de.makibytes.registerwerk.blockchain.api.StarknetFeltUtils.parseHexFelt(hex);
     }
 
     private static BigInteger shortStringToFelt(String s) {

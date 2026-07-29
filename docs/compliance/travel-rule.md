@@ -5,6 +5,12 @@ description: IVMS-101 Travel Rule implementation for cross-VASP crypto-asset tra
 
 # Travel Rule (TFR / IVMS-101)
 
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and current repository behavior. It is not evidence
+    that the operator or transaction is in scope, that all required data is collected or exchanged,
+    or that a transfer conforms to current TFR/Travel Rule rules. Scope, thresholds,
+    counterparties, exceptions, data protection, and protocol evidence require current external review.
+
 The **Transfer of Funds Regulation (TFR)** — Regulation (EU) 2023/1113 — applies in full since 30 December 2024. It requires that originator and beneficiary information (structured according to the **IVMS-101** standard) accompany **every** crypto-asset transfer between Crypto-Asset Service Providers (CASPs), **regardless of amount**. Unlike fiat wire transfers, the TFR contains **no de minimis threshold** for CASP-to-CASP transfers — this is confirmed by the EBA Travel Rule Guidelines (EBA/GL/2024/11). The €1,000 figure in the TFR relates only to transfers to/from **self-hosted addresses**: above it, Art. 14(5) requires the originating CASP to verify that the self-hosted address is owned or controlled by its own customer.
 
 ---

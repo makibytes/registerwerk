@@ -11,7 +11,6 @@ import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 import org.web3j.protocol.Web3j;
 
 import java.time.Instant;
@@ -43,8 +42,13 @@ import java.util.stream.Collectors;
  *   <li>If ALL nodes are manually disabled ({@code enabled=false}), throw —
  *       this is the only way a chain can become completely unreachable.</li>
  * </ol>
+ *
+ * <p>Constructed exclusively via {@code BlockchainConfig.blockchainClientRegistry()} — this
+ * class must NOT also be {@code @Component}-annotated: that would create a second bean
+ * definition under the same default name as the {@code @Bean} factory method, which (depending
+ * on Spring's bean-definition-overriding setting) either crashes at boot or silently lets one
+ * definition shadow the other.
  */
-@Component
 public class BlockchainClientRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(BlockchainClientRegistry.class);

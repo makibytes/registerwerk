@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.registertransfer.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.audit.AuditApi;
 import de.makibytes.registerwerk.audit.api.AuditEventView;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -11,9 +12,11 @@ import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.registertransfer.api.RegisterTransfer;
 import de.makibytes.registerwerk.registertransfer.api.RegisterTransferRepository;
 import de.makibytes.registerwerk.registertransfer.api.TransferStatus;
+import de.makibytes.registerwerk.registertransfer.events.RegisterTransferEvent;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -57,6 +60,7 @@ public class RegisterTransferService {
     private final AssetDeploymentRepository deploymentRepository;
     private final AuditApi auditApi;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     public RegisterTransferService(
             RegisterTransferRepository transferRepository,
@@ -64,13 +68,15 @@ public class RegisterTransferService {
             AssetHolderRepository holderRepository,
             AssetDeploymentRepository deploymentRepository,
             AuditApi auditApi,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ApplicationEventPublisher eventPublisher) {
         this.transferRepository = transferRepository;
         this.assetRepository = assetRepository;
         this.holderRepository = holderRepository;
         this.deploymentRepository = deploymentRepository;
         this.auditApi = auditApi;
         this.objectMapper = objectMapper;
+        this.eventPublisher = eventPublisher;
     }
 
     /** Initiates a transfer. Rejects a second concurrent transfer for the same asset. */
@@ -94,7 +100,12 @@ public class RegisterTransferService {
         transfer.setReason(reason);
         transfer.setInitiatedBy(initiatedBy);
         transfer.setStatus(TransferStatus.INITIATED);
-        return transferRepository.save(transfer);
+        RegisterTransfer saved = transferRepository.save(transfer);
+
+        eventPublisher.publishEvent(new RegisterTransferEvent(saved.getId(), "INITIATED", initiatedBy, "REGISTRY_ADMIN",
+                nullSafeMap("assetId", assetId, "successorName", successorName,
+                        "successorIdentifier", successorIdentifier, "reason", reason)));
+        return saved;
     }
 
     /**
@@ -102,7 +113,7 @@ public class RegisterTransferService {
      * canonical JSON bytes for download; the manifest and its hash are persisted.
      */
     @Transactional
-    public byte[] export(UUID transferId) {
+    public byte[] export(UUID transferId, UUID actorId) {
         RegisterTransfer transfer = load(transferId);
         require(transfer.getStatus() == TransferStatus.INITIATED
                         || transfer.getStatus() == TransferStatus.EXPORTED,
@@ -135,42 +146,71 @@ public class RegisterTransferService {
         transferRepository.save(transfer);
         log.info("Exported register transfer {} for asset {} ({} bytes)",
                 transferId, transfer.getAssetId(), json.length);
+
+        eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "EXPORTED", actorId, "REGISTRY_ADMIN",
+                nullSafeMap("assetId", transfer.getAssetId(), "exportHash", transfer.getExportHash(), "bytes", json.length)));
         return json;
     }
 
     /** Records the on-chain control handover transaction. */
     @Transactional
-    public RegisterTransfer recordOnchainHandover(UUID transferId, String txHash) {
+    public RegisterTransfer recordOnchainHandover(UUID transferId, String txHash, UUID actorId) {
         RegisterTransfer transfer = load(transferId);
         require(transfer.getStatus() == TransferStatus.EXPORTED,
                 "Export must precede the on-chain handover");
         transfer.setOnchainTxHash(txHash);
         transfer.setStatus(TransferStatus.HANDED_OVER);
         transfer.setUpdatedAt(Instant.now());
-        return transferRepository.save(transfer);
+        RegisterTransfer saved = transferRepository.save(transfer);
+
+        eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "HANDED_OVER", actorId, "REGISTRY_ADMIN",
+                Map.of("txHash", txHash)));
+        return saved;
     }
 
-    /** Marks the transfer complete once the successor has confirmed receipt. */
+    /**
+     * Marks the transfer complete once the successor has confirmed receipt, and flips the
+     * asset to {@link AssetStatus#TRANSFERRED_OUT} — without this, nothing stops this
+     * registrar's own automated jobs ({@code BondMaturityJob}, {@code CouponPaymentJob}) from
+     * continuing to auto-raise and dispatch coupon/redemption corporate actions against an
+     * asset whose register has already been handed over to a successor operator, risking
+     * duplicate/parallel processing between the two registrars.
+     */
     @Transactional
-    public RegisterTransfer complete(UUID transferId) {
+    public RegisterTransfer complete(UUID transferId, UUID actorId) {
         RegisterTransfer transfer = load(transferId);
         require(transfer.getStatus() == TransferStatus.HANDED_OVER,
                 "Only a HANDED_OVER transfer can be completed");
         transfer.setStatus(TransferStatus.COMPLETED);
         transfer.setCompletedAt(Instant.now());
         transfer.setUpdatedAt(Instant.now());
-        return transferRepository.save(transfer);
+        RegisterTransfer saved = transferRepository.save(transfer);
+
+        assetRepository.findById(transfer.getAssetId()).ifPresentOrElse(asset -> {
+            asset.setStatus(AssetStatus.TRANSFERRED_OUT);
+            assetRepository.save(asset);
+        }, () -> log.warn("Asset {} disappeared before it could be marked TRANSFERRED_OUT (transfer={})",
+                transfer.getAssetId(), transferId));
+
+        eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "COMPLETED", actorId, "REGISTRY_ADMIN",
+                nullSafeMap("assetId", transfer.getAssetId(), "successorName", transfer.getSuccessorName())));
+        return saved;
     }
 
     @Transactional
-    public RegisterTransfer cancel(UUID transferId, String reason) {
+    public RegisterTransfer cancel(UUID transferId, String reason, UUID actorId) {
         RegisterTransfer transfer = load(transferId);
         require(transfer.getStatus() != TransferStatus.COMPLETED,
                 "A completed transfer cannot be cancelled");
+        String previousStatus = transfer.getStatus() != null ? transfer.getStatus().name() : "";
         transfer.setStatus(TransferStatus.CANCELLED);
         transfer.setReason(transfer.getReason() + " | cancelled: " + reason);
         transfer.setUpdatedAt(Instant.now());
-        return transferRepository.save(transfer);
+        RegisterTransfer saved = transferRepository.save(transfer);
+
+        eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "CANCELLED", actorId, "REGISTRY_ADMIN",
+                nullSafeMap("assetId", transfer.getAssetId(), "reason", reason, "previousStatus", previousStatus)));
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -190,7 +230,10 @@ public class RegisterTransferService {
     }
 
     private List<Map<String, Object>> holderSnapshots(UUID assetId) {
-        List<AssetHolder> holders = holderRepository.findByAssetId(assetId, Pageable.unpaged()).getContent();
+        // The §20 eWpRV package hands the successor operator the *current* register to continue
+        // maintaining; a removed holder is no longer a register entry (the audit trail, exported
+        // separately by this same class, already preserves that history).
+        List<AssetHolder> holders = holderRepository.findActiveByAssetId(assetId, Pageable.unpaged()).getContent();
         List<Map<String, Object>> out = new ArrayList<>(holders.size());
         for (AssetHolder h : holders) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -256,6 +299,22 @@ public class RegisterTransferService {
         if (!condition) {
             throw new IllegalStateException(message);
         }
+    }
+
+    /**
+     * {@link Map#of} throws NPE on any null value, but several audit-payload fields here
+     * (e.g. {@code transfer.getAssetId()} in states reachable during tests/edge cases) can
+     * legitimately be null — this drops null entries instead of crashing the audit publish.
+     */
+    private static Map<String, Object> nullSafeMap(Object... kvPairs) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i < kvPairs.length; i += 2) {
+            Object value = kvPairs[i + 1];
+            if (value != null) {
+                map.put((String) kvPairs[i], value);
+            }
+        }
+        return map;
     }
 
     private static String sha256Hex(byte[] data) {

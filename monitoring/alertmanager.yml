@@ -1,6 +1,12 @@
+# Alertmanager's own config format has NO env-var interpolation — the ${VAR:default} syntax
+# previously used below for webhook/PagerDuty/Slack URLs is never substituted at all (the
+# monitoring/docker-compose.yml alertmanager service runs the stock image with no envsubst
+# wrapper), so the literal string "${ALERTMANAGER_PAGERDUTY_KEY:changeme}" would have been sent
+# to PagerDuty verbatim as the service_key (Phase 12, finding #13). Same convention as
+# gateway/kong.yml: edit the placeholder values below directly, or render this file with your
+# own deployment tooling before mounting it.
 global:
   resolve_timeout: 5m
-  # Configure PagerDuty or Opsgenie integration key via env var ALERTMANAGER_PAGERDUTY_KEY
   pagerduty_url: https://events.pagerduty.com/v2/enqueue
 
 route:
@@ -22,12 +28,12 @@ route:
 receivers:
   - name: default
     webhook_configs:
-      - url: ${ALERTMANAGER_WEBHOOK_URL:http://localhost:9094}
+      - url: "http://localhost:9094"  # EDIT ME — default receiver's webhook target
         send_resolved: true
 
   - name: critical-pagerduty
     pagerduty_configs:
-      - service_key: ${ALERTMANAGER_PAGERDUTY_KEY:changeme}
+      - service_key: "changeme"  # EDIT ME — PagerDuty integration key
         send_resolved: true
         description: '{{ .CommonAnnotations.summary }}'
         details:
@@ -37,7 +43,7 @@ receivers:
 
   - name: warning-slack
     slack_configs:
-      - api_url: ${ALERTMANAGER_SLACK_WEBHOOK:}
+      - api_url: "https://hooks.slack.com/services/CHANGEME"  # EDIT ME — Slack incoming webhook URL
         channel: '#registerwerk-alerts'
         send_resolved: true
         title: '[{{ .Status | toUpper }}] {{ .CommonAnnotations.summary }}'

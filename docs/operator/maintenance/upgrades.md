@@ -184,19 +184,35 @@ Token and identity contracts are **not upgradeable by design** (immutability is 
 
 ## Subgraph upgrades
 
-If the subgraph schema changes, redeploy all subgraphs:
+If the subgraph schema changes, preserve the previous configuration and deploy a fresh version.
+Before deployment, verify every singleton address has its own actual `*_START_BLOCK_<SUFFIX>` and
+every BondDesk, AMM, and RepoVault entry uses `address@deploymentBlock`. One factory block is not a
+valid substitute for the deployment blocks of the other sources.
+
+Render and compile all configured targets without publishing first:
 
 ```bash
-./indexer/evm/deploy-subgraph.sh all
+SUBGRAPH_VALIDATE_ONLY=true ./indexer/evm/deploy-subgraph.sh all
 ```
 
-graph-node will reindex from the factory deployment block.
+Then deploy with a version label that has never been used for the affected graph names:
+
+```bash
+SUBGRAPH_VERSION_LABEL=schema-20260729-01 ./indexer/evm/deploy-subgraph.sh all
+```
+
+graph-node reindexes each rendered source from that source's configured block. Keep the previous
+versions and their configuration available for non-destructive rollback until every replacement
+has reached the chain head and its event ranges have been reconciled independently. Do not remove
+the prior subgraph before validation; rollback means redeploying the previously approved manifest
+and source configuration under another fresh version label.
 
 ## Kong upgrades
 
-1. Update image tag in `gateway/docker-compose.kong.yml`
-2. Run migrations: `docker compose run --rm kong-migrations`
-3. Restart Kong: `docker compose restart kong`
+1. Update the `kong` image tag in `docker-compose.yml` (and `gateway/docker-compose.kong.yml`
+   if using the standalone gateway-only stack).
+2. Restart Kong: `docker compose restart kong` — it re-reads `gateway/kong.yml` on start
+   (DB-less mode, no migrations to run).
 
 ## Dependency updates
 

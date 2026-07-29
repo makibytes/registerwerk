@@ -1,8 +1,10 @@
 package de.makibytes.registerwerk.travelrule.internal;
 
 import de.makibytes.registerwerk.travelrule.api.CaspAuthorizationStatus;
+import de.makibytes.registerwerk.travelrule.events.CaspRegisterImportedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Bulk import of CASP authorization entries from CSV — typically an export of
@@ -42,17 +45,20 @@ public class CaspRegisterImportService {
 
     private final CaspRegistryService registryService;
     private final CaspAuthorizationRepository repository;
+    private final ApplicationEventPublisher eventPublisher;
 
     CaspRegisterImportService(CaspRegistryService registryService,
-                              CaspAuthorizationRepository repository) {
+                              CaspAuthorizationRepository repository,
+                              ApplicationEventPublisher eventPublisher) {
         this.registryService = registryService;
         this.repository = repository;
+        this.eventPublisher = eventPublisher;
     }
 
     public record ImportResult(int created, int updated, int failed, List<String> errors) {}
 
     @Transactional
-    public ImportResult importCsv(String csvContent, String source) {
+    public ImportResult importCsv(String csvContent, String source, UUID actorId, String actorRole) {
         if (csvContent == null || csvContent.isBlank()) {
             return new ImportResult(0, 0, 0, List.of("Empty file."));
         }
@@ -117,6 +123,9 @@ public class CaspRegisterImportService {
         }
         log.info("CASP register import: {} created, {} updated, {} failed (source: {})",
                 created, updated, failed, source);
+        eventPublisher.publishEvent(new CaspRegisterImportedEvent(UUID.randomUUID(), actorId, actorRole, Map.of(
+                "source", source, "created", created, "updated", updated, "failed", failed
+        )));
         return new ImportResult(created, updated, failed, errors);
     }
 

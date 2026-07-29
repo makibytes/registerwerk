@@ -13,10 +13,15 @@ on:
       - frontend-operator/**
       - frontend-customer/**
 
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend-operator:
     name: Operator Frontend
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend-operator
@@ -48,6 +53,7 @@ jobs:
   frontend-customer:
     name: Customer Frontend
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend-customer

@@ -9,6 +9,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { FormsModule } from '@angular/forms';
@@ -22,9 +23,16 @@ import {
   TrustedIssuer, ClaimTopic,
 } from '../../../core/api/erc3643.service';
 import { MintControlService, MintControlRule, RuleType } from '../../../core/api/mint-control.service';
+import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../../core/api/gas-sponsorship.service';
+import { VaultService } from '../../../core/api/vault.service';
+import { VaultRequestsComponent } from '../wizards/vault-requests/vault-requests.component';
+import { NavStrikeComponent } from '../wizards/nav-strike/nav-strike.component';
+import { SlotAdminComponent } from '../wizards/slot-admin/slot-admin.component';
+import { CorporateActionsComponent } from '../wizards/corporate-actions/corporate-actions.component';
+import { ForceGrantsComponent } from '../wizards/force-grants/force-grants.component';
 import {
   Asset, AssetDeployment, AssetDocument, AssetHolder,
-  KycComplianceResponse, DocumentStatus,
+  KycComplianceResponse, DocumentStatus, VAULT_STANDARDS,
 } from '../../../core/models';
 
 import { StatusBadgeComponent, ChainNamePipe } from '@registerwerk/ui';
@@ -33,6 +41,7 @@ import { AddIssuerDialogComponent, AddIssuerData } from './add-issuer-dialog.com
 import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-topic-dialog.component';
 import { TransactionService, TxRecord } from '../../../core/api/transaction.service';
 import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../shared/components/address-picker-dialog.component';
+import { ConfidentialViewerPanelComponent } from '../../../shared/components/confidential-viewer-panel/confidential-viewer-panel.component';
 
 @Component({
   selector: 'app-asset-detail',
@@ -47,6 +56,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
     MatDividerModule,
     MatFormFieldModule,
     MatInputModule,
+    MatSelectModule,
     MatTooltipModule,
     FormsModule,
     MatChipsModule,
@@ -56,6 +66,12 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
     ChainNamePipe,
     DatePipe,
     DecimalPipe,
+    VaultRequestsComponent,
+    NavStrikeComponent,
+    SlotAdminComponent,
+    CorporateActionsComponent,
+    ForceGrantsComponent,
+    ConfidentialViewerPanelComponent,
   ],
 
   styles: [`
@@ -200,7 +216,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
             <button mat-stroked-button color="warn" (click)="suspend()">Suspend</button>
           }
           @if (asset.status === 'SUSPENDED') {
-            <button mat-stroked-button color="primary" (click)="issue()">Reissue</button>
+            <button mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
           }
           @if (asset.status !== 'REDEEMED') {
             <button mat-stroked-button color="warn" (click)="redeem()">Redeem</button>
@@ -457,6 +473,16 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
           </div>
         </mat-tab>
 
+        <!-- Corporate Actions — coupon/dividend/split/redemption/call lifecycle -->
+        <mat-tab label="Corporate Actions">
+          <app-corporate-actions [assetId]="id" />
+        </mat-tab>
+
+        <!-- Token Admin Grants — delegatable forcedTransfer/forcedApprove/forceBurn -->
+        <mat-tab label="Token Admin Grants">
+          <app-force-grants [assetId]="id" />
+        </mat-tab>
+
         <!-- Mint Control (only if CONTROL level) -->
         @if (asset.onchainLevel === 'CONTROL') {
           <mat-tab label="Mint Control">
@@ -476,7 +502,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   <input matInput type="number" [(ngModel)]="mintAmount" min="1" />
                 </mat-form-field>
                 <div>
-                  <button mat-raised-button color="primary" (click)="mintTokens()" [disabled]="!mintAddress || !mintAmount">
+                  <button mat-raised-button color="primary" (click)="mintTokens()" [disabled]="!primaryDeploymentId || !mintAddress || !mintAmount">
                     <mat-icon>add_circle</mat-icon>
                     Mint
                   </button>
@@ -500,7 +526,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   <input matInput type="number" [(ngModel)]="burnAmount" min="1" />
                 </mat-form-field>
                 <div>
-                  <button mat-raised-button color="warn" (click)="burnTokens()" [disabled]="!burnAddress || !burnAmount">
+                  <button mat-raised-button color="warn" (click)="burnTokens()" [disabled]="!primaryDeploymentId || !burnAddress || !burnAmount">
                     <mat-icon>remove_circle</mat-icon>
                     Burn
                   </button>
@@ -551,6 +577,95 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   <p style="text-align:center;padding:16px;color:var(--rw-text-secondary)">No mint control rules defined.</p>
                 }
               }
+            </div>
+          </mat-tab>
+        }
+
+        <!-- Gas Sponsorship (any deployed asset — backs the on-chain EwpgPaymaster) -->
+        @if (deployments.length > 0) {
+          <mat-tab label="Gas Sponsorship">
+            <div class="tab-content">
+              <p style="font-size:13px;color:var(--rw-text-secondary);margin:0 0 16px;max-width:640px">
+                Sponsor gas fees for this deployment's investors so they can transact without
+                holding native gas tokens, via the <code>EwpgPaymaster</code> ERC-4337 paymaster.
+                Set a deployment-specific override here, or leave it unset to inherit the
+                issuer's default (configured on the issuer's Customers page). If neither is
+                configured, investors pay their own gas.
+              </p>
+
+              @if (gasSponsorshipLoading) {
+                <div class="spinner-wrap"><mat-spinner diameter="28" /></div>
+              } @else {
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding:12px 16px;border:1px solid var(--rw-border);border-radius:var(--rw-radius);background:var(--rw-surface)">
+                  <mat-icon [style.color]="effectiveGasPolicy ? 'var(--rw-approved-fg)' : 'var(--rw-text-muted)'">
+                    {{ effectiveGasPolicy ? 'local_gas_station' : 'money_off' }}
+                  </mat-icon>
+                  @if (effectiveGasPolicy) {
+                    <span style="font-size:13px">
+                      Currently sponsored by <strong>{{ effectiveGasPolicy.sponsor === 'ISSUER' ? 'the issuer' : 'the operator' }}</strong>,
+                      up to {{ effectiveGasPolicy.monthlyCapEth ?? 'an unlimited' }} ETH/month
+                      — {{ effectiveGasPolicy.assetDeploymentId ? 'a deployment-specific override' : "inherited from the issuer's default" }}.
+                    </span>
+                  } @else {
+                    <span style="font-size:13px;color:var(--rw-text-secondary)">No gas sponsorship configured — investors pay their own gas.</span>
+                  }
+                </div>
+
+                <h3 style="font-size:14px;font-weight:500;margin:0 0 12px">Set a deployment-specific override</h3>
+                <div class="mint-form">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Sponsor</mat-label>
+                    <mat-select [(ngModel)]="gasSponsor">
+                      <mat-option value="ISSUER">Issuer</mat-option>
+                      <mat-option value="OPERATOR">Operator</mat-option>
+                    </mat-select>
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Monthly cap (ETH)</mat-label>
+                    <input matInput type="number" min="0" step="0.01" [(ngModel)]="gasMonthlyCapEth" />
+                  </mat-form-field>
+                  <div style="display:flex;gap:8px">
+                    <button mat-raised-button color="primary" (click)="saveGasSponsorshipOverride()">
+                      <mat-icon>save</mat-icon>
+                      Save override
+                    </button>
+                    @if (effectiveGasPolicy?.assetDeploymentId) {
+                      <button mat-stroked-button color="warn" (click)="deactivateGasSponsorshipOverride()">
+                        <mat-icon>remove_circle_outline</mat-icon>
+                        Remove override
+                      </button>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          </mat-tab>
+        }
+
+        <!-- Vault (ERC-4626 / ERC-7540 tokenized funds — NAV strikes + redemption requests) -->
+        @if (isVaultStandard && primaryDeploymentId) {
+          <mat-tab label="Vault">
+            <div class="tab-content">
+              <app-nav-strike [deploymentId]="primaryDeploymentId" />
+              <mat-divider style="margin:20px 0" />
+              <app-vault-requests [deploymentId]="primaryDeploymentId" [latestNav]="latestVaultNav" />
+            </div>
+          </mat-tab>
+        }
+
+        <!-- Slots (ERC-3525 semi-fungible bonds — tranche admin, regulatory token ops) -->
+        @if (isErc3525 && primaryDeploymentId) {
+          <mat-tab label="Slots">
+            <div class="tab-content">
+              <app-slot-admin [deploymentId]="primaryDeploymentId" />
+            </div>
+          </mat-tab>
+        }
+
+        @if (isConfidential && primaryDeploymentId) {
+          <mat-tab label="Confidential Balances">
+            <div class="tab-content">
+              <app-confidential-viewer-panel [assetId]="id" [deploymentId]="primaryDeploymentId" />
             </div>
           </mat-tab>
         }
@@ -695,6 +810,8 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                   </div>
                 </div>
                 <!-- Forced Transfer -->
+                <!-- No "Forced Approve" here: T-REX/ERC-3643 has no forcedApprove agent
+                     operation (approvals are between owner/spender, not registry-forced). -->
                 <div class="mint-form">
                   <p style="font-size:12px;color:var(--rw-text-muted);margin:0 0 4px">Forced Transfer (§ eWpG / MiCAR Art. 36)</p>
                   <mat-form-field appearance="outline">
@@ -728,43 +845,6 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../
                             [disabled]="!forceFrom || !forceTo || !forceAmount"
                             (click)="executeForceTransfer()">
                       <mat-icon>swap_horiz</mat-icon> Execute Forced Transfer
-                    </button>
-                  </div>
-                </div>
-                <!-- Forced Approve -->
-                <div class="mint-form">
-                  <p style="font-size:12px;color:var(--rw-text-muted);margin:0 0 4px">Forced Approve (Regulatory Override)</p>
-                  <mat-form-field appearance="outline">
-                    <mat-label>Owner Address</mat-label>
-                    <input matInput [(ngModel)]="forceApproveOwner" placeholder="0x..." />
-                    <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
-                            (click)="pickAddress('WALLET', 'Select owner wallet', a => forceApproveOwner = a)">
-                      <mat-icon style="font-size:18px">contacts</mat-icon>
-                    </button>
-                  </mat-form-field>
-                  <mat-form-field appearance="outline">
-                    <mat-label>Spender Address</mat-label>
-                    <input matInput [(ngModel)]="forceApproveSpender" placeholder="0x..." />
-                    <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
-                            (click)="pickAddress('WALLET', 'Select spender wallet', a => forceApproveSpender = a)">
-                      <mat-icon style="font-size:18px">contacts</mat-icon>
-                    </button>
-                  </mat-form-field>
-                  <div class="form-row">
-                    <mat-form-field appearance="outline">
-                      <mat-label>Amount / Value</mat-label>
-                      <input matInput [(ngModel)]="forceApproveAmount" placeholder="0" />
-                    </mat-form-field>
-                    <mat-form-field appearance="outline">
-                      <mat-label>Legal Basis / Reason</mat-label>
-                      <input matInput [(ngModel)]="forceApproveReason" placeholder="BaFin order" />
-                    </mat-form-field>
-                  </div>
-                  <div>
-                    <button mat-raised-button color="warn"
-                            [disabled]="!forceApproveOwner || !forceApproveSpender || !forceApproveAmount"
-                            (click)="executeForceApprove()">
-                      <mat-icon>verified</mat-icon> Execute Forced Approve
                     </button>
                   </div>
                 </div>
@@ -912,6 +992,8 @@ export class AssetDetailComponent implements OnInit {
   private readonly assetService = inject(AssetService);
   private readonly erc3643Service = inject(Erc3643Service);
   private readonly mintControlService = inject(MintControlService);
+  private readonly gasSponsorshipService = inject(GasSponsorshipService);
+  private readonly vaultService = inject(VaultService);
   private readonly txService = inject(TransactionService);
   private readonly router = inject(Router);
   private readonly dialog = inject(MatDialog);
@@ -953,13 +1035,43 @@ export class AssetDetailComponent implements OnInit {
   newRuleMax = '';
   readonly ruleColumns = ['target', 'type', 'maxAmount', 'created', 'actions'];
 
+  // ── Gas Sponsorship ───────────────────────────────────────────────────────
+  gasSponsorshipLoading = false;
+  effectiveGasPolicy: GasSponsorshipPolicy | null = null;
+  gasSponsor: GasSponsor = 'ISSUER';
+  gasMonthlyCapEth: number | null = 0.1;
+
   // ── ERC-3643 state ────────────────────────────────────────────────────────
   get isErc3643(): boolean {
     return this.asset?.tokenStandard === 'ERC3643' || this.asset?.tokenStandard === 'CONF_ERC3643';
   }
 
-  private get primaryDeploymentId(): string | null {
+  get isErc3525(): boolean {
+    return this.asset?.tokenStandard === 'ERC3525';
+  }
+
+  get isConfidential(): boolean {
+    return this.asset?.tokenStandard === 'CONF_ERC20' || this.asset?.tokenStandard === 'CONF_ERC3643';
+  }
+
+  get isVaultStandard(): boolean {
+    return !!this.asset && VAULT_STANDARDS.includes(this.asset.tokenStandard);
+  }
+
+  get primaryDeploymentId(): string | null {
     return this.deployments[0]?.id ?? null;
+  }
+
+  // ── Vault (ERC-4626 / ERC-7540) state ────────────────────────────────────
+  latestVaultNav: number | null = null;
+
+  private loadLatestVaultNav(deploymentId: string): void {
+    this.vaultService.getNavStrikes(deploymentId).subscribe({
+      next: (strikes) => {
+        this.latestVaultNav = strikes[0]?.navPerShare ?? null;
+        this.cdr.markForCheck();
+      },
+    });
   }
 
   suiteLoading = false;
@@ -983,10 +1095,6 @@ export class AssetDetailComponent implements OnInit {
   forceTo = '';
   forceAmount = '';
   forceReason = '';
-  forceApproveOwner = '';
-  forceApproveSpender = '';
-  forceApproveAmount = '';
-  forceApproveReason = '';
   forceBurnFrom = '';
   forceBurnAmount = '';
   forceBurnLegalBasis = '';
@@ -1027,9 +1135,58 @@ export class AssetDetailComponent implements OnInit {
           if (this.isErc3643) {
             this.loadErc3643Data(d[0].id);
           }
+          if (this.isVaultStandard) {
+            this.loadLatestVaultNav(d[0].id);
+          }
+          this.loadGasSponsorship(d[0].id);
         }
       },
       error: () => { this.deploymentsLoading = false; this.cdr.markForCheck(); },
+    });
+  }
+
+  // ── Gas Sponsorship ───────────────────────────────────────────────────────
+
+  loadGasSponsorship(deploymentId: string): void {
+    this.gasSponsorshipLoading = true;
+    this.gasSponsorshipService.getEffectivePolicy(this.id, deploymentId).subscribe({
+      next: (policy) => {
+        this.effectiveGasPolicy = policy;
+        this.gasSponsor = policy?.sponsor ?? 'ISSUER';
+        this.gasMonthlyCapEth = policy?.monthlyCapEth != null ? Number(policy.monthlyCapEth) : 0.1;
+        this.gasSponsorshipLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => { this.gasSponsorshipLoading = false; this.cdr.markForCheck(); },
+    });
+  }
+
+  saveGasSponsorshipOverride(): void {
+    const depId = this.primaryDeploymentId;
+    if (!depId) return;
+    this.gasSponsorshipService.createForDeployment(this.id, depId, {
+      sponsor: this.gasSponsor,
+      monthlyCapEth: this.gasMonthlyCapEth ?? undefined,
+    }).subscribe({
+      next: (policy) => {
+        this.effectiveGasPolicy = policy;
+        this.snackBar.open('Gas sponsorship override saved.', 'OK', { duration: 3000 });
+        this.cdr.markForCheck();
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to save gas sponsorship override.', 'OK', { duration: 4000 }),
+    });
+  }
+
+  deactivateGasSponsorshipOverride(): void {
+    const policyId = this.effectiveGasPolicy?.id;
+    const depId = this.primaryDeploymentId;
+    if (!policyId || !depId || !confirm('Remove this deployment\'s gas sponsorship override? It will fall back to the issuer default, if any.')) return;
+    this.gasSponsorshipService.deactivate(policyId).subscribe({
+      next: () => {
+        this.snackBar.open('Override removed.', 'OK', { duration: 3000 });
+        this.loadGasSponsorship(depId);
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to remove override.', 'OK', { duration: 4000 }),
     });
   }
 
@@ -1277,23 +1434,6 @@ export class AssetDetailComponent implements OnInit {
     });
   }
 
-  executeForceApprove(): void {
-    const depId = this.primaryDeploymentId;
-    if (!depId || !this.forceApproveOwner || !this.forceApproveSpender || !this.forceApproveAmount) return;
-    if (!confirm(`Execute forced approve of ${this.forceApproveAmount} from ${this.forceApproveOwner} to ${this.forceApproveSpender}?`)) return;
-    this.erc3643Service.forcedApprove(this.id, depId, {
-      owner: this.forceApproveOwner,
-      spender: this.forceApproveSpender,
-      amount: this.forceApproveAmount,
-      reason: this.forceApproveReason,
-    }).subscribe({
-      next: (r) => {
-        this.txService.track(r.txId, 'Forced approve');
-        this.forceApproveOwner = ''; this.forceApproveSpender = '';
-        this.forceApproveAmount = ''; this.forceApproveReason = '';
-      },
-    });
-  }
 
   executeForceBurn(): void {
     const depId = this.primaryDeploymentId;
@@ -1331,15 +1471,22 @@ export class AssetDetailComponent implements OnInit {
     this.assetService.suspendAsset(this.id).subscribe({ next: () => this.loadAsset() });
   }
 
+  /** Correction path for a wrongful suspend — moves the asset back to ISSUED. */
+  reactivate(): void {
+    this.assetService.reactivateAsset(this.id).subscribe({ next: () => this.loadAsset() });
+  }
+
   redeem(): void {
     if (!confirm('Redeem this asset? This is a final action.')) return;
     this.assetService.redeemAsset(this.id).subscribe({ next: () => this.loadAsset() });
   }
 
   mintTokens(): void {
-    if (!this.mintAddress || !this.mintAmount) return;
-    this.assetService.mint(this.id, { toAddress: this.mintAddress, amount: this.mintAmount }).subscribe({
-      next: () => {
+    const depId = this.primaryDeploymentId;
+    if (!depId || !this.mintAddress || !this.mintAmount) return;
+    this.assetService.mint(this.id, depId, { toAddress: this.mintAddress, amount: this.mintAmount }).subscribe({
+      next: (r) => {
+        this.txService.track(r.txId, 'Mint');
         this.mintAddress = '';
         this.mintAmount = null;
         this.loadHolders();
@@ -1348,9 +1495,11 @@ export class AssetDetailComponent implements OnInit {
   }
 
   burnTokens(): void {
-    if (!this.burnAddress || !this.burnAmount) return;
-    this.assetService.burn(this.id, { fromAddress: this.burnAddress, amount: this.burnAmount }).subscribe({
-      next: () => {
+    const depId = this.primaryDeploymentId;
+    if (!depId || !this.burnAddress || !this.burnAmount) return;
+    this.assetService.burn(this.id, depId, { fromAddress: this.burnAddress, amount: this.burnAmount }).subscribe({
+      next: (r) => {
+        this.txService.track(r.txId, 'Burn');
         this.burnAddress = '';
         this.burnAmount = null;
         this.loadHolders();

@@ -1,19 +1,33 @@
 """
-Represents a deployed eWpG asset token contract.
-Created automatically when AssetTokenFactory emits TokenDeployed.
+IMPORTANT: every entity in this schema is a provisional technical projection of observed
+events. No entity represents chain finality, a legal register entry, legal effectiveness, or
+deployed-code identity. Consumers must reconcile against the configured chain and the
+instrument-specific register authority before relying on it for a financial or legal decision.
+
+Projection status is deliberately closed: EVENT_DERIVED means only that configured event
+handlers produced the row; INCOMPLETE means required replay context was not observed.
 """
+enum ProjectionStatus {
+  EVENT_DERIVED
+  INCOMPLETE
+}
+
+"""A token-address claim observed in an AssetTokenFactory event stream."""
 type Token @entity(immutable: false) {
-  id: ID!                        # contract address (lowercase)
-  assetId: Bytes!                # bytes32 asset ID from the registry DB
+  id: ID!                        # address value emitted by the configured factory
+  projectionStatus: ProjectionStatus!
+  factoryReportedAssetId: Bytes! # bytes32 value emitted by the factory; no DB linkage is verified
   tokenType: Int!                # 0=ERC20, 1=ERC721, 2=ERC1155, 3=ERC3525, 4=ERC4626, 5=ERC7540
-  deployedAtBlock: BigInt!
-  deployedAtTimestamp: BigInt!
-  deployedByTx: Bytes!
+  factoryReportedUnderlyingAsset: Bytes # emitted for ERC4626/ERC7540 VaultDeployed events
+  observedAtBlock: BigInt!
+  observedAtTimestamp: BigInt!
+  observedInTx: Bytes!
   totalTransfers: BigInt!
   totalMints: BigInt!
   totalBurns: BigInt!
   transfers: [Transfer!]! @derivedFrom(field: "token")
   whitelistChanges: [WhitelistChange!]! @derivedFrom(field: "token")
+  addressFreezeChanges: [AddressFreezeChange!]! @derivedFrom(field: "token")
 }
 
 """
@@ -21,6 +35,7 @@ A single Transfer / Mint / Burn event. Mint: from == address(0). Burn: to == add
 """
 type Transfer @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
   token: Token!
   tokenType: Int!                # duplicated for efficient filtering without joins
   from: Bytes!
@@ -39,6 +54,7 @@ Whitelist add / remove events.
 """
 type WhitelistChange @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
   token: Token!
   account: Bytes!
   added: Boolean!                # true = whitelisted, false = removed
@@ -47,11 +63,27 @@ type WhitelistChange @entity(immutable: true) {
   transactionHash: Bytes!
 }
 
+"""Address freeze/unfreeze event. Kept separate from whitelist membership."""
+type AddressFreezeChange @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
+  token: Token!
+  account: Bytes!
+  frozen: Boolean!
+  reason: String                 # only emitted by AddressFrozen
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
 """
-Aggregate holder position per token. Updated on every Transfer.
+Provisional fungible/NFT holder balance updated from Transfer events. ERC-3525 deliberately
+does not use this entity: its economic balance is not the number of token IDs and is represented
+by Erc3525OwnerSlotBalance instead.
 """
 type HolderBalance @entity(immutable: false) {
   id: ID!                        # {tokenAddress}-{holderAddress}
+  projectionStatus: ProjectionStatus!
   token: Token!
   holder: Bytes!
   balance: BigInt!               # current balance
@@ -61,9 +93,45 @@ type HolderBalance @entity(immutable: false) {
 
 # ── ERC-3525 Semi-Fungible (bond slots / SFT) ──────────────────────────────────
 
+"""
+Provisional current state of one ERC-3525 token ID. Mint ordering is Transfer, TransferValue,
+then SlotChanged, so value may be present before slotAssigned becomes true. A complete state
+requires replay from the token deployment block.
+"""
+type Erc3525Position @entity(immutable: false) {
+  id: ID!                        # {tokenAddress}-{tokenId}
+  token: Token!
+  tokenId: BigInt!
+  owner: Bytes!                 # zero-address sentinel for incomplete replay or a burned position
+  slot: BigInt!                 # zero sentinel until SlotChanged; consult slotAssigned
+  value: BigInt!
+  active: Boolean!
+  slotAssigned: Boolean!
+  projectionStatus: ProjectionStatus!
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
+"""
+Provisional ERC-3525 notional aggregated by owner and slot. positionCount is kept separately
+from value so a token-ID count can never be mistaken for economic notional.
+"""
+type Erc3525OwnerSlotBalance @entity(immutable: false) {
+  id: ID!                        # {tokenAddress}-{ownerAddress}-{slot}
+  token: Token!
+  owner: Bytes!
+  slot: BigInt!
+  value: BigInt!
+  positionCount: BigInt!
+  projectionStatus: ProjectionStatus!
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
 """Value transfer between two ERC-3525 token IDs within the same slot."""
 type ValueTransfer @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
   token: Token!
   fromTokenId: BigInt!
   toTokenId: BigInt!
@@ -76,6 +144,7 @@ type ValueTransfer @entity(immutable: true) {
 """Slot assignment change for an ERC-3525 token ID."""
 type SlotTransfer @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
   token: Token!
   tokenId: BigInt!
   oldSlot: BigInt!
@@ -90,6 +159,7 @@ type SlotTransfer @entity(immutable: true) {
 """Identity registry add / remove events for ERC-3643 T-REX tokens."""
 type IdentityRegistered @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
   token: Token!
   investorAddress: Bytes!
   identity: Bytes!
@@ -102,6 +172,7 @@ type IdentityRegistered @entity(immutable: true) {
 """Compliance module add events for ERC-3643 T-REX tokens."""
 type ComplianceChange @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
   token: Token!
   compliance: Bytes!
   blockNumber: BigInt!
@@ -114,6 +185,7 @@ type ComplianceChange @entity(immutable: true) {
 """Deposit into an ERC-4626 tokenized vault."""
 type VaultDeposit @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
   token: Token!
   caller: Bytes!
   owner: Bytes!
@@ -127,6 +199,7 @@ type VaultDeposit @entity(immutable: true) {
 """Withdrawal from an ERC-4626 tokenized vault."""
 type VaultWithdraw @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
   token: Token!
   caller: Bytes!
   receiver: Bytes!
@@ -141,32 +214,282 @@ type VaultWithdraw @entity(immutable: true) {
 # ── ERC-7540 Async Vault (capital-call / redemption window) ──────────────────────
 
 """
-Deposit or redeem request submitted to an ERC-7540 async vault.
-Also used for DepositClaimable / RedeemClaimable events (requestKind differentiates).
+Provisional mutable lifecycle of one ERC-7540 request, keyed by vault address and request ID.
+Fulfilment/cancellation events omit request metadata; it is joined only from the prior request
+event. INCOMPLETE therefore means required earlier context was not observed.
 """
-type DepositRequest @entity(immutable: true) {
-  id: ID!                        # {txHash}-{logIndex}
-  token: Token!
-  controller: Bytes!
-  owner: Bytes!
+type AsyncVaultRequest @entity(immutable: false) {
+  id: ID!                        # {vaultAddress}-{requestId}
+  vault: Token!
   requestId: BigInt!
-  assets: BigInt!
-  requestKind: String!           # 'DEPOSIT_REQUEST' | 'DEPOSIT_CLAIMABLE'
-  blockNumber: BigInt!
-  blockTimestamp: BigInt!
-  transactionHash: Bytes!
+  requestType: String!           # 'DEPOSIT' | 'REDEEM' | 'UNKNOWN'
+  status: String!                # 'PENDING' | 'FULFILLED' | 'CANCELLED'
+  controller: Bytes
+  owner: Bytes
+  assets: BigInt
+  shares: BigInt
+  navAtFulfill: BigInt
+  cancelledBy: Bytes
+  requestedAtBlock: BigInt
+  requestedAtTimestamp: BigInt
+  completedAtBlock: BigInt
+  completedAtTimestamp: BigInt
+  projectionStatus: ProjectionStatus!
+  events: [AsyncVaultRequestEvent!]! @derivedFrom(field: "request")
 }
 
-"""Redeem request submitted to or claimable from an ERC-7540 async vault."""
-type RedeemRequest @entity(immutable: true) {
+"""Immutable provisional event history for an ERC-7540 request lifecycle."""
+type AsyncVaultRequestEvent @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
-  token: Token!
-  controller: Bytes!
-  owner: Bytes!
+  request: AsyncVaultRequest!
+  vault: Token!
   requestId: BigInt!
-  assets: BigInt!
-  requestKind: String!           # 'REDEEM_REQUEST' | 'REDEEM_CLAIMABLE'
+  eventKind: String!             # 'REQUESTED' | 'FULFILLED' | 'CANCELLED'
+  requestType: String!           # type known from the request event, otherwise 'UNKNOWN'
+  actor: Bytes                   # controller on request; cancelling account on cancellation
+  owner: Bytes
+  assets: BigInt
+  shares: BigInt
+  navAtFulfill: BigInt
+  projectionStatus: ProjectionStatus!
   blockNumber: BigInt!
   blockTimestamp: BigInt!
   transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+# ── EwpgRepoMarket (isolated repo/lending market) ────────────────────────────
+# finding #7, Phase 7 — previously no event-log ingestion existed for this contract pair at
+# all. RepoMarketEvent now exposes a provisional event hint; it cannot establish durable
+# liquidation status without separate canonical-inclusion and finality evidence.
+
+"""
+Represents a market-address/configuration claim observed when the configured factory emits
+MarketCreated. It does not verify deployment or runtime code identity.
+"""
+type RepoMarket @entity(immutable: false) {
+  id: ID!                        # market address value emitted by the configured factory
+  projectionStatus: ProjectionStatus!
+  factoryReportedLoanToken: Bytes!
+  factoryReportedCollateralToken: Bytes!
+  factoryReportedLltvBps: BigInt!
+  factoryReportedPriceOracle: Bytes!
+  observedAtBlock: BigInt!
+  observedAtTimestamp: BigInt!
+  observedInTx: Bytes!
+  events: [RepoMarketEvent!]! @derivedFrom(field: "market")
+}
+
+"""
+A single EwpgRepoMarket lifecycle event. eventType differentiates the seven possible kinds;
+field semantics vary accordingly:
+  - SUPPLIED / WITHDRAWN: actor = lender, amount = underlying amount, scaledAmount = scaled shares
+  - BORROWED: actor = borrower, amount = borrowAmount, collateralAmount = pledged collateral
+  - REPAID: actor = borrower, amount = repayAmount, collateralAmount = collateral returned
+  - LIQUIDATED: actor = borrower, liquidator = liquidator, amount = debtRepaid,
+    collateralAmount = collateralSeized
+  - BAD_DEBT_RECOGNIZED: actor = borrower, amount = writtenOffDebt,
+    collateralAmount = lossToDepositors
+  - COLLATERAL_RECONCILED: actor = borrower, collateralAmount = newCollateral
+The backend may query the most recent event for operational context after debt reaches zero.
+This row alone must not create a durable REPAID, LIQUIDATED, or bad-debt classification.
+"""
+type RepoMarketEvent @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
+  market: RepoMarket!
+  eventType: String!             # 'SUPPLIED' | 'WITHDRAWN' | 'BORROWED' | 'REPAID' | 'LIQUIDATED' | 'BAD_DEBT_RECOGNIZED' | 'COLLATERAL_RECONCILED'
+  actor: Bytes!
+  liquidator: Bytes              # only populated for LIQUIDATED
+  amount: BigInt
+  scaledAmount: BigInt           # emitted by SUPPLIED / WITHDRAWN; never inferred
+  collateralAmount: BigInt
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+# ── EwpgRepoVault (explicitly configured provisional sources) ─────────────────
+
+"""
+Provisional event-derived state of a configured EwpgRepoVault instance. A static data source has
+no factory provenance, so its first observed event is INCOMPLETE unless separately proven replay
+provenance exists outside this subgraph. Allocation totals are signed event cash flow only.
+"""
+type RepoVault @entity(immutable: false) {
+  id: ID!                        # vault contract address
+  netAllocationCashFlow: BigInt!
+  totalDepositedAssets: BigInt!
+  totalWithdrawnAssets: BigInt!
+  projectionStatus: ProjectionStatus!
+  firstSeenBlock: BigInt!
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+  allocations: [RepoVaultMarketAllocation!]! @derivedFrom(field: "vault")
+  events: [RepoVaultEvent!]! @derivedFrom(field: "vault")
+}
+
+"""
+Provisional configured-market state within a RepoVault. netAllocationCashFlow is the signed sum
+of Allocated minus Deallocated event amounts. It is not principal, a scaled position, NAV,
+current market value, or withdrawable liquidity.
+"""
+type RepoVaultMarketAllocation @entity(immutable: false) {
+  id: ID!                        # {vaultAddress}-{marketAddress}
+  vault: RepoVault!
+  market: Bytes!
+  enabled: Boolean!
+  cap: BigInt!
+  netAllocationCashFlow: BigInt!
+  projectionStatus: ProjectionStatus!
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
+"""Immutable provisional event history for a configured RepoVault instance."""
+type RepoVaultEvent @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  vault: RepoVault!
+  eventType: String!             # market/allocation/deposit/withdraw/share-transfer event kind
+  market: Bytes
+  actor: Bytes
+  receiver: Bytes
+  owner: Bytes
+  from: Bytes
+  to: Bytes
+  amount: BigInt
+  assets: BigInt
+  shares: BigInt
+  cap: BigInt
+  projectionStatus: ProjectionStatus!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+# ── Payment-leg contracts (finding #6, Phase 8) ──────────────────────────────
+# DvpSettlement, EwpgBondDesk and StablecoinAmm previously had no event-log ingestion at
+# all — the on-chain cash legs these contracts move (DvP escrow/settlement, primary-market
+# bond subscriptions/coupons/redemptions, stablecoin AMM swaps) were invisible to the
+# backend's Travel Rule enforcement and audit trail, unlike backend-initiated forceTransfer
+# paths. Every configured BondDesk and AMM instance is rendered as an independent static data
+# source. These are provisional event projections and are not payment confirmation or legal
+# settlement evidence.
+
+"""
+A single DvpSettlement lifecycle event. eventType differentiates the five possible kinds;
+field semantics vary accordingly:
+  - LEG_LOCKED: seller/buyer/assetToken/assetAmount/paymentToken/paymentAmount/lockedLeg/expiry all populated
+  - TRADE_SETTLED / TRADE_CANCELLED: only tradeId populated (TRADE_CANCELLED also sets actor = caller)
+  - PAUSED / UNPAUSED: only actor populated (the operator wallet that called it)
+"""
+type DvpSettlementEvent @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
+  eventType: String!             # 'LEG_LOCKED' | 'TRADE_SETTLED' | 'TRADE_CANCELLED' | 'PAUSED' | 'UNPAUSED'
+  tradeId: Bytes
+  actor: Bytes
+  seller: Bytes
+  buyer: Bytes
+  assetToken: Bytes
+  assetAmount: BigInt
+  paymentToken: Bytes
+  paymentAmount: BigInt
+  lockedLeg: String               # 'ASSET' | 'PAYMENT', only for LEG_LOCKED
+  expiry: BigInt
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"""
+A single EwpgBondDesk lifecycle event. eventType differentiates the five possible kinds:
+  - SUBSCRIBED: actor = investor, amount = bond units, paidOrPrincipal = payment-token cost
+  - COUPON_PAID: actor = holder, period = coupon period, paidOrPrincipal = amount paid
+  - REDEEMED: actor = holder, amount = bond units burned, paidOrPrincipal = principal paid
+  - PAUSED / UNPAUSED: actor = the org wallet that called it
+"""
+type BondDeskEvent @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
+  desk: Bytes!                   # EwpgBondDesk contract address
+  eventType: String!             # 'SUBSCRIBED' | 'COUPON_PAID' | 'REDEEMED' | 'PAUSED' | 'UNPAUSED'
+  actor: Bytes!
+  amount: BigInt
+  paidOrPrincipal: BigInt
+  period: BigInt                 # only populated for COUPON_PAID
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"""
+A single StablecoinAmm lifecycle event. eventType differentiates the three possible kinds:
+  - LIQUIDITY_ADDED / LIQUIDITY_REMOVED: actor = provider, amountA/amountB/shares all populated
+  - SWAPPED: actor = trader, tokenIn/amountIn(as amountA)/amountOut(as amountB) populated
+"""
+type StablecoinAmmEvent @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
+  pool: Bytes!                   # StablecoinAmm contract address
+  eventType: String!             # 'LIQUIDITY_ADDED' | 'LIQUIDITY_REMOVED' | 'SWAPPED'
+  actor: Bytes!
+  tokenIn: Bytes                 # only populated for SWAPPED
+  amountA: BigInt
+  amountB: BigInt
+  shares: BigInt                 # only populated for LIQUIDITY_ADDED / LIQUIDITY_REMOVED
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+# ── Confidential (Zama fhEVM) tokens (finding #8, Phase 9) ───────────────────
+# Previously no event-log ingestion existed for confidential tokens at all — a holder-initiated
+# ConfidentialTransfer was invisible to the backend, so it could never be evaluated for FATF/TFR
+# Travel Rule obligations the way a backend-initiated forceTransfer already is. Amounts stay
+# encrypted here too (only the backend's registered-viewer operator-decrypt call, via the Zama
+# Relayer, can ever turn `handle` into a real value) — this only makes the *addresses and
+# occurrence* of a confidential transfer visible, which is genuinely new.
+
+"""
+Represents a confidential-token address claim observed when the configured factory emits
+ConfidentialTokenDeployed. It does not verify deployment, code identity, or database linkage.
+"""
+type ConfidentialToken @entity(immutable: false) {
+  id: ID!                        # address value emitted by the configured factory
+  projectionStatus: ProjectionStatus!
+  factoryReportedAssetId: Bytes! # bytes32 value emitted by the configured factory
+  tokenType: Int!                # 0=CONFIDENTIAL_ERC20, 1=CONFIDENTIAL_ERC3643
+  observedAtBlock: BigInt!
+  observedAtTimestamp: BigInt!
+  observedInTx: Bytes!
+  events: [ConfidentialTokenEvent!]! @derivedFrom(field: "token")
+}
+
+"""
+A single confidential-token lifecycle event. eventType differentiates the three possible kinds:
+  - TRANSFER: from/to both populated
+  - MINT: only to populated
+  - BURN: only from populated
+`handle` is the FHE ciphertext handle (a euint64 — ABI-encoded as uint256) of the transferred
+amount — opaque here; decrypting it requires the registry operator's registered-viewer key via
+the Zama Relayer (see backend ZamaRelayerClient.requestOperatorDecrypt), never this indexer.
+"""
+type ConfidentialTokenEvent @entity(immutable: true) {
+  id: ID!                        # {txHash}-{logIndex}
+  projectionStatus: ProjectionStatus!
+  token: ConfidentialToken!
+  eventType: String!             # 'TRANSFER' | 'MINT' | 'BURN'
+  from: Bytes
+  to: Bytes
+  handle: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
 }

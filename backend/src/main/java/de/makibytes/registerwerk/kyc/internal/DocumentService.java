@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.kyc.internal;
 
+import de.makibytes.registerwerk.kyc.events.DocumentDeletedEvent;
+import de.makibytes.registerwerk.kyc.events.DocumentUploadedEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.kyc.api.KycDocument;
 import de.makibytes.registerwerk.kyc.api.KycDocumentContent;
@@ -8,14 +10,15 @@ import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
 import de.makibytes.registerwerk.kyc.api.S3DocumentStorageAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -35,14 +38,17 @@ public class DocumentService {
     private final KycDocumentRepository kycDocumentRepository;
     private final KycDocumentContentRepository kycDocumentContentRepository;
     private final S3DocumentStorageAdapter s3DocumentStorageAdapter;
+    private final ApplicationEventPublisher eventPublisher;
 
     public DocumentService(
             KycDocumentRepository kycDocumentRepository,
             KycDocumentContentRepository kycDocumentContentRepository,
-            S3DocumentStorageAdapter s3DocumentStorageAdapter) {
+            S3DocumentStorageAdapter s3DocumentStorageAdapter,
+            ApplicationEventPublisher eventPublisher) {
         this.kycDocumentRepository = kycDocumentRepository;
         this.kycDocumentContentRepository = kycDocumentContentRepository;
         this.s3DocumentStorageAdapter = s3DocumentStorageAdapter;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -54,6 +60,7 @@ public class DocumentService {
      * @param mimeType   MIME type
      * @param docType    document classification
      * @param uploadedBy ID of the uploading user
+     * @param actorRole  role of the uploading user (for audit)
      * @return saved {@link KycDocument} metadata record
      */
     public KycDocument storeDocument(
@@ -62,7 +69,8 @@ public class DocumentService {
             String fileName,
             String mimeType,
             KycDocument.DocumentType docType,
-            UUID uploadedBy) {
+            UUID uploadedBy,
+            String actorRole) {
 
         String contentHash = sha256Hex(content);
 
@@ -75,9 +83,10 @@ public class DocumentService {
         doc.setSizeBytes((long) content.length);
         doc.setUploadedBy(uploadedBy);
 
+        KycDocument saved;
         if (content.length <= MAX_INLINE_BYTES) {
             doc.setStorageRef(INLINE_STORAGE_REF);
-            KycDocument saved = kycDocumentRepository.save(doc);
+            saved = kycDocumentRepository.save(doc);
 
             KycDocumentContent inline = new KycDocumentContent();
             inline.setId(saved.getId());
@@ -85,17 +94,19 @@ public class DocumentService {
             kycDocumentContentRepository.save(inline);
 
             log.info("Stored document inline: id={}, entity={}", saved.getId(), entityId);
-            return saved;
         } else {
             String s3Key = "kyc/" + entityId + "/" + UUID.randomUUID() + "/" + fileName;
             doc.setStorageRef(s3Key);
-            KycDocument saved = kycDocumentRepository.save(doc);
+            saved = kycDocumentRepository.save(doc);
 
             s3DocumentStorageAdapter.upload(s3Key, content, mimeType);
 
             log.info("Stored document in S3: id={}, key={}", saved.getId(), s3Key);
-            return saved;
         }
+
+        eventPublisher.publishEvent(new DocumentUploadedEvent(saved.getId(), uploadedBy, actorRole,
+                Map.of("entityId", entityId.toString(), "documentType", docType.name(), "fileName", fileName)));
+        return saved;
     }
 
     /**
@@ -122,15 +133,18 @@ public class DocumentService {
     /**
      * Soft-deletes a document by setting its deletedAt timestamp.
      *
-     * @param docId   document to delete
-     * @param actorId ID of the actor performing deletion
+     * @param docId     document to delete
+     * @param actorId   ID of the actor performing deletion
+     * @param actorRole role of the actor performing deletion (for audit)
      */
-    public void softDeleteDocument(UUID docId, UUID actorId) {
+    public void softDeleteDocument(UUID docId, UUID actorId, String actorRole) {
         KycDocument doc = kycDocumentRepository.findById(docId)
             .orElseThrow(() -> new EntityNotFoundException("KycDocument", docId));
         doc.setDeletedAt(Instant.now());
         kycDocumentRepository.save(doc);
         log.info("Soft-deleted document: id={}, by={}", docId, actorId);
+        eventPublisher.publishEvent(new DocumentDeletedEvent(docId, actorId, actorRole,
+                Map.of("entityId", doc.getLegalEntityId().toString())));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

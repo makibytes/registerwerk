@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.registerstatement.internal;
 import de.makibytes.registerwerk.registerstatement.api.StatementTrigger;
 import de.makibytes.registerwerk.asset.events.HolderEnteredEvent;
 import de.makibytes.registerwerk.asset.events.HolderRegisterChangedEvent;
+import de.makibytes.registerwerk.indexer.events.HolderBalanceSyncedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -37,6 +38,16 @@ class RegisterStatementEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onHolderRegisterChanged(HolderRegisterChangedEvent event) {
         safeIssue(event.holderId(), StatementTrigger.CHANGE);
+    }
+
+    /**
+     * Register changes driven purely by indexed on-chain activity — without this, a position
+     * that changed only through on-chain transfers (no operator/issuer action) would silently
+     * never trigger its §19(2) statement.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onHolderBalanceSynced(HolderBalanceSyncedEvent event) {
+        safeIssue(event.holderId(), event.newlyCreated() ? StatementTrigger.INITIAL_ENTRY : StatementTrigger.CHANGE);
     }
 
     private void safeIssue(java.util.UUID holderId, StatementTrigger trigger) {

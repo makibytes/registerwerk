@@ -1,5 +1,8 @@
 package de.makibytes.registerwerk.indexer.internal;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,15 +41,35 @@ class ChainDriftDetectionJob {
     private static final Logger log = LoggerFactory.getLogger(ChainDriftDetectionJob.class);
     private static final BigDecimal CRITICAL_THRESHOLD_PCT = new BigDecimal("0.01"); // 1%
 
+    /** EVM chains — the only ones whose addresses are safe to case-fold (EIP-55 checksums vs. The
+     *  Graph's lowercase indexing). Solana (base58) and Stellar (StrKey base32) are
+     *  case-SENSITIVE encodings where folding can (in principle) collide two distinct addresses. */
+    private static final java.util.Set<String> EVM_CHAIN_SET = java.util.Set.of(
+            "ETHEREUM", "POLYGON", "BASE", "FHENIX", "INCO", "ARBITRUM", "AVALANCHE", "OPTIMISM");
+
+    /** SQL IN-list literal derived from {@link #EVM_CHAIN_SET} so the two never drift apart. */
+    private static final String EVM_CHAINS = EVM_CHAIN_SET.stream()
+            .map(chain -> "'" + chain + "'")
+            .collect(java.util.stream.Collectors.joining(","));
+
     private final JdbcTemplate jdbc;
     private final int batchSize;
 
     ChainDriftDetectionJob(JdbcTemplate jdbc,
-                           @Value("${registerwerk.drift.batch-size:500}") int batchSize) {
+                           @Value("${registerwerk.drift.batch-size:500}") int batchSize,
+                           MeterRegistry meterRegistry) {
         this.jdbc = jdbc;
         this.batchSize = batchSize;
+        // Live query at scrape time rather than a value cached between this job's own 15-minute
+        // runs — chain_drift_event is small and status is a simple equality filter, so a COUNT
+        // here is cheap.
+        Gauge.builder("registerwerk_chain_drift_open_total", jdbc,
+                        j -> j.queryForObject("SELECT count(*) FROM chain_drift_event WHERE status = 'OPEN'", Long.class))
+                .description("Count of currently OPEN chain_drift_event rows (registry vs. on-chain balance divergence)")
+                .register(meterRegistry);
     }
 
+    @SchedulerLock(name = "chainDriftDetection", lockAtMostFor = "PT10M")
     @Scheduled(fixedDelayString = "${registerwerk.drift.check-interval-ms:900000}")
     public void checkDrift() {
         int driftCount = 0;
@@ -91,15 +114,30 @@ class ChainDriftDetectionJob {
                 ah.nominal_amount  AS db_balance,
                 COALESCE(
                     (SELECT SUM(
-                        CASE WHEN LOWER(tt.to_address) = LOWER(ah.wallet_address) THEN tt.amount
-                             ELSE -tt.amount END)
+                        CASE WHEN (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+) THEN LOWER(tt.to_address) ELSE tt.to_address END)
+                                  = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+) THEN LOWER(ah.wallet_address) ELSE ah.wallet_address END)
+                             THEN tt.amount ELSE -tt.amount END)
                      FROM token_transfer tt
-                     -- LOWER(): The Graph indexes lowercase addresses while holder rows may
-                     -- store EIP-55 checksummed ones; a case-sensitive join silently reports
-                     -- zero drift for every holder, voiding the eWpG §16 consistency control.
-                     WHERE LOWER(tt.contract_address) = LOWER(ad.contract_address)
-                       AND (LOWER(tt.from_address) = LOWER(ah.wallet_address)
-                            OR LOWER(tt.to_address) = LOWER(ah.wallet_address))
+                     -- Case-fold only for EVM chains: The Graph indexes lowercase addresses while
+                     -- holder rows may store EIP-55 checksummed ones, so a case-sensitive join
+                     -- there would silently report zero drift for every holder. Solana (base58)
+                     -- and Stellar (StrKey) addresses are compared exactly.
+                     WHERE (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+) THEN LOWER(tt.contract_address) ELSE tt.contract_address END)
+                         = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+) THEN LOWER(ad.contract_address) ELSE ad.contract_address END)
+                       AND (
+                            (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+) THEN LOWER(tt.from_address) ELSE tt.from_address END)
+                                = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+) THEN LOWER(ah.wallet_address) ELSE ah.wallet_address END)
+                            OR (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+) THEN LOWER(tt.to_address) ELSE tt.to_address END)
+                                = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+) THEN LOWER(ah.wallet_address) ELSE ah.wallet_address END)
+                           )
                     ), ah.nominal_amount
                 ) AS indexed_balance,
                 -- Net units this holder gained or lost through the SIMULATED venue, which
@@ -115,7 +153,8 @@ class ChainDriftDetectionJob {
                           WHERE te.seller_holder_id = ah.id
                             AND te.venue_code = 'SIMULATED'
                             AND te.settlement_status = 'SETTLED'), 0) AS net_simulated,
-                ad.id              AS deployment_id
+                ad.id              AS deployment_id,
+                ad.chain           AS chain
             FROM asset_holder ah
             JOIN asset a ON a.id = ah.asset_id AND a.status = 'ISSUED'
             JOIN asset_deployment ad ON ad.asset_id = a.id
@@ -155,6 +194,11 @@ class ChainDriftDetectionJob {
         UUID assetId = toUuid(row.get("asset_id"));
         UUID deploymentId = toUuid(row.get("deployment_id"));
         String wallet = (String) row.get("wallet_address");
+        String chain = (String) row.get("chain");
+        // Case-fold the wallet-address match only for EVM chains — Solana (base58) and Stellar
+        // (StrKey) addresses are case-sensitive.
+        boolean isEvm = chain != null && EVM_CHAIN_SET.contains(chain);
+        String walletMatchSql = isEvm ? "LOWER(wallet_address) = LOWER(?)" : "wallet_address = ?";
 
         try {
             // One OPEN event per (deployment, wallet): refresh if present, insert otherwise.
@@ -163,7 +207,8 @@ class ChainDriftDetectionJob {
             int refreshed = jdbc.update("""
                 UPDATE chain_drift_event
                 SET db_balance = ?, onchain_balance = ?, severity = ?, detected_at = now()
-                WHERE deployment_id = ? AND LOWER(wallet_address) = LOWER(?) AND status = 'OPEN'
+                WHERE deployment_id = ? AND """ + walletMatchSql + """
+                 AND status = 'OPEN'
                 """, dbBalance, effectiveIndexed, severity, deploymentId, wallet);
             if (refreshed == 0) {
                 jdbc.update("""

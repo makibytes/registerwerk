@@ -5,6 +5,11 @@ description: How Registerwerk implements French AMF and Loi PACTE regulatory req
 
 # France — AMF
 
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and configured assumptions. It is not French legal
+    advice or evidence of instrument classification, regulatory authorisation, compliance, or
+    legal effect. Obtain current instrument-, operator-, service-, and deployment-specific review.
+
 France created one of Europe's first dedicated legal frameworks for token-based financial instruments through the **Loi PACTE** (Plan d'Action pour la Croissance et la Transformation des Entreprises, 2019). The **Autorité des Marchés Financiers (AMF)** supervises issuers and service providers.
 
 ---
@@ -78,19 +83,26 @@ Both are represented in Registerwerk using [ERC-3643](../token-standards/erc3643
 
 ## MiFIR reporting for France
 
-When a token registered under `FR_AMF` is traded on an EU-regulated trading venue, [MiFIR RTS 22](../compliance/mifir.md) transaction reports must be filed with the **AMF via ROSA** (Reporting On Securities and Assets). The `MifirReportingService` uses the `FR_AMF` strategy to format and deliver the XML payload.
+MiFIR applicability, reporting capacity, competent authority, and channel require transaction- and
+instrument-specific external review. The current [MiFIR](../compliance/mifir.md) service produces
+`DRAFT_UNVALIDATED` prototype XML; it has no `FR_AMF` strategy and does not file or prove delivery
+to AMF or another authority.
 
 ---
 
 ## TRACFIN — Suspicious transaction reporting
 
-France's financial intelligence unit, **Tracfin**, receives AML/CTF disclosures from financial institutions. For `FR_AMF` entities, Registerwerk's sanctions screening module flags hits for COMPLIANCE_OFFICER review. Confirmed suspicious transactions trigger a structured workflow documented in the operator's AML procedures; the system records the disclosure reference in the relevant `ScreeningHit` record.
+France's financial-intelligence reporting scope and process require external review. Registerwerk's
+screening module records screening runs and operator review decisions, but it does not submit a
+Tracfin disclosure or independently verify a disclosure reference.
 
 ---
 
 ## DORA incident reporting (France)
 
-Major ICT incidents must be reported to **ACPR** (for PSAN/CASP activities) and **AMF** (for securities activities). The `dora` module routes incidents with `jurisdiction = FR_AMF` to both authorities. Deadlines:
+Authority scope and current incident-reporting deadlines require external review. The `dora`
+module does not route or transmit incidents to ACPR, AMF, or another authority. The values below
+are historical design assumptions, not configured filing evidence:
 
 - Initial notification: 4 hours from classification as major
 - Intermediate report: 72 hours

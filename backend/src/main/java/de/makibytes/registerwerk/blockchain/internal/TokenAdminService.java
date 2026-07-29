@@ -11,6 +11,7 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.Address;
@@ -28,14 +29,20 @@ import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.TokenAdminPort;
+import de.makibytes.registerwerk.blockchain.api.ZamaRelayerClient;
+import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleGate;
 
 /**
  * Registry-operator administrative controls for ERC-20, ERC-721, and ERC-1155 token contracts.
  *
  * <p>All write operations submit transactions asynchronously and return a tracking UUID.
- * The client polls {@code GET /api/v1/transactions/{txId}} for status.
+ * The client polls {@code GET /api/v1/transactions/{txId}} for status. Every operation also
+ * publishes a {@link TokenAdminActionEvent} to the tamper-evident audit log (eWpRV §6) via
+ * {@link #submitAdmin}, the single chokepoint all of these calls funnel through.
  *
  * <p>Regulatory basis:
  * <ul>
@@ -54,7 +61,7 @@ import de.makibytes.registerwerk.travelrule.api.TravelRuleGate;
  */
 @Service
 @Transactional
-public class TokenAdminService {
+public class TokenAdminService implements TokenAdminPort {
 
     private static final Logger log = LoggerFactory.getLogger(TokenAdminService.class);
 
@@ -64,6 +71,9 @@ public class TokenAdminService {
     private final EvmContractService evmContractService;
     private final BlockchainTransactionService txService;
     private final TravelRuleGate travelRuleGate;
+    private final HolderBlockGate holderBlockGate;
+    private final ApplicationEventPublisher eventPublisher;
+    private final ZamaRelayerClient zamaRelayerClient;
 
     public TokenAdminService(
             AssetDeploymentRepository deploymentRepository,
@@ -71,36 +81,43 @@ public class TokenAdminService {
             BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
             BlockchainTransactionService txService,
-            TravelRuleGate travelRuleGate) {
+            TravelRuleGate travelRuleGate,
+            HolderBlockGate holderBlockGate,
+            ApplicationEventPublisher eventPublisher,
+            ZamaRelayerClient zamaRelayerClient) {
         this.deploymentRepository = deploymentRepository;
         this.assetLookupPort = assetLookupPort;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
         this.txService = txService;
         this.travelRuleGate = travelRuleGate;
+        this.holderBlockGate = holderBlockGate;
+        this.eventPublisher = eventPublisher;
+        this.zamaRelayerClient = zamaRelayerClient;
     }
 
     // ── Pause / Unpause (MiCAR Art. 36, 84; eWpG §24) ────────────────────────
 
-    public UUID pause(UUID deploymentId) {
+    public UUID pause(UUID deploymentId, UUID actorId, String actorRole) {
         log.info("ADMIN pause on deployment={}", deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         return submitAdmin(dep, asset, new Function("pause", Collections.emptyList(), Collections.emptyList()),
-                "pause", Map.of());
+                "pause", Map.of(), actorId, actorRole);
     }
 
-    public UUID unpause(UUID deploymentId) {
+    public UUID unpause(UUID deploymentId, UUID actorId, String actorRole) {
         log.info("ADMIN unpause on deployment={}", deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         return submitAdmin(dep, asset, new Function("unpause", Collections.emptyList(), Collections.emptyList()),
-                "unpause", Map.of());
+                "unpause", Map.of(), actorId, actorRole);
     }
 
     // ── Address freeze (AWG §17, GwG §40; MiCAR Art. 36) ─────────────────────
 
-    public UUID freezeAddress(UUID deploymentId, String walletAddress, String reason, String legalBasis) {
+    public UUID freezeAddress(UUID deploymentId, String walletAddress, String reason, String legalBasis,
+                               UUID actorId, String actorRole) {
         log.info("ADMIN freezeAddress={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
@@ -108,49 +125,58 @@ public class TokenAdminService {
                 Arrays.asList(new Address(walletAddress), new Utf8String(reason)),
                 Collections.emptyList());
         return submitAdmin(dep, asset, fn, "freezeAddress",
-                Map.of("address", walletAddress, "reason", reason, "legalBasis", legalBasis));
+                Map.of("address", walletAddress, "reason", reason, "legalBasis", legalBasis), actorId, actorRole);
     }
 
-    public UUID unfreezeAddress(UUID deploymentId, String walletAddress) {
+    public UUID unfreezeAddress(UUID deploymentId, String walletAddress, UUID actorId, String actorRole) {
         log.info("ADMIN unfreezeAddress={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("unfreezeAddress",
                 Collections.singletonList(new Address(walletAddress)),
                 Collections.emptyList());
-        return submitAdmin(dep, asset, fn, "unfreezeAddress", Map.of("address", walletAddress));
+        return submitAdmin(dep, asset, fn, "unfreezeAddress", Map.of("address", walletAddress), actorId, actorRole);
     }
 
     // ── Whitelist management ──────────────────────────────────────────────────
 
     /** Adds {@code walletAddress} to the on-chain transfer whitelist. */
-    public UUID whitelist(UUID deploymentId, String walletAddress) {
+    public UUID whitelist(UUID deploymentId, String walletAddress, UUID actorId, String actorRole) {
         log.info("ADMIN whitelist={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        requireNotBlocked(walletAddress);
         Function fn = new Function("whitelist",
                 Collections.singletonList(new Address(walletAddress)),
                 Collections.emptyList());
-        return submitAdmin(dep, asset, fn, "whitelist", Map.of("address", walletAddress));
+        return submitAdmin(dep, asset, fn, "whitelist", Map.of("address", walletAddress), actorId, actorRole);
     }
 
     /** Removes {@code walletAddress} from the on-chain transfer whitelist. */
-    public UUID unwhitelist(UUID deploymentId, String walletAddress) {
+    public UUID unwhitelist(UUID deploymentId, String walletAddress, UUID actorId, String actorRole) {
         log.info("ADMIN removeFromWhitelist={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("removeFromWhitelist",
                 Collections.singletonList(new Address(walletAddress)),
                 Collections.emptyList());
-        return submitAdmin(dep, asset, fn, "removeFromWhitelist", Map.of("address", walletAddress));
+        return submitAdmin(dep, asset, fn, "removeFromWhitelist", Map.of("address", walletAddress), actorId, actorRole);
     }
 
     // ── Forced transfer — eWpG §24 Berichtigung ───────────────────────────────
 
-    public UUID forcedTransfer(UUID deploymentId, String from, String to, BigInteger value, String legalBasis) {
+    public UUID forcedTransfer(UUID deploymentId, String from, String to, BigInteger value, String legalBasis,
+                               UUID actorId, String actorRole) {
         log.info("ADMIN forcedTransfer from={} to={} value={} on deployment={}", from, to, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        if (asset.tokenStandard() == TokenStandard.ERC1155) {
+            throw new IllegalArgumentException(
+                    "forcedTransfer is not available for ERC-1155 tokens (it would only target token id 0) "
+                    + "— use forcedTransferSingle to target a specific token id");
+        }
+        requireNotBlocked(from);
+        requireNotBlocked(to);
         // TFR Reg (EU) 2023/1113: dispatch/record Travel Rule information before
         // submitting the on-chain transfer. EUR valuation is not available at this
         // layer — null is treated conservatively by the gate.
@@ -160,17 +186,21 @@ public class TokenAdminService {
                 Arrays.asList(new Address(from), new Address(to), new Uint256(value), new Utf8String(legalBasis)),
                 Collections.emptyList());
         return submitAdmin(dep, asset, fn, "forcedTransfer",
-                Map.of("from", from, "to", to, "value", value.toString(), "legalBasis", legalBasis));
+                Map.of("from", from, "to", to, "value", value.toString(), "legalBasis", legalBasis),
+                actorId, actorRole);
     }
 
     /**
      * ERC-1155 only: forces transfer of {@code amount} of token {@code id} from {@code from} to {@code to}.
      */
     public UUID forcedTransferSingle(UUID deploymentId, String from, String to,
-                                     BigInteger id, BigInteger amount, String legalBasis) {
+                                     BigInteger id, BigInteger amount, String legalBasis,
+                                     UUID actorId, String actorRole) {
         log.info("ADMIN forcedTransferSingle id={} amount={} on deployment={}", id, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        requireNotBlocked(from);
+        requireNotBlocked(to);
         travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
         if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forcedTransferSingle is only available for ERC-1155 tokens");
@@ -181,88 +211,251 @@ public class TokenAdminService {
                 Collections.emptyList());
         return submitAdmin(dep, asset, fn, "forcedTransferSingle",
                 Map.of("from", from, "to", to, "id", id.toString(),
-                        "amount", amount.toString(), "legalBasis", legalBasis));
+                        "amount", amount.toString(), "legalBasis", legalBasis),
+                actorId, actorRole);
     }
 
     // ── Forced approve ────────────────────────────────────────────────────────
 
-    public UUID forcedApprove(UUID deploymentId, String owner, String spender, BigInteger value, String legalBasis) {
+    public UUID forcedApprove(UUID deploymentId, String owner, String spender, BigInteger value, String legalBasis,
+                              UUID actorId, String actorRole) {
         log.info("ADMIN forcedApprove owner={} spender={} value={} on deployment={}", owner, spender, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        requireNotBlocked(owner);
         Function fn = new Function(
                 forcedApproveMethodName(asset.tokenStandard()),
                 Arrays.asList(new Address(owner), new Address(spender), new Uint256(value), new Utf8String(legalBasis)),
                 Collections.emptyList());
         return submitAdmin(dep, asset, fn, "forcedApprove",
-                Map.of("owner", owner, "spender", spender, "value", value.toString(), "legalBasis", legalBasis));
+                Map.of("owner", owner, "spender", spender, "value", value.toString(), "legalBasis", legalBasis),
+                actorId, actorRole);
     }
 
     // ── Forced burn — eWpG §26 Einziehung ────────────────────────────────────
 
-    public UUID forceBurn(UUID deploymentId, String from, BigInteger value, String legalBasis) {
+    @Override
+    public UUID forceBurn(UUID deploymentId, String from, BigInteger value, String legalBasis,
+                          UUID actorId, String actorRole) {
         log.info("ADMIN forceBurn from={} value={} on deployment={}", from, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        if (asset.tokenStandard() == TokenStandard.ERC1155) {
+            throw new IllegalArgumentException(
+                    "forceBurn is not available for ERC-1155 tokens (it would only target token id 0) "
+                    + "— use forceBurnSingle to target a specific token id");
+        }
+        requireNotBlocked(from);
         Function fn = new Function("forceBurn",
                 Arrays.asList(new Address(from), new Uint256(value), new Utf8String(legalBasis)),
                 Collections.emptyList());
         return submitAdmin(dep, asset, fn, "forceBurn",
-                Map.of("from", from, "value", value.toString(), "legalBasis", legalBasis));
+                Map.of("from", from, "value", value.toString(), "legalBasis", legalBasis), actorId, actorRole);
     }
 
     /**
      * ERC-1155 only: forces burn of {@code amount} of token {@code id} from {@code from}.
      */
-    public UUID forceBurnSingle(UUID deploymentId, String from, BigInteger id, BigInteger amount, String legalBasis) {
+    @Override
+    public UUID forceBurnSingle(UUID deploymentId, String from, BigInteger id, BigInteger amount, String legalBasis,
+                                UUID actorId, String actorRole) {
         log.info("ADMIN forceBurnSingle id={} amount={} on deployment={}", id, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forceBurnSingle is only available for ERC-1155 tokens");
         }
+        requireNotBlocked(from);
         Function fn = new Function("forceBurnSingle",
                 Arrays.asList(new Address(from), new Uint256(id), new Uint256(amount), new Utf8String(legalBasis)),
                 Collections.emptyList());
         return submitAdmin(dep, asset, fn, "forceBurnSingle",
-                Map.of("from", from, "id", id.toString(), "amount", amount.toString(), "legalBasis", legalBasis));
+                Map.of("from", from, "id", id.toString(), "amount", amount.toString(), "legalBasis", legalBasis),
+                actorId, actorRole);
+    }
+
+    // ── Confidential force-burn (eWpG §26 Einziehung, ERC-7984 encrypted amounts) ─────────────
+
+    /**
+     * Forced burn on a confidential (Zama fhEVM) token.
+     * {@code ConfidentialERC20.confidentialBurn}/{@code ConfidentialERC3643.confidentialBurn}
+     * are already {@code onlyOwner}/{@code onlyAgent}-gated — i.e. already exactly the forced-burn
+     * primitive, no separate contract method is needed. What this adds is encrypting
+     * {@code amount} into a ciphertext handle + input proof before submitting it, via the
+     * {@link ZamaRelayerClient} (a companion relayer sidecar — see that interface's class-level
+     * note on what is and is not verified end-to-end here).
+     */
+    public UUID confidentialForceBurn(UUID deploymentId, String from, BigInteger amount, String legalBasis,
+                                       UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialForceBurn from={} on deployment={}", from, deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = assetLookupPort.findById(dep.getAssetId())
+                .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException("Asset", dep.getAssetId()));
+        if (asset.tokenStandard() != TokenStandard.CONF_ERC20 && asset.tokenStandard() != TokenStandard.CONF_ERC3643) {
+            throw new IllegalArgumentException("confidentialForceBurn is only available for confidential token standards");
+        }
+        if (!zamaRelayerClient.isConfigured()) {
+            throw new IllegalStateException(
+                    "Confidential force-burn requires a configured Zama relayer sidecar "
+                    + "(registerwerk.zama.relayer-url) to encrypt the burn amount.");
+        }
+        requireNotBlocked(from);
+        String operatorAddress = evmContractService.credentials(
+                new ChainDescriptor(dep.getChain(), dep.getNetwork())).getAddress();
+        ZamaRelayerClient.EncryptedInput encrypted =
+                zamaRelayerClient.encryptInput(dep.getContractAddress(), operatorAddress, amount);
+
+        Function fn = new Function("confidentialBurn",
+                Arrays.asList(
+                        new Address(from),
+                        new org.web3j.abi.datatypes.generated.Bytes32(
+                                org.web3j.utils.Numeric.hexStringToByteArray(encrypted.ciphertextHandle())),
+                        new org.web3j.abi.datatypes.DynamicBytes(
+                                org.web3j.utils.Numeric.hexStringToByteArray(encrypted.inputProofHex()))
+                ),
+                Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialForceBurn",
+                Map.of("from", from, "amount", amount.toString(), "legalBasis", legalBasis), actorId, actorRole);
+    }
+
+    // ── Confidential issuance (issuer/operator minting, encrypted amounts) ───────────────────
+
+    /**
+     * Confidential mint — the ERC-7984/ERC-3643 encrypted-amount equivalent of {@link #mint}.
+     * Same encrypt-then-submit shape as {@link #confidentialForceBurn}: the amount is encrypted
+     * server-side via {@link ZamaRelayerClient} (there is no browser/wallet in an
+     * issuer-initiated mint any more than in an operator-initiated force-burn — an investor's own
+     * confidential TRANSFER, by contrast, is encrypted client-side by the frontend and never
+     * reaches this method).
+     */
+    public UUID confidentialMint(UUID deploymentId, String toAddress, BigInteger amount,
+                                  UUID actorId, String actorRole) {
+        log.info("ISSUER confidentialMint to={} on deployment={}", toAddress, deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = assetLookupPort.findById(dep.getAssetId())
+                .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));
+        if (asset.tokenStandard() != TokenStandard.CONF_ERC20 && asset.tokenStandard() != TokenStandard.CONF_ERC3643) {
+            throw new IllegalArgumentException("confidentialMint is only available for confidential token standards");
+        }
+        if (!zamaRelayerClient.isConfigured()) {
+            throw new IllegalStateException(
+                    "Confidential mint requires a configured Zama relayer sidecar "
+                    + "(registerwerk.zama.relayer-url) to encrypt the mint amount.");
+        }
+        requireNotBlocked(toAddress);
+        String operatorAddress = evmContractService.credentials(
+                new ChainDescriptor(dep.getChain(), dep.getNetwork())).getAddress();
+        ZamaRelayerClient.EncryptedInput encrypted =
+                zamaRelayerClient.encryptInput(dep.getContractAddress(), operatorAddress, amount);
+
+        Function fn = new Function("confidentialMint",
+                Arrays.asList(
+                        new Address(toAddress),
+                        new org.web3j.abi.datatypes.generated.Bytes32(
+                                org.web3j.utils.Numeric.hexStringToByteArray(encrypted.ciphertextHandle())),
+                        new org.web3j.abi.datatypes.DynamicBytes(
+                                org.web3j.utils.Numeric.hexStringToByteArray(encrypted.inputProofHex()))
+                ),
+                Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialMint",
+                Map.of("toAddress", toAddress, "amount", amount.toString()), actorId, actorRole);
+    }
+
+    // ── Confidential viewer ACL (who besides the holder can decrypt a balance) ───────────────
+
+    /**
+     * Grants {@code viewerAddress} decrypt rights on every holder's (and total supply's) FUTURE
+     * balance handle on this confidential token — see {@code ConfidentialERC20.addViewer}'s doc
+     * comment for the "additive, not retroactive" ACL semantics. Typically used to add an
+     * auditor, or an issuer's own wallet, after deployment (the operator's and initially
+     * configured auditor's viewer addresses are already granted at deploy time — see
+     * {@code ContractAddressConfig.confidentialInitialViewers}).
+     */
+    public UUID confidentialAddViewer(UUID deploymentId, String viewerAddress, UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialAddViewer={} on deployment={}", viewerAddress, deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialToken(dep);
+        Function fn = new Function("addViewer",
+                Collections.singletonList(new Address(viewerAddress)), Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialAddViewer", Map.of("viewer", viewerAddress), actorId, actorRole);
+    }
+
+    /**
+     * Stops granting {@code viewerAddress} decrypt rights on FUTURE balance mutations — does NOT
+     * revoke already-granted access to existing ciphertext handles (Zama's ACL has no revoke
+     * primitive; see {@code ConfidentialERC20.removeViewer}'s doc comment).
+     */
+    public UUID confidentialRemoveViewer(UUID deploymentId, String viewerAddress, UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialRemoveViewer={} on deployment={}", viewerAddress, deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialToken(dep);
+        Function fn = new Function("removeViewer",
+                Collections.singletonList(new Address(viewerAddress)), Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialRemoveViewer", Map.of("viewer", viewerAddress), actorId, actorRole);
+    }
+
+    private AssetLookupPort.AssetInfo requireConfidentialToken(AssetDeployment dep) {
+        AssetLookupPort.AssetInfo asset = assetLookupPort.findById(dep.getAssetId())
+                .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));
+        if (asset.tokenStandard() != TokenStandard.CONF_ERC20 && asset.tokenStandard() != TokenStandard.CONF_ERC3643) {
+            throw new IllegalArgumentException("This operation is only available for confidential token standards");
+        }
+        return asset;
     }
 
     // ── Standard issuance (issuer minting/burning) ────────────────────────────
 
-    public UUID mint(UUID deploymentId, String toAddress, BigInteger amount) {
+    public UUID mint(UUID deploymentId, String toAddress, BigInteger amount, UUID actorId, String actorRole) {
         log.info("Issuer MINT to={} amount={} on deployment={}", toAddress, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        requireNotBlocked(toAddress);
         Function fn = new Function("mint",
                 Arrays.asList(new Address(toAddress), new Uint256(amount)),
                 Collections.emptyList());
-        return submitAdmin(dep, asset, fn, "mint", Map.of("toAddress", toAddress, "amount", amount.toString()));
+        return submitAdmin(dep, asset, fn, "mint", Map.of("toAddress", toAddress, "amount", amount.toString()),
+                actorId, actorRole);
     }
 
-    public UUID regularBurn(UUID deploymentId, String fromAddress, BigInteger amount) {
+    public UUID regularBurn(UUID deploymentId, String fromAddress, BigInteger amount, UUID actorId, String actorRole) {
         log.info("Issuer BURN from={} amount={} on deployment={}", fromAddress, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("burn",
                 Arrays.asList(new Address(fromAddress), new Uint256(amount)),
                 Collections.emptyList());
-        return submitAdmin(dep, asset, fn, "burn", Map.of("fromAddress", fromAddress, "amount", amount.toString()));
+        return submitAdmin(dep, asset, fn, "burn", Map.of("fromAddress", fromAddress, "amount", amount.toString()),
+                actorId, actorRole);
     }
 
     // ── Supply cap — MiCAR Art. 46 ────────────────────────────────────────────
 
-    public UUID setSupplyCap(UUID deploymentId, BigInteger newCap) {
+    public UUID setSupplyCap(UUID deploymentId, BigInteger newCap, UUID actorId, String actorRole) {
         log.info("ADMIN setSupplyCap={} on deployment={}", newCap, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         Function fn = new Function("setSupplyCap",
                 Collections.singletonList(new Uint256(newCap)),
                 Collections.emptyList());
-        return submitAdmin(dep, asset, fn, "setSupplyCap", Map.of("newCap", newCap.toString()));
+        return submitAdmin(dep, asset, fn, "setSupplyCap", Map.of("newCap", newCap.toString()), actorId, actorRole);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * §16 eWpG Sperrvermerk — a wallet under an active legal block (court order, pledge,
+     * insolvency, etc.) must not be whitelisted, minted to, or have tokens moved/burned/approved
+     * on its behalf, regardless of KYC/screening status. Checked by wallet address only: at this
+     * layer the caller does not always have the corresponding {@code LegalEntity} on hand, and a
+     * block may itself be registered against only a wallet address (see {@link HolderBlockGate}).
+     */
+    private void requireNotBlocked(String walletAddress) {
+        if (holderBlockGate.isBlocked(null, walletAddress)) {
+            throw new de.makibytes.registerwerk.shared.ComplianceGateException(
+                    "Wallet " + walletAddress + " is subject to an active §16 eWpG Sperrvermerk "
+                    + "(legal block) — operation refused.");
+        }
+    }
 
     private AssetDeployment requireDeployment(UUID deploymentId) {
         return deploymentRepository.findById(deploymentId)
@@ -312,11 +505,19 @@ public class TokenAdminService {
         return asset;
     }
 
-    private UUID submitAdmin(AssetDeployment dep, AssetLookupPort.AssetInfo asset, Function fn, String methodName, Map<String, Object> params) {
+    /**
+     * Submits the on-chain transaction and publishes a {@link TokenAdminActionEvent} to the
+     * audit log — the single chokepoint every public method in this class funnels through,
+     * so wiring the audit publish here covers the entire EVM admin/correction surface.
+     */
+    private UUID submitAdmin(AssetDeployment dep, AssetLookupPort.AssetInfo asset, Function fn, String methodName,
+                              Map<String, Object> params, UUID actorId, String actorRole) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
         Credentials creds = evmContractService.credentials(descriptor);
         String txHash = evmContractService.submit(web3j, creds, dep.getContractAddress(), fn);
+
+        eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 
         return txService.record(txHash, methodName, dep.getId(), asset.id(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
@@ -324,7 +525,10 @@ public class TokenAdminService {
 
     private static String forcedTransferMethodName(TokenStandard standard) {
         return switch (standard) {
-            case ERC20, ERC721, ERC1155 -> "forcedTransfer";
+            case ERC20, ERC721 -> "forcedTransfer";
+            // ERC1155 is rejected earlier in forcedTransfer() — it must go through
+            // forcedTransferSingle so the caller-supplied token id is honored instead
+            // of silently defaulting to id 0.
             default -> throw new UnsupportedOperationException(
                     "Forced transfer method mapping is not defined for token standard: " + standard);
         };

@@ -84,12 +84,12 @@ export class IssuanceService {
 
   // ── Issuer token operations ────────────────────────────────────────────────
 
-  mint(assetId: string, depId: string, body: { toAddress: string; amount: string; reason?: string }): Observable<void> {
-    return this.http.post<void>(`${this.base}/${assetId}/deployments/${depId}/issuer/mint`, body);
+  mint(assetId: string, depId: string, body: { toAddress: string; amount: string; reason?: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/mint`, body);
   }
 
-  burn(assetId: string, depId: string, body: { fromAddress: string; amount: string }): Observable<void> {
-    return this.http.post<void>(`${this.base}/${assetId}/deployments/${depId}/issuer/burn`, body);
+  burn(assetId: string, depId: string, body: { fromAddress: string; amount: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/burn`, body);
   }
 
   forceTransfer(assetId: string, depId: string, body: { from: string; to: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
@@ -98,6 +98,24 @@ export class IssuanceService {
 
   forceApprove(assetId: string, depId: string, body: { owner: string; spender: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
     return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/forced-approve`, body);
+  }
+
+  /**
+   * Confidential mint (CONF_ERC20/CONF_ERC3643 only) — the amount is encrypted server-side via
+   * the backend's `zama-relayer` sidecar (there is no browser/wallet in an issuer-initiated
+   * mint), unlike an investor's own confidential transfer, which {@link FheClientService}
+   * encrypts entirely client-side.
+   */
+  mintConfidential(assetId: string, depId: string, body: { toAddress: string; amount: string; reason?: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/mint-confidential`, body);
+  }
+
+  /**
+   * Contract address + chain id for a confidential deployment — everything
+   * {@link FheClientService}'s `encrypt64`/`userDecrypt` need to talk to Zama's relayer directly.
+   */
+  getConfidentialContext(assetId: string, depId: string): Observable<ConfidentialContext> {
+    return this.http.get<ConfidentialContext>(`${this.base}/${assetId}/deployments/${depId}/confidential-context`);
   }
 
   // ── Documents ──────────────────────────────────────────────────────────────
@@ -139,4 +157,12 @@ export interface IssuanceCreateRequest {
   chain: Chain | null;
   network: Network | null;
   tokenStandard: TokenStandard;
+}
+
+/** Mirrors the backend's `ConfidentialContextResponse`. */
+export interface ConfidentialContext {
+  contractAddress: string;
+  chain: string;
+  network: string;
+  chainId: number;
 }

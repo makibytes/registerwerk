@@ -4,20 +4,31 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.events.HolderEnteredEvent;
 import de.makibytes.registerwerk.asset.events.HolderRegisterChangedEvent;
+import de.makibytes.registerwerk.customer.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpoint;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpointRepository;
+import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.trading.api.*;
 import de.makibytes.registerwerk.trading.events.TradeExecutedEvent;
 import de.makibytes.registerwerk.trading.events.TradeListingCancelledEvent;
 import de.makibytes.registerwerk.trading.events.TradeListingCreatedEvent;
+import de.makibytes.registerwerk.trading.events.TradePendingCancelledEvent;
+import de.makibytes.registerwerk.trading.events.TradePendingTimedOutEvent;
+import de.makibytes.registerwerk.trading.events.TradeRefundedEvent;
 import de.makibytes.registerwerk.trading.web.dto.BuyTradingOfferRequest;
 import de.makibytes.registerwerk.trading.web.dto.CreateTradeListingRequest;
+import de.makibytes.registerwerk.trading.web.dto.TradeExecutionResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -53,6 +64,9 @@ class TradingServiceTest {
     @Mock private AddressEndpointRepository endpointRepository;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private TradingVenueAdapter venueAdapter;
+    @Mock private LegalEntityRepository legalEntityRepository;
+    @Mock private ScreeningGate screeningGate;
+    @Mock private HolderBlockGate holderBlockGate;
 
     private TradingProperties tradingProperties;
     private TradingAssetTypeResolver tradingAssetTypeResolver;
@@ -72,7 +86,8 @@ class TradingServiceTest {
                 tradingProperties, settingsRepository, walletDefaultRepository,
                 tradeListingRepository, tradeExecutionRepository, assetHolderRepository,
                 assetRepository, assetDeploymentRepository, endpointRepository,
-                List.of(venueAdapter), tradingAssetTypeResolver, eventPublisher);
+                List.of(venueAdapter), tradingAssetTypeResolver, eventPublisher,
+                legalEntityRepository, screeningGate, holderBlockGate);
         lenient().when(tradeListingRepository.save(any(TradeListing.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(tradeExecutionRepository.save(any(TradeExecution.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(assetHolderRepository.save(any(AssetHolder.class))).thenAnswer(inv -> {
@@ -80,6 +95,18 @@ class TradingServiceTest {
             if (h.getId() == null) h.setId(UUID.randomUUID());
             return h;
         });
+        // Compliant-by-default: settlement's KYC/screening/Sperrvermerk gate passes for any
+        // entity unless a test explicitly overrides one of these stubs to exercise the gate itself.
+        lenient().when(legalEntityRepository.findById(any())).thenAnswer(inv -> Optional.of(approvedEntity(inv.getArgument(0))));
+        lenient().when(screeningGate.hasUnresolvedHit(any())).thenReturn(false);
+        lenient().when(holderBlockGate.isBlocked(any(), any())).thenReturn(false);
+    }
+
+    private static LegalEntity approvedEntity(UUID id) {
+        LegalEntity entity = new LegalEntity();
+        entity.setId(id);
+        entity.setKycStatus(KycStatus.APPROVED);
+        return entity;
     }
 
     private static AssetHolder sellerHolder(BigDecimal nominal) {
@@ -194,6 +221,50 @@ class TradingServiceTest {
         assertThat(response.venueCode()).isEqualTo(TradingVenueCode.SIMULATED);
         assertThat(response.quantityAvailable()).isEqualByComparingTo("5");
         verify(eventPublisher).publishEvent(any(TradeListingCreatedEvent.class));
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("createListing surfaces the most recent settled trade price as a reference (finding #15)")
+    void createListing_populatesLastTradePrice_whenASettledExecutionExistsForTheAsset() {
+        AssetHolder holder = sellerHolder(BigDecimal.TEN);
+        when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(holder));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        when(tradeListingRepository.sumQuantityAvailableBySellerHolderIdAndStatusIn(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        when(tradeExecutionRepository.sumExecutedQuantityBySellerHolderIdAndSettlementStatus(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        when(assetDeploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of());
+        TradeExecution settled = new TradeExecution();
+        settled.setUnitPrice(BigDecimal.valueOf(12.5));
+        when(tradeExecutionRepository.findFirstByAssetIdAndSettlementStatusOrderBySettledAtDesc(ASSET_ID, SettlementStatus.SETTLED))
+                .thenReturn(Optional.of(settled));
+        CreateTradeListingRequest req = new CreateTradeListingRequest(
+                HOLDER_ID, BigDecimal.valueOf(5), BigDecimal.TEN, false, List.of(PaymentOption.STABLECOIN));
+
+        var response = service.createListing(SELLER, UUID.randomUUID(), req);
+
+        assertThat(response.lastTradePrice()).isEqualByComparingTo("12.5");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("createListing leaves lastTradePrice null when the asset has never settled a trade (finding #15)")
+    void createListing_leavesLastTradePriceNull_whenNoSettledExecutionExists() {
+        AssetHolder holder = sellerHolder(BigDecimal.TEN);
+        when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(holder));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        when(tradeListingRepository.sumQuantityAvailableBySellerHolderIdAndStatusIn(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        when(tradeExecutionRepository.sumExecutedQuantityBySellerHolderIdAndSettlementStatus(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        when(assetDeploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of());
+        when(tradeExecutionRepository.findFirstByAssetIdAndSettlementStatusOrderBySettledAtDesc(ASSET_ID, SettlementStatus.SETTLED))
+                .thenReturn(Optional.empty());
+        CreateTradeListingRequest req = new CreateTradeListingRequest(
+                HOLDER_ID, BigDecimal.valueOf(5), BigDecimal.TEN, false, List.of(PaymentOption.STABLECOIN));
+
+        var response = service.createListing(SELLER, UUID.randomUUID(), req);
+
+        assertThat(response.lastTradePrice()).isNull();
     }
 
     // ── cancelListing ─────────────────────────────────────────────────────────
@@ -337,7 +408,7 @@ class TradingServiceTest {
         AssetHolder seller = sellerHolder(BigDecimal.TEN);
         seller.setId(HOLDER_ID);
         when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(seller));
-        when(assetHolderRepository.findByAssetIdAndWalletAddress(eq(ASSET_ID), any())).thenReturn(Optional.empty());
+        when(assetHolderRepository.findActiveByAssetIdAndWalletAddress(eq(ASSET_ID), any())).thenReturn(Optional.empty());
         BuyTradingOfferRequest req = new BuyTradingOfferRequest(
                 BigDecimal.ONE, OrderType.MARKET, null, null, WalletPreferenceMode.CUSTOM_ADDRESS, null, "0x" + "cc".repeat(20));
 
@@ -357,7 +428,7 @@ class TradingServiceTest {
         AssetHolder seller = sellerHolder(BigDecimal.valueOf(100));
         seller.setId(HOLDER_ID);
         when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(seller));
-        when(assetHolderRepository.findByAssetIdAndWalletAddress(eq(ASSET_ID), any())).thenReturn(Optional.empty());
+        when(assetHolderRepository.findActiveByAssetIdAndWalletAddress(eq(ASSET_ID), any())).thenReturn(Optional.empty());
         BuyTradingOfferRequest req = new BuyTradingOfferRequest(
                 BigDecimal.valueOf(4), OrderType.MARKET, null, PaymentOption.STABLECOIN,
                 WalletPreferenceMode.CUSTOM_ADDRESS, null, "0x" + "dd".repeat(20));
@@ -390,7 +461,7 @@ class TradingServiceTest {
         existingBuyerHolder.setNominalAmount(BigDecimal.valueOf(10));
         String walletAddress = "0x" + "ee".repeat(20);
         existingBuyerHolder.setWalletAddress(walletAddress);
-        when(assetHolderRepository.findByAssetIdAndWalletAddress(ASSET_ID, walletAddress))
+        when(assetHolderRepository.findActiveByAssetIdAndWalletAddress(ASSET_ID, walletAddress))
                 .thenReturn(Optional.of(existingBuyerHolder));
 
         BuyTradingOfferRequest req = new BuyTradingOfferRequest(
@@ -443,10 +514,14 @@ class TradingServiceTest {
     // ── buy — non-SIMULATED venue dispatch ────────────────────────────────────
 
     @Test
-    void buy_nonSimulatedVenue_rejectedByAdapter_throws() {
+    void buy_nonSimulatedVenue_rejectedByAdapter_persistsFailedExecutionInsteadOfThrowing() {
+        // Previously this threw and rolled back the whole transaction — the rejected attempt
+        // left no record anywhere. Now it persists a FAILED TradeExecution (with a reason) and
+        // does NOT decrement the listing's available quantity, since nothing was actually filled.
         UUID listingId = UUID.randomUUID();
         TradeListing listing = openListing(BigDecimal.TEN, BigDecimal.ONE, Set.of(PaymentOption.STABLECOIN));
         listing.setVenueCode(TradingVenueCode.ASSETERA);
+        BigDecimal availableBefore = listing.getQuantityAvailable();
         when(tradeListingRepository.findByIdForUpdate(listingId)).thenReturn(Optional.of(listing));
         when(settingsRepository.findById(BUYER)).thenReturn(Optional.of(settings(true, PaymentOption.STABLECOIN)));
         when(venueAdapter.venueCode()).thenReturn(TradingVenueCode.ASSETERA);
@@ -455,9 +530,12 @@ class TradingServiceTest {
                 BigDecimal.ONE, OrderType.MARKET, null, PaymentOption.STABLECOIN,
                 WalletPreferenceMode.CUSTOM_ADDRESS, null, "0x" + "22".repeat(20));
 
-        assertThatThrownBy(() -> service.buy(BUYER, UUID.randomUUID(), listingId, req))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("insufficient liquidity");
+        TradeExecutionResponse response = service.buy(BUYER, UUID.randomUUID(), listingId, req);
+
+        assertThat(response.settlementStatus()).isEqualTo(SettlementStatus.FAILED);
+        assertThat(listing.getQuantityAvailable()).isEqualByComparingTo(availableBefore);
+        verify(tradeExecutionRepository).save(argThat(e -> e.getFailureReason() != null
+                && e.getFailureReason().contains("insufficient liquidity")));
     }
 
     @Test
@@ -494,6 +572,90 @@ class TradingServiceTest {
 
         assertThat(response.settlementStatus()).isEqualTo(SettlementStatus.PENDING);
         verifyNoInteractions(assetHolderRepository);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("buy fails clearly (not a bare 404) when the listingId belongs to a live external-venue offer (finding #10)")
+    void buy_unknownListingId_thatMatchesALiveExternalOffer_failsWithClearError() {
+        UUID externalListingId = UUID.randomUUID();
+        when(tradeListingRepository.findByIdForUpdate(externalListingId)).thenReturn(Optional.empty());
+        when(venueAdapter.venueCode()).thenReturn(TradingVenueCode.TALOS);
+        TradingVenueOffer liveOffer = new TradingVenueOffer(
+                externalListingId, TradingVenueCode.TALOS, "Talos", ASSET_ID, "AN-1", "Test Bond", null,
+                TradingAssetType.BOND, de.makibytes.registerwerk.deployment.api.TokenStandard.ERC20, null,
+                BigDecimal.TEN, BigDecimal.ONE, Set.of(PaymentOption.STABLECOIN), List.of(OrderType.MARKET),
+                java.time.Instant.now());
+        when(venueAdapter.searchOffers(any())).thenReturn(List.of(liveOffer));
+        BuyTradingOfferRequest req = new BuyTradingOfferRequest(
+                BigDecimal.ONE, OrderType.MARKET, null, PaymentOption.STABLECOIN,
+                WalletPreferenceMode.CUSTOM_ADDRESS, null, "0x" + "55".repeat(20));
+
+        assertThatThrownBy(() -> service.buy(BUYER, UUID.randomUUID(), externalListingId, req))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("TALOS");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("buy still throws a plain not-found for a listingId that matches nothing anywhere (finding #10)")
+    void buy_trulyUnknownListingId_throwsEntityNotFound() {
+        UUID unknownId = UUID.randomUUID();
+        when(tradeListingRepository.findByIdForUpdate(unknownId)).thenReturn(Optional.empty());
+        when(venueAdapter.venueCode()).thenReturn(TradingVenueCode.TALOS);
+        when(venueAdapter.searchOffers(any())).thenReturn(List.of());
+        BuyTradingOfferRequest req = new BuyTradingOfferRequest(
+                BigDecimal.ONE, OrderType.MARKET, null, PaymentOption.STABLECOIN,
+                WalletPreferenceMode.CUSTOM_ADDRESS, null, "0x" + "66".repeat(20));
+
+        assertThatThrownBy(() -> service.buy(BUYER, UUID.randomUUID(), unknownId, req))
+                .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    // ── listMarketplaceOffers ─────────────────────────────────────────────────
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("listMarketplaceOffers surfaces the most recent settled trade price per asset (finding #15)")
+    void listMarketplaceOffers_populatesLastTradePrice_whenASettledExecutionExistsForTheAsset() {
+        UUID listingId = UUID.randomUUID();
+        TradingVenueOffer offer = new TradingVenueOffer(
+                listingId, TradingVenueCode.TALOS, "Talos", ASSET_ID, "AN-1", "Test Bond", null,
+                TradingAssetType.BOND, de.makibytes.registerwerk.deployment.api.TokenStandard.ERC20, null,
+                BigDecimal.TEN, BigDecimal.ONE, Set.of(PaymentOption.STABLECOIN), List.of(OrderType.MARKET),
+                java.time.Instant.now());
+        when(venueAdapter.searchOffers(any())).thenReturn(List.of(offer));
+        TradeListing underlyingListing = new TradeListing();
+        underlyingListing.setSellerEntityId(SELLER);
+        when(tradeListingRepository.findById(listingId)).thenReturn(Optional.of(underlyingListing));
+        TradeExecution settled = new TradeExecution();
+        settled.setUnitPrice(BigDecimal.valueOf(9.75));
+        when(tradeExecutionRepository.findFirstByAssetIdAndSettlementStatusOrderBySettledAtDesc(ASSET_ID, SettlementStatus.SETTLED))
+                .thenReturn(Optional.of(settled));
+
+        var offers = service.listMarketplaceOffers(BUYER, null, null, null, null, null, null, null);
+
+        assertThat(offers).hasSize(1);
+        assertThat(offers.getFirst().lastTradePrice()).isEqualByComparingTo("9.75");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("listMarketplaceOffers leaves lastTradePrice null when the asset has never settled a trade (finding #15)")
+    void listMarketplaceOffers_leavesLastTradePriceNull_whenNoSettledExecutionExists() {
+        UUID listingId = UUID.randomUUID();
+        TradingVenueOffer offer = new TradingVenueOffer(
+                listingId, TradingVenueCode.TALOS, "Talos", ASSET_ID, "AN-1", "Test Bond", null,
+                TradingAssetType.BOND, de.makibytes.registerwerk.deployment.api.TokenStandard.ERC20, null,
+                BigDecimal.TEN, BigDecimal.ONE, Set.of(PaymentOption.STABLECOIN), List.of(OrderType.MARKET),
+                java.time.Instant.now());
+        when(venueAdapter.searchOffers(any())).thenReturn(List.of(offer));
+        TradeListing underlyingListing = new TradeListing();
+        underlyingListing.setSellerEntityId(SELLER);
+        when(tradeListingRepository.findById(listingId)).thenReturn(Optional.of(underlyingListing));
+        when(tradeExecutionRepository.findFirstByAssetIdAndSettlementStatusOrderBySettledAtDesc(ASSET_ID, SettlementStatus.SETTLED))
+                .thenReturn(Optional.empty());
+
+        var offers = service.listMarketplaceOffers(BUYER, null, null, null, null, null, null, null);
+
+        assertThat(offers).hasSize(1);
+        assertThat(offers.getFirst().lastTradePrice()).isNull();
     }
 
     // ── resolveWallet (via buy) ───────────────────────────────────────────────
@@ -609,7 +771,7 @@ class TradingServiceTest {
         execution.setBuyerEntityId(BUYER);
         when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
 
-        assertThatThrownBy(() -> service.settlePendingTrade(SELLER, UUID.randomUUID(), executionId))
+        assertThatThrownBy(() -> service.settlePendingTrade(SELLER, UUID.randomUUID(), executionId, "tx-ref"))
                 .isInstanceOf(AccessDeniedException.class);
     }
 
@@ -621,7 +783,7 @@ class TradingServiceTest {
         execution.setSettlementStatus(SettlementStatus.SETTLED);
         when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
 
-        service.settlePendingTrade(BUYER, UUID.randomUUID(), executionId);
+        service.settlePendingTrade(BUYER, UUID.randomUUID(), executionId, "tx-ref");
 
         verify(tradeExecutionRepository, never()).save(any());
         verifyNoInteractions(assetHolderRepository);
@@ -642,13 +804,226 @@ class TradingServiceTest {
 
         AssetHolder seller = sellerHolder(BigDecimal.valueOf(50));
         when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(seller));
-        when(assetHolderRepository.findByAssetIdAndWalletAddress(eq(ASSET_ID), any())).thenReturn(Optional.empty());
+        when(assetHolderRepository.findActiveByAssetIdAndWalletAddress(eq(ASSET_ID), any())).thenReturn(Optional.empty());
 
-        service.settlePendingTrade(BUYER, UUID.randomUUID(), executionId);
+        service.settlePendingTrade(BUYER, UUID.randomUUID(), executionId, "0xtxhash123");
 
         assertThat(execution.getSettlementStatus()).isEqualTo(SettlementStatus.SETTLED);
         assertThat(execution.getSettledAt()).isNotNull();
         assertThat(execution.getBuyerHolderId()).isNotNull();
+        assertThat(execution.getPaymentReference()).isEqualTo("0xtxhash123");
         assertThat(seller.getNominalAmount()).isEqualByComparingTo("47"); // 50 - 3
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("settlePendingTrade requires a payment reference (finding #2, Phase 7)")
+    void settlePendingTrade_rejectsBlankPaymentReference() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = new TradeExecution();
+        execution.setBuyerEntityId(BUYER);
+        execution.setSettlementStatus(SettlementStatus.PENDING);
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+
+        assertThatThrownBy(() -> service.settlePendingTrade(BUYER, UUID.randomUUID(), executionId, "  "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("payment reference");
+        verifyNoInteractions(assetHolderRepository);
+    }
+
+    // ── settlement compliance gate (KYC / screening / Sperrvermerk) ──────────────
+
+    private TradeExecution pendingExecution() {
+        TradeExecution execution = new TradeExecution();
+        execution.setBuyerEntityId(BUYER);
+        execution.setSellerEntityId(SELLER);
+        execution.setSellerHolderId(HOLDER_ID);
+        execution.setAssetId(ASSET_ID);
+        execution.setExecutedQuantity(BigDecimal.valueOf(3));
+        execution.setWalletAddress("0x" + "77".repeat(20));
+        execution.setSettlementStatus(SettlementStatus.PENDING);
+        return execution;
+    }
+
+    @Test
+    void settlePendingTrade_refusesWhenBuyerKycIsNotApproved() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = pendingExecution();
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+        when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(sellerHolder(BigDecimal.valueOf(50))));
+        LegalEntity buyer = approvedEntity(BUYER);
+        buyer.setKycStatus(KycStatus.IN_PROGRESS);
+        when(legalEntityRepository.findById(BUYER)).thenReturn(Optional.of(buyer));
+
+        assertThatThrownBy(() -> service.settlePendingTrade(BUYER, UUID.randomUUID(), executionId, "tx-ref"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("KYC");
+        verify(assetHolderRepository, never()).save(any());
+    }
+
+    @Test
+    void settlePendingTrade_refusesWhenSellerHasAnUnresolvedScreeningHit() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = pendingExecution();
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+        when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(sellerHolder(BigDecimal.valueOf(50))));
+        when(screeningGate.hasUnresolvedHit(SELLER)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.settlePendingTrade(BUYER, UUID.randomUUID(), executionId, "tx-ref"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("screening");
+        verify(assetHolderRepository, never()).save(any());
+    }
+
+    @Test
+    void settlePendingTrade_refusesWhenBuyerWalletHasAnActiveSperrvermerk() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = pendingExecution();
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+        when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(sellerHolder(BigDecimal.valueOf(50))));
+        when(holderBlockGate.isBlocked(BUYER, execution.getWalletAddress())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.settlePendingTrade(BUYER, UUID.randomUUID(), executionId, "tx-ref"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Sperrvermerk");
+        verify(assetHolderRepository, never()).save(any());
+    }
+
+    // ── cancelPendingTrade / refundSettledTrade / timeoutStuckPendingTrades ──────
+
+    @Test
+    void cancelPendingTrade_cancelsAndRestoresListingQuantity() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = new TradeExecution();
+        execution.setBuyerEntityId(BUYER);
+        execution.setSellerEntityId(SELLER);
+        execution.setListingId(UUID.randomUUID());
+        execution.setExecutedQuantity(BigDecimal.valueOf(3));
+        execution.setSettlementStatus(SettlementStatus.PENDING);
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+
+        TradeListing listing = openListing(BigDecimal.valueOf(2), BigDecimal.ONE, Set.of(PaymentOption.STABLECOIN));
+        listing.setStatus(ListingStatus.PARTIALLY_FILLED);
+        when(tradeListingRepository.findByIdForUpdate(execution.getListingId())).thenReturn(Optional.of(listing));
+
+        TradeExecutionResponse response = service.cancelPendingTrade(BUYER, UUID.randomUUID(), executionId, "buyer changed their mind");
+
+        assertThat(response.settlementStatus()).isEqualTo(SettlementStatus.CANCELLED);
+        assertThat(execution.getFailureReason()).isEqualTo("buyer changed their mind");
+        assertThat(listing.getQuantityAvailable()).isEqualByComparingTo("5"); // 2 + 3
+        assertThat(listing.getStatus()).isEqualTo(ListingStatus.OPEN);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("cancelPendingTrade publishes an audit event (finding #6, Phase 7)")
+    void cancelPendingTrade_publishesAuditEvent() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = new TradeExecution();
+        execution.setBuyerEntityId(BUYER);
+        execution.setSellerEntityId(SELLER);
+        execution.setExecutedQuantity(BigDecimal.valueOf(3));
+        execution.setSettlementStatus(SettlementStatus.PENDING);
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+
+        UUID actorId = UUID.randomUUID();
+        service.cancelPendingTrade(BUYER, actorId, executionId, "buyer changed their mind");
+
+        ArgumentCaptor<TradePendingCancelledEvent> captor = ArgumentCaptor.forClass(TradePendingCancelledEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().executionId()).isEqualTo(executionId);
+        assertThat(captor.getValue().actorId()).isEqualTo(actorId);
+        assertThat(captor.getValue().reason()).isEqualTo("buyer changed their mind");
+    }
+
+    @Test
+    void cancelPendingTrade_rejectsWhenNotPending() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = new TradeExecution();
+        execution.setBuyerEntityId(BUYER);
+        execution.setSellerEntityId(SELLER);
+        execution.setSettlementStatus(SettlementStatus.SETTLED);
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+
+        assertThatThrownBy(() -> service.cancelPendingTrade(BUYER, UUID.randomUUID(), executionId, "too late"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void cancelPendingTrade_rejectsNonParty() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = new TradeExecution();
+        execution.setBuyerEntityId(BUYER);
+        execution.setSellerEntityId(SELLER);
+        execution.setSettlementStatus(SettlementStatus.PENDING);
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+
+        assertThatThrownBy(() -> service.cancelPendingTrade(UUID.randomUUID(), UUID.randomUUID(), executionId, "not my trade"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+    }
+
+    @Test
+    void refundSettledTrade_marksRefundedOnlyWhenSettled() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = new TradeExecution();
+        execution.setBuyerEntityId(BUYER);
+        execution.setSettlementStatus(SettlementStatus.SETTLED);
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+
+        UUID approverId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        TradeExecutionResponse response = service.refundSettledTrade(actorId, executionId, "compliance clawback", approverId);
+
+        assertThat(response.settlementStatus()).isEqualTo(SettlementStatus.REFUNDED);
+        assertThat(execution.getFailureReason()).isEqualTo("compliance clawback");
+
+        ArgumentCaptor<TradeRefundedEvent> captor = ArgumentCaptor.forClass(TradeRefundedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().executionId()).isEqualTo(executionId);
+        assertThat(captor.getValue().actorId()).isEqualTo(actorId);
+        assertThat(captor.getValue().reason()).isEqualTo("compliance clawback");
+        assertThat(captor.getValue().dualControlApproverId()).isEqualTo(approverId);
+    }
+
+    @Test
+    void refundSettledTrade_rejectsWhenNotSettled() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = new TradeExecution();
+        execution.setSettlementStatus(SettlementStatus.PENDING);
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+
+        assertThatThrownBy(() -> service.refundSettledTrade(UUID.randomUUID(), executionId, "too early", UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void timeoutStuckPendingTrades_marksOverduePendingTradesFailed() {
+        tradingProperties.setPendingTimeoutHours(72);
+        TradeExecution stuck = new TradeExecution();
+        stuck.setSettlementStatus(SettlementStatus.PENDING);
+        when(tradeExecutionRepository.findBySettlementStatusAndCreatedAtBefore(eq(SettlementStatus.PENDING), any()))
+                .thenReturn(List.of(stuck));
+
+        service.timeoutStuckPendingTrades();
+
+        assertThat(stuck.getSettlementStatus()).isEqualTo(SettlementStatus.FAILED);
+        assertThat(stuck.getFailureReason()).contains("Timed out");
+        verify(tradeExecutionRepository).save(stuck);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("timeoutStuckPendingTrades publishes an audit event per timed-out trade (finding #6, Phase 7)")
+    void timeoutStuckPendingTrades_publishesEventPerTimedOutTrade() {
+        tradingProperties.setPendingTimeoutHours(72);
+        TradeExecution stuck = new TradeExecution();
+        stuck.setSettlementStatus(SettlementStatus.PENDING);
+        when(tradeExecutionRepository.findBySettlementStatusAndCreatedAtBefore(eq(SettlementStatus.PENDING), any()))
+                .thenReturn(List.of(stuck));
+
+        service.timeoutStuckPendingTrades();
+
+        ArgumentCaptor<TradePendingTimedOutEvent> captor = ArgumentCaptor.forClass(TradePendingTimedOutEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().actorRole()).isEqualTo("SYSTEM");
+        assertThat(captor.getValue().actorId()).isNull();
+        assertThat(captor.getValue().pendingTimeoutHours()).isEqualTo(72);
     }
 }

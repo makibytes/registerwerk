@@ -5,7 +5,13 @@ description: Overview of all four supported jurisdictions and their regulatory f
 
 # Legal Frameworks
 
-Registerwerk is designed to operate simultaneously under four European legal frameworks. Each framework defines requirements for securities registration, KYC/AML, data retention, incident reporting, and investor protection. The platform maps every legal obligation to a concrete implementation.
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and configured assumptions. It is not legal
+    advice or evidence of compliance, regulatory authorisation, certification, or legal effect.
+    Applicability depends on the operator, service, instrument, transaction, jurisdiction, and
+    deployment and must be approved by qualified counsel and the responsible control owners.
+
+Registerwerk contains configuration and technical components intended to support deployments in four European jurisdictions. The tables below are review inputs, not determinations that a law applies or that every obligation has been implemented.
 
 ---
 
@@ -33,13 +39,13 @@ public enum Jurisdiction {
 }
 ```
 
-A `LegalEntity` carries a single `Jurisdiction`, which determines which KYC documents are required, which screening adapters are applied, which supervisory authority receives incident reports, and how long records must be retained.
+A `LegalEntity` carries a single configured `Jurisdiction`. Code uses that value for selected profiles and workflows; it is not an instrument-classification decision and does not prove that an authority receives a report or that a configured retention period is legally correct.
 
 ---
 
 ## Per-jurisdiction configuration
 
-The `JurisdictionRequirementConfig` class (`kyc/api/`) is the single source of truth for per-jurisdiction behaviour. It is a Spring `@Configuration` that produces one `JurisdictionProfile` bean per jurisdiction, containing:
+The `JurisdictionRequirementConfig` class (`kyc/api/`) contains application assumptions for selected per-jurisdiction behavior. It is not a legal source of truth. It produces one `JurisdictionProfile` bean per jurisdiction, containing configured values such as:
 
 - Required KYC document types (see [KYC & AML](../compliance/kyc-aml.md))
 - Sanctions screening providers (OpenSanctions + optional Refinitiv World-Check)
@@ -52,7 +58,7 @@ The `JurisdictionRequirementConfig` class (`kyc/api/`) is the single source of t
 
 ## Common obligations
 
-Despite different primary laws, all four jurisdictions share a common set of obligations that Registerwerk implements once and reuses:
+The repository groups several technical components under common compliance headings. Their presence does not establish that an obligation applies or has been satisfied:
 
 | Obligation | Implementation | Reference |
 |---|---|---|

@@ -25,6 +25,10 @@ spec:
       serviceAccountName: {{ include "registerwerk.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: backend
           securityContext:
@@ -40,14 +44,16 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
-            {{- range .Values.envFromSecrets }}
-            {{- range .keys }}
-            - name: {{ . }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $.Values.envFromSecrets | first | (index .) }}
-                  key: {{ . }}
-            {{- end }}
+            {{- if .Values.postgresql.enabled }}
+            {{/* Bitnami's postgresql subchart (no fullnameOverride set) names its primary
+                 Service "<release-name>-postgresql" — nothing else in this chart previously
+                 set DB_URL/DB_USER at all, so the backend would fall back to
+                 application.yml's localhost:5432 default, which doesn't resolve in a real
+                 cluster. */}}
+            - name: DB_URL
+              value: "jdbc:postgresql://{{ .Release.Name }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
+            - name: DB_USER
+              value: {{ .Values.postgresql.auth.username | quote }}
             {{- end }}
           envFrom:
             - secretRef:

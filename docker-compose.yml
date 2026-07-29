@@ -1,3 +1,8 @@
+# Named explicitly (rather than left to Compose's directory-name default) so the network
+# monitoring/docker-compose.yml joins as "registerwerk_default" is deterministic regardless
+# of what directory this repo is checked out into (Phase 12, finding #4).
+name: registerwerk
+
 services:
   # ─── Application Database ──────────────────────────────────────────────────
   postgres:
@@ -8,11 +13,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-registerwerk}
       DB_USER: ${DB_USER:-registerwerk}
       DB_PASSWORD: ${DB_PASSWORD:-registerwerk}
-      KONG_DB_USER: ${KONG_DB_USER:-kong}
-      KONG_DB_PASSWORD: ${KONG_DB_PASSWORD:-kong}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -36,6 +38,12 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/registerwerk
       DB_USER: ${DB_USER:-registerwerk}
       DB_PASSWORD: ${DB_PASSWORD:-registerwerk}
+      # This compose file is the local/demo deployment path (see CLAUDE.md). Without an
+      # active "dev"/"test" profile, SecurityConfig.jwtDecoder() refuses to start at all
+      # when JWT_DEV_SECRET is left at its factory default below and JWT_ISSUER_URI is
+      # blank — by design, to stop that default secret from reaching a real deployment.
+      # Override to blank/"production" once JWT_ISSUER_URI and a real JWT_DEV_SECRET are set.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-}
       ENTRA_ENABLED: ${ENTRA_ENABLED:-false}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
@@ -55,7 +63,10 @@ services:
       AVALANCHE_FUJI_RPC: ${AVALANCHE_FUJI_RPC:-https://api.avax-test.network/ext/bc/C/rpc}
       OPTIMISM_MAINNET_RPC: ${OPTIMISM_MAINNET_RPC:-https://mainnet.optimism.io}
       OPTIMISM_SEPOLIA_RPC: ${OPTIMISM_SEPOLIA_RPC:-https://sepolia.optimism.io}
-      REGISTERWERK_WALLET_MASTER_KEY: ${REGISTERWERK_WALLET_MASTER_KEY}
+      # Dev-only fallback so a bare `docker compose up` without an .env doesn't
+      # crash-loop the backend (WalletProperties requires >= 32 chars). Override
+      # in .env for any real deployment.
+      REGISTERWERK_WALLET_MASTER_KEY: ${REGISTERWERK_WALLET_MASTER_KEY:-registerwerk-dev-wallet-master-key-change-in-production}
       REGISTERWERK_WALLET_DIR: /data/wallets
       S3_BUCKET: ${S3_BUCKET:-registerwerk-documents}
       S3_ENDPOINT: ${S3_ENDPOINT}
@@ -69,6 +80,11 @@ services:
       CUSTOMER_FRONTEND_URL: ${CUSTOMER_FRONTEND_URL:-http://localhost:4201}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      # Repo/lending ships fail-closed in application.yml; the dev stack opts in so the
+      # feature is exercisable locally. Both flags are required (LendingProductionReadinessCheck
+      # refuses a partially enabled deployment).
+      REGISTERWERK_LENDING_ENABLED: ${REGISTERWERK_LENDING_ENABLED:-true}
+      REGISTERWERK_LENDING_RELEASE_APPROVED: ${REGISTERWERK_LENDING_RELEASE_APPROVED:-true}
       REGISTERWERK_TRADING_ENABLED: ${REGISTERWERK_TRADING_ENABLED:-true}
       REGISTERWERK_TRADING_VENUE_SIMULATED_ENABLED: ${REGISTERWERK_TRADING_VENUE_SIMULATED_ENABLED:-true}
       REGISTERWERK_TRADING_VENUE_ASSETERA_ENABLED: ${REGISTERWERK_TRADING_VENUE_ASSETERA_ENABLED:-true}
@@ -80,6 +96,11 @@ services:
       REGISTERWERK_TRADING_VENUE_TALOS_ENABLED: ${REGISTERWERK_TRADING_VENUE_TALOS_ENABLED:-true}
       REGISTERWERK_TRADING_VENUE_TALOS_BASE_URL: ${REGISTERWERK_TRADING_VENUE_TALOS_BASE_URL:-}
       REGISTERWERK_TRADING_VENUE_TALOS_API_KEY: ${REGISTERWERK_TRADING_VENUE_TALOS_API_KEY:-}
+      # Confidential (Zama fhEVM) tokens — the operator-initiated encrypt/decrypt path only;
+      # investor/issuer/auditor self-decrypt and investor confidential-transfer encryption happen
+      # entirely client-side in the frontends (FheClientService), never through this backend.
+      REGISTERWERK_ZAMA_RELAYER_URL: ${REGISTERWERK_ZAMA_RELAYER_URL:-http://zama-relayer:3001}
+      REGISTERWERK_ZAMA_RELAYER_API_KEY: ${ZAMA_RELAYER_API_KEY:-registerwerk-dev-zama-relayer-key-change-in-production}
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,11 +120,60 @@ services:
         limits:
           memory: 1500m
 
+  # ─── Zama Relayer Sidecar ───────────────────────────────────────────────────
+  # Registerwerk's own wrapper around @zama-fhe/relayer-sdk (see zama-relayer/README and
+  # docs/token-standards/confidential.md) — not an external dependency, this is our code, built
+  # and shipped in this monorepo. Exists only because Zama publishes no Java/JVM client; the
+  # frontends talk to Zama's relayer directly in the browser for every user-initiated flow.
+  # Backend calls this for operator/issuer-initiated confidential mint/force-burn (encrypt-input)
+  # and headless operator/auditor balance reconciliation (operator-decrypt) — see
+  # ConfidentialTokenAdminService / ConfidentialBalanceReconciliationService.
+  zama-relayer:
+    build:
+      context: ./zama-relayer
+      dockerfile: Dockerfile
+      network: host
+    environment:
+      ZAMA_CONFIG_PRESET: ${ZAMA_CONFIG_PRESET:-sepolia}
+      CHAIN_ID: ${ZAMA_CHAIN_ID:-11155111}
+      SEPOLIA_NETWORK_RPC_URL: ${ETH_SEPOLIA_RPC}
+      NETWORK_RPC_URL: ${ZAMA_NETWORK_RPC_URL:-}
+      RELAYER_URL: ${ZAMA_RELAYER_UPSTREAM_URL:-}
+      GATEWAY_CHAIN_ID: ${ZAMA_GATEWAY_CHAIN_ID:-}
+      ACL_CONTRACT_ADDRESS: ${ZAMA_ACL_CONTRACT_ADDRESS:-}
+      KMS_CONTRACT_ADDRESS: ${ZAMA_KMS_CONTRACT_ADDRESS:-}
+      INPUT_VERIFIER_CONTRACT_ADDRESS: ${ZAMA_INPUT_VERIFIER_CONTRACT_ADDRESS:-}
+      VERIFYING_CONTRACT_ADDRESS_DECRYPTION: ${ZAMA_VERIFYING_CONTRACT_ADDRESS_DECRYPTION:-}
+      VERIFYING_CONTRACT_ADDRESS_INPUT_VERIFICATION: ${ZAMA_VERIFYING_CONTRACT_ADDRESS_INPUT_VERIFICATION:-}
+      # Dedicated decrypt-only viewer key — deliberately NOT any chain's on-chain
+      # transaction-signing wallet (registry wallets configured via Operator Portal → Wallets).
+      # Its public address must be registered as a viewer (addViewer / deploy-time
+      # initialViewers) on any confidential token the operator needs to reconcile.
+      OPERATOR_DECRYPT_PRIVATE_KEY: ${ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY:-}
+      # Finding #6, Phase 9: shared secret every /v1/* caller must present — see auth.ts. Same
+      # value the backend sends above (REGISTERWERK_ZAMA_RELAYER_API_KEY); keep them in sync.
+      RELAYER_API_KEY: ${ZAMA_RELAYER_API_KEY:-registerwerk-dev-zama-relayer-key-change-in-production}
+      PORT: 3001
+    profiles: [confidential]
+    ports:
+      - "127.0.0.1:3005:3001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
   # ─── Operator Frontend ────────────────────────────────────────────────────
   frontend-operator:
     build:
-      context: ./frontend-operator
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend-operator/Dockerfile
       network: host
       args:
         BUILD_CONFIG: ${FRONTEND_BUILD_ENV:-production}
@@ -121,13 +191,13 @@ services:
   # ─── Customer Frontend ─────────────────────────────────────────────────────
   frontend-customer:
     build:
-      context: ./frontend-customer
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend-customer/Dockerfile
       network: host
       args:
         BUILD_CONFIG: ${FRONTEND_BUILD_ENV:-production}
     depends_on:
-      backend:
+      kong:
         condition: service_healthy
     ports:
       - "4201:80"
@@ -137,69 +207,34 @@ services:
         limits:
           memory: 128m
 
-  # ─── Kong/Konga DB Bootstrap ──────────────────────────────────────────────
-  # Runs on every `docker compose up` (script is idempotent) so that operators
-  # upgrading from an existing pgdata volume still get the kong DB created.
-  db-bootstrap:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: ${DB_USER:-registerwerk}
-      PGHOST: postgres
-      PGPASSWORD: ${DB_PASSWORD:-registerwerk}
-      KONG_DB_USER: ${KONG_DB_USER:-kong}
-      KONG_DB_PASSWORD: ${KONG_DB_PASSWORD:-kong}
-    volumes:
-      - ./docker/postgres/init:/scripts:ro
-    entrypoint: ["sh", "/scripts/01-create-service-databases.sh"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: on-failure
-
-  # ─── Kong Database ─────────────────────────────────────────────────────────
-  kong-migrations:
-    image: kong:3.8
-    command: kong migrations bootstrap
-    environment:
-      KONG_DATABASE: postgres
-      KONG_PG_HOST: postgres
-      KONG_PG_USER: ${KONG_DB_USER:-kong}
-      KONG_PG_PASSWORD: ${KONG_DB_PASSWORD:-kong}
-      KONG_PG_DATABASE: kong
-    depends_on:
-      postgres:
-        condition: service_healthy
-      db-bootstrap:
-        condition: service_completed_successfully
-    restart: on-failure
-
+  # ─── API Gateway ────────────────────────────────────────────────────────────
+  # DB-less (declarative) mode: gateway/kong.yml is the single source of truth
+  # for routes/plugins and is actually loaded — Kong in DB mode ignores mounted
+  # declarative files, which is why this used to route nothing. JWT validation
+  # still happens in the Spring backend (see gateway/kong.yml header comment);
+  # Kong here only handles caching, rate limiting, CORS, and security headers.
   kong:
     image: kong:3.8
     environment:
-      KONG_DATABASE: postgres
-      KONG_PG_HOST: postgres
-      KONG_PG_USER: ${KONG_DB_USER:-kong}
-      KONG_PG_PASSWORD: ${KONG_DB_PASSWORD:-kong}
-      KONG_PG_DATABASE: kong
-      KONG_ADMIN_LISTEN: "0.0.0.0:8001, 0.0.0.0:8444 ssl"
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_ADMIN_LISTEN: "127.0.0.1:8001"
       KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
-      KONG_ADMIN_GUI_LISTEN: "127.0.0.1:8002"
-      KONG_ADMIN_GUI_URL: "http://localhost:8002"
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_PLUGINS: bundled
+    volumes:
+      - ./gateway/kong.yml:/etc/kong/kong.yml:ro
     depends_on:
-      postgres:
+      backend:
         condition: service_healthy
-      kong-migrations:
-        condition: service_completed_successfully
     ports:
       - "8000:8000"
       - "8443:8443"
       # Kong admin port must NOT be exposed publicly. Access via: docker exec or SSH tunnel.
-      # - "127.0.0.1:8001:8001"
-      - "127.0.0.1:8002:8002"
+      - "127.0.0.1:8001:8001"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s

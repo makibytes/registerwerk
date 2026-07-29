@@ -11,6 +11,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
@@ -57,6 +58,7 @@ public class SolanaTransferSyncService {
     private final ChainConfigRepository chainConfigRepository;
     private final IndexerStateRepository indexerStateRepository;
     private final TokenTransferRepository tokenTransferRepository;
+    private final SolanaMintSyncCursorRepository mintSyncCursorRepository;
     private final ExplorerUrlBuilder explorerUrlBuilder;
     private final RestClient restClient;
 
@@ -64,11 +66,13 @@ public class SolanaTransferSyncService {
             ChainConfigRepository chainConfigRepository,
             IndexerStateRepository indexerStateRepository,
             TokenTransferRepository tokenTransferRepository,
+            SolanaMintSyncCursorRepository mintSyncCursorRepository,
             ExplorerUrlBuilder explorerUrlBuilder,
             RestClient.Builder restClientBuilder) {
         this.chainConfigRepository = chainConfigRepository;
         this.indexerStateRepository = indexerStateRepository;
         this.tokenTransferRepository = tokenTransferRepository;
+        this.mintSyncCursorRepository = mintSyncCursorRepository;
         this.explorerUrlBuilder = explorerUrlBuilder;
         this.restClient = restClientBuilder.build();
     }
@@ -103,6 +107,7 @@ public class SolanaTransferSyncService {
      * Every 10 minutes, fetches recent signatures for every tracked SPL mint and processes
      * any transfers not yet present in the database.
      */
+    @SchedulerLock(name = "solanaTransferSync", lockAtMostFor = "PT9M")
     @Scheduled(cron = "0 */10 * * * *")
     public void pollMissedTransactions() {
         try {
@@ -157,7 +162,7 @@ public class SolanaTransferSyncService {
         int totalNew = 0;
         for (String mint : mints) {
             try {
-                totalNew += pollMintAddress(chain, state, mint);
+                totalNew += pollMintAddress(chain, mint);
             } catch (Exception e) {
                 log.warn("Error polling mint {} on chain {}: {}", mint, chain.getIdentifier(),
                         e.getMessage());
@@ -220,7 +225,7 @@ public class SolanaTransferSyncService {
         transfer.setTxHash(txSignature);
         transfer.setSlot(slot);
         transfer.setEventType(eventType);
-        transfer.setOccurredAt(Instant.now());
+        transfer.setOccurredAt(resolveOccurredAt(rawTxData));
         transfer.setExplorerTxUrl(explorerUrlBuilder.buildTxUrl(chain, txSignature));
         transfer.setRawData(rawTxData);
 
@@ -245,21 +250,28 @@ public class SolanaTransferSyncService {
                 chain.getIdentifier(), chain.getWsUrl());
     }
 
-    private int pollMintAddress(ChainConfig chain, IndexerState state, String mint) {
-        // getSignaturesForAddress paginates backwards from the most recent signature.
-        // We pass the last-known signature as an "until" boundary to avoid re-processing.
-        String until = state.getLastSyncedSignature();
+    private int pollMintAddress(ChainConfig chain, String mint) {
+        SolanaMintSyncCursor cursor = loadOrCreateMintCursor(chain, mint);
+
+        // getSignaturesForAddress paginates backwards from the most recent signature, stopping at
+        // (exclusive of) the "until" boundary or MAX_SIGNATURES_PER_POLL, whichever comes first.
+        // Results are ordered newest-first, so signatures.get(0) is this poll's new high-water mark.
+        String until = cursor.getLastSyncedSignature();
 
         List<Map<String, Object>> signatures = fetchSignaturesForAddress(
                 chain.getRpcUrl(), mint, MAX_SIGNATURES_PER_POLL, until);
 
         int count = 0;
+        String newestSignatureThisPoll = null;
         for (Map<String, Object> sigInfo : signatures) {
             String sig = (String) sigInfo.get("signature");
             Object slotObj = sigInfo.get("slot");
             Long slot = slotObj instanceof Number n ? n.longValue() : null;
 
             if (sig == null) continue;
+            if (newestSignatureThisPoll == null) {
+                newestSignatureThisPoll = sig;
+            }
 
             boolean dup = tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(
                     chain.getId(), sig, null);
@@ -267,13 +279,26 @@ public class SolanaTransferSyncService {
                 processSolanaTransaction(chain, sig, slot);
                 count++;
             }
+        }
 
-            // Update the high-water mark to the most recent signature seen.
-            if (state.getLastSyncedSignature() == null) {
-                state.setLastSyncedSignature(sig);
-            }
+        // The cursor always advances to the newest signature actually seen this poll — if this
+        // poll returned nothing new, the cursor is left untouched (nothing to advance to).
+        if (newestSignatureThisPoll != null) {
+            cursor.setLastSyncedSignature(newestSignatureThisPoll);
+            cursor.setLastSyncedAt(Instant.now());
+            mintSyncCursorRepository.save(cursor);
         }
         return count;
+    }
+
+    private SolanaMintSyncCursor loadOrCreateMintCursor(ChainConfig chain, String mint) {
+        return mintSyncCursorRepository.findByChainConfigIdAndMintAddress(chain.getId(), mint)
+                .orElseGet(() -> {
+                    SolanaMintSyncCursor c = new SolanaMintSyncCursor();
+                    c.setChainConfigId(chain.getId());
+                    c.setMintAddress(mint);
+                    return mintSyncCursorRepository.save(c);
+                });
     }
 
     /**
@@ -369,6 +394,10 @@ public class SolanaTransferSyncService {
             Map<String, Object> result = (Map<String, Object>) response.get("result");
             Map<String, Object> parsed = new HashMap<>();
             parsed.put("signature", txSignature);
+            // blockTime (unix epoch seconds) is the real on-chain confirmation time — using
+            // Instant.now() (processing time) instead would re-order transfer history whenever
+            // the indexer falls behind and catches up later.
+            parsed.put("blockTime", result.get("blockTime"));
 
             // Walk transaction.message.instructions to find the first SPL Token instruction.
             Map<String, Object> tx = (Map<String, Object>) result.get("transaction");
@@ -433,5 +462,16 @@ public class SolanaTransferSyncService {
     private String extractField(Map<String, Object> data, String key) {
         Object val = data.get(key);
         return val instanceof String s ? s : null;
+    }
+
+    /** Uses the transaction's real on-chain {@code blockTime} when available; falls back to
+     *  processing time only if the RPC response omitted it (observed for very old ledger data
+     *  on some public RPC providers). */
+    private Instant resolveOccurredAt(Map<String, Object> rawTxData) {
+        Object blockTime = rawTxData.get("blockTime");
+        if (blockTime instanceof Number n) {
+            return Instant.ofEpochSecond(n.longValue());
+        }
+        return Instant.now();
     }
 }

@@ -6,6 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AuthService } from '../../core/auth/auth.service';
 import { AdminService, EntityListItem } from '../../core/api/admin.service';
 
@@ -19,6 +20,7 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
     MatProgressSpinnerModule,
     MatFormFieldModule,
     MatInputModule,
+    MatSnackBarModule,
   ],
   styles: [`
     .page {
@@ -253,6 +255,7 @@ export class SelectCompanyComponent implements OnInit {
   private readonly adminService = inject(AdminService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
 
   entities: EntityListItem[] = [];
   loadingEntities = true;
@@ -280,7 +283,7 @@ export class SelectCompanyComponent implements OnInit {
       error: (err) => {
         this.selecting = null;
         this.cdr.markForCheck();
-        alert(err?.error?.message ?? 'Impersonation failed');
+        this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
       },
     });
   }

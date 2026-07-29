@@ -2,7 +2,6 @@ package de.makibytes.registerwerk.blockchain.api;
 
 import com.daml.ledger.javaapi.data.Command;
 import com.daml.ledger.javaapi.data.CreateAndExerciseCommand;
-import com.daml.ledger.javaapi.data.ExerciseByKeyCommand;
 import com.daml.ledger.javaapi.data.ExerciseCommand;
 import de.makibytes.registerwerk.blockchain.events.CantonInstrumentCreatedEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonTokensIssuedEvent;
@@ -19,13 +18,18 @@ import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.wallet.api.WalletStorage.CantonContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -66,16 +70,19 @@ public class CantonTokenService implements CantonTokenOperations {
     private final ChainConfigRepository chainConfigRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final WalletSigner walletSigner;
 
     public CantonTokenService(
             BlockchainClientRegistry registry,
             ChainConfigRepository chainConfigRepository,
             AssetDeploymentRepository assetDeploymentRepository,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            WalletSigner walletSigner) {
         this.registry                 = registry;
         this.chainConfigRepository    = chainConfigRepository;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.eventPublisher            = eventPublisher;
+        this.walletSigner              = walletSigner;
     }
 
     // ── Instrument creation (= token deployment) ──────────────────────────────
@@ -90,7 +97,7 @@ public class CantonTokenService implements CantonTokenOperations {
      * @return update ID of the committed transaction
      */
     public CompletableFuture<String> createInstrument(
-            UUID assetId, Network network, String issuerPartyId, int decimals) {
+            UUID assetId, Network network, String issuerPartyId, int decimals, UUID actorId, String actorRole) {
 
         return CompletableFuture.supplyAsync(() -> {
             CantonLedgerClient client = resolveClient(network);
@@ -118,7 +125,8 @@ public class CantonTokenService implements CantonTokenOperations {
             String updateId = client.submitAndWait(issuerPartyId, List.of(createCmd));
             log.info("Canton instrument created: asset={} network={} updateId={}", assetId, network, updateId);
 
-            eventPublisher.publishEvent(new CantonInstrumentCreatedEvent(assetId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonInstrumentCreatedEvent(assetId, actorId, actorRole,
+                    Map.of("network", network.name(), "issuerPartyId", issuerPartyId, "decimals", decimals, "updateId", updateId)));
             return updateId;
         });
     }
@@ -133,7 +141,8 @@ public class CantonTokenService implements CantonTokenOperations {
      * @param amount         token amount to issue
      * @return update ID
      */
-    public CompletableFuture<String> issue(UUID deploymentId, String recipientPartyId, BigDecimal amount) {
+    public CompletableFuture<String> issue(UUID deploymentId, String recipientPartyId, BigDecimal amount,
+                                            UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment deployment = loadDeployment(deploymentId);
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
@@ -155,7 +164,8 @@ public class CantonTokenService implements CantonTokenOperations {
             log.info("Canton tokens issued: deployment={} recipient={} amount={} updateId={}",
                     deploymentId, recipientPartyId, amount, updateId);
 
-            eventPublisher.publishEvent(new CantonTokensIssuedEvent(deploymentId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonTokensIssuedEvent(deploymentId, actorId, actorRole,
+                    Map.of("recipientPartyId", recipientPartyId, "amount", amount.toPlainString(), "updateId", updateId)));
             return updateId;
         });
     }
@@ -167,7 +177,7 @@ public class CantonTokenService implements CantonTokenOperations {
      */
     public CompletableFuture<String> transfer(
             UUID deploymentId, String holdingContractId,
-            String fromParty, String toParty, BigDecimal amount) {
+            String fromParty, String toParty, BigDecimal amount, UUID actorId, String actorRole) {
 
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment deployment = loadDeployment(deploymentId);
@@ -190,7 +200,8 @@ public class CantonTokenService implements CantonTokenOperations {
             log.info("Canton transfer: deployment={} from={} to={} amount={} updateId={}",
                     deploymentId, fromParty, toParty, amount, updateId);
 
-            eventPublisher.publishEvent(new CantonTransferEvent(deploymentId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonTransferEvent(deploymentId, actorId, actorRole,
+                    Map.of("from", fromParty, "to", toParty, "amount", amount.toPlainString(), "updateId", updateId)));
             return updateId;
         });
     }
@@ -202,7 +213,7 @@ public class CantonTokenService implements CantonTokenOperations {
      */
     public CompletableFuture<String> forceTransfer(
             UUID deploymentId, String holdingContractId,
-            String toParty, BigDecimal amount, String reason) {
+            String toParty, BigDecimal amount, String reason, UUID actorId, String actorRole) {
 
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment deployment = loadDeployment(deploymentId);
@@ -227,7 +238,9 @@ public class CantonTokenService implements CantonTokenOperations {
             log.info("Canton force-transfer: deployment={} to={} amount={} reason='{}' updateId={}",
                     deploymentId, toParty, amount, reason, updateId);
 
-            eventPublisher.publishEvent(new CantonForceTransferEvent(deploymentId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonForceTransferEvent(deploymentId, actorId, actorRole,
+                    Map.of("holdingContractId", holdingContractId, "to", toParty,
+                            "amount", amount.toPlainString(), "reason", reason, "updateId", updateId)));
             return updateId;
         });
     }
@@ -238,7 +251,8 @@ public class CantonTokenService implements CantonTokenOperations {
      * Freezes a holding (prevents the owner from transferring it).
      * Equivalent to Solana {@code freezeTokenAccount}.
      */
-    public CompletableFuture<String> freezeHolding(UUID deploymentId, String holdingContractId) {
+    public CompletableFuture<String> freezeHolding(UUID deploymentId, String holdingContractId,
+                                                    UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment deployment = loadDeployment(deploymentId);
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
@@ -256,7 +270,8 @@ public class CantonTokenService implements CantonTokenOperations {
             log.info("Canton holding locked: deployment={} holding={} updateId={}",
                     deploymentId, holdingContractId, updateId);
 
-            eventPublisher.publishEvent(new CantonHoldingLockedEvent(deploymentId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonHoldingLockedEvent(deploymentId, actorId, actorRole,
+                    Map.of("holdingContractId", holdingContractId, "updateId", updateId)));
             return updateId;
         });
     }
@@ -265,7 +280,8 @@ public class CantonTokenService implements CantonTokenOperations {
      * Unfreezes a previously frozen holding.
      * Equivalent to Solana {@code thawTokenAccount}.
      */
-    public CompletableFuture<String> unfreezeHolding(UUID deploymentId, String holdingContractId) {
+    public CompletableFuture<String> unfreezeHolding(UUID deploymentId, String holdingContractId,
+                                                       UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment deployment = loadDeployment(deploymentId);
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
@@ -283,7 +299,8 @@ public class CantonTokenService implements CantonTokenOperations {
             log.info("Canton holding unlocked: deployment={} holding={} updateId={}",
                     deploymentId, holdingContractId, updateId);
 
-            eventPublisher.publishEvent(new CantonHoldingUnlockedEvent(deploymentId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonHoldingUnlockedEvent(deploymentId, actorId, actorRole,
+                    Map.of("holdingContractId", holdingContractId, "updateId", updateId)));
             return updateId;
         });
     }
@@ -293,7 +310,8 @@ public class CantonTokenService implements CantonTokenOperations {
     /**
      * Burns tokens from a holding.
      */
-    public CompletableFuture<String> burn(UUID deploymentId, String holdingContractId, BigDecimal amount) {
+    public CompletableFuture<String> burn(UUID deploymentId, String holdingContractId, BigDecimal amount,
+                                           UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment deployment = loadDeployment(deploymentId);
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
@@ -311,7 +329,8 @@ public class CantonTokenService implements CantonTokenOperations {
             String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
             log.info("Canton burn: deployment={} amount={} updateId={}", deploymentId, amount, updateId);
 
-            eventPublisher.publishEvent(new CantonBurnEvent(deploymentId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonBurnEvent(deploymentId, actorId, actorRole,
+                    Map.of("holdingContractId", holdingContractId, "amount", amount.toPlainString(), "updateId", updateId)));
             return updateId;
         });
     }
@@ -321,7 +340,7 @@ public class CantonTokenService implements CantonTokenOperations {
     /**
      * Pauses the instrument — all transfers on this instrument are blocked.
      */
-    public CompletableFuture<String> pauseInstrument(UUID deploymentId) {
+    public CompletableFuture<String> pauseInstrument(UUID deploymentId, UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment deployment = loadDeployment(deploymentId);
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
@@ -336,7 +355,8 @@ public class CantonTokenService implements CantonTokenOperations {
             String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
             log.info("Canton instrument paused: deployment={} updateId={}", deploymentId, updateId);
 
-            eventPublisher.publishEvent(new CantonInstrumentPausedEvent(deploymentId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonInstrumentPausedEvent(deploymentId, actorId, actorRole,
+                    Map.of("updateId", updateId)));
             return updateId;
         });
     }
@@ -344,7 +364,7 @@ public class CantonTokenService implements CantonTokenOperations {
     /**
      * Resumes a paused instrument.
      */
-    public CompletableFuture<String> unpauseInstrument(UUID deploymentId) {
+    public CompletableFuture<String> unpauseInstrument(UUID deploymentId, UUID actorId, String actorRole) {
         return CompletableFuture.supplyAsync(() -> {
             AssetDeployment deployment = loadDeployment(deploymentId);
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
@@ -359,7 +379,8 @@ public class CantonTokenService implements CantonTokenOperations {
             String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
             log.info("Canton instrument resumed: deployment={} updateId={}", deploymentId, updateId);
 
-            eventPublisher.publishEvent(new CantonInstrumentResumedEvent(deploymentId, null, null, java.util.Map.of()));
+            eventPublisher.publishEvent(new CantonInstrumentResumedEvent(deploymentId, actorId, actorRole,
+                    Map.of("updateId", updateId)));
             return updateId;
         });
     }
@@ -380,24 +401,17 @@ public class CantonTokenService implements CantonTokenOperations {
     }
 
     private CantonContext resolveContext(AssetDeployment deployment) {
-        // Load from the chain_config-linked default wallet via WalletSigner.
-        // For now we resolve by chain identifier directly from the registry.
-        // WalletSigner.cantonContextForChain is the authoritative path but requires
-        // a chain config UUID; we go through the registry's stored client context instead.
-        // TODO: wire WalletSigner injection once the circular-dep guard is lifted.
+        // Load the party ID + JWT from the chain_config-linked default wallet via WalletSigner —
+        // the same default-wallet mechanism every other chain (EVM, Solana) uses.
         String identifier = resolveIdentifier(deployment.getNetwork());
-        CantonLedgerClient client = (CantonLedgerClient) registry.getCantonClientByIdentifier(identifier);
-        // The client carries the submission JWT via its call credentials; the party ID
-        // is retrieved from the default wallet's address field.
-        // Return a context with empty JWT (the channel already carries auth headers).
-        return new de.makibytes.registerwerk.infrastructure.wallet.WalletStorage.CantonContext(
-                "", "");
+        ChainConfig chainConfig = chainConfigRepository.findByIdentifier(identifier)
+                .orElseThrow(() -> new EntityNotFoundException("ChainConfig", "identifier", identifier));
+        return walletSigner.cantonContextForChain(chainConfig.getId());
     }
 
     private AssetDeployment loadDeployment(UUID deploymentId) {
         return assetDeploymentRepository.findById(deploymentId)
-                .orElseThrow(() -> new de.makibytes.registerwerk.application.exception
-                        .EntityNotFoundException("AssetDeployment", deploymentId));
+                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
     }
 
     private static com.daml.ledger.javaapi.data.DamlRecord.Field field(

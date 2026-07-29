@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://registerwerk.example/schemas/claims-registry.schema.json",
+  "title": "Registerwerk claims registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "registryRevision", "generatedAt", "historyPath", "suppressionsPath", "externalApprovalEnabled", "claims"],
+  "properties": {
+    "$schema": { "type": "string", "const": "./registry.schema.json" },
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "registryRevision": { "type": "integer", "minimum": 1 },
+    "generatedAt": { "type": "string", "format": "date" },
+    "historyPath": { "type": "string", "const": "docs/claims/registry.history.json" },
+    "suppressionsPath": { "type": "string", "const": "docs/claims/suppressions.json" },
+    "externalApprovalEnabled": { "type": "boolean", "const": false },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/claim" }
+    }
+  },
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "statement", "path", "textSha256", "recordSha256", "category", "status", "scope",
+        "owner", "reviewedBy", "reviewedAt", "expiresAt", "evidence", "limitations"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^RW-CLAIM-[0-9]{4}$" },
+        "statement": { "type": "string", "minLength": 20 },
+        "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).+$" },
+        "textSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "recordSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "category": {
+          "type": "string",
+          "enum": ["LEGAL", "REGULATORY", "SECURITY", "PRIVACY", "SETTLEMENT", "OPERATIONS"]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "SELF_ASSESSED_UNREVIEWED", "VERIFIED_TECHNICAL", "CONDITIONAL", "PROTOTYPE",
+            "FALSE_RETIRED", "EXTERNAL_REVIEW_REQUIRED", "EXTERNALLY_APPROVED", "BLOCKED"
+          ]
+        },
+        "scope": { "type": "string", "minLength": 10 },
+        "owner": { "type": "string", "minLength": 3 },
+        "reviewedBy": { "type": "string", "minLength": 3 },
+        "reviewedAt": { "type": "string", "format": "date" },
+        "expiresAt": { "type": "string", "format": "date" },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence" }
+        },
+        "limitations": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 5 } },
+        "externalReview": { "$ref": "#/$defs/externalReview" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "reference"],
+      "properties": {
+        "type": { "type": "string", "enum": ["REPOSITORY", "TEST", "OFFICIAL", "DECISION"] },
+        "reference": { "type": "string", "minLength": 3 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "ciCommandId": { "type": "string", "pattern": "^[a-z0-9-]+$" }
+      },
+      "oneOf": [
+        {
+          "properties": { "type": { "const": "OFFICIAL" } },
+          "not": { "anyOf": [{ "required": ["sha256"] }, { "required": ["ciCommandId"] }] }
+        },
+        {
+          "properties": { "type": { "const": "TEST" } },
+          "required": ["sha256", "ciCommandId"]
+        },
+        {
+          "properties": { "type": { "enum": ["REPOSITORY", "DECISION"] } },
+          "required": ["sha256"],
+          "not": { "required": ["ciCommandId"] }
+        }
+      ]
+    },
+    "externalReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewerName", "reviewerOrganization", "reviewerQualification", "outcome", "decisionDate", "validUntil", "jurisdictions", "scope", "decisionEvidence"],
+      "properties": {
+        "reviewerName": { "type": "string", "minLength": 5 },
+        "reviewerOrganization": { "type": "string", "minLength": 3 },
+        "reviewerQualification": { "type": "string", "minLength": 10 },
+        "outcome": { "type": "string", "const": "APPROVED" },
+        "decisionDate": { "type": "string", "format": "date" },
+        "validUntil": { "type": "string", "format": "date" },
+        "jurisdictions": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 2 } },
+        "scope": { "type": "string", "minLength": 20 },
+        "decisionEvidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^https://" }
+        }
+      }
+    }
+  }
+}

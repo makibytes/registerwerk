@@ -5,13 +5,17 @@ import de.makibytes.registerwerk.erc3643.events.Erc3643SuiteDeployedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.ClaimSigningService;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.blockchain.api.EvmUtils;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopic;
+import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopicRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643Suite;
 import de.makibytes.registerwerk.erc3643.api.OnchainClaim;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
@@ -29,14 +33,15 @@ import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.DynamicBytes;
 import org.web3j.abi.datatypes.DynamicStruct;
 import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.abi.datatypes.generated.Uint8;
+import org.web3j.abi.TypeReference;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
 
@@ -44,6 +49,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -88,6 +94,7 @@ public class Erc3643DeploymentService {
     private final OnchainIdentityRepository identityRepository;
     private final OnchainClaimRepository claimRepository;
     private final Erc3643SuiteRepository suiteRepository;
+    private final Erc3643ClaimTopicRepository claimTopicRepository;
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetLookupPort assetLookupPort;
     private final ApplicationEventPublisher eventPublisher;
@@ -95,23 +102,27 @@ public class Erc3643DeploymentService {
     private final ChainConfigRepository chainConfigRepository;
     private final EvmContractService evmContractService;
     private final ContractAddressConfig contractAddressConfig;
+    private final ClaimSigningService claimSigningService;
 
     public Erc3643DeploymentService(
             BlockchainClientRegistry clientRegistry,
             OnchainIdentityRepository identityRepository,
             OnchainClaimRepository claimRepository,
             Erc3643SuiteRepository suiteRepository,
+            Erc3643ClaimTopicRepository claimTopicRepository,
             AssetDeploymentRepository deploymentRepository,
             AssetLookupPort assetLookupPort,
             ApplicationEventPublisher eventPublisher,
             ExplorerUrlBuilder explorerUrlBuilder,
             ChainConfigRepository chainConfigRepository,
             EvmContractService evmContractService,
-            ContractAddressConfig contractAddressConfig) {
+            ContractAddressConfig contractAddressConfig,
+            ClaimSigningService claimSigningService) {
         this.clientRegistry = clientRegistry;
         this.identityRepository = identityRepository;
         this.claimRepository = claimRepository;
         this.suiteRepository = suiteRepository;
+        this.claimTopicRepository = claimTopicRepository;
         this.deploymentRepository = deploymentRepository;
         this.assetLookupPort = assetLookupPort;
         this.eventPublisher = eventPublisher;
@@ -119,6 +130,7 @@ public class Erc3643DeploymentService {
         this.chainConfigRepository = chainConfigRepository;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
+        this.claimSigningService = claimSigningService;
     }
 
     /**
@@ -171,10 +183,11 @@ public class Erc3643DeploymentService {
             String assetSymbol = deriveSymbol(assetName);
 
             Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, creds.getAddress(), assetName, assetSymbol);
-            TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, fn);
+            evmContractService.send(web3j, creds, factoryAddress, fn);
 
-            Erc3643Suite suite = extractSuiteFromReceipt(receipt, deployment.getId(), assetIdBytes);
+            Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deployment.getId());
             Erc3643Suite saved = suiteRepository.save(suite);
+            seedDefaultClaimTopics(saved.getId());
 
             eventPublisher.publishEvent(new Erc3643SuiteDeployedEvent(saved.getId(), actorId, "REGISTRY_ADMIN", java.util.Map.of()));
 
@@ -190,9 +203,10 @@ public class Erc3643DeploymentService {
      * @param assetId   ID of the asset to deploy
      * @param chain     legacy chain descriptor
      * @param ownerAddress  registry backend wallet address
-     * @return future resolving to the deployment transaction hash (placeholder)
+     * @return future resolving to the deployment tx hash and the deployed suite's token address
      */
-    public CompletableFuture<String> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
+    public CompletableFuture<TokenDeploymentResult> deploy(
+            UUID assetId, ChainDescriptor chain, String ownerAddress) {
         log.info("Deploying ERC-3643 suite for asset={} on chain={}", assetId, chain);
         // Delegate to the chainConfigId-based overload by finding a matching ChainConfig
         return CompletableFuture.supplyAsync(() -> {
@@ -204,8 +218,12 @@ public class Erc3643DeploymentService {
 
             if (chainConfig == null) {
                 log.warn("No ChainConfig found for descriptor={}; returning placeholder", chain);
-                return "0x-PENDING-ERC3643-" + assetId;
+                return TokenDeploymentResult.txOnly("0x-PENDING-ERC3643-" + assetId);
             }
+
+            AssetDeployment deployment = deploymentRepository.findByAssetId(assetId).stream()
+                    .findFirst()
+                    .orElseThrow(() -> new EntityNotFoundException("AssetDeployment for asset", assetId));
 
             String factoryAddress = contractAddressConfig.requireTrexFactory(chainConfig.getIdentifier());
             Web3j web3j = clientRegistry.getEvmClient(chain);
@@ -217,48 +235,30 @@ public class Erc3643DeploymentService {
             Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, creds.getAddress(),
                     assetInfo.name(), deriveSymbol(assetInfo.name()));
             TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, fn);
-            return receipt.getTransactionHash();
+
+            // send() already waits for a mined, non-reverted receipt (throws otherwise), so the
+            // suite genuinely exists on-chain now — resolve its real addresses via the factory's
+            // own getSuiteAddresses(salt) view call rather than parsing event-log topics (the
+            // previous approach only ever captured 3 of 6 addresses and, for the sibling overload,
+            // was never even attempted here — see the ERC-3643 review's findings #2/#6).
+            Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deployment.getId());
+            Erc3643Suite saved = suiteRepository.save(suite);
+            saved.setFactoryTxHash(receipt.getTransactionHash());
+            suiteRepository.save(saved);
+            seedDefaultClaimTopics(saved.getId());
+
+            eventPublisher.publishEvent(new Erc3643SuiteDeployedEvent(
+                    saved.getId(), null, "SYSTEM", java.util.Map.of()));
+
+            return new TokenDeploymentResult(receipt.getTransactionHash(), saved.getTokenAddress());
         });
     }
 
-    /**
-     * Deploy a confidential ERC-3643 suite on Fhenix or Inco (fhEVM networks).
-     *
-     * <p>Confidential deployments use the {@code ConfidentialERC3643} contract instead of
-     * {@code EwpgERC3643}, and require the {@code @fhevm/solidity} library and the Zama KMS
-     * Gateway address to be configured.
-     *
-     * <p>Supported fhEVM chain IDs:
-     * <ul>
-     *   <li>Fhenix Helium testnet: 21888</li>
-     *   <li>Fhenix mainnet: 8008135</li>
-     *   <li>Inco Gentry testnet: 9090</li>
-     *   <li>Inco mainnet: 21097</li>
-     * </ul>
-     *
-     * @param assetId         ID of the asset to deploy
-     * @param chainIdentifier stable chain identifier, e.g. "FHENIX_TESTNET"
-     * @param actorId         ID of the user initiating the deployment
-     * @return future resolving to the saved {@link Erc3643Suite}
-     */
-    public CompletableFuture<Erc3643Suite> deployConfidential(
-            UUID assetId, String chainIdentifier, UUID actorId) {
-        log.info(
-            "Deploying confidential ERC-3643 suite for asset={} on chain={}",
-            assetId, chainIdentifier);
-
-        // TODO: Web3j implementation — requires generated T-REX contract wrappers
-        // Confidential deployment additionally needs:
-        // - Zama KMS Gateway address for the target fhEVM network
-        // - @fhevm/solidity compiled ConfidentialERC3643 ABI
-        // - fhEVM-compatible gas provider
-
-        return CompletableFuture.failedFuture(new UnsupportedOperationException(
-                "Confidential ERC-3643 deployment is not yet supported. " +
-                "It requires the @fhevm/solidity library (Zama), a compiled ConfidentialERC3643 ABI, " +
-                "and the Zama KMS Gateway address for chain=" + chainIdentifier + ". " +
-                "Configure these dependencies and re-enable this path."));
-    }
+    // Confidential ERC-3643 deployment is handled by ConfidentialErc3643Service (a real,
+    // Web3j-backed implementation), routed via Erc3643DeploymentPortImpl.deployConfidential —
+    // not here. An earlier, permanently-unreachable duplicate of this method used to sit in
+    // this class throwing "not yet supported"; it was dead code (the port never called it) and
+    // its message was stale even before removal.
 
     /**
      * Register an investor wallet with the T-REX IdentityRegistry.
@@ -325,8 +325,9 @@ public class Erc3643DeploymentService {
      *
      * @param onchainIdentityId ID of the ONCHAINID record to receive the claim
      * @param claimTopic        claim topic number (e.g. {@link #CLAIM_TOPIC_KYC})
+     * @param expiresAt         optional expiry baked into the signed claim data; {@code null} means none
      */
-    public void issueKycClaim(UUID onchainIdentityId, long claimTopic) {
+    public void issueKycClaim(UUID onchainIdentityId, long claimTopic, java.time.Instant expiresAt) {
         log.info("Issuing claim topic={} to identity={}", claimTopic, onchainIdentityId);
 
         OnchainIdentity identity = identityRepository.findById(onchainIdentityId)
@@ -339,14 +340,14 @@ public class Erc3643DeploymentService {
             return;
         }
 
-        // Sign the claim off-chain using the registry wallet for this chain
+        // Sign via ClaimSigningService — real ABI encoding (abi.encode(address,uint256,bytes) for
+        // the claim hash, matching OnchainID's ClaimIssuer.isClaimValid exactly). Using the same
+        // signer here that submits the tx below is required: the trusted-issuer address
+        // registered on-chain must equal the recovered signer.
+        ClaimSigningService.SignedClaim signed = claimSigningService.signClaim(
+                identity.getChainConfigId(), identityAddress, claimTopic, expiresAt);
+
         Credentials creds = evmContractService.credentials(identity.getChainConfigId());
-        java.time.Instant expiresAt = java.time.Instant.now().plusSeconds(365L * 86400); // 1 year
-        byte[] claimData = buildClaimData(creds.getAddress(), identityAddress, claimTopic, expiresAt);
-        byte[] claimHash = claimHash(identityAddress, claimTopic, claimData);
-        org.web3j.crypto.Sign.SignatureData sig =
-                org.web3j.crypto.Sign.signPrefixedMessage(claimHash, creds.getEcKeyPair());
-        byte[] sigBytes = concat(sig.getR(), sig.getS(), new byte[]{sig.getV()[0]});
 
         // ONCHAINID.addClaim(uint256 topic, uint256 scheme, address issuer,
         //                    bytes signature, bytes data, string uri)
@@ -360,9 +361,9 @@ public class Erc3643DeploymentService {
                 Arrays.asList(
                         new Uint256(java.math.BigInteger.valueOf(claimTopic)),
                         new Uint256(java.math.BigInteger.ONE),                // scheme = 1 (ECDSA)
-                        new Address(creds.getAddress()),
-                        new DynamicBytes(sigBytes),
-                        new DynamicBytes(claimData),
+                        new Address(signed.issuerAddress()),
+                        new DynamicBytes(Numeric.hexStringToByteArray(signed.claimSignature())),
+                        new DynamicBytes(Numeric.hexStringToByteArray(signed.claimData())),
                         new Utf8String("")
                 ),
                 Collections.emptyList()
@@ -424,6 +425,11 @@ public class Erc3643DeploymentService {
      *   address irs, address ONCHAINID, address[] irAgents, address[] tokenAgents,
      *   address[] complianceModules, bytes[] complianceSettings)
      * ClaimDetails: (uint256[] claimTopics, address[] issuers, uint256[][] issuerClaims)
+     *
+     * <p>{@code issuers}/{@code issuerClaims} must be the same length — {@code TREXFactory
+     * .deployTREXSuite} reverts with {@code InvalidClaimPattern()} otherwise. There is exactly
+     * one issuer (the registry backend wallet), trusted for every topic in {@code claimTopics}
+     * (KYC + AML).
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static Function buildDeployEwpgSuiteFunction(
@@ -442,10 +448,18 @@ public class Erc3643DeploymentService {
                 new DynamicArray<>(DynamicBytes.class)                   // complianceSettings (empty)
         );
 
+        // Required topics: KYC + AML (AML revocation must also be visible to the on-chain
+        // compliance gate). The registry wallet is the sole trusted issuer for both at deploy
+        // time; more can be added later via addTrustedIssuer.
+        List<Uint256> requiredTopics = List.of(
+                new Uint256(java.math.BigInteger.valueOf(CLAIM_TOPIC_KYC)),
+                new Uint256(java.math.BigInteger.valueOf(CLAIM_TOPIC_AML)));
+
         DynamicStruct claimDetails = new DynamicStruct(
-                new DynamicArray<>(Uint256.class, new Uint256(java.math.BigInteger.valueOf(CLAIM_TOPIC_KYC))),
+                new DynamicArray<>(Uint256.class, requiredTopics),
                 new DynamicArray<>(Address.class, new Address(ownerAddress)),
-                new DynamicArray(DynamicArray.class)                     // issuerClaims (empty)
+                new DynamicArray<>(DynamicArray.class,
+                        new DynamicArray<>(Uint256.class, requiredTopics))   // issuerClaims[0] = same topics
         );
 
         return new Function(
@@ -461,78 +475,78 @@ public class Erc3643DeploymentService {
     }
 
     private static String deriveSymbol(String assetName) {
-        String cleaned = assetName.toUpperCase().replaceAll("[^A-Z0-9]", "");
-        return cleaned.length() > 8 ? cleaned.substring(0, 8) : cleaned.isEmpty() ? "TOKEN" : cleaned;
+        return de.makibytes.registerwerk.blockchain.api.EvmUtils.tokenSymbol(assetName);
     }
 
     /**
-     * Parses the {@code EwpgSuiteDeployed} event from the transaction receipt to populate
-     * the {@link Erc3643Suite} record.
+     * Resolves all six deployed T-REX suite contract addresses via {@code EwpgTREXFactory
+     * .getSuiteAddresses(salt)} — a single {@code eth_call} — rather than parsing the
+     * {@code EwpgSuiteDeployed} event log, which previously only carried three of the six
+     * addresses (token, identityRegistry, compliance) and left {@code identityRegistryStorage}/
+     * {@code claimTopicsRegistry}/{@code trustedIssuersRegistry} permanently null, silently
+     * breaking every trusted-issuer/claim-topic management call against those fields (finding
+     * #6). Requires the deploying tx to already be mined and successful (callers only reach
+     * this after {@code EvmContractService.send()} returns, which itself throws on revert).
      *
-     * <p>Event signature:
-     * {@code EwpgSuiteDeployed(bytes32 indexed assetId, address indexed tokenAddress,
-     *                          address identityRegistry, address compliance)}
+     * @throws IllegalStateException if the factory reports no token deployed for this salt
      */
-    private Erc3643Suite extractSuiteFromReceipt(TransactionReceipt receipt, UUID deploymentId,
-                                                   byte[] assetIdBytes) {
+    private Erc3643Suite resolveDeployedSuite(
+            Web3j web3j, String factoryAddress, String salt, UUID deploymentId) {
+        Function getSuiteAddresses = new Function(
+                "getSuiteAddresses",
+                List.of(new Utf8String(salt)),
+                Arrays.asList(
+                        new TypeReference<Address>() {}, new TypeReference<Address>() {},
+                        new TypeReference<Address>() {}, new TypeReference<Address>() {},
+                        new TypeReference<Address>() {}, new TypeReference<Address>() {})
+        );
+        List<Type> result = evmContractService.call(web3j, factoryAddress, getSuiteAddresses);
+
+        String tokenAddress = (String) result.get(0).getValue();
+        if (ZERO_ADDRESS.equalsIgnoreCase(tokenAddress)) {
+            throw new IllegalStateException(
+                    "EwpgTREXFactory.getSuiteAddresses(" + salt + ") returned no token — "
+                            + "suite was not actually deployed under this salt");
+        }
+
         Erc3643Suite suite = new Erc3643Suite();
         suite.setAssetDeploymentId(deploymentId);
         suite.setIsConfidential(false);
-
-        for (Log logEntry : receipt.getLogs()) {
-            if (logEntry.getTopics() == null || logEntry.getTopics().size() < 3) continue;
-            if (!REGISTERWERK_SUITE_DEPLOYED_TOPIC.equalsIgnoreCase(logEntry.getTopics().get(0))) continue;
-
-            // topics[1] = indexed bytes32 assetId (already known)
-            // topics[2] = indexed address tokenAddress (left-padded)
-            String paddedToken = logEntry.getTopics().get(2);
-            suite.setTokenAddress("0x" + paddedToken.substring(paddedToken.length() - 40));
-
-            // data = abi.encode(identityRegistry, compliance) — two 32-byte padded addresses
-            String data = logEntry.getData();
-            if (data != null && data.length() >= 130) {
-                String cleanData = Numeric.cleanHexPrefix(data);
-                // First 32 bytes → identityRegistry
-                String irAddr = "0x" + cleanData.substring(24, 64);
-                // Next 32 bytes → compliance
-                String compAddr = "0x" + cleanData.substring(64 + 24, 128);
-                suite.setIdentityRegistryAddress(irAddr);
-                suite.setComplianceAddress(compAddr);
-            }
-            break;
-        }
-
-        if (suite.getTokenAddress() == null) {
-            // Event not found; use placeholder (may happen on non-EwpgTREXFactory contract)
-            suite.setTokenAddress("0x-PENDING-TOKEN-" + deploymentId);
-            log.warn("EwpgSuiteDeployed event not found in receipt={}; using placeholder addresses",
-                    receipt.getTransactionHash());
-        }
-
+        suite.setTokenAddress(tokenAddress);
+        suite.setIdentityRegistryAddress((String) result.get(1).getValue());
+        suite.setIdentityRegistryStorage((String) result.get(2).getValue());
+        suite.setTrustedIssuersRegistry((String) result.get(3).getValue());
+        suite.setClaimTopicsRegistry((String) result.get(4).getValue());
+        suite.setComplianceAddress((String) result.get(5).getValue());
         return suite;
     }
 
+    /**
+     * Seeds the DB-side required-claim-topics record (KYC + AML) for a freshly deployed suite,
+     * mirroring the on-chain {@code ClaimTopicsRegistry} state set by {@link
+     * #buildDeployEwpgSuiteFunction}. Without this, {@code IdentityRegistryService.isVerified}'s
+     * suite-scoped topic lookup would find zero required topics for every new suite and
+     * vacuously report every investor as verified.
+     */
+    private void seedDefaultClaimTopics(UUID suiteId) {
+        Erc3643ClaimTopic kyc = new Erc3643ClaimTopic();
+        kyc.setSuiteId(suiteId);
+        kyc.setTopic(CLAIM_TOPIC_KYC);
+        kyc.setLabel("KYC");
+        claimTopicRepository.save(kyc);
+
+        Erc3643ClaimTopic aml = new Erc3643ClaimTopic();
+        aml.setSuiteId(suiteId);
+        aml.setTopic(CLAIM_TOPIC_AML);
+        aml.setLabel("AML");
+        claimTopicRepository.save(aml);
+    }
+
     // ── Signing helpers ───────────────────────────────────────────────────────
-
-    private static byte[] buildClaimData(String issuer, String identity, long topic,
-                                          java.time.Instant expiresAt) {
-        // ABI-encode: (topic, scheme=1, issuer, expiresAt, "")
-        // Simplified 96-byte encoding for compatibility with ClaimSigningService
-        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(96);
-        buf.put(toBigEndian32(java.math.BigInteger.valueOf(topic)));
-        buf.put(hexToBytes(issuer.replace("0x", "")));
-        buf.put(toBigEndian32(java.math.BigInteger.valueOf(expiresAt.getEpochSecond())));
-        return buf.array();
-    }
-
-    private static byte[] claimHash(String identityAddress, long topic, byte[] data) {
-        byte[] raw = concat(
-                hexToBytes(identityAddress.replace("0x", "").toLowerCase()),
-                toBigEndian32(java.math.BigInteger.valueOf(topic)),
-                data
-        );
-        return org.web3j.crypto.Hash.sha3(raw);
-    }
+    // Claim signing itself goes through ClaimSigningService (see issueKycClaim), matching
+    // OnchainID's real abi.encode(address,uint256,bytes) layout. encodeClaimId below encodes
+    // only static types (address, uint256), so a packed concat is correct here with no
+    // dynamic-type offset/length words needed.
 
     private static byte[] encodeClaimId(String issuer, long topic) {
         // keccak256(abi.encode(issuer_as_address, topic_as_uint256))

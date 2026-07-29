@@ -7,6 +7,7 @@ import { Token, Transfer, WhitelistChange, HolderBalance } from '../generated/sc
 import { BigInt, Bytes } from '@graphprotocol/graph-ts'
 
 const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000'
+const EVENT_DERIVED = 'EVENT_DERIVED'
 
 function updateBalance(tokenAddress: string, holder: Bytes, tokenId: BigInt,
                        delta: BigInt, block: BigInt, ts: BigInt): void {
@@ -14,6 +15,7 @@ function updateBalance(tokenAddress: string, holder: Bytes, tokenId: BigInt,
   let hb = HolderBalance.load(id)
   if (hb == null) {
     hb = new HolderBalance(id)
+    hb.projectionStatus = EVENT_DERIVED
     hb.token   = tokenAddress
     hb.holder  = holder
     hb.balance = BigInt.fromI32(0)
@@ -35,6 +37,7 @@ function recordTransfer(tokenAddress: string, from: Bytes, to: Bytes,
 
   let id = txHash.toHexString() + '-' + logIndex.toString() + suffix
   let transfer = new Transfer(id)
+  transfer.projectionStatus = EVENT_DERIVED
   transfer.token           = tokenAddress
   transfer.tokenType       = 2
   transfer.from            = from
@@ -105,6 +108,7 @@ export function handleTransferBatch(event: TransferBatchEvent): void {
 export function handleWhitelisted(event: Whitelisted): void {
   let id = event.transaction.hash.toHexString() + '-' + event.logIndex.toString()
   let change = new WhitelistChange(id)
+  change.projectionStatus = EVENT_DERIVED
   change.token           = event.address.toHexString()
   change.account         = event.params.account
   change.added           = true
@@ -117,6 +121,7 @@ export function handleWhitelisted(event: Whitelisted): void {
 export function handleRemovedFromWhitelist(event: RemovedFromWhitelist): void {
   let id = event.transaction.hash.toHexString() + '-' + event.logIndex.toString()
   let change = new WhitelistChange(id)
+  change.projectionStatus = EVENT_DERIVED
   change.token           = event.address.toHexString()
   change.account         = event.params.account
   change.added           = false

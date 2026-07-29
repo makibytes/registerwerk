@@ -99,6 +99,40 @@ export interface AssetCouponPayment {
   txRef?: string;
 }
 
+// ── Corporate actions ──────────────────────────────────────────────────────────
+export type CorporateActionType =
+  | 'COUPON' | 'DIVIDEND' | 'SPLIT' | 'REVERSE_SPLIT' | 'CONVERSION'
+  | 'REDEMPTION' | 'PARTIAL_REDEMPTION' | 'PLEDGE' | 'CALL'
+  | 'CAPITAL_CALL' | 'INTEREST_PAYMENT';
+
+export type CorporateActionStatus =
+  | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT' | 'SETTLED' | 'CLOSED' | 'CANCELLED';
+
+export interface CorporateAction {
+  id: string;
+  assetId: string;
+  actionType: CorporateActionType;
+  status: CorporateActionStatus;
+  announcementDate?: string;
+  recordDate?: string;
+  exDate?: string;
+  paymentDate?: string;
+  ratioNumerator?: number;
+  ratioDenominator?: number;
+  amountPerUnit?: number;
+  totalAmount?: number;
+  currency?: string;
+  settlementTxHash?: string;
+  settlementChain?: string;
+  settledAt?: string;
+  initiatedBy: string;
+  dualControlApproverId?: string;
+  dualControlApprovedAt?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LegalEntity {
   id: string;
   entityNumber: string;
@@ -115,11 +149,26 @@ export interface LegalEntity {
 
 export interface LegalEntityNameHistory {
   id: string;
-  entityId: string;
-  name: string;
-  effectiveFrom: string;
-  effectiveTo?: string;
-  changedBy?: string;
+  legalEntityId: string;
+  previousName: string;
+  newName: string;
+  changeType: 'RENAME' | 'MERGER_ABSORBED' | 'MERGER_SURVIVOR' | 'ACQUISITION';
+  relatedEntityId: string | null;
+  effectiveDate: string;
+  notes: string | null;
+  recordedAt: string;
+  recordedBy: string | null;
+}
+
+export interface EntityMergeRecordView {
+  id: string;
+  sourceEntityId: string;
+  targetEntityId: string;
+  mergeType: 'ABSORPTION' | 'CONSOLIDATION';
+  effectiveDate: string;
+  notes: string | null;
+  recordedAt: string;
+  recordedBy: string | null;
 }
 
 export type Jurisdiction = 'DE_EWPG' | 'LU_CSSF' | 'FR_AMF' | 'LI_TVTG';
@@ -248,6 +297,13 @@ export interface AuditEvent {
   actorRole?: string;
   metadata?: Record<string, unknown>;
   occurredAt: string;
+}
+
+export interface ChainVerificationResult {
+  valid: boolean;
+  rowsChecked: number;
+  firstBrokenSequenceNo?: number | null;
+  checkedAt: string;
 }
 
 export interface OnboardingToken {
@@ -457,6 +513,7 @@ export interface ScreeningHit {
   id: string;
   runId: string;
   listSource: string;
+  category: 'SANCTIONS' | 'PEP' | 'ADVERSE_MEDIA';
   matchedField: string;
   matchedValue: string;
   matchScore: number | null;
@@ -506,6 +563,43 @@ export interface HolderBlockRequest {
   expiresAt?: string;
 }
 
+// ─── Asset Token Admin Grants (delegatable forcedTransfer/forcedApprove/forceBurn) ──
+
+export type TokenAdminGrantStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+
+export type TokenAdminGrantEligibilityBasis =
+  | 'ISSUER_WALLET_BINDING' | 'INVESTOR_WHITELIST' | 'INVESTOR_WHITELIST_AND_ONCHAINID' | 'ENTITY_WALLET_BINDING';
+
+export interface TokenAdminGrant {
+  id: string;
+  entityId: string;
+  /** null = entity-wide, applies to every asset the entity is issuer/holder on. */
+  assetId: string | null;
+  walletAddress: string;
+  capability: 'ASSET_TOKEN_ADMIN';
+  status: TokenAdminGrantStatus;
+  eligibilityBasis: TokenAdminGrantEligibilityBasis;
+  chainConfigId: string | null;
+  legalBasis: string;
+  createdBy: string;
+  dualControlApproverId: string | null;
+  dualControlApprovedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  revokeReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TokenAdminGrantRequest {
+  entityId?: string;
+  walletAddress: string;
+  chainConfigId?: string;
+  legalBasis: string;
+  expiresAt?: string;
+}
+
 // ─── DORA (Digital Operational Resilience Act) ───────────────────────────────
 
 export type IctCategory = 'DATA_BREACH' | 'SYSTEM_OUTAGE' | 'RANSOMWARE' | 'THIRD_PARTY_FAILURE' | 'OTHER';
@@ -543,8 +637,28 @@ export interface ThirdPartyProvider {
   notifiedAuthority: boolean;
 }
 
+export type ResilienceTestType = 'VULNERABILITY_SCAN' | 'SCENARIO_BASED' | 'TLPT';
+export type ResilienceTestResult = 'PASSED' | 'FINDINGS_OPEN' | 'FAILED';
+
+export interface ResilienceTest {
+  id: string;
+  testType: ResilienceTestType;
+  scope: string;
+  tlptRequired: boolean;
+  thirdPartyProviderId: string | null;
+  performedAt: string;
+  nextDueDate: string | null;
+  result: ResilienceTestResult;
+  findings: string | null;
+  testerName: string | null;
+  reportRef: string | null;
+}
+
 // ─── Regulatory Reporting ────────────────────────────────────────────────────
 
+/** A draft reporting export. `status` is transport-only (DRAFT_UNVALIDATED,
+ *  NOT_TRANSPORTED, TRANSPORTED_UNVERIFIED, TRANSPORT_FAILED) — it never represents
+ *  authority filing, acknowledgement, or acceptance. */
 export interface RegulatorySubmission {
   id: string;
   report_type: string;
@@ -552,8 +666,9 @@ export interface RegulatorySubmission {
   status: string;
   reporting_period_start: string | null;
   reporting_period_end: string | null;
-  submitted_at: string | null;
-  submission_ref: string | null;
+  transported_at: string | null;
+  transport_ref: string | null;
+  transport_error: string | null;
   created_at: string;
 }
 
@@ -564,6 +679,7 @@ export interface OpenHitView {
   entityId: string | null;
   naturalPersonId: string | null;
   listSource: string;
+  category: 'SANCTIONS' | 'PEP' | 'ADVERSE_MEDIA';
   matchedField: string;
   matchedValue: string;
   matchScore: number | null;
@@ -587,4 +703,210 @@ export interface ErasureRequestView {
   reviewedBy: string | null;
   reviewedAt: string | null;
   resolutionNote: string | null;
+}
+
+// ─── Ecosystem org identity ──────────────────────────────────────────────────
+
+/** Onchain organization registration, mirrors OrgRegistrationResponse. */
+export interface OrgRegistrationView {
+  id: string;
+  legalEntityId: string;
+  entityName: string | null;
+  chainConfigId: string;
+  chainIdentifier: string | null;
+  orgAddress: string;
+  status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'FAILED';
+  registeredTx: string | null;
+  suspendedAt: string | null;
+  suspensionReason: string | null;
+  activeMemberCount: number;
+  createdAt: string;
+}
+
+/** Member wallet bound to an organization, mirrors MemberWalletResponse. */
+export interface OrgMemberWalletView {
+  id: string;
+  walletAddress: string;
+  label: string | null;
+  roles: string[];
+  status: 'PENDING' | 'ACTIVE' | 'REMOVED' | 'FAILED';
+  boundTx: string | null;
+  createdAt: string;
+  removedAt: string | null;
+}
+
+/** Ecosystem permission definition, mirrors PermissionDefinitionResponse. */
+export interface PermissionDefinitionView {
+  id: string;
+  code: string;
+  permissionHash: string;
+  name: string;
+  description: string | null;
+  dappListingId: string | null;
+  status: 'DRAFT' | 'ACTIVE' | 'RETIRED';
+  createdAt: string;
+}
+
+/** Permission grant (org grant or role delegation), mirrors PermissionGrantResponse. */
+export interface PermissionGrantView {
+  id: string;
+  permissionDefinitionId: string;
+  permissionCode: string | null;
+  orgRegistrationId: string;
+  entityName: string | null;
+  grantType: 'ORG' | 'ROLE';
+  roleCode: string | null;
+  roleRestricted: boolean;
+  status: 'PENDING' | 'ACTIVE' | 'REVOKED' | 'FAILED';
+  grantedTx: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+/** Ecosystem-wide trusted claim issuer, mirrors TrustedIssuerResponse. */
+export interface EcosystemTrustedIssuerView {
+  id: string;
+  chainConfigId: string;
+  issuerAddress: string;
+  claimTopics: number[];
+  legalEntityId: string | null;
+  status: 'PENDING' | 'ACTIVE' | 'REMOVED' | 'FAILED';
+  addedTx: string | null;
+  createdAt: string;
+  removedAt: string | null;
+}
+
+// ─── dApp marketplace (operator) ─────────────────────────────────────────────
+
+export type DappListingStatus =
+  | 'DRAFT' | 'SUBMITTED' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED'
+  | 'PUBLISHED' | 'DEPRECATED' | 'DELISTED';
+
+export type DappVersionStatus =
+  | 'DRAFT' | 'SUBMITTED' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED'
+  | 'PUBLISHED' | 'SUPERSEDED';
+
+export interface DappListingView {
+  id: string;
+  slug: string;
+  dappIdHash: string;
+  name: string;
+  category: string;
+  status: DappListingStatus;
+  chainConfigId: string;
+  chainIdentifier: string | null;
+  publisherEntityId: string;
+  publisherName: string | null;
+  currentVersionId: string | null;
+  contactEmail: string | null;
+  docsUrl: string | null;
+  pricingNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DappVersionView {
+  id: string;
+  listingId: string;
+  version: string;
+  status: DappVersionStatus;
+  manifestHash: string | null;
+  signerWallet: string | null;
+  signed: boolean;
+  reviewNotes: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  onchainTx: string | null;
+  createdAt: string;
+}
+
+export interface DappRequiredPermissionView {
+  permissionCode: string;
+  permissionHash: string;
+  claimTopics: number[];
+  rationale: string | null;
+}
+
+export interface ReviewQueueItemView {
+  versionId: string;
+  listingId: string;
+  slug: string;
+  name: string;
+  publisherName: string | null;
+  version: string;
+  status: DappVersionStatus;
+  submittedAt: string | null;
+}
+
+export interface ReviewDetailView {
+  listing: DappListingView;
+  version: DappVersionView;
+  manifestRaw: string | null;
+  previousManifestRaw: string | null;
+  requiredPermissions: DappRequiredPermissionView[];
+  paymentMethods: PaymentMethodView[];
+}
+
+// ─── Payment rails (operator catalog + dApp-declared payment methods) ───────
+
+export type PaymentRailType = 'STABLECOIN' | 'PONTES_API' | 'ERC7573_DVP' | 'OFFCHAIN_SEPA';
+
+export interface PaymentRailChainAddressView {
+  chainConfigId: string;
+  chainIdentifier: string | null;
+  tokenAddress: string;
+}
+
+export interface PaymentRailView {
+  id: string;
+  code: string;
+  displayName: string;
+  railType: PaymentRailType;
+  currency: string;
+  decimals: number | null;
+  description: string | null;
+  issuerName: string | null;
+  issuerLei: string | null;
+  micarAuthorization: string | null;
+  emtFlag: boolean;
+  whitePaperUrl: string | null;
+  redemptionAtPar: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  chainAddresses: PaymentRailChainAddressView[];
+}
+
+export interface PaymentRailRequest {
+  code: string;
+  displayName: string;
+  railType: PaymentRailType;
+  currency: string;
+  decimals: number | null;
+  description: string | null;
+  issuerName: string | null;
+  issuerLei: string | null;
+  micarAuthorization: string | null;
+  emtFlag: boolean;
+  whitePaperUrl: string | null;
+  redemptionAtPar: boolean;
+  chainAddresses: { chainConfigId: string; tokenAddress: string }[];
+}
+
+/** A payment method a dApp version declares — a rail reference (resolved) or a custom descriptor. */
+export interface PaymentMethodView {
+  methodType: 'RAIL' | 'CUSTOM';
+  railCode: string | null;
+  displayName: string | null;
+  railType: PaymentRailType | null;
+  currency: string | null;
+  emtFlag: boolean | null;
+  issuerName: string | null;
+  issuerLei: string | null;
+  whitePaperUrl: string | null;
+  redemptionAtPar: boolean | null;
+  railEnabled: boolean;
+  customName: string | null;
+  customDescription: string | null;
+  note: string | null;
 }

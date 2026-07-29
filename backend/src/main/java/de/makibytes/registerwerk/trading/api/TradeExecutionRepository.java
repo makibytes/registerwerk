@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,4 +36,15 @@ public interface TradeExecutionRepository extends JpaRepository<TradeExecution, 
     BigDecimal sumExecutedQuantityBySellerHolderIdAndSettlementStatus(
             @Param("sellerHolderId") UUID sellerHolderId,
             @Param("settlementStatus") SettlementStatus settlementStatus);
+
+    /** Input for {@code TradingService.timeoutStuckPendingTrades}. */
+    List<TradeExecution> findBySettlementStatusAndCreatedAtBefore(SettlementStatus status, Instant cutoff);
+
+    /**
+     * Most recent settled trade price for an asset — the reference price surfaced alongside
+     * marketplace listings/offers. Previously a trader had nothing to
+     * benchmark a quoted listing price against beyond eyeballing it.
+     */
+    Optional<TradeExecution> findFirstByAssetIdAndSettlementStatusOrderBySettledAtDesc(
+            UUID assetId, SettlementStatus settlementStatus);
 }

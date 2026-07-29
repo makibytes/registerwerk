@@ -77,6 +77,7 @@ public class AssetController {
 
     /** Creates a new asset. */
     @PostMapping
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'ISSUER', 'COMPANY_ADMIN')")
     public ResponseEntity<AssetResponse> createAsset(
             @RequestBody @Valid AssetCreateRequest request,
             Authentication auth) {
@@ -86,14 +87,20 @@ public class AssetController {
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created, auth, false));
     }
 
-    /** Returns a paginated list of assets with optional filters. */
+    /**
+     * Returns a paginated list of assets with optional filters. A non-admin/audit caller
+     * is always scoped to their own entity's assets — {@code issuerId} is ignored (forced
+     * to the caller's own entity) rather than trusted from the query string, otherwise any
+     * authenticated customer could browse every other issuer's assets across the registry.
+     */
     @GetMapping
     public ResponseEntity<PageResponse<AssetResponse>> listAssets(
             @RequestParam(required = false) UUID issuerId,
             @RequestParam(required = false) AssetStatus status,
             Authentication auth,
             Pageable pageable) {
-        Page<Asset> page = assetService.listAssets(issuerId, status, pageable);
+        UUID effectiveIssuerId = SecurityUtils.isAdminOrAudit(auth) ? issuerId : SecurityUtils.extractEntityId(auth);
+        Page<Asset> page = assetService.listAssets(effectiveIssuerId, status, pageable);
         return ResponseEntity.ok(PageResponse.of(page.map(asset -> toResponse(asset, auth, false))));
     }
 
@@ -137,6 +144,7 @@ public class AssetController {
     /** Updates an asset (full or partial — all fields optional). */
     @PutMapping("/{id}")
     @PatchMapping("/{id}")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
     public ResponseEntity<AssetResponse> updateAsset(
             @PathVariable UUID id,
             @RequestBody @Valid AssetUpdateRequest request,
@@ -191,6 +199,14 @@ public class AssetController {
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<Void> suspendAsset(@PathVariable UUID id, Authentication auth) {
         assetLifecycleService.suspend(id, extractActorId(auth));
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Reactivates a suspended asset (SUSPENDED → ISSUED) — correction path for a wrongful suspend. */
+    @PostMapping("/{id}/reactivate")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<Void> reactivateAsset(@PathVariable UUID id, Authentication auth) {
+        assetLifecycleService.reactivate(id, extractActorId(auth));
         return ResponseEntity.noContent().build();
     }
 
@@ -257,8 +273,15 @@ public class AssetController {
         );
     }
 
+    /**
+     * A non-admin caller can only ever create assets under their own entity — an explicit
+     * {@code issuerId} in the request body is trusted only for REGISTRY_ADMIN (who has no
+     * entity of their own and legitimately creates assets on behalf of any issuer).
+     * Otherwise a customer could set an arbitrary {@code issuerId} and create draft assets
+     * attributed to a different company.
+     */
     private UUID resolveIssuerId(AssetCreateRequest request, Authentication auth) {
-        if (request.issuerId() != null) {
+        if (SecurityUtils.isAdminOrAudit(auth) && request.issuerId() != null) {
             return request.issuerId();
         }
 

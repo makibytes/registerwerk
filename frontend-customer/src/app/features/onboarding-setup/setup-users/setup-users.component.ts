@@ -130,7 +130,10 @@ export class SetupUsersComponent implements OnInit {
   ngOnInit(): void {
     this.company.getEntityUsers().subscribe({
       next: users => { this.users = users; this.cdr.markForCheck(); },
-      error: () => {}
+      error: () => {
+        this.snackBar.open('Failed to load company users', 'Dismiss', { duration: 5000 });
+        this.cdr.markForCheck();
+      }
     });
   }
 

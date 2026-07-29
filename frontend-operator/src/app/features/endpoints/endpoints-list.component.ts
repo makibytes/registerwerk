@@ -7,7 +7,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { EndpointService } from '../../core/api/endpoint.service';
 import { Endpoint, EndpointAddressType, EndpointCreateRequest, EndpointUpdateRequest } from '../../core/models';
-import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialogResult } from './endpoint-form-dialog.component';
+import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialogResult } from '@registerwerk/ui';
 
 @Component({
   selector: 'app-endpoints-list',

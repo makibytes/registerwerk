@@ -23,7 +23,7 @@ import { forkJoin } from 'rxjs';
 
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
 import { DoraService } from '../../../core/api/dora.service';
-import { IctIncident, ThirdPartyProvider } from '../../../core/models';
+import { IctIncident, ResilienceTest, ThirdPartyProvider } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 
 @Component({
@@ -44,7 +44,23 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     DataTableComponent,
     PageHeaderComponent,
   ],
-  styles: [`.tab-content { padding-top: 20px; }`],
+  styles: [`
+    .tab-content { padding-top: 20px; }
+    .hint-card {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      border-left: 3px solid var(--rw-accent);
+      background: var(--rw-surface-subtle, rgba(245, 158, 11, 0.06));
+      border-radius: 4px;
+      font-size: 13px;
+      color: var(--rw-text-secondary);
+
+      mat-icon { color: var(--rw-accent); font-size: 20px; height: 20px; width: 20px; }
+    }
+  `],
   template: `
     <app-page-header
       title="DORA ICT Resilience"
@@ -93,6 +109,34 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             [state]="providersState"
             filterPlaceholder="Filter providers…"
             emptyMessage="No ICT third-party providers registered.">
+          </rw-data-table>
+        </div>
+      </mat-tab>
+
+      <!-- Resilience Testing -->
+      <mat-tab label="Resilience Testing">
+        <div class="tab-content">
+          <div class="hint-card">
+            <mat-icon>info</mat-icon>
+            <div>
+              Art. 24/25 requires regular digital operational resilience testing — vulnerability
+              scans and scenario-based tests for every entity, and threat-led penetration testing
+              (TLPT) at least every 3 years for functions/providers designated critical. Record
+              each test here as it completes so overdue re-testing shows up automatically below.
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+            <button mat-raised-button color="primary" (click)="openRecordTestDialog()">
+              <mat-icon>fact_check</mat-icon>
+              Record Test Result
+            </button>
+          </div>
+          <rw-data-table
+            [columns]="resilienceTestColumns"
+            [rows]="resilienceTests"
+            [state]="resilienceTestsState"
+            filterPlaceholder="Filter tests…"
+            emptyMessage="No resilience tests recorded yet.">
           </rw-data-table>
         </div>
       </mat-tab>
@@ -202,12 +246,79 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </button>
       </mat-dialog-actions>
     </ng-template>
+
+    <!-- Record Resilience Test Dialog -->
+    <ng-template #recordTestDialog>
+      <h2 mat-dialog-title>Record Resilience Test Result</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;min-width:460px;padding-top:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <mat-form-field appearance="outline">
+            <mat-label>Test type *</mat-label>
+            <mat-select [(ngModel)]="testForm.testType">
+              @for (t of testTypes; track t) {
+                <mat-option [value]="t">{{ t.replace('_',' ') }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Result *</mat-label>
+            <mat-select [(ngModel)]="testForm.result">
+              @for (r of testResults; track r) {
+                <mat-option [value]="r">{{ r.replace('_',' ') }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+        </div>
+        <mat-form-field appearance="outline">
+          <mat-label>Scope *</mat-label>
+          <input matInput [(ngModel)]="testForm.scope" placeholder="e.g. T-REX identity registry, EwpgPaymaster" />
+        </mat-form-field>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <mat-form-field appearance="outline">
+            <mat-label>Performed on *</mat-label>
+            <input matInput type="date" [(ngModel)]="testForm.performedAt" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Next due date</mat-label>
+            <input matInput type="date" [(ngModel)]="testForm.nextDueDate" />
+          </mat-form-field>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" [(ngModel)]="testForm.tlptRequired" id="tlptRequired" />
+          <label for="tlptRequired" style="font-size:13px;cursor:pointer">
+            Scope is a designated-critical function/provider (TLPT-in-scope, Art. 26)
+          </label>
+        </div>
+        <mat-form-field appearance="outline">
+          <mat-label>Tester / firm name</mat-label>
+          <input matInput [(ngModel)]="testForm.testerName" />
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Report reference</mat-label>
+          <input matInput [(ngModel)]="testForm.reportRef" />
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Findings</mat-label>
+          <textarea matInput [(ngModel)]="testForm.findings" rows="2"></textarea>
+        </mat-form-field>
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="primary"
+                (click)="submitRecordTest()"
+                [disabled]="!testForm.testType || !testForm.result || !testForm.scope || !testForm.performedAt">
+          <mat-icon>save</mat-icon>
+          Save
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
   `,
 })
 export class DoraDashboardComponent implements OnInit {
   @ViewChild('reportDialog') reportDialogTpl!: TemplateRef<unknown>;
   @ViewChild('updateStatusDialog') updateStatusDialogTpl!: TemplateRef<unknown>;
   @ViewChild('reportToAuthorityDialog') reportToAuthorityDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('recordTestDialog') recordTestDialogTpl!: TemplateRef<unknown>;
 
   private readonly doraService = inject(DoraService);
   private readonly dialog = inject(MatDialog);
@@ -216,18 +327,27 @@ export class DoraDashboardComponent implements OnInit {
 
   incidents: IctIncident[] = [];
   providers: ThirdPartyProvider[] = [];
+  resilienceTests: ResilienceTest[] = [];
   incidentsState: AsyncSectionStatus = 'pending';
   providersState: AsyncSectionStatus = 'pending';
+  resilienceTestsState: AsyncSectionStatus = 'pending';
 
   selectedIncidentId: string | null = null;
 
   readonly categories = ['DATA_BREACH', 'SYSTEM_OUTAGE', 'RANSOMWARE', 'THIRD_PARTY_FAILURE', 'OTHER'];
   readonly severities = ['LOW', 'MEDIUM', 'HIGH', 'MAJOR'];
   readonly statuses = ['INVESTIGATING', 'CONTAINED', 'RESOLVED', 'REPORTED_TO_AUTHORITY', 'CLOSED'];
+  readonly testTypes = ['VULNERABILITY_SCAN', 'SCENARIO_BASED', 'TLPT'];
+  readonly testResults = ['PASSED', 'FINDINGS_OPEN', 'FAILED'];
 
   incidentForm = { title: '', description: '', category: '', severity: '' };
   statusForm = { status: '', rootCause: '', remediationSteps: '' };
   authorityForm = { authorityRef: '', isFinalReport: false };
+  testForm: {
+    testType: string; result: string; scope: string; performedAt: string; nextDueDate: string;
+    tlptRequired: boolean; testerName: string; reportRef: string; findings: string;
+  } = { testType: '', result: '', scope: '', performedAt: '', nextDueDate: '',
+        tlptRequired: false, testerName: '', reportRef: '', findings: '' };
 
   readonly incidentColumns: TableColumn[] = [
     {
@@ -301,6 +421,42 @@ export class DoraDashboardComponent implements OnInit {
     },
   ];
 
+  readonly resilienceTestColumns: TableColumn[] = [
+    {
+      key: 'result',
+      header: 'Result',
+      cell: (t: ResilienceTest) => t.result.replace('_', ' '),
+      type: 'badge',
+    },
+    {
+      key: 'testType',
+      header: 'Test Type',
+      cell: (t: ResilienceTest) => t.testType.replace('_', ' '),
+    },
+    {
+      key: 'scope',
+      header: 'Scope',
+      cell: (t: ResilienceTest) => t.scope,
+    },
+    {
+      key: 'tlptRequired',
+      header: 'TLPT-in-scope',
+      cell: (t: ResilienceTest) => t.tlptRequired ? 'YES' : 'NO',
+    },
+    {
+      key: 'performedAt',
+      header: 'Performed',
+      cell: (t: ResilienceTest) => t.performedAt,
+      type: 'date',
+    },
+    {
+      key: 'nextDueDate',
+      header: 'Next Due',
+      cell: (t: ResilienceTest) => t.nextDueDate,
+      type: 'date',
+    },
+  ];
+
   ngOnInit(): void {
     this.load();
   }
@@ -308,22 +464,27 @@ export class DoraDashboardComponent implements OnInit {
   load(): void {
     this.incidentsState = 'pending';
     this.providersState = 'pending';
+    this.resilienceTestsState = 'pending';
     this.cdr.markForCheck();
 
     forkJoin({
       incidents: this.doraService.listOpenIncidents(),
       providers: this.doraService.listProviders(),
+      resilienceTests: this.doraService.listResilienceTests(),
     }).subscribe({
-      next: ({ incidents, providers }) => {
+      next: ({ incidents, providers, resilienceTests }) => {
         this.incidents = incidents;
         this.providers = providers;
+        this.resilienceTests = resilienceTests;
         this.incidentsState = 'ready';
         this.providersState = 'ready';
+        this.resilienceTestsState = 'ready';
         this.cdr.markForCheck();
       },
       error: () => {
         this.incidentsState = 'error';
         this.providersState = 'error';
+        this.resilienceTestsState = 'error';
         this.cdr.markForCheck();
       },
     });
@@ -397,6 +558,34 @@ export class DoraDashboardComponent implements OnInit {
         );
       },
       error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to report to authority.', 'Dismiss', { duration: 6000 }),
+    });
+  }
+
+  openRecordTestDialog(): void {
+    this.testForm = { testType: 'VULNERABILITY_SCAN', result: 'PASSED', scope: '', performedAt: '',
+                       nextDueDate: '', tlptRequired: false, testerName: '', reportRef: '', findings: '' };
+    this.dialog.open(this.recordTestDialogTpl, { width: '520px' });
+  }
+
+  submitRecordTest(): void {
+    this.dialog.closeAll();
+    this.doraService.recordResilienceTest({
+      testType: this.testForm.testType,
+      scope: this.testForm.scope,
+      tlptRequired: this.testForm.tlptRequired,
+      performedAt: this.testForm.performedAt,
+      nextDueDate: this.testForm.nextDueDate || undefined,
+      result: this.testForm.result,
+      findings: this.testForm.findings || undefined,
+      testerName: this.testForm.testerName || undefined,
+      reportRef: this.testForm.reportRef || undefined,
+    }).subscribe({
+      next: (test) => {
+        this.resilienceTests = [test, ...this.resilienceTests];
+        this.cdr.markForCheck();
+        this.snackBar.open(`Resilience test recorded (${test.result}).`, 'Dismiss', { duration: 5000 });
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record test.', 'Dismiss', { duration: 6000 }),
     });
   }
 }

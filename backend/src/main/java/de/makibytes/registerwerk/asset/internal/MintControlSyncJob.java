@@ -10,6 +10,7 @@ import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 import org.web3j.abi.EventEncoder;
 import org.web3j.abi.TypeReference;
@@ -63,6 +64,7 @@ public class MintControlSyncJob {
         this.mintControlRuleRepository = mintControlRuleRepository;
     }
 
+    @SchedulerLock(name = "mintControlSync", lockAtMostFor = "PT4M")
     @Scheduled(cron = "0 */5 * * * *")
     public void syncFromChain() {
         log.info("MintControlSyncJob: starting scan");

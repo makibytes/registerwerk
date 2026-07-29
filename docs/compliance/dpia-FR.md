@@ -1,4 +1,9 @@
 # Analyse d'Impact relative à la Protection des Données (RGPD Art. 35)
+
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This is a repository draft, not an approved DPIA. The deployment controller and DPO must
+    establish scope, necessity, proportionality, risks, mitigations, consultation requirements,
+    ownership, approval, and review evidence before relying on it.
 # Data Protection Impact Assessment — FR_AMF Jurisdiction
 
 **System:** Registerwerk  

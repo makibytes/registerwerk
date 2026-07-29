@@ -53,6 +53,9 @@ export interface OperatorInviteRequest {
 export class AdminUserService {
   private readonly http = inject(HttpClient);
   private readonly base = `${environment.apiUrl}/admin`;
+  // Not under `base` — impersonation deliberately lives outside the IP-restricted
+  // /api/v1/admin/** prefix (see AdminImpersonationController's Javadoc).
+  private readonly impersonationUrl = `${environment.apiUrl}/impersonation`;
 
   listUsers(params: {
     legalEntityId?: string;
@@ -103,6 +106,6 @@ export class AdminUserService {
   }
 
   impersonate(entityId: string): Observable<ImpersonateResponse> {
-    return this.http.post<ImpersonateResponse>(`${this.base}/impersonation`, { entityId });
+    return this.http.post<ImpersonateResponse>(this.impersonationUrl, { entityId });
   }
 }

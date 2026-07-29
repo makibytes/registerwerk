@@ -150,8 +150,14 @@ export class ScreeningQueueComponent implements OnInit {
       type: 'mono',
     },
     {
+      key: 'category',
+      header: 'Category',
+      cell: (h: OpenHitView) => h.category === 'PEP' ? 'PEP' : h.category === 'ADVERSE_MEDIA' ? 'Adverse Media' : 'Sanctions',
+      type: 'badge',
+    },
+    {
       key: 'listSource',
-      header: 'Sanctions List',
+      header: 'List Source',
       cell: (h: OpenHitView) => h.listSource,
     },
     {

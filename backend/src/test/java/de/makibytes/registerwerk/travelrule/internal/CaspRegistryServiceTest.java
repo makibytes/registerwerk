@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Clock;
@@ -34,10 +35,13 @@ class CaspRegistryServiceTest {
     @Mock
     private CaspAuthorizationRepository repository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private CaspRegistryService serviceAt(LocalDate today) {
         Clock fixed = Clock.fixed(
                 Instant.parse(today + "T12:00:00Z"), ZoneOffset.UTC);
-        CaspRegistryService service = new CaspRegistryService(repository, fixed);
+        CaspRegistryService service = new CaspRegistryService(repository, fixed, eventPublisher);
         ReflectionTestUtils.setField(service, "micaEnforcementDate", CUTOFF);
         return service;
     }

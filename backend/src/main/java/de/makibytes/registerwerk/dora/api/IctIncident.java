@@ -54,6 +54,18 @@ public class IctIncident {
     @Column(name = "detected_at", nullable = false)
     private Instant detectedAt = Instant.now();
 
+    /**
+     * When this incident was classified as MAJOR (DORA Art. 19(4)) — in the current model
+     * this happens at report time, since there is no separate reclassification workflow yet.
+     */
+    @Column(name = "classified_at")
+    private Instant classifiedAt;
+
+    /** 4-hour deadline from classification — the stricter of the two initial-notification
+     *  sub-deadlines (DORA Art. 19(4)). */
+    @Column(name = "classification_deadline")
+    private Instant classificationDeadline;
+
     /** 24-hour initial notification deadline (DORA Art. 19 para. 4a). */
     @Column(name = "initial_report_deadline")
     private Instant initialReportDeadline;
@@ -70,6 +82,10 @@ public class IctIncident {
 
     @Column(name = "authority_ref")
     private String authorityRef;
+
+    /** Who filed (or last touched) the Art. 19 authority notification. */
+    @Column(name = "reported_by")
+    private UUID reportedBy;
 
     @Column(name = "contained_at")
     private Instant containedAt;
@@ -115,6 +131,10 @@ public class IctIncident {
     public void setSourceEventRef(UUID r) { this.sourceEventRef = r; }
     public Instant getDetectedAt() { return detectedAt; }
     public void setDetectedAt(Instant t) { this.detectedAt = t; }
+    public Instant getClassifiedAt() { return classifiedAt; }
+    public void setClassifiedAt(Instant t) { this.classifiedAt = t; }
+    public Instant getClassificationDeadline() { return classificationDeadline; }
+    public void setClassificationDeadline(Instant t) { this.classificationDeadline = t; }
     public Instant getInitialReportDeadline() { return initialReportDeadline; }
     public void setInitialReportDeadline(Instant t) { this.initialReportDeadline = t; }
     public Instant getFinalReportDeadline() { return finalReportDeadline; }
@@ -125,6 +145,8 @@ public class IctIncident {
     public void setFinalReportedAt(Instant t) { this.finalReportedAt = t; }
     public String getAuthorityRef() { return authorityRef; }
     public void setAuthorityRef(String r) { this.authorityRef = r; }
+    public UUID getReportedBy() { return reportedBy; }
+    public void setReportedBy(UUID u) { this.reportedBy = u; }
     public Instant getContainedAt() { return containedAt; }
     public void setContainedAt(Instant t) { this.containedAt = t; }
     public Instant getResolvedAt() { return resolvedAt; }

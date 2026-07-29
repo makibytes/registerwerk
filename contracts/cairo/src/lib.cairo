@@ -1,4 +1,4 @@
-// Registerwerk Cairo contracts — eWpG-compliant token standards on Starknet
+// Registerwerk Cairo contracts — token standards with eWpG-oriented controls on Starknet
 //
 // Modules:
 //   erc20   — EwpgERC20 fungible security token (whitelist, freeze, pause, cap,

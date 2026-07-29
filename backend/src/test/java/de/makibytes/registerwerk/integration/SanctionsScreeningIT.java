@@ -4,7 +4,7 @@ import de.makibytes.registerwerk.screening.internal.ScreeningRun;
 import de.makibytes.registerwerk.screening.internal.ScreeningRunRepository;
 import de.makibytes.registerwerk.screening.internal.ScreeningService;
 import de.makibytes.registerwerk.screening.internal.ScreeningStatus;
-import de.makibytes.registerwerk.screening.internal.ScreeningTrigger;
+import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

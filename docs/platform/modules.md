@@ -1,11 +1,11 @@
 ---
 title: Module Architecture
-description: Spring Modulith bounded context architecture — 22 modules, dependency constraints, and design patterns.
+description: Spring Modulith bounded context architecture — 29 modules, dependency constraints, and design patterns.
 ---
 
 # Module Architecture
 
-The Registerwerk backend is a **modulith**: a single deployable JAR internally structured as 22 Spring Modulith bounded contexts. Each module owns its database tables, its domain entities, and its business logic. Cross-module communication happens exclusively through **domain events** (via the Spring Modulith transactional outbox).
+The Registerwerk backend is a **modulith**: a single deployable JAR internally structured as 29 Spring Modulith bounded contexts (`@ApplicationModule`-annotated top-level packages). Each module owns its database tables, its domain entities, and its business logic. Cross-module communication happens exclusively through **domain events** (via the Spring Modulith transactional outbox). Two further top-level packages, `bootstrap` (demo-data seeders) and `infrastructure` (cross-cutting `@Configuration` classes), are plain support code, not bounded contexts.
 
 ---
 
@@ -31,6 +31,7 @@ graph TD
         screening
         stepup
         travelrule
+        endpoint
     end
 
     subgraph Customers
@@ -46,6 +47,8 @@ graph TD
         indexer
         trading
         corporateactions
+        registerstatement
+        registertransfer
     end
 
     subgraph Regulatory
@@ -53,6 +56,12 @@ graph TD
         dora
         admin
         endpoint
+    end
+
+    subgraph Ecosystem
+        orgidentity
+        marketplace
+        payment
     end
 
     customer --> kyc
@@ -64,6 +73,8 @@ graph TD
     indexer --> deployment
     regreporting --> trading
     dora --> audit
+    marketplace --> orgidentity
+    marketplace --> payment
 ```
 
 ---
@@ -83,6 +94,7 @@ graph TD
 | `screening` | `screening` | `ScreeningRun`, `ScreeningHit` | `ScreeningService`, adapters |
 | `stepup` | `stepup` | `StepUpToken`, `DualControlToken` | `StepUpService`, `StepUpEnforcementAspect` |
 | `travelrule` | `travelrule` | `TravelRuleMessage` | `TravelRuleService`, adapters |
+| `endpoint` | `endpoint` | `AddressEndpoint` | `EndpointService` — risk-scored counterparty wallet address register (`RiskLevel`) consumed by travel-rule/AML checks |
 | `customer` | `customer` | `LegalEntity`, `CompanyUser` | `LegalEntityService`, `CompanyUserService` |
 | `onboarding` | `onboarding` | `OnboardingToken` | `OnboardingService` |
 | `externalref` | `externalref` | `CompanyExternalReference` | `RegistryOverviewService` |
@@ -91,10 +103,15 @@ graph TD
 | `erc3643` | `erc3643` | `OnchainIdentity`, `OnchainClaim` | `IdentityRegistryService`, `ClaimIssuanceService` |
 | `indexer` | `indexer` | `IndexerState` | `HolderSyncScheduler`, `IndexerMonitorService` |
 | `trading` | `trading` | `TradeListing`, `TradeExecution` | `TradingService` |
-| `corporateactions` | `corporateactions` | `CorporateAction` | `CorporateActionService`, `CouponScheduler` |
-| `regreporting` | `regreporting` | `RegreportSubmission` | `MifirReportingService`, `CrarsExportService` |
-| `dora` | `dora` | `IctIncident`, `ThirdPartyProvider` | `DoraService` |
+| `corporateactions` | `corporateactions` | `CorporateAction` | `CorporateActionService` (dual-control settlement approval, daily lifecycle transitions), `CouponPaymentJob`, `CorporateActionSettlementListener` (routes settlement per token standard — Canton bonds automated, ERC-3525/4626/7540 held for operator review); operator UI: Corporate Actions tab on the asset detail page |
+| `registerstatement` | `registerstatement` | `RegisterStatement` | `RegisterStatementService`, `AnnualRegisterStatementJob`, `RegisterStatementPdfRenderer` — annual/on-demand eWpG register statements to investors |
+| `registertransfer` | `registertransfer` | `RegisterTransfer`, `RegisterInspectionRequest` | `RegisterTransferService`, `RegisterInspectionService`, `RegisterExtractRenderer` — register extract exports and third-party inspection requests |
+| `regreporting` | `regreporting` | `RegreportSubmission` | `MifirReportingService`, `Dac8ExportService` (both draft/unvalidated prototypes) |
+| `dora` | `dora` | `IctIncident`, `ThirdPartyProvider`, `ResilienceTest` | `DoraService` — Art. 17 incidents, Art. 28 third-party register, Art. 24/25 resilience testing (vulnerability scans, TLPT) |
 | `admin` | `admin` | `OperatorUser` | `AdminImpersonationService` |
+| `orgidentity` | `orgidentity` | `OrgRegistration`, `OrgMemberWallet`, `PermissionDefinition`, `PermissionGrant`, `EcosystemTrustedIssuer` | `OrgRegistrationService`, `MemberWalletService`, `PermissionAdminService`; exposes `PermissionGate` port |
+| `marketplace` | `marketplace` | `DappListing`, `DappVersion`, `DappRequiredPermission`, `DappPaymentMethod`, `DappReviewEvent` | `ListingLifecycleService`, `ManifestValidationService`, `ManifestSigningService`, `MarketplaceOnchainAnchorService` |
+| `payment` | `payment` | `PaymentRail`, `PaymentRailChainAddress` | `PaymentRailAdminService` — operator-curated payment rails (MiCAR stablecoins, Pontes API, ERC-7573 DvP, SEPA) dApp manifests reference by code |
 
 ---
 

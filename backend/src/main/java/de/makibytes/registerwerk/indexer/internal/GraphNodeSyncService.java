@@ -13,6 +13,7 @@ import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -67,6 +68,7 @@ public class GraphNodeSyncService {
      * Triggered every 30 seconds. Iterates over all enabled EVM chains that have a configured
      * Graph Node and syncs each one.
      */
+    @SchedulerLock(name = "graphNodeSync", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
     @Scheduled(fixedDelay = 30_000)
     public void syncAllEvmChains() {
         try {
@@ -111,6 +113,17 @@ public class GraphNodeSyncService {
 
         long fromBlock = state.getLastSyncedBlock() != null ? state.getLastSyncedBlock() + 1 : 0L;
 
+        // Load all deployments once per sync call (not once per transfer, which would be an
+        // O(page_size × total_deployments) full-table scan per PAGE_SIZE=1000 batch), keyed by
+        // lowercased contract address to match the existing case-insensitive lookup.
+        Map<String, de.makibytes.registerwerk.deployment.api.AssetDeployment> deploymentsByAddress =
+                assetDeploymentRepository.findAll().stream()
+                        .filter(d -> d.getContractAddress() != null)
+                        .collect(java.util.stream.Collectors.toMap(
+                                d -> d.getContractAddress().toLowerCase(java.util.Locale.ROOT),
+                                d -> d,
+                                (first, second) -> first));
+
         try {
             int skip = 0;
             int totalSaved = 0;
@@ -129,7 +142,7 @@ public class GraphNodeSyncService {
                         continue;
                     }
 
-                    TokenTransfer transfer = mapToEntity(chain, gt);
+                    TokenTransfer transfer = mapToEntity(chain, gt, deploymentsByAddress);
                     tokenTransferRepository.save(transfer);
                     totalSaved++;
 
@@ -192,7 +205,8 @@ public class GraphNodeSyncService {
                 });
     }
 
-    private TokenTransfer mapToEntity(ChainConfig chain, GraphTransfer gt) {
+    private TokenTransfer mapToEntity(ChainConfig chain, GraphTransfer gt,
+            Map<String, de.makibytes.registerwerk.deployment.api.AssetDeployment> deploymentsByAddress) {
         TokenTransfer t = new TokenTransfer();
         t.setChainConfigId(chain.getId());
         t.setContractAddress(gt.tokenAddress() != null ? gt.tokenAddress() : "");
@@ -214,13 +228,12 @@ public class GraphNodeSyncService {
 
         // Link to deployment if we can find a matching contract address.
         if (gt.tokenAddress() != null) {
-            assetDeploymentRepository.findAll().stream()
-                    .filter(d -> gt.tokenAddress().equalsIgnoreCase(d.getContractAddress()))
-                    .findFirst()
-                    .ifPresent(d -> {
-                        t.setDeploymentId(d.getId());
-                        t.setAssetId(d.getAssetId());
-                    });
+            de.makibytes.registerwerk.deployment.api.AssetDeployment d =
+                    deploymentsByAddress.get(gt.tokenAddress().toLowerCase(java.util.Locale.ROOT));
+            if (d != null) {
+                t.setDeploymentId(d.getId());
+                t.setAssetId(d.getAssetId());
+            }
         }
 
         t.setRawData(Map.of(

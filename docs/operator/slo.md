@@ -52,7 +52,7 @@ histogram_quantile(0.95,
 )
 
 # Indexer lag
-time() - registerwerk_indexer_last_sync_seconds
+time() - registerwerk_indexer_last_sync_timestamp_seconds
 
 # Open drift events
 registerwerk_chain_drift_open_total
@@ -62,4 +62,6 @@ registerwerk_chain_drift_open_total
 
 ## SLO Reporting
 
-Monthly SLO report generated automatically by `regreport_submission` (type=INTERNAL) and filed internally. Required for DORA Art. 6 operational resilience reporting to competent authorities annually.
+No automatic monthly SLO report or authority filing is implemented through
+`regreport_submission`. Operators must define, generate, review, retain, and distribute SLO
+evidence under an externally approved resilience and reporting procedure.

@@ -17,9 +17,11 @@ import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
@@ -55,6 +57,9 @@ public class StepUpTokenIssuer {
     private static final int TOTP_STEP_SECONDS = 30;
     private static final int TOTP_DIGITS = 6;
     private static final int MAX_ATTEMPTS = 5;
+    private static final int SECRET_BYTES = 20; // 160 bits — standard TOTP/HMAC-SHA1 secret strength
+    private static final String BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final AppUserRepository userRepository;
     private final NimbusJwtEncoder encoder;
@@ -81,6 +86,17 @@ public class StepUpTokenIssuer {
     }
 
     public String issueAfterVerification(UUID userId, String code, String method) {
+        return issueAfterVerification(userId, code, method, null);
+    }
+
+    /**
+     * @param action the {@code @RequiresStepUp(reason=...)} value this token is intended to
+     *               approve, if the caller knows it up front (e.g. minting a dual-control
+     *               approval for one specific pending action). Embedded as a {@code
+     *               stepup_scope} claim; null when the caller doesn't
+     *               supply one, in which case the token carries no scope restriction.
+     */
+    public String issueAfterVerification(UUID userId, String code, String method, String action) {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
 
@@ -106,15 +122,109 @@ public class StepUpTokenIssuer {
 
         Instant now = Instant.now();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
+        JwtClaimsSet.Builder claimsBuilder = JwtClaimsSet.builder()
                 .subject(userId.toString())
                 .claim("acr", "stepup")
                 .claim("roles", user.getRoles().stream().map(Enum::name).toList())
                 .claim("email", user.getEmail())
                 .issuedAt(now)
-                .expiresAt(now.plusSeconds(STEP_UP_TTL_SECONDS))
-                .build();
-        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+                .expiresAt(now.plusSeconds(STEP_UP_TTL_SECONDS));
+        if (action != null && !action.isBlank()) {
+            claimsBuilder.claim("stepup_scope", action);
+        }
+        return encoder.encode(JwtEncoderParameters.from(header, claimsBuilder.build())).getTokenValue();
+    }
+
+    /** Result of starting TOTP enrolment: the raw secret and an otpauth:// URI for a QR code. */
+    public record EnrollmentStart(String secret, String otpauthUri) {}
+
+    /**
+     * Starts TOTP enrolment for the calling user — generates and stores a new secret, but
+     * leaves {@code totpEnabled=false} until {@link #confirmEnrollment} verifies the caller's
+     * authenticator app actually produced a matching code from it. Previously there was no
+     * code path at all by which a real (non-seeded) user could ever enrol, meaning no
+     * dual-control/step-up-gated action was reachable in a production deployment.
+     *
+     * @throws AccessDeniedException if this account is already enrolled (re-enrolling requires
+     *         disenrolling first — not implemented here — so a caller who merely has a valid
+     *         session JWT cannot silently overwrite an existing, working TOTP secret)
+     */
+    public EnrollmentStart enroll(UUID userId) {
+        AppUser user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
+        if (user.isTotpEnabled()) {
+            throw new AccessDeniedException(
+                    "TOTP is already enrolled for this account. Disenrol before re-enrolling.");
+        }
+        String secret = generateBase32Secret();
+        user.setTotpSecret(secret);
+        userRepository.save(user);
+        String otpauthUri = "otpauth://totp/Registerwerk:" + urlEncode(user.getEmail())
+                + "?secret=" + secret + "&issuer=Registerwerk&algorithm=SHA1&digits=6&period=30";
+        return new EnrollmentStart(secret, otpauthUri);
+    }
+
+    /**
+     * Confirms TOTP enrolment: verifies a real code from the secret {@link #enroll} generated,
+     * then activates it. Requiring one successful code (rather than activating immediately on
+     * {@code enroll}) proves the user actually captured the secret in their authenticator app —
+     * otherwise a typo'd/never-scanned QR code would silently brick step-up for that account.
+     */
+    public void confirmEnrollment(UUID userId, String code) {
+        AppUser user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
+        if (user.getTotpSecret() == null) {
+            throw new AccessDeniedException("No pending TOTP enrolment for this account — call enroll first.");
+        }
+        if (user.isTotpEnabled()) {
+            throw new AccessDeniedException("TOTP is already enrolled for this account.");
+        }
+        if (code == null || !code.matches("\\d{6}")) {
+            throw new AccessDeniedException("Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
+        }
+        long currentStep = Instant.now().getEpochSecond() / TOTP_STEP_SECONDS;
+        boolean matched = false;
+        for (int delta = -TOTP_WINDOW; delta <= TOTP_WINDOW; delta++) {
+            if (constantTimeEquals(generateTotp(user.getTotpSecret(), currentStep + delta), code)) {
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            throw new AccessDeniedException("Invalid TOTP code. Check your authenticator app's time sync.");
+        }
+        user.setTotpEnabled(true);
+        user.setTotpEnrolledAt(Instant.now());
+        userRepository.save(user);
+    }
+
+    /** RFC 4226 §4: a shared secret at least 128 bits long; 160 bits matches HMAC-SHA1's block size. */
+    static String generateBase32Secret() {
+        byte[] bytes = new byte[SECRET_BYTES];
+        SECURE_RANDOM.nextBytes(bytes);
+        return encodeBase32(bytes);
+    }
+
+    /** RFC 4648 Base32 encode (no padding) — the inverse of {@link #decodeBase32}. */
+    private static String encodeBase32(byte[] data) {
+        StringBuilder sb = new StringBuilder();
+        int buffer = 0, bitsLeft = 0;
+        for (byte b : data) {
+            buffer = (buffer << 8) | (b & 0xFF);
+            bitsLeft += 8;
+            while (bitsLeft >= 5) {
+                sb.append(BASE32_ALPHABET.charAt((buffer >> (bitsLeft - 5)) & 0x1F));
+                bitsLeft -= 5;
+            }
+        }
+        if (bitsLeft > 0) {
+            sb.append(BASE32_ALPHABET.charAt((buffer << (5 - bitsLeft)) & 0x1F));
+        }
+        return sb.toString();
+    }
+
+    private static String urlEncode(String value) {
+        return URLEncoder.encode(value != null ? value : "", StandardCharsets.UTF_8);
     }
 
     /** @return the accepted time step (for replay tracking) */

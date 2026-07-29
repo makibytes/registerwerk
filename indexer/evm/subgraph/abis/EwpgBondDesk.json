@@ -1,0 +1,43 @@
+[
+  {
+    "type": "event",
+    "name": "BondSubscribed",
+    "inputs": [
+      { "name": "investor", "type": "address", "indexed": true },
+      { "name": "amount",   "type": "uint256", "indexed": false },
+      { "name": "paid",     "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "CouponPaid",
+    "inputs": [
+      { "name": "period", "type": "uint256", "indexed": true },
+      { "name": "holder", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "BondRedeemed",
+    "inputs": [
+      { "name": "holder",    "type": "address", "indexed": true },
+      { "name": "amount",    "type": "uint256", "indexed": false },
+      { "name": "principal", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "DeskPaused",
+    "inputs": [
+      { "name": "by", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "DeskUnpaused",
+    "inputs": [
+      { "name": "by", "type": "address", "indexed": true }
+    ]
+  }
+]

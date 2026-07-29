@@ -18,6 +18,7 @@ import de.makibytes.registerwerk.kyc.events.KycJurisdictionApprovedEvent;
 import de.makibytes.registerwerk.kyc.events.KycJurisdictionRejectedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
@@ -60,13 +61,13 @@ public class KycService {
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
 
         if (screeningGate.hasUnresolvedHit(entityId)) {
-            throw new IllegalStateException(
+            throw new ComplianceGateException(
                 "Cannot approve KYC: no clear sanctions screening result exists for this entity. " +
                 "Either the entity was never screened, the latest screening is pending or failed, " +
                 "or there is an unresolved hit that a compliance officer must review first (GwG §10).");
         }
         if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
-            throw new IllegalStateException(
+            throw new ComplianceGateException(
                 "Cannot approve KYC: a beneficial owner has an unresolved sanctions screening hit. " +
                 "A compliance officer must review and dismiss the hit first (GwG §11).");
         }
@@ -125,12 +126,12 @@ public class KycService {
         // an overrideNote cannot waive EU sanctions law (GwG §10, §11). The block is
         // lifted by running a screening or by a compliance officer resolving open hits.
         if (screeningGate.hasUnresolvedHit(entityId)) {
-            throw new IllegalStateException(
+            throw new ComplianceGateException(
                 "Cannot approve KYC for jurisdiction " + jurisdiction.name() + ": no clear sanctions " +
                 "screening result exists for this entity. Run a screening or resolve open hits first (GwG §10).");
         }
         if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
-            throw new IllegalStateException(
+            throw new ComplianceGateException(
                 "Cannot approve KYC for jurisdiction " + jurisdiction.name() + ": a beneficial owner has " +
                 "no clear sanctions screening result. Resolve the screening condition first (GwG §11).");
         }

@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.endpoint.internal;
 
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpoint;
@@ -73,15 +74,30 @@ public class EndpointService {
 
         if (remaining.isEmpty()) return result;
 
-        // Step 2: asset_holder wallet addresses → entity names
+        // Step 2: asset_holder wallet addresses → entity names. Deliberately unfiltered
+        // (includes soft-deleted/removed rows): resolving a wallet seen in a past transaction to
+        // the name it was associated with at the time is a labeling/history convenience, not a
+        // "current register holders" listing — a removed holder's name is still the correct
+        // label for their historical wallet.
+        //
+        // asset_holder.wallet_address is consistently lowercase-normalized (write-time
+        // normalization in HolderService + the V3 backfill migration), so the query side is
+        // normalized too here — otherwise a checksummed request would still miss a
+        // lowercase-stored row. The returned map is still keyed by the caller's ORIGINAL
+        // requested string (this method's documented "each requested address" contract), never
+        // by the normalized/stored one.
+        Map<String, String> normalizedToOriginal = remaining.stream()
+                .collect(Collectors.toMap(EvmUtils::normalizeAddress, java.util.function.Function.identity(), (a, b) -> a));
+        Set<String> normalizedRemaining = normalizedToOriginal.keySet();
+
         List<AssetHolder> holders;
         if (isOperator) {
-            holders = assetHolderRepository.findByWalletAddressIn(remaining);
+            holders = assetHolderRepository.findByWalletAddressIn(normalizedRemaining);
         } else {
             List<UUID> relatedAssets = findRelatedAssetIds(entityId);
             holders = relatedAssets.isEmpty()
                     ? List.of()
-                    : assetHolderRepository.findByAssetIdInAndWalletAddressIn(relatedAssets, remaining);
+                    : assetHolderRepository.findByAssetIdInAndWalletAddressIn(relatedAssets, normalizedRemaining);
         }
 
         if (!holders.isEmpty()) {
@@ -90,9 +106,11 @@ public class EndpointService {
                     .collect(Collectors.toMap(LegalEntity::getId, LegalEntity::getCurrentName));
 
             for (AssetHolder h : holders) {
-                if (!result.containsKey(h.getWalletAddress())) {
+                String original = normalizedToOriginal.getOrDefault(
+                        EvmUtils.normalizeAddress(h.getWalletAddress()), h.getWalletAddress());
+                if (!result.containsKey(original)) {
                     String name = entityNames.get(h.getInvestorId());
-                    if (name != null) result.put(h.getWalletAddress(), name);
+                    if (name != null) result.put(original, name);
                 }
             }
         }
@@ -104,19 +122,23 @@ public class EndpointService {
     public AddressEndpoint createEndpoint(boolean isOperator, UUID entityId, String address,
                                           AddressEndpoint.AddressType addressType, String name,
                                           String notes, RiskLevel riskLevel) {
+        // Normalized at write time (not backfilled for pre-existing rows, unlike asset_holder —
+        // there is no companion migration here), so new endpoints at least match the indexer's
+        // and HolderService's lowercase convention going forward.
+        String normalizedAddress = EvmUtils.normalizeAddress(address);
         boolean duplicate = isOperator
-                ? endpointRepository.findByOperatorAndAddress(AddressEndpoint.OwnerType.OPERATOR, address).isPresent()
+                ? endpointRepository.findByOperatorAndAddress(AddressEndpoint.OwnerType.OPERATOR, normalizedAddress).isPresent()
                 : endpointRepository.findByOwnerTypeAndOwnerIdAndAddress(
-                        AddressEndpoint.OwnerType.ENTITY, entityId, address).isPresent();
+                        AddressEndpoint.OwnerType.ENTITY, entityId, normalizedAddress).isPresent();
 
         if (duplicate) {
-            throw new IllegalArgumentException("An endpoint for address " + address + " already exists");
+            throw new IllegalArgumentException("An endpoint for address " + normalizedAddress + " already exists");
         }
 
         AddressEndpoint ep = new AddressEndpoint();
         ep.setOwnerType(isOperator ? AddressEndpoint.OwnerType.OPERATOR : AddressEndpoint.OwnerType.ENTITY);
         ep.setOwnerId(isOperator ? null : entityId);
-        ep.setAddress(address);
+        ep.setAddress(normalizedAddress);
         ep.setAddressType(addressType);
         ep.setName(name);
         ep.setNotes(notes);
@@ -149,7 +171,9 @@ public class EndpointService {
     private List<UUID> findRelatedAssetIds(UUID entityId) {
         Set<UUID> ids = new HashSet<>();
         ids.addAll(assetRepository.findIdsByIssuerId(entityId));
-        ids.addAll(assetHolderRepository.findDistinctAssetIdsByInvestorId(entityId));
+        // Active-only: this scopes which assets' wallets a non-operator caller may resolve
+        // addresses for; a removed holding no longer makes the entity "related" to that asset.
+        ids.addAll(assetHolderRepository.findDistinctActiveAssetIdsByInvestorId(entityId));
         return new ArrayList<>(ids);
     }
 

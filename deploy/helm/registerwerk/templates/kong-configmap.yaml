@@ -1,0 +1,16 @@
+{{- if .Values.kong.enabled }}
+# Fixed name (not derived from registerwerk.fullname/.Release.Name): the Kong subchart's own
+# values.yaml (kong.dblessConfig.configMap) is a plain, non-templated value, so it can't
+# reference a release-specific computed name either — both sides must agree on a literal
+# string. Assumes one registerwerk release per namespace, which the rest of this chart
+# already assumes implicitly (see deploy/helm/backup's own cross-release name requirements).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registerwerk-kong-config
+  labels:
+    {{- include "registerwerk.labels" . | nindent 4 }}
+data:
+  kong.yml: |-
+{{ .Files.Get "files/kong.yml" | indent 4 }}
+{{- end }}

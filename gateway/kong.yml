@@ -133,12 +133,28 @@ plugins:
   # IP restriction on ADMIN endpoints only. Replace with your operator
   # network's CIDR ranges per deployment. Attaching this to all protected
   # routes would lock out every investor.
+  #
+  # INVARIANT: the operator frontend bypasses Kong entirely (nginx proxies /api/ straight to
+  # backend:8080 — see frontend-operator/nginx.conf and CLAUDE.md). Nothing that the operator
+  # portal itself calls should ever need to satisfy this allowlist. If an operator-console call
+  # starts failing with "Access denied by IP restriction policy.", the bug is almost always that
+  # something got pointed at Kong (:8000) instead of the backend directly — check
+  # frontend-operator/src/environments/*.ts's apiUrl first, not this list.
+  #
+  # Endpoints the CUSTOMER portal legitimately calls (which DOES go through Kong) must live
+  # outside /api/v1/admin/**, e.g. impersonation lives at /api/v1/impersonation, not
+  # /api/v1/admin/impersonation, specifically so it isn't caught by this plugin.
+  #
+  # 172.16.0.0/12 is included as defense-in-depth for Docker's default bridge-network range —
+  # it does NOT make it safe to point the operator frontend at Kong; the invariant above still
+  # applies. Restrict this list to your real operator-network CIDRs before production use.
   - name: ip-restriction
     route: api-admin
     config:
       allow:
         - 127.0.0.1
         - 10.0.0.0/8
+        - 172.16.0.0/12
       message: "Access denied by IP restriction policy."
 
   # CORS — set the deployed frontend origins here per environment.

@@ -3,7 +3,8 @@ pragma solidity ^0.8.27;
 
 /**
  * @title IEwpgDocumentManagement
- * @notice ERC-1643-based document management for eWpG-compliant security tokens.
+ * @notice ERC-1643-based document management intended to link security-token documents.
+ *         This interface does not establish eWpG register or document-law compliance.
  *         Enables on-chain storage of document URIs and content hashes, allowing
  *         regulators (e.g. BaFin) to retrieve legal documents such as term sheets
  *         directly from the token contract.

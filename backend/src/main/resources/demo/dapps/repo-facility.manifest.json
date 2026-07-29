@@ -1,0 +1,57 @@
+{
+  "slug": "repo-facility",
+  "name": "eWpG Repo & Lending Facility",
+  "version": "1.0.0",
+  "description": "Technical repo / collateralized-lending reference — get liquidity against a bond or equity position without selling it. Deposit a stablecoin to earn a utilization-based yield. Pledge a KYC-verified holding as collateral and draw a stablecoin loan up to a configured loan-to-value ratio; repay to reclaim collateral. Liquidations remain subject to token transfer controls, but those controls do not establish legal, custody, licensing, collateral, insolvency, or KYC sufficiency. This is not approved for production use pending jurisdiction-specific legal and risk decisions.",
+  "category": "lending",
+  "contracts": [
+    {
+      "name": "EwpgRepoFacility",
+      "abiSha256": "832229e7c1dab2647df5e6574459423c82f916310358be64a479c99b37737b83",
+      "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/examples/EwpgRepoFacility.sol"
+    }
+  ],
+  "requiredPermissions": [
+    {
+      "code": "repo-facility.borrow",
+      "rationale": "Pledge a KYC'd investor's security-token holding as collateral and draw a stablecoin loan against it — liquidity without a sale"
+    },
+    {
+      "code": "repo-facility.configure",
+      "rationale": "Operator-only: enable a collateral asset and set its price mark, max LTV, liquidation threshold and liquidation bonus"
+    }
+  ],
+  "requiredClaimTopics": [
+    1
+  ],
+  "paymentMethods": [
+    {
+      "rail": "aueur",
+      "note": "Lender deposits/withdrawals and borrower draws/repayments denominated in AllUnity Euro"
+    },
+    {
+      "rail": "usdc",
+      "note": "Alternative USD-denominated liquidity for lenders and borrowers"
+    }
+  ],
+  "images": [
+    {
+      "name": "backend",
+      "role": "backend",
+      "ref": "ghcr.io/registerwerk/examples/repo-facility-backend@sha256:1cf5cb0a7677c55142f0ac101def8e8479650ab2433e4d9870e80016b6a24aa8"
+    },
+    {
+      "name": "frontend",
+      "role": "frontend",
+      "ref": "ghcr.io/registerwerk/examples/repo-facility-frontend@sha256:74c5738a699689504030272078c20017019ec539ac273446cf5e9ae60d2c3fc5"
+    }
+  ],
+  "deployment": {
+    "composeUrl": "https://github.com/registerwerk/registerwerk/blob/main/examples/dapps/repo-facility/docker-compose.yml",
+    "composeSha256": "9df5de1b16b57d9484982b4ce0d2fba9ee13e35294f241446fb2ab893ec738d5"
+  },
+  "docsUrl": "https://docs.registerwerk.de/platform/defi-interoperability",
+  "contact": "dapps@registerwerk.de",
+  "license": "MIT",
+  "pricingNote": "Reference implementation — free, self-hosted"
+}

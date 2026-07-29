@@ -2,11 +2,15 @@ package de.makibytes.registerwerk.blockchain.internal.deploy;
 
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetVaultState;
 import de.makibytes.registerwerk.deployment.api.AssetVaultStateRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +23,6 @@ import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.math.BigInteger;
@@ -50,20 +53,23 @@ public class Erc7540DeploymentService {
     private final ContractAddressConfig contractAddressConfig;
     private final AssetLookupPort assetLookupPort;
     private final AssetVaultStateRepository vaultStateRepository;
+    private final AssetDeploymentRepository assetDeploymentRepository;
 
     public Erc7540DeploymentService(BlockchainClientRegistry blockchainClientRegistry,
                                     EvmContractService evmContractService,
                                     ContractAddressConfig contractAddressConfig,
                                     AssetLookupPort assetLookupPort,
-                                    AssetVaultStateRepository vaultStateRepository) {
+                                    AssetVaultStateRepository vaultStateRepository,
+                                    AssetDeploymentRepository assetDeploymentRepository) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
         this.assetLookupPort = assetLookupPort;
         this.vaultStateRepository = vaultStateRepository;
+        this.assetDeploymentRepository = assetDeploymentRepository;
     }
 
-    public CompletableFuture<String> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
+    public CompletableFuture<TokenDeploymentResult> deploy(UUID assetId, ChainDescriptor chain, String ownerAddress) {
         log.info("Deploying ERC-7540 (async vault) contract: assetId={}, chain={}", assetId, chain);
 
         return CompletableFuture.supplyAsync(() -> {
@@ -75,9 +81,7 @@ public class Erc7540DeploymentService {
                             "AssetVaultState not found for assetId=" + assetId +
                             ". Configure vault parameters via POST /api/v1/assets/{id}/vault-state before deploying."));
 
-            if (vaultState.getUnderlyingAssetId() == null) {
-                throw new IllegalStateException("underlyingAssetId must be set on AssetVaultState before deploying ERC-7540.");
-            }
+            String underlyingAddress = resolveUnderlyingAddress(vaultState, chain);
 
             String chainId = chain.chain().name().toLowerCase() + "-" + chain.network().name().toLowerCase();
             String factoryAddress = contractAddressConfig.requireAssetTokenFactory(chainId);
@@ -85,22 +89,40 @@ public class Erc7540DeploymentService {
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
             Credentials creds = evmContractService.credentials(chain);
 
-            // Underlying address must be pre-resolved by the caller (stored on AssetVaultState via an admin endpoint)
-            throw new UnsupportedOperationException(
-                    "ERC-7540 deployment requires the underlying asset's on-chain address to be resolved from " +
-                    "AssetDeployment. Use the vault-setup wizard which populates this before calling deploy.");
+            Function deployVault = new Function(
+                    "deployVault",
+                    Arrays.asList(
+                            new Uint8(TOKEN_TYPE_ERC7540),
+                            new Utf8String(asset.name()),
+                            new Utf8String(EvmUtils.tokenSymbol(asset)),
+                            new Bytes32(Erc20DeploymentService.uuidToBytes32(assetId)),
+                            new Address(underlyingAddress)
+                    ),
+                    Collections.singletonList(new TypeReference<Address>() {})
+            );
+
+            TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, deployVault);
+            String vaultAddress = EvmUtils.extractIndexedAddress(receipt, VAULT_DEPLOYED_TOPIC, 3)
+                    .orElseThrow(() -> new RuntimeException(
+                            "VaultDeployed event not found in receipt: " + receipt.getTransactionHash()));
+            log.info("ERC-7540 vault deployed: assetId={} → vaultAddress={} tx={}",
+                    assetId, vaultAddress, receipt.getTransactionHash());
+
+            return new TokenDeploymentResult(receipt.getTransactionHash(), vaultAddress);
         });
     }
 
-    private String extractVaultAddress(TransactionReceipt receipt) {
-        for (Log logEntry : receipt.getLogs()) {
-            if (logEntry.getTopics() != null && !logEntry.getTopics().isEmpty()
-                    && VAULT_DEPLOYED_TOPIC.equalsIgnoreCase(logEntry.getTopics().get(0))
-                    && logEntry.getTopics().size() >= 3) {
-                String padded = logEntry.getTopics().get(2);
-                return "0x" + padded.substring(padded.length() - 40);
-            }
+    private String resolveUnderlyingAddress(AssetVaultState vaultState, ChainDescriptor chain) {
+        if (vaultState.getUnderlyingAssetId() == null) {
+            throw new IllegalStateException("underlyingAssetId must be set on AssetVaultState before deploying ERC-7540.");
         }
-        throw new RuntimeException("VaultDeployed event not found in receipt: " + receipt.getTransactionHash());
+        return assetDeploymentRepository.findByAssetId(vaultState.getUnderlyingAssetId()).stream()
+                .filter(d -> d.getChain() == chain.chain() && d.getNetwork() == chain.network())
+                .filter(d -> d.getContractAddress() != null && !d.getContractAddress().isBlank())
+                .findFirst()
+                .map(AssetDeployment::getContractAddress)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Underlying asset " + vaultState.getUnderlyingAssetId() + " has no confirmed deployment on " +
+                        chain.chain() + "/" + chain.network() + ". Deploy the underlying asset on the same chain first."));
     }
 }

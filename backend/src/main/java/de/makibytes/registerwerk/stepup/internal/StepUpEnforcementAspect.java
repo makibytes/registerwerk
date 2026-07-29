@@ -18,6 +18,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * AOP aspect enforcing @RequiresStepUp: verifies fresh step-up token and optional
@@ -86,7 +87,11 @@ class StepUpEnforcementAspect {
                         "This action requires dual control: provide a second REGISTRY_ADMIN " +
                         "step-up token in the " + DUAL_CONTROL_HEADER + " header.");
             }
-            validator.validateDualControlToken(dualControlToken, jwt.getSubject(), stepUp.reason());
+            UUID approverId = validator.validateDualControlToken(dualControlToken, jwt.getSubject(), stepUp.reason());
+            if (request != null) {
+                request.setAttribute(
+                        de.makibytes.registerwerk.stepup.api.StepUpAttributes.DUAL_CONTROL_APPROVER_ID, approverId);
+            }
         }
 
         log.info("Step-up auth passed: sub={} action={} 4eyes={}",

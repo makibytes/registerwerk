@@ -31,6 +31,7 @@
     <jacoco.version>0.8.15</jacoco.version>
     <greenmail.version>2.1.7</greenmail.version>
     <awssdk.version>2.44.14</awssdk.version>
+    <shedlock.version>6.9.2</shedlock.version>
     <!--
       Testcontainers requires a sufficiently new Docker API.
       Force a safe floor for test JVMs so host-level API pinning (e.g. 1.32)
@@ -114,6 +115,13 @@
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
       <artifactId>caffeine</artifactId>
+    </dependency>
+
+    <!-- ── dApp manifest validation (marketplace) ──────────────────────────── -->
+    <dependency>
+      <groupId>com.networknt</groupId>
+      <artifactId>json-schema-validator</artifactId>
+      <version>1.5.9</version>
     </dependency>
 
     <!-- ── Blockchain — EVM ────────────────────────────────────────────────── -->
@@ -222,11 +230,38 @@
       <artifactId>spring-boot-starter-quartz</artifactId>
     </dependency>
 
+    <!-- ── ShedLock (multi-instance safety for @Scheduled jobs) ─────────── -->
+    <!-- Serializes every @Scheduled job across concurrent threads AND multiple backend
+         instances via a Postgres row lock (V3__shedlock.sql), so on-chain tx pollers,
+         indexers, and reporting crons never double-fire under horizontal scale-out. -->
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-spring</artifactId>
+      <version>${shedlock.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-provider-jdbc-template</artifactId>
+      <version>${shedlock.version}</version>
+    </dependency>
+
     <!-- ── PDF generation (position statements — Track C3) ──────────────── -->
     <dependency>
       <groupId>org.apache.pdfbox</groupId>
       <artifactId>pdfbox</artifactId>
       <version>3.0.7</version>
+    </dependency>
+
+    <!-- ── PDF digital signing (CMS/PKCS#7 via PDFBox external-signing API) ──
+         Backs shared.DocumentSigningService — real PAdES-B-B signatures on
+         Registerauszug/Depotauszug/Steuerbescheinigung/Registereinsicht when a
+         signing keystore is configured (registerwerk.docsig.*); previously these
+         documents carried a "PAdES-B-LT Signatur vorhanden" footer that was never
+         backed by any signing code at all. -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-jdk18on</artifactId>
+      <version>1.79</version>
     </dependency>
 
     <!-- ── AOP (for @RequiresStepUp enforcement) ─────────────────────────── -->

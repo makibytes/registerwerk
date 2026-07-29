@@ -24,6 +24,8 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
     Optional<Asset> findByIsin(String isin);
 
+    Optional<Asset> findByAssetNumber(String assetNumber);
+
     @Query("SELECT a.id FROM Asset a WHERE a.issuerId = :issuerId")
     List<UUID> findIdsByIssuerId(@Param("issuerId") UUID issuerId);
 }

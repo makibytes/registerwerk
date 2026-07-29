@@ -38,9 +38,12 @@ sidebar_position: 1
 
 | Service | Port | Access |
 |---|---|---|
-| Kong proxy | 8000 | Public |
-| Konga UI | 1337 | Internal only |
-| Backend (direct) | 8080 | Internal only (via Kong in prod) |
+| Operator frontend | 4200 | Public — opened directly, never through Kong |
+| Customer frontend | 4201 | Public — opened directly; only its own API calls route through Kong |
+| Kong proxy | 8000 | Public — customer-API traffic only, DB-less, no admin GUI |
+| Kong admin API | 8001 | Loopback only — `docker exec`/SSH tunnel, never expose publicly |
+| zama-relayer (opt-in, `--profile confidential`) | 3005 | Internal only |
+| Backend (direct) | 8080 | Internal only (operator frontend and, in prod, Kong both call this) |
 | graph-node GraphQL | 8000 | Internal only |
 | graph-node admin | 8020 | Internal only |
 | PostgreSQL | 5432 | Internal only |

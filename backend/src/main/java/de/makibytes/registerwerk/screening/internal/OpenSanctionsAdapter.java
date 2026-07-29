@@ -135,10 +135,41 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
                     "name",
                     caption,
                     score.doubleValue(),
-                    String.valueOf(entry.get("id"))
+                    String.valueOf(entry.get("id")),
+                    categoryOf(entry)
             ));
         }
         return hits;
+    }
+
+    /**
+     * OpenSanctions entities carry a "topics" list (e.g. {@code sanction}, {@code role.pep},
+     * {@code poi}, {@code crime}) summarising why the entity is on file. Not every deployment/
+     * dataset populates it on match results, so this stays defensive: missing or unrecognized
+     * topics fall back to {@code SANCTIONS}, preserving today's behavior rather than guessing.
+     */
+    @SuppressWarnings("unchecked")
+    static String categoryOf(Map<String, Object> entry) {
+        Object topicsObj = entry.get("topics");
+        if (!(topicsObj instanceof List<?> topics)) {
+            return HitCategory.SANCTIONS.name();
+        }
+        for (Object t : topics) {
+            String topic = String.valueOf(t).toLowerCase(Locale.ROOT);
+            if (topic.startsWith("role.pep") || topic.equals("poi")) {
+                return HitCategory.PEP.name();
+            }
+        }
+        for (Object t : topics) {
+            String topic = String.valueOf(t).toLowerCase(Locale.ROOT);
+            if (topic.contains("sanction")) {
+                return HitCategory.SANCTIONS.name();
+            }
+        }
+        if (!topics.isEmpty()) {
+            return HitCategory.ADVERSE_MEDIA.name();
+        }
+        return HitCategory.SANCTIONS.name();
     }
 
     private static BigDecimal toScore(Object score) {

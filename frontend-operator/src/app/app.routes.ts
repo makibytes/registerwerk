@@ -64,6 +64,41 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'organizations',
+        loadChildren: () =>
+          import('./features/organizations/organizations.routes').then(
+            (m) => m.ORGANIZATION_ROUTES
+          ),
+      },
+      {
+        path: 'permissions',
+        loadChildren: () =>
+          import('./features/permissions/permissions.routes').then(
+            (m) => m.PERMISSION_ROUTES
+          ),
+      },
+      {
+        path: 'payment-rails',
+        loadChildren: () =>
+          import('./features/payment-rails/payment-rails.routes').then(
+            (m) => m.PAYMENT_RAIL_ROUTES
+          ),
+      },
+      {
+        path: 'dapp-review',
+        loadChildren: () =>
+          import('./features/dapp-review/dapp-review.routes').then(
+            (m) => m.DAPP_REVIEW_ROUTES
+          ),
+      },
+      {
+        path: 'dapp-catalog',
+        loadComponent: () =>
+          import('./features/dapp-catalog/dapp-catalog.component').then(
+            (m) => m.DappCatalogComponent
+          ),
+      },
+      {
         path: 'network-nodes',
         loadComponent: () =>
           import('./features/network-nodes/network-nodes.component').then(

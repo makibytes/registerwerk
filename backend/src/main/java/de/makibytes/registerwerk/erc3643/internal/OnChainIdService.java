@@ -93,9 +93,12 @@ public class OnChainIdService {
      *
      * @param legalEntityId ID of the legal entity
      * @param chainConfigId ID of the chain configuration
+     * @param actorId       ID of the user triggering identity creation (for audit); may be
+     *                      {@code null} for system-initiated calls
+     * @param actorRole     role of the triggering user (for audit)
      * @return the existing or newly created {@link OnchainIdentity}
      */
-    public OnchainIdentity getOrCreate(UUID legalEntityId, UUID chainConfigId) {
+    public OnchainIdentity getOrCreate(UUID legalEntityId, UUID chainConfigId, UUID actorId, String actorRole) {
         Optional<OnchainIdentity> existing =
             identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId);
 
@@ -160,7 +163,7 @@ public class OnChainIdService {
 
         OnchainIdentity saved = identityRepository.save(identity);
 
-        eventPublisher.publishEvent(new OnchainIdentityDeployedEvent(saved.getId(), null, "REGISTRY_ADMIN", java.util.Map.of()));
+        eventPublisher.publishEvent(new OnchainIdentityDeployedEvent(saved.getId(), actorId, actorRole, java.util.Map.of()));
 
         return saved;
     }
@@ -231,15 +234,22 @@ public class OnChainIdService {
      * <p>Returns {@code true} only if:
      * <ol>
      *   <li>An ONCHAINID identity exists for the entity on the chain</li>
-     *   <li>All required claim topics have at least one non-revoked, non-expired claim</li>
+     *   <li>Every topic in {@code requiredTopics} has at least one non-revoked, non-expired claim</li>
      * </ol>
      *
-     * @param legalEntityId ID of the legal entity
-     * @param chainConfigId ID of the chain configuration
+     * <p>{@code requiredTopics} is suite-scoped (see {@code IdentityRegistryService.isVerified},
+     * which sources it from {@code Erc3643ClaimTopicRepository}), so a revoked AML/Accreditation
+     * claim affects the result, not just KYC. An empty {@code requiredTopics} list vacuously
+     * returns {@code true} for an existing identity, mirroring on-chain {@code IIdentityRegistry
+     * .isVerified()}'s own behavior when a suite's {@code ClaimTopicsRegistry} is empty.
+     *
+     * @param legalEntityId  ID of the legal entity
+     * @param chainConfigId  ID of the chain configuration
+     * @param requiredTopics claim topics that must each have a valid claim
      * @return {@code true} if the entity is verified for token transfers
      */
     @Transactional(readOnly = true)
-    public boolean isVerified(UUID legalEntityId, UUID chainConfigId) {
+    public boolean isVerified(UUID legalEntityId, UUID chainConfigId, java.util.List<Long> requiredTopics) {
         Optional<OnchainIdentity> identity =
             identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId);
 
@@ -250,16 +260,16 @@ public class OnChainIdService {
             return false;
         }
 
-        // Check locally: entity must hold a non-revoked, non-expired KYC claim (topic 1)
         java.util.List<OnchainClaim> claims =
                 claimRepository.findByOnchainIdentityId(identity.get().getId());
         java.time.Instant now = java.time.Instant.now();
-        boolean hasKyc = claims.stream().anyMatch(c ->
-                c.getTopic() == Erc3643DeploymentService.CLAIM_TOPIC_KYC
+        boolean verified = requiredTopics.stream().allMatch(topic -> claims.stream().anyMatch(c ->
+                c.getTopic() == topic
                 && c.getRevokedAt() == null
-                && (c.getExpiresAt() == null || c.getExpiresAt().isAfter(now)));
-        log.debug("isVerified: entity={} chain={} hasKyc={}", legalEntityId, chainConfigId, hasKyc);
-        return hasKyc;
+                && (c.getExpiresAt() == null || c.getExpiresAt().isAfter(now))));
+        log.debug("isVerified: entity={} chain={} requiredTopics={} verified={}",
+                legalEntityId, chainConfigId, requiredTopics, verified);
+        return verified;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

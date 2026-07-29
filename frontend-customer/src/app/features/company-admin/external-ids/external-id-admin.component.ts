@@ -57,6 +57,9 @@ import {
         <a mat-tab-link routerLink="/company-admin/external-ids" routerLinkActive #extRla="routerLinkActive" [active]="extRla.isActive">
           <mat-icon>tag</mat-icon>&nbsp;External IDs
         </a>
+        <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #orgRla="routerLinkActive" [active]="orgRla.isActive">
+          <mat-icon>fingerprint</mat-icon>&nbsp;Organization
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 

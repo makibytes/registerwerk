@@ -3,12 +3,14 @@ import {
   Deposit as DepositEvent,
   Withdraw as WithdrawEvent,
   AddressFrozen,
+  AddressUnfrozen,
 } from '../generated/templates/EwpgERC4626/EwpgERC4626'
-import { Token, Transfer, VaultDeposit, VaultWithdraw, WhitelistChange, HolderBalance } from '../generated/schema'
+import { Token, Transfer, VaultDeposit, VaultWithdraw, AddressFreezeChange, HolderBalance } from '../generated/schema'
 import { BigInt, Bytes } from '@graphprotocol/graph-ts'
 
 const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000'
 const TOKEN_TYPE   = 4  // ERC-4626 sync vault
+const EVENT_DERIVED = 'EVENT_DERIVED'
 
 function getOrCreateHolderBalance(tokenAddress: string, holder: Bytes): HolderBalance {
   let id = tokenAddress + '-' + holder.toHexString()
@@ -18,6 +20,7 @@ function getOrCreateHolderBalance(tokenAddress: string, holder: Bytes): HolderBa
     hb.token   = tokenAddress
     hb.holder  = holder
     hb.balance = BigInt.fromI32(0)
+    hb.projectionStatus = EVENT_DERIVED
     hb.lastUpdatedBlock     = BigInt.fromI32(0)
     hb.lastUpdatedTimestamp = BigInt.fromI32(0)
   }
@@ -42,6 +45,7 @@ export function handleTransfer(event: TransferEvent): void {
   transfer.to              = event.params.to
   transfer.amount          = event.params.value
   transfer.eventType       = eventType
+  transfer.projectionStatus = EVENT_DERIVED
   transfer.blockNumber     = event.block.number
   transfer.blockTimestamp  = event.block.timestamp
   transfer.transactionHash = event.transaction.hash
@@ -78,6 +82,7 @@ export function handleDeposit(event: DepositEvent): void {
   deposit.owner           = event.params.owner
   deposit.assets          = event.params.assets
   deposit.shares          = event.params.shares
+  deposit.projectionStatus = EVENT_DERIVED
   deposit.blockNumber     = event.block.number
   deposit.blockTimestamp  = event.block.timestamp
   deposit.transactionHash = event.transaction.hash
@@ -94,6 +99,7 @@ export function handleWithdraw(event: WithdrawEvent): void {
   withdraw.owner           = event.params.owner
   withdraw.assets          = event.params.assets
   withdraw.shares          = event.params.shares
+  withdraw.projectionStatus = EVENT_DERIVED
   withdraw.blockNumber     = event.block.number
   withdraw.blockTimestamp  = event.block.timestamp
   withdraw.transactionHash = event.transaction.hash
@@ -102,10 +108,25 @@ export function handleWithdraw(event: WithdrawEvent): void {
 
 export function handleAddressFrozen(event: AddressFrozen): void {
   let id = event.transaction.hash.toHexString() + '-' + event.logIndex.toString()
-  let change = new WhitelistChange(id)
+  let change = new AddressFreezeChange(id)
   change.token           = event.address.toHexString()
-  change.account         = event.params.addr
-  change.added           = !event.params.frozen
+  change.account         = event.params.account
+  change.frozen          = true
+  change.reason          = event.params.reason
+  change.projectionStatus = EVENT_DERIVED
+  change.blockNumber     = event.block.number
+  change.blockTimestamp  = event.block.timestamp
+  change.transactionHash = event.transaction.hash
+  change.save()
+}
+
+export function handleAddressUnfrozen(event: AddressUnfrozen): void {
+  let id = event.transaction.hash.toHexString() + '-' + event.logIndex.toString()
+  let change = new AddressFreezeChange(id)
+  change.token           = event.address.toHexString()
+  change.account         = event.params.account
+  change.frozen          = false
+  change.projectionStatus = EVENT_DERIVED
   change.blockNumber     = event.block.number
   change.blockTimestamp  = event.block.timestamp
   change.transactionHash = event.transaction.hash

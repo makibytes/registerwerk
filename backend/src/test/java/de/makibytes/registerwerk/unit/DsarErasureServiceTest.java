@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.customer.api.ErasureRequest;
 import de.makibytes.registerwerk.customer.api.ErasureRequestRepository;
 import de.makibytes.registerwerk.customer.api.ErasureRequestStatus;
@@ -25,18 +27,21 @@ import static org.mockito.Mockito.*;
 class DsarErasureServiceTest {
 
     ErasureRequestRepository repository;
+    AppUserRepository userRepository;
     ApplicationEventPublisher eventPublisher;
     DsarErasureService service;
 
     static final UUID ENTITY = UUID.randomUUID();
     static final UUID USER = UUID.randomUUID();
     static final UUID OPERATOR = UUID.randomUUID();
+    static final UUID APPROVER = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         repository = mock(ErasureRequestRepository.class);
+        userRepository = mock(AppUserRepository.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
-        service = new DsarErasureService(repository, eventPublisher);
+        service = new DsarErasureService(repository, userRepository, eventPublisher);
         // Emulate JPA assigning the generated id on persist.
         when(repository.save(any(ErasureRequest.class))).thenAnswer(inv -> {
             ErasureRequest r = inv.getArgument(0);
@@ -84,13 +89,43 @@ class DsarErasureServiceTest {
         ErasureRequest open = openRequest(id);
         when(repository.findById(id)).thenReturn(Optional.of(open));
 
-        ErasureRequest resolved = service.complete(id, OPERATOR, "erased marketing prefs; kept KYC (GwG §8)");
+        ErasureRequest resolved = service.complete(id, OPERATOR, "erased marketing prefs; kept KYC (GwG §8)", APPROVER);
 
         assertThat(resolved.getStatus()).isEqualTo(ErasureRequestStatus.COMPLETED);
         assertThat(resolved.getReviewedBy()).isEqualTo(OPERATOR);
         assertThat(resolved.getReviewedAt()).isNotNull();
         assertThat(resolved.getResolutionNote()).contains("KYC");
         verify(eventPublisher).publishEvent(any(DsarErasureResolvedEvent.class));
+    }
+
+    @Test
+    void complete_tombstonesAppUserContactFieldsButNotAlreadyErasedOnes() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.of(openRequest(id)));
+
+        AppUser realUser = new AppUser();
+        realUser.setId(UUID.randomUUID());
+        realUser.setFullName("Heinz Weber");
+        realUser.setEmail("heinz.weber@example.de");
+        realUser.setPasswordHash("bcrypt-hash");
+        realUser.setEnabled(true);
+
+        AppUser alreadyErasedUser = new AppUser();
+        alreadyErasedUser.setId(UUID.randomUUID());
+        alreadyErasedUser.setEmail("erased-" + alreadyErasedUser.getId() + "@erased.invalid");
+        alreadyErasedUser.setEnabled(false);
+
+        when(userRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(ENTITY))
+                .thenReturn(List.of(realUser, alreadyErasedUser));
+
+        service.complete(id, OPERATOR, "erased contact details; kept register/KYC trail (eWpG/GwG retention)", APPROVER);
+
+        assertThat(realUser.getFullName()).isEqualTo("[ERASED]");
+        assertThat(realUser.getEmail()).endsWith("@erased.invalid");
+        assertThat(realUser.getPasswordHash()).isNull();
+        assertThat(realUser.isEnabled()).isFalse();
+        verify(userRepository).save(realUser);
+        verify(userRepository, never()).save(alreadyErasedUser); // idempotent — already tombstoned
     }
 
     @Test
@@ -110,7 +145,7 @@ class DsarErasureServiceTest {
         done.setStatus(ErasureRequestStatus.COMPLETED);
         when(repository.findById(id)).thenReturn(Optional.of(done));
 
-        assertThatThrownBy(() -> service.complete(id, OPERATOR, "x"))
+        assertThatThrownBy(() -> service.complete(id, OPERATOR, "x", APPROVER))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("already resolved");
         verify(eventPublisher, never()).publishEvent(any());

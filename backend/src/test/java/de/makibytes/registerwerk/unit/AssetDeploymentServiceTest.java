@@ -5,6 +5,10 @@ import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
+import de.makibytes.registerwerk.asset.events.DeploymentConfirmedEvent;
+import de.makibytes.registerwerk.asset.events.DeploymentFailedEvent;
+import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.erc3643.api.Erc3643DeploymentPort;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -16,10 +20,16 @@ import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.methods.response.Log;
+import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -109,8 +119,11 @@ class AssetDeploymentServiceTest {
     }
 
     @Test
-    @DisplayName("deploy should allow confidential tokens on fhEVM chains")
+    @DisplayName("deploy should allow confidential tokens on real Zama-coprocessor chains (Ethereum, Base)")
     void deploy_shouldAllowConfidentialTokensOnFhevmChains() {
+        // FHEVM_CHAINS previously listed FHENIX/INCO — separate, non-Zama FHE stacks that
+        // Registerwerk's ConfidentialERC20/ERC3643 (built against Zama's TFHE.sol) cannot
+        // actually run on. Ethereum/Base are Zama's real, documented coprocessor chains.
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
@@ -125,14 +138,27 @@ class AssetDeploymentServiceTest {
             deployment.setId(deploymentId);
             return deployment;
         });
-        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.CONF_ERC20), eq(Chain.FHENIX), eq(Network.TESTNET), any()))
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.CONF_ERC20), eq(Chain.ETHEREUM), eq(Network.TESTNET), any()))
                 .thenReturn(new CompletableFuture<>());
 
         AssetDeployment result = assetDeploymentService.deploy(
-                assetId, Chain.FHENIX, Network.TESTNET, actorId);
+                assetId, Chain.ETHEREUM, Network.TESTNET, actorId);
 
-        assertThat(result.getChain()).isEqualTo(Chain.FHENIX);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.CONF_ERC20), eq(Chain.FHENIX), eq(Network.TESTNET), eq("owner-placeholder"));
+        assertThat(result.getChain()).isEqualTo(Chain.ETHEREUM);
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.CONF_ERC20), eq(Chain.ETHEREUM), eq(Network.TESTNET), eq("owner-placeholder"));
+    }
+
+    @Test
+    @DisplayName("deploy should reject confidential tokens on Fhenix — a separate, non-Zama FHE stack")
+    void deploy_shouldRejectConfidentialTokensOnFhenix() {
+        UUID assetId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.CONF_ERC20);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> assetDeploymentService.deploy(assetId, Chain.FHENIX, Network.TESTNET, UUID.randomUUID()))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     @Test
@@ -345,5 +371,155 @@ class AssetDeploymentServiceTest {
 
         assertThat(result).isNotNull();
         verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.SPL_2022_BOND), eq(Chain.SOLANA), eq(Network.TESTNET), eq("owner-placeholder"));
+    }
+
+    // ── Regression coverage: syncFromChain/deploy no longer key confirmation on
+    // ── receipt.getContractAddress() (always null for factory/CREATE2-pattern deployments) ──
+
+    @Test
+    @DisplayName("deploy should mark CONFIRMED immediately and publish an audit event when the " +
+            "deployment port already resolves a real contract address")
+    void deploy_whenCompleteMarksConfirmed_whenAddressIsPresent() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.ERC20);
+
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        AssetDeployment[] holder = new AssetDeployment[1];
+        when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
+            AssetDeployment dep = invocation.getArgument(0);
+            if (dep.getId() == null) {
+                dep.setId(deploymentId);
+            }
+            holder[0] = dep;
+            return dep;
+        });
+        when(assetDeploymentRepository.findById(deploymentId))
+                .thenAnswer(invocation -> Optional.ofNullable(holder[0]));
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.ETHEREUM), eq(Network.TESTNET), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        new TokenDeploymentResult("0xtxhash", "0xdeadbeef00000000000000000000000000000001")));
+
+        assetDeploymentService.deploy(assetId, Chain.ETHEREUM, Network.TESTNET, actorId);
+
+        assertThat(holder[0].getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        assertThat(holder[0].getContractAddress()).isEqualTo("0xdeadbeef00000000000000000000000000000001");
+        assertThat(holder[0].getDeployedAt()).isNotNull();
+
+        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(events.capture());
+        assertThat(events.getAllValues()).anySatisfy(e -> assertThat(e).isInstanceOf(DeploymentConfirmedEvent.class));
+    }
+
+    @Test
+    @DisplayName("deploy should mark FAILED and publish an audit event when the deployment tx errors")
+    void deploy_whenCompleteMarksFailed_onException() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.ERC20);
+
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        AssetDeployment[] holder = new AssetDeployment[1];
+        when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
+            AssetDeployment dep = invocation.getArgument(0);
+            if (dep.getId() == null) {
+                dep.setId(deploymentId);
+            }
+            holder[0] = dep;
+            return dep;
+        });
+        when(assetDeploymentRepository.findById(deploymentId))
+                .thenAnswer(invocation -> Optional.ofNullable(holder[0]));
+        CompletableFuture<TokenDeploymentResult> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("boom"));
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.ETHEREUM), eq(Network.TESTNET), any()))
+                .thenReturn(failed);
+
+        assetDeploymentService.deploy(assetId, Chain.ETHEREUM, Network.TESTNET, UUID.randomUUID());
+
+        assertThat(holder[0].getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.FAILED);
+
+        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(events.capture());
+        assertThat(events.getAllValues()).anySatisfy(e -> assertThat(e).isInstanceOf(DeploymentFailedEvent.class));
+    }
+
+    @Test
+    @DisplayName("syncFromChain should mark FAILED on a reverted receipt, not merely a missing contractAddress")
+    void syncFromChain_marksFailed_whenReceiptReverted() throws java.io.IOException {
+        UUID deploymentId = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x0"); // reverted
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.FAILED);
+        verify(eventPublisher).publishEvent(any(DeploymentFailedEvent.class));
+    }
+
+    @Test
+    @DisplayName("syncFromChain should mark CONFIRMED and extract the token address from event logs " +
+            "when the receipt succeeded but has no top-level contractAddress (factory-pattern deploy)")
+    void syncFromChain_marksConfirmed_extractingAddressFromEventLogs() throws java.io.IOException {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.ERC20);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setAssetId(assetId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1"); // success — but no top-level contractAddress, since `to` was the factory
+        String topicSig = "0x" + org.web3j.crypto.Hash.sha3String("TokenDeployed(bytes32,uint8,address)");
+        String tokenAddress = "0x" + "ab".repeat(20); // 20-byte address, 40 hex chars
+        String tokenAddressTopic = "0x" + "0".repeat(24) + tokenAddress.substring(2); // left-padded to 32 bytes
+        Log log = new Log();
+        log.setTopics(Arrays.asList(
+                topicSig,
+                "0x" + "1".repeat(64), // assetId (topics[1]) — value irrelevant to extraction
+                "0x" + "0".repeat(64), // tokenType (topics[2]) — value irrelevant to extraction
+                tokenAddressTopic      // tokenAddress (topics[3])
+        ));
+        receipt.setLogs(List.of(log));
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        assertThat(deployment.getContractAddress()).isEqualTo(tokenAddress);
+        verify(eventPublisher).publishEvent(any(DeploymentConfirmedEvent.class));
     }
 }

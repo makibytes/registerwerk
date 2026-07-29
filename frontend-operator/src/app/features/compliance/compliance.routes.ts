@@ -50,5 +50,12 @@ export const COMPLIANCE_ROUTES: Routes = [
         (m) => m.ErasureQueueComponent,
       ),
   },
+  {
+    path: 'token-admin-grants',
+    loadComponent: () =>
+      import('./token-admin-grants/token-admin-grant-list.component').then(
+        (m) => m.TokenAdminGrantListComponent,
+      ),
+  },
   { path: '', redirectTo: 'screening', pathMatch: 'full' },
 ];

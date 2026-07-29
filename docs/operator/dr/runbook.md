@@ -1,5 +1,10 @@
 # Disaster Recovery Runbook
 
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This is a draft operational runbook, not evidence of an approved continuity plan, tested RTO/RPO,
+    legally correct incident classification, or authority notification. The operator must approve,
+    exercise, and reconcile it with current legal, regulatory, contractual, and infrastructure requirements.
+
 **Service:** Registerwerk eWpG Registry  
 **RTO target:** ≤4 hours (eWpRV §6)  
 **RPO target:** ≤15 minutes (WAL archiving via wal-g)  
@@ -12,11 +17,12 @@
 
 | Severity | Criteria | Action | Deadline |
 |---|---|---|---|
-| MINOR | Single service down, <30 min, no data loss | Internal alert | — |
+| MINOR | Single service down, &lt;30 min, no data loss | Internal alert | — |
 | MAJOR | Multi-service, 30 min–4h, potential data impact | Initial report to BaFin/CSSF/AMF/FMA | 72h from detection |
 | CRITICAL | Full outage >4h OR data integrity breach | Initial report to competent authority | 4h from detection |
 
-To file a DORA report: `POST /api/v1/admin/ict-incidents` (or use the ICT incident table in the DB). Authorities:
+`POST /api/v1/dora/incidents` records an internal incident; it does not file a DORA report. Any
+authority, deadline, form, and channel below is a review input that must be verified externally:
 - DE: BaFin (bafin.de) Referat IT-Risikoaufsicht
 - LU: CSSF via CSS portal
 - FR: AMF / ACPR via ONEGATE
@@ -95,7 +101,9 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 Raw private key access requires all three of the following:
 1. Two out of three Shamir shares (held by CTO, CFO, external Counsel)
 2. Board resolution (minimum 24h advance notice to regulatory counsel)
-3. Audit log entry filed with all four competent authorities (DE/LU/FR/LI)
+3. Internally approved and audited break-glass record. Any regulator notification is
+   incident-, operator-, and jurisdiction-specific and must follow the externally approved
+   procedure; this repository does not file it with an authority.
 
 Emergency KMS access (AWS KMS):
 ```bash

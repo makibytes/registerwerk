@@ -41,4 +41,21 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID>, JpaSpec
     long countEnabledUsersWithRole(
             @Param("role") AppUserRole role,
             @Param("excludeUserId") UUID excludeUserId);
+
+    /**
+     * Counts enabled, TOTP-enrolled users with {@code role} — i.e. how many people could
+     * actually act as the SECOND approver on a {@code requireSecondApprover} 4-eyes action
+     * (which mints its step-up token only for TOTP-enrolled REGISTRY_ADMINs). Used by
+     * {@code ProductionReadinessCheck} to detect the single-admin 4-eyes deadlock: with
+     * fewer than 2, every dual-control endpoint (wallet export/delete, force-burn,
+     * forced-transfer, org suspension, dApp approval, Sperrvermerk) is permanently
+     * unreachable.
+     */
+    @Query("""
+        select count(u) from AppUser u
+        where u.enabled = true
+          and u.totpEnabled = true
+          and :role member of u.roles
+        """)
+    long countEnabledTotpEnrolledUsersWithRole(@Param("role") AppUserRole role);
 }

@@ -8,10 +8,12 @@ import de.makibytes.registerwerk.deployment.api.VaultRequestStatus;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.Function;
@@ -47,24 +49,27 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
     private final BlockchainClientRegistry clientRegistry;
     private final EvmContractService evmContractService;
     private final BlockchainTransactionService txService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public Erc7540AdminService(
             AssetDeploymentRepository deploymentRepository,
             VaultRequestRepository vaultRequestRepository,
             BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
-            BlockchainTransactionService txService) {
+            BlockchainTransactionService txService,
+            ApplicationEventPublisher eventPublisher) {
         this.deploymentRepository = deploymentRepository;
         this.vaultRequestRepository = vaultRequestRepository;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
         this.txService = txService;
+        this.eventPublisher = eventPublisher;
     }
 
     // ── Fulfill deposit request ───────────────────────────────────────────────
 
     public UUID fulfillDepositRequest(UUID deploymentId, BigInteger onChainRequestId,
-                                      BigDecimal navAtFulfill, UUID actorId) {
+                                      BigDecimal navAtFulfill, UUID actorId, String actorRole) {
         log.info("Fulfilling deposit request={} on deployment={} at NAV={}",
                 onChainRequestId, deploymentId, navAtFulfill);
 
@@ -75,7 +80,8 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
                 Collections.emptyList());
 
         UUID txId = submitEvm(dep, fn, "fulfillDepositRequest",
-                Map.of("requestId", onChainRequestId.toString()));
+                Map.of("requestId", onChainRequestId.toString(), "navAtFulfill", navAtFulfill.toPlainString()),
+                actorId, actorRole);
 
         vaultRequestRepository.findByAssetIdAndRequestId(dep.getAssetId(), onChainRequestId)
                 .ifPresent(req -> {
@@ -91,7 +97,7 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
     // ── Fulfill redeem request ────────────────────────────────────────────────
 
     public UUID fulfillRedeemRequest(UUID deploymentId, BigInteger onChainRequestId,
-                                     BigDecimal navAtFulfill, UUID actorId) {
+                                     BigDecimal navAtFulfill, UUID actorId, String actorRole) {
         log.info("Fulfilling redeem request={} on deployment={} at NAV={}",
                 onChainRequestId, deploymentId, navAtFulfill);
 
@@ -102,7 +108,8 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
                 Collections.emptyList());
 
         UUID txId = submitEvm(dep, fn, "fulfillRedeemRequest",
-                Map.of("requestId", onChainRequestId.toString()));
+                Map.of("requestId", onChainRequestId.toString(), "navAtFulfill", navAtFulfill.toPlainString()),
+                actorId, actorRole);
 
         vaultRequestRepository.findByAssetIdAndRequestId(dep.getAssetId(), onChainRequestId)
                 .ifPresent(req -> {
@@ -117,22 +124,23 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
 
     // ── Cancel request ────────────────────────────────────────────────────────
 
-    public UUID cancelDepositRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId) {
+    public UUID cancelDepositRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId, String actorRole) {
         log.info("Cancelling deposit request={} on deployment={}", onChainRequestId, deploymentId);
-        return cancelRequest(deploymentId, onChainRequestId, "cancelDepositRequest");
+        return cancelRequest(deploymentId, onChainRequestId, "cancelDepositRequest", actorId, actorRole);
     }
 
-    public UUID cancelRedeemRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId) {
+    public UUID cancelRedeemRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId, String actorRole) {
         log.info("Cancelling redeem request={} on deployment={}", onChainRequestId, deploymentId);
-        return cancelRequest(deploymentId, onChainRequestId, "cancelRedeemRequest");
+        return cancelRequest(deploymentId, onChainRequestId, "cancelRedeemRequest", actorId, actorRole);
     }
 
-    private UUID cancelRequest(UUID deploymentId, BigInteger onChainRequestId, String fnName) {
+    private UUID cancelRequest(UUID deploymentId, BigInteger onChainRequestId, String fnName,
+                               UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
         Function fn = new Function(fnName,
                 Collections.singletonList(new Uint256(onChainRequestId)),
                 Collections.emptyList());
-        UUID txId = submitEvm(dep, fn, fnName, Map.of("requestId", onChainRequestId.toString()));
+        UUID txId = submitEvm(dep, fn, fnName, Map.of("requestId", onChainRequestId.toString()), actorId, actorRole);
 
         vaultRequestRepository.findByAssetIdAndRequestId(dep.getAssetId(), onChainRequestId)
                 .ifPresent(req -> {
@@ -161,11 +169,20 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
         return dep;
     }
 
-    private UUID submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params) {
+    /**
+     * Submits the on-chain transaction and publishes a {@link TokenAdminActionEvent} to the
+     * audit log — the chokepoint all four public methods in this class funnel through, so
+     * vault-request fulfillment AND cancellation (both previously unaudited) are covered.
+     */
+    private UUID submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
+                           UUID actorId, String actorRole) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
         Credentials creds = evmContractService.credentials(descriptor);
         String txHash = evmContractService.submit(web3j, creds, dep.getContractAddress(), fn);
+
+        eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
+
         return txService.record(txHash, methodName, dep.getId(), dep.getAssetId(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
     }

@@ -1,10 +1,14 @@
 package de.makibytes.registerwerk.asset.internal;
 
 import de.makibytes.registerwerk.asset.events.AssetDeploymentInitiatedEvent;
+import de.makibytes.registerwerk.asset.events.DeploymentConfirmedEvent;
+import de.makibytes.registerwerk.asset.events.DeploymentFailedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.erc3643.api.Erc3643DeploymentPort;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -26,6 +30,7 @@ import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -40,8 +45,20 @@ public class AssetDeploymentService {
     private static final EnumSet<Chain> TRACKING_ONLY_CHAINS = EnumSet.noneOf(Chain.class);
     private static final EnumSet<Chain> NON_EVM_CHAINS =
             EnumSet.of(Chain.SOLANA, Chain.CANTON, Chain.STARKNET, Chain.STELLAR);
+    /**
+     * Chains where Zama's fhEVM coprocessor is (or will be) actually deployed — Ethereum and
+     * Base today, per Zama's own "fhEVM Coprocessor: Run FHE smart contracts on Ethereum, Base,
+     * and other EVM chains" announcement. Deliberately excludes {@code FHENIX}/{@code INCO} —
+     * both real chains but running their OWN, separate, non-Zama FHE stacks with incompatible
+     * libraries; Registerwerk's confidential contracts (ConfidentialERC20/ERC3643) are built
+     * specifically against Zama's TFHE.sol/Gateway API and will not function against either.
+     * Add {@code Chain.CANTON} here once T-REX Chain is represented as its own {@code Chain}
+     * value and has published its FHEVM infrastructure addresses (T-REX Network announced in
+     * March 2026 that Zama is becoming its confidentiality layer, but T-REX Chain is not yet a
+     * distinct entry in this enum).
+     */
     private static final EnumSet<Chain> FHEVM_CHAINS =
-            EnumSet.of(Chain.FHENIX, Chain.INCO);
+            EnumSet.of(Chain.ETHEREUM, Chain.BASE);
 
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final AssetRepository assetRepository;
@@ -88,25 +105,47 @@ public class AssetDeploymentService {
         ChainDescriptor descriptor = new ChainDescriptor(chain, network);
 
         // Determine correct deployment service based on token standard
-        CompletableFuture<String> txFuture = switch (standard) {
+        CompletableFuture<TokenDeploymentResult> txFuture = switch (standard) {
             case ERC3643 -> erc3643DeploymentPort.deployStandard(assetId, descriptor, "owner-placeholder");
-            case CONF_ERC3643 -> erc3643DeploymentPort.deployConfidential(assetId, descriptor, "owner-placeholder");
+            case CONF_ERC3643 -> erc3643DeploymentPort.deployConfidential(assetId, descriptor, "owner-placeholder")
+                    .thenApply(TokenDeploymentResult::txOnly);
             default -> tokenDeploymentPort.deploy(assetId, standard, chain, network, "owner-placeholder");
         };
 
         UUID deploymentId = saved.getId();
-        txFuture.whenComplete((txHash, ex) -> {
+        txFuture.whenComplete((result, ex) -> {
             if (ex != null) {
                 log.error("Deployment failed for deploymentId={}", deploymentId, ex);
                 assetDeploymentRepository.findById(deploymentId).ifPresent(dep -> {
                     dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.FAILED);
                     assetDeploymentRepository.save(dep);
                 });
+                eventPublisher.publishEvent(new DeploymentFailedEvent(
+                        deploymentId, actorId, null, ex.getMessage()));
             } else {
-                log.info("Deployment tx sent: deploymentId={}, txHash={}", deploymentId, txHash);
+                log.info("Deployment tx sent: deploymentId={}, txHash={}, contractAddress={}",
+                        deploymentId, result.txHash(), result.contractAddress());
                 assetDeploymentRepository.findById(deploymentId).ifPresent(dep -> {
-                    dep.setDeployedByTx(txHash);
-                    assetDeploymentRepository.save(dep);
+                    dep.setDeployedByTx(result.txHash());
+                    if (result.contractAddress() != null && !result.contractAddress().isBlank()) {
+                        // The chains reaching this branch (EVM's standard token/vault types via
+                        // send(), which already waits for a mined, non-reverted receipt before
+                        // returning; Starknet's UDC precomputation; a Stellar issuer account) all
+                        // know the real, final address by the time we have it here — so this is
+                        // a genuine confirmation, not just an early hint. Previously this only
+                        // stored the address and left status at PENDING, relying on a separate
+                        // syncFromChain() call that keyed confirmation on TransactionReceipt
+                        // .getContractAddress() — always null for factory/CREATE2-pattern
+                        // deployments, so every one of these deployments was later marked FAILED.
+                        dep.setContractAddress(result.contractAddress());
+                        dep.setDeployedAt(Instant.now());
+                        dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+                        assetDeploymentRepository.save(dep);
+                        eventPublisher.publishEvent(new DeploymentConfirmedEvent(
+                                deploymentId, actorId, null, result.contractAddress(), result.txHash()));
+                    } else {
+                        assetDeploymentRepository.save(dep);
+                    }
                 });
             }
         });
@@ -154,6 +193,8 @@ public class AssetDeploymentService {
         deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
         assetDeploymentRepository.save(deployment);
         log.info("Confirmed deployment: id={}, contract={}", deploymentId, contractAddress);
+        eventPublisher.publishEvent(new DeploymentConfirmedEvent(
+                deploymentId, null, null, contractAddress, txHash));
     }
 
     /**
@@ -205,23 +246,83 @@ public class AssetDeploymentService {
             }
 
             TransactionReceipt receipt = receiptOpt.get();
-            String contractAddress = receipt.getContractAddress();
 
-            if (contractAddress != null && !contractAddress.isBlank()) {
-                deployment.setContractAddress(contractAddress);
-                deployment.setDeployedAt(Instant.now());
-                deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
-                assetDeploymentRepository.save(deployment);
-                log.info("syncFromChain: confirmed deploymentId={} contractAddress={}", deploymentId, contractAddress);
-            } else {
-                // Tx mined but no contract address → reverted or non-deployment tx
+            // A mined-but-reverted tx also yields a receipt with no contractAddress — but so does
+            // every SUCCESSFUL factory/CREATE2-pattern deployment (our AssetTokenFactory/
+            // EwpgTREXFactory calls, `to` = factory address, not a top-level creation tx).
+            // receipt.getContractAddress() is only ever populated for a real contract-creation
+            // tx, so keying success/failure on its presence — as this used to — marked every
+            // successful factory-routed deployment FAILED. The receipt's own status field is the
+            // correct signal; see EvmContractService.send(), which already throws on revert, so
+            // in practice this branch mostly serves deployments in flight before that fix, or a
+            // manual re-sync.
+            if (!receipt.isStatusOK()) {
                 deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.FAILED);
                 assetDeploymentRepository.save(deployment);
-                log.warn("syncFromChain: tx={} mined but no contractAddress; marking FAILED", txHash);
+                log.warn("syncFromChain: tx={} reverted on-chain (status={}); marking FAILED",
+                        txHash, receipt.getStatus());
+                eventPublisher.publishEvent(new DeploymentFailedEvent(
+                        deploymentId, null, null, "Transaction reverted on-chain: " + txHash));
+                return;
             }
+
+            String contractAddress = deployment.getContractAddress();
+            if (contractAddress == null || contractAddress.isBlank()) {
+                contractAddress = extractDeployedAddress(receipt, asset(deployment).getTokenStandard()).orElse(null);
+            }
+
+            deployment.setDeployedAt(Instant.now());
+            deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+            if (contractAddress != null) {
+                deployment.setContractAddress(contractAddress);
+            } else {
+                log.warn("syncFromChain: deploymentId={} confirmed on-chain but no address-extraction " +
+                        "rule for standard={}; contractAddress left unset", deploymentId,
+                        asset(deployment).getTokenStandard());
+            }
+            assetDeploymentRepository.save(deployment);
+            log.info("syncFromChain: confirmed deploymentId={} contractAddress={}", deploymentId, contractAddress);
+            eventPublisher.publishEvent(new DeploymentConfirmedEvent(
+                    deploymentId, null, null, contractAddress, txHash));
         } catch (Exception e) {
             log.error("syncFromChain: error fetching receipt for deploymentId={}: {}",
                     deploymentId, e.getMessage(), e);
         }
+    }
+
+    // ── Address-extraction fallback for syncFromChain ──────────────────────────
+    // Mirrors the topic constants each deploy service declares locally (Erc20/721/1155/3525
+    // DeploymentService: TOKEN_DEPLOYED_TOPIC; Erc4626/7540DeploymentService: VAULT_DEPLOYED_TOPIC;
+    // Erc3643DeploymentService: REGISTERWERK_SUITE_DEPLOYED_TOPIC) — this is only a fallback path
+    // for deployments whose contractAddress wasn't already captured when the tx was submitted.
+
+    private static final Set<TokenStandard> TOKEN_DEPLOYED_STANDARDS =
+            EnumSet.of(TokenStandard.ERC20, TokenStandard.ERC721, TokenStandard.ERC1155, TokenStandard.ERC3525);
+    private static final Set<TokenStandard> VAULT_DEPLOYED_STANDARDS =
+            EnumSet.of(TokenStandard.ERC4626, TokenStandard.ERC7540);
+
+    private static final String TOKEN_DEPLOYED_TOPIC =
+            "0x" + org.web3j.crypto.Hash.sha3String("TokenDeployed(bytes32,uint8,address)");
+    private static final String VAULT_DEPLOYED_TOPIC =
+            "0x" + org.web3j.crypto.Hash.sha3String("VaultDeployed(bytes32,uint8,address,address)");
+    private static final String REGISTERWERK_SUITE_DEPLOYED_TOPIC =
+            "0x" + org.web3j.crypto.Hash.sha3String("EwpgSuiteDeployed(bytes32,address,address,address)");
+
+    private Optional<String> extractDeployedAddress(TransactionReceipt receipt, TokenStandard standard) {
+        if (TOKEN_DEPLOYED_STANDARDS.contains(standard)) {
+            return EvmUtils.extractIndexedAddress(receipt, TOKEN_DEPLOYED_TOPIC, 3);
+        }
+        if (VAULT_DEPLOYED_STANDARDS.contains(standard)) {
+            return EvmUtils.extractIndexedAddress(receipt, VAULT_DEPLOYED_TOPIC, 3);
+        }
+        if (standard == TokenStandard.ERC3643) {
+            return EvmUtils.extractIndexedAddress(receipt, REGISTERWERK_SUITE_DEPLOYED_TOPIC, 2);
+        }
+        return Optional.empty();
+    }
+
+    private Asset asset(AssetDeployment deployment) {
+        return assetRepository.findById(deployment.getAssetId())
+                .orElseThrow(() -> new EntityNotFoundException("Asset", deployment.getAssetId()));
     }
 }

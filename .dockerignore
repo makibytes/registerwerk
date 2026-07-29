@@ -1,0 +1,17 @@
+# The frontend build contexts are now the repo root (needed so frontend-shared/
+# is available at the ../frontend-shared path frontend-*/tsconfig.json expects).
+# Keep the context lean by excluding everything the frontend builds don't need.
+**/node_modules
+**/dist
+**/.angular
+backend
+contracts
+daml
+indexer
+gateway
+monitoring
+docs
+examples
+deploy
+docker
+.git

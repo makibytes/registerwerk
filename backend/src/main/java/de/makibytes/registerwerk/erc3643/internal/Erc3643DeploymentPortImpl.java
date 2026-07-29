@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.erc3643.api.Erc3643DeploymentPort;
 import org.springframework.stereotype.Service;
@@ -24,7 +25,7 @@ public class Erc3643DeploymentPortImpl implements Erc3643DeploymentPort {
     }
 
     @Override
-    public CompletableFuture<String> deployStandard(UUID assetId, ChainDescriptor chain, String ownerAddress) {
+    public CompletableFuture<TokenDeploymentResult> deployStandard(UUID assetId, ChainDescriptor chain, String ownerAddress) {
         return erc3643DeploymentService.deploy(assetId, chain, ownerAddress);
     }
 

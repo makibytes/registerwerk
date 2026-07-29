@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.integration;
 
 import de.makibytes.registerwerk.audit.internal.AuditEvent;
 import de.makibytes.registerwerk.audit.internal.AuditEventRepository;
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.kyc.api.KycDocument;
 import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
@@ -11,7 +13,7 @@ import de.makibytes.registerwerk.kyc.web.dto.KycJurisdictionApprovalResponse;
 import de.makibytes.registerwerk.screening.internal.ScreeningRun;
 import de.makibytes.registerwerk.screening.internal.ScreeningRunRepository;
 import de.makibytes.registerwerk.screening.internal.ScreeningStatus;
-import de.makibytes.registerwerk.screening.internal.ScreeningTrigger;
+import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -83,6 +85,9 @@ class KycJurisdictionApprovalIT {
     @Autowired
     private ScreeningRunRepository screeningRunRepository;
 
+    @Autowired
+    private AppUserRepository appUserRepository;
+
     @LocalServerPort
     private int port;
 
@@ -111,14 +116,54 @@ class KycJurisdictionApprovalIT {
     }
 
     private String signedJwt(String... roles) {
+        return signedJwt("00000000-0000-0000-0000-000000000001", false, roles);
+    }
+
+    /**
+     * The jurisdiction approve/reject endpoints carry {@code @RequiresStepUp(requireSecondApprover
+     * = true)} — the aspect runs before the controller body, so exercising the actual approve/
+     * reject/override logic (not just the step-up gate) requires a full step-up token for the
+     * caller AND a dual-control token from a second, currently-enabled REGISTRY_ADMIN
+     * {@code AppUser} (the validator re-checks the DB, not just the JWT claims).
+     */
+    private HttpHeaders stepUpHeaders(String... roles) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(signedJwt("00000000-0000-0000-0000-000000000001", true, roles));
+        // Every call site in this file hits the same jurisdiction-approve endpoint
+        // (@RequiresStepUp(reason = "KYC_JURISDICTION_APPROVE")) — the dual-control token
+        // must carry a matching stepup_scope claim (finding #10, Phase 8).
+        headers.set("X-Dual-Control-Token", dualControlToken("KYC_JURISDICTION_APPROVE"));
+        return headers;
+    }
+
+    private String dualControlToken(String scope) {
+        AppUser approver = new AppUser();
+        approver.setEmail("approver-" + UUID.randomUUID() + "@test.local");
+        UUID approverId = appUserRepository.save(approver).getId();
+        return signedJwtWithScope(approverId.toString(), scope, "REGISTRY_ADMIN");
+    }
+
+    private String signedJwt(String sub, boolean stepUp, String... roles) {
+        return signedJwt(sub, stepUp, null, roles);
+    }
+
+    /** @param scope embedded as the {@code stepup_scope} claim when non-null (finding #10, Phase 8). */
+    private String signedJwtWithScope(String sub, String scope, String... roles) {
+        return signedJwt(sub, true, scope, roles);
+    }
+
+    private String signedJwt(String sub, boolean stepUp, String scope, String... roles) {
         try {
             String header = base64Url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
             long iat = Instant.now().getEpochSecond();
             long exp = iat + 3600;
             String rolesJson = String.join(",", java.util.Arrays.stream(roles).map(r -> "\"" + r + "\"").toList());
             String payload = base64Url("{"
-                + "\"sub\":\"00000000-0000-0000-0000-000000000001\","
+                + "\"sub\":\"" + sub + "\","
                 + "\"roles\":[" + rolesJson + "],"
+                + (stepUp ? "\"acr\":\"stepup\"," : "")
+                + (scope != null ? "\"stepup_scope\":\"" + scope + "\"," : "")
                 + "\"iat\":" + iat + ","
                 + "\"exp\":" + exp
                 + "}");
@@ -199,7 +244,7 @@ class KycJurisdictionApprovalIT {
             HttpMethod.POST,
             new HttpEntity<>(
                 Map.of("expiresAt", LocalDate.now().plusYears(1).toString()),
-                authHeaders("COMPLIANCE_OFFICER")
+                stepUpHeaders("COMPLIANCE_OFFICER")
             ),
             String.class,
             entityId
@@ -210,7 +255,7 @@ class KycJurisdictionApprovalIT {
     }
 
     @Test
-    @DisplayName("Compliance officer can approve jurisdiction when checklist is fully compliant")
+    @DisplayName("Compliance officer can approve jurisdiction when implemented checklist controls pass")
     void complianceOfficerCanApproveWhenCompliant() {
         UUID entityId = createEntityAndGetId("Compliance Officer Happy Path GmbH");
         addMandatoryDeEwpgDocs(entityId);
@@ -221,7 +266,7 @@ class KycJurisdictionApprovalIT {
             HttpMethod.POST,
             new HttpEntity<>(
                 Map.of("expiresAt", LocalDate.now().plusYears(2).toString()),
-                authHeaders("COMPLIANCE_OFFICER")
+                stepUpHeaders("COMPLIANCE_OFFICER")
             ),
             KycJurisdictionApprovalResponse.class,
             entityId
@@ -243,7 +288,7 @@ class KycJurisdictionApprovalIT {
             HttpMethod.POST,
             new HttpEntity<>(
                 Map.of("overrideNote", "Attempted override without admin role"),
-                authHeaders("COMPLIANCE_OFFICER")
+                stepUpHeaders("COMPLIANCE_OFFICER")
             ),
             String.class,
             entityId
@@ -263,7 +308,7 @@ class KycJurisdictionApprovalIT {
             HttpMethod.POST,
             new HttpEntity<>(
                 Map.of("overrideNote", "Approved after enhanced manual review"),
-                authHeaders("REGISTRY_ADMIN")
+                stepUpHeaders("REGISTRY_ADMIN")
             ),
             KycJurisdictionApprovalResponse.class,
             entityId

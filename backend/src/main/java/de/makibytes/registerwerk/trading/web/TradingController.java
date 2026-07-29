@@ -117,11 +117,25 @@ public class TradingController {
     @PostMapping("/history/{executionId}/settle")
     public ResponseEntity<TradeExecutionResponse> settle(
             @PathVariable UUID executionId,
+            @RequestBody @Valid SettleTradeRequest request,
             Authentication authentication) {
         return ResponseEntity.ok(tradingService.settlePendingTrade(
                 extractEntityId(authentication),
                 extractActorId(authentication),
-                executionId));
+                executionId,
+                request.paymentReference()));
+    }
+
+    @PostMapping("/history/{executionId}/cancel")
+    public ResponseEntity<TradeExecutionResponse> cancel(
+            @PathVariable UUID executionId,
+            @RequestBody @Valid de.makibytes.registerwerk.trading.web.dto.CancelTradeRequest request,
+            Authentication authentication) {
+        return ResponseEntity.ok(tradingService.cancelPendingTrade(
+                extractEntityId(authentication),
+                extractActorId(authentication),
+                executionId,
+                request.reason()));
     }
 
     private UUID extractEntityId(Authentication authentication) {

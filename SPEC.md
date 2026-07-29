@@ -1,6 +1,6 @@
 # Registerwerk — Product Specification
 
-An eWpG-compliant electronic securities registry. Operators run the platform; customers (issuers, investors, auditors) access their own data through it.
+A reference implementation for an electronic-securities registry. Operators run the platform; customers (issuers, investors, auditors) access their own data through it. This specification does not establish eWpG compliance, regulatory authorisation, or legal effect for any instrument or deployment.
 
 ## Supported Chains & Token Standards
 
@@ -12,7 +12,7 @@ Token standards: ERC-20, ERC-721, ERC-1155, ERC-3643, Confidential ERC-20 (Zama)
 
 - **none** — PostgreSQL only
 - **simple** — token emitted for primary market; investors KYC'd and wallets whitelisted
-- **control** — onchain is primary layer; adds mint control and auto-approval (transferFrom / burn) for wallets and contracts
+- **control** — adds contract-level compliance and mint-control mechanisms; it does not make the chain the legal register by default
 
 ## Roles
 
@@ -31,7 +31,8 @@ Full lifecycle: onboarding, KYC documents (PDF/images/XML), company rename histo
 
 ## Legal / Regulatory Baseline
 
-The platform must provide controls enabling operators to satisfy obligations under:
+The platform is intended to provide controls mapped to the following regimes; an operator must
+separately determine scope, configure the controls, and obtain the evidence and approvals required:
 
 - Germany eWpG (electronic securities register integrity and traceability)
 - EU AML baseline (risk-based KYC/KYB, beneficial ownership)

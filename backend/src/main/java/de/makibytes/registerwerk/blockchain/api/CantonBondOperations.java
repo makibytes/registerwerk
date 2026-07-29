@@ -30,6 +30,10 @@ public interface CantonBondOperations {
      * @param dayCount       day-count convention (e.g. "ACT_360")
      * @param paymentFrequency payment frequency (e.g. "SEMI_ANNUAL", "ZERO")
      * @param callable       whether the bond is callable before maturity
+     * @param issuePrice     issue price as a fraction of face value (e.g. 0.80 for 80%); null
+     *                       leaves any existing/default value untouched —
+     *                       only meaningful for zero-coupon bonds, where the discount to face
+     *                       value at issuance is the investor's return
      */
     record BondCreationTerms(
             BigDecimal faceValue,
@@ -41,17 +45,29 @@ public interface CantonBondOperations {
             BigDecimal spread,
             String dayCount,
             String paymentFrequency,
-            boolean callable
+            boolean callable,
+            BigDecimal issuePrice
     ) {}
 
+    /**
+     * @param actorId   who triggered this creation, or null when deployment-triggered (mirrors
+     *                  {@code CantonTokenOperations.createInstrument}'s existing
+     *                  actorId/actorRole convention; deployment-time creation deliberately
+     *                  passes null/"SYSTEM", same as every other chain/standard in
+     *                  {@code TokenDeploymentPortImpl})
+     * @param actorRole the triggering actor's role, for the audit record
+     */
     CompletableFuture<String> createFixedBond(
-            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms);
+            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
+            UUID actorId, String actorRole);
 
     CompletableFuture<String> createFloatingBond(
-            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms);
+            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
+            UUID actorId, String actorRole);
 
     CompletableFuture<String> createZeroBond(
-            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms);
+            UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
+            UUID actorId, String actorRole);
 
     CompletableFuture<String> payCoupon(
             UUID deploymentId, Instant paymentDate, BigDecimal amountPerUnit, UUID actorId);

@@ -19,11 +19,12 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * SFTP-based regulatory report filing gateway.
+ * Generic SFTP transport for draft/unvalidated reporting documents.
  * Activate: REGISTERWERK_REPORTING_GATEWAY=SFTP
  *
- * Supports per-jurisdiction SFTP endpoints (BaFin MeldewesenPortal, ESMA ARM, etc.).
+ * Supports per-jurisdiction SFTP endpoints configured by an operator.
  * Uses Apache MINA SSHD for SFTP transport with private-key authentication.
+ * A successful write is not an authenticated authority receipt or filing acceptance.
  */
 @Component("sftpSubmissionGateway")
 @ConditionalOnProperty(name = "registerwerk.reporting.gateway", havingValue = "SFTP")
@@ -44,8 +45,8 @@ class SftpSubmissionGateway implements SubmissionGateway {
                                    String jurisdiction, byte[] xmlDocument) {
         ReportingProperties.SftpEndpoint endpoint = props.sftpForJurisdiction(jurisdiction);
         if (endpoint == null || !endpoint.isConfigured()) {
-            log.warn("SFTP not configured for jurisdiction={}, falling back to PENDING", jurisdiction);
-            return SubmissionResult.pending("sftp-unconfigured-" + submissionId);
+            log.warn("SFTP not configured for jurisdiction={}; draft was not transported", jurisdiction);
+            return SubmissionResult.notTransported("SFTP endpoint is not configured for " + jurisdiction);
         }
 
         String remoteFile = endpoint.getRemoteDir()
@@ -70,17 +71,17 @@ class SftpSubmissionGateway implements SubmissionGateway {
                         SftpClient.OpenMode.Write, SftpClient.OpenMode.Create, SftpClient.OpenMode.Truncate)) {
                     out.write(xmlDocument);
                 }
-                log.info("Filed regulatory report via SFTP: submissionId={} host={} file={}",
+                log.info("Transported draft reporting document via SFTP (acceptance unverified): submissionId={} host={} file={}",
                         submissionId, endpoint.getHost(), remoteFile);
             }
 
             String ref = "SFTP-" + Instant.now().toEpochMilli() + "-" + submissionId;
-            return SubmissionResult.pending(ref);
+            return SubmissionResult.transportedUnverified(ref);
 
         } catch (Exception e) {
-            log.error("SFTP submission failed for submissionId={} jurisdiction={}: {}",
+            log.error("SFTP transport failed for submissionId={} jurisdiction={}: {}",
                     submissionId, jurisdiction, e.getMessage());
-            return SubmissionResult.rejected("SFTP error: " + e.getMessage());
+            return SubmissionResult.transportFailed("SFTP error: " + e.getMessage());
         } finally {
             client.stop();
         }

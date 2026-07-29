@@ -8,8 +8,10 @@ import de.makibytes.registerwerk.registertransfer.api.InspectionLegalBasis;
 import de.makibytes.registerwerk.registertransfer.api.InspectionStatus;
 import de.makibytes.registerwerk.registertransfer.api.RegisterInspectionRequest;
 import de.makibytes.registerwerk.registertransfer.api.RegisterInspectionRequestRepository;
+import de.makibytes.registerwerk.registertransfer.events.RegisterInspectionEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -44,16 +46,19 @@ public class RegisterInspectionService {
     private final AssetRepository assetRepository;
     private final AssetHolderRepository holderRepository;
     private final RegisterExtractRenderer extractRenderer;
+    private final ApplicationEventPublisher eventPublisher;
 
     public RegisterInspectionService(
             RegisterInspectionRequestRepository requestRepository,
             AssetRepository assetRepository,
             AssetHolderRepository holderRepository,
-            RegisterExtractRenderer extractRenderer) {
+            RegisterExtractRenderer extractRenderer,
+            ApplicationEventPublisher eventPublisher) {
         this.requestRepository = requestRepository;
         this.assetRepository = assetRepository;
         this.holderRepository = holderRepository;
         this.extractRenderer = extractRenderer;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -75,14 +80,20 @@ public class RegisterInspectionService {
         request.setLegalBasis(legalBasis);
         request.setStatedInterest(statedInterest);
 
-        if (isAlwaysEntitled(legalBasis)) {
+        boolean autoApproved = isAlwaysEntitled(legalBasis);
+        if (autoApproved) {
             request.setStatus(InspectionStatus.APPROVED);
             request.setDecisionReason("Berechtigter — legitimate interest presumed (§10(2) eWpRV)");
             request.setDecidedAt(Instant.now());
         } else {
             request.setStatus(InspectionStatus.REQUESTED);
         }
-        return requestRepository.save(request);
+        RegisterInspectionRequest saved = requestRepository.save(request);
+        if (autoApproved) {
+            eventPublisher.publishEvent(new RegisterInspectionEvent(
+                    saved.getId(), assetId, "AUTO_APPROVED", null, "SYSTEM", saved.getDecisionReason()));
+        }
+        return saved;
     }
 
     /** Operator approves a pending LEGITIMATE_INTEREST request. */
@@ -96,7 +107,10 @@ public class RegisterInspectionService {
         request.setDecidedBy(operatorEntityId);
         request.setDecidedAt(Instant.now());
         request.setUpdatedAt(Instant.now());
-        return requestRepository.save(request);
+        RegisterInspectionRequest saved = requestRepository.save(request);
+        eventPublisher.publishEvent(new RegisterInspectionEvent(
+                requestId, saved.getAssetId(), "APPROVED", operatorEntityId, "REGISTRY_ADMIN", reason));
+        return saved;
     }
 
     /** Operator rejects a pending request. */
@@ -110,7 +124,10 @@ public class RegisterInspectionService {
         request.setDecidedBy(operatorEntityId);
         request.setDecidedAt(Instant.now());
         request.setUpdatedAt(Instant.now());
-        return requestRepository.save(request);
+        RegisterInspectionRequest saved = requestRepository.save(request);
+        eventPublisher.publishEvent(new RegisterInspectionEvent(
+                requestId, saved.getAssetId(), "REJECTED", operatorEntityId, "REGISTRY_ADMIN", reason));
+        return saved;
     }
 
     /**
@@ -125,8 +142,9 @@ public class RegisterInspectionService {
 
         Asset asset = assetRepository.findById(request.getAssetId())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown asset " + request.getAssetId()));
+        // §10 disclosure is of the current register; a removed holder is no longer in it.
         List<AssetHolder> holders = holderRepository
-                .findByAssetId(request.getAssetId(), Pageable.unpaged()).getContent();
+                .findActiveByAssetId(request.getAssetId(), Pageable.unpaged()).getContent();
 
         byte[] pdf = extractRenderer.render(asset, holders, request.getLegalBasis(),
                 request.getRequesterName());

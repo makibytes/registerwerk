@@ -5,7 +5,13 @@ description: How Registerwerk implements the German Electronic Securities Act (e
 
 # Germany — Electronic Securities Act (eWpG)
 
-The **Gesetz über elektronische Wertpapiere** (eWpG, BGBl. I 2021 S. 1423) came into force on 10 June 2021, creating a legal framework for electronic securities that dispenses with the traditional paper certificate. Registerwerk implements both the **central register** variant (§ 12 eWpG) and the **crypto securities register** variant (§ 16 eWpG) for tokens on public blockchains.
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and configured assumptions. It is not legal
+    advice or evidence of eWpG compliance, regulatory authorisation, certification, or legal
+    effect. The register model and authority of each record require an instrument-, operator-,
+    service-, transaction-, and deployment-specific decision approved by qualified counsel.
+
+The **Gesetz über elektronische Wertpapiere** (eWpG, BGBl. I 2021 S. 1423) provides a legal framework for electronic securities. Registerwerk contains technical models that may support central-register or crypto-securities-register deployments, but the repository does not establish that either model is legally implemented for a particular instrument.
 
 ---
 
@@ -15,7 +21,7 @@ The **Gesetz über elektronische Wertpapiere** (eWpG, BGBl. I 2021 S. 1423) came
 
 The issuer of an electronic security must be identifiable and bear legal responsibility for the register entry.
 
-**Implementation:** The `Asset` entity stores `issuerId` referencing a `LegalEntity` with `Jurisdiction.DE_EWPG`. Full KYC/KYB must be completed and approved before the asset can be deployed. See [KYC & AML](../compliance/kyc-aml.md).
+**Repository behavior:** The `Asset` entity stores `issuerId` referencing a `LegalEntity`. KYC/KYB records and approval workflows exist, but issuance and deployment paths do not yet uniformly enforce an approved KYC state. See [KYC & AML](../compliance/kyc-aml.md).
 
 ---
 
@@ -41,12 +47,12 @@ See [Audit Log](../platform/audit-log.md) for the full implementation.
 For tokens on public blockchains, §16 requires a separate "crypto securities register" that:
 
 1. Records each token unit, its holder, and any encumbrances (Sperrvermerk)
-2. Is the **authoritative source of truth** — not the blockchain
+2. Has an authority and legal effect that must be determined for the selected register model
 3. Supports court-ordered freezes, pledges (Pfandrecht), liens (Pfändung), and succession blocks
 
-**Implementation:** Registerwerk inverts the usual "blockchain-first" assumption:
+**Repository behavior:** Registerwerk currently maintains both database records and selected on-chain state:
 
-- The `asset_holder` table in PostgreSQL is canonical
+- The `asset_holder` table in PostgreSQL is the current application holder record; whether it is the legal register requires an approved instrument-specific authority policy
 - The `ChainDriftDetectionJob` runs every 15 minutes to verify on-chain balances match the DB. Detected discrepancies are stored as `chain_drift_event` records and trigger `ChainDriftDetectedEvent` notifications.
 - The `holder_block` table implements the Sperrvermerk with block types: `PFANDRECHT`, `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`
 
@@ -67,7 +73,7 @@ flowchart LR
 
 Transfers require both parties to have completed identity verification and the transferor must not have an active `HolderBlock`.
 
-**Implementation:** Before executing a force-transfer, `TokenAdminController` checks:
+**Intended control mapping:** The following checks require repository verification and instrument-specific legal approval; this list must not be treated as proof that every transfer path is gated:
 
 1. Both issuer and target holder have valid, non-expired KYC (`KycStatus.APPROVED`)
 2. No active `HolderBlock` exists for the source holder on the asset in question

@@ -40,6 +40,11 @@ public class AssetBondTerms {
     @Column(name = "spread", precision = 10, scale = 8)
     private BigDecimal spread;
 
+    /** Issue price as a fraction of face value (e.g. 0.80 for 80%) — used by zero-coupon bonds,
+     *  where the discount to face value at issuance IS the return. */
+    @Column(name = "issue_price", nullable = false, precision = 10, scale = 8)
+    private BigDecimal issuePrice = BigDecimal.ONE;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "day_count", nullable = false, length = 20)
     private DayCountConvention dayCount;
@@ -93,6 +98,9 @@ public class AssetBondTerms {
 
     public BigDecimal getSpread() { return spread; }
     public void setSpread(BigDecimal spread) { this.spread = spread; }
+
+    public BigDecimal getIssuePrice() { return issuePrice; }
+    public void setIssuePrice(BigDecimal issuePrice) { this.issuePrice = issuePrice; }
 
     public DayCountConvention getDayCount() { return dayCount; }
     public void setDayCount(DayCountConvention dayCount) { this.dayCount = dayCount; }

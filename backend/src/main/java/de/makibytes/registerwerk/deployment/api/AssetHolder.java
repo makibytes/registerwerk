@@ -70,6 +70,17 @@ public class AssetHolder {
     @Column(name = "last_statement_at")
     private Instant lastStatementAt;
 
+    /**
+     * Soft-delete marker (§16 eWpG register entries must not simply vanish — a hard delete
+     * conflicts with retention/tamper-evidence obligations). Null means the holder record is
+     * still an active register entry; non-null is the instant {@link HolderService#removeHolder}
+     * closed it out. Compliance-facing listings/reports should filter this out (see the
+     * repository's {@code findActive*} methods); reconciliation/audit-facing code may
+     * legitimately still need to see removed rows.
+     */
+    @Column(name = "removed_at")
+    private Instant removedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -124,4 +135,7 @@ public class AssetHolder {
     public void setLegalCapacityNote(String legalCapacityNote) { this.legalCapacityNote = legalCapacityNote; }
     public Instant getLastStatementAt() { return lastStatementAt; }
     public void setLastStatementAt(Instant lastStatementAt) { this.lastStatementAt = lastStatementAt; }
+
+    public Instant getRemovedAt() { return removedAt; }
+    public void setRemovedAt(Instant removedAt) { this.removedAt = removedAt; }
 }

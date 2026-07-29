@@ -1,10 +1,14 @@
 package de.makibytes.registerwerk.wallet.web;
 
+import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
 import de.makibytes.registerwerk.wallet.internal.WalletDefaultService;
 import de.makibytes.registerwerk.wallet.api.WalletChainDefault;
 import de.makibytes.registerwerk.wallet.web.dto.WalletDefaultResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,15 +34,25 @@ public class WalletDefaultController {
         return ResponseEntity.ok(result);
     }
 
+    /**
+     * Rewires which wallet signs for a chain — every subsequent mint/burn/transfer on that
+     * chain moves to whatever key this points at. Guarded by step-up MFA plus a second
+     * approver (4-eyes), matching {@code WalletController}'s export/delete gating: this is
+     * at least as consequential as either of those.
+     */
     @PutMapping("/{chainId}")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_DEFAULT_CHANGED")
     public ResponseEntity<WalletDefaultResponse> setDefault(
             @PathVariable UUID chainId,
-            @RequestBody Map<String, UUID> body) {
+            @RequestBody Map<String, UUID> body,
+            Authentication auth,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         UUID walletId = body.get("walletId");
         if (walletId == null) {
             return ResponseEntity.badRequest().build();
         }
-        WalletChainDefault saved = defaultService.setDefault(chainId, walletId);
+        WalletChainDefault saved = defaultService.setDefault(chainId, walletId,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), approverId);
         return ResponseEntity.ok(toResponse(saved));
     }
 

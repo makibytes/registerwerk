@@ -37,22 +37,6 @@
   },
   {
     "type": "event",
-    "name": "IdentityRegistered",
-    "inputs": [
-      { "name": "investorAddress", "type": "address", "indexed": true },
-      { "name": "identity",        "type": "address", "indexed": true }
-    ]
-  },
-  {
-    "type": "event",
-    "name": "IdentityRemoved",
-    "inputs": [
-      { "name": "investorAddress", "type": "address", "indexed": true },
-      { "name": "identity",        "type": "address", "indexed": true }
-    ]
-  },
-  {
-    "type": "event",
     "name": "ComplianceAdded",
     "inputs": [{ "name": "compliance", "type": "address", "indexed": true }]
   }

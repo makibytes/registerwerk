@@ -5,11 +5,17 @@ description: Overview of shared compliance mechanisms that apply across all supp
 
 # Compliance Components
 
-Registerwerk implements a set of shared compliance components that apply across all four jurisdictions. Each component maps to one or more regulatory obligations and is implemented as a dedicated Spring Modulith module.
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This section records intended control mappings and current repository behavior. It is not
+    legal advice or evidence of compliance, regulatory authorisation, certification, or legal
+    effect. Applicability and control sufficiency require a current operator-, service-,
+    instrument-, transaction-, jurisdiction-, and deployment-specific review.
+
+Registerwerk contains shared technical components named for compliance workflows. A component or configured trigger does not prove that an obligation applies, that every relevant operation is gated, or that a statutory report or notification occurs.
 
 ---
 
-## Compliance trigger map
+## Intended control map — not a statement of implemented end-to-end enforcement
 
 ```mermaid
 flowchart TD
@@ -20,14 +26,14 @@ flowchart TD
     D -->|Yes| F[COMPLIANCE_OFFICER review]
     F -->|4-eyes accept| E
     F -->|Reject| G[KYC blocked]
-    E --> H[Token deployment]
+    E -. incomplete central gate .-> H[Token deployment]
     H --> I[Travel Rule check on transfers]
     H --> J[Sperrvermerk check on freezes]
     H --> K[Step-up auth on force ops]
     H --> L[Audit log — every operation]
-    L --> M[DORA incident detection]
-    M --> N[MiFIR trade reporting]
-    M --> O[DAC8 annual report]
+    L --> M[Manual incident records]
+    H --> N[DRAFT_UNVALIDATED MiFIR-shaped export]
+    H --> O[DRAFT_UNVALIDATED DAC8/CARF-shaped export]
 ```
 
 ---
@@ -41,11 +47,13 @@ flowchart TD
 | [Travel Rule](travel-rule.md) | `travelrule` | Any transfer ≥ €1,000 to external VASP | TFR Reg. (EU) 2023/1113 |
 | [Sperrvermerk](sperrvermerk.md) | `kyc` (HolderBlock) | Court order / pledge / operator action | eWpG §16 |
 | [Step-Up MFA & 4-Eyes](step-up-mfa.md) | `stepup` | Any regulator-grade operation | GwG §6(2), eWpG §16 |
-| [DORA](dora.md) | `dora` | ICT incident, RPC drift, indexer stale | DORA Reg. (EU) 2022/2554 |
-| [MiFIR Reporting](mifir.md) | `regreporting` | Trade execution events | MiFIR RTS 22 |
-| [DAC8 / CARF](dac8.md) | `regreporting` | Annual aggregation | DAC8 Directive (EU) 2023/2226 |
+| [DORA](dora.md) | `dora` | Manual incident/provider/test records and deadline reminders | Intended DORA mapping; applicability and sufficiency require review |
+| [MiFIR Reporting](mifir.md) | `regreporting` | Scheduled/on-demand draft export | `DRAFT_UNVALIDATED`; not an RTS 22 filing |
+| [DAC8 / CARF](dac8.md) | `regreporting` | Scheduled/on-demand current-holdings draft export | `DRAFT_UNVALIDATED`; not a DAC8/CARF/KStTG filing |
 | [Data Protection](data-protection.md) | cross-cutting | PII creation / deletion requests | GDPR Art. 30, 32, 35 |
+| [Repo/Lending Facility Review](lending-facility-review.md) | `lending` | Pre-production review of collateralized-lending contracts | MiFID II margin-lending, eWpG §24 |
+| [Token Admin Grants](token-admin-grants.md) | `asset` (AssetTokenAdminGrant) | Operator delegates forcedTransfer/forcedApprove/forceBurn to a customer entity | eWpG §24 Berichtigung, §26 Einziehung |
 
 ---
 
-All compliance events flow through the [audit log](../platform/audit-log.md), creating a traceable, tamper-evident record of every compliance decision.
+Selected state changes emit audit events. The repository does not establish that every compliance decision is captured or that the resulting record has the necessary evidentiary or legal effect.

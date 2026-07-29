@@ -5,7 +5,7 @@ description: The definitive implementation reference for the Registerwerk electr
 
 # Registerwerk — Technical & Regulatory Reference
 
-Registerwerk is an **eWpG-compliant electronic securities registry** that issues and manages tokenised securities across multiple blockchains. It bridges the world of capital markets regulation and distributed-ledger technology — allowing regulated issuers to deploy bonds, fund shares, and other instruments as blockchain tokens while remaining fully compliant with German, Luxembourgish, French, and Liechtenstein law.
+Registerwerk is a reference implementation for modelling and administering electronic securities and tokenised assets across multiple blockchains. The repository contains technical control components and jurisdiction-oriented configuration, but it is not evidence of legal compliance, regulatory authorisation, certification, or legal effect in Germany, Luxembourg, France, Liechtenstein, or elsewhere. Those conclusions require an operator-, service-, instrument-, transaction-, and deployment-specific review.
 
 ---
 

@@ -13,6 +13,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatDialogModule } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { DatePipe } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
@@ -24,9 +25,10 @@ import { CorporateActionsService } from '../../../core/api/corporate-actions.ser
 import { environment } from '../../../../environments/environment';
 import { AddressComponent } from '../../../shared/components/address.component';
 import { KycService } from '../../../core/api/kyc.service';
+import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../../core/api/gas-sponsorship.service';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 import {
-  LegalEntity, KycDocument, LegalEntityNameHistory,
+  LegalEntity, KycDocument, LegalEntityNameHistory, EntityMergeRecordView,
   KycJurisdictionApproval, KycComplianceResponse, Jurisdiction,
   JurisdictionRequirement, DocumentStatus, SyncStatus, ScreeningRun, HolderBlock,
 } from '../../../core/models';
@@ -304,11 +306,11 @@ interface OnchainIdentityView {
                   <mat-card-title style="font-size:14px;display:flex;align-items:center;gap:10px">
                     {{ jurisdictionLabel(jur) }}
                     @if (getJurisdictionStatus(jur) === 'APPROVED') {
-                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(16,185,129,0.12);color:#10b981">APPROVED</span>
+                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--rw-approved-bg);color:var(--rw-approved-fg)">APPROVED</span>
                     } @else if (getJurisdictionStatus(jur) === 'REJECTED') {
-                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(239,68,68,0.12);color:#ef4444">REJECTED</span>
+                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--rw-rejected-bg);color:var(--rw-rejected-fg)">REJECTED</span>
                     } @else {
-                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(245,158,11,0.12);color:#f59e0b">PENDING</span>
+                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--rw-pending-bg);color:var(--rw-pending-fg)">PENDING</span>
                     }
                   </mat-card-title>
                 </mat-card-header>
@@ -317,16 +319,16 @@ interface OnchainIdentityView {
                     @let cr = complianceByJurisdiction[jur];
                     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
                       @if (cr.fullyCompliant) {
-                        <span style="color:#10b981;font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">check_circle</mat-icon> All required documents present</span>
+                        <span style="color:var(--rw-text-success);font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">check_circle</mat-icon> All required documents present</span>
                       } @else {
                         @if (cr.missingCount > 0) {
-                          <span style="color:#ef4444;font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">cancel</mat-icon> {{ cr.missingCount }} missing</span>
+                          <span style="color:var(--rw-text-danger);font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">cancel</mat-icon> {{ cr.missingCount }} missing</span>
                         }
                         @if (cr.tooOldCount > 0) {
-                          <span style="color:#f59e0b;font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">schedule</mat-icon> {{ cr.tooOldCount }} too old</span>
+                          <span style="color:var(--rw-text-warning);font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">schedule</mat-icon> {{ cr.tooOldCount }} too old</span>
                         }
                         @if (cr.expiredCount > 0) {
-                          <span style="color:#ef4444;font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">event_busy</mat-icon> {{ cr.expiredCount }} expired</span>
+                          <span style="color:var(--rw-text-danger);font-size:13px"><mat-icon style="font-size:16px;vertical-align:middle">event_busy</mat-icon> {{ cr.expiredCount }} expired</span>
                         }
                       }
                     </div>
@@ -336,11 +338,11 @@ interface OnchainIdentityView {
                           @if (!doc.mandatory) {
                             <mat-icon style="font-size:14px;color:var(--rw-text-muted)">radio_button_unchecked</mat-icon>
                           } @else if (doc.present && !doc.expired && !doc.tooOld) {
-                            <mat-icon style="font-size:14px;color:#10b981">check_circle</mat-icon>
+                            <mat-icon style="font-size:14px;color:var(--rw-text-success)">check_circle</mat-icon>
                           } @else if (doc.tooOld) {
-                            <mat-icon style="font-size:14px;color:#f59e0b">schedule</mat-icon>
+                            <mat-icon style="font-size:14px;color:var(--rw-text-warning)">schedule</mat-icon>
                           } @else {
-                            <mat-icon style="font-size:14px;color:#ef4444">cancel</mat-icon>
+                            <mat-icon style="font-size:14px;color:var(--rw-text-danger)">cancel</mat-icon>
                           }
                           <span [style.font-weight]="doc.mandatory ? '600' : '400'">{{ doc.localName }}</span>
                           @if (!doc.mandatory) {
@@ -436,27 +438,81 @@ interface OnchainIdentityView {
         </mat-tab>
 
         <!-- History Tab -->
-        <mat-tab label="Name History">
+        <mat-tab label="History">
           <div class="tab-content">
             @if (historyLoading) {
               <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
             } @else {
+              <h4 style="margin:0 0 8px">Name Changes</h4>
               @for (entry of nameHistory; track entry.id) {
                 <div class="history-item">
                   <div>
-                    <div class="name">{{ entry.name }}</div>
+                    <div class="name">{{ entry.previousName }} → {{ entry.newName }}</div>
                     <div class="dates">
-                      From {{ entry.effectiveFrom | date:'mediumDate' }}
-                      @if (entry.effectiveTo) {
-                        &nbsp;— {{ entry.effectiveTo | date:'mediumDate' }}
-                      } @else {
-                        &nbsp;— current
-                      }
+                      Effective {{ entry.effectiveDate | date:'mediumDate' }}
+                      &nbsp;— {{ entry.changeType.replace('_', ' ') }}
                     </div>
                   </div>
                 </div>
               } @empty {
-                <p class="text-muted" style="text-align:center;padding:24px">No name history.</p>
+                <p class="text-muted" style="text-align:center;padding:16px">No name history.</p>
+              }
+
+              <mat-divider style="margin:16px 0" />
+
+              <h4 style="margin:0 0 8px">Mergers &amp; Acquisitions</h4>
+              @for (record of mergeRecords; track record.id) {
+                <div class="history-item">
+                  <div>
+                    <div class="name">
+                      {{ record.sourceEntityId === id ? 'Absorbed into' : 'Absorbed' }}
+                      {{ record.sourceEntityId === id ? record.targetEntityId : record.sourceEntityId }}
+                    </div>
+                    <div class="dates">
+                      Effective {{ record.effectiveDate | date:'mediumDate' }}
+                      &nbsp;— {{ record.mergeType }}
+                      @if (record.notes) { &nbsp;— {{ record.notes }} }
+                    </div>
+                  </div>
+                </div>
+              } @empty {
+                <p class="text-muted" style="text-align:center;padding:16px">No merge records.</p>
+              }
+
+              @if (entity && entity.status !== 'DISSOLVED') {
+                <mat-divider style="margin:16px 0" />
+                <h4 style="margin:0 0 8px">Record a Merger</h4>
+                <p class="hint-text" style="margin:0 0 8px;font-size:12px;color:var(--rw-text-secondary)">
+                  Records this entity as absorbed into another (M&amp;A event) and marks it dissolved —
+                  German commercial law requires this history to be retained, not deleted.
+                </p>
+                <div class="row-2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:640px">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Target entity ID (surviving entity)</mat-label>
+                    <input matInput [(ngModel)]="mergeForm.targetEntityId" placeholder="xxxxxxxx-…" />
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Merge type</mat-label>
+                    <mat-select [(ngModel)]="mergeForm.mergeType">
+                      <mat-option value="ABSORPTION">Absorption</mat-option>
+                      <mat-option value="CONSOLIDATION">Consolidation</mat-option>
+                    </mat-select>
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Effective date</mat-label>
+                    <input matInput type="date" [(ngModel)]="mergeForm.effectiveDate" />
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Notes</mat-label>
+                    <input matInput [(ngModel)]="mergeForm.notes" />
+                  </mat-form-field>
+                </div>
+                <button mat-raised-button color="warn"
+                        [disabled]="!mergeForm.targetEntityId || !mergeForm.effectiveDate"
+                        (click)="recordMerger()">
+                  <mat-icon>call_merge</mat-icon>
+                  Record Merger
+                </button>
               }
             }
           </div>
@@ -514,6 +570,82 @@ interface OnchainIdentityView {
             }
           </div>
         </mat-tab>
+
+        <!-- Gas Sponsorship Default (issuers only) -->
+        @if (entity.type === 'ISSUER') {
+          <mat-tab label="Gas Sponsorship">
+            <div class="tab-content">
+              <p style="font-size:13px;color:var(--rw-text-secondary);margin:0 0 16px;max-width:640px">
+                This issuer's default gas-sponsorship policy, inherited by every future asset
+                deployment unless a specific deployment overrides it (set on the asset's
+                deployment detail page). Sponsored transactions run through the on-chain
+                <code>EwpgPaymaster</code>. If no default and no override exists, investors
+                pay their own gas.
+              </p>
+
+              <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:20px;flex-wrap:wrap">
+                <mat-form-field appearance="outline">
+                  <mat-label>Sponsor</mat-label>
+                  <mat-select [(ngModel)]="gasSponsor">
+                    <mat-option value="ISSUER">Issuer</mat-option>
+                    <mat-option value="OPERATOR">Operator</mat-option>
+                  </mat-select>
+                </mat-form-field>
+                <mat-form-field appearance="outline">
+                  <mat-label>Monthly cap (ETH)</mat-label>
+                  <input matInput type="number" min="0" step="0.01" [(ngModel)]="gasMonthlyCapEth" />
+                </mat-form-field>
+                <button mat-raised-button color="primary" (click)="saveGasSponsorshipDefault()">
+                  <mat-icon>save</mat-icon>
+                  Set default
+                </button>
+              </div>
+
+              @if (gasPoliciesLoading) {
+                <div class="spinner-wrap"><mat-spinner diameter="28" /></div>
+              } @else {
+                <table mat-table [dataSource]="gasPolicies" style="width:100%">
+                  <ng-container matColumnDef="scope">
+                    <th mat-header-cell *matHeaderCellDef>Scope</th>
+                    <td mat-cell *matCellDef="let p">{{ p.assetDeploymentId ? 'Deployment override' : 'Issuer default' }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="sponsor">
+                    <th mat-header-cell *matHeaderCellDef>Sponsor</th>
+                    <td mat-cell *matCellDef="let p">{{ p.sponsor }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="monthlyCapEth">
+                    <th mat-header-cell *matHeaderCellDef>Monthly cap (ETH)</th>
+                    <td mat-cell *matCellDef="let p">{{ p.monthlyCapEth ?? 'Unlimited' }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="active">
+                    <th mat-header-cell *matHeaderCellDef>Active</th>
+                    <td mat-cell *matCellDef="let p">
+                      <mat-icon [style.color]="p.active ? 'green' : 'var(--rw-text-muted)'">{{ p.active ? 'check_circle' : 'cancel' }}</mat-icon>
+                    </td>
+                  </ng-container>
+                  <ng-container matColumnDef="createdAt">
+                    <th mat-header-cell *matHeaderCellDef>Created</th>
+                    <td mat-cell *matCellDef="let p">
+                      {{ p.createdAt | date:'mediumDate' }}
+                      @if (p.active) {
+                        <button mat-icon-button color="warn" matTooltip="Deactivate" (click)="deactivateGasPolicy(p)">
+                          <mat-icon style="font-size:18px">delete</mat-icon>
+                        </button>
+                      }
+                    </td>
+                  </ng-container>
+                  <tr mat-header-row *matHeaderRowDef="gasPolicyColumns"></tr>
+                  <tr mat-row *matRowDef="let row; columns: gasPolicyColumns;"></tr>
+                </table>
+                @if (gasPolicies.length === 0) {
+                  <p style="text-align:center;padding:24px;color:var(--rw-text-secondary);font-size:13px">
+                    No gas sponsorship policies configured for this issuer yet.
+                  </p>
+                }
+              }
+            </div>
+          </mat-tab>
+        }
 
         <!-- Corporate Actions Tab -->
         <mat-tab label="Documents &amp; Certificates">
@@ -640,9 +772,11 @@ export class CustomerDetailComponent implements OnInit {
   private readonly screeningService = inject(ScreeningService);
   private readonly holderBlockService = inject(HolderBlockService);
   private readonly corporateActionsService = inject(CorporateActionsService);
+  private readonly gasSponsorshipService = inject(GasSponsorshipService);
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
 
   loading = true;
   docsLoading = false;
@@ -654,6 +788,9 @@ export class CustomerDetailComponent implements OnInit {
   entity: LegalEntity | null = null;
   documents: KycDocument[] = [];
   nameHistory: LegalEntityNameHistory[] = [];
+  mergeRecords: EntityMergeRecordView[] = [];
+  mergeForm: { targetEntityId: string; mergeType: 'ABSORPTION' | 'CONSOLIDATION'; effectiveDate: string; notes: string } =
+    { targetEntityId: '', mergeType: 'ABSORPTION', effectiveDate: '', notes: '' };
   identities: OnchainIdentityView[] = [];
   screeningRuns: ScreeningRun[] = [];
   holderBlocks: HolderBlock[] = [];
@@ -673,6 +810,13 @@ export class CustomerDetailComponent implements OnInit {
   complianceByJurisdiction: Partial<Record<Jurisdiction, KycComplianceResponse>> = {};
   jurActionLoading: Partial<Record<Jurisdiction, boolean>> = {};
 
+  // ── Gas Sponsorship (issuer default) ─────────────────────────────────────
+  gasPoliciesLoading = false;
+  gasPolicies: GasSponsorshipPolicy[] = [];
+  gasSponsor: GasSponsor = 'ISSUER';
+  gasMonthlyCapEth: number | null = 0.5;
+  readonly gasPolicyColumns = ['scope', 'sponsor', 'monthlyCapEth', 'active', 'createdAt'];
+
   ngOnInit(): void {
     this.loadEntity();
   }
@@ -690,11 +834,45 @@ export class CustomerDetailComponent implements OnInit {
         this.loadJurisdictionApprovals();
         this.loadScreeningRuns();
         this.loadHolderBlocks();
+        if (entity.type === 'ISSUER') {
+          this.loadGasPolicies();
+        }
       },
       error: () => {
         this.loading = false;
         this.cdr.markForCheck();
       },
+    });
+  }
+
+  // ── Gas Sponsorship (issuer default) ─────────────────────────────────────
+
+  loadGasPolicies(): void {
+    this.gasPoliciesLoading = true;
+    this.gasSponsorshipService.listForIssuer(this.id).subscribe({
+      next: (policies) => {
+        this.gasPolicies = policies;
+        this.gasPoliciesLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => { this.gasPoliciesLoading = false; this.cdr.markForCheck(); },
+    });
+  }
+
+  saveGasSponsorshipDefault(): void {
+    this.gasSponsorshipService.createIssuerDefault(this.id, {
+      sponsor: this.gasSponsor,
+      monthlyCapEth: this.gasMonthlyCapEth ?? undefined,
+    }).subscribe({
+      next: () => this.loadGasPolicies(),
+      error: () => this.loadGasPolicies(),
+    });
+  }
+
+  deactivateGasPolicy(policy: GasSponsorshipPolicy): void {
+    if (!confirm('Deactivate this gas sponsorship policy?')) return;
+    this.gasSponsorshipService.deactivate(policy.id).subscribe({
+      next: () => this.loadGasPolicies(),
     });
   }
 
@@ -825,7 +1003,8 @@ export class CustomerDetailComponent implements OnInit {
     this.historyLoading = true;
     this.entityService.getEntityHistory(this.id).subscribe({
       next: (history) => {
-        this.nameHistory = history;
+        this.nameHistory = history.nameHistory;
+        this.mergeRecords = history.mergeRecords;
         this.historyLoading = false;
         this.cdr.markForCheck();
       },
@@ -950,6 +1129,23 @@ export class CustomerDetailComponent implements OnInit {
     this.entityService.dissolveEntity(this.id).subscribe({ next: () => this.loadEntity() });
   }
 
+  recordMerger(): void {
+    if (!confirm('This will mark the current entity as dissolved (absorbed). Continue?')) return;
+    this.entityService.mergeEntity(this.id, {
+      targetEntityId: this.mergeForm.targetEntityId,
+      mergeType: this.mergeForm.mergeType,
+      effectiveDate: this.mergeForm.effectiveDate,
+      notes: this.mergeForm.notes || undefined,
+    }).subscribe({
+      next: () => {
+        this.mergeForm = { targetEntityId: '', mergeType: 'ABSORPTION', effectiveDate: '', notes: '' };
+        this.loadEntity();
+        this.loadHistory();
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record merger.', 'Dismiss', { duration: 6000 }),
+    });
+  }
+
   generateToken(): void {
     this.router.navigate(['/onboarding/token', this.id]);
   }
@@ -961,7 +1157,7 @@ export class CustomerDetailComponent implements OnInit {
         window.open(res.handoffUrl, '_blank');
       },
       error: (err) => {
-        alert(err?.error?.message ?? 'Impersonation failed');
+        this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
       },
     });
   }

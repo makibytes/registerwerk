@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.kyc.internal.SperrvermerkService;
 import de.makibytes.registerwerk.kyc.web.dto.HolderBlockRequest;
 import de.makibytes.registerwerk.kyc.web.dto.HolderBlockLiftRequest;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -55,10 +56,14 @@ public class HolderBlockController {
     @RequiresStepUp(requireSecondApprover = true, reason = "SPERRVERMERK_CREATE")
     public ResponseEntity<HolderBlock> create(
             @RequestBody @Valid HolderBlockRequest req,
-            @AuthenticationPrincipal Jwt jwt) {
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         HolderBlock block = req.toEntity();
         UUID createdBy = UUID.fromString(jwt.getSubject());
-        return ResponseEntity.status(HttpStatus.CREATED).body(service.create(block, createdBy));
+        // Reads the aspect-validated dual-control approver — a newly created legal block must
+        // record its second approver, since the endpoint enforces that one exists.
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(service.create(block, createdBy, primaryRole(jwt), approverId));
     }
 
     @PostMapping("/{id}/lift")
@@ -67,9 +72,14 @@ public class HolderBlockController {
     public ResponseEntity<HolderBlock> lift(
             @PathVariable UUID id,
             @RequestBody @Valid HolderBlockLiftRequest req,
-            @AuthenticationPrincipal Jwt jwt) {
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         UUID liftedBy = UUID.fromString(jwt.getSubject());
-        // The second approver's UUID is extracted from the dual-control token by the aspect
-        return ResponseEntity.ok(service.lift(id, liftedBy, req.reason(), null));
+        return ResponseEntity.ok(service.lift(id, liftedBy, primaryRole(jwt), req.reason(), approverId));
+    }
+
+    private static String primaryRole(Jwt jwt) {
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        return (roles != null && !roles.isEmpty()) ? roles.get(0) : "REGISTRY_ADMIN";
     }
 }

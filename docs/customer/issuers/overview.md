@@ -6,7 +6,7 @@ sidebar_label: Overview
 
 # Issuer Overview
 
-As an issuer on the eWpG Registry, you can create, deploy, and manage tokenized securities that are legally recognized under the German Electronic Securities Act (eWpG). This section describes what issuers can do and how the platform supports the full issuance lifecycle.
+As an issuer, you can use Registerwerk to create, deploy, and administer tokenized-asset records. Legal recognition under the German Electronic Securities Act (eWpG), and the legal effect of any register or token action, depend on the approved instrument and operator perimeter and are not established by this software.
 
 ## What issuers can do
 

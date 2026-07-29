@@ -17,8 +17,8 @@ import java.util.UUID;
  * Checks whether a legal entity has the required KYC documents
  * for a given regulatory jurisdiction.
  *
- * Documents without a jurisdiction tag (null) are treated as universal
- * and satisfy requirements across all jurisdictions if the document type matches.
+ * Documents without a jurisdiction tag (null) are treated as matching the configured
+ * document rule across all jurisdictions. This is a workflow rule, not a legal conclusion.
  */
 @Service
 @Transactional(readOnly = true)

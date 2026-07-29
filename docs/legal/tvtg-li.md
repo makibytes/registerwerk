@@ -5,6 +5,11 @@ description: How Registerwerk implements Liechtenstein TVTG (Token Act) and SPG 
 
 # Liechtenstein — TVTG (Token Act)
 
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and configured assumptions. It is not Liechtenstein
+    legal advice or evidence of instrument classification, registration, regulatory authorisation,
+    compliance, or legal effect. Obtain current instrument-, operator-, service-, and deployment-specific review.
+
 Liechtenstein was the first European country to pass comprehensive token-specific legislation. The **Token and Trusted Technologies Service Provider Act** (TVTG, in force 1 January 2020) created a neutral, technology-agnostic legal framework treating tokens as containers for rights of any kind — including financial instruments.
 
 ---
@@ -91,13 +96,16 @@ Liechtenstein requires 10-year retention for all records related to token transa
 
 ## MiFIR reporting for Liechtenstein
 
-Liechtenstein is part of the EEA but not the EU. MiFIR applies via the EEA agreement. Transaction reporting uses a **bilateral arrangement** with the FMA, as Liechtenstein is not connected to ESMA's central reporting infrastructure. The `LI_TVTG` strategy in `MifirReportingService` marks reports as optional pending the bilateral arrangement's activation.
+MiFIR applicability, reporting capacity, competent authority, and channel require current external
+review. There is no `LI_TVTG` filing strategy in `MifirReportingService`; the current service
+produces only the `DRAFT_UNVALIDATED` prototype described in [MiFIR](../compliance/mifir.md).
 
 ---
 
 ## FMA incident reporting
 
-For major ICT incidents under DORA (applicable via EEA agreement), the `dora` module routes notifications for `LI_TVTG` incidents to the **FMA**. Timeline is identical to EU requirements (4h initial, 72h intermediate, 30 days final).
+DORA/EEA applicability, authority, and deadlines require current external review. The `dora`
+module does not route or transmit `LI_TVTG` incident notifications to FMA.
 
 ---
 

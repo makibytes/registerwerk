@@ -22,8 +22,9 @@ public interface TokenDeploymentPort {
      * @param chain        target chain
      * @param network      mainnet or testnet
      * @param ownerAddress on-chain owner address (for Canton: issuer party ID; for EVM: logged only)
-     * @return future resolving to the transaction hash / signature / contract ID
+     * @return future resolving to the transaction hash / signature / contract ID, plus the
+     *         contract address when the deploying chain can report it at submission time
      */
-    CompletableFuture<String> deploy(
+    CompletableFuture<TokenDeploymentResult> deploy(
             UUID assetId, TokenStandard standard, Chain chain, Network network, String ownerAddress);
 }

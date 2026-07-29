@@ -10,10 +10,13 @@ import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
 import org.bouncycastle.crypto.signers.Ed25519Signer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -23,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -57,6 +61,13 @@ import java.util.concurrent.CompletableFuture;
 public class StellarAssetService {
 
     private static final Logger log = LoggerFactory.getLogger(StellarAssetService.class);
+
+    /**
+     * Result of a Stellar asset issuance. {@code issuerAddress} is the issuing account's
+     * G-address — known synchronously from the configured wallet before the transaction is
+     * even built, unlike EVM where a contract address is only known once the tx is mined.
+     */
+    public record StellarDeployment(String txHash, String issuerAddress) {}
 
     // ── Stellar XDR constants ─────────────────────────────────────────────────
 
@@ -100,14 +111,17 @@ public class StellarAssetService {
     private final WalletSigner walletSigner;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final ApplicationEventPublisher eventPublisher;
 
     public StellarAssetService(
             ChainConfigRepository chainConfigRepository,
             WalletSigner walletSigner,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ApplicationEventPublisher eventPublisher) {
         this.chainConfigRepository = chainConfigRepository;
         this.walletSigner = walletSigner;
         this.objectMapper = objectMapper;
+        this.eventPublisher = eventPublisher;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
@@ -124,9 +138,9 @@ public class StellarAssetService {
      * @param network      MAINNET or TESTNET
      * @param issuerAddress Stellar G-address of the issuing account (used for logging; resolved
      *                      from the configured wallet if blank)
-     * @return future resolving to the Stellar transaction hash (hex-encoded)
+     * @return future resolving to the Stellar transaction hash and the issuer G-address
      */
-    public CompletableFuture<String> createStellarAsset(UUID assetId, Network network, String issuerAddress) {
+    public CompletableFuture<StellarDeployment> createStellarAsset(UUID assetId, Network network, String issuerAddress) {
         log.info("Creating Stellar asset: assetId={}, network={}", assetId, network);
 
         return CompletableFuture.supplyAsync(() -> {
@@ -150,8 +164,8 @@ public class StellarAssetService {
             byte[] envelope = buildEnvelope(txXdr, keys.publicKeyBytes(), signature);
             String txHashHex = submitTransaction(horizonUrl, envelope);
 
-            log.info("Stellar asset registered: assetId={} txHash={}", assetId, txHashHex);
-            return txHashHex;
+            log.info("Stellar asset registered: assetId={} txHash={} issuer={}", assetId, txHashHex, keys.address());
+            return new StellarDeployment(txHashHex, keys.address());
         });
     }
 
@@ -165,12 +179,22 @@ public class StellarAssetService {
      *
      * @param assetId        Registerwerk asset UUID (determines the asset code)
      * @param accountAddress Stellar G-address of the account to claw back from
+     * @param amount         amount to claw back, in the asset's human-readable units (e.g.
+     *                       "100.50") — a clawback amount can never exceed the actual trustline
+     *                       balance or Stellar rejects it as {@code CLAWBACK_UNDERFUNDED};
+     *                       callers must supply the real amount to reclaim (e.g. the holder's
+     *                       current registered balance) rather than this method guessing at a
+     *                       Horizon balance lookup
      * @param network        MAINNET or TESTNET
+     * @param deploymentId   Registerwerk deployment ID, for the audit record
+     * @param actorId        operator who triggered this clawback
+     * @param actorRole      the triggering actor's role, for the audit record
      * @return future resolving to the transaction hash
      */
-    public CompletableFuture<String> clawbackAsset(UUID assetId, String accountAddress, Network network) {
-        log.info("ADMIN clawback Stellar asset={} from account={} network={}",
-                assetId, accountAddress, network);
+    public CompletableFuture<String> clawbackAsset(UUID assetId, String accountAddress, BigDecimal amount,
+                                                     Network network, UUID deploymentId, UUID actorId, String actorRole) {
+        log.info("ADMIN clawback Stellar asset={} from account={} amount={} network={}",
+                assetId, accountAddress, amount, network);
 
         return CompletableFuture.supplyAsync(() -> {
             ChainConfig chain = resolveChainConfig(network);
@@ -181,16 +205,28 @@ public class StellarAssetService {
 
             String assetCode = deriveAssetCode(assetId);
             byte[] targetPubKey = strKeyDecode(accountAddress);
+            long amountStroops = toStroops(amount);
 
-            byte[] txXdr = buildClawbackTx(keys.publicKeyBytes(), sequence, assetCode, keys.publicKeyBytes(), targetPubKey);
+            byte[] txXdr = buildClawbackTx(keys.publicKeyBytes(), sequence, assetCode, keys.publicKeyBytes(),
+                    targetPubKey, amountStroops);
 
             String passphrase = network == Network.MAINNET ? PASSPHRASE_MAINNET : PASSPHRASE_TESTNET;
             byte[] txHash = computeTxHash(passphrase, txXdr);
             byte[] signature = ed25519Sign(keys.privKey(), txHash);
             byte[] envelope = buildEnvelope(txXdr, keys.publicKeyBytes(), signature);
 
-            return submitTransaction(horizonUrl, envelope);
+            String txHashHex = submitTransaction(horizonUrl, envelope);
+            publishAdminAction(deploymentId, "clawbackAsset",
+                    Map.of("accountAddress", accountAddress, "amount", amount.toPlainString()), actorId, actorRole);
+            return txHashHex;
         });
+    }
+
+    /** Stellar amounts on the wire (XDR {@code Int64}) are in stroops — 10,000,000 per unit
+     *  (7 decimal places), per the Stellar protocol. Horizon's own JSON responses do this
+     *  conversion for you, but XDR operations built directly (as here) must do it themselves. */
+    private static long toStroops(BigDecimal amount) {
+        return amount.movePointRight(7).setScale(0, RoundingMode.UNNECESSARY).longValueExact();
     }
 
     /**
@@ -203,10 +239,14 @@ public class StellarAssetService {
      * @param accountAddress Stellar G-address of the trustor account
      * @param authorize      {@code true} to restore authorization, {@code false} to revoke it
      * @param network        MAINNET or TESTNET
+     * @param deploymentId   Registerwerk deployment ID, for the audit record
+     * @param actorId        operator who triggered this change
+     * @param actorRole      the triggering actor's role, for the audit record
      * @return future resolving to the transaction hash
      */
     public CompletableFuture<String> setAuthorizationFlags(
-            UUID assetId, String accountAddress, boolean authorize, Network network) {
+            UUID assetId, String accountAddress, boolean authorize, Network network,
+            UUID deploymentId, UUID actorId, String actorRole) {
         log.info("ADMIN {} Stellar trustline: asset={} account={} network={}",
                 authorize ? "authorize" : "revoke", assetId, accountAddress, network);
 
@@ -231,8 +271,19 @@ public class StellarAssetService {
             byte[] signature = ed25519Sign(keys.privKey(), txHash);
             byte[] envelope = buildEnvelope(txXdr, keys.publicKeyBytes(), signature);
 
-            return submitTransaction(horizonUrl, envelope);
+            String txHashHex = submitTransaction(horizonUrl, envelope);
+            publishAdminAction(deploymentId, "setAuthorizationFlags",
+                    Map.of("accountAddress", accountAddress, "authorize", authorize), actorId, actorRole);
+            return txHashHex;
         });
+    }
+
+    /** Publishes the same {@code TokenAdminActionEvent} every EVM admin service uses, so
+     *  clawback and trustline-authorization changes reach the audit trail. */
+    private void publishAdminAction(UUID deploymentId, String methodName, Map<String, Object> params,
+                                     UUID actorId, String actorRole) {
+        eventPublisher.publishEvent(new de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent(
+                deploymentId, methodName, actorId, actorRole, params));
     }
 
     // ── Credential helper ─────────────────────────────────────────────────────
@@ -249,6 +300,9 @@ public class StellarAssetService {
 
     // ── Horizon REST helpers ──────────────────────────────────────────────────
 
+    /** Fails fast on any fetch error rather than falling back to a guessed sequence number,
+     *  which would just be submitted as a doomed transaction — mirrors the Starknet
+     *  nonce-fetch path's own "fail fast" convention. */
     private long fetchSequenceNumber(String horizonUrl, String accountId) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -259,11 +313,17 @@ public class StellarAssetService {
             HttpResponse<String> response = httpClient.send(request,
                     HttpResponse.BodyHandlers.ofString());
             JsonNode root = objectMapper.readTree(response.body());
-            long seq = root.path("sequence").asLong(0);
-            return seq + 1; // submit with next sequence
+            JsonNode seqNode = root.path("sequence");
+            if (seqNode.isMissingNode()) {
+                throw new IllegalStateException(
+                        "Horizon response for account " + accountId + " has no 'sequence' field: " + response.body());
+            }
+            return seqNode.asLong() + 1; // submit with next sequence
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
-            log.warn("Could not fetch sequence for {}, using 1: {}", accountId, e.getMessage());
-            return 1L;
+            throw new IllegalStateException(
+                    "Failed to fetch Stellar sequence number for account " + accountId, e);
         }
     }
 
@@ -324,7 +384,7 @@ public class StellarAssetService {
     }
 
     private byte[] buildClawbackTx(byte[] srcPubKey, long sequence,
-            String assetCode, byte[] issuerPubKey, byte[] fromPubKey) {
+            String assetCode, byte[] issuerPubKey, byte[] fromPubKey, long amountStroops) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(baos);
@@ -340,7 +400,9 @@ public class StellarAssetService {
             writeInt32(out, OP_CLAWBACK);
             writeAsset(out, assetCode, issuerPubKey);  // asset
             writeMuxedAccount(out, fromPubKey);        // from
-            writeInt64(out, Long.MAX_VALUE);           // amount = max (clawback all)
+            // Stellar has no "clawback all" sentinel; the amount must not exceed the actual
+            // trustline balance or the operation fails with CLAWBACK_UNDERFUNDED.
+            writeInt64(out, amountStroops);
 
             writeInt32(out, 0);
             out.flush();
@@ -582,10 +644,6 @@ public class StellarAssetService {
     }
 
     private static String deriveAssetCode(UUID assetId) {
-        // First 12 characters of the UUID (digits and hyphens removed, upper-cased)
-        return assetId.toString()
-                .replace("-", "")
-                .substring(0, 12)
-                .toUpperCase();
+        return de.makibytes.registerwerk.blockchain.api.StellarUtils.deriveAssetCode(assetId);
     }
 }

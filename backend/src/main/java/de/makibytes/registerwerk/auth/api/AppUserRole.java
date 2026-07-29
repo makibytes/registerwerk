@@ -7,5 +7,6 @@ public enum AppUserRole {
     ISSUER,
     INVESTOR,
     COMPANY_ADMIN,
-    TRADER
+    TRADER,
+    DAPP_PUBLISHER
 }

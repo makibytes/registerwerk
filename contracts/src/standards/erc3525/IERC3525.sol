@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Based on EIP-3525 authored by Solv Protocol. Vendored to avoid external dependency.
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.36;
 
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 

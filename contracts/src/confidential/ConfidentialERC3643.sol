@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.36;
 
 // Zama fhEVM imports (available after `forge install zama-ai/fhevm-solidity`).
 import "@fhevm/lib/TFHE.sol";
-import "@fhevm/lib/FHE.sol";
 import "@fhevm/gateway/GatewayCaller.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -23,9 +22,9 @@ import "./ConfidentialERC20.sol";
  *  - Owner/agent roles mirror the non-confidential {EwpgERC3643} so the
  *    Registerwerk lifecycle services can treat both variants uniformly.
  *
- * Supported fhEVM networks:
- *  - Fhenix mainnet (8008135) / Helium testnet (21888)
- *  - Inco   mainnet (21097)   / Rivest testnet (9090)
+ * FHEVM/Gateway infrastructure is injected via {ConfidentialERC20.FhevmInfra}
+ * at construction — see that contract's class-level note for why these
+ * addresses are not hardcoded per network.
  */
 interface IIdentityRegistryMinimal {
     function isVerified(address account) external view returns (bool);
@@ -71,11 +70,12 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
         bytes32 _assetId,
         string memory _name,
         string memory _symbol,
-        address _kmsGateway,
+        ConfidentialERC20.FhevmInfra memory _infra,
+        address[] memory _initialViewers,
         address _identityRegistry,
         address _compliance,
         address _owner
-    ) ConfidentialERC20(_assetId, _name, _symbol, _kmsGateway, _owner) {
+    ) ConfidentialERC20(_assetId, _name, _symbol, _infra, _initialViewers, _owner) {
         identityRegistry = _identityRegistry;
         compliance       = _compliance;
         isAgent[_owner]  = true;
@@ -122,7 +122,7 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
         address to,
         einput encryptedAmount,
         bytes calldata inputProof
-    ) public virtual returns (euint64 transferred) {
+    ) public virtual override returns (euint64 transferred) {
         _checkTransfer(msg.sender, to);
         euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
         transferred = _transfer(msg.sender, to, amount);
@@ -135,7 +135,7 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
         address to,
         einput encryptedAmount,
         bytes calldata inputProof
-    ) public virtual onlyAgent {
+    ) public virtual override onlyAgent {
         if (identityRegistry != address(0)
             && !IIdentityRegistryMinimal(identityRegistry).isVerified(to)) {
             revert RecipientNotVerified();
@@ -143,9 +143,9 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
         euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
         _balances[to] = TFHE.add(_balances[to], amount);
         _totalSupply  = TFHE.add(_totalSupply, amount);
-        TFHE.allowThis(_balances[to]);
-        TFHE.allow(_balances[to], to);
-        TFHE.allowThis(_totalSupply);
+        _grantBalanceAcl(to);
+        _grantSupplyAcl();
+        _grantHandleAcl(amount);
         emit ConfidentialMint(to, amount);
         if (compliance != address(0)) {
             IConfidentialCompliance(compliance).created(to, amount);
@@ -156,17 +156,37 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
         address from,
         einput encryptedAmount,
         bytes calldata inputProof
-    ) public virtual onlyAgent {
+    ) public virtual override onlyAgent {
         euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
         ebool enough   = TFHE.le(amount, _balances[from]);
         euint64 actual = TFHE.select(enough, amount, TFHE.asEuint64(0));
         _balances[from] = TFHE.sub(_balances[from], actual);
         _totalSupply    = TFHE.sub(_totalSupply, actual);
-        TFHE.allowThis(_balances[from]);
-        TFHE.allowThis(_totalSupply);
+        _grantBalanceAcl(from);
+        _grantSupplyAcl();
+        _grantHandleAcl(actual);
         emit ConfidentialBurn(from, actual);
         if (compliance != address(0)) {
             IConfidentialCompliance(compliance).destroyed(from, actual);
+        }
+    }
+
+    /// @notice Confidential allowance-based transfer that enforces the same T-REX identity/
+    ///         freeze/pause/modular-compliance gating as {confidentialTransfer} — without this
+    ///         override the base {ConfidentialERC20.confidentialTransferFrom} would let any
+    ///         approved spender move encrypted tokens between two addresses with zero compliance
+    ///         enforcement, bypassing every check a direct {confidentialTransfer} is subject to.
+    function confidentialTransferFrom(
+        address from,
+        address to,
+        einput encryptedAmount,
+        bytes calldata inputProof
+    ) public virtual override returns (euint64 transferred) {
+        _checkTransfer(from, to);
+        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
+        transferred = _transferFrom(from, to, amount);
+        if (compliance != address(0)) {
+            IConfidentialCompliance(compliance).transferred(from, to, transferred);
         }
     }
 
@@ -178,13 +198,21 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
         address to,
         einput encryptedAmount,
         bytes calldata inputProof
-    ) external onlyAgent returns (euint64) {
+    ) external onlyAgent returns (euint64 transferred) {
         if (identityRegistry != address(0)
             && !IIdentityRegistryMinimal(identityRegistry).isVerified(to)) {
             revert RecipientNotVerified();
         }
         euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
-        return _transfer(from, to, amount);
+        transferred = _transfer(from, to, amount);
+        // Bypassing _checkTransfer (pause/freeze) is intentional for a regulatory override, but
+        // the compliance module's bookkeeping (cumulative holdings/investor counts/transfer
+        // limits) must still be told the transfer happened — real T-REX's Token.forcedTransfer
+        // (contracts/lib/erc3643/contracts/token/Token.sol) does the same, otherwise the module's
+        // internal state silently drifts from on-chain reality after every forced transfer.
+        if (compliance != address(0)) {
+            IConfidentialCompliance(compliance).transferred(from, to, transferred);
+        }
     }
 
     // ── Internal ───────────────────────────────────────────────────────────

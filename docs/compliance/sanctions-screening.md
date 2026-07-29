@@ -5,7 +5,15 @@ description: PEP and sanctions screening implementation using OpenSanctions and 
 
 # Sanctions Screening
 
-Registerwerk performs automated sanctions and PEP (Politically Exposed Person) screening at all critical points in the customer lifecycle. This satisfies GwG §10(2), AMLD6 Art. 18, and MiCAR Art. 60 obligations across all four [supported jurisdictions](../legal/index.md).
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and configured workflows. It is not evidence of
+    sanctions/PEP compliance or of complete, current, licensed, or appropriately matched source
+    data. Lists, scope, matching thresholds, review, overrides, cadence, and record retention
+    require operator- and jurisdiction-specific approval.
+
+Registerwerk contains sanctions and PEP screening triggers at the lifecycle points listed below.
+Coverage, source quality, matching, review, override, cadence, and legal sufficiency remain
+unverified and require the approvals stated above.
 
 ---
 

@@ -5,9 +5,19 @@ metadata:
   name: {{ include "registerwerk.fullname" . }}
   labels:
     {{- include "registerwerk.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- if or .Values.ingress.annotations .Values.ingress.certManagerClusterIssuer }}
   annotations:
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.ingress.certManagerClusterIssuer }}
+    # Previously there was no cert-manager integration at all — the TLS secret referenced
+    # below was assumed to pre-exist, provisioned entirely out-of-band with nothing automating
+    # renewal (Phase 12, finding #11). cert-manager's ingress-shim watches for this annotation
+    # and automatically provisions/renews that secret once cert-manager + this ClusterIssuer
+    # are installed in the cluster (not something this chart can install for you).
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManagerClusterIssuer }}
+    {{- end }}
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}

@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.audit;
 
 import de.makibytes.registerwerk.kyc.events.KycApprovedEvent;
+import de.makibytes.registerwerk.kyc.events.KycRejectedEvent;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
 
@@ -54,5 +56,55 @@ class AuditModuleScenarioIT {
                                 "SELECT count(*) FROM audit_event WHERE subject_id = ? AND event_type = 'KYC_APPROVED'",
                                 Integer.class, entityId))
                 .andVerify(count -> assertThat(count).isGreaterThan(0));
+    }
+
+    @Test
+    @DisplayName("Consecutively recorded audit entries link via entry_hash/prev_hash and populate sequence_no")
+    void auditEventsFormAHashChain(Scenario scenario) {
+        var subjectId = UUID.randomUUID();
+        var actorId = UUID.randomUUID();
+        var first = new KycApprovedEvent(subjectId, actorId, "REGISTRY_ADMIN", Map.of("jurisdiction", "DE"));
+
+        scenario.publish(first)
+                .andWaitForStateChange(() -> jdbc.queryForObject(
+                        "SELECT entry_hash IS NOT NULL FROM audit_event "
+                        + "WHERE subject_id = ? AND event_type = 'KYC_APPROVED'",
+                        Boolean.class, subjectId))
+                .andVerify(populated -> assertThat(populated).isTrue());
+
+        var second = new KycRejectedEvent(subjectId, actorId, "REGISTRY_ADMIN", Map.of("reason", "duplicate submission"));
+
+        scenario.publish(second)
+                .andWaitForStateChange(() -> jdbc.queryForObject(
+                        "SELECT entry_hash IS NOT NULL FROM audit_event "
+                        + "WHERE subject_id = ? AND event_type = 'KYC_REJECTED'",
+                        Boolean.class, subjectId))
+                .andVerify(populated -> assertThat(populated).isTrue());
+
+        byte[] firstEntryHash = jdbc.queryForObject(
+                "SELECT entry_hash FROM audit_event WHERE subject_id = ? AND event_type = 'KYC_APPROVED'",
+                byte[].class, subjectId);
+        byte[] secondPrevHash = jdbc.queryForObject(
+                "SELECT prev_hash FROM audit_event WHERE subject_id = ? AND event_type = 'KYC_REJECTED'",
+                byte[].class, subjectId);
+        Long firstSeq = jdbc.queryForObject(
+                "SELECT sequence_no FROM audit_event WHERE subject_id = ? AND event_type = 'KYC_APPROVED'",
+                Long.class, subjectId);
+        Long secondSeq = jdbc.queryForObject(
+                "SELECT sequence_no FROM audit_event WHERE subject_id = ? AND event_type = 'KYC_REJECTED'",
+                Long.class, subjectId);
+
+        assertThat(HexFormat.of().formatHex(secondPrevHash))
+                .as("second entry's prev_hash must equal the first entry's entry_hash")
+                .isEqualTo(HexFormat.of().formatHex(firstEntryHash));
+        assertThat(secondSeq).isGreaterThan(firstSeq);
+
+        byte[] tip = jdbc.queryForObject("SELECT entry_hash FROM audit_chain_tip WHERE id = TRUE", byte[].class);
+        assertThat(HexFormat.of().formatHex(tip))
+                .as("chain tip must advance to the last-written entry's hash")
+                .isEqualTo(HexFormat.of().formatHex(
+                        jdbc.queryForObject(
+                                "SELECT entry_hash FROM audit_event WHERE subject_id = ? AND event_type = 'KYC_REJECTED'",
+                                byte[].class, subjectId)));
     }
 }

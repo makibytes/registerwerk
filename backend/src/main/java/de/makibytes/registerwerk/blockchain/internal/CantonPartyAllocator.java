@@ -2,10 +2,7 @@ package de.makibytes.registerwerk.blockchain.internal;
 
 import com.daml.ledger.javaapi.data.AllocatePartyResponse;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
-import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.wallet.api.WalletStorage;
@@ -50,10 +47,6 @@ public class CantonPartyAllocator {
      * @return allocated party ID and JWT
      */
     public AllocationResult allocateParty(UUID walletId, ChainConfig chainConfig, String displayName) {
-        Network network = chainConfig.getNetworkType() == ChainConfig.NetworkType.MAINNET
-                ? Network.MAINNET : Network.TESTNET;
-        ChainDescriptor descriptor = new ChainDescriptor(Chain.CANTON, network);
-
         CantonLedgerClient client = (CantonLedgerClient) registry.getCantonClientByIdentifier(chainConfig.getIdentifier());
 
         AllocatePartyResponse response = client.partyManagementClient()
@@ -63,10 +56,14 @@ public class CantonPartyAllocator {
         String partyId = response.getPartyDetails().getParty();
         log.info("Allocated Canton party '{}' on {}", partyId, chainConfig.getIdentifier());
 
-        // For JWT: we reuse the participant-level admin token stored in CantonProperties.
-        // Per-party JWT issuance is a Canton Enterprise feature; for open-source Canton,
-        // the admin token grants rights for all locally hosted parties.
-        String jwt = resolveJwt(chainConfig.getIdentifier());
+        // Known limitation, not a pending fix: open-source/Community Canton has no API to mint
+        // a JWT scoped to a single party — only Canton Enterprise supports per-party token
+        // issuance. On Community Canton every locally hosted party is authorized by the
+        // participant's shared admin token, so there is deliberately nothing party-specific to
+        // store here; submissions for this party go through CantonLedgerClient's own
+        // admin-token-bearing channel. Revisit only if/when the participant upgrades to
+        // Canton Enterprise.
+        String jwt = "";
 
         String keystorePath = walletStorage.storeCanton(walletId, partyId, jwt);
         return new AllocationResult(partyId, keystorePath);
@@ -87,15 +84,4 @@ public class CantonPartyAllocator {
      * @param keystorePath relative path of the stored credentials file
      */
     public record AllocationResult(String partyId, String keystorePath) {}
-
-    private String resolveJwt(String chainIdentifier) {
-        // Return the admin token from the participant config.
-        // In production this token covers all parties hosted on the participant.
-        // The registry's CantonLedgerClient was built with this token.
-        CantonLedgerClient client = (CantonLedgerClient) registry.getCantonClientByIdentifier(chainIdentifier);
-        // The client itself holds the JWT used for its own connection.
-        // We surface it for storage so per-wallet signing can reuse it.
-        // TODO: when per-party JWT issuance is available (Canton Enterprise), replace this.
-        return "";
-    }
 }

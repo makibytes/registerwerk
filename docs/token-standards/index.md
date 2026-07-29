@@ -1,11 +1,11 @@
 ---
 title: Token Standards
-description: All 21 token standards supported by Registerwerk — comparison, use cases, and implementation status.
+description: Token-standard implementations represented in Registerwerk, with comparison, use cases, and implementation status.
 ---
 
 # Token Standards
 
-Registerwerk supports 21 token standards across EVM, Solana, StarkNet, Stellar, and Canton chains. Each standard has distinct properties that make it suitable for different types of financial instruments.
+Registerwerk contains implementations, integrations, or placeholders for token standards across EVM, Solana, StarkNet, Stellar, and Canton chains. Presence in this table does not establish production readiness or suitability for a financial instrument.
 
 ---
 
@@ -13,26 +13,26 @@ Registerwerk supports 21 token standards across EVM, Solana, StarkNet, Stellar, 
 
 | Standard | Chain | Type | Use case | Confidential variant | Status |
 |---|---|---|---|---|---|
-| [ERC-20](erc20.md) | EVM | Fungible | Equity, utility | CONF_ERC20 | ✅ Production |
-| [ERC-721](erc721.md) | EVM | Non-fungible | Unique certificates, NFT bonds | — | ✅ Production |
-| [ERC-1155](erc1155.md) | EVM | Multi-token | Batch issuance | — | ✅ Production |
-| [ERC-3525](erc3525.md) | EVM | Semi-fungible | Bonds with tranches, fund series | STARKNET_ERC3525 | ✅ Production |
-| [ERC-3643](erc3643.md) | EVM | Fungible + identity | Regulated securities, permissioned | CONF_ERC3643 | ✅ Production |
-| [ERC-4626](erc4626.md) | EVM | Vault (sync) | Money-market funds, daily NAV | — | ✅ Production |
-| [ERC-7540](erc7540.md) | EVM | Vault (async) | Institutional funds, T+1/T+2 | — | ✅ Production |
-| [DAML BOND FIXED](canton-daml.md) | Canton | Bond | Fixed-rate bonds on private ledger | — | ✅ (–Pcanton) |
-| [DAML BOND FLOATING](canton-daml.md) | Canton | Bond | Floating-rate bonds | — | ✅ (–Pcanton) |
-| [DAML BOND ZERO](canton-daml.md) | Canton | Bond | Zero-coupon bonds | — | ✅ (–Pcanton) |
-| [CANTON_TOKEN](canton-daml.md) | Canton | Generic | DAML-based digital asset | — | ✅ (–Pcanton) |
-| [SPL](../blockchains/solana.md) | Solana | Fungible | Solana-native tokens | — | ✅ Production |
-| [SPL_2022](spl-2022.md) | Solana | Fungible + ext. | Extended Solana tokens | — | ✅ Production |
-| [SPL_2022_BOND](spl-2022.md) | Solana | Fungible + interest | Interest-bearing bonds on Solana | — | ✅ Production |
-| [SPL_2022_CONFIDENTIAL](spl-2022.md) | Solana | Confidential | Confidential Solana token | — | ✅ Production |
+| [ERC-20](erc20.md) | EVM | Fungible | Equity, utility | CONF_ERC20 | Implementation present; readiness unverified |
+| [ERC-721](erc721.md) | EVM | Non-fungible | Unique certificates, NFT bonds | — | Implementation present; readiness unverified |
+| [ERC-1155](erc1155.md) | EVM | Multi-token | Batch issuance | — | Implementation present; readiness unverified |
+| [ERC-3525](erc3525.md) | EVM | Semi-fungible | Bonds with tranches, fund series | STARKNET_ERC3525 | Implementation present; readiness unverified |
+| [ERC-3643](erc3643.md) | EVM | Fungible + identity | Regulated securities, permissioned | CONF_ERC3643 | Implementation present; readiness unverified |
+| [ERC-4626](erc4626.md) | EVM | Vault (sync) | Money-market funds, daily NAV | — | Implementation present; economic model/readiness unverified |
+| [ERC-7540](erc7540.md) | EVM | Vault (async) | Institutional funds, T+1/T+2 | — | Implementation present; economic model/readiness unverified |
+| [DAML BOND FIXED](canton-daml.md) | Canton | Bond | Fixed-rate bonds on private ledger | — | Optional implementation (`-Pcanton`); readiness unverified |
+| [DAML BOND FLOATING](canton-daml.md) | Canton | Bond | Floating-rate bonds | — | Optional implementation (`-Pcanton`); readiness unverified |
+| [DAML BOND ZERO](canton-daml.md) | Canton | Bond | Zero-coupon bonds | — | Optional implementation (`-Pcanton`); readiness unverified |
+| [CANTON_TOKEN](canton-daml.md) | Canton | Generic | DAML-based digital asset | — | Optional implementation (`-Pcanton`); readiness unverified |
+| [SPL](../blockchains/solana.md) | Solana | Fungible | Solana-native tokens | — | Integration present; readiness unverified |
+| [SPL_2022](spl-2022.md) | Solana | Fungible + ext. | Extended Solana tokens | — | Integration present; readiness unverified |
+| [SPL_2022_BOND](spl-2022.md) | Solana | Fungible + interest | Interest-bearing bonds on Solana | — | Integration present; readiness unverified |
+| [SPL_2022_CONFIDENTIAL](spl-2022.md) | Solana | Confidential | Confidential Solana token | — | Integration present; readiness unverified |
 | [STARKNET_ERC20](../blockchains/starknet-stellar.md) | StarkNet | Fungible | Cairo ERC-20 equivalent | — | ⚠️ Placeholder |
 | [STARKNET_ERC3525](../blockchains/starknet-stellar.md) | StarkNet | Semi-fungible | Cairo ERC-3525 equivalent | — | ⚠️ Placeholder |
 | [STELLAR_ASSET](../blockchains/starknet-stellar.md) | Stellar | Asset | Stellar-native issued asset | — | ⚠️ Placeholder |
-| [CONF_ERC20](confidential.md) | Fhenix / Inco | Confidential fungible | Privacy-preserving equity | — | ✅ Production |
-| [CONF_ERC3643](confidential.md) | Fhenix / Inco | Confidential regulated | Privacy-preserving regulated security | — | ✅ Production |
+| [CONF_ERC20](confidential.md) | Fhenix / Inco | Confidential fungible | Privacy-preserving equity | — | Implementation present; readiness unverified |
+| [CONF_ERC3643](confidential.md) | Fhenix / Inco | Confidential regulated | Privacy-preserving regulated security | — | Implementation present; readiness unverified |
 
 ---
 

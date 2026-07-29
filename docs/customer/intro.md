@@ -6,7 +6,7 @@ sidebar_label: Introduction
 
 # Welcome to the eWpG Registry
 
-The eWpG Registry is a digital securities registry compliant with the German Electronic Securities Act (Elektronisches Wertpapiergesetz — eWpG). It enables issuers to tokenize securities on public blockchains while maintaining full regulatory compliance.
+Registerwerk is a reference implementation for modelling and administering electronic securities and tokenized assets. It includes workflows and controls intended to support regulated deployments, but use of the software does not by itself establish eWpG compliance, regulatory authorisation, or legal effect.
 
 ## What you can do
 

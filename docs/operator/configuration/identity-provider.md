@@ -48,7 +48,9 @@ The backend is an OAuth2 Resource Server. It accepts JWTs from any OIDC-complian
    ENTRA_CLIENT_SECRET=<client-secret>
    ```
 
-Configure Kong OIDC plugin using `gateway/plugins/oidc-entra.yml`.
+Optionally, if running Kong Enterprise/Konnect, you can additionally terminate OIDC at the
+gateway using `gateway/plugins/oidc-entra.yml` — the backend validates the JWT itself either way,
+so this is defense-in-depth, not a requirement.
 
 ## Self-managed Keycloak
 
@@ -63,14 +65,15 @@ Configure Kong OIDC plugin using `gateway/plugins/oidc-entra.yml`.
    ENTRA_CLIENT_SECRET=<client-secret>
    ```
 
-Configure Kong OIDC plugin using `gateway/plugins/oidc-self-managed.yml`.
+Optionally, terminate OIDC at Kong too using `gateway/plugins/oidc-self-managed.yml` (Enterprise/Konnect only).
 
 ## JWT claims expected
 
-The backend's `JwtEntityClaimsConverter` reads:
-- `sub` — user subject (mapped to entity via Kong entity-mapper)
-- `roles` — list of role strings (e.g. `["ISSUER", "COMPANY_ADMIN"]`)
+The backend's `JwtEntityClaimsConverter` reads claims directly off the validated JWT — it does
+not rely on any gateway-injected header:
+- `sub` — user subject
+- `roles` — list of role strings (e.g. `["ISSUER", "COMPANY_ADMIN"]`), turned into `ROLE_*` authorities
+- `entity_id` — the legal entity UUID, for multi-tenant scoping
 
-The Kong plugin injects:
-- `X-Entity-Id` — UUID of the legal entity
-- `X-Entity-Roles` — comma-separated roles
+Configure your IdP's token/claims mapping so these are present in the issued JWT. There is no
+Kong-side entity-mapping step in this repo's OSS Kong setup.

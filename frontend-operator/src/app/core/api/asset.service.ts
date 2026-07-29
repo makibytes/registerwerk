@@ -54,6 +54,11 @@ export class AssetService {
     return this.http.post<Asset>(`${this.base}/${id}/suspend`, {});
   }
 
+  /** Correction path for a wrongful suspend — moves a SUSPENDED asset back to ISSUED. */
+  reactivateAsset(id: string): Observable<Asset> {
+    return this.http.post<Asset>(`${this.base}/${id}/reactivate`, {});
+  }
+
   redeemAsset(id: string): Observable<Asset> {
     return this.http.post<Asset>(`${this.base}/${id}/redeem`, {});
   }
@@ -66,12 +71,12 @@ export class AssetService {
     return this.http.get<AssetHolder[]>(`${this.base}/${assetId}/holders`);
   }
 
-  mint(assetId: string, body: { toAddress: string; amount: number }): Observable<unknown> {
-    return this.http.post(`${this.base}/${assetId}/mint`, body);
+  mint(assetId: string, deploymentId: string, body: { toAddress: string; amount: number }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${deploymentId}/issuer/mint`, body);
   }
 
-  burn(assetId: string, body: { fromAddress: string; amount: number }): Observable<unknown> {
-    return this.http.post(`${this.base}/${assetId}/burn`, body);
+  burn(assetId: string, deploymentId: string, body: { fromAddress: string; amount: number }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${deploymentId}/issuer/burn`, body);
   }
 
   listDocuments(assetId: string): Observable<AssetDocument[]> {

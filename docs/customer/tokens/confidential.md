@@ -6,78 +6,67 @@ sidebar_label: Confidential Tokens
 
 # Confidential ERC-3643
 
-Confidential ERC-3643 extends the standard T-REX security token with **Fully Homomorphic Encryption (FHE)**, provided by Zama's fhEVM technology. Investor balances and transfer amounts are encrypted on-chain — they are not visible to the public, while compliance enforcement and auditability are fully preserved.
+Confidential ERC-3643 extends the standard T-REX security token with **Fully Homomorphic
+Encryption (FHE)**, using Zama's fhEVM technology. Investor balances and transfer amounts are
+encrypted on-chain — not visible to the public — while compliance enforcement (KYC, freeze,
+pause) still applies.
 
 ## What is Fully Homomorphic Encryption?
 
-In normal computing, you must decrypt data before you can work with it. Fully Homomorphic Encryption (FHE) is a special form of encryption that allows computation to be performed directly on encrypted data — without ever decrypting it.
-
-In plain terms: the smart contract can check whether a transfer is compliant, add or subtract balances, and enforce all compliance rules — all while the actual numbers remain hidden behind encryption. Even the blockchain nodes processing the transaction cannot see the values.
+FHE allows computation to happen directly on encrypted data, without ever decrypting it. The
+smart contract can check whether a transfer is compliant and update balances while the actual
+numbers stay hidden — even from the blockchain nodes processing the transaction.
 
 ## Why confidentiality matters for institutional securities
 
-Public blockchains are, by design, transparent. This is great for auditability but creates problems for institutional investors:
+Public blockchains are transparent by design, which creates real problems for institutional
+holders:
 
-- **Market impact**: Large position sizes, if visible, can move prices against the holder
-- **Competitive sensitivity**: Institutional strategies depend on keeping position sizes private
-- **Regulatory requirements**: Some jurisdictions require that investor holdings not be disclosed to other market participants
+- **Market impact** — visible large positions can move prices against the holder
+- **Competitive sensitivity** — position sizes can reveal strategy
+- **Regulatory requirements** — some jurisdictions restrict disclosure of holdings to other
+  market participants
 
-Confidential ERC-3643 solves this by making balances and transfer amounts visible only to:
-- The investor themselves (via their wallet)
-- The issuer (via a designated decryption key)
-- The registry operator (for compliance and audit purposes)
-- Any auditor explicitly granted access
+## Who can see what
 
-## How it works
+Only you can decrypt your own balance — not other investors, not the public. The registry
+operator and an independent auditor can also decrypt your balance (that's a regulatory
+requirement, not a bug: eWpG registry oversight and audit obligations don't disappear because a
+token is confidential), and the issuer can see all holders' balances on their own asset. Nobody
+else can — this is enforced on-chain by Zama's access-control list, not by trusting Registerwerk's
+backend: the platform itself cannot decrypt your balance unless it holds a key you're aware of
+(the operator's, for reporting and reconciliation obligations).
 
-When you receive or transfer a Confidential ERC-3643 token:
+## Which chains support this
 
-1. The token amount is encrypted using your public FHE key before the transaction is submitted
-2. The smart contract processes the encrypted transfer, updating encrypted balance states
-3. The blockchain records only the encrypted values — no one can read the actual amounts from the transaction data
-4. To view your balance, you use your private key to request decryption from the Zama Key Management System (KMS) Gateway — this is a gas-free operation
+Zama's fhEVM runs on **Ethereum and Base** (Sepolia testnet today has real, documented
+infrastructure; mainnet addresses were still being finalised at time of writing). It does **not**
+run on Fhenix or Inco — those are separate FHE ecosystems with incompatible cryptography.
 
-The compliance check (KYC, AML, country restrictions) still happens on-chain, but the compliance modules operate on encrypted inputs. The result of the compliance check (pass/fail) is visible, but the specific amount is not.
+## How it works in the portal
 
-## Supported chains
+1. Open a confidential holding from **My Investments**. If your wallet isn't connected yet,
+   click **Connect Wallet**.
+2. Click **Reveal My Balance** — your wallet signs a request, and your balance is decrypted
+   directly against Zama's relayer. Registerwerk's servers never see the plaintext amount; this
+   happens entirely in your browser.
+3. To send a confidential transfer, enter the recipient and amount and click **Transfer** — the
+   amount is encrypted in your browser before it ever leaves your machine, and your wallet submits
+   the encrypted transaction. Standard compliance checks (KYC, freeze, pause) still apply on-chain.
+4. If you're an issuer, your issuance's **Confidential Balances** panel lets you (as a registered
+   viewer) reveal any holder's balance and confidentially mint new tokens to an investor.
 
-Confidential ERC-3643 is currently only available on:
+## Current status
 
-| Network | Status |
-|---------|--------|
-| **Fhenix Mainnet** | Production |
-| **Inco Mainnet** | Production |
-| Fhenix Testnet | Available for testing |
-| Inco Testnet | Available for testing |
+| Capability | Status |
+|---|---|
+| Encrypted balances/transfers on-chain | ✅ Implemented |
+| You revealing your own balance in the portal | ✅ Implemented — client-side, via your connected wallet |
+| You submitting a confidential transfer in the portal | ✅ Implemented — client-side encryption |
+| Issuer revealing any holder's balance / confidential minting | ✅ Implemented |
+| Registry-initiated compulsory cancellation (§26 Einziehung) on an encrypted amount | ✅ Available to the operator |
+| Regulator-triggered aggregate disclosure (not your individual balance) | ✅ Implemented on-chain |
+| Freeze/pause/forced-transfer on confidential ERC-3643 via the operator | ❌ Not yet wired — only forced-burn has a confidential-specific path today |
 
-These are purpose-built FHE-enabled EVM chains. Standard Ethereum, Polygon, and Base do not support FHE computation natively.
-
-## Viewing your encrypted balance
-
-In the portal:
-
-1. Navigate to **Investments → Holdings**
-2. Find a Confidential ERC-3643 token (shown with a lock icon)
-3. Click **Decrypt Balance**
-4. Your wallet prompts you to sign a decryption authorization message
-5. The portal contacts the KMS Gateway, which validates your authorization and returns the decrypted value
-6. Your balance is displayed for this session only — it is not stored anywhere
-
-## Current limitations
-
-- FHE computation is significantly more expensive in gas than standard EVM operations — expect 10–50x higher gas costs per transfer
-- Wallet tooling for FHE chains is maturing; not all standard wallets are supported
-- Cross-chain bridges for FHE tokens are not yet available
-- Batch transfers and some compliance modules are not yet supported in the confidential variant
-
-## Roadmap
-
-The Zama fhEVM ecosystem is evolving rapidly. Planned improvements include:
-- Support for additional EVM-compatible chains as FHE co-processors become available
-- Reduced gas costs as FHE hardware accelerators become mainstream
-- Standardized wallet integrations
-- Cross-chain confidential token bridges
-
-:::tip
-Use confidential tokens for pilot institutional issuances where privacy is critical, but evaluate the maturity of the tooling carefully before committing large volumes.
-:::
+Ask your registry operator whether confidential issuance is active for a specific asset if you
+have questions about the current rollout.

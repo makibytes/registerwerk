@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.customer.web;
 
+import de.makibytes.registerwerk.customer.internal.CustomerOffboardingService;
 import de.makibytes.registerwerk.customer.internal.EntityHistoryService;
 import de.makibytes.registerwerk.customer.internal.LegalEntityService;
 import de.makibytes.registerwerk.customer.api.EntityMergeRecord;
@@ -10,8 +11,12 @@ import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
 import de.makibytes.registerwerk.customer.web.dto.EntityUpdateRequest;
+import de.makibytes.registerwerk.customer.web.dto.MergeEntityRequest;
+import de.makibytes.registerwerk.customer.web.dto.TerminateEntityRequest;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.customer.web.EntityMapper;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,14 +44,17 @@ public class CustomerController {
     private final LegalEntityService legalEntityService;
     private final EntityHistoryService entityHistoryService;
     private final EntityMapper entityMapper;
+    private final CustomerOffboardingService offboardingService;
 
     public CustomerController(
             LegalEntityService legalEntityService,
             EntityHistoryService entityHistoryService,
-            EntityMapper entityMapper) {
+            EntityMapper entityMapper,
+            CustomerOffboardingService offboardingService) {
         this.legalEntityService = legalEntityService;
         this.entityHistoryService = entityHistoryService;
         this.entityMapper = entityMapper;
+        this.offboardingService = offboardingService;
     }
 
     /**
@@ -138,6 +146,24 @@ public class CustomerController {
     }
 
     /**
+     * Terminates the customer relationship — the off-ramp: disables the entity's users,
+     * publishes {@code CustomerOffboardedEvent} so other modules cancel open trade listings,
+     * revoke ASSET_TOKEN_ADMIN grants, and raise portfolio-migration requests for every
+     * holding/issuance needing operator follow-up, and moves the entity to CLOSED. Irreversible
+     * enough to warrant the same step-up + dual-control bar as a forced transfer.
+     */
+    @PostMapping("/{id}/terminate")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "CUSTOMER_OFFBOARDING")
+    public ResponseEntity<EntityResponse> terminateEntity(@PathVariable UUID id,
+                                                           @Valid @RequestBody TerminateEntityRequest request,
+                                                           Authentication auth) {
+        LegalEntity terminated = offboardingService.terminate(id, extractActorId(auth),
+                SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), request.reason());
+        return ResponseEntity.ok(toResponse(terminated, auth));
+    }
+
+    /**
      * Returns just the name change history for an entity.
      */
     @GetMapping("/{id}/name-history")
@@ -158,16 +184,19 @@ public class CustomerController {
     }
 
     /**
-     * Records an entity merge (M&A event).
+     * Records an entity merge (M&A event): the entity at {@code id} is absorbed into
+     * {@code request.targetEntityId()} and marked dissolved.
      */
     @PostMapping("/{id}/merge")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> mergeEntities(
+    public ResponseEntity<EntityMergeRecord> mergeEntities(
             @PathVariable UUID id,
-            @RequestBody Map<String, Object> mergeRequest) {
-        // TODO: Implement full merge workflow via a MergeService
-        log.info("[STUB] mergeEntities called for id={}, request={}", id, mergeRequest);
-        return ResponseEntity.accepted().build();
+            @RequestBody @Valid MergeEntityRequest request,
+            Authentication auth) {
+        EntityMergeRecord record = legalEntityService.mergeEntities(
+                id, request.targetEntityId(), request.mergeType(),
+                request.effectiveDate(), request.notes(), extractActorId(auth));
+        return ResponseEntity.status(HttpStatus.CREATED).body(record);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

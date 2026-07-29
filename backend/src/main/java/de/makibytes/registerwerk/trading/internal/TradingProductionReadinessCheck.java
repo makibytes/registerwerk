@@ -31,6 +31,10 @@ class TradingProductionReadinessCheck {
 
     @PostConstruct
     void check() {
+        check("true".equalsIgnoreCase(System.getenv("REGISTERWERK_PRODUCTION_MODE")));
+    }
+
+    void check(boolean productionMode) {
         if (!tradingProperties.isEnabled()) {
             return; // trading off entirely — no venue can settle anything
         }
@@ -38,8 +42,6 @@ class TradingProductionReadinessCheck {
         if (!simulatedEnabled) {
             return;
         }
-
-        boolean productionMode = "true".equalsIgnoreCase(System.getenv("REGISTERWERK_PRODUCTION_MODE"));
         String message = "TRADING: the SIMULATED venue settles the canonical register off-chain with no "
                 + "on-chain leg and must be disabled in production "
                 + "(set registerwerk.trading.venues.SIMULATED.enabled=false).";

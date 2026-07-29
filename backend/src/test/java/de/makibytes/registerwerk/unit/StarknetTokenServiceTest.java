@@ -154,7 +154,7 @@ class StarknetTokenServiceTest {
         when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STARKNET))
                 .thenReturn(List.of());
 
-        CompletableFuture<String> future = starknetTokenService.createCairoErc20(
+        CompletableFuture<StarknetTokenService.StarknetDeployment> future = starknetTokenService.createCairoErc20(
                 UUID.randomUUID(), Network.TESTNET, "0x0");
 
         assertThatThrownBy(() -> {
@@ -177,7 +177,7 @@ class StarknetTokenServiceTest {
         when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STARKNET))
                 .thenReturn(List.of(mainnetConfig));
 
-        CompletableFuture<String> future = starknetTokenService.createCairoErc20(
+        CompletableFuture<StarknetTokenService.StarknetDeployment> future = starknetTokenService.createCairoErc20(
                 UUID.randomUUID(), Network.TESTNET, "0x0");
 
         assertThatThrownBy(() -> {

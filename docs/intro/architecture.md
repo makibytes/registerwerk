@@ -5,7 +5,7 @@ description: Component diagram, data flow, and module structure of the Registerw
 
 # System Architecture
 
-Registerwerk follows a **modulith** pattern: a single deployable backend application internally structured as 22 loosely-coupled bounded contexts. Two separate Angular frontends (operator and customer) connect through different paths to the same backend.
+Registerwerk follows a **modulith** pattern: a single deployable backend application internally structured into loosely-coupled bounded contexts. Two separate Angular frontends (operator and customer) are always opened directly by the browser — `:4200` and `:4201` — and connect through different paths to the same backend for API calls only.
 
 ---
 
@@ -13,37 +13,44 @@ Registerwerk follows a **modulith** pattern: a single deployable backend applica
 
 ```mermaid
 graph TB
+    U["Browser"]
+
     subgraph Frontends
         FO["Operator Frontend<br/>Angular 21 · :4200"]
         FC["Customer Frontend<br/>Angular 21 · :4201"]
     end
 
     subgraph Gateway
-        K["Kong 3.8<br/>OIDC · Rate-limiting<br/>Bot-detection · :8000"]
-        KM["Kong Manager<br/>:8002"]
+        K["Kong 3.8 OSS, DB-less<br/>Rate-limiting · Caching<br/>Security headers · :8000"]
     end
 
     subgraph Backend
-        B["Spring Boot 4 · Java 25<br/>22 Spring Modulith modules<br/>:8080"]
+        B["Spring Boot 4 · Java 25<br/>Spring Modulith modules<br/>:8080"]
+    end
+
+    subgraph Confidential
+        ZR["zama-relayer sidecar<br/>@zama-fhe/relayer-sdk<br/>:3005 (opt-in profile)"]
     end
 
     subgraph Data
-        PG[("PostgreSQL 17<br/>registerwerk · kong · konga")]
+        PG[("PostgreSQL 17<br/>registerwerk (Kong is DB-less — no kong/konga database)")]
         S3["S3 / Object Store<br/>KYC documents"]
     end
 
     subgraph Chains
         EVM["EVM Chains<br/>Ethereum · Polygon · Base<br/>Arbitrum · Avalanche · Optimism"]
-        CEVM["Confidential EVM<br/>Fhenix · Inco (Zama fhEVM)"]
+        CEVM["Confidential EVM<br/>Ethereum · Base (Zama fhEVM)"]
         SOL["Solana<br/>mainnet-beta · devnet"]
         CTN["Canton / DAML<br/>Private ledger"]
         STR["StarkNet · Stellar"]
     end
 
-    FO -->|"nginx → direct"| B
-    FC -->|"nginx → Kong OIDC"| K
+    U -->|"http://localhost:4200"| FO
+    U -->|"http://localhost:4201"| FC
+    FO -->|"nginx /api/ → direct, bypasses Kong"| B
+    FC -->|"nginx /api/ → Kong"| K
     K --> B
-    KM -.->|"admin API (localhost)"| K
+    B <--> ZR
     B --> PG
     B --> S3
     B --> EVM
@@ -55,9 +62,11 @@ graph TB
 
 ### Why two paths to the backend?
 
-The **operator frontend** connects directly (nginx proxy → `backend:8080`). It uses a built-in HS256 JWT login (`POST /api/v1/public/auth/login`) and never passes through Kong. This keeps the operator portal functional even when Kong is down.
+Both frontends are always opened **directly** by the browser at their own port — Kong never fronts either app's UI, only the customer app's backend API traffic, and only because the customer frontend's own nginx forwards `/api/` to Kong rather than to the backend.
 
-The **customer frontend** goes through Kong, which validates JWTs issued by an external OIDC provider (Microsoft Entra or any OIDC-compatible IdP) and injects `X-Entity-Id` and `X-Entity-Roles` headers before forwarding to the backend. This enforces multi-tenancy at the gateway layer.
+The **operator frontend** connects its API calls directly (nginx proxy → `backend:8080`). It uses a built-in HS256 JWT login (`POST /api/v1/public/auth/login`) and never passes through Kong. This keeps the operator portal functional even when Kong is down.
+
+The **customer frontend**'s API calls go through Kong, which adds rate limiting, response caching, and security headers in front of the backend. JWT validation itself always happens in the Spring backend (`JwtEntityClaimsConverter` reads `roles`/entity claims straight off the token) — Kong's OSS build here does not validate JWTs or inject entity headers. An `openid-connect` plugin exists as an optional, Enterprise/Konnect-only add-on (`gateway/plugins/oidc-entra.yml`) for deployments that want JWT termination at the gateway too.
 
 ---
 
@@ -88,7 +97,7 @@ sequenceDiagram
 
 ---
 
-## Spring Modulith — 22 bounded contexts
+## Spring Modulith — bounded contexts
 
 The backend is organised into modules, each representing a single domain responsibility. Modules communicate through [Spring Modulith events](platform/modules.md) (transactional outbox), never through direct inter-module service calls into `internal/` packages.
 
@@ -118,6 +127,9 @@ The backend is organised into modules, each representing a single domain respons
 | `regreporting` | MiFIR/DAC8 regulatory reporting exports |
 | `dora` | DORA ICT incidents and third-party register |
 | `externalref` | External system ID mapping (LEI, registry IDs) |
+| `orgidentity` | Onchain org identity (wallet↔org binding), permission delegation |
+| `marketplace` | dApp marketplace: manifest review, step-up + 4-eyes approval, onchain anchoring |
+| `payment` | Operator-curated payment rail catalog with disclosure and attestation fields for the DvP cash leg; no independent MiCAR verification |
 
 See [Module Architecture](../platform/modules.md) for the full dependency graph and design rationale.
 
@@ -125,12 +137,15 @@ See [Module Architecture](../platform/modules.md) for the full dependency graph 
 
 ## Data persistence
 
-All application data lives in a single **PostgreSQL 17** instance with three databases:
+All application data lives in a single **PostgreSQL 17** instance with one database:
 
 | Database | Owner | Contents |
 |---|---|---|
 | `registerwerk` | `registerwerk` user | All application tables, partitioned `audit_event`, Flyway migrations |
-| `kong` | `kong` user | Kong route, service, plugin, consumer configuration |
+
+Kong runs **DB-less**: its declarative config (`gateway/kong.yml`) is loaded directly via
+`KONG_DECLARATIVE_CONFIG`, so it has no database of its own — there is no `kong` or `konga`
+database or service in this stack.
 
 Flyway manages the `registerwerk` schema. Migrations are named `V{n}__description.sql` and are never edited after merging.
 

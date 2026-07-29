@@ -2,7 +2,9 @@ package de.makibytes.registerwerk.onboarding.internal;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.onboarding.events.OnboardingCompletedEvent;
+import de.makibytes.registerwerk.onboarding.events.OnboardingTokenIssuedEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
@@ -73,8 +75,12 @@ public class OnboardingService {
      * @return cleartext token (send to the entity via a secure channel)
      */
     public String generateToken(UUID entityId, UUID issuedBy) {
-        legalEntityRepository.findById(entityId)
+        LegalEntity entity = legalEntityRepository.findById(entityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
+        if (entity.getStatus() == EntityStatus.CLOSED || entity.getStatus() == EntityStatus.DISSOLVED) {
+            throw new IllegalStateException(
+                    "Cannot issue an onboarding token for a " + entity.getStatus() + " legal entity (id=" + entityId + ")");
+        }
 
         // Invalidate any existing unused token
         onboardingTokenRepository.findByLegalEntityIdAndUsedAtIsNull(entityId)
@@ -94,6 +100,7 @@ public class OnboardingService {
         token.setIssuedBy(issuedBy);
         onboardingTokenRepository.save(token);
 
+        eventPublisher.publishEvent(new OnboardingTokenIssuedEvent(entityId, issuedBy, "REGISTRY_ADMIN"));
         log.info("Generated onboarding token for entityId={}", entityId);
         return cleartext;
     }
@@ -132,9 +139,14 @@ public class OnboardingService {
 
         LegalEntity entity = legalEntityRepository.findById(token.getLegalEntityId())
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", token.getLegalEntityId()));
+        if (entity.getStatus() != EntityStatus.PENDING_ONBOARDING) {
+            throw new IllegalStateException(
+                    "Legal entity " + entity.getId() + " is not pending onboarding (status=" + entity.getStatus()
+                    + ") — a stale onboarding token must not reactivate or otherwise change it");
+        }
         entity.setStatus(EntityStatus.ACTIVE);
         legalEntityRepository.save(entity);
-        authApi.createInitialCompanyAdmin(
+        AppUser admin = authApi.createInitialCompanyAdmin(
             entity.getId(),
             adminEmail,
             adminName,
@@ -142,7 +154,7 @@ public class OnboardingService {
             authProperties.isEntraEnabled()
         );
         eventPublisher.publishEvent(new OnboardingCompletedEvent(
-            entity.getId(), null, null, adminEmail, entity.getCurrentName(), frontendUrl));
+            entity.getId(), admin.getId(), actorId, adminEmail, entity.getCurrentName(), frontendUrl));
 
         log.info("Completed onboarding for entityId={}", token.getLegalEntityId());
     }

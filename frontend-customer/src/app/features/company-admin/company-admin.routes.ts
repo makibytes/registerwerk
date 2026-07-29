@@ -14,4 +14,8 @@ export const COMPANY_ADMIN_ROUTES: Routes = [
     path: 'external-ids',
     loadComponent: () => import('./external-ids/external-id-admin.component').then(m => m.ExternalIdAdminComponent)
   },
+  {
+    path: 'org-identity',
+    loadComponent: () => import('./org-identity/org-identity.component').then(m => m.OrgIdentityComponent)
+  },
 ];

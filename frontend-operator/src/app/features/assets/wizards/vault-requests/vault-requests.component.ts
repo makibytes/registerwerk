@@ -5,7 +5,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe, SlicePipe } from '@angular/common';
 import { VaultService } from '../../../../core/api/vault.service';
 import { VaultRequest } from '../../../../core/models';
 
@@ -13,7 +13,7 @@ import { VaultRequest } from '../../../../core/models';
   selector: 'app-vault-requests',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MatButtonModule, MatIconModule, MatCheckboxModule, DatePipe, DecimalPipe],
+  imports: [MatButtonModule, MatIconModule, MatCheckboxModule, DatePipe, DecimalPipe, SlicePipe],
   template: `
     <div class="req-shell">
       <div class="req-header">
@@ -282,7 +282,10 @@ export class VaultRequestsComponent implements OnInit {
   load(): void {
     this.vaultService.getVaultRequests(this.deploymentId).subscribe({
       next: (reqs) => { this.pending = reqs; this.cdr.markForCheck(); },
-      error: () => {},
+      error: () => {
+        this.snackBar.open('Failed to load vault requests', 'Dismiss', { duration: 5000 });
+        this.cdr.markForCheck();
+      },
     });
   }
 

@@ -134,11 +134,8 @@ export class Erc3643Service {
     return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/forced-transfer`, body);
   }
 
-  forcedApprove(assetId: string, deploymentId: string, body: {
-    owner: string; spender: string; amount: string; reason?: string;
-  }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/forced-approve`, body);
-  }
+  // No forcedApprove(): T-REX/ERC-3643 has no forcedApprove agent operation — the backend
+  // endpoint always returns 501 (see Erc3643LifecycleService.forcedApprove).
 
   forceBurn(assetId: string, deploymentId: string, body: {
     from: string; amount: string; legalBasis?: string;

@@ -1,0 +1,21 @@
+services:
+  # Stellar quickstart — local development node running Horizon (REST API) on port 8000, so
+  # Stellar asset issuance and the backend's Horizon transfer indexer
+  # (StellarTransferSyncService) can be exercised end-to-end without depending on the public
+  # testnet/mainnet Horizon.
+  #
+  # Production operators point the STELLAR_MAINNET / STELLAR_TESTNET chain_config rows (see
+  # Operator Portal → Network Nodes) at a real Horizon instance — this sidecar is not a
+  # substitute for that.
+  stellar:
+    image: stellar/quickstart:${STELLAR_QUICKSTART_TAG:-testing}
+    command: --testnet --enable-soroban-rpc
+    ports:
+      - "8000:8000"    # Horizon REST API — backend connects here
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/ledgers?order=desc&limit=1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s

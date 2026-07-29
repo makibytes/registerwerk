@@ -5,6 +5,11 @@ description: How Registerwerk implements Luxembourg CSSF regulatory requirements
 
 # Luxembourg — CSSF
 
+!!! warning "EXTERNAL_REVIEW_REQUIRED"
+    This page records intended control mappings and configured assumptions. It is not Luxembourg
+    legal advice or evidence of instrument classification, regulatory authorisation, compliance,
+    or legal effect. Obtain current instrument-, operator-, service-, and deployment-specific review.
+
 Luxembourg is Europe's largest fund domicile and a leading jurisdiction for tokenised fund instruments. The **Commission de Surveillance du Secteur Financier (CSSF)** regulates the use of distributed ledger technology (DLT) for financial instruments under CSSF Circular 19/732 and subsequent guidance.
 
 ---
@@ -67,7 +72,9 @@ The `AssetVaultState` entity tracks NAV per share. `VaultNavStrike` records each
 
 ## Settlement timing
 
-CSSF guidance aligns with the EU T+2 settlement default for tokenised securities. The `trading` module's `TradeExecution` entity records `settledAt` timestamp, and the [MiFIR reporting](../compliance/mifir.md) export validates that settlement occurred within the regulatory window before including the trade in the report.
+Current settlement obligations require external review. The `trading` module can record a
+`settledAt` timestamp, but the [MiFIR](../compliance/mifir.md) prototype does not validate
+settlement status or a regulatory settlement window before selecting rows.
 
 ---
 
@@ -79,7 +86,9 @@ Under DORA Art. 19 (transposed in Luxembourg via the DORA implementation act), m
 - **Intermediate report**: within 72 hours
 - **Final report**: within 1 month
 
-The `DoraService` in the `dora` module classifies incidents, sets deadlines, and triggers notifications. See [DORA](../compliance/dora.md).
+The `DoraService` stores manually classified incidents and application reminder timestamps. It
+does not determine the legally correct classification/deadlines or route notifications to CSSF.
+See [DORA](../compliance/dora.md).
 
 ---
 
@@ -89,4 +98,5 @@ Luxembourg's transposition of MiCAR makes it applicable to crypto-asset service 
 
 - The operator must hold a CASP licence from CSSF (or a passportable licence from another EU member state)
 - The [Travel Rule](../compliance/travel-rule.md) applies to all crypto-asset transfers ≥ €1,000
-- The [DAC8/CARF](../compliance/dac8.md) report is filed with the **Administration des Contributions Directes (ACD)**
+- The [DAC8/CARF](../compliance/dac8.md) component produces `DRAFT_UNVALIDATED` prototype output;
+  it does not file with ACD or prove authority delivery or acceptance

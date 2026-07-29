@@ -27,5 +27,8 @@ public record TradeListingResponse(
         BigDecimal quantityAvailable,
         BigDecimal pricePerUnit,
         List<PaymentOption> allowedPaymentOptions,
-        Instant createdAt) {
+        Instant createdAt,
+        // Most recent settled trade price for this asset, if any — a benchmark for the listed
+        // price; null when the asset has never settled a trade yet.
+        BigDecimal lastTradePrice) {
 }

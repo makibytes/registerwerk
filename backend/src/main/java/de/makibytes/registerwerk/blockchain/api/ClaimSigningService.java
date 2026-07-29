@@ -24,14 +24,22 @@ import java.util.Collections;
  * <p>The claim signature follows the ERC-735 / ONCHAINID specification:
  * <pre>
  *   claimData  = abi.encode(topic, scheme=1, issuer, expiresAt, "")
- *   claimHash  = keccak256(abi.encodePacked(identity, topic, data))
+ *   claimHash  = keccak256(abi.encode(identity, topic, data))
  *   prefixed   = keccak256("\x19Ethereum Signed Message:\n32" + claimHash)
  *   signature  = ecSign(prefixed, issuerKey)  → (v, r, s) packed as 65 bytes
  * </pre>
  *
- * <p>The claim data is ABI-encoded using Web3j's {@code DefaultFunctionEncoder}
- * to produce the same byte layout as Solidity's {@code abi.encode()}. This allows
- * the ONCHAINID contract's {@code addClaim()} to verify the signature correctly.
+ * <p>Both {@code claimData} and {@code claimHash}'s input are ABI-encoded using Web3j's
+ * {@code FunctionEncoder} to produce the exact byte layout Solidity's {@code abi.encode()}
+ * would — real {@code abi.encode}, not {@code abi.encodePacked}: a plain byte concatenation of
+ * a raw 20-byte address + a 32-byte topic + the data bytes (this class's previous claimHash
+ * computation) is neither. {@code abi.encode} left-pads the address to a full 32-byte word and,
+ * because {@code data} is a dynamic type, prepends an offset word and a length word ahead of its
+ * (32-byte-aligned) content — three extra words a flat concatenation omits entirely. OnchainID's
+ * {@code ClaimIssuer.isClaimValid} recomputes {@code dataHash} via real {@code abi.encode} before
+ * recovering the signer, so a mismatched encoding here means the recovered signer never matches
+ * the actual issuer wallet and {@code isClaimValid} returns {@code false} for every claim —
+ * permanently, regardless of whether the correct private key signed it.
  * </p>
  */
 @Service
@@ -100,12 +108,21 @@ public class ClaimSigningService {
         byte[] data = Numeric.hexStringToByteArray(encodedWithSelector.substring(10)); // drop "0x" + 8 hex chars
         String claimDataHex = Numeric.toHexString(data);
 
-        // claimHash = keccak256(abi.encodePacked(identityAddress, topic, data))
-        byte[] packed = concat(
-                Numeric.hexStringToByteArray(identityAddress),
-                toBigEndian32(BigInteger.valueOf(topic)),
-                data);
-        byte[] claimHash = Hash.sha3(packed);
+        // claimHash = keccak256(abi.encode(identityAddress, topic, data)) — real ABI encoding
+        // (see class javadoc for why a flat concatenation, this method's previous approach,
+        // produces different bytes and makes every issued claim permanently unverifiable).
+        Function claimHashInputFn = new Function(
+                "",
+                Arrays.asList(
+                        new Address(identityAddress),
+                        new Uint256(BigInteger.valueOf(topic)),
+                        new DynamicBytes(data)
+                ),
+                Collections.emptyList()
+        );
+        String encodedHashInputWithSelector = FunctionEncoder.encode(claimHashInputFn);
+        byte[] hashInput = Numeric.hexStringToByteArray(encodedHashInputWithSelector.substring(10));
+        byte[] claimHash = Hash.sha3(hashInput);
 
         // EIP-191 prefix: "\x19Ethereum Signed Message:\n32" + claimHash → sign
         Sign.SignatureData sig = Sign.signPrefixedMessage(claimHash, credentials.getEcKeyPair());
@@ -115,28 +132,5 @@ public class ClaimSigningService {
         sigBytes[64] = sig.getV()[0];
 
         return new SignedClaim(claimDataHex, Numeric.toHexString(sigBytes), issuer);
-    }
-
-    // ── Internal helpers ────────────────────────────────────────────────────
-
-    private static byte[] toBigEndian32(BigInteger value) {
-        byte[] raw = value.toByteArray();
-        byte[] padded = new byte[32];
-        int srcPos = Math.max(0, raw.length - 32);
-        System.arraycopy(raw, srcPos, padded, 32 - (raw.length - srcPos), raw.length - srcPos);
-        return padded;
-    }
-
-    private static byte[] hexToBytes(String hex) {
-        return Numeric.hexStringToByteArray("0x" + hex);
-    }
-
-    private static byte[] concat(byte[]... arrays) {
-        int len = 0;
-        for (byte[] a : arrays) len += a.length;
-        byte[] result = new byte[len];
-        int pos = 0;
-        for (byte[] a : arrays) { System.arraycopy(a, 0, result, pos, a.length); pos += a.length; }
-        return result;
     }
 }

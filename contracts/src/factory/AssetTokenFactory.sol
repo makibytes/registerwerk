@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.36;
 
 import "../tokens/EwpgERC20.sol";
 import "../tokens/EwpgERC721.sol";
@@ -117,11 +117,15 @@ contract AssetTokenFactory {
     }
 
     /// @notice Predict the CREATE2 address for a token without deploying it.
+    /// @param underlyingAsset Only used (and required) for vault types (4=ERC4626, 5=ERC7540);
+    ///        pass address(0) for non-vault token types 0-3. Vault constructors take this extra
+    ///        arg, which changes the CREATE2 init-code hash relative to deployToken's types.
     function predictAddress(
         uint8 tokenType,
         string calldata name,
         string calldata symbol,
-        bytes32 assetId
+        bytes32 assetId,
+        address underlyingAsset
     ) external view returns (address) {
         bytes32 salt = keccak256(abi.encode(assetId, tokenType));
         bytes32 initCodeHash;
@@ -138,6 +142,16 @@ contract AssetTokenFactory {
         } else if (tokenType == TOKEN_TYPE_ERC3525) {
             initCodeHash = keccak256(abi.encodePacked(
                 type(EwpgERC3525).creationCode, abi.encode(name, symbol, registryWallet, assetId)));
+        } else if (tokenType == TOKEN_TYPE_ERC4626) {
+            require(underlyingAsset != address(0), "AssetTokenFactory: zero underlying asset");
+            initCodeHash = keccak256(abi.encodePacked(
+                type(EwpgERC4626).creationCode,
+                abi.encode(IERC20(underlyingAsset), name, symbol, registryWallet, assetId)));
+        } else if (tokenType == TOKEN_TYPE_ERC7540) {
+            require(underlyingAsset != address(0), "AssetTokenFactory: zero underlying asset");
+            initCodeHash = keccak256(abi.encodePacked(
+                type(EwpgERC7540).creationCode,
+                abi.encode(IERC20(underlyingAsset), name, symbol, registryWallet, assetId)));
         } else {
             revert("AssetTokenFactory: unsupported token type");
         }

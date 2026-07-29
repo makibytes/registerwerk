@@ -59,9 +59,11 @@ export type EndpointFormDialogResult = EndpointCreateRequest | EndpointUpdateReq
       margin-bottom: 4px;
     }
 
-    .type-row {
-      display: flex;
-      gap: 16px;
+    .smart-wallet-hint {
+      font-size: 12px;
+      color: var(--rw-text-muted);
+      margin: 6px 0 0;
+      line-height: 1.5;
     }
 
     mat-form-field {
@@ -71,12 +73,6 @@ export type EndpointFormDialogResult = EndpointCreateRequest | EndpointUpdateReq
     .address-field input {
       font-family: 'IBM Plex Mono', monospace;
       font-size: 13px;
-    }
-
-    .disabled-hint {
-      font-size: 11px;
-      color: var(--rw-text-muted);
-      margin-top: 2px;
     }
   `],
   template: `
@@ -91,6 +87,12 @@ export type EndpointFormDialogResult = EndpointCreateRequest | EndpointUpdateReq
             <mat-radio-button value="WALLET">Wallet</mat-radio-button>
             <mat-radio-button value="CONTRACT">Contract</mat-radio-button>
           </mat-radio-group>
+          @if (form.addressType === 'WALLET' && !isEdit) {
+            <p class="smart-wallet-hint">
+              A wallet can also be a <strong>smart wallet</strong> — a smart contract used as a
+              wallet (e.g. multisig, account abstraction). Use type <em>Wallet</em> for these too.
+            </p>
+          }
         </div>
 
         <mat-form-field appearance="outline" class="address-field">

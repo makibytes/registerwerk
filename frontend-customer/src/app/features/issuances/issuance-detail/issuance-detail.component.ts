@@ -16,11 +16,26 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { firstValueFrom } from 'rxjs';
+import { numberToHex } from 'viem';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { TransactionService } from '../../../core/api/transaction.service';
+import { RegisterDocumentService } from '../../../core/api/register-document.service';
 import { AuthService } from '../../../core/auth/auth.service';
 import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
 import { Asset, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
+import { WalletService } from '../../../core/wallet/wallet.service';
+import { FheClientService } from '../../../core/fhe/fhe-client.service';
+
+/** Minimal ABI fragment for reading a confidential balance handle — see
+ *  `investment-detail.component.ts`'s identical fragment for the fuller rationale. */
+const CONFIDENTIAL_BALANCE_ABI = [
+  {
+    name: 'confidentialBalanceOf', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
 import {
   AsyncSection,
   beginAsyncSection,
@@ -143,6 +158,13 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 <button mat-raised-button color="primary" (click)="openAddHolder()">
                   <mat-icon>person_add</mat-icon>
                   Add Holder
+                </button>
+              }
+              @if (isIssuer) {
+                <button mat-stroked-button [disabled]="downloadingRegisterExtract" (click)="downloadRegisterExtract()"
+                        matTooltip="§ 10 eWpG register extract for this asset's full holder list">
+                  <mat-icon>gavel</mat-icon>
+                  @if (downloadingRegisterExtract) { Preparing… } @else { Register extract (§10) }
                 </button>
               }
             </div>
@@ -473,6 +495,84 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
           </mat-card-content>
         </mat-card>
 
+        @if (isConfidential) {
+          <mat-card class="section-card confidential-card">
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon class="confidential-icon">lock</mat-icon>
+                Confidential Balances
+              </mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <p class="confidential-intro">
+                Balances/transfer amounts are encrypted on-chain (Zama fhEVM). As the issuer you're
+                a registered viewer — connect your wallet to reveal any holder's on-chain balance
+                directly against Zama's relayer and compare it with the register's own nominal
+                amount above. Confidential minting is encrypted server-side (there's no browser
+                signature needed for issuance).
+              </p>
+
+              @if (!walletService.isConnected()) {
+                <button mat-stroked-button color="primary" (click)="connectIssuerWallet()" [disabled]="connectingWallet">
+                  <mat-icon>account_balance_wallet</mat-icon>
+                  {{ connectingWallet ? 'Connecting…' : 'Connect Viewer Wallet' }}
+                </button>
+              } @else if (holders.length > 0) {
+                <table mat-table [dataSource]="holders" class="mat-elevation-z0">
+                  <ng-container matColumnDef="wallet">
+                    <th mat-header-cell *matHeaderCellDef>Wallet Address</th>
+                    <td mat-cell *matCellDef="let h"><app-address [address]="h.walletAddress" /></td>
+                  </ng-container>
+                  <ng-container matColumnDef="register">
+                    <th mat-header-cell *matHeaderCellDef>Register Amount</th>
+                    <td mat-cell *matCellDef="let h">{{ h.nominalAmount | number:'1.0-2' }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="onchain">
+                    <th mat-header-cell *matHeaderCellDef>On-Chain (decrypted)</th>
+                    <td mat-cell *matCellDef="let h">
+                      @if (revealedBalances[h.walletAddress]) {
+                        <span class="revealed-balance">{{ revealedBalances[h.walletAddress] }}</span>
+                      } @else {
+                        <button mat-stroked-button (click)="revealHolderBalance(h.walletAddress)" [disabled]="revealingWallet === h.walletAddress">
+                          {{ revealingWallet === h.walletAddress ? 'Decrypting…' : 'Reveal' }}
+                        </button>
+                      }
+                    </td>
+                  </ng-container>
+                  <tr mat-header-row *matHeaderRowDef="confidentialHolderColumns"></tr>
+                  <tr mat-row *matRowDef="let r; columns: confidentialHolderColumns;"></tr>
+                </table>
+                @if (revealError) {
+                  <p class="confidential-error">{{ revealError }}</p>
+                }
+              } @else {
+                <p class="empty-text">No holders recorded yet.</p>
+              }
+
+              @if (isIssuer && deployments.length > 0) {
+                <mat-divider style="margin: 20px 0"></mat-divider>
+                <h3 class="confidential-mint-title">Confidential Mint</h3>
+                <div class="confidential-mint-form">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Recipient address</mat-label>
+                    <input matInput [(ngModel)]="mintToAddress" placeholder="0x…" />
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Amount</mat-label>
+                    <input matInput type="number" [(ngModel)]="mintAmount" min="0" />
+                  </mat-form-field>
+                  <button mat-flat-button color="primary"
+                          (click)="submitConfidentialMint()"
+                          [disabled]="minting || !mintToAddress || mintAmount === null">
+                    <mat-icon>add_circle</mat-icon>
+                    {{ minting ? 'Encrypting & submitting…' : 'Mint' }}
+                  </button>
+                </div>
+              }
+            </mat-card-content>
+          </mat-card>
+        }
+
         <!-- ── Token Holders (Live from Blockchain) ────────────────────────── -->
         <mat-card class="section-card">
           <mat-card-header>
@@ -578,6 +678,14 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
        height: 18px;
        margin-top: 1px;
      }
+     .confidential-card { border-left: 4px solid var(--rw-accent); }
+     .confidential-icon { vertical-align: middle; margin-right: 6px; color: var(--rw-accent); }
+     .confidential-intro { color: var(--rw-text-secondary); font-size: 13px; margin: 0 0 16px; max-width: 720px; }
+     .revealed-balance { font-weight: 700; color: var(--rw-accent); }
+     .confidential-error { color: var(--rw-text-danger); font-size: 13px; margin-top: 8px; }
+     .confidential-mint-title { font-size: 14px; margin: 0 0 12px; color: var(--rw-text-primary); }
+     .confidential-mint-form { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+     .confidential-mint-form mat-form-field { flex: 1; min-width: 220px; }
    `]
 })
 export class IssuanceDetailComponent implements OnInit {
@@ -589,14 +697,27 @@ export class IssuanceDetailComponent implements OnInit {
   private readonly txService = inject(TransactionService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly registerDocumentService = inject(RegisterDocumentService);
+  protected readonly walletService = inject(WalletService);
+  private readonly fheService = inject(FheClientService);
 
   asset: Asset | null = null;
+  downloadingRegisterExtract = false;
   deployments: AssetDeployment[] = [];
   holders: AssetHolder[] = [];
   loading = true;
   actionLoading = false;
   deploymentsState: AsyncSection<null> = createAsyncSection<null>(null);
   holdersState: AsyncSection<null> = createAsyncSection<null>(null);
+
+  // ── Confidential balances (issuer reveal-all + confidential mint) ────────
+  connectingWallet = false;
+  revealedBalances: Record<string, string> = {};
+  revealingWallet: string | null = null;
+  revealError: string | null = null;
+  mintToAddress = '';
+  mintAmount: number | null = null;
+  minting = false;
   identityRegistryState: AsyncSection<null> = createAsyncSection<null>(null);
   liveHoldersState: AsyncSection<null> = { data: null, status: 'ready', hasLoaded: true };
 
@@ -620,10 +741,15 @@ export class IssuanceDetailComponent implements OnInit {
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status', 'deployedAt'];
   readonly baseHolderColumns  = ['wallet', 'amount', 'whitelisted', 'externalId'];
   readonly erc3643HolderColumns = ['wallet', 'amount', 'whitelisted', 'externalId', 'onchainId', 'kyc'];
+  readonly confidentialHolderColumns = ['wallet', 'register', 'onchain'];
   readonly identityRegistryColumns = ['wallet', 'entity', 'legalEntityExternalId', 'registryExternalId', 'status'];
 
   get isErc3643(): boolean {
     return this.asset?.tokenStandard === 'ERC3643' || this.asset?.tokenStandard === 'CONF_ERC3643';
+  }
+
+  get isConfidential(): boolean {
+    return this.asset?.tokenStandard === 'CONF_ERC20' || this.asset?.tokenStandard === 'CONF_ERC3643';
   }
 
   get activeHolderColumns(): string[] {
@@ -783,6 +909,28 @@ export class IssuanceDetailComponent implements OnInit {
       });
   }
 
+  downloadRegisterExtract(): void {
+    if (!this.asset) return;
+    this.downloadingRegisterExtract = true;
+    this.registerDocumentService.downloadIssuerRegisterExtract(this.asset.id).subscribe({
+      next: (pdf) => {
+        const url = URL.createObjectURL(pdf);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `registereinsicht-${this.asset!.assetNumber}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+        this.downloadingRegisterExtract = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.downloadingRegisterExtract = false;
+        this.snackBar.open('Failed to generate the register extract. Please try again.', 'Close', { duration: 5000 });
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   jurisdictionLabel(jur: string): string {
@@ -879,7 +1027,7 @@ export class IssuanceDetailComponent implements OnInit {
       toAddress: action.recipient,
       amount: action.amount.toString(),
     }).subscribe({
-      next: () => this.snackBar.open(`Mint of ${action.amount} tokens submitted.`, 'OK', { duration: 3000 }),
+      next: (r) => this.txService.track(r.txId, `Mint ${action.amount} tokens`),
       error: () => this.snackBar.open('Mint failed.', 'Close', { duration: 5000 }),
     });
   }
@@ -890,7 +1038,7 @@ export class IssuanceDetailComponent implements OnInit {
       fromAddress: action.fromWallet ?? '',
       amount: action.amount.toString(),
     }).subscribe({
-      next: () => this.snackBar.open(`Burn of ${action.amount} tokens submitted.`, 'OK', { duration: 3000 }),
+      next: (r) => this.txService.track(r.txId, `Burn ${action.amount} tokens`),
       error: () => this.snackBar.open('Burn failed.', 'Close', { duration: 5000 }),
     });
   }
@@ -917,4 +1065,66 @@ export class IssuanceDetailComponent implements OnInit {
     });
   }
 
+  // ── Confidential balances: issuer reveal-all + confidential mint ─────────
+
+  async connectIssuerWallet(): Promise<void> {
+    this.connectingWallet = true;
+    this.cdr.detectChanges();
+    try {
+      await this.walletService.connect();
+    } catch (err: unknown) {
+      this.snackBar.open((err as Error)?.message ?? 'Wallet connection failed.', 'Dismiss', { duration: 5000 });
+    } finally {
+      this.connectingWallet = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async revealHolderBalance(walletAddress: string): Promise<void> {
+    if (!this.asset || this.deployments.length === 0) return;
+    this.revealingWallet = walletAddress;
+    this.revealError = null;
+    this.cdr.detectChanges();
+    try {
+      const dep = this.deployments[0];
+      const ctx = await firstValueFrom(this.issuanceService.getConfidentialContext(this.asset.id, dep.id));
+      const handleValue = await this.walletService.readContract<bigint>({
+        address: ctx.contractAddress as `0x${string}`,
+        abi: CONFIDENTIAL_BALANCE_ABI,
+        functionName: 'confidentialBalanceOf',
+        args: [walletAddress as `0x${string}`],
+      });
+      const handle = numberToHex(handleValue, { size: 32 });
+      const cleartext = await this.fheService.userDecrypt(handle, ctx.contractAddress as `0x${string}`, ctx.chainId);
+      this.revealedBalances = { ...this.revealedBalances, [walletAddress]: cleartext.toString() };
+    } catch (err: unknown) {
+      this.revealError = (err as Error)?.message ?? 'Failed to reveal balance — is your wallet a registered viewer for this token?';
+    } finally {
+      this.revealingWallet = null;
+      this.cdr.detectChanges();
+    }
+  }
+
+  submitConfidentialMint(): void {
+    if (!this.asset?.id || this.deployments.length === 0 || !this.mintToAddress || this.mintAmount === null) return;
+    this.minting = true;
+    this.cdr.detectChanges();
+    this.issuanceService.mintConfidential(this.asset.id, this.deployments[0].id, {
+      toAddress: this.mintToAddress,
+      amount: this.mintAmount.toString(),
+    }).subscribe({
+      next: (r) => {
+        this.txService.track(r.txId, 'Confidential mint');
+        this.mintToAddress = '';
+        this.mintAmount = null;
+        this.minting = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.snackBar.open('Confidential mint failed.', 'Close', { duration: 5000 });
+        this.minting = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
 }

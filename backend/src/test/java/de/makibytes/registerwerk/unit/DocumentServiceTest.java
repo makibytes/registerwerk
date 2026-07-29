@@ -6,6 +6,8 @@ import de.makibytes.registerwerk.kyc.api.KycDocumentContent;
 import de.makibytes.registerwerk.kyc.api.KycDocumentContentRepository;
 import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
 import de.makibytes.registerwerk.kyc.api.S3DocumentStorageAdapter;
+import de.makibytes.registerwerk.kyc.events.DocumentDeletedEvent;
+import de.makibytes.registerwerk.kyc.events.DocumentUploadedEvent;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,6 +15,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -40,6 +43,9 @@ class DocumentServiceTest {
 
     @Mock
     private S3DocumentStorageAdapter s3DocumentStorageAdapter;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private DocumentService documentService;
@@ -69,6 +75,7 @@ class DocumentServiceTest {
         doc.setStorageRef(storageRef);
         doc.setMimeType("application/pdf");
         doc.setFileName("test.pdf");
+        doc.setLegalEntityId(UUID.randomUUID());
         return doc;
     }
 
@@ -91,7 +98,7 @@ class DocumentServiceTest {
 
         KycDocument result = documentService.storeDocument(
             entityId, content, "report.pdf", "application/pdf",
-            KycDocument.DocumentType.ANNUAL_REPORT, uploadedBy);
+            KycDocument.DocumentType.ANNUAL_REPORT, uploadedBy, "REGISTRY_ADMIN");
 
         assertThat(result.getStorageRef()).isEqualTo("inline");
         verify(kycDocumentContentRepository).save(any(KycDocumentContent.class));
@@ -114,7 +121,7 @@ class DocumentServiceTest {
 
         KycDocument result = documentService.storeDocument(
             entityId, content, "large.pdf", "application/pdf",
-            KycDocument.DocumentType.COMMERCIAL_REGISTER, uploadedBy);
+            KycDocument.DocumentType.COMMERCIAL_REGISTER, uploadedBy, "REGISTRY_ADMIN");
 
         assertThat(result.getStorageRef()).isNotEqualTo("inline").contains("kyc/");
         verify(s3DocumentStorageAdapter).upload(any(), eq(content), eq("application/pdf"));
@@ -137,7 +144,7 @@ class DocumentServiceTest {
 
         KycDocument result = documentService.storeDocument(
             entityId, content, "small.txt", "text/plain",
-            KycDocument.DocumentType.OTHER, UUID.randomUUID());
+            KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(result.getContentHash()).isEqualTo(expectedHash);
     }
@@ -193,10 +200,50 @@ class DocumentServiceTest {
         when(kycDocumentRepository.findById(docId)).thenReturn(Optional.of(doc));
         when(kycDocumentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        documentService.softDeleteDocument(docId, UUID.randomUUID());
+        documentService.softDeleteDocument(docId, UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(doc.getDeletedAt()).isNotNull();
         assertThat(doc.isDeleted()).isTrue();
         verify(kycDocumentRepository).save(doc);
+    }
+
+    // ── audit events (finding #11a) ───────────────────────────────────────────
+
+    @Test
+    @DisplayName("storeDocument publishes a DocumentUploadedEvent")
+    void storeDocument_publishesUploadedEvent() {
+        UUID entityId = UUID.randomUUID();
+        UUID uploadedBy = UUID.randomUUID();
+        when(kycDocumentRepository.save(any())).thenAnswer(inv -> {
+            KycDocument d = inv.getArgument(0);
+            d.setId(UUID.randomUUID());
+            return d;
+        });
+        when(kycDocumentContentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        documentService.storeDocument(entityId, "hi".getBytes(StandardCharsets.UTF_8), "a.txt", "text/plain",
+                KycDocument.DocumentType.OTHER, uploadedBy, "COMPANY_ADMIN");
+
+        ArgumentCaptor<DocumentUploadedEvent> captor = ArgumentCaptor.forClass(DocumentUploadedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().actorId()).isEqualTo(uploadedBy);
+        assertThat(captor.getValue().actorRole()).isEqualTo("COMPANY_ADMIN");
+    }
+
+    @Test
+    @DisplayName("softDeleteDocument publishes a DocumentDeletedEvent")
+    void softDeleteDocument_publishesDeletedEvent() {
+        UUID docId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        KycDocument doc = savedDocWith(docId, "inline");
+        when(kycDocumentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(kycDocumentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        documentService.softDeleteDocument(docId, actorId, "REGISTRY_ADMIN");
+
+        ArgumentCaptor<DocumentDeletedEvent> captor = ArgumentCaptor.forClass(DocumentDeletedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().documentId()).isEqualTo(docId);
+        assertThat(captor.getValue().actorId()).isEqualTo(actorId);
     }
 }

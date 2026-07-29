@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +38,7 @@ class AuditPartitionJob {
     }
 
     /** Monthly on the 1st at 02:00 UTC. */
+    @SchedulerLock(name = "auditPartitionEnsure", lockAtMostFor = "PT10M")
     @Scheduled(cron = "0 0 2 1 * *")
     @Transactional
     public void ensurePartitions() {

@@ -20,6 +20,10 @@ import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerw
 import { DsarService } from '../../../core/api/dsar.service';
 import { ErasureRequestView } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
+import {
+  StepUpDialogComponent,
+  StepUpDialogResult,
+} from '../../../shared/components/step-up/step-up-dialog.component';
 
 type ResolveMode = 'complete' | 'reject';
 
@@ -190,27 +194,50 @@ export class ErasureQueueComponent implements OnInit {
     this.dialog.closeAll();
 
     const note = this.resolutionNote.trim();
-    const action$ =
-      this.resolveMode === 'complete'
-        ? this.dsarService.complete(req.id, note)
-        : this.dsarService.reject(req.id, note);
+    const isComplete = this.resolveMode === 'complete';
 
-    action$.subscribe({
-      next: () => {
-        this.snackBar.open(
-          `Erasure request ${this.resolveMode === 'complete' ? 'completed' : 'rejected'}.`,
-          'Dismiss',
-          { duration: 5000 },
-        );
-        this.loadQueue();
-      },
-      error: (err) => {
-        this.snackBar.open(
-          err?.error?.message ?? 'Failed to resolve erasure request.',
-          'Dismiss',
-          { duration: 6000 },
-        );
-      },
-    });
+    this.dialog
+      .open(StepUpDialogComponent, {
+        data: isComplete
+          ? {
+              requireDualControl: true,
+              reason: `Complete erasure request for entity ${req.entityId} (irreversibly tombstones user PII)`,
+              action: 'DSAR_ERASURE_COMPLETE',
+            }
+          : {
+              requireDualControl: false,
+              reason: `Reject erasure request for entity ${req.entityId}`,
+              action: 'DSAR_ERASURE_REJECT',
+            },
+        width: '520px',
+        disableClose: true,
+      })
+      .afterClosed()
+      .subscribe((result: StepUpDialogResult | undefined) => {
+        if (!result?.stepUpToken) return;
+        if (isComplete && !result.dualControlToken) return;
+
+        const action$ = isComplete
+          ? this.dsarService.complete(req.id, note, result.stepUpToken, result.dualControlToken!)
+          : this.dsarService.reject(req.id, note, result.stepUpToken);
+
+        action$.subscribe({
+          next: () => {
+            this.snackBar.open(
+              `Erasure request ${isComplete ? 'completed' : 'rejected'}.`,
+              'Dismiss',
+              { duration: 5000 },
+            );
+            this.loadQueue();
+          },
+          error: (err) => {
+            this.snackBar.open(
+              err?.error?.message ?? 'Failed to resolve erasure request.',
+              'Dismiss',
+              { duration: 6000 },
+            );
+          },
+        });
+      });
   }
 }

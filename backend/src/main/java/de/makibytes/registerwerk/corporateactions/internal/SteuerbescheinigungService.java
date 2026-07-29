@@ -1,11 +1,14 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
-import de.makibytes.registerwerk.deployment.api.AssetHolder;
-import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryRepository;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.shared.DocumentSigningService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -15,13 +18,19 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -32,24 +41,49 @@ import java.util.stream.Collectors;
  * Generates Steuerbescheinigung (annual tax certificate) PDFs per DE §43 KStG / §32d EStG.
  * Required for German investors to declare capital gains from electronic securities.
  * Issued annually for the prior tax year; also on-demand per investor request.
+ *
+ * <p>Income figures come from settled {@link CorporateActionEntry} rows — this used to be a
+ * pure-placeholder document ("— (Coupon-Service ermittelt)" in every row, hardcoded "0,00 EUR"
+ * withholding) because corporate actions never carried a per-holder payout breakdown at all.
+ * Now: KESt (Kapitalertragsteuer, §43a Abs. 1 Nr. 1 EStG — 25%) and SolZ (Solidaritätszuschlag —
+ * 5.5% of KESt) are computed from the actual settled income; church tax (KiSt) is honestly
+ * reported as "not tracked" rather than falsely asserted "nein", since no field anywhere records
+ * an investor's church-tax liability.
  */
 @Service
 public class SteuerbescheinigungService {
 
     private static final Logger log = LoggerFactory.getLogger(SteuerbescheinigungService.class);
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    private static final BigDecimal KEST_RATE = new BigDecimal("0.25");
+    private static final BigDecimal SOLZ_RATE = new BigDecimal("0.055");
 
-    private final AssetHolderRepository holderRepository;
+    private final CorporateActionEntryRepository entryRepository;
+    private final CorporateActionRepository corporateActionRepository;
     private final AssetRepository assetRepository;
     private final LegalEntityRepository entityRepository;
+    private final DocumentSigningService signingService;
+    private final String operatorName;
+    private final String operatorTaxId;
 
-    SteuerbescheinigungService(AssetHolderRepository holderRepository,
+    SteuerbescheinigungService(CorporateActionEntryRepository entryRepository,
+                                CorporateActionRepository corporateActionRepository,
                                 AssetRepository assetRepository,
-                                LegalEntityRepository entityRepository) {
-        this.holderRepository = holderRepository;
+                                LegalEntityRepository entityRepository,
+                                DocumentSigningService signingService,
+                                @Value("${registerwerk.operator.name:}") String operatorName,
+                                @Value("${registerwerk.operator.tax-id:}") String operatorTaxId) {
+        this.entryRepository = entryRepository;
+        this.corporateActionRepository = corporateActionRepository;
         this.assetRepository = assetRepository;
         this.entityRepository = entityRepository;
+        this.signingService = signingService;
+        this.operatorName = operatorName;
+        this.operatorTaxId = operatorTaxId;
     }
+
+    /** One tax-relevant income line — one asset's aggregate settled income for the tax year. */
+    private record IncomeLine(Asset asset, BigDecimal grossIncome) {}
 
     /**
      * Generates a Steuerbescheinigung PDF for the given entity and tax year.
@@ -60,21 +94,53 @@ public class SteuerbescheinigungService {
     public byte[] generate(UUID entityId, int taxYear) {
         LegalEntity entity = entityRepository.findById(entityId)
                 .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
-        List<AssetHolder> holdings = holderRepository.findByInvestorId(entityId);
 
-        log.info("Generating Steuerbescheinigung for entity={} taxYear={}", entityId, taxYear);
+        Instant yearStart = LocalDate.of(taxYear, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant yearEnd = LocalDate.of(taxYear + 1, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        List<CorporateActionEntry> entries = entryRepository.findSettledByInvestorAndPeriod(entityId, yearStart, yearEnd);
+        List<IncomeLine> incomeLines = aggregateByAsset(entries);
+
+        log.info("Generating Steuerbescheinigung for entity={} taxYear={} incomeLines={}", entityId, taxYear, incomeLines.size());
 
         try {
-            return buildPdf(entity, holdings, taxYear);
+            byte[] unsigned = buildPdf(entity, incomeLines, taxYear);
+            return signingService.isConfigured()
+                    ? signingService.signPdf(unsigned, "Steuerbescheinigung " + taxYear + " — " + entity.getEntityNumber())
+                    : unsigned;
         } catch (IOException e) {
             throw new RuntimeException("Failed to generate Steuerbescheinigung PDF", e);
         }
     }
 
-    private byte[] buildPdf(LegalEntity entity, List<AssetHolder> holdings, int taxYear) throws IOException {
-        List<UUID> assetIds = holdings.stream().map(AssetHolder::getAssetId).toList();
-        Map<UUID, Asset> assetById = assetRepository.findAllById(assetIds).stream()
+    private List<IncomeLine> aggregateByAsset(List<CorporateActionEntry> entries) {
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> corporateActionIds = entries.stream().map(CorporateActionEntry::getCorporateActionId).distinct().toList();
+        Map<UUID, UUID> assetIdByAction = corporateActionRepository.findAllById(corporateActionIds).stream()
+                .collect(Collectors.toMap(CorporateAction::getId, CorporateAction::getAssetId));
+
+        Map<UUID, BigDecimal> grossByAsset = new LinkedHashMap<>();
+        for (CorporateActionEntry entry : entries) {
+            UUID assetId = assetIdByAction.get(entry.getCorporateActionId());
+            if (assetId == null || entry.getEntitlementAmount() == null) {
+                continue;
+            }
+            grossByAsset.merge(assetId, entry.getEntitlementAmount(), BigDecimal::add);
+        }
+
+        Map<UUID, Asset> assetById = assetRepository.findAllById(grossByAsset.keySet()).stream()
                 .collect(Collectors.toMap(Asset::getId, Function.identity()));
+
+        return grossByAsset.entrySet().stream()
+                .map(e -> new IncomeLine(assetById.get(e.getKey()), e.getValue()))
+                .toList();
+    }
+
+    private byte[] buildPdf(LegalEntity entity, List<IncomeLine> incomeLines, int taxYear) throws IOException {
+        BigDecimal totalIncome = incomeLines.stream().map(IncomeLine::grossIncome).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal kest = totalIncome.multiply(KEST_RATE).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal solz = kest.multiply(SOLZ_RATE).setScale(2, RoundingMode.HALF_UP);
 
         try (PDDocument doc = new PDDocument()) {
             PDPage page = new PDPage(PDRectangle.A4);
@@ -100,9 +166,11 @@ public class SteuerbescheinigungService {
                 // Issuer info
                 PdfHelper.writeText(content, margin, y, fontBold, 11, "Ausstellendes Institut (Registerführer):");
                 y -= 14;
-                PdfHelper.writeText(content, margin, y, fontRegular, 9, "Registerwerk eWpG-Registry — [Operator name to fill in]");
+                PdfHelper.writeText(content, margin, y, fontRegular, 9,
+                    operatorName != null && !operatorName.isBlank() ? operatorName : "Registerwerk eWpG-Registry");
                 y -= 14;
-                PdfHelper.writeText(content, margin, y, fontRegular, 9, "Steuer-ID / LEI: [To fill in]");
+                PdfHelper.writeText(content, margin, y, fontRegular, 9,
+                    "Steuer-ID / LEI: " + (operatorTaxId != null && !operatorTaxId.isBlank() ? operatorTaxId : "nicht konfiguriert (registerwerk.operator.tax-id)"));
                 y -= 20;
 
                 // Holder info
@@ -124,27 +192,27 @@ public class SteuerbescheinigungService {
                 content.stroke();
                 y -= 14;
 
-                float[] cols = {margin, 220, 350, 440};
+                float[] cols = {margin, 260, 400};
                 PdfHelper.writeText(content, cols[0], y, fontBold, 9, "Wertpapier / ISIN");
-                PdfHelper.writeText(content, cols[1], y, fontBold, 9, "Nennbetrag");
-                PdfHelper.writeText(content, cols[2], y, fontBold, 9, "Kupon / Erträge EUR");
-                PdfHelper.writeText(content, cols[3], y, fontBold, 9, "KiSt-Merkmal");
+                PdfHelper.writeText(content, cols[1], y, fontBold, 9, "Kupon / Erträge EUR");
+                PdfHelper.writeText(content, cols[2], y, fontBold, 9, "Quelle");
                 y -= 12;
 
-                for (AssetHolder holder : holdings) {
-                    Asset asset = assetById.get(holder.getAssetId());
-                    String assetDesc = asset != null
-                        ? (asset.getIsin() != null ? asset.getIsin() : asset.getName())
-                        : holder.getAssetId().toString().substring(0, 8) + "…";
-                    String nominal = holder.getNominalAmount() != null
-                        ? holder.getNominalAmount().toPlainString() : "0";
-
-                    PdfHelper.writeText(content, cols[0], y, fontRegular, 8, assetDesc.substring(0, Math.min(30, assetDesc.length())));
-                    PdfHelper.writeText(content, cols[1], y, fontRegular, 8, nominal);
-                    PdfHelper.writeText(content, cols[2], y, fontRegular, 8, "— (Coupon-Service ermittelt)");
-                    PdfHelper.writeText(content, cols[3], y, fontRegular, 8, "nein");
+                if (incomeLines.isEmpty()) {
+                    PdfHelper.writeText(content, cols[0], y, fontRegular, 8,
+                            "Keine im Veranlagungszeitraum " + taxYear + " abgerechneten Kapitalerträge.");
                     y -= 12;
-                    if (y < margin + 60) break;
+                } else {
+                    for (IncomeLine line : incomeLines) {
+                        String assetDesc = line.asset() != null
+                            ? (line.asset().getIsin() != null ? line.asset().getIsin() : line.asset().getName())
+                            : "(Asset gelöscht)";
+                        PdfHelper.writeText(content, cols[0], y, fontRegular, 8, PdfHelper.truncate(assetDesc, 32));
+                        PdfHelper.writeText(content, cols[1], y, fontRegular, 8, line.grossIncome().setScale(2, RoundingMode.HALF_UP).toPlainString());
+                        PdfHelper.writeText(content, cols[2], y, fontRegular, 8, "Coupon-Service (settled)");
+                        y -= 12;
+                        if (y < margin + 100) break;
+                    }
                 }
 
                 // Tax summary
@@ -153,17 +221,24 @@ public class SteuerbescheinigungService {
                 content.lineTo(PDRectangle.A4.getWidth() - margin, y);
                 content.stroke();
                 y -= 14;
-                PdfHelper.writeText(content, margin, y, fontBold, 10, "Kapitalertragsteuer (KESt): — EUR");
+                PdfHelper.writeText(content, margin, y, fontBold, 10,
+                        "Summe Kapitalerträge: " + totalIncome.setScale(2, RoundingMode.HALF_UP).toPlainString() + " EUR");
+                y -= 14;
+                PdfHelper.writeText(content, margin, y, fontBold, 10, "Kapitalertragsteuer (KESt, 25%): " + kest.toPlainString() + " EUR");
                 y -= 12;
-                PdfHelper.writeText(content, margin, y, fontBold, 10, "Solidaritätszuschlag (SolZ): — EUR");
+                PdfHelper.writeText(content, margin, y, fontBold, 10, "Solidaritätszuschlag (SolZ, 5,5% der KESt): " + solz.toPlainString() + " EUR");
                 y -= 12;
-                PdfHelper.writeText(content, margin, y, fontBold, 10, "Kirchensteuer (KiSt): 0,00 EUR");
+                PdfHelper.writeText(content, margin, y, fontRegular, 9,
+                        "Kirchensteuer (KiSt): nicht erfasst — Registerwerk führt kein KiSt-Merkmal je Anleger.");
                 y -= 20;
 
                 // Footer
+                String signatureClaim = signingService.isConfigured()
+                        ? "Dieses Dokument wird digital signiert (PAdES-B-B, CMS/PKCS#7)."
+                        : "Dieses Dokument ist NICHT digital signiert (kein Signaturzertifikat konfiguriert).";
                 PdfHelper.writeText(content, margin, margin + 20, fontRegular, 7,
                     "Diese Steuerbescheinigung wurde maschinell erstellt und ist ohne Unterschrift gültig " +
-                    "(§ 45a Abs. 2 EStG). PAdES-B-LT Signatur. Registerwerk eWpG-Registry.");
+                    "(§ 45a Abs. 2 EStG). " + signatureClaim + " Registerwerk eWpG-Registry.");
             }
 
             ByteArrayOutputStream bos = new ByteArrayOutputStream();

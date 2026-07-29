@@ -1,6 +1,11 @@
 export const environment = {
   production: false,
   testEnvironment: true,
-  apiUrl: 'http://localhost:8000/api/v1',
+  // The operator portal bypasses Kong entirely (see CLAUDE.md / frontend-operator/nginx.conf) —
+  // it must point straight at the backend, never at Kong's :8000. Kong IP-restricts
+  // /api/v1/admin/** to operator-network CIDRs (see gateway/kong.yml), and a browser hitting
+  // Kong directly in dev arrives from a Docker-bridge/host IP that isn't on that allowlist,
+  // producing "Access denied by IP restriction policy." on every admin-console call.
+  apiUrl: 'http://localhost:8080/api/v1',
   customerUrl: 'http://localhost:4201'
 };

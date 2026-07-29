@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.notification.internal.EmailService;
 import de.makibytes.registerwerk.notification.internal.OnboardingEmailService;
 import de.makibytes.registerwerk.notification.internal.WelcomeEmailService;
 import de.makibytes.registerwerk.notification.internal.SmtpEmailAdapter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,7 +41,7 @@ class EmailTemplateRenderingTest {
         TemplateEngine templateEngine = new SpringTemplateEngine();
         templateEngine.setTemplateResolver(templateResolver);
 
-        EmailService emailService = new EmailService(smtpEmailAdapter, templateEngine);
+        EmailService emailService = new EmailService(smtpEmailAdapter, templateEngine, new SimpleMeterRegistry());
         welcomeEmailService = new WelcomeEmailService(emailService);
         onboardingEmailService = new OnboardingEmailService(emailService);
     }
