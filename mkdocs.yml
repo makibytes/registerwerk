@@ -123,6 +123,7 @@ nav:
     - platform/index.md
     - Module Architecture: platform/modules.md
     - Security & Authentication: platform/security.md
+    - Microsoft Entra ID Setup: platform/entra-setup.md
     - Audit Log: platform/audit-log.md
     - REST API Overview: platform/api.md
     - dApp Development & Marketplace: platform/dapp-development.md

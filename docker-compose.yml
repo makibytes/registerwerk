@@ -45,10 +45,25 @@ services:
       # Override to blank/"production" once JWT_ISSUER_URI and a real JWT_DEV_SECRET are set.
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-}
       ENTRA_ENABLED: ${ENTRA_ENABLED:-false}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
       JWT_DEV_SECRET: ${JWT_DEV_SECRET:-registerwerk-dev-jwt-secret-change-in-production!!}
+      # Microsoft Entra ID. All blank by default, which is what keeps this a local/demo stack:
+      # ENTRA_ENABLED=false means built-in login, and ENTRA_SUPPORT_ENABLED=false means nothing
+      # here ever reaches out to Microsoft Graph. See docs/platform/entra-setup.md.
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      ENTRA_SPA_CLIENT_ID: ${ENTRA_SPA_CLIENT_ID:-}
+      ENTRA_API_SCOPE: ${ENTRA_API_SCOPE:-}
+      ENTRA_SUPPORT_ENABLED: ${ENTRA_SUPPORT_ENABLED:-false}
+      ENTRA_GRAPH_BASE_URL: ${ENTRA_GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}
+      ENTRA_STEPUP_AUTH_CONTEXT_ID: ${ENTRA_STEPUP_AUTH_CONTEXT_ID:-}
+      ENTRA_AUTHORIZATION_URI: ${ENTRA_AUTHORIZATION_URI:-https://login.microsoftonline.com/common/oauth2/authorize}
+      ENTRA_MFA_SETUP_URL: ${ENTRA_MFA_SETUP_URL:-https://mysignins.microsoft.com/security-info}
+      ENTRA_REQUIRE_2FA_ENROLMENT: ${ENTRA_REQUIRE_2FA_ENROLMENT:-false}
       ETH_MAINNET_RPC: ${ETH_MAINNET_RPC}
       ETH_SEPOLIA_RPC: ${ETH_SEPOLIA_RPC}
       POLYGON_MAINNET_RPC: ${POLYGON_MAINNET_RPC}

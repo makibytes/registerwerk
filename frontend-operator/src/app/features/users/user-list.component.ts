@@ -17,6 +17,7 @@ import { MatMenuModule } from '@angular/material/menu';
 import { AdminUserService, AppUserRole, OperatorUser } from '../../core/api/admin-user.service';
 import { InviteUserDialogComponent } from './invite-user-dialog.component';
 import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component';
+import { User2faDialogComponent } from './user-2fa-dialog.component';
 
 const ALL_ROLES: AppUserRole[] = [
   'REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER',
@@ -292,6 +293,10 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
                 <mat-icon>lock_reset</mat-icon>
                 Reset password
               </button>
+              <button mat-menu-item [disabled]="u.authProvider !== 'ENTRA'" (click)="manage2fa(u)">
+                <mat-icon>security</mat-icon>
+                Manage 2FA
+              </button>
               <mat-divider />
               <button mat-menu-item class="menu-delete" (click)="deleteUser(u)">
                 <mat-icon>delete</mat-icon>
@@ -408,6 +413,19 @@ export class UserListComponent implements OnInit {
       error: (err) => {
         this.snackBar.open(err?.error?.message ?? 'Failed to send reset', 'Dismiss', { duration: 4000 });
       },
+    });
+  }
+
+  /**
+   * Opens the Microsoft Entra 2FA support console — list registered methods, reset them, revoke
+   * sessions, and issue a Temporary Access Pass. Only meaningful for ENTRA accounts; local
+   * accounts use the password-reset action above.
+   */
+  manage2fa(user: OperatorUser): void {
+    this.dialog.open(User2faDialogComponent, {
+      data: user,
+      width: '620px',
+      autoFocus: false,
     });
   }
 

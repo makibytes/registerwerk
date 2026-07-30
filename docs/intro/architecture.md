@@ -66,7 +66,7 @@ Both frontends are always opened **directly** by the browser at their own port �
 
 The **operator frontend** connects its API calls directly (nginx proxy → `backend:8080`). It uses a built-in HS256 JWT login (`POST /api/v1/public/auth/login`) and never passes through Kong. This keeps the operator portal functional even when Kong is down.
 
-The **customer frontend**'s API calls go through Kong, which adds rate limiting, response caching, and security headers in front of the backend. JWT validation itself always happens in the Spring backend (`JwtEntityClaimsConverter` reads `roles`/entity claims straight off the token) — Kong's OSS build here does not validate JWTs or inject entity headers. An `openid-connect` plugin exists as an optional, Enterprise/Konnect-only add-on (`gateway/plugins/oidc-entra.yml`) for deployments that want JWT termination at the gateway too.
+The **customer frontend**'s API calls go through Kong, which adds rate limiting, response caching, and security headers in front of the backend. JWT validation itself always happens in the Spring backend (`SecurityConfig` reads the `roles` claim straight off the token, and `SecurityUtils.extractEntityId` the entity claim) — Kong's OSS build here does not validate JWTs or inject entity headers. An `openid-connect` plugin exists as an optional, Enterprise/Konnect-only add-on (`gateway/plugins/oidc-entra.yml`) for deployments that want JWT termination at the gateway too.
 
 ---
 

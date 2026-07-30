@@ -67,6 +67,33 @@ public class AppUser {
     @Column(name = "totp_enrolled_at")
     private Instant totpEnrolledAt;
 
+    // ── Microsoft Entra ID ─────────────────────────────────────────────────
+    /**
+     * The Entra object id (token {@code oid}) this row mirrors. The join key between an Entra
+     * principal and this account; null for LOCAL accounts. Without it the token's {@code sub}
+     * (an Entra oid) and {@code app_user.id} (a DB-generated UUID) are unrelated values.
+     */
+    @Column(name = "entra_object_id")
+    private UUID entraObjectId;
+
+    /**
+     * Home tenant of the principal (token {@code tid}). Differing from the operator's own
+     * tenant is the ground truth for "this user is federated from a customer's tenant", and
+     * therefore that we can neither read nor manage their authentication methods.
+     */
+    @Column(name = "entra_tenant_id")
+    private UUID entraTenantId;
+
+    /**
+     * Advisory cache of the Graph second-factor lookup, so the nav banner costs no Graph
+     * round-trip. Never an authorisation input — Conditional Access is the enforcement point.
+     */
+    @Column(name = "entra_mfa_registered_at")
+    private Instant entraMfaRegisteredAt;
+
+    @Column(name = "entra_mfa_checked_at")
+    private Instant entraMfaCheckedAt;
+
     @PreUpdate
     void onUpdate() {
         this.updatedAt = Instant.now();
@@ -127,4 +154,16 @@ public class AppUser {
     public void setTotpEnabled(boolean totpEnabled) { this.totpEnabled = totpEnabled; }
     public Instant getTotpEnrolledAt() { return totpEnrolledAt; }
     public void setTotpEnrolledAt(Instant totpEnrolledAt) { this.totpEnrolledAt = totpEnrolledAt; }
+
+    public UUID getEntraObjectId() { return entraObjectId; }
+    public void setEntraObjectId(UUID entraObjectId) { this.entraObjectId = entraObjectId; }
+
+    public UUID getEntraTenantId() { return entraTenantId; }
+    public void setEntraTenantId(UUID entraTenantId) { this.entraTenantId = entraTenantId; }
+
+    public Instant getEntraMfaRegisteredAt() { return entraMfaRegisteredAt; }
+    public void setEntraMfaRegisteredAt(Instant v) { this.entraMfaRegisteredAt = v; }
+
+    public Instant getEntraMfaCheckedAt() { return entraMfaCheckedAt; }
+    public void setEntraMfaCheckedAt(Instant v) { this.entraMfaCheckedAt = v; }
 }

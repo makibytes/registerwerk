@@ -93,7 +93,7 @@ export class CompanyService {
     return this.http.get<IdpSettings>(`${this.base}/idp`);
   }
 
-  saveIdpSettings(body: { issuerUrl: string; clientId: string; clientSecret: string }): Observable<IdpSettings> {
+  saveIdpSettings(body: { issuerUrl: string; clientId: string }): Observable<IdpSettings> {
     return this.http.put<IdpSettings>(`${this.base}/idp`, body);
   }
 

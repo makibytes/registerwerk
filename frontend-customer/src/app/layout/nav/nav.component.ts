@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -6,6 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { SecurityService } from '../../core/api/security.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { WorkspaceKey, WorkspaceService } from '../../core/workspace/workspace.service';
 import { environment } from '../../../environments/environment';
@@ -125,6 +126,13 @@ const { operatorUrl } = environment;
           </div>
         </div>
         <mat-divider></mat-divider>
+        <button mat-menu-item routerLink="/security">
+          <mat-icon>shield</mat-icon>
+          <span>Security</span>
+          @if (twoFactorMissing) {
+            <span class="menu-alert-dot" aria-label="Two-factor authentication is not set up"></span>
+          }
+        </button>
         <button mat-menu-item (click)="logout()">
           <mat-icon>logout</mat-icon>
           <span>Sign out</span>
@@ -435,12 +443,23 @@ const { operatorUrl } = environment;
       color: var(--rw-text-secondary);
       line-height: 1.3;
     }
+
+    .menu-alert-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #F59E0B;
+      margin-left: 8px;
+      flex-shrink: 0;
+    }
   `]
 })
 export class NavComponent implements OnInit {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly workspaceService = inject(WorkspaceService);
+  private readonly securityService = inject(SecurityService);
+  private readonly cdr = inject(ChangeDetectorRef);
   readonly isTestEnv = environment.testEnvironment;
   readonly operatorUrl = operatorUrl;
 
@@ -449,6 +468,16 @@ export class NavComponent implements OnInit {
   isImpersonating = false;
   canImpersonate = false;
   impersonationEntityName = '';
+
+  /**
+   * Marks the Security menu entry when no second factor is registered.
+   *
+   * A nudge, not a gate. Conditional Access already blocks unenrolled users during sign-in, so
+   * a hard block here would be redundant — and it would make a Microsoft Graph outage take the
+   * entire portal down, because the status read would fail for everyone at once. The check also
+   * fails open: an error leaves the dot off rather than showing a false alarm.
+   */
+  twoFactorMissing = false;
 
   eligibleWorkspaces = this.workspaceService.eligibleWorkspaces();
   activeWorkspace = this.workspaceService.activeWorkspace();
@@ -466,6 +495,23 @@ export class NavComponent implements OnInit {
     this.impersonationEntityName = meta?.entityName ?? '';
     this.eligibleWorkspaces = this.workspaceService.eligibleWorkspaces();
     this.activeWorkspace = this.workspaceService.activeWorkspace();
+    this.checkTwoFactorStatus();
+  }
+
+  private checkTwoFactorStatus(): void {
+    if (!this.auth.isEntraMode()) {
+      return;
+    }
+    this.securityService.getTwoFactorStatus().subscribe({
+      next: status => {
+        this.twoFactorMissing = status.applicable && status.managedHere && !status.registered;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        // Fail open — see the field's documentation.
+        this.twoFactorMissing = false;
+      },
+    });
   }
 
   switchWorkspace(key: WorkspaceKey): void {

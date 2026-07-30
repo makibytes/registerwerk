@@ -320,8 +320,17 @@ export interface OnboardingCompleteRequest {
 export interface IdpSettings {
   issuerUrl: string;
   clientId: string;
-  clientSecret: string;
-  hasClientSecret: boolean;
+  /**
+   * How this organisation's users are hosted. Operator-controlled and read-only here:
+   * WORKFORCE_MEMBER / WORKFORCE_GUEST (the operator manages their MFA) or FEDERATED
+   * (this organisation's own tenant does).
+   */
+  identityModel: 'LOCAL' | 'WORKFORCE_MEMBER' | 'WORKFORCE_GUEST' | 'FEDERATED';
+  /**
+   * Whether MFA performed in this organisation's own tenant is accepted. Operator-controlled —
+   * an organisation vouching for its own MFA would let it lower the bar applied to its users.
+   */
+  idpMfaTrusted: boolean;
   lifecycleManagedExternally: boolean;
 }
 

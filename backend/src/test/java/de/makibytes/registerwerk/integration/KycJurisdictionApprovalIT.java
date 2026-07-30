@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.integration;
 
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
+
 import de.makibytes.registerwerk.audit.internal.AuditEvent;
 import de.makibytes.registerwerk.audit.internal.AuditEventRepository;
 import de.makibytes.registerwerk.auth.api.AppUser;
@@ -160,6 +162,9 @@ class KycJurisdictionApprovalIT {
             long exp = iat + 3600;
             String rolesJson = String.join(",", java.util.Arrays.stream(roles).map(r -> "\"" + r + "\"").toList());
             String payload = base64Url("{"
+                // The HS256 decoder is pinned to this issuer, so knowing the signing secret is
+                // not on its own enough to mint an accepted token.
+                + "\"iss\":\"" + JwtMintingService.LOCAL_ISSUER + "\","
                 + "\"sub\":\"" + sub + "\","
                 + "\"roles\":[" + rolesJson + "],"
                 + (stepUp ? "\"acr\":\"stepup\"," : "")

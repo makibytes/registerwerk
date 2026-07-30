@@ -191,6 +191,13 @@ interface LoginResponse {
       }
     }
 
+    .entra-hint {
+      margin: 0 0 20px;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--rw-text-muted, #6B7280);
+    }
+
     .submit-btn {
       width: 100%;
       height: 46px;
@@ -246,6 +253,16 @@ interface LoginResponse {
           <p class="card-subtitle">Sign in to the Registerwerk Customer Portal</p>
         </div>
 
+        @if (entraMode) {
+          <p class="entra-hint">
+            Sign in with your organisation's Microsoft account. Two-factor authentication is
+            required and is managed by Microsoft Entra ID.
+          </p>
+          <button class="submit-btn" type="button" (click)="signInWithMicrosoft()">
+            <mat-icon>login</mat-icon>
+            Sign in with Microsoft
+          </button>
+        } @else {
         <form (ngSubmit)="onSubmit()">
           <div class="field-group">
             <div>
@@ -298,12 +315,15 @@ interface LoginResponse {
             }
           </button>
         </form>
+        }
 
-        <div class="card-footer">
-          <p class="onboarding-link">
-            New here? <a routerLink="/onboarding">Set up your account</a>
-          </p>
-        </div>
+        @if (!entraMode) {
+          <div class="card-footer">
+            <p class="onboarding-link">
+              New here? <a routerLink="/onboarding">Set up your account</a>
+            </p>
+          </div>
+        }
       </div>
     </div>
   `,
@@ -319,6 +339,17 @@ export class LoginComponent {
   hidePassword = true;
   loading = false;
   errorMessage = '';
+
+  /**
+   * Under Entra sign-in the password form is not merely redundant — the backend's login,
+   * invite and password-reset endpoints all reject in that mode, so offering them would present
+   * flows that cannot succeed.
+   */
+  readonly entraMode = this.auth.isEntraMode();
+
+  signInWithMicrosoft(): void {
+    this.auth.login();
+  }
 
   onSubmit(): void {
     if (!this.email || !this.password) return;

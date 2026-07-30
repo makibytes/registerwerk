@@ -23,6 +23,10 @@ public class WebConfig implements WebMvcConfigurer {
             .allowedOrigins(allowedOrigins.toArray(String[]::new))
             .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
             .allowedHeaders("*")
+            // Browsers hide every response header from JS unless it is explicitly exposed.
+            // WWW-Authenticate carries the OAuth2 claims challenge (error="insufficient_claims")
+            // that the customer SPA must read to trigger an Entra step-up redirect.
+            .exposedHeaders("WWW-Authenticate", "X-Total-Count")
             .allowCredentials(false)
             .maxAge(3600);
     }

@@ -53,8 +53,44 @@ public class LegalEntity {
     @Column(name = "idp_client_id", length = 255)
     private String idpClientId;
 
+    /**
+     * @deprecated Never populated since V19. Inbound B2B federation is configured tenant-to-tenant
+     *     in the Entra portal; Registerwerk never runs an authorization-code flow against a
+     *     customer's tenant, so it has no use for their client secret — and this column stored it
+     *     in plaintext. The column remains because V1 is shipped and migrations are not edited.
+     */
+    @Deprecated
     @Column(name = "idp_client_secret", length = 500)
     private String idpClientSecret;
+
+    /**
+     * Whether this customer's users are invited into the operator's own tenant (and their MFA is
+     * therefore manageable from here) or federated to the customer's own tenant. One of
+     * {@code WORKFORCE_MEMBER}, {@code WORKFORCE_GUEST}, {@code FEDERATED}, enforced by a CHECK
+     * constraint in V19.
+     *
+     * <p>Deliberately a String rather than the {@code entra} module's {@code EntraIdentityModel}:
+     * {@code entra} depends on {@code customer.api}, so typing it here would close a module cycle.
+     * The {@code entra} module parses it — a small cost to keep {@code customer} ignorant of the
+     * identity provider.
+     *
+     * <p>Records operator <em>intent</em>. Once a user has signed in, the {@code tid} on their
+     * token is ground truth and wins.
+     */
+    @Column(name = "identity_model", length = 20, nullable = false)
+    private String identityModel = "WORKFORCE_GUEST";
+
+    /** The federated customer's Entra tenant id, derived from {@link #idpIssuerUrl}. */
+    @Column(name = "idp_tenant_id")
+    private UUID idpTenantId;
+
+    /**
+     * Whether MFA performed in the customer's home tenant is accepted here (Entra cross-tenant
+     * access settings). Operator-controlled only — a customer asserting "trust my MFA" about
+     * themselves would be a privilege-escalation path.
+     */
+    @Column(name = "idp_mfa_trusted", nullable = false)
+    private boolean idpMfaTrusted = false;
 
     @Column(name = "incorporation_date")
     private LocalDate incorporationDate;
@@ -113,8 +149,25 @@ public class LegalEntity {
     public String getIdpClientId() { return idpClientId; }
     public void setIdpClientId(String idpClientId) { this.idpClientId = idpClientId; }
 
+    /** @deprecated see the field. */
+    @Deprecated
     public String getIdpClientSecret() { return idpClientSecret; }
+    /** @deprecated see the field — nothing should call this. */
+    @Deprecated
     public void setIdpClientSecret(String idpClientSecret) { this.idpClientSecret = idpClientSecret; }
+
+    public String getIdentityModel() { return identityModel; }
+    public void setIdentityModel(String identityModel) {
+        this.identityModel = identityModel == null || identityModel.isBlank()
+                ? "WORKFORCE_GUEST"
+                : identityModel;
+    }
+
+    public UUID getIdpTenantId() { return idpTenantId; }
+    public void setIdpTenantId(UUID idpTenantId) { this.idpTenantId = idpTenantId; }
+
+    public boolean isIdpMfaTrusted() { return idpMfaTrusted; }
+    public void setIdpMfaTrusted(boolean idpMfaTrusted) { this.idpMfaTrusted = idpMfaTrusted; }
 
     public LocalDate getIncorporationDate() { return incorporationDate; }
     public void setIncorporationDate(LocalDate incorporationDate) { this.incorporationDate = incorporationDate; }

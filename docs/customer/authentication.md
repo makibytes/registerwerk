@@ -22,16 +22,56 @@ To log in:
 1. Navigate to the customer portal at `https://portal.registerwerk.example.com`
 2. Click **Sign in with Microsoft**
 3. Enter your corporate Microsoft account email address
-4. Complete MFA if your organization requires it
+4. Complete two-factor authentication (required — see below)
 5. You are redirected back to the portal
 
 :::note
 Your Microsoft account must belong to the same tenant that the registry operator has whitelisted. If you see an "Account not recognized" error, contact your registry operator.
 :::
 
+### Two-factor authentication
+
+Two-factor authentication is **required** for the customer portal in production. It is enforced by
+Microsoft Conditional Access during sign-in, not by the portal itself: if you have not yet
+registered a second factor, Microsoft prompts you to do so before you can continue.
+
+The **Security** page (user menu → Security) shows your current status and walks you through
+setup. Because Microsoft owns the credential, the setup code you scan is shown on Microsoft's own
+security-info page — the registry never sees or stores it. The QR code on our Security page is
+simply a link to that Microsoft page, so you can move from your desktop to the phone that will
+hold the authenticator.
+
+To set up Microsoft Authenticator:
+
+1. Install **Microsoft Authenticator** on your phone.
+2. Open **Security** in the portal and scan the QR code, or select **Set up now**.
+3. Add a sign-in method on Microsoft's page and follow its instructions.
+4. Return to the portal and select **I've finished** — the page re-checks and confirms.
+
+#### Lost or replaced your phone?
+
+Contact the registry operator. After verifying your identity out-of-band, they will remove your
+old authentication methods, sign out your existing sessions, and issue a **Temporary Access
+Pass** — a short-lived, usually single-use code that lets you sign in once and register a new
+method. Deliver-and-use it promptly: it typically expires within the hour.
+
+If your organisation runs its own Microsoft Entra tenant (see below), the registry operator
+cannot do this — contact your own IT administrator instead.
+
 ### Self-managed identity provider
 
-Organizations that completed IdP configuration during [onboarding](./onboarding) are redirected automatically to their own identity provider. The login experience depends on your IdP (e.g., Keycloak login page, Okta, Ping Identity).
+Organizations that completed IdP configuration during [onboarding](./onboarding) sign in through
+their own Microsoft Entra tenant. Registry access is then established **tenant-to-tenant** in
+Microsoft Entra (B2B collaboration and cross-tenant access settings) — the registry never runs an
+authorization-code flow against your tenant and therefore never asks for a client secret. Only
+your issuer URL and client id are recorded, for identification.
+
+With this model your own tenant issues the credentials, so:
+
+- your administrators control which authentication methods are available and how strong they are;
+- multi-factor authentication performed in your tenant is accepted here only if the registry
+  operator has configured inbound MFA trust;
+- **the registry operator cannot reset your users' 2FA** — your own helpdesk does.
 
 The registry supports any OIDC-compliant identity provider that can issue JWTs with the following standard claims:
 

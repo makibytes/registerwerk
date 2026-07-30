@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.auth.api.AppUserActionToken;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.auth.api.AppUserActionTokenType;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
+import de.makibytes.registerwerk.auth.api.PrincipalResolver;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
@@ -43,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +57,7 @@ class CompanyUserServiceTest {
     @Mock private LegalEntityRepository legalEntityRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock ApplicationEventPublisher eventPublisher;
+    @Mock private PrincipalResolver principalResolver;
 
     private RegisterwerkAuthProperties authProperties;
     private CompanyUserService service;
@@ -73,6 +76,7 @@ class CompanyUserServiceTest {
             passwordEncoder,
             eventPublisher,
             authProperties,
+            principalResolver,
             "http://localhost:4201",
             48L
         );
@@ -127,17 +131,48 @@ class CompanyUserServiceTest {
     }
 
     @Test
-    @DisplayName("saveIdpSettings stores company IdP settings on the legal entity")
+    @DisplayName("saveIdpSettings stores company IdP settings and derives the federated tenant id")
     void saveIdpSettings_updatesEntity() {
+        LegalEntity entity = buildEntity();
+        UUID customerTenant = UUID.randomUUID();
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+
+        service.saveIdpSettings(authentication, new CompanyIdpSettingsRequest(
+            "https://login.microsoftonline.com/" + customerTenant + "/v2.0", "client-123"));
+
+        assertThat(entity.getIdpIssuerUrl())
+            .isEqualTo("https://login.microsoftonline.com/" + customerTenant + "/v2.0");
+        assertThat(entity.getIdpClientId()).isEqualTo("client-123");
+        // Extracted so a federated user can later be recognised by the `tid` on their token.
+        assertThat(entity.getIdpTenantId()).isEqualTo(customerTenant);
+        verify(legalEntityRepository).save(entity);
+    }
+
+    @Test
+    @DisplayName("saveIdpSettings never writes a client secret — the column is not populated at all")
+    void saveIdpSettings_neverStoresAClientSecret() {
         LegalEntity entity = buildEntity();
         when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
 
-        service.saveIdpSettings(authentication, new CompanyIdpSettingsRequest("https://issuer.example", "client-123", "secret"));
+        service.saveIdpSettings(authentication,
+            new CompanyIdpSettingsRequest("https://idp.example/realms/x", "client-123"));
 
-        assertThat(entity.getIdpIssuerUrl()).isEqualTo("https://issuer.example");
-        assertThat(entity.getIdpClientId()).isEqualTo("client-123");
-        assertThat(entity.getIdpClientSecret()).isEqualTo("secret");
-        verify(legalEntityRepository).save(entity);
+        // Inbound B2B federation is configured tenant-to-tenant in the IdP; Registerwerk never
+        // runs an authorization-code flow against a customer's tenant, so it has no use for
+        // their secret — and the column stored it in plaintext.
+        assertThat(entity.getIdpClientSecret()).isNull();
+    }
+
+    @Test
+    @DisplayName("a non-Entra issuer URL is stored without inventing a tenant id")
+    void saveIdpSettings_nonEntraIssuer_leavesTenantIdNull() {
+        LegalEntity entity = buildEntity();
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+
+        service.saveIdpSettings(authentication,
+            new CompanyIdpSettingsRequest("https://keycloak.example/realms/customer", "client-123"));
+
+        assertThat(entity.getIdpTenantId()).isNull();
     }
 
     @Test
@@ -197,22 +232,33 @@ class CompanyUserServiceTest {
     }
 
     @Test
-    @DisplayName("syncAuthenticatedPrincipal upserts the current Entra user from JWT claims")
-    void syncAuthenticatedPrincipal_upsertsCurrentEntraUser() {
+    @DisplayName("syncAuthenticatedPrincipal records the sign-in on the resolved account")
+    void syncAuthenticatedPrincipal_recordsLastLoginOnResolvedAccount() {
         authProperties.setEntraEnabled(true);
-        when(appUserRepository.findByEmailIgnoreCase("company-admin@test.local")).thenReturn(Optional.empty());
-        when(appUserRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        Authentication entraAuthentication = buildAuthentication(entityId, actorId, "company-admin@test.local", "Company Admin", List.of("COMPANY_ADMIN", "ISSUER"));
+        AppUser resolved = buildCompanyAdmin();
+        resolved.setAuthProvider(UserAuthProvider.ENTRA);
+        resolved.setLastLoginAt(null);
+        Authentication entraAuthentication = buildAuthentication(
+            entityId, actorId, "company-admin@test.local", "Company Admin", List.of("COMPANY_ADMIN", "ISSUER"));
+        when(principalResolver.resolve(entraAuthentication)).thenReturn(Optional.of(resolved));
 
         service.syncAuthenticatedPrincipal(entraAuthentication);
 
         ArgumentCaptor<AppUser> captor = ArgumentCaptor.forClass(AppUser.class);
         verify(appUserRepository).save(captor.capture());
-        AppUser saved = captor.getValue();
-        assertThat(saved.getAuthProvider()).isEqualTo(UserAuthProvider.ENTRA);
-        assertThat(saved.getRoles()).containsExactlyInAnyOrder(AppUserRole.COMPANY_ADMIN, AppUserRole.ISSUER);
-        assertThat(saved.getLastLoginAt()).isNotNull();
+        assertThat(captor.getValue().getLastLoginAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("syncAuthenticatedPrincipal writes nothing when no account can be resolved")
+    void syncAuthenticatedPrincipal_noAccount_writesNothing() {
+        Authentication entraAuthentication = buildAuthentication(
+            entityId, actorId, "stranger@test.local", "Stranger", List.of());
+        when(principalResolver.resolve(entraAuthentication)).thenReturn(Optional.empty());
+
+        service.syncAuthenticatedPrincipal(entraAuthentication);
+
+        verify(appUserRepository, never()).save(any(AppUser.class));
     }
 
     private AppUser buildCompanyAdmin() {

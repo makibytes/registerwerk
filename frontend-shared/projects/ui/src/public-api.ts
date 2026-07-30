@@ -12,3 +12,4 @@ export * from './lib/donut-chart/donut-chart.component';
 export * from './lib/data-table/data-table.component';
 export * from './lib/page-header/page-header.component';
 export * from './lib/endpoint-manager/endpoint-form-dialog.component';
+export * from './lib/qr-code/qr-code.component';

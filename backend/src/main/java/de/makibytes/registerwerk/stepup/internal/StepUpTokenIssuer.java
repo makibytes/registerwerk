@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 
 import javax.crypto.Mac;
@@ -123,6 +124,7 @@ public class StepUpTokenIssuer {
         Instant now = Instant.now();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         JwtClaimsSet.Builder claimsBuilder = JwtClaimsSet.builder()
+                .issuer(JwtMintingService.LOCAL_ISSUER)
                 .subject(userId.toString())
                 .claim("acr", "stepup")
                 .claim("roles", user.getRoles().stream().map(Enum::name).toList())

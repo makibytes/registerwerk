@@ -359,6 +359,35 @@ registerwerk:
     default-admin:
       email: ${DEFAULT_ADMIN_EMAIL:}
       password: ${DEFAULT_ADMIN_PASSWORD:}
+    # Expected audience of incoming Entra access tokens. Without it, a token issued to any
+    # other app in the same tenant validates against this API.
+    audience: ${JWT_AUDIENCE:}
+    step-up:
+      entra:
+        # Conditional Access authentication context (c1–c99) required for step-up-protected
+        # actions when ENTRA_ENABLED=true. No default on purpose: guessing "c1" could mean
+        # protecting forced transfers with a context that was never published to the app.
+        auth-context-id: ${ENTRA_STEPUP_AUTH_CONTEXT_ID:}
+        authorization-uri: ${ENTRA_AUTHORIZATION_URI:https://login.microsoftonline.com/common/oauth2/authorize}
+        # Per-action overrides keyed on @RequiresStepUp#reason(). Several reasons are free text
+        # with spaces, so quote those keys. Left unset here — an explicit `{}` binds as an empty
+        # string rather than an empty map. Example:
+        #   reason-overrides:
+        #     FORCE_BURN_EWG26: c2
+        #     "Payment rail creation": c1
+  entra:
+    tenant-id: ${ENTRA_TENANT_ID:}
+    client-id: ${ENTRA_CLIENT_ID:}
+    spa-client-id: ${ENTRA_SPA_CLIENT_ID:}
+    client-secret: ${ENTRA_CLIENT_SECRET:}
+    api-scope: ${ENTRA_API_SCOPE:}
+    graph-base-url: ${ENTRA_GRAPH_BASE_URL:https://graph.microsoft.com/v1.0}
+    authority-base-url: ${ENTRA_AUTHORITY_BASE_URL:https://login.microsoftonline.com}
+    # Master switch for every Microsoft Graph call (2FA status page + operator support console).
+    # Independent of registerwerk.auth.entra-enabled, which only decides how users sign in.
+    support-enabled: ${ENTRA_SUPPORT_ENABLED:false}
+    mfa-setup-url: ${ENTRA_MFA_SETUP_URL:https://mysignins.microsoft.com/security-info}
+    require-two-factor-enrolment: ${ENTRA_REQUIRE_2FA_ENROLMENT:false}
   seed-demo-data: ${SEED_DEMO_DATA:false}
   blockchain:
     tx:

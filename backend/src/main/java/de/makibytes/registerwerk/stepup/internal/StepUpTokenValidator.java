@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -34,7 +35,16 @@ class StepUpTokenValidator {
     private final JwtDecoder jwtDecoder;
     private final AppUserRepository appUserRepository;
 
-    StepUpTokenValidator(JwtDecoder jwtDecoder, AppUserRepository appUserRepository) {
+    /**
+     * @param jwtDecoder deliberately the HS256 decoder <em>by qualifier</em>, not the primary
+     *        one. Dual-control tokens are always minted locally by {@link StepUpTokenIssuer},
+     *        so they must always be verified locally — with the primary decoder they became
+     *        unverifiable the moment an OIDC issuer was configured, silently disabling every
+     *        4-eyes endpoint in Entra mode.
+     */
+    StepUpTokenValidator(
+            @Qualifier("localHs256JwtDecoder") JwtDecoder jwtDecoder,
+            AppUserRepository appUserRepository) {
         this.jwtDecoder = jwtDecoder;
         this.appUserRepository = appUserRepository;
     }

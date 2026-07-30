@@ -21,9 +21,10 @@ docker-compose.yml    / .env.example
 ## Key Architecture Decisions
 
 - **Operator frontend bypasses Kong** — nginx proxies `/api/` directly to `backend:8080`. Uses built-in HS256 JWT login (`POST /api/v1/public/auth/login`).
-- **Customer frontend's API calls go through Kong** (the frontend itself is always opened directly at `:4201`) — Kong adds rate limiting/caching/security headers only; JWT validation and entity/role extraction happen in the backend itself (`JwtEntityClaimsConverter`), not via a Kong-injected header. Kong's `openid-connect` plugin is Enterprise/Konnect-only and not active in this repo's OSS setup (`gateway/plugins/oidc-entra.yml` is a ready-to-merge snippet for anyone who is running Enterprise/Konnect).
+- **Customer frontend's API calls go through Kong** (the frontend itself is always opened directly at `:4201`) — Kong adds rate limiting/caching/security headers only; JWT validation and entity/role extraction happen in the backend itself (`SecurityConfig` + `EntraPrincipalNormalizationFilter`), not via a Kong-injected header. Kong's `openid-connect` plugin is Enterprise/Konnect-only and not active in this repo's OSS setup (`gateway/plugins/oidc-entra.yml` is a ready-to-merge snippet for anyone who is running Enterprise/Konnect).
 - **Backend is a pure resource server** — stateless JWT validation; does not issue OIDC tokens.
-- **Auth toggle:** `ENTRA_ENABLED=false` → HS256 dev mode with `JWT_DEV_SECRET`; `=true` → OIDC, validated by the backend (optionally fronted by Kong for the customer app).
+- **Auth toggle:** `ENTRA_ENABLED=false` → HS256 dev mode with `JWT_DEV_SECRET`; `=true` → Entra sign-in for customers, validated by the backend. `DelegatingJwtDecoder` routes on the JWS `alg` header (HS256 → local, else JWKS), so the operator portal keeps built-in login and local TOTP step-up in both modes. Both branches are issuer-pinned; the OIDC branch is also audience-pinned via `JWT_AUDIENCE`.
+- **Two-factor auth** is Entra's, not ours: Graph cannot create an Authenticator/TOTP method, so enrolment happens on Microsoft's security-info page and `/security` guides users there. Conditional Access enforces it at sign-in — no app-side gate. Step-up is dual-track: local TOTP (403) in HS256 mode, `acrs` + a 401 claims challenge in Entra mode. Runbook: `docs/platform/entra-setup.md`.
 - **Single PostgreSQL instance** — hosts only the `registerwerk` database. Kong runs DB-less (`gateway/kong.yml` loaded via `KONG_DECLARATIVE_CONFIG`), so it has no database of its own — there is no `kong` or `konga` database/service in this stack.
 
 ---
@@ -31,7 +32,7 @@ docker-compose.yml    / .env.example
 ## Backend
 
 **Stack:** Java 25, Spring Boot 4.1, Spring Security 7, Spring Modulith 2.1, JPA/Hibernate, Flyway, Caffeine (30s TTL), Jackson 3 (tools.jackson), Web3j (EVM), Solanaj (Solana), Daml Java bindings (Canton), plus native Starknet (Cairo/STARK ECDSA) and Stellar (Horizon/Ed25519) client code — see `blockchain/internal/deploy/`.
-Build: `./mvnw verify` — runs unit + integration tests + JaCoCo (30% line coverage gate).
+Build: `./mvnw verify` — runs unit + integration tests + JaCoCo. Coverage gate: bundle LINE ≥ 0.36 / BRANCH ≥ 0.23, plus stricter per-package floors (e.g. `customer/internal` 0.60/0.40, `registertransfer/internal` 0.85/0.70) — check `pom.xml` before adding code to those packages.
 **Lazy datasource:** `spring.datasource.connection-fetch=lazy` — defers physical DB connection until first SQL statement.
 
 **Package root:** `de.makibytes.registerwerk` — organized as **vertical Spring Modulith modules** (boundaries enforced by `ModulithArchitectureTest`). Each module follows the same convention:
@@ -100,10 +101,15 @@ Modules: `asset`, `audit`, `auth`, `blockchain`, `chain`, `customer`, `deploymen
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ENTRA_ENABLED` | `false` | `false` → built-in login; `true` → OIDC via Kong |
+| `ENTRA_ENABLED` | `false` | `false` → built-in login everywhere; `true` → Entra sign-in for customers (operators keep built-in login) |
 | `DEFAULT_ADMIN_EMAIL` / `_PASSWORD` | — | Seeds built-in admin `app_user` row |
 | `JWT_DEV_SECRET` | `registerwerk-dev-jwt-secret-…` | HS256 signing key — must never be empty |
 | `JWT_ISSUER_URI` | blank | OIDC issuer URI; blank → HS256 mode |
+| `JWT_AUDIENCE` | blank | Expected `aud` of Entra tokens. Blank = any app in the tenant is accepted — required in production |
+| `ENTRA_TENANT_ID` / `_CLIENT_ID` / `_CLIENT_SECRET` | blank | API app registration + app-only Graph credential |
+| `ENTRA_SPA_CLIENT_ID` / `ENTRA_API_SCOPE` | blank | Served to the browser by `GET /api/v1/public/auth/config` |
+| `ENTRA_SUPPORT_ENABLED` | `false` | Master switch for all Microsoft Graph calls (2FA status + operator support console) |
+| `ENTRA_STEPUP_AUTH_CONTEXT_ID` | blank | Conditional Access auth context (c1–c99) for step-up; must be *published to apps* |
 | `DB_URL` | `jdbc:postgresql://postgres:5432/registerwerk` | |
 | `DB_USER` / `DB_PASSWORD` | `registerwerk` / — | |
 
@@ -148,4 +154,4 @@ Marketplace = metadata-only listings: signed manifests (EIP-191 `personal_sign` 
 
 **Indexers:** EVM (Graph Node / RPC) and Solana write to `token_transfer` / `indexer_state` tables. `IndexerMonitorService` checks liveness.
 
-**Kong 3.8** (`gateway/`): declarative `kong.yml`. Plugins: `openid-connect` (customer JWT), `request-transformer` (injects entity headers), caching on public routes. Operator bypasses Kong entirely.
+**Kong 3.8** (`gateway/`): declarative `kong.yml`, DB-less. Plugins: `rate-limiting`, `proxy-cache` on public routes, `request-transformer` (strips client-supplied identity headers), `cors`, `bot-detection`, `ip-restriction` on `/api/v1/admin`, `response-transformer` (security headers). It does **not** validate JWTs — `openid-connect` is Enterprise/Konnect-only. Operator bypasses Kong entirely.

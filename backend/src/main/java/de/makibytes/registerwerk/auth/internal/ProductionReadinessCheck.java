@@ -30,16 +30,35 @@ class ProductionReadinessCheck {
 
     private final AppUserRepository appUserRepository;
 
+    // Read as raw properties rather than through RegisterwerkEntraProperties: auth must not
+    // depend on the entra module (entra already depends on auth.api), and these are only ever
+    // inspected for blankness.
+    private final String entraTenantId;
+    private final String entraClientId;
+    private final String entraClientSecret;
+    private final boolean entraSupportEnabled;
+    private final String stepUpAuthContextId;
+
     ProductionReadinessCheck(
             RegisterwerkAuthProperties authProps,
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri,
             @Value("${registerwerk.wallet.kek-provider:}") String kekProviderName,
             @Value("${registerwerk.auth.step-up.allow-unenrolled:false}") boolean stepUpAllowUnenrolled,
+            @Value("${registerwerk.entra.tenant-id:}") String entraTenantId,
+            @Value("${registerwerk.entra.client-id:}") String entraClientId,
+            @Value("${registerwerk.entra.client-secret:}") String entraClientSecret,
+            @Value("${registerwerk.entra.support-enabled:false}") boolean entraSupportEnabled,
+            @Value("${registerwerk.auth.step-up.entra.auth-context-id:}") String stepUpAuthContextId,
             AppUserRepository appUserRepository) {
         this.authProps = authProps;
         this.issuerUri = issuerUri;
         this.kekProviderName = kekProviderName;
         this.stepUpAllowUnenrolled = stepUpAllowUnenrolled;
+        this.entraTenantId = entraTenantId == null ? "" : entraTenantId.trim();
+        this.entraClientId = entraClientId == null ? "" : entraClientId.trim();
+        this.entraClientSecret = entraClientSecret == null ? "" : entraClientSecret.trim();
+        this.entraSupportEnabled = entraSupportEnabled;
+        this.stepUpAuthContextId = stepUpAuthContextId == null ? "" : stepUpAuthContextId.trim();
         this.appUserRepository = appUserRepository;
     }
 
@@ -84,10 +103,62 @@ class ProductionReadinessCheck {
                         "it bypasses the TOTP second factor that the dual-control (Vieraugenprinzip) " +
                         "actions depend on.");
             }
+            checkEntraConfiguration(noIssuerUri);
             log.info("Production readiness checks passed.");
         }
 
         checkDualControlAvailability();
+    }
+
+    /**
+     * Guards the ways an Entra deployment can look configured while being silently broken or
+     * silently insecure.
+     *
+     * <p>Each of these has a failure mode that is hard to diagnose from the outside:
+     * <ul>
+     *   <li><strong>No issuer URI</strong> — Entra sign-in is on but no token from it can be
+     *       validated, so every customer request is rejected.</li>
+     *   <li><strong>No audience</strong> — a token Entra issued for any other application in the
+     *       same tenant is accepted here as a Registerwerk session. Silent, and severe.</li>
+     *   <li><strong>No tenant id</strong> — federated users cannot be told apart from local ones,
+     *       so the support console would attempt Graph calls against another tenant's principals.</li>
+     *   <li><strong>No step-up authentication context</strong> — all 77 step-up-protected
+     *       endpoints fail closed at the first call rather than at startup.</li>
+     *   <li><strong>Graph enabled without credentials</strong> — the 2FA status page and the
+     *       whole support console fail at the moment an operator needs them, mid-incident.</li>
+     * </ul>
+     */
+    private void checkEntraConfiguration(boolean noIssuerUri) {
+        if (authProps.isEntraEnabled()) {
+            if (noIssuerUri) {
+                throw new IllegalStateException(
+                        "ENTRA_ENABLED=true but JWT_ISSUER_URI is blank — no Entra-issued token "
+                        + "could be validated.");
+            }
+            if (authProps.getAudience().isBlank()) {
+                throw new IllegalStateException(
+                        "JWT_AUDIENCE must be set when ENTRA_ENABLED=true. Without it, an access "
+                        + "token issued to any other application in the same tenant is accepted "
+                        + "by this API.");
+            }
+            if (entraTenantId.isBlank()) {
+                throw new IllegalStateException(
+                        "ENTRA_TENANT_ID must be set when ENTRA_ENABLED=true — it is how a "
+                        + "federated customer identity is told apart from one in our own tenant.");
+            }
+            if (stepUpAuthContextId.isBlank()) {
+                throw new IllegalStateException(
+                        "ENTRA_STEPUP_AUTH_CONTEXT_ID must be set when ENTRA_ENABLED=true. Every "
+                        + "step-up-protected endpoint (forced transfers, key export, Sperrvermerk, "
+                        + "…) fails closed without it.");
+            }
+        }
+
+        if (entraSupportEnabled && (entraClientId.isBlank() || entraClientSecret.isBlank())) {
+            throw new IllegalStateException(
+                    "ENTRA_SUPPORT_ENABLED=true requires ENTRA_CLIENT_ID and ENTRA_CLIENT_SECRET "
+                    + "for app-only Microsoft Graph access.");
+        }
     }
 
     /**

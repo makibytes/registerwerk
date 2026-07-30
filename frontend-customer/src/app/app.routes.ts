@@ -79,6 +79,10 @@ export const routes: Routes = [
       {
         path: 'endpoints',
         loadComponent: () => import('./features/endpoints/endpoints-list.component').then(m => m.EndpointsListComponent)
+      },
+      {
+        path: 'security',
+        loadComponent: () => import('./features/security/security.component').then(m => m.SecurityComponent)
       }
     ]
   },

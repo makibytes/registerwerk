@@ -91,21 +91,23 @@ import { CompanyService } from '../../../core/api/company.service';
               <mat-icon matSuffix>fingerprint</mat-icon>
             </mat-form-field>
 
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Client Secret</mat-label>
-              <input
-                matInput
-                [type]="hideSecret ? 'password' : 'text'"
-                [(ngModel)]="clientSecret"
-                placeholder="{{ hasExistingSecret ? '(unchanged)' : 'Enter secret' }}"
-              />
-              <button mat-icon-button matSuffix type="button" (click)="hideSecret = !hideSecret">
-                <mat-icon>{{ hideSecret ? 'visibility_off' : 'visibility' }}</mat-icon>
-              </button>
-              @if (hasExistingSecret) {
-                <mat-hint>Leave blank to keep the existing secret</mat-hint>
-              }
-            </mat-form-field>
+            <!-- Federation is established tenant-to-tenant in your identity provider, so
+                 Registerwerk never needs a client secret from you. These two read-only rows
+                 show what the registry operator has configured for your organisation. -->
+            <div class="readonly-row">
+              <span class="readonly-label">Identity model</span>
+              <span class="readonly-value">{{ identityModelLabel }}</span>
+            </div>
+            <div class="readonly-row">
+              <span class="readonly-label">Inbound MFA trust</span>
+              <span class="readonly-value">
+                {{ idpMfaTrusted ? 'Configured' : 'Not configured' }}
+              </span>
+            </div>
+            <p class="readonly-note">
+              These are set by the registry operator. Contact them to change how your users sign
+              in or whether multi-factor authentication performed in your own tenant is accepted.
+            </p>
 
             @if (saveError) {
               <p class="error-message">{{ saveError }}</p>
@@ -139,6 +141,25 @@ import { CompanyService } from '../../../core/api/company.service';
     .settings-card { margin-top: 16px; }
     .info-text { font-size: 14px; color: var(--rw-text-secondary); margin: 0 0 24px; }
     .full-width { width: 100%; margin-bottom: 16px; }
+
+    .readonly-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--rw-border, #E5E7EB);
+      font-size: 14px;
+    }
+
+    .readonly-label { color: var(--rw-text-muted, #6B7280); }
+    .readonly-value { font-weight: 600; text-align: right; }
+
+    .readonly-note {
+      margin: 14px 0 8px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--rw-text-muted, #6B7280);
+    }
     .error-message { color: var(--rw-text-danger); font-size: 13px; }
     .managed-banner {
       margin: 0 0 16px;
@@ -158,10 +179,9 @@ export class IdpSettingsComponent implements OnInit {
 
   issuerUrl = '';
   clientId  = '';
-  clientSecret = '';
-  hideSecret = true;
-  hasExistingSecret = false;
   lifecycleManagedExternally = false;
+  identityModel: string = 'WORKFORCE_GUEST';
+  idpMfaTrusted = false;
 
   loadingSettings = true;
   saving = false;
@@ -178,7 +198,8 @@ export class IdpSettingsComponent implements OnInit {
         this.clientId   = s.clientId;
         this.origIssuerUrl = s.issuerUrl;
         this.origClientId  = s.clientId;
-        this.hasExistingSecret = s.hasClientSecret;
+        this.identityModel = s.identityModel;
+        this.idpMfaTrusted = s.idpMfaTrusted;
         this.lifecycleManagedExternally = s.lifecycleManagedExternally;
         this.loadingSettings = false;
         this.cdr.markForCheck();
@@ -193,15 +214,12 @@ export class IdpSettingsComponent implements OnInit {
 
     this.companyService
       .saveIdpSettings({
-        issuerUrl:    this.issuerUrl,
-        clientId:     this.clientId,
-        clientSecret: this.clientSecret,
+        issuerUrl: this.issuerUrl,
+        clientId:  this.clientId,
       })
       .subscribe({
         next: () => {
           this.saving = false;
-          this.hasExistingSecret = true;
-          this.clientSecret = '';
           this.cdr.markForCheck();
           this.snackBar.open('IdP settings saved.', 'OK', { duration: 3000 });
         },
@@ -214,9 +232,21 @@ export class IdpSettingsComponent implements OnInit {
   }
 
   reset(): void {
-    this.issuerUrl    = this.origIssuerUrl;
-    this.clientId     = this.origClientId;
-    this.clientSecret = '';
-    this.saveError    = '';
+    this.issuerUrl = this.origIssuerUrl;
+    this.clientId  = this.origClientId;
+    this.saveError = '';
+  }
+
+  get identityModelLabel(): string {
+    switch (this.identityModel) {
+      case 'FEDERATED':
+        return 'Federated — your own Microsoft Entra tenant';
+      case 'WORKFORCE_GUEST':
+        return 'Guest accounts in the registry operator’s tenant';
+      case 'WORKFORCE_MEMBER':
+        return 'Member accounts in the registry operator’s tenant';
+      default:
+        return 'Local accounts';
+    }
   }
 }

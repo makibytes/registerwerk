@@ -20,6 +20,7 @@ import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
 import de.makibytes.registerwerk.auth.api.AppUserActionTokenRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
+import de.makibytes.registerwerk.auth.api.PrincipalResolver;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.customer.web.dto.CompanyIdpSettingsRequest;
 import de.makibytes.registerwerk.customer.web.dto.CompanyIdpSettingsResponse;
@@ -65,6 +66,7 @@ public class CompanyUserService {
     private final PasswordEncoder passwordEncoder;
     private final ApplicationEventPublisher eventPublisher;
     private final RegisterwerkAuthProperties authProperties;
+    private final PrincipalResolver principalResolver;
     private final String customerFrontendUrl;
     private final long userActionTokenTtlHours;
 
@@ -75,6 +77,7 @@ public class CompanyUserService {
             PasswordEncoder passwordEncoder,
             ApplicationEventPublisher eventPublisher,
             RegisterwerkAuthProperties authProperties,
+            PrincipalResolver principalResolver,
                         @Value("${registerwerk.onboarding.frontend-url:http://localhost:4201}") String customerFrontendUrl,
             @Value("${registerwerk.onboarding.user-action-ttl-hours:48}") long userActionTokenTtlHours) {
         this.appUserRepository = appUserRepository;
@@ -83,6 +86,7 @@ public class CompanyUserService {
         this.passwordEncoder = passwordEncoder;
         this.eventPublisher = eventPublisher;
         this.authProperties = authProperties;
+        this.principalResolver = principalResolver;
         this.customerFrontendUrl = customerFrontendUrl;
         this.userActionTokenTtlHours = userActionTokenTtlHours;
     }
@@ -115,29 +119,20 @@ public class CompanyUserService {
             .toList();
     }
 
+    /**
+     * Records this sign-in against the caller's account, provisioning one on first sight of an
+     * Entra principal.
+     *
+     * <p>Identity resolution and provisioning now live in {@code auth}'s {@link PrincipalResolver}
+     * — this used to key off email alone and never recorded the Entra object id, which is what
+     * left {@code app_user.id} and the token's {@code sub} as unrelated values. All this adds on
+     * top is the last-login timestamp.
+     */
     public void syncAuthenticatedPrincipal(Authentication authentication) {
-        String email = SecurityUtils.extractEmail(authentication);
-        UUID entityId = SecurityUtils.extractEntityId(authentication);
-        if (email == null || entityId == null) {
-            return;
-        }
-
-        AppUser user = appUserRepository.findByEmailIgnoreCase(email)
-            .orElseGet(AppUser::new);
-
-        user.setEmail(email);
-        user.setLegalEntityId(entityId);
-        user.setEnabled(true);
-        user.setLastLoginAt(Instant.now());
-        user.setFullName(SecurityUtils.extractDisplayName(authentication));
-        if (authProperties.isEntraEnabled()) {
-            user.setAuthProvider(UserAuthProvider.ENTRA);
-            Set<AppUserRole> mappedRoles = mapRoles(SecurityUtils.extractRoles(authentication));
-            if (!mappedRoles.isEmpty()) {
-                user.setRoles(mappedRoles);
-            }
-        }
-        appUserRepository.save(user);
+        principalResolver.resolve(authentication).ifPresent(user -> {
+            user.setLastLoginAt(Instant.now());
+            appUserRepository.save(user);
+        });
     }
 
     public CompanyUserResponse inviteUser(Authentication authentication, InviteCompanyUserRequest request) {
@@ -233,21 +228,25 @@ public class CompanyUserService {
         return new CompanyIdpSettingsResponse(
             entity.getIdpIssuerUrl() == null ? "" : entity.getIdpIssuerUrl(),
             entity.getIdpClientId() == null ? "" : entity.getIdpClientId(),
-            "",
-            entity.getIdpClientSecret() != null && !entity.getIdpClientSecret().isBlank(),
+            entity.getIdentityModel(),
+            entity.isIdpMfaTrusted(),
             authProperties.isEntraEnabled()
         );
     }
 
+    /**
+     * A company administrator may record which tenant they federate from. They may not decide
+     * the identity model or whether their tenant's MFA is trusted here — both are
+     * operator-controlled, because a customer vouching for their own MFA would let them lower
+     * the authentication bar applied to their own users.
+     */
     public CompanyIdpSettingsResponse saveIdpSettings(Authentication authentication, CompanyIdpSettingsRequest request) {
         UUID entityId = requireEntityId(authentication);
         UUID actorId = SecurityUtils.extractUserId(authentication);
         LegalEntity entity = getEntity(entityId);
         entity.setIdpIssuerUrl(blankToNull(request.issuerUrl()));
         entity.setIdpClientId(blankToNull(request.clientId()));
-        if (request.clientSecret() != null && !request.clientSecret().isBlank()) {
-            entity.setIdpClientSecret(request.clientSecret().trim());
-        }
+        entity.setIdpTenantId(tenantIdFromIssuerUrl(request.issuerUrl()));
         legalEntityRepository.save(entity);
 
         eventPublisher.publishEvent(new CompanyIdpSettingsUpdatedEvent(entity.getId(), actorId, null, null));
@@ -434,20 +433,28 @@ public class CompanyUserService {
         return user.getFullName() == null || user.getFullName().isBlank() ? user.getEmail() : user.getFullName();
     }
 
-    private static Set<AppUserRole> mapRoles(List<String> roles) {
-        EnumSet<AppUserRole> mapped = EnumSet.noneOf(AppUserRole.class);
-        for (String role : roles) {
-            try {
-                mapped.add(AppUserRole.valueOf(role));
-            } catch (IllegalArgumentException ignored) {
-                log.debug("Ignoring unmapped role from token: {}", role);
-            }
-        }
-        return mapped;
-    }
-
     private static List<String> roleNames(Set<AppUserRole> roles) {
         return roles.stream().map(Enum::name).toList();
+    }
+
+    /**
+     * Extracts the tenant id from an Entra issuer URL such as
+     * {@code https://login.microsoftonline.com/<tenant-id>/v2.0}, so federated users can later be
+     * recognised by the {@code tid} on their token. Returns null for anything that is not
+     * recognisably an Entra issuer — a non-Entra IdP is recorded but not tenant-matched.
+     */
+    private static UUID tenantIdFromIssuerUrl(String issuerUrl) {
+        if (issuerUrl == null || issuerUrl.isBlank()) {
+            return null;
+        }
+        for (String segment : issuerUrl.split("/")) {
+            try {
+                return UUID.fromString(segment);
+            } catch (IllegalArgumentException ignored) {
+                // Not this segment; keep looking.
+            }
+        }
+        return null;
     }
 
     private static String blankToNull(String value) {

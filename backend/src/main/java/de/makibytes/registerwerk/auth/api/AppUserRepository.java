@@ -16,6 +16,9 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID>, JpaSpec
     @Query("select u from AppUser u where lower(u.email) = lower(:email)")
     Optional<AppUser> findByEmailIgnoreCase(@Param("email") String email);
 
+    /** Primary lookup for an Entra principal: the token's {@code oid} is stable, its email is not. */
+    Optional<AppUser> findByEntraObjectId(UUID entraObjectId);
+
     List<AppUser> findByLegalEntityIdOrderByFullNameAscEmailAsc(UUID legalEntityId);
 
     Optional<AppUser> findByIdAndLegalEntityId(UUID id, UUID legalEntityId);

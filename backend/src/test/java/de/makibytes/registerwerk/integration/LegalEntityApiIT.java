@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.integration;
 
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
+
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
@@ -103,6 +105,9 @@ class LegalEntityApiIT {
             long iat = Instant.now().getEpochSecond();
             long exp = iat + 3600;
             String payload = base64Url("{"
+                // The HS256 decoder is pinned to this issuer, so knowing the signing secret is
+                // not on its own enough to mint an accepted token.
+                + "\"iss\":\"" + JwtMintingService.LOCAL_ISSUER + "\","
                 + "\"sub\":\"00000000-0000-0000-0000-000000000001\","
                 + "\"roles\":[\"REGISTRY_ADMIN\"],"
                 + "\"iat\":" + iat + ","
