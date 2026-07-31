@@ -1,8 +1,18 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- Registerwerk — squashed schema (previously V1–V24, then V1–V9).
+-- Registerwerk — squashed schema (previously V1–V24, then V1–V9, then V1–V19).
 -- Single migration for a clean-slate deploy. Never edit a released version of
 -- this file in place — squashing again requires wiping every environment's
 -- flyway_schema_history (see backend/CLAUDE.md / the squash note in git history).
+--
+-- Upgrading an environment that already ran V1–V19: Flyway will fail on this
+-- file's changed checksum and on the now-absent V2–V19. The schema is unchanged
+-- (verified column-, constraint-, index-, comment-, function- and trigger-wise
+-- against the pre-squash result), so no DDL needs to run — reconcile the history
+-- table instead:
+--     DELETE FROM flyway_schema_history WHERE version <> '1';
+--     UPDATE flyway_schema_history SET checksum = NULL WHERE version = '1';
+-- then start with spring.flyway.validate-on-migrate=false for exactly one boot,
+-- or run `flyway repair`. A fresh database needs none of this.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ── Audit sequence (referenced by audit_event DEFAULT) ───────────────────────
@@ -26,13 +36,28 @@ CREATE TABLE legal_entity (
     kyc_expiry_date      DATE,
     idp_issuer_url       VARCHAR(500),
     idp_client_id        VARCHAR(255),
+    -- Retained but never written. Inbound B2B federation is configured tenant-to-tenant in the
+    -- Entra portal; Registerwerk never runs an authorization-code flow against a customer's
+    -- tenant, so it has no use for their client secret and must not hold one in plaintext.
     idp_client_secret    VARCHAR(500),
+    -- Per-legal-entity identity model: whether the operator invites this customer's users as B2B
+    -- guests into its own tenant (and therefore manages their MFA), or federates to the
+    -- customer's own Entra tenant (and therefore does not). This records operator *intent*;
+    -- once a user has actually signed in, app_user.entra_tenant_id is the ground truth.
+    identity_model       VARCHAR(20) NOT NULL DEFAULT 'WORKFORCE_GUEST',
+    idp_tenant_id        UUID,
+    -- Whether MFA performed in the customer's home tenant is trusted here (Entra cross-tenant
+    -- access settings). Operator-controlled only: a customer self-asserting "trust my MFA"
+    -- would be a privilege-escalation vector.
+    idp_mfa_trusted      BOOLEAN NOT NULL DEFAULT FALSE,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by           UUID,
     CONSTRAINT chk_entity_type   CHECK (type IN ('ISSUER','INVESTOR','AUDITOR')),
     CONSTRAINT chk_entity_status CHECK (status IN ('PENDING_ONBOARDING','ACTIVE','SUSPENDED','DISSOLVED')),
-    CONSTRAINT chk_kyc_status    CHECK (kyc_status IN ('NOT_STARTED','IN_PROGRESS','APPROVED','REJECTED','EXPIRED'))
+    CONSTRAINT chk_kyc_status    CHECK (kyc_status IN ('NOT_STARTED','IN_PROGRESS','APPROVED','REJECTED','EXPIRED')),
+    CONSTRAINT chk_legal_entity_identity_model
+        CHECK (identity_model IN ('WORKFORCE_MEMBER', 'WORKFORCE_GUEST', 'FEDERATED'))
 );
 
 CREATE INDEX idx_legal_entity_type   ON legal_entity (type);
@@ -156,6 +181,20 @@ CREATE TABLE app_user (
     totp_secret      TEXT,
     totp_enabled     BOOLEAN      NOT NULL DEFAULT FALSE,
     totp_enrolled_at TIMESTAMPTZ,
+    -- Microsoft Entra ID identity mapping. entra_object_id is the token's `oid`: stable per user
+    -- per tenant, and the join key between an Entra principal and this row. Without it app_user.id
+    -- and the token's `sub` would be unrelated values, so SecurityUtils.extractUserId() would
+    -- return an id matching no row — breaking step-up issuance, dual-control self-approval checks
+    -- and every audit_event actor_id. NULL for LOCAL accounts.
+    entra_object_id  UUID,
+    -- Home tenant of the principal (token `tid`). When it differs from our own tenant the user is
+    -- federated from a customer's tenant, and we can neither read nor manage their MFA methods.
+    entra_tenant_id  UUID,
+    -- Advisory cache of the Microsoft Graph second-factor lookup, so the nav banner does not cost
+    -- a Graph round-trip on every page load. NEVER an authorisation input: Conditional Access is
+    -- the enforcement point, and a stale cache must not be able to grant or deny access.
+    entra_mfa_registered_at TIMESTAMPTZ,
+    entra_mfa_checked_at    TIMESTAMPTZ,
     CONSTRAINT chk_app_user_role CHECK (
         role IN (
             'REGISTRY_ADMIN','AUDIT','COMPLIANCE_OFFICER',
@@ -167,6 +206,17 @@ CREATE TABLE app_user (
 
 CREATE INDEX idx_app_user_email_lower     ON app_user (LOWER(email));
 CREATE INDEX idx_app_user_legal_entity_id ON app_user (legal_entity_id);
+
+COMMENT ON COLUMN app_user.entra_object_id IS
+    'Entra object id (token `oid`). Stable per user per tenant; the join key between an Entra '
+    'principal and this row. NULL for LOCAL accounts.';
+
+-- Partial unique index rather than a UNIQUE constraint: every LOCAL account leaves this NULL,
+-- and Postgres treats NULLs as distinct, but a partial index states the intent explicitly and
+-- keeps the index off the many LOCAL rows.
+CREATE UNIQUE INDEX ux_app_user_entra_object_id
+    ON app_user (entra_object_id)
+    WHERE entra_object_id IS NOT NULL;
 
 CREATE TABLE app_user_role (
     app_user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -272,6 +322,12 @@ CREATE TABLE asset (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_holder_sync_time TIMESTAMP WITH TIME ZONE,
+    -- Optimistic-lock version. AssetLifecycleService's submit/approve/reject/issue/suspend/
+    -- reactivate/redeem methods all do a read-modify-write on asset.status; without a version
+    -- check two concurrent transitions can both pass their precondition and both commit
+    -- silently. JPA's @Version turns a lost update into an optimistic-lock failure (HTTP 409) —
+    -- mirrors the identical guard on asset_holder.version below.
+    version          BIGINT NOT NULL DEFAULT 0,
     CONSTRAINT chk_token_standard CHECK (
         token_standard IN (
             'ERC20','ERC721','ERC1155','ERC3643','CONF_ERC20','CONF_ERC3643',
@@ -362,6 +418,11 @@ CREATE TABLE asset_holder (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     asset_id          UUID NOT NULL REFERENCES asset(id),
     investor_id       UUID NOT NULL REFERENCES legal_entity(id),
+    -- 0x-prefixed (EVM/Starknet) addresses are normalized to lowercase at write time
+    -- (EvmUtils.normalizeAddress), matching indexer.api.HolderDataService's convention, so that
+    -- an indexer-persisted address and a UI-entered checksummed one match. Solana (base58) and
+    -- Stellar (base32) addresses also live in this column and are case-SENSITIVE by
+    -- construction — lowercasing those would corrupt them, so normalization is 0x-only.
     wallet_address    VARCHAR(66) NOT NULL,
     whitelisted       BOOLEAN NOT NULL DEFAULT false,
     whitelist_tx_hash VARCHAR(66),
@@ -408,6 +469,9 @@ CREATE TABLE asset_bond_terms (
     callable          BOOLEAN NOT NULL DEFAULT FALSE,
     call_schedule     JSONB,
     bond_status       VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    -- Fraction of face value paid at issue (e.g. 0.80 for 80%). The entire point of a
+    -- zero-coupon bond; fixed/floating bonds leave it at par.
+    issue_price       NUMERIC(10, 8) NOT NULL DEFAULT 1.0,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -565,6 +629,55 @@ CREATE TABLE indexer_state (
 CREATE INDEX idx_indexer_state_chain  ON indexer_state (chain_config_id);
 CREATE INDEX idx_indexer_state_status ON indexer_state (status);
 
+-- Per-mint Solana cursor. indexer_state above is keyed only by (chain, indexer_type), which is
+-- too coarse for Solana: one shared cursor across every tracked mint on a chain permanently
+-- freezes the "until" boundary and silently loses transfer history once a mint's backlog
+-- exceeds MAX_SIGNATURES_PER_POLL. Each mint therefore gets its own advancing cursor.
+CREATE TABLE solana_mint_sync_cursor (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_config_id       UUID NOT NULL REFERENCES chain_config(id),
+    mint_address          VARCHAR(64) NOT NULL,
+    last_synced_signature VARCHAR(200),
+    last_synced_at        TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_solana_mint_sync_cursor UNIQUE (chain_config_id, mint_address)
+);
+
+-- Durable mirror of the Canton Holdings the indexer has seen Created and not yet seen Archived.
+-- Daml's Archived ledger event carries only the contract ID, never its former argument payload,
+-- so without this table an Archived event cannot be attributed to an instrument/owner/amount.
+CREATE TABLE canton_holding_snapshot (
+    contract_id      VARCHAR(255) PRIMARY KEY,
+    chain_config_id  UUID NOT NULL REFERENCES chain_config(id),
+    instrument       VARCHAR(255) NOT NULL,
+    owner            VARCHAR(255) NOT NULL,
+    amount           NUMERIC(38,18) NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_canton_holding_snapshot_chain ON canton_holding_snapshot (chain_config_id);
+
+-- Per-deployment cursor for ConfidentialTravelRuleScreeningService: the last indexed block
+-- screened for Travel Rule obligations, so each scheduled run only decrypts and evaluates
+-- confidential transfer/mint events new since the previous run.
+CREATE TABLE confidential_transfer_screening_state (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_deployment_id  UUID NOT NULL REFERENCES asset_deployment(id),
+    last_screened_block  BIGINT NOT NULL DEFAULT 0,
+    last_run_at          TIMESTAMPTZ,
+    last_error           TEXT,
+    -- Consecutive runs that failed to resolve the earliest unresolved event. The cursor must
+    -- not advance unconditionally past a failed decrypt (a transient relayer/KMS hiccup would
+    -- permanently and silently skip screening for that transfer), but nor may it retry forever
+    -- (a non-transient failure would wedge the service). This bounds the retries; on exhaustion
+    -- the service advances past the event and logs at ERROR.
+    consecutive_decrypt_failures INT NOT NULL DEFAULT 0,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_conf_transfer_screening_deployment UNIQUE (asset_deployment_id)
+);
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ERC-3643 / ONCHAIN IDENTITY
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -654,9 +767,15 @@ CREATE TABLE erc3643_identity_registry (
     country_code        SMALLINT,
     registered_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     registered_by_tx    VARCHAR(66),
-    removed_at          TIMESTAMPTZ,
-    UNIQUE (suite_id, wallet_address)
+    removed_at          TIMESTAMPTZ
 );
+
+-- Partial, not a plain UNIQUE (suite_id, wallet_address): removal here is a soft-delete and
+-- registerInvestor always INSERTs a new row rather than reactivating, so an unconditional
+-- constraint made re-registering a previously-removed wallet fail with an unhandled 500.
+CREATE UNIQUE INDEX erc3643_identity_registry_active_unique
+    ON erc3643_identity_registry (suite_id, wallet_address)
+    WHERE removed_at IS NULL;
 
 CREATE INDEX idx_erc3643_ir_suite    ON erc3643_identity_registry (suite_id);
 CREATE INDEX idx_erc3643_ir_identity ON erc3643_identity_registry (onchain_identity_id);
@@ -871,6 +990,10 @@ CREATE TABLE trade_execution (
     -- Populated for FAILED/CANCELLED/REFUNDED executions — a venue rejection previously threw
     -- and rolled back the whole transaction, leaving no record of the attempt at all.
     failure_reason         TEXT,
+    -- Evidence of the actual cash leg (a stablecoin tx hash, a SEPA transfer reference, …).
+    -- Settling a PENDING trade otherwise required nothing beyond the buyer's own HTTP call,
+    -- leaving reconciliation with pure self-attestation to check.
+    payment_reference      VARCHAR(255),
     CONSTRAINT chk_trade_execution_venue CHECK (
         venue_code IN ('SIMULATED','ASSETERA','ARCHAX','TALOS')
     ),
@@ -1203,7 +1326,11 @@ CREATE TABLE regreport_submission (
     id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     report_type            VARCHAR(30) NOT NULL,
     jurisdiction           VARCHAR(20) NOT NULL,
-    status                 VARCHAR(20) NOT NULL DEFAULT 'GENERATING',
+    -- Transport-only statuses. Regulatory reporting here is an opt-in, non-production draft
+    -- generator: none of these states proves official-schema validity, filing, acceptance, or
+    -- legal compliance. Earlier authority-outcome labels (ACCEPTED / ACKNOWLEDGED / REJECTED)
+    -- described local gateway outcomes far too strongly.
+    status                 VARCHAR(30) NOT NULL DEFAULT 'DRAFT_UNVALIDATED',
     reporting_period_start DATE NOT NULL,
     reporting_period_end   DATE NOT NULL,
     entity_id              UUID,
@@ -1211,10 +1338,15 @@ CREATE TABLE regreport_submission (
     document_s3_key        TEXT,
     document_hash          BYTEA,
     document_signature     BYTEA,
+    -- Legacy adapter-evidence columns. Retained so that historical rows keep their evidence;
+    -- new code writes transported_at / transport_ref / transport_error instead.
     submitted_at           TIMESTAMPTZ,
     submission_ref         TEXT,
     acknowledged_at        TIMESTAMPTZ,
     rejection_reason       TEXT,
+    transported_at         TIMESTAMPTZ,
+    transport_ref          TEXT,
+    transport_error        TEXT,
     generated_by           UUID,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -1222,7 +1354,9 @@ CREATE TABLE regreport_submission (
 
 CREATE INDEX idx_regreport_type_period ON regreport_submission (report_type, reporting_period_end);
 CREATE INDEX idx_regreport_entity      ON regreport_submission (entity_id) WHERE entity_id IS NOT NULL;
-CREATE INDEX idx_regreport_status      ON regreport_submission (status)    WHERE status NOT IN ('ACKNOWLEDGED');
+CREATE INDEX idx_regreport_status      ON regreport_submission (status)
+    WHERE status IN ('DRAFT_UNVALIDATED', 'NOT_TRANSPORTED', 'TRANSPORT_FAILED',
+                     'TRANSPORTED_UNVERIFIED');
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- DORA ICT INCIDENTS & THIRD-PARTY REGISTER (Art. 5-17, Art. 28)
@@ -1238,10 +1372,18 @@ CREATE TABLE ict_incident (
     source_event_type       TEXT,
     source_event_ref        UUID,
     detected_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- DORA Art. 19(4) / RTS (EU) 2025/301 impose *two* deadlines. Tracking only the 24h
+    -- initial-report clock let an incident look "on track" for up to 20h after the stricter
+    -- 4h-from-classification deadline had already passed.
+    classified_at           TIMESTAMPTZ,
+    classification_deadline TIMESTAMPTZ,
     initial_report_deadline TIMESTAMPTZ,
     final_report_deadline   TIMESTAMPTZ,
     initial_reported_at     TIMESTAMPTZ,
     final_reported_at       TIMESTAMPTZ,
+    -- Who filed (or decided not to file) the Art. 19 authority notification — arguably the
+    -- single most examination-sensitive action in this module, and previously unattributable.
+    reported_by             UUID,
     authority_ref           TEXT,
     contained_at            TIMESTAMPTZ,
     resolved_at             TIMESTAMPTZ,
@@ -1619,7 +1761,21 @@ ALTER TABLE asset_holder
     -- balance (eWpG §16) and is mutated by read-modify-write in several paths that
     -- can run concurrently (trade settlement, manual §24 corrections, indexer sync).
     -- JPA's @Version turns a lost update into an optimistic-lock failure (HTTP 409).
-    ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+    ADD COLUMN version BIGINT NOT NULL DEFAULT 0,
+    -- Soft-delete marker. Removal must never hard-delete the row: a §16 eWpG register entry
+    -- disappearing entirely conflicts with retention/tamper-evidence obligations.
+    ADD COLUMN removed_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN asset_holder.removed_at IS
+    'Soft-delete marker. NULL = still an active register entry. Non-null = the instant '
+    'HolderService.removeHolder closed this holder out; the row is retained (never hard-deleted) '
+    'for eWpG §16 retention/tamper-evidence. Compliance-facing reads should exclude removed rows '
+    '(see AssetHolderRepository.findActive* methods); reconciliation/audit reads may still need them.';
+
+-- Compliance-facing listings filter on this predicate constantly (findActiveByAssetId /
+-- findActiveByInvestorId / existsActiveBy...); index it alongside the existing lookup columns.
+CREATE INDEX idx_holder_asset_active    ON asset_holder (asset_id)    WHERE removed_at IS NULL;
+CREATE INDEX idx_holder_investor_active ON asset_holder (investor_id) WHERE removed_at IS NULL;
 
 COMMENT ON COLUMN asset_holder.holder_reference IS
     'eWpG §17(2) pseudonymous unique identifier for single-entry (Einzeleintragung) holders.';
@@ -1857,6 +2013,10 @@ CREATE TABLE permission_grant (
     revoked_tx               VARCHAR(66),
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at               TIMESTAMPTZ,
+    -- 4-eyes: operator-tier permission grants/revocations carry step-up *and* a second
+    -- approver, matching the asset_token_admin_grant pattern.
+    dual_control_approver_id UUID,
+    dual_control_approved_at TIMESTAMPTZ,
     CONSTRAINT chk_permission_grant_type CHECK (grant_type IN ('ORG','ROLE')),
     CONSTRAINT chk_permission_grant_status CHECK (
         status IN ('PENDING','ACTIVE','REVOKED','FAILED')
@@ -1881,6 +2041,9 @@ CREATE TABLE ecosystem_trusted_issuer (
     removed_tx      VARCHAR(66),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     removed_at      TIMESTAMPTZ,
+    -- 4-eyes, as for permission_grant above.
+    dual_control_approver_id UUID,
+    dual_control_approved_at TIMESTAMPTZ,
     CONSTRAINT chk_ecosystem_trusted_issuer_status CHECK (
         status IN ('PENDING','ACTIVE','REMOVED','FAILED')
     )
@@ -1918,6 +2081,13 @@ CREATE TABLE payment_rail (
     -- disclosure-surfacing only; Registerwerk is not the EMT issuer.
     white_paper_url     VARCHAR(500),
     redemption_at_par   BOOLEAN       NOT NULL DEFAULT false,
+    -- The fields above are operator-entered free text. These three record that an operator
+    -- attested to having checked them, so "disclosed" is distinguishable from "actually
+    -- checked against a real register". This is an auditable attestation, NOT a live
+    -- register cross-check performed by Registerwerk.
+    micar_verified      BOOLEAN       NOT NULL DEFAULT FALSE,
+    micar_verified_at   TIMESTAMPTZ,
+    micar_verified_by   UUID,
     enabled             BOOLEAN       NOT NULL DEFAULT true,
     created_at          TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ   NOT NULL DEFAULT now(),
@@ -2277,6 +2447,10 @@ CREATE TABLE lending_position (
     collateral_amount NUMERIC(78,0) NOT NULL DEFAULT 0,
     current_debt      NUMERIC(78,0) NOT NULL DEFAULT 0,
     health_factor_wad NUMERIC(78,0),
+    -- Whether health_factor_wad can be trusted. NULL = not read (no debt, or the read itself
+    -- failed); FALSE = read succeeded but the price backing it is unpriced or stale. Without
+    -- this flag a stale mark is indistinguishable from a good one.
+    health_factor_reliable BOOLEAN,
     status            VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
     last_synced_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -2319,12 +2493,17 @@ CREATE TABLE asset_token_admin_grant (
     chain_config_id          UUID,
     legal_basis              TEXT NOT NULL,
     created_by               UUID NOT NULL,
+    -- Set at GRANT time and never overwritten.
     dual_control_approver_id UUID,
     dual_control_approved_at TIMESTAMPTZ,
     expires_at               TIMESTAMPTZ,
     revoked_at               TIMESTAMPTZ,
     revoked_by               UUID,
     revoke_reason            TEXT,
+    -- Revocation needs 4-eyes too, and needs its *own* pair: reusing the grant-time columns
+    -- would erase the record of who approved the original grant.
+    revoke_dual_control_approver_id UUID,
+    revoke_dual_control_approved_at TIMESTAMPTZ,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );

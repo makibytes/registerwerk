@@ -66,7 +66,7 @@ Modules: `asset`, `audit`, `auth`, `blockchain`, `chain`, `customer`, `deploymen
 - DTOs are Java `record` types with Bean Validation annotations
 - `@Transactional` at service method level, not on repositories
 - `@PreAuthorize("hasRole('REGISTRY_ADMIN')")` on controllers/methods
-- New Flyway migrations: `V{n}__description.sql` — never edit existing
+- New Flyway migrations: `V{n}__description.sql` — never edit existing. Schema was squashed to a single `V1__initial_schema.sql` on 2026-07-31 (V1–V19 folded in; header documents the `flyway_schema_history` reconciliation for already-migrated environments)
 - Emit audit events in every state-changing service method
 
 ---
@@ -126,7 +126,17 @@ cd frontend-customer && npm start            # :4201
 cd contracts && forge test -vvv
 cd contracts/cairo && scarb build && snforge test   # Cairo (Starknet) contracts
 cd daml && dpm build                                # Daml (Canton) bond templates — SDK via dpm
+docker compose --profile docs up                    # docs server :8003
 ```
+
+**Documentation** is MkDocs Material (`mkdocs.yml` + `docs/`), served by the `docs` compose profile. Build it strictly before committing doc changes:
+
+```bash
+docker run --rm -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro \
+  squidfunk/mkdocs-material:9.5 build --strict
+```
+
+`docs/` also contains a **dormant Docusaurus setup** (`docusaurus.config.ts`, `sidebars-*.ts`, `src/`, `static/`, `node_modules/`) that nothing runs. It is excluded via `exclude_docs`; without that, every npm README under `docs/node_modules` shipped as a doc page. Use MkDocs syntax (`!!! note`), not Docusaurus (`:::note`).
 
 ---
 
