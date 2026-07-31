@@ -1,3 +1,8 @@
+---
+title: SLO / SLI catalogue
+description: Service-level objectives and indicators for the registry, the error-budget policy, and the Prometheus queries used to report them.
+---
+
 # SLO / SLI Catalogue
 
 **Service:** Registerwerk eWpG Registry  

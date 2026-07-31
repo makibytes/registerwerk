@@ -1,3 +1,8 @@
+---
+title: Registerwerk assurance review ledger
+description: The proposed control record for a future multidisciplinary review of Registerwerk — not evidence that any review has taken place.
+---
+
 # Registerwerk assurance review ledger
 
 Last updated: 2026-07-29

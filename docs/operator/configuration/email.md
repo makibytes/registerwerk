@@ -1,7 +1,5 @@
 ---
-id: email
 title: Email Configuration
-sidebar_position: 5
 ---
 
 # Email Configuration

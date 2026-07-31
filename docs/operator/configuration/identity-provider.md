@@ -1,7 +1,5 @@
 ---
-id: identity-provider
 title: Identity Provider
-sidebar_position: 4
 ---
 
 # Identity Provider (OIDC)
@@ -25,12 +23,12 @@ On startup the backend seeds (or refreshes) a row in the `app_user` table with t
 email and a BCrypt hash of the password. Rotating the password is as simple as changing
 `DEFAULT_ADMIN_PASSWORD` and restarting the service — the hash is updated on every boot.
 
-:::warning Not for production
-The HS256 dev secret and the built-in admin are intended for local development and demo
-environments only. For production, configure a real identity provider below and set
-`ENTRA_ENABLED=true` + `JWT_ISSUER_URI=<your-issuer>`. The `/api/v1/public/auth/login`
-endpoint returns 404 when `ENTRA_ENABLED=true`.
-:::
+!!! warning "Not for production"
+    The HS256 dev secret and the built-in admin are intended for local development and demo
+    environments only. For production, configure a real identity provider below and set
+    `ENTRA_ENABLED=true` + `JWT_ISSUER_URI=<your-issuer>`. The `/api/v1/public/auth/login`
+    endpoint returns 404 when `ENTRA_ENABLED=true`.
+
 
 
 The backend is an OAuth2 Resource Server. It accepts JWTs from any OIDC-compliant provider.

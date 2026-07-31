@@ -1,7 +1,5 @@
 ---
-id: adding-chains
 title: Adding New Chains
-sidebar_position: 4
 ---
 
 # Adding New Chains
@@ -48,7 +46,7 @@ forge script script/Deploy.s.sol \
 
 ### 3. Add to graph-node config
 
-See [Indexer Configuration](../configuration/indexers) for the TOML and docker-compose changes.
+See [Indexer Configuration](../configuration/indexers.md) for the TOML and docker-compose changes.
 
 ### 4. Restart graph-node with the new network
 
@@ -63,7 +61,7 @@ Verify graph-node is healthy before continuing.
 
 ### 5. Configure and deploy the subgraph
 
-Configure every `*_OPTIMISM` source described in [The Graph](../indexers/the-graph), then:
+Configure every `*_OPTIMISM` source described in [The Graph](../indexers/the-graph.md), then:
 
 ```bash
 SUBGRAPH_VERSION_LABEL=optimism-20260729-01 ./indexer/evm/deploy-subgraph.sh optimism

@@ -1,8 +1,5 @@
 ---
-id: api-reference
 title: API Reference
-sidebar_label: API Reference
-sidebar_position: 9
 ---
 
 # API Reference
@@ -38,7 +35,7 @@ curl https://api.registerwerk.example.com/api/v1/issuances \
   -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIs..."
 ```
 
-See [Authentication](../customer/authentication) for how to obtain a token.
+See [Authentication](../customer/authentication.md) for how to obtain a token.
 
 ## API groups
 

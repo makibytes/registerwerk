@@ -267,7 +267,12 @@ services:
   # Binds to 0.0.0.0 by default so it is reachable on remote hosts.
   # Set DOCS_BIND_ADDR=127.0.0.1 in .env to restrict to loopback only.
   docs:
-    image: squidfunk/mkdocs-material:9.5
+    # Built rather than pulled: the stock mkdocs-material image has no
+    # mkdocs-static-i18n, which is what makes the site multilingual.
+    build:
+      context: ./docs
+      dockerfile: Dockerfile
+    image: registerwerk-docs:local
     volumes:
       - ./mkdocs.yml:/docs/mkdocs.yml:ro
       - ./docs:/docs/docs:ro
@@ -281,7 +286,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256m
+          # Five languages are built and held in memory at once; 256m (enough for
+          # the old English-only site) makes `mkdocs serve` die mid-build.
+          memory: 768m
 
 volumes:
   pgdata:

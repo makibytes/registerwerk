@@ -1,3 +1,8 @@
+---
+title: DPIA — Luxembourg
+description: Draft Data Protection Impact Assessment for the LU_CSSF jurisdiction — requires DPO and legal sign-off before go-live.
+---
+
 # Data Protection Impact Assessment — LU_CSSF Jurisdiction
 
 !!! warning "EXTERNAL_REVIEW_REQUIRED"

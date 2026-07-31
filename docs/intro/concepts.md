@@ -121,7 +121,7 @@ This glossary defines the terms used across Registerwerk's documentation, code, 
 ## Platform-Specific Terms
 
 **Module**
-: A Spring Modulith bounded context. Registerwerk has 22 modules, each with an `api/` package (public types) and an `internal/` package (private implementation). See [Module Architecture](../platform/modules.md).
+: A Spring Modulith bounded context. Registerwerk has 34 modules, each with an `api/` package (public types) and an `internal/` package (private implementation). See [Module Architecture](../platform/modules.md).
 
 **Step-up authentication**
 : A second authentication challenge required before executing high-risk operations (force-transfer, force-burn, KYC override). Enforced by the `@RequiresStepUp` annotation. See [Step-Up MFA](../compliance/step-up-mfa.md).

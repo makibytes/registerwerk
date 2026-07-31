@@ -1,7 +1,5 @@
 ---
-id: backups
 title: Backups and Recovery
-sidebar_label: Backups
 ---
 
 # Backups and Recovery

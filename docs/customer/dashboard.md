@@ -1,7 +1,5 @@
 ---
-id: dashboard
 title: Dashboard
-sidebar_label: Dashboard
 ---
 
 # Dashboard
@@ -61,9 +59,9 @@ The **Quick Actions** panel provides one-click navigation to the most common tas
 
 The bottom of the dashboard shows a live **Network Status** grid, indicating whether each configured blockchain network is currently reachable and synced. A green indicator means the indexer is current; yellow indicates the indexer is more than 10 blocks behind the chain head; red means the indexer is unavailable.
 
-:::tip
-If a network shows red, on-chain data for that network may be stale. Wait a few minutes and refresh. If the issue persists, contact the registry operator.
-:::
+!!! tip
+    If a network shows red, on-chain data for that network may be stale. Wait a few minutes and refresh. If the issue persists, contact the registry operator.
+
 
 ## Refreshing data
 

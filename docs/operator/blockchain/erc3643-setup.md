@@ -1,7 +1,5 @@
 ---
-id: erc3643-setup
 title: ERC-3643 Setup
-sidebar_label: ERC-3643 Setup
 ---
 
 # ERC-3643 (T-REX) Setup
@@ -25,7 +23,7 @@ All six are deployed atomically by the `EwpgTREXFactory` via `AssetTokenFactory`
 
 ## Step 1 — Deploy the factory suite
 
-Ensure the `AssetTokenFactory` and `EwpgTREXFactory` are deployed per [Deploying Contracts](./deploying-contracts). Confirm the factory address is set in `.env` and the backend has loaded it:
+Ensure the `AssetTokenFactory` and `EwpgTREXFactory` are deployed per [Deploying Contracts](./deploying-contracts.md). Confirm the factory address is set in `.env` and the backend has loaded it:
 
 ```bash
 curl http://localhost:8080/api/v1/admin/chains/11155111 \

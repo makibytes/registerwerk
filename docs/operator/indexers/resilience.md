@@ -1,8 +1,5 @@
 ---
-id: resilience
 title: Resilience and Recovery
-sidebar_label: Resilience
-sidebar_position: 3
 ---
 
 # Indexer Resilience

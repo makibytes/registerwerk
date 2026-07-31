@@ -28,7 +28,9 @@ All protected endpoints require:
 Authorization: Bearer <jwt>
 ```
 
-For the customer frontend via Kong, the JWT is issued by the OIDC provider and validated by Kong before the request reaches the backend. For the operator frontend, the JWT is issued by `POST /api/v1/public/auth/login`.
+**The backend validates every token itself, on every request.** Kong does not validate JWTs and does not tell the backend who the caller is — its `openid-connect` plugin is an Enterprise feature and is not active in this OSS setup. Kong additionally *strips* client-supplied identity headers, so nothing can be smuggled in ahead of the backend.
+
+Operator tokens are issued by `POST /api/v1/public/auth/login` (HS256, `iss: registerwerk-local`). Customer tokens are issued by the OIDC provider when `ENTRA_ENABLED=true`, and by the same local endpoint otherwise. A delegating decoder routes on the JWS `alg` header; both branches are issuer-pinned and the OIDC branch is audience-pinned. See [Security & authentication](security.md).
 
 ---
 

@@ -1,7 +1,5 @@
 ---
-id: onboarding
 title: Onboarding
-sidebar_label: Onboarding
 ---
 
 # Onboarding
@@ -32,14 +30,14 @@ The registry operator creates an entity (company or individual) on your behalf. 
 - A one-time **onboarding token** (valid for 48 hours)
 - A link to the customer portal
 
-:::warning Token expiry
-The onboarding token expires after 48 hours. If it has expired, contact the registry operator to request a new one. Do not share the token — it grants full setup access to your account.
-:::
+!!! warning "Token expiry"
+    The onboarding token expires after 48 hours. If it has expired, contact the registry operator to request a new one. Do not share the token — it grants full setup access to your account.
+
 
 ## Step 2 — Redeem the token
 
 1. Click the link in the invitation email. You will be taken to the customer portal.
-2. You will be asked to log in via your identity provider (see [Authentication](./authentication)). For new users, this is typically Microsoft Entra ID (formerly Azure AD) with your corporate email address.
+2. You will be asked to log in via your identity provider (see [Authentication](./authentication.md)). For new users, this is typically Microsoft Entra ID (formerly Azure AD) with your corporate email address.
 3. After logging in, the portal detects your onboarding token from the URL and activates your entity automatically.
 4. You are redirected to the **Welcome** screen, which shows your assigned role (Issuer, Investor, or Auditor).
 
@@ -75,13 +73,11 @@ You will need to provide:
 ```
 OIDC Issuer URL:       https://your-idp.example.com/realms/your-realm
 Client ID:             registerwerk-client
-Client Secret:         (provided by your IdP admin)
-Redirect URI:          https://portal.registerwerk.example.com/auth/callback
 ```
 
-:::tip
-The redirect URI is shown on the settings page. Copy it exactly into your IdP configuration. The registry only supports the `authorization_code` flow with PKCE.
-:::
+!!! info "There is no client secret field"
+    Federation is established tenant-to-tenant in your own identity provider. Registerwerk never runs an authorization-code flow against your tenant, so it has no use for a client secret of yours — and the field was removed rather than left to collect a credential nobody needs. See [Company administrator](workspaces/company-admin.md).
+
 
 Once configured and verified, all users in your organization will be redirected to your IdP for authentication instead of the default Entra ID login.
 
@@ -89,7 +85,7 @@ Once configured and verified, all users in your organization will be redirected 
 
 Your account is now active. Depending on your role:
 
-- **Issuers**: You may be asked to complete a KYC/AML review before you can deploy tokens to mainnet. See [Creating an issuance](./issuers/creating-issuance).
+- **Issuers**: You may be asked to complete a KYC/AML review before you can deploy tokens to mainnet. See [Creating an issuance](lifecycle/primary-issuance.md).
 - **Investors**: Your account is ready. You can connect a wallet and view your holdings.
 - **Auditors**: Your account is ready. You have read-only access to all registry data.
 

@@ -1,7 +1,5 @@
 ---
-id: frontends
 title: Frontend Setup
-sidebar_position: 4
 ---
 
 # Frontend Setup

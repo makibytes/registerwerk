@@ -1,7 +1,5 @@
 ---
-id: deploying-contracts
 title: Deploying Contracts
-sidebar_position: 1
 ---
 
 # Deploying Smart Contracts
