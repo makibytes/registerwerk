@@ -15,7 +15,15 @@ public interface RpcNodeRepository extends JpaRepository<RpcNode, UUID> {
 
     List<RpcNode> findByChainConfig_Identifier(String identifier);
 
-    /** Eagerly joins chain_config to avoid N+1 during health checks. */
+    /**
+     * Eagerly joins chain_config to avoid N+1 during health checks.
+     *
+     * <p>Returns every node, including disabled ones and nodes of disabled chains, because
+     * {@code BlockchainClientRegistry.refreshFromNodes} needs the complete picture — a chain whose
+     * nodes are <em>all</em> disabled must stay present in the pool so lookups fail loudly rather
+     * than silently falling through to the legacy single-client tier. Deciding which of these to
+     * actually probe is {@code RpcNodeHealthService}'s job.
+     */
     @Query("SELECT n FROM RpcNode n JOIN FETCH n.chainConfig")
     List<RpcNode> findAllWithChainConfig();
 

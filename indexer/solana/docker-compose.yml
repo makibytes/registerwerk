@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Yellowstone Dragon's Mouth — gRPC Geyser proxy for Solana.
 # Connects to a Yellowstone-enabled Solana RPC (Triton, Helius, or self-hosted validator)
 # and streams account updates + transactions in real time.

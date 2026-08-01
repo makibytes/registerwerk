@@ -1,16 +1,23 @@
 # The frontend build contexts are now the repo root (needed so frontend-shared/
 # is available at the ../frontend-shared path frontend-*/tsconfig.json expects).
 # Keep the context lean by excluding everything the frontend builds don't need.
+#
+# `docs` is deliberately NOT excluded: the docs image (docs/Dockerfile) also builds from the repo
+# root, because mkdocs.yml lives there and references docs/hooks.py. It is only ~750 KB, and the
+# `**/node_modules` rule above already keeps any future `npm install` under docs/ out of every
+# context — which is what made this directory 361 MB before.
 **/node_modules
 **/dist
 **/.angular
+**/site
+docs/build
+docs/.docusaurus
 backend
 contracts
 daml
 indexer
 gateway
 monitoring
-docs
 examples
 deploy
 docker

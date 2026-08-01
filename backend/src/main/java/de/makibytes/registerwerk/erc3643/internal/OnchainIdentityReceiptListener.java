@@ -46,7 +46,7 @@ class OnchainIdentityReceiptListener {
     }
 
     @SchedulerLock(name = "onchainIdentityReceiptListener", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 30_000, initialDelay = 25_000)
     @Transactional
     public void resolvePendingIdentities() {
         // Indexed prefix query — this poller runs every 30s; a full-table scan

@@ -84,7 +84,7 @@ class OrgEcosystemTxPoller {
     }
 
     @SchedulerLock(name = "orgEcosystemTxPoller", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 30_000, initialDelay = 45_000)
     @Transactional
     public void resolvePending() {
         for (OrgRegistration registration : registrationRepository.findByStatus(OrgRegistrationStatus.PENDING)) {

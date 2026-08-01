@@ -1,0 +1,44 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main, develop, feat/**, fix/**, release/**]
+    paths:
+      - 'mkdocs.yml'
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mkdocs.yml'
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Strict MkDocs build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # --strict promotes broken internal links to build failures. Nothing enforced this before,
+      # so the documented build command had drifted out of working order unnoticed.
+      - name: Build documentation (strict)
+        run: |
+          docker run --rm \
+            -v "$PWD/mkdocs.yml:/docs/mkdocs.yml:ro" \
+            -v "$PWD/docs:/docs/docs:ro" \
+            squidfunk/mkdocs-material:9.7.7 build --strict
+
+      # The compose `docs` profile ships this image, so a green strict build alone is not enough —
+      # the Dockerfile has to stay buildable too.
+      - name: Build the docs container image
+        run: docker build -f docs/Dockerfile -t registerwerk-docs:ci .

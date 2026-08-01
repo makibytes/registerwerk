@@ -51,7 +51,7 @@ class MarketplaceTxPoller {
     }
 
     @SchedulerLock(name = "marketplaceTxPoller", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 30_000, initialDelay = 35_000)
     @Transactional
     public void resolveApprovedVersions() {
         for (DappVersion version : versionRepository.findByStatus(DappVersionStatus.APPROVED)) {

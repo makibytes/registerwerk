@@ -69,7 +69,7 @@ public class GraphNodeSyncService {
      * Graph Node and syncs each one.
      */
     @SchedulerLock(name = "graphNodeSync", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 30_000, initialDelay = 55_000)
     public void syncAllEvmChains() {
         try {
             List<ChainConfig> evmChains = chainConfigRepository

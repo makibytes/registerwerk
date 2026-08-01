@@ -2,7 +2,9 @@ _format_version: "3.0"
 
 # ─── Registerwerk API Gateway (Kong OSS, DB-less) ─────────────────────────────
 #
-# Loaded via KONG_DECLARATIVE_CONFIG (see docker-compose.kong.yml). Kong's
+# Loaded via KONG_DECLARATIVE_CONFIG by the root docker-compose.yml, which is what the running
+# stack uses. (docker-compose.kong.yml in this directory runs the gateway standalone against the
+# same file and cannot run at the same time — see its header.) Kong's
 # declarative format performs NO environment substitution — deployment-specific
 # values (CORS origins, admin IP allowlist) are edited here or rendered by your
 # deployment tooling before start.
@@ -57,6 +59,15 @@ services:
 
 # ─── Plugins ───────────────────────────────────────────────────────────────────
 plugins:
+  # Exposes Kong's own metrics on the Status API (:8100/metrics — see KONG_STATUS_LISTEN in
+  # docker-compose.yml), which is what monitoring/prometheus.yml scrapes. Bundled in Kong OSS.
+  # Without this plugin the endpoint exists but reports nothing about routes or upstreams.
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      upstream_health_metrics: true
+
   # Response caching — PUBLIC routes only. Caching authenticated registry data
   # at the gateway would serve stale compliance state (and, mis-keyed, another
   # user's responses); an eWpG register must always read current state.

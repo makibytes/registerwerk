@@ -99,7 +99,7 @@ sequenceDiagram
 
 ## Spring Modulith — bounded contexts
 
-The backend is organised into modules, each representing a single domain responsibility. Modules communicate through [Spring Modulith events](platform/modules.md) (transactional outbox), never through direct inter-module service calls into `internal/` packages.
+The backend is organised into modules, each representing a single domain responsibility. Modules communicate through [Spring Modulith events](../platform/modules.md) (transactional outbox), never through direct inter-module service calls into `internal/` packages.
 
 | Module | Responsibility |
 |---|---|

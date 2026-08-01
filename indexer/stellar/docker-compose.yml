@@ -8,7 +8,7 @@ services:
   # Operator Portal → Network Nodes) at a real Horizon instance — this sidecar is not a
   # substitute for that.
   stellar:
-    image: stellar/quickstart:${STELLAR_QUICKSTART_TAG:-testing}
+    image: stellar/quickstart:${STELLAR_QUICKSTART_TAG:-v649-b1276.1-testing}
     command: --testnet --enable-soroban-rpc
     ports:
       - "8000:8000"    # Horizon REST API — backend connects here

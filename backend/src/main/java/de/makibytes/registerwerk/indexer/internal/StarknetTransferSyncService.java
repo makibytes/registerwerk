@@ -80,7 +80,7 @@ public class StarknetTransferSyncService {
     // ── Scheduling ────────────────────────────────────────────────────────────
 
     @SchedulerLock(name = "starknetTransferSync", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 30_000, initialDelay = 65_000)
     public void syncAllStarknetChains() {
         try {
             List<ChainConfig> chains = chainConfigRepository

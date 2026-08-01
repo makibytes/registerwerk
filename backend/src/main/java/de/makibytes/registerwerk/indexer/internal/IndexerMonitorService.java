@@ -103,6 +103,15 @@ public class IndexerMonitorService {
             if (expectedType == null) {
                 continue;
             }
+            // Subgraph indexing is opt-in per chain: GraphNodeSyncService only polls chains with a
+            // graph_node_url, and self-hosting a graph-node is a separate deployment
+            // (indexer/evm/docker-compose.yml). Flagging every EVM chain without one as a broken
+            // indexer would raise a permanent ERROR state for a chain nobody asked to index —
+            // alert noise that trains operators to ignore this monitor.
+            if (expectedType == IndexerState.IndexerType.GRAPH_NODE
+                    && (chain.getGraphNodeUrl() == null || chain.getGraphNodeUrl().isBlank())) {
+                continue;
+            }
             if (!byChainAndType.containsKey(reconciliationKey(chain.getId(), expectedType))) {
                 IndexerState state = new IndexerState();
                 state.setChainConfigId(chain.getId());

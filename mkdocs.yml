@@ -47,8 +47,20 @@ plugins:
 hooks:
   - docs/hooks.py
 
+# MkDocs renders a page for EVERY .md under docs_dir — an explicit `nav` below only controls the
+# navigation tree, it does not restrict what gets built. A dormant Docusaurus install used to sit
+# in docs/ and contributed 1,722 pages (1,281 of them npm READMEs) to every build and to the
+# search index. It has been removed; these entries make sure a stray `npm install` under docs/
+# cannot bring the problem back.
+#
+# Note this does NOT shrink what `mkdocs serve` watches — its livereload uses a PollingObserver
+# that re-stats all of docs_dir twice a second regardless of exclusions. That is why the docs
+# container builds a static site instead of serving live (see docs/Dockerfile).
 exclude_docs: |
   hooks.py
+  node_modules/
+  build/
+  .docusaurus/
 
 markdown_extensions:
   - admonition

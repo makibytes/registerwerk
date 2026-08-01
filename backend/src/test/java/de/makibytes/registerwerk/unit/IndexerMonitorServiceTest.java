@@ -51,6 +51,12 @@ class IndexerMonitorServiceTest {
         c.setIdentifier(type.name() + "_TESTNET");
         c.setChainType(type);
         c.setEnabled(true);
+        // EVM chains are only expected to have a graph-node indexer when one is configured —
+        // subgraph indexing is opt-in per chain. Set it here so the general-purpose fixture
+        // represents a chain that IS meant to be indexed.
+        if (type == ChainConfig.ChainType.EVM) {
+            c.setGraphNodeUrl("http://graph-node:8000/subgraphs/name");
+        }
         return c;
     }
 
@@ -79,6 +85,36 @@ class IndexerMonitorServiceTest {
         assertThat(captor.getValue().getIndexerType()).isEqualTo(IndexerState.IndexerType.GRAPH_NODE);
         assertThat(captor.getValue().getStatus()).isEqualTo(IndexerState.IndexerStatus.ERROR);
         assertThat(captor.getValue().getLastError()).contains(evmChain.getIdentifier());
+    }
+
+    @Test
+    @DisplayName("does not flag an EVM chain that has no graph-node configured")
+    void reconcile_skipsEvmChainWithoutGraphNodeUrl() {
+        // Subgraph indexing is opt-in: GraphNodeSyncService only polls chains with a
+        // graph_node_url, and self-hosting graph-node is a separate deployment. Raising a
+        // permanent ERROR state for a chain nobody asked to index is pure alert noise.
+        ChainConfig evmChain = chain(ChainConfig.ChainType.EVM);
+        evmChain.setGraphNodeUrl(null);
+        when(chainConfigRepository.findByEnabledTrue()).thenReturn(List.of(evmChain));
+        when(indexerStateRepository.findAll()).thenReturn(List.of());
+
+        invokeReconcile();
+
+        verify(indexerStateRepository, never()).save(any(IndexerState.class));
+    }
+
+    @Test
+    @DisplayName("still flags a non-EVM chain, which needs no graph-node configuration")
+    void reconcile_stillFlagsNonEvmChain() {
+        ChainConfig solanaChain = chain(ChainConfig.ChainType.SOLANA);
+        when(chainConfigRepository.findByEnabledTrue()).thenReturn(List.of(solanaChain));
+        when(indexerStateRepository.findAll()).thenReturn(List.of());
+
+        invokeReconcile();
+
+        ArgumentCaptor<IndexerState> captor = ArgumentCaptor.forClass(IndexerState.class);
+        verify(indexerStateRepository).save(captor.capture());
+        assertThat(captor.getValue().getIndexerType()).isEqualTo(IndexerState.IndexerType.SOLANA_POLL);
     }
 
     @Test

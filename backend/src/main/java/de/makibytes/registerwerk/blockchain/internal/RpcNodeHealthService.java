@@ -63,10 +63,23 @@ public class RpcNodeHealthService {
 
     private final CantonClientProvider cantonClientFactory;
 
+    /**
+     * Consecutive failures past which a node is only re-probed on an exponentially growing
+     * interval. The default seed data ships placeholder endpoints (`.../v3/changeme`) and chains
+     * with no public RPC, so without this a stock demo deployment probes ~10 endpoints that can
+     * never answer, every tick, forever — burning the timeout budget and emitting a WARN each time.
+     */
+    private static final int BACKOFF_AFTER_FAILURES = 3;
+    /** Cap so a node that recovers is picked up again within a bounded time. */
+    private static final int MAX_BACKOFF_TICKS = 32;
+
     /** Cached clients keyed by node ID to avoid creating new connections on every tick. */
     private final Map<UUID, Web3j>              evmHealthClients    = new ConcurrentHashMap<>();
     private final Map<UUID, RpcClient>          solanaHealthClients = new ConcurrentHashMap<>();
     private final Map<UUID, CantonLedgerEndpoint> cantonHealthClients = new ConcurrentHashMap<>();
+
+    /** nodeId → ticks still to skip before the next probe (backoff for persistently dead nodes). */
+    private final Map<UUID, Integer> skipTicks = new ConcurrentHashMap<>();
 
     public RpcNodeHealthService(
             RpcNodeRepository rpcNodeRepository,
@@ -124,11 +137,16 @@ public class RpcNodeHealthService {
         // saveAll is transactional — merges the (now detached) modified entities
         rpcNodeRepository.saveAll(allNodes);
 
-        // Purge stale health-check clients for nodes that were removed
+        // Purge stale health-check clients for nodes that were removed. EVM and Solana clients
+        // hold no dedicated resources (see Web3jClientFactory) and are simply dropped; Canton
+        // endpoints own a gRPC channel and must be closed.
         Set<UUID> activeIds = allNodes.stream().map(RpcNode::getId).collect(Collectors.toSet());
         evmHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
         solanaHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
-        cantonHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
+        skipTicks.keySet().removeIf(id -> !activeIds.contains(id));
+        for (UUID staleId : Set.copyOf(cantonHealthClients.keySet())) {
+            if (!activeIds.contains(staleId)) closeQuietly(cantonHealthClients.remove(staleId));
+        }
 
         registry.refreshFromNodes(allNodes);
     }
@@ -139,6 +157,8 @@ public class RpcNodeHealthService {
         Map<UUID, Long> blockNumbers = new HashMap<>();
 
         for (RpcNode node : nodes) {
+            if (skipProbe(node)) continue;
+
             Web3j client = evmHealthClients.computeIfAbsent(node.getId(),
                     id -> web3jClientFactory.createClient(node.getUrl()));
 
@@ -162,13 +182,11 @@ public class RpcNodeHealthService {
                 node.setLatestBlockNumber(bn);
                 node.setLastSuccessAt(checkStart);
                 node.setConsecutiveFailures(0);
+                recordSuccess(node);
 
             } catch (Exception e) {
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
-                log.warn("EVM health check failed for node {} ({}): {}", node.getUrl(),
-                        chain.getIdentifier(), e.getMessage());
-                // Recreate client on failure — connection may be broken
-                evmHealthClients.remove(node.getId());
+                recordFailure(node, chain, e);
             }
             node.setLastCheckedAt(checkStart);
         }
@@ -207,6 +225,8 @@ public class RpcNodeHealthService {
         Map<UUID, Long> slots = new HashMap<>();
 
         for (RpcNode node : nodes) {
+            if (skipProbe(node)) continue;
+
             RpcClient client = solanaHealthClients.computeIfAbsent(node.getId(),
                     id -> solanaClientFactory.createClient(node.getUrl()));
 
@@ -222,12 +242,11 @@ public class RpcNodeHealthService {
                 node.setLastSuccessAt(checkStart);
                 node.setConsecutiveFailures(0);
                 node.setSyncing(false);
+                recordSuccess(node);
 
             } catch (RpcException e) {
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
-                log.warn("Solana health check failed for node {} ({}): {}", node.getUrl(),
-                        chain.getIdentifier(), e.getMessage());
-                solanaHealthClients.remove(node.getId());
+                recordFailure(node, chain, e);
             }
             node.setLastCheckedAt(checkStart);
         }
@@ -260,6 +279,8 @@ public class RpcNodeHealthService {
 
     private void checkCantonNodes(ChainConfig chain, List<RpcNode> nodes) {
         for (RpcNode node : nodes) {
+            if (skipProbe(node)) continue;
+
             Instant checkStart = Instant.now();
             try {
                 CantonLedgerEndpoint client = cantonHealthClients.computeIfAbsent(node.getId(),
@@ -277,19 +298,72 @@ public class RpcNodeHealthService {
                 node.setSyncing(false);
                 node.setHealthy(true);
                 node.setLagFromBest(0);
+                recordSuccess(node);
 
             } catch (Exception e) {
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
                 node.setHealthy(false);
-                log.warn("Canton health check failed for node {} ({}): {}", node.getUrl(),
-                        chain.getIdentifier(), e.getMessage());
-                cantonHealthClients.remove(node.getId());
+                recordFailure(node, chain, e);
+                // Unlike the EVM/Solana clients, a Canton endpoint owns a gRPC channel with its
+                // own event-loop threads, so it must be closed rather than simply dropped.
+                closeQuietly(cantonHealthClients.remove(node.getId()));
             }
             node.setLastCheckedAt(checkStart);
         }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Whether to skip probing this node on this round — either because it (or its chain) is
+     * disabled, or because it is serving out an exponential backoff after repeated failures.
+     *
+     * <p>Disabled nodes are still handed to {@code refreshFromNodes} by the caller, so routing
+     * semantics are unchanged; they are merely not probed over the network.
+     */
+    private boolean skipProbe(RpcNode node) {
+        if (!node.isEnabled() || !node.getChainConfig().isEnabled()) return true;
+
+        Integer remaining = skipTicks.get(node.getId());
+        if (remaining == null || remaining <= 0) return false;
+        skipTicks.put(node.getId(), remaining - 1);
+        return true;
+    }
+
+    /** Clears any backoff so a recovered node returns to the normal cadence immediately. */
+    private void recordSuccess(RpcNode node) {
+        skipTicks.remove(node.getId());
+    }
+
+    /**
+     * Applies exponential backoff and log throttling after a failed probe. The first
+     * {@link #BACKOFF_AFTER_FAILURES} failures are logged and re-probed normally, so genuine
+     * transient outages stay visible; beyond that a node is probed on a doubling interval and
+     * logged only on the rounds it is actually probed.
+     */
+    private void recordFailure(RpcNode node, ChainConfig chain, Exception e) {
+        int failures = node.getConsecutiveFailures();
+        if (failures <= BACKOFF_AFTER_FAILURES) {
+            log.warn("{} health check failed for node {} ({}): {}", chain.getChainType(),
+                    node.getUrl(), chain.getIdentifier(), e.getMessage());
+            return;
+        }
+        int ticks = Math.min(1 << Math.min(failures - BACKOFF_AFTER_FAILURES, 5), MAX_BACKOFF_TICKS);
+        skipTicks.put(node.getId(), ticks);
+        log.warn("{} health check failed for node {} ({}) — {} consecutive failures, "
+                        + "backing off for {} rounds: {}",
+                chain.getChainType(), node.getUrl(), chain.getIdentifier(), failures, ticks,
+                e.getMessage());
+    }
+
+    private void closeQuietly(@Nullable AutoCloseable client) {
+        if (client == null) return;
+        try {
+            client.close();
+        } catch (Exception e) {
+            log.debug("Failed to close RPC client: {}", e.getMessage());
+        }
+    }
 
     private boolean isStalled(RpcNode node) {
         Instant lastAdvanced = node.getBlockLastAdvancedAt();

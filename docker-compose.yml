@@ -3,10 +3,23 @@
 # of what directory this repo is checked out into (Phase 12, finding #4).
 name: registerwerk
 
+# Container logs previously had no rotation configured anywhere, so Docker's default json-file
+# driver grew without bound — on a long-lived demo host that eventually fills the disk. Anchored
+# here and merged into every service rather than repeated seven times.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # ─── Application Database ──────────────────────────────────────────────────
   postgres:
-    image: postgres:17-alpine
+    # Patch-pinned rather than tracking the floating `17-alpine`. Staying on 17.x is deliberate:
+    # moving to 18 requires a pg_upgrade or dump/restore of the pgdata volume, which is a separate
+    # deliberate migration, not something a `docker compose pull` should ever do implicitly.
+    image: postgres:17.10-alpine
+    logging: *default-logging
     environment:
       POSTGRES_DB: registerwerk
       POSTGRES_USER: ${DB_USER:-registerwerk}
@@ -19,13 +32,16 @@ services:
       - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-registerwerk} -d registerwerk"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 10
+      # Without this, initdb time on a fresh volume burns retries instead of being tolerated.
+      start_period: 30s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          cpus: "1.0"
           memory: 1g
 
   # ─── Backend ───────────────────────────────────────────────────────────────
@@ -34,6 +50,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       network: host
+    logging: *default-logging
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/registerwerk
       DB_USER: ${DB_USER:-registerwerk}
@@ -133,6 +150,10 @@ services:
     deploy:
       resources:
         limits:
+          # Keep in step with -XX:ActiveProcessorCount in backend/Dockerfile. Without a CPU limit
+          # the JVM sized G1, the JIT and the common ForkJoinPool for every host core, so a leak
+          # or a GC storm could saturate the whole machine.
+          cpus: "2.0"
           memory: 1500m
 
   # ─── Zama Relayer Sidecar ───────────────────────────────────────────────────
@@ -148,6 +169,7 @@ services:
       context: ./zama-relayer
       dockerfile: Dockerfile
       network: host
+    logging: *default-logging
     environment:
       ZAMA_CONFIG_PRESET: ${ZAMA_CONFIG_PRESET:-sepolia}
       CHAIN_ID: ${ZAMA_CHAIN_ID:-11155111}
@@ -182,6 +204,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "0.5"
           memory: 512m
 
   # ─── Operator Frontend ────────────────────────────────────────────────────
@@ -192,15 +215,25 @@ services:
       network: host
       args:
         BUILD_CONFIG: ${FRONTEND_BUILD_ENV:-production}
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_healthy
     ports:
       - "4200:80"
+    healthcheck:
+      # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
+      # resolves to ::1 first inside the container and the probe is refused.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          cpus: "0.25"
           memory: 128m
 
   # ─── Customer Frontend ─────────────────────────────────────────────────────
@@ -211,15 +244,25 @@ services:
       network: host
       args:
         BUILD_CONFIG: ${FRONTEND_BUILD_ENV:-production}
+    logging: *default-logging
     depends_on:
       kong:
         condition: service_healthy
     ports:
       - "4201:80"
+    healthcheck:
+      # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
+      # resolves to ::1 first inside the container and the probe is refused.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          cpus: "0.25"
           memory: 128m
 
   # ─── API Gateway ────────────────────────────────────────────────────────────
@@ -229,17 +272,30 @@ services:
   # still happens in the Spring backend (see gateway/kong.yml header comment);
   # Kong here only handles caching, rate limiting, CORS, and security headers.
   kong:
-    image: kong:3.8
+    image: kong:3.9.3
+    logging: *default-logging
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_ADMIN_LISTEN: "127.0.0.1:8001"
       KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+      # Read-only status API, reachable on the compose network so Prometheus can scrape
+      # /metrics from the `prometheus` plugin (gateway/kong.yml). The Admin API deliberately
+      # stays on loopback — monitoring/prometheus.yml used to target kong:8001, which Kong
+      # could never answer from another container, so the scrape job was dead by construction.
+      # Not published to the host; only other compose services can reach it.
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_PLUGINS: bundled
+      # Kong defaults nginx_worker_processes to "auto" — one worker per host CPU, so an 8-core
+      # demo host got 8 OpenResty workers (each with its own LuaJIT VM, its own proxy-cache
+      # memory store, and its own rate-limiting counters, which is why `policy: local` in
+      # kong.yml effectively multiplies the configured limit by the worker count). Two is ample
+      # for a single-host demo and makes the rate limit mean roughly what it says.
+      KONG_NGINX_WORKER_PROCESSES: "2"
     volumes:
       - ./gateway/kong.yml:/etc/kong/kong.yml:ro
     depends_on:
@@ -251,14 +307,30 @@ services:
       # Kong admin port must NOT be exposed publicly. Access via: docker exec or SSH tunnel.
       - "127.0.0.1:8001:8001"
     healthcheck:
-      test: ["CMD", "kong", "health"]
-      interval: 10s
+      # Overrides the healthcheck baked into the kong image, which is `CMD-SHELL kong health`
+      # every 10s. That is the Kong CLI, not a probe: each invocation spawns a full resty/LuaJIT
+      # process, loads the Kong Lua runtime and parses kong.conf just to stat a pidfile — running
+      # forever, plus once per retry during boot.
+      #
+      # The image ships no curl, wget, nc or busybox (verified against kong:3.9.3), but it does
+      # ship bash, so a real HTTP round trip costs exactly one bash: /dev/tcp opens the socket and
+      # `head -c 12` reads just the status line. Kong answers `HTTP/1.1 404` for an unrouted `/`,
+      # which is a perfectly good liveness signal — it proves the proxy port is listening and the
+      # router is loaded. Any HTTP status line passes; a refused connection fails.
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/8000; printf "GET / HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3; head -c 12 <&3 | grep -q "^HTTP/"'
+      interval: 30s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          cpus: "1.0"
           memory: 512m
 
   # ─── Documentation Server ─────────────────────────────────────────────────
@@ -266,22 +338,40 @@ services:
   # Access at http://<host>:8003 once the service is up.
   # Binds to 0.0.0.0 by default so it is reachable on remote hosts.
   # Set DOCS_BIND_ADDR=127.0.0.1 in .env to restrict to loopback only.
+  # Prebuilt static site served by nginx — see docs/Dockerfile for why this is no longer
+  # `mkdocs serve` against a bind mount (short version: livereload polls the whole docs tree
+  # twice a second, forever, and that was the single largest source of idle CPU on the host).
+  #
+  # Consequence of prebuilding: docs changes now need `docker compose --profile docs up --build
+  # docs` to appear. For live authoring, run mkdocs on the host instead:
+  #   docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro \
+  #     -v $PWD/docs:/docs/docs:ro squidfunk/mkdocs-material:9.7.7
   docs:
-    image: squidfunk/mkdocs-material:9.5
-    volumes:
-      - ./mkdocs.yml:/docs/mkdocs.yml:ro
-      - ./docs:/docs/docs:ro
+    build:
+      context: .
+      dockerfile: docs/Dockerfile
+      network: host
+      args:
+        # Baked in at build time now, not read at serve time — hooks.py substitutes it into pages.
+        BACKEND_URL: ${BACKEND_URL:-http://localhost:8080}
     ports:
-      - "${DOCS_BIND_ADDR:-0.0.0.0}:8003:8000"
-    command: serve --dev-addr=0.0.0.0:8000
+      - "${DOCS_BIND_ADDR:-0.0.0.0}:8003:80"
     profiles: [docs]
-    environment:
-      BACKEND_URL: ${BACKEND_URL:-http://localhost:8080}
+    logging: *default-logging
+    healthcheck:
+      # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
+      # resolves to ::1 first inside the container and the probe is refused.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 256m
+          cpus: "0.25"
+          memory: 128m
 
 volumes:
   pgdata:

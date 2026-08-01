@@ -5,6 +5,19 @@ spring:
     virtual:
       enabled: true
 
+  task:
+    # With virtual threads on, Boot backs @Scheduled and @Async with SimpleAsyncTaskExecutor,
+    # which is UNBOUNDED by default — every job gets its own thread and nothing queues. Most of
+    # these jobs are blocking RPC calls against external chains, so an unbounded fan-out lets a
+    # single slow endpoint pull an arbitrary number of concurrent outbound requests. The caps
+    # below are deliberately generous (they only bite under pathological fan-out) but finite.
+    scheduling:
+      simple:
+        concurrency-limit: 16
+    execution:
+      simple:
+        concurrency-limit: 64
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/registerwerk}
     username: ${DB_USER:registerwerk}

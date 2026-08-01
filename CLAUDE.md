@@ -129,14 +129,22 @@ cd daml && dpm build                                # Daml (Canton) bond templat
 docker compose --profile docs up                    # docs server :8003
 ```
 
-**Documentation** is MkDocs Material (`mkdocs.yml` + `docs/`), served by the `docs` compose profile. Build it strictly before committing doc changes:
+**Documentation** is MkDocs Material (`mkdocs.yml` + `docs/`). The `docs` compose profile builds the site into a **static nginx image** (`docs/Dockerfile`) rather than running `mkdocs serve` — so doc changes need a rebuild to show up:
+
+```bash
+docker compose --profile docs up --build docs      # http://localhost:8003
+```
+
+Build it strictly before committing doc changes (CI enforces this via `.github/workflows/docs.yml`):
 
 ```bash
 docker run --rm -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro \
-  squidfunk/mkdocs-material:9.5 build --strict
+  squidfunk/mkdocs-material:9.7.7 build --strict
 ```
 
-`docs/` also contains a **dormant Docusaurus setup** (`docusaurus.config.ts`, `sidebars-*.ts`, `src/`, `static/`, `node_modules/`) that nothing runs. It is excluded via `exclude_docs`; without that, every npm README under `docs/node_modules` shipped as a doc page. Use MkDocs syntax (`!!! note`), not Docusaurus (`:::note`).
+For live authoring with reload, run mkdocs directly (`docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro squidfunk/mkdocs-material:9.7.7`).
+
+Two things to know about `docs_dir`: MkDocs builds a page for **every** `.md` under it — the explicit `nav:` only controls the sidebar, not what gets rendered or indexed — and `mkdocs serve`'s livereload polls the **entire** tree twice a second regardless of `exclude_docs`. A dormant Docusaurus install used to sit here and cost 1,722 rendered pages plus a permanent 30k-file polling loop; it has been removed, and `exclude_docs` now also lists `node_modules/`, `build/`, `.docusaurus/` so a stray `npm install` under `docs/` cannot bring it back. Use MkDocs syntax (`!!! note`), not Docusaurus (`:::note`).
 
 ---
 

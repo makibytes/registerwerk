@@ -20,9 +20,11 @@ scrape_configs:
         target_label: instance
         replacement: registerwerk-backend
 
+  # Kong's Status API, not its Admin API. Admin stays bound to 127.0.0.1 inside the Kong
+  # container, so the previous kong:8001 target was unreachable from here by construction.
   - job_name: kong
     static_configs:
-      - targets: ["kong:8001"]
+      - targets: ["kong:8100"]
     metrics_path: /metrics
 
   - job_name: postgres

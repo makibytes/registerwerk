@@ -70,7 +70,8 @@ class ChainDriftDetectionJob {
     }
 
     @SchedulerLock(name = "chainDriftDetection", lockAtMostFor = "PT10M")
-    @Scheduled(fixedDelayString = "${registerwerk.drift.check-interval-ms:900000}")
+    @Scheduled(fixedDelayString = "${registerwerk.drift.check-interval-ms:900000}",
+               initialDelayString = "${registerwerk.drift.initial-delay-ms:95000}")
     public void checkDrift() {
         int driftCount = 0;
         int scanned = 0;

@@ -77,7 +77,7 @@ public class StellarTransferSyncService {
     // ── Scheduling ────────────────────────────────────────────────────────────
 
     @SchedulerLock(name = "stellarTransferSync", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 30_000, initialDelay = 75_000)
     public void syncAllStellarChains() {
         try {
             List<ChainConfig> chains = chainConfigRepository

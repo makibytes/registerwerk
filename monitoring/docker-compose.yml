@@ -13,7 +13,7 @@ networks:
 services:
   # ─── Prometheus ────────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:v2.52.0
+    image: prom/prometheus:v3.13.2
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./alerts:/etc/prometheus/alerts:ro
@@ -28,7 +28,7 @@ services:
 
   # ─── Grafana ───────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:11.2.0
+    image: grafana/grafana:12.4.6
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme}
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -44,7 +44,7 @@ services:
 
   # ─── Loki ──────────────────────────────────────────────────────────────────
   loki:
-    image: grafana/loki:3.1.0
+    image: grafana/loki:3.7.4
     volumes:
       - loki_data:/loki
     ports:
@@ -53,7 +53,11 @@ services:
 
   # ─── Promtail (log shipper) ────────────────────────────────────────────────
   promtail:
-    image: grafana/promtail:3.1.0
+    # NOTE: Promtail is end-of-life. Loki has moved on to 3.7.x while promtail stopped at 3.6.x;
+    # Grafana's replacement is Alloy (grafana/alloy), which subsumes promtail's scrape config.
+    # 3.6.11 is the last release — pinned here so the stack keeps working, but migrating this
+    # service to Alloy is a tracked follow-up, not something to defer indefinitely.
+    image: grafana/promtail:3.6.11
     volumes:
       - /var/log:/var/log:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
@@ -64,7 +68,7 @@ services:
 
   # ─── Tempo (distributed tracing) ───────────────────────────────────────────
   tempo:
-    image: grafana/tempo:2.5.0
+    image: grafana/tempo:2.9.4
     volumes:
       - ./tempo.yml:/etc/tempo/config.yml:ro
       - tempo_data:/tmp/tempo
@@ -76,7 +80,7 @@ services:
 
   # ─── Alertmanager ──────────────────────────────────────────────────────────
   alertmanager:
-    image: prom/alertmanager:v0.27.0
+    image: prom/alertmanager:v0.33.1
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
@@ -87,7 +91,7 @@ services:
   # prometheus.yml's "postgres" scrape job referenced this target already; the service
   # itself was never defined anywhere (Phase 12, finding #4).
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:v0.15.0
+    image: prometheuscommunity/postgres-exporter:v0.20.1
     environment:
       DATA_SOURCE_NAME: "postgresql://${DB_USER:-registerwerk}:${DB_PASSWORD:-registerwerk}@postgres:5432/registerwerk?sslmode=disable"
     ports:
@@ -97,7 +101,7 @@ services:
   # ─── Node exporter ──────────────────────────────────────────────────────────
   # Same gap as postgres-exporter — referenced by prometheus.yml's "node" job, never defined.
   node-exporter:
-    image: prom/node-exporter:v1.8.1
+    image: prom/node-exporter:v1.12.1
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro

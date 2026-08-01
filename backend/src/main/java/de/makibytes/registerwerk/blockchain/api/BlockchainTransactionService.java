@@ -104,7 +104,7 @@ public class BlockchainTransactionService {
     // ── Scheduled polling ─────────────────────────────────────────────────────
 
     @SchedulerLock(name = "blockchainTxPoller", lockAtMostFor = "PT1M", lockAtLeastFor = "PT4S")
-    @Scheduled(fixedDelay = 5_000)
+    @Scheduled(fixedDelay = 5_000, initialDelay = 15_000)
     public void pollPendingTransactions() {
         List<BlockchainTransaction> pending = repository.findByStatus(BlockchainTransaction.Status.PENDING);
         if (pending.isEmpty()) return;
