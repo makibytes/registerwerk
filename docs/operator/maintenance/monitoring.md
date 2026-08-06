@@ -1,8 +1,5 @@
 ---
-id: monitoring
 title: Monitoring
-sidebar_label: Monitoring
-sidebar_position: 1
 ---
 
 # Monitoring

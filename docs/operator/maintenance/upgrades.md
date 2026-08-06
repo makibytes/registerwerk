@@ -1,7 +1,5 @@
 ---
-id: upgrades
 title: Upgrading the Registry
-sidebar_label: Upgrades
 ---
 
 # Upgrading the Registry
@@ -49,9 +47,9 @@ docker compose logs -f backend | grep -E "Started|ERROR"
 curl http://localhost:8080/actuator/health
 ```
 
-:::warning
-Database migrations run automatically on startup. If a migration fails, the backend will not start. Check logs for the specific migration error. Never manually modify the Flyway history table.
-:::
+!!! warning
+    Database migrations run automatically on startup. If a migration fails, the backend will not start. Check logs for the specific migration error. Never manually modify the Flyway history table.
+
 
 ### 5. Verify
 
@@ -80,9 +78,9 @@ Frontends are stateless — upgrades are zero-downtime.
 
 ## Smart contract upgrades
 
-:::warning
-Smart contract upgrades are the most sensitive operations. All contracts go through a testnet deployment and audit before any mainnet upgrade. Never upgrade mainnet contracts without completing testnet validation first.
-:::
+!!! warning
+    Smart contract upgrades are the most sensitive operations. All contracts go through a testnet deployment and audit before any mainnet upgrade. Never upgrade mainnet contracts without completing testnet validation first.
+
 
 ### Upgradeable vs. non-upgradeable contracts
 

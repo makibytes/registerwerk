@@ -1,7 +1,5 @@
 ---
-id: docker
 title: Docker Setup
-sidebar_position: 2
 ---
 
 # Docker Setup

@@ -1,7 +1,5 @@
 ---
-id: backend
 title: Backend Setup
-sidebar_position: 3
 ---
 
 # Backend Setup

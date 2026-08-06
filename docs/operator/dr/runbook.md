@@ -1,3 +1,8 @@
+---
+title: Disaster recovery runbook
+description: Draft operational runbook for Postgres and backend restore, audit chain verification, and DORA incident classification — pending operator approval and testing.
+---
+
 # Disaster Recovery Runbook
 
 !!! warning "EXTERNAL_REVIEW_REQUIRED"

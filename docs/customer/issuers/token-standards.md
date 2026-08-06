@@ -1,7 +1,5 @@
 ---
-id: token-standards
 title: Choosing a Token Standard
-sidebar_label: Token Standards
 ---
 
 # Choosing a Token Standard
@@ -77,7 +75,7 @@ ERC-3643, also known as T-REX (Token for Regulated EXchanges), is an open standa
 
 **Best for**: Any regulated security issuance where transfer restrictions must be enforced automatically on-chain.
 
-See the full deep-dive at [ERC-3643 explained](../tokens/erc3643).
+See the full deep-dive at [ERC-3643 explained](../../token-standards/erc3643.md).
 
 ---
 
@@ -98,7 +96,7 @@ Confidential ERC-3643 extends the T-REX standard with Fully Homomorphic Encrypti
 
 **Best for**: Institutional securities where confidentiality of holdings is a regulatory or commercial requirement.
 
-See [Confidential Tokens explained](../tokens/confidential).
+See [Confidential Tokens explained](../../token-standards/confidential.md).
 
 ---
 

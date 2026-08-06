@@ -1,7 +1,5 @@
 ---
-id: indexers
 title: Indexer Configuration
-sidebar_position: 3
 ---
 
 # Indexer Configuration
@@ -45,7 +43,7 @@ graph-node is configured via `indexer/evm/config/graph-node.toml`. The TOML file
    SUBGRAPH_VERSION_LABEL=arbitrum-20260729-01 ./indexer/evm/deploy-subgraph.sh arbitrum-one
    ```
 
-   See [The Graph](../indexers/the-graph) for singleton variables, multi-instance lists and
+   See [The Graph](../indexers/the-graph.md) for singleton variables, multi-instance lists and
    deployment-block requirements. These outputs are provisional event projections, not chain
    finality, legal register state, settlement evidence, or code-identity verification.
 

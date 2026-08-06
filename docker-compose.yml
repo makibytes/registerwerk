@@ -347,13 +347,15 @@ services:
   #   docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro \
   #     -v $PWD/docs:/docs/docs:ro squidfunk/mkdocs-material:9.7.7
   docs:
+    # Built rather than pulled: the stock mkdocs-material image has no
+    # mkdocs-static-i18n, which is what makes the site multilingual.
     build:
-      context: .
-      dockerfile: docs/Dockerfile
-      network: host
-      args:
-        # Baked in at build time now, not read at serve time — hooks.py substitutes it into pages.
-        BACKEND_URL: ${BACKEND_URL:-http://localhost:8080}
+      context: ./docs
+      dockerfile: Dockerfile
+    image: registerwerk-docs:local
+    volumes:
+      - ./mkdocs.yml:/docs/mkdocs.yml:ro
+      - ./docs:/docs/docs:ro
     ports:
       - "${DOCS_BIND_ADDR:-0.0.0.0}:8003:80"
     profiles: [docs]
@@ -370,8 +372,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 128m
+          # Five languages are built and held in memory at once; 256m (enough for
+          # the old English-only site) makes `mkdocs serve` die mid-build.
+          memory: 768m
 
 volumes:
   pgdata:

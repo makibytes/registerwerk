@@ -1,7 +1,5 @@
 ---
-id: chains
 title: Chain Configuration
-sidebar_position: 2
 ---
 
 # Chain Configuration
@@ -85,7 +83,7 @@ Wait until graph-node reports healthy.
 
 ### Step 4 — Deploy and index subgraph
 
-Configure every `*_ARBITRUM` static source described in [The Graph](../indexers/the-graph), then:
+Configure every `*_ARBITRUM` static source described in [The Graph](../indexers/the-graph.md), then:
 
 ```bash
 SUBGRAPH_VERSION_LABEL=arbitrum-20260729-01 ./indexer/evm/deploy-subgraph.sh arbitrum-one

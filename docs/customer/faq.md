@@ -1,7 +1,5 @@
 ---
-id: faq
 title: Frequently Asked Questions
-sidebar_label: FAQ
 ---
 
 # Frequently Asked Questions
@@ -81,7 +79,7 @@ No. The auditor role is strictly read-only. No auditor action can modify any reg
 
 ### How do I verify that the registry data matches the blockchain?
 
-Every transfer record in the registry includes the on-chain transaction hash. You can independently verify any transfer on the relevant block explorer using that hash. See [Token History](./auditors/token-history) for details.
+Every transfer record in the registry includes the on-chain transaction hash. You can independently verify any transfer on the relevant block explorer using that hash. See [the auditor guide](workspaces/auditor.md) for details.
 
 ### Can I export audit data for my own systems?
 
@@ -93,12 +91,12 @@ Yes. The audit log and token history views support CSV and JSON exports. For lar
 
 ### Which blockchains are supported?
 
-Ethereum, Polygon, Base, Solana, Fhenix, and Inco. Testnets (Sepolia, Amoy, Base Sepolia, Solana Devnet) are also available for testing.
+EVM chains (Ethereum, Polygon, Base), Solana, Canton, StarkNet, Stellar, and confidential EVM networks. Testnets (Sepolia, Amoy, Base Sepolia, Solana Devnet) are also available for testing. See [Supported Blockchains](../blockchains/index.md) for the full list and what each is suited to.
 
 ### What token standards are supported?
 
-ERC-20, ERC-721, ERC-1155, ERC-3643, and Confidential ERC-3643. See [Choosing a Token Standard](./issuers/token-standards) for guidance.
+ERC-20, ERC-721, ERC-1155, ERC-3525, ERC-3643, ERC-4626, ERC-7540, their confidential variants, Solana SPL-2022, and DAML Finance bonds on Canton. See [Choosing a Token Standard](./issuers/token-standards.md) for guidance.
 
 ### How do I access the API?
 
-The REST API is available at `https://api.registerwerk.example.com`. Documentation is at `/swagger-ui.html`. You need a JWT token from your identity provider to authenticate. See [Authentication](./authentication).
+The REST API is available at `https://api.registerwerk.example.com`. Documentation is at `/swagger-ui.html`. You need a JWT token from your identity provider to authenticate. See [Authentication](./authentication.md).

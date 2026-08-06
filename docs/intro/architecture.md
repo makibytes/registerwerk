@@ -99,7 +99,7 @@ sequenceDiagram
 
 ## Spring Modulith — bounded contexts
 
-The backend is organised into modules, each representing a single domain responsibility. Modules communicate through [Spring Modulith events](../platform/modules.md) (transactional outbox), never through direct inter-module service calls into `internal/` packages.
+The backend is organised into 34 modules, each representing a single domain responsibility — every top-level package under `de.makibytes.registerwerk` carries `@ApplicationModule`. Modules communicate through [Spring Modulith events](../platform/modules.md) (transactional outbox), never through direct inter-module service calls into `internal/` packages.
 
 | Module | Responsibility |
 |---|---|
@@ -130,6 +130,13 @@ The backend is organised into modules, each representing a single domain respons
 | `orgidentity` | Onchain org identity (wallet↔org binding), permission delegation |
 | `marketplace` | dApp marketplace: manifest review, step-up + 4-eyes approval, onchain anchoring |
 | `payment` | Operator-curated payment rail catalog with disclosure and attestation fields for the DvP cash leg; no independent MiCAR verification |
+| `entra` | Microsoft Graph adapter: 2FA status, operator support console, temporary access passes |
+| `lending` | Isolated collateralised lending markets, health factors, liquidation |
+| `registerstatement` | §19(2) eWpG register statements — generation and retention |
+| `registertransfer` | Register-side transfers, including §24 forced transfers |
+| `support` | Operator support tooling |
+| `bootstrap` | Startup wiring, demo-data seeding, production-readiness checks |
+| `infrastructure` | Cross-cutting web, persistence and client configuration |
 
 See [Module Architecture](../platform/modules.md) for the full dependency graph and design rationale.
 

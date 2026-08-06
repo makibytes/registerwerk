@@ -60,7 +60,7 @@ struct FhevmInfra {
 
 ## Who can decrypt — the viewer ACL model
 
-See [Confidential Tokens](../token-standards/confidential.md#who-can-decrypt-what--the-viewer-acl-model)
+See [Confidential Tokens](../token-standards/confidential.md#who-can-decrypt-what-the-viewer-acl-model)
 for the full explanation. In short: every holder can decrypt only their OWN balance handle; a
 small operator/auditor/issuer "viewer" set can decrypt every handle. This lives entirely in
 `ConfidentialERC20`'s `isViewer`/`addViewer`/`removeViewer` — no separate per-investor contracts.

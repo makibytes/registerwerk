@@ -34,7 +34,7 @@ The highest-privilege role. A `REGISTRY_ADMIN` can:
 - Deploy and manage [security tokens](../token-standards/index.md)
 - Issue [Sperrvermerk](../compliance/sperrvermerk.md) (trading restrictions) — requires [step-up authentication](../compliance/step-up-mfa.md)
 - Force-transfer and force-burn tokens — requires step-up + 4-eyes
-- Impersonate customer users for support purposes — requires step-up
+- Impersonate customer users for support purposes — a standing capability, see the caveat below
 - Access all [audit log](../platform/audit-log.md) records
 - Trigger [MiFIR](../compliance/mifir.md) and [DAC8](../compliance/dac8.md) regulatory exports
 
@@ -69,7 +69,9 @@ Dual-control approval is currently a capability of a second, distinct `REGISTRY_
 
 ## Customer roles
 
-Customer users access the platform through the customer frontend (:4201) via Kong. Their JWT contains the `X-Entity-Id` claim identifying which `LegalEntity` they belong to, enforcing data isolation.
+Customer users access the platform through the customer frontend (`:4201`), whose API calls pass through Kong. Their JWT carries an `entityId` claim (also emitted as `entity_id`) identifying which `LegalEntity` they belong to, and the backend enforces data isolation from it on every request.
+
+`X-Entity-Id` is a *header* name, not a claim — and one Kong deliberately **strips** from inbound requests so it cannot be forged. Nothing in the backend trusts it.
 
 ### ISSUER
 
@@ -112,7 +114,14 @@ A machine or human user authorised to interact with trading venue integrations:
 
 `REGISTRY_ADMIN` users can impersonate a customer user to investigate issues or assist with onboarding. Impersonation:
 
-- Requires [step-up authentication](../compliance/step-up-mfa.md)
-- Is recorded in the [audit log](../platform/audit-log.md) immediately on start and end
+- Mints a short-lived token whose `sub` remains the **operator's** user id, so every action is attributed to the operator and never to the customer
+- Is recorded in the [audit log](../platform/audit-log.md), flagged with `imp` so impersonated actions are distinguishable
 - Is visible to all `REGISTRY_ADMIN` users via the impersonation bar in the customer frontend
-- Automatically expires after a configurable timeout
+- Expires with the token; re-enter rather than extending
+
+!!! warning "Impersonation is not step-up protected"
+    `AdminImpersonationController` carries no `@RequiresStepUp`. Any `REGISTRY_ADMIN` can enter any customer's portal without a second authentication challenge and without a second person.
+
+    Treat this as a control question rather than a technical one: keep the admin roster small, require a recorded reason outside the platform, and review impersonation events periodically. [Impersonation](../operator/customers/impersonation.md) covers governing it.
+
+Impersonation is also unavailable entirely when `ENTRA_ENABLED=true` — the backend refuses to mint a session on a customer's behalf.
