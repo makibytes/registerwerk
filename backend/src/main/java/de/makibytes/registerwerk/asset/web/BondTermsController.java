@@ -56,7 +56,16 @@ public class BondTermsController {
         return ResponseEntity.ok(bondTermsRepository.save(terms));
     }
 
+    /**
+     * Readable by the asset's issuer or its current holders, in addition to REGISTRY_ADMIN —
+     * previously this whole controller was REGISTRY_ADMIN-only, so an issuer or investor could
+     * never see the terms of the bond they issued or hold. Write (upsert, above) stays operator-
+     * only: the class-level {@code @PreAuthorize} still governs it.
+     */
     @GetMapping
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') "
+            + "or @assetAccessChecker.canRead(#assetId, authentication) "
+            + "or @assetAccessChecker.isHolderOfAsset(#assetId, authentication)")
     public ResponseEntity<AssetBondTerms> getBondTerms(@PathVariable UUID assetId) {
         return ResponseEntity.ok(
                 bondTermsRepository.findById(assetId)

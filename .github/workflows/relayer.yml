@@ -1,0 +1,46 @@
+name: Zama Relayer CI
+
+on:
+  push:
+    branches: [main, feat/**, fix/**]
+    paths: [zama-relayer/**, .github/workflows/relayer.yml]
+  pull_request:
+    branches: [main]
+    paths: [zama-relayer/**, .github/workflows/relayer.yml]
+
+concurrency:
+  group: relayer-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  relayer:
+    name: Lint, Test & Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: zama-relayer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: zama-relayer/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Trivy SCA
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: zama-relayer
+          format: sarif
+          output: trivy-relayer.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-relayer.sarif

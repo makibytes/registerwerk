@@ -1,0 +1,37 @@
+name: Indexers CI
+
+on:
+  push:
+    branches: [main, feat/**, fix/**]
+    paths: [indexer/**, .github/workflows/indexers.yml]
+  pull_request:
+    branches: [main]
+    paths: [indexer/**, .github/workflows/indexers.yml]
+
+concurrency:
+  group: indexers-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The EVM subgraph is the only indexer with its own buildable/testable source (mapping.ts
+  # handlers, manifest templating, ABI parity checks) — see indexer/evm/subgraph/package.json's
+  # `test` script, which chains ABI-parity validation, manifest-render tests, codegen, and a
+  # full `graph build`. The Solana/Starknet/Canton/Stellar indexers are config + a
+  # docker-compose service each (no custom source to build here); their runtime behavior is
+  # exercised via IndexerMonitorService in the backend's own test suite, not here.
+  evm-subgraph:
+    name: EVM Subgraph — ABI Parity, Manifest, Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: indexer/evm/subgraph
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: indexer/evm/subgraph/package-lock.json
+      - run: npm ci
+      - run: npm test

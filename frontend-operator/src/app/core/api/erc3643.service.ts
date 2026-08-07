@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
@@ -151,17 +151,27 @@ export class Erc3643Service {
     return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unfreeze-partial`, body);
   }
 
+  /** Backend carries `@RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")`. */
   batchForcedTransfer(assetId: string, deploymentId: string, body: {
     froms: string[]; tos: string[]; amounts: string[];
-  }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/batch-forced-transfer`, body);
+  }, stepUpToken: string, dualControlToken: string): Observable<{ txId: string }> {
+    const headers = new HttpHeaders({
+      Authorization: `Bearer ${stepUpToken}`,
+      'X-Dual-Control-Token': dualControlToken,
+    });
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/batch-forced-transfer`, body, { headers });
   }
 
   batchMint(assetId: string, deploymentId: string, body: { addresses: string[]; amounts: string[] }): Observable<{ txId: string }> {
     return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/batch-mint`, body);
   }
 
-  batchBurn(assetId: string, deploymentId: string, body: { addresses: string[]; amounts: string[] }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/batch-burn`, body);
+  /** Backend carries `@RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")`. */
+  batchBurn(assetId: string, deploymentId: string, body: { addresses: string[]; amounts: string[] }, stepUpToken: string, dualControlToken: string): Observable<{ txId: string }> {
+    const headers = new HttpHeaders({
+      Authorization: `Bearer ${stepUpToken}`,
+      'X-Dual-Control-Token': dualControlToken,
+    });
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/batch-burn`, body, { headers });
   }
 }

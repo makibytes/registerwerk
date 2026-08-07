@@ -35,7 +35,9 @@ securityContext:
   allowPrivilegeEscalation: false
   capabilities:
     drop: [ALL]
-  readOnlyRootFilesystem: false  # wallets dir needs write
+  # false because Spring Boot needs a writable /tmp at minimum; also required if you switch
+  # wallets.persistence back on (storage-backend=FILESYSTEM writes under /data/wallets).
+  readOnlyRootFilesystem: false
 
 service:
   type: ClusterIP
@@ -99,10 +101,23 @@ env:
   SWAGGER_ENABLED: "false"
   OTEL_SAMPLING_PROBABILITY: "0.10"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4318/v1/traces"
+  # Wallet keystores live in Postgres (wallet_keystore_blob, V3 migration) rather than on a
+  # shared filesystem volume — see wallets.persistence below for why that matters here.
+  REGISTERWERK_WALLET_STORAGE_BACKEND: "POSTGRES"
 
+# Previously this chart shipped replicaCount: 3 + autoscaling (min 3) + REQUIRED pod
+# anti-affinity (one replica per node, see affinity: below) while ALSO mounting a single
+# ReadWriteOnce PVC into every pod — three mutually exclusive constraints. RWO binds to one
+# node; anti-affinity forbids two replicas sharing a node; so replicas 2 and 3 hung forever on
+# FailedAttachVolume and podDisruptionBudget.minAvailable could never be satisfied. Moving
+# wallet storage to Postgres (env.REGISTERWERK_WALLET_STORAGE_BACKEND above) removes the need
+# for this volume entirely, so persistence defaults to disabled and the deployment no longer
+# mounts it. Only re-enable this if you deliberately switch storage-backend back to
+# FILESYSTEM — and if you do, you MUST also drop replicaCount to 1 (or relax the anti-affinity
+# in affinity: below), or the exact same deadlock recurs.
 wallets:
   persistence:
-    enabled: true
+    enabled: false
     storageClass: ""
     size: 5Gi
     accessMode: ReadWriteOnce
@@ -129,6 +144,12 @@ postgresql:
     database: registerwerk
     username: registerwerk
     existingSecret: registerwerk-postgres-secret
+    # Matches the Bitnami postgresql subchart's own default (values.yaml:
+    # auth.secretKeys.userPasswordKey) — spelled out here, rather than left to that subchart's
+    # internal default, so templates/deployment.yaml's DB_PASSWORD secretKeyRef (which reads
+    # this same key from the same existingSecret) stays correct if you ever override it.
+    secretKeys:
+      userPasswordKey: password
   primary:
     persistence:
       enabled: true
@@ -163,10 +184,33 @@ kong:
   # if you ever need more than one registerwerk release in the same namespace.
   dblessConfig:
     configMap: "registerwerk-kong-config"
+  # Same prometheus.io/* pod-annotation convention as the backend's podAnnotations above
+  # (this Kong subchart version's status listener "cannot be exposed through a service or
+  # ingress" per its own values.yaml comment, so a ServiceMonitor has no Service to bind to —
+  # pod-annotation scraping is the working mechanism here, and it's what monitoring/prometheus.yml
+  # already assumes for the Compose path's :8100/metrics). Requires the `prometheus` plugin in
+  # files/kong.yml, which previously only existed in gateway/kong.yml.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8100"
+    prometheus.io/path: /metrics
 
 networkPolicy:
   enabled: true
-  # Backend only reachable from Kong and monitoring
+  # templates/ingress.yaml routes external traffic directly to this chart's backend Service,
+  # not through Kong — but this policy previously only admitted pods labeled
+  # app.kubernetes.io/name: kong or prometheus. The ingress controller's pods match neither,
+  # so every request arriving via the Ingress resource was silently dropped at the network
+  # layer with ingress.enabled=true (ledger finding: "network policy does not admit the
+  # ingress-controller path"). templates/networkpolicy.yaml appends a rule admitting
+  # ingressControllerNamespace + ingressControllerPodSelector automatically whenever
+  # ingress.enabled is true — defaults below match the standard ingress-nginx Helm chart's own
+  # namespace/labels; override both if your cluster's ingress controller differs.
+  ingressControllerNamespace: ingress-nginx
+  ingressControllerPodSelector:
+    app.kubernetes.io/name: ingress-nginx
+  # Backend only reachable from Kong and monitoring (see ingress controller rule appended
+  # automatically in templates/networkpolicy.yaml, above)
   ingress:
     - from:
         - podSelector:

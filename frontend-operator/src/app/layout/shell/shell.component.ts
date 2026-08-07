@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -115,6 +115,6 @@ import { environment } from '../../../environments/environment';
 })
 export class ShellComponent {
   readonly isTestEnv = environment.testEnvironment;
-  constructor(private readonly authService: AuthService) {}
+  private readonly authService = inject(AuthService);
   logout(): void { this.authService.logout(); }
 }

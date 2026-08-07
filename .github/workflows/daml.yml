@@ -1,0 +1,48 @@
+name: Daml (Canton) CI
+
+on:
+  push:
+    branches: [main, feat/**, fix/**]
+    paths: [daml/**, .github/workflows/daml.yml]
+  pull_request:
+    branches: [main]
+    paths: [daml/**, .github/workflows/daml.yml]
+
+concurrency:
+  group: daml-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dpm-build:
+    name: dpm Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: daml
+    steps:
+      - uses: actions/checkout@v4
+
+      # dpm (Daml Package Manager, digital-asset/dpm) is the drop-in replacement for the
+      # deprecated classic `daml` assistant — it resolves and installs the SDK version pinned
+      # in daml.yaml (currently 3.5.2) itself, so there is no separate SDK-install step.
+      # Installed from the pinned GitHub release tarball rather than a curl-to-shell script,
+      # so this step is reproducible and doesn't silently pick up a newer major version.
+      - name: Install dpm
+        env:
+          DPM_VERSION: "1.0.21"
+        run: |
+          curl -fsSL -o dpm.tar.gz \
+            "https://github.com/digital-asset/dpm/releases/download/${DPM_VERSION}/dpm-${DPM_VERSION}-linux-amd64.tar.gz"
+          tar -xzf dpm.tar.gz
+          chmod +x dpm
+          sudo mv dpm /usr/local/bin/dpm
+          rm dpm.tar.gz
+
+      - name: Build
+        run: dpm build
+
+      # daml.yaml has no `test-declarations`/scripts wired yet — see build.sh, which only
+      # builds the DAR and generates Java bindings. Bond template test coverage lives in
+      # backend/src/test/java against the generated Java bindings, not as Daml Script tests
+      # here. Tracked separately from this CI gap, not invented as part of it.

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -11,6 +11,9 @@ import { MatTableModule } from '@angular/material/table';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatSelectModule } from '@angular/material/select';
+import { MatDialogModule, MatDialog } from '@angular/material/dialog';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { firstValueFrom } from 'rxjs';
 import { numberToHex } from 'viem';
@@ -19,9 +22,12 @@ import { IssuanceService } from '../../../core/api/issuance.service';
 import { Erc3643Service, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
 import { IdentityRequestService } from '../../../core/api/identity-request.service';
 import { RegisterDocumentService } from '../../../core/api/register-document.service';
-import { AssetDeployment, InvestmentRecord, RegisterDocumentMeta } from '../../../core/models';
+import { RegisterInspectionService } from '../../../core/api/register-inspection.service';
+import { BondTermsService } from '../../../core/api/bond-terms.service';
+import { AssetBondTerms, AssetDeployment, InspectionLegalBasis, InvestmentRecord, RegisterDocumentMeta } from '../../../core/models';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
+import { AuthService } from '../../../core/auth/auth.service';
 import { environment } from '../../../../environments/environment';
 
 /** Minimal ABI fragments for the two confidential-token calls this component makes directly
@@ -74,6 +80,9 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     MatChipsModule,
     MatFormFieldModule,
     MatInputModule,
+    MatSelectModule,
+    MatDialogModule,
+    MatTooltipModule,
     StatusBadgeComponent,
     ChainIconComponent,
     DataStatePillComponent,
@@ -107,7 +116,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
             <div class="detail-grid">
               <div class="detail-item">
                 <span class="detail-label">Nominal Amount</span>
-                <span class="detail-value large">{{ record.nominalAmount | number:'1.0-2' }}</span>
+                <span class="detail-value large">{{ record.nominalAmount | number:'1.0-2' }} {{ record.currency ?? '' }}</span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">Wallet Address</span>
@@ -199,9 +208,74 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                 <mat-icon>picture_as_pdf</mat-icon>
                 @if (downloadingRegisterDoc) { Preparing… } @else { Download }
               </button>
+              <button mat-stroked-button (click)="openInspectionDialog()"
+                      matTooltip="Ask the operator to disclose this asset's register (§10 eWpG)">
+                <mat-icon>visibility</mat-icon>
+                Request Register Inspection
+              </button>
             </div>
           </mat-card-content>
         </mat-card>
+
+        <ng-template #inspectionDialogTpl>
+          <h2 mat-dialog-title>Request Register Inspection (§10 eWpG)</h2>
+          <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:380px">
+            <p style="margin:0;font-size:13px;color:var(--rw-text-secondary)">
+              Issuers, holders, and beneficiaries have a statutory right to inspect this asset's
+              register. Other applicants must state a legitimate interest for operator review.
+            </p>
+            <mat-form-field appearance="outline">
+              <mat-label>Your basis for inspection</mat-label>
+              <mat-select [(ngModel)]="inspectionForm.legalBasis">
+                <mat-option value="HOLDER">I am a holder of this asset</mat-option>
+                <mat-option value="ISSUER">I am the issuer of this asset</mat-option>
+                <mat-option value="BENEFICIARY">I am a beneficiary</mat-option>
+                <mat-option value="LEGITIMATE_INTEREST">Other — legitimate interest</mat-option>
+              </mat-select>
+            </mat-form-field>
+            @if (inspectionForm.legalBasis === 'LEGITIMATE_INTEREST') {
+              <mat-form-field appearance="outline">
+                <mat-label>Stated interest</mat-label>
+                <textarea matInput rows="3" [(ngModel)]="inspectionForm.statedInterest"></textarea>
+              </mat-form-field>
+            }
+          </mat-dialog-content>
+          <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+            <button mat-stroked-button mat-dialog-close>Cancel</button>
+            <button mat-raised-button color="primary"
+                    [disabled]="submittingInspection || (inspectionForm.legalBasis === 'LEGITIMATE_INTEREST' && !inspectionForm.statedInterest.trim())"
+                    (click)="submitInspectionRequest()">
+              <mat-icon>send</mat-icon>
+              Submit
+            </button>
+          </mat-dialog-actions>
+        </ng-template>
+
+        @if (bondTerms) {
+          <mat-card class="section-card">
+            <mat-card-header>
+              <mat-card-title>Bond Terms</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="bond-terms-grid">
+                <div><span class="bt-label">Face value</span><span class="bt-value">{{ bondTerms.faceValue | number }} {{ bondTerms.currencyIso }}</span></div>
+                <div><span class="bt-label">Issue date</span><span class="bt-value">{{ bondTerms.issueDate }}</span></div>
+                <div><span class="bt-label">Maturity date</span><span class="bt-value">{{ bondTerms.maturityDate }}</span></div>
+                @if (bondTerms.couponRate !== null) {
+                  <div><span class="bt-label">Coupon rate</span><span class="bt-value">{{ bondTerms.couponRate | percent:'1.2-4' }}</span></div>
+                }
+                @if (bondTerms.referenceRate) {
+                  <div><span class="bt-label">Reference rate</span><span class="bt-value">{{ bondTerms.referenceRate }}{{ bondTerms.spread !== null ? ' + ' + (bondTerms.spread | percent:'1.2-4') : '' }}</span></div>
+                }
+                <div><span class="bt-label">Payment frequency</span><span class="bt-value">{{ bondTerms.paymentFrequency.replace('_', ' ') }}</span></div>
+                <div><span class="bt-label">Day count</span><span class="bt-value">{{ formatEnum(bondTerms.dayCount) }}</span></div>
+                <div><span class="bt-label">Issue price</span><span class="bt-value">{{ bondTerms.issuePrice | percent:'1.0-2' }} of face value</span></div>
+                <div><span class="bt-label">Callable</span><span class="bt-value">{{ bondTerms.callable ? 'Yes' : 'No' }}</span></div>
+                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus }}</span></div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        }
 
         @if (isErc3643) {
           <mat-card class="section-card identity-card">
@@ -468,6 +542,14 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     .register-doc-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 240px; }
     .register-doc-body strong { color: var(--rw-text-primary); font-size: 14px; }
     .register-doc-body span { color: var(--rw-text-secondary); font-size: 13px; }
+    .bond-terms-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px 24px;
+    }
+    .bond-terms-grid > div { display: flex; flex-direction: column; gap: 2px; }
+    .bt-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--rw-text-secondary); }
+    .bt-value { font-size: 14px; color: var(--rw-text-primary); font-weight: 600; }
     .identity-card { border-left: 4px solid #5e35b1; }
     .identity-icon { vertical-align: middle; margin-right: 6px; color: #5e35b1; }
     .identity-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
@@ -534,6 +616,10 @@ export class InvestmentDetailComponent implements OnInit {
   private readonly erc3643Service = inject(Erc3643Service);
   private readonly identityRequestService = inject(IdentityRequestService);
   private readonly registerDocumentService = inject(RegisterDocumentService);
+  private readonly registerInspectionService = inject(RegisterInspectionService);
+  private readonly bondTermsService = inject(BondTermsService);
+  private readonly authService = inject(AuthService);
+  private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   protected readonly walletService = inject(WalletService);
   private readonly fheService = inject(FheClientService);
@@ -544,6 +630,12 @@ export class InvestmentDetailComponent implements OnInit {
   identitySection: AsyncSection<IdentityRegistryEntry | null> = createAsyncSection<IdentityRegistryEntry | null>(null);
   registerDocMeta: RegisterDocumentMeta | null = null;
   downloadingRegisterDoc = false;
+  bondTerms: AssetBondTerms | null = null;
+
+  @ViewChild('inspectionDialogTpl') inspectionDialogTpl!: TemplateRef<unknown>;
+  inspectionForm: { legalBasis: InspectionLegalBasis; statedInterest: string } =
+    { legalBasis: 'HOLDER', statedInterest: '' };
+  submittingInspection = false;
 
   showRegistrationForm = false;
   registrationNote = '';
@@ -579,6 +671,7 @@ export class InvestmentDetailComponent implements OnInit {
         this.cdr.detectChanges();
         this.loadDeployments(record.assetId, record.walletAddress);
         this.loadRegisterDocMeta(record.assetId);
+        this.loadBondTerms(record.assetId);
       },
       error: () => {
         this.loading = false;
@@ -599,6 +692,22 @@ export class InvestmentDetailComponent implements OnInit {
     });
   }
 
+  private loadBondTerms(assetId: string): void {
+    this.bondTermsService.getBondTerms(assetId).subscribe({
+      next: (terms) => {
+        this.bondTerms = terms;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        // 404 for the (common) case of a non-bond asset — no terms to show, not an error.
+      },
+    });
+  }
+
+  formatEnum(value: string): string {
+    return value.split('_').join(' ');
+  }
+
   downloadRegisterDocument(): void {
     if (!this.record) return;
     this.downloadingRegisterDoc = true;
@@ -617,6 +726,40 @@ export class InvestmentDetailComponent implements OnInit {
         this.downloadingRegisterDoc = false;
         this.snackBar.open('Failed to generate the register document. Please try again.', 'Dismiss', { duration: 5000 });
         this.cdr.detectChanges();
+      },
+    });
+  }
+
+  openInspectionDialog(): void {
+    this.inspectionForm = { legalBasis: 'HOLDER', statedInterest: '' };
+    this.dialog.open(this.inspectionDialogTpl, { width: '460px' });
+  }
+
+  submitInspectionRequest(): void {
+    if (!this.record) return;
+    if (this.inspectionForm.legalBasis === 'LEGITIMATE_INTEREST' && !this.inspectionForm.statedInterest.trim()) return;
+
+    this.submittingInspection = true;
+    this.cdr.detectChanges();
+
+    this.registerInspectionService.submit(
+      this.record.assetId,
+      this.authService.getUserName() ?? this.authService.getUserEmail() ?? 'Unknown requester',
+      this.authService.getUserEmail() ?? '',
+      this.inspectionForm.legalBasis,
+      this.inspectionForm.statedInterest || undefined,
+      this.authService.getEntityId() ?? undefined,
+    ).subscribe({
+      next: () => {
+        this.dialog.closeAll();
+        this.submittingInspection = false;
+        this.cdr.detectChanges();
+        this.snackBar.open('Inspection request submitted. An operator will review it.', 'Dismiss', { duration: 5000 });
+      },
+      error: () => {
+        this.submittingInspection = false;
+        this.cdr.detectChanges();
+        this.snackBar.open('Failed to submit inspection request. Please try again.', 'Dismiss', { duration: 5000 });
       },
     });
   }

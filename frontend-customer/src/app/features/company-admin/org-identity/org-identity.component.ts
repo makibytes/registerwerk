@@ -149,6 +149,9 @@ import { WalletService } from '../../../core/wallet/wallet.service';
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #rla4="routerLinkActive" [active]="rla4.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
         </a>
+        <a mat-tab-link routerLink="/company-admin/beneficial-owners" routerLinkActive #rlaBo="routerLinkActive" [active]="rlaBo.isActive">
+          <mat-icon>diversity_3</mat-icon>&nbsp;Beneficial Owners
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 
@@ -604,8 +607,8 @@ export class OrgIdentityComponent implements OnInit {
       this.signature = await this.wallet.signMessage(this.challengeMessage);
       this.cdr.markForCheck();
       this.bind();
-    } catch (err: any) {
-      this.dialogError = err?.message ?? 'Browser wallet signing failed.';
+    } catch (err: unknown) {
+      this.dialogError = err instanceof Error ? err.message : 'Browser wallet signing failed.';
       this.cdr.markForCheck();
     }
   }

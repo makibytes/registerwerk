@@ -1,0 +1,80 @@
+{{- if .Values.monitoring.deployPushgateway }}
+# Prometheus Pushgateway — the backup CronJobs (backup-cronjob.yaml, wallets-backup-cronjob.yaml)
+# push backup_last_success_timestamp here because CronJob pods are ephemeral and can't be
+# scraped directly. Without this, monitoring.pushgatewayUrl had nothing to point at, so the
+# BackupStale alert (monitoring/alerts/registerwerk.yml) never received data even when a URL
+# was configured — the chain (CronJob push → Pushgateway → Prometheus scrape → alert) had no
+# working link anywhere in shipped config. Set monitoring.deployPushgateway: false if you run
+# a shared Pushgateway elsewhere and point monitoring.pushgatewayUrl at it instead.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registerwerk-pushgateway
+  labels:
+    app.kubernetes.io/name: registerwerk-pushgateway
+    app.kubernetes.io/component: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: registerwerk-pushgateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: registerwerk-pushgateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: pushgateway
+          image: prom/pushgateway:v1.11.0
+          args:
+            # Backup runs are daily; anything the CronJobs pushed more than 36h ago is from a
+            # run that's already either succeeded again or is itself covered by BackupStale —
+            # without this, a metric from a one-off manual push would linger forever and mask
+            # a real gap in scheduled runs.
+            - --web.push-gateway.push-metrics-lifetime=36h
+          ports:
+            - name: http
+              containerPort: 9091
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registerwerk-pushgateway
+  labels:
+    app.kubernetes.io/name: registerwerk-pushgateway
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    app.kubernetes.io/name: registerwerk-pushgateway
+  ports:
+    - name: http
+      port: 9091
+      targetPort: http
+{{- end }}

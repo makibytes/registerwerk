@@ -1,5 +1,5 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit, inject
+  ChangeDetectionStrategy, ChangeDetectorRef, Component, inject
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormBuilder, FormGroup, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -15,7 +15,7 @@ import { CommonModule } from '@angular/common';
 import { BondService } from '../../../../core/api/bond.service';
 import { AssetService } from '../../../../core/api/asset.service';
 import {
-  BOND_STANDARDS, TokenStandard, DayCountConvention, PaymentFrequency
+  TokenStandard
 } from '../../../../core/models';
 
 @Component({

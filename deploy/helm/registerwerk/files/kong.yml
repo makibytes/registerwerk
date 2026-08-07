@@ -63,6 +63,17 @@ services:
 
 # ─── Plugins ───────────────────────────────────────────────────────────────────
 plugins:
+  # Exposes Kong's own metrics on the Status API (:8100/metrics), which the in-cluster
+  # Prometheus is configured to scrape (see registerwerk.kongMetrics in values.yaml). Bundled
+  # in Kong OSS. Without this plugin the endpoint exists but reports nothing about routes or
+  # upstreams. (Was present in gateway/kong.yml but missing here — the two configs had already
+  # drifted; see the SYNC NOTE at the top of this file.)
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      upstream_health_metrics: true
+
   # Response caching — PUBLIC routes only. Caching authenticated registry data
   # at the gateway would serve stale compliance state (and, mis-keyed, another
   # user's responses); an eWpG register must always read current state.
@@ -182,8 +193,20 @@ plugins:
         - Authorization
         - Content-Type
         - X-Requested-With
+        # Second-approver token for 4-eyes (Vieraugenprinzip) endpoints — see
+        # stepup/internal/StepUpEnforcementAspect. Without it the browser preflight rejects
+        # every dual-control call routed through Kong. (Was present in gateway/kong.yml but
+        # missing here — the two configs had already drifted.)
+        - X-Dual-Control-Token
+        # CSRF header Angular's withXsrfConfiguration attaches automatically, reading it back
+        # from the (non-httpOnly) XSRF-TOKEN cookie SpaCsrfConfig sets — required now that the
+        # session moved from the login response body into an httpOnly cookie (SessionCookieService).
+        - X-XSRF-TOKEN
       exposed_headers:
         - X-Total-Count
+        # Carries the OAuth2 claims challenge (error="insufficient_claims") the customer SPA
+        # reads to trigger an Entra step-up redirect. (Also missing here — see comment above.)
+        - WWW-Authenticate
       credentials: true
       max_age: 3600
 

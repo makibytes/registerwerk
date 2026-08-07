@@ -75,7 +75,7 @@ export class WalletService {
     } catch (err: unknown) {
       const message = this.extractMessage(err, 'Wallet connection failed.');
       this._error.set(message);
-      throw new Error(message);
+      throw new Error(message, { cause: err });
     } finally {
       this._connecting.set(false);
     }
@@ -95,7 +95,7 @@ export class WalletService {
     try {
       return await client.signMessage({ account, message });
     } catch (err: unknown) {
-      throw new Error(this.extractMessage(err, 'Signing failed or was rejected.'));
+      throw new Error(this.extractMessage(err, 'Signing failed or was rejected.'), { cause: err });
     }
   }
 
@@ -123,7 +123,7 @@ export class WalletService {
         message: params.message,
       } as Parameters<WalletClient['signTypedData']>[0]);
     } catch (err: unknown) {
-      throw new Error(this.extractMessage(err, 'Typed-data signing failed or was rejected.'));
+      throw new Error(this.extractMessage(err, 'Typed-data signing failed or was rejected.'), { cause: err });
     }
   }
 
@@ -157,7 +157,7 @@ export class WalletService {
       >[0]);
       return await walletClient.writeContract(request as Parameters<WalletClient['writeContract']>[0]);
     } catch (err: unknown) {
-      throw new Error(this.extractMessage(err, 'Transaction failed or was rejected.'));
+      throw new Error(this.extractMessage(err, 'Transaction failed or was rejected.'), { cause: err });
     }
   }
 

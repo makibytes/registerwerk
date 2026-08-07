@@ -191,6 +191,10 @@ plugins:
         # stepup/internal/StepUpEnforcementAspect. Without it the browser preflight
         # rejects every dual-control call routed through Kong.
         - X-Dual-Control-Token
+        # CSRF header Angular's withXsrfConfiguration attaches automatically, reading it back
+        # from the (non-httpOnly) XSRF-TOKEN cookie SpaCsrfConfig sets — required now that the
+        # session moved from the login response body into an httpOnly cookie (SessionCookieService).
+        - X-XSRF-TOKEN
       exposed_headers:
         - X-Total-Count
         # Carries the OAuth2 claims challenge (error="insufficient_claims") the

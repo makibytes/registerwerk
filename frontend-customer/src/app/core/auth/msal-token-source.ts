@@ -1,9 +1,18 @@
 import { Injectable, inject } from '@angular/core';
 import type { AccountInfo, PublicClientApplication } from '@azure/msal-browser';
-import { Observable, from, of } from 'rxjs';
+import { Observable, from, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { AUTH_CONFIG } from './auth-config';
 import { TokenSource } from './token-source';
+
+/** Entra tokens are never persisted here (MSAL owns that in its own sessionStorage cache) —
+ *  only decoded on demand for `getProfile()`, the same way the app has always read claims. */
+function decodePayload(token: string): Record<string, unknown> {
+  const base64 = token.split('.')[1];
+  if (!base64) throw new Error('Invalid token');
+  const json = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
+  return JSON.parse(json) as Record<string, unknown>;
+}
 
 /**
  * Sign-in through Microsoft Entra ID, driving `@azure/msal-browser` directly.
@@ -76,6 +85,15 @@ export class MsalTokenSource extends TokenSource {
     return this.cachedToken;
   }
 
+  getProfile(): Record<string, unknown> | null {
+    if (!this.cachedToken) return null;
+    try {
+      return decodePayload(this.cachedToken);
+    } catch {
+      return null;
+    }
+  }
+
   acquireToken$(): Observable<string | null> {
     if (!this.account) {
       return of(null);
@@ -125,6 +143,10 @@ export class MsalTokenSource extends TokenSource {
     void this.pca.loginRedirect({ scopes: this.config.scopes });
   }
 
+  loginWithCredentials(_email: string, _password: string): Observable<void> {
+    return throwError(() => new Error('Password sign-in is unavailable with Microsoft Entra sign-in.'));
+  }
+
   logout(): void {
     this.cachedToken = null;
     void this.pca.logoutRedirect({ account: this.account ?? undefined });
@@ -144,12 +166,13 @@ export class MsalTokenSource extends TokenSource {
     this.cachedToken = null;
   }
 
-  enterImpersonation(_token: string, _entityId: string, _entityName: string): void {
-    throw new Error('Impersonation is unavailable with Microsoft Entra sign-in.');
+  enterImpersonation(_token: string, _entityId: string, _entityName: string): Observable<void> {
+    return throwError(() => new Error('Impersonation is unavailable with Microsoft Entra sign-in.'));
   }
 
-  exitImpersonation(): void {
+  exitImpersonation(): Observable<void> {
     // Nothing to restore — impersonation can never have been entered in this mode.
+    return of(void 0);
   }
 
   getImpersonationMeta(): { entityId: string; entityName: string } | null {

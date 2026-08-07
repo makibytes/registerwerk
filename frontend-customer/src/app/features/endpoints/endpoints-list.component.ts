@@ -161,5 +161,9 @@ export class EndpointsListComponent implements OnInit {
     return `${address.slice(0, 8)}…${address.slice(-6)}`;
   }
 
-  copyAddress(address: string): void { navigator.clipboard.writeText(address).catch(() => {}); }
+  copyAddress(address: string): void {
+    navigator.clipboard.writeText(address).catch((err: unknown) => {
+      console.warn('[endpoints] Failed to copy address to clipboard', err);
+    });
+  }
 }

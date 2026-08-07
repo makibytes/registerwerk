@@ -28,6 +28,8 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
 @Configuration
 @EnableWebSecurity
@@ -92,11 +94,22 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             PrincipalResolver principalResolver,
+            CookieBearerTokenResolver cookieBearerTokenResolver,
             // Named explicitly: two JwtDecoder beans exist (this one and localHs256JwtDecoder),
             // so resolving the resource server's decoder by type alone is ambiguous.
             @Qualifier("jwtDecoder") JwtDecoder jwtDecoder) throws Exception {
         http
-            .csrf(csrf -> csrf.disable())
+            // The session token moved from the login response body into an httpOnly
+            // `rw_session` cookie (SessionCookieService) — an ambient credential the browser
+            // now attaches automatically, which is exactly what CSRF protection exists for.
+            // Login/logout/impersonate (under /public) stay exempt: they either have no
+            // session yet to protect, or (impersonate) their "proof" is a freshly-minted,
+            // unguessable token in the request body rather than the ambient cookie, the same
+            // reasoning step-up/dual-control endpoints already rely on.
+            .csrf(csrf -> csrf
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRequestHandler(new SpaCsrfConfig.SpaCsrfTokenRequestHandler())
+                .ignoringRequestMatchers("/api/v1/public/**", "/actuator/**"))
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
@@ -120,6 +133,7 @@ public class SecurityConfig {
                 .anyRequest().denyAll()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
+                .bearerTokenResolver(cookieBearerTokenResolver)
                 .jwt(jwt -> jwt
                     .decoder(jwtDecoder)
                     .jwtAuthenticationConverter(jwtAuthenticationConverter()))
@@ -128,7 +142,11 @@ public class SecurityConfig {
             // so it can swap Entra's identifiers for Registerwerk's. See the filter's Javadoc
             // for why this is a filter rather than a change to ~100 call sites.
             .addFilterAfter(new EntraPrincipalNormalizationFilter(principalResolver),
-                            BearerTokenAuthenticationFilter.class);
+                            BearerTokenAuthenticationFilter.class)
+            // Forces the XSRF-TOKEN cookie to be (re-)written on every response — see
+            // SpaCsrfConfig's Javadoc for why the default CsrfTokenRequestHandler alone
+            // wouldn't reliably do this for a REST API with no server-rendered forms.
+            .addFilterAfter(new SpaCsrfConfig.CsrfCookieFilter(), BasicAuthenticationFilter.class);
 
         return http.build();
     }

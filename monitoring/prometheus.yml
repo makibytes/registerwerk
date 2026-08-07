@@ -34,3 +34,12 @@ scrape_configs:
   - job_name: node
     static_configs:
       - targets: ["node-exporter:9100"]
+
+  # Scrapes whatever a backup job has pushed since ephemeral CronJob pods can't be scraped
+  # directly — see pushgateway's comment in docker-compose.yml. honor_labels keeps the pushed
+  # "job" label (e.g. registerwerk_pg_backup) instead of Prometheus overwriting it with
+  # "pushgateway".
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]

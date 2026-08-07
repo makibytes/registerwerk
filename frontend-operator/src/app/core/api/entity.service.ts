@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
@@ -63,5 +63,24 @@ export class EntityService {
     notes?: string;
   }): Observable<EntityMergeRecordView> {
     return this.http.post<EntityMergeRecordView>(`${this.base}/${sourceId}/merge`, body);
+  }
+
+  /**
+   * Wraps `CustomerController.terminateEntity` (`POST /entities/{id}/terminate`), which had
+   * no frontend caller: the customer off-ramp — disabling users, cancelling listings, revoking
+   * admin grants, and moving the entity to CLOSED — was previously curl-only despite carrying
+   * the same step-up + dual-control bar as a forced transfer.
+   */
+  terminateEntity(
+    id: string,
+    reason: string,
+    stepUpToken: string,
+    dualControlToken: string,
+  ): Observable<LegalEntity> {
+    const headers = new HttpHeaders({
+      Authorization: `Bearer ${stepUpToken}`,
+      'X-Dual-Control-Token': dualControlToken,
+    });
+    return this.http.post<LegalEntity>(`${this.base}/${id}/terminate`, { reason }, { headers });
   }
 }

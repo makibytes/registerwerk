@@ -18,22 +18,21 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Low-level encrypted keystore I/O for operator wallets.
+ * Low-level encrypted keystore I/O for operator wallets. Where the resulting bytes physically
+ * live (local filesystem vs Postgres) is delegated to {@link KeystoreBlobStore}; everything in
+ * this class only ever handles already-encrypted content.
  *
  * <h3>EVM wallets</h3>
- * Stored as Web3 Secret Storage v3 keystore JSON files. A random per-wallet DEK is
+ * Stored as Web3 Secret Storage v3 keystore JSON. A random per-wallet DEK is
  * generated and used as the keystore password. The DEK is wrapped via {@link KekProvider}
- * and stored as a {@code .dek.bin} sidecar file alongside the keystore JSON. Legacy
+ * and stored as a {@code .dek.bin} sidecar blob alongside the keystore JSON. Legacy
  * keystores (no sidecar) fall back to the master key as password.
  *
  * <h3>Solana/Canton wallets</h3>
@@ -62,11 +61,13 @@ public class WalletStorage {
 
     private final WalletProperties props;
     private final KekProvider kekProvider;
+    private final KeystoreBlobStore blobStore;
 
-    public WalletStorage(WalletProperties props, KekProvider kekProvider) {
+    public WalletStorage(WalletProperties props, KekProvider kekProvider, KeystoreBlobStore blobStore) {
         this.props = props;
         this.kekProvider = kekProvider;
-        log.info("WalletStorage initialized with KekProvider={}", kekProvider.name());
+        this.blobStore = blobStore;
+        log.info("WalletStorage initialized with KekProvider={}, KeystoreBlobStore={}", kekProvider.name(), blobStore.name());
     }
 
     // ── EVM (Web3 Secret Storage v3) ──────────────────────────────────────────
@@ -85,11 +86,11 @@ public class WalletStorage {
 
             WalletFile wf = Wallet.createStandard(dekPassword, ecKeyPair); // full scrypt N=2^18
             String json = MAPPER.writeValueAsString(wf);
-            Path keystorePath = storagePath(walletId + ".json");
-            Files.writeString(keystorePath, json, StandardCharsets.UTF_8);
-            Files.write(storagePath(walletId + ".dek.bin"), wrappedDek);
+            String keystorePath = walletId + ".json";
+            blobStore.write(keystorePath, json.getBytes(StandardCharsets.UTF_8));
+            blobStore.write(walletId + ".dek.bin", wrappedDek);
             log.debug("Stored EVM keystore with wrapped DEK: {}", keystorePath);
-            return walletId + ".json";
+            return keystorePath;
         } catch (Exception e) {
             throw new WalletStorageException("Failed to store EVM keystore for wallet " + walletId, e);
         }
@@ -101,14 +102,13 @@ public class WalletStorage {
      */
     public Credentials loadEvm(String relativePath) {
         try {
-            Path path = storagePath(relativePath);
-            String json = Files.readString(path, StandardCharsets.UTF_8);
+            String json = new String(blobStore.read(relativePath), StandardCharsets.UTF_8);
             WalletFile wf = MAPPER.readValue(json, WalletFile.class);
 
-            Path dekPath = storagePath(relativePath.replace(".json", ".dek.bin"));
+            String dekPath = relativePath.replace(".json", ".dek.bin");
             String password;
-            if (Files.exists(dekPath)) {
-                byte[] wrappedDek = Files.readAllBytes(dekPath);
+            if (blobStore.exists(dekPath)) {
+                byte[] wrappedDek = blobStore.read(dekPath);
                 byte[] dek = kekProvider.unwrap(wrappedDek);
                 password = HexFormat.of().formatHex(dek);
             } else {
@@ -214,10 +214,10 @@ public class WalletStorage {
                     "ciphertext", hex.formatHex(ciphertext)
             );
 
-            Path path = storagePath(walletId + ".json");
-            Files.writeString(path, MAPPER.writeValueAsString(envelope), StandardCharsets.UTF_8);
+            String path = walletId + ".json";
+            blobStore.write(path, MAPPER.writeValueAsString(envelope).getBytes(StandardCharsets.UTF_8));
             log.debug("Stored Solana keystore: {}", path);
-            return walletId + ".json";
+            return path;
         } catch (Exception e) {
             throw new WalletStorageException("Failed to store Solana keystore for wallet " + walletId, e);
         }
@@ -229,10 +229,9 @@ public class WalletStorage {
      */
     public byte[] loadSolana(String relativePath) {
         try {
-            Path path = storagePath(relativePath);
             @SuppressWarnings("unchecked")
             Map<String, String> envelope = MAPPER.readValue(
-                    Files.readString(path, StandardCharsets.UTF_8), Map.class);
+                    new String(blobStore.read(relativePath), StandardCharsets.UTF_8), Map.class);
 
             HexFormat hex = HexFormat.of();
             byte[] iv         = hex.parseHex(envelope.get("iv"));
@@ -291,10 +290,10 @@ public class WalletStorage {
                     "ciphertext", hex.formatHex(ciphertext)
             );
 
-            Path path = storagePath(walletId + ".json");
-            Files.writeString(path, MAPPER.writeValueAsString(envelope), StandardCharsets.UTF_8);
+            String path = walletId + ".json";
+            blobStore.write(path, MAPPER.writeValueAsString(envelope).getBytes(StandardCharsets.UTF_8));
             log.debug("Stored Canton keystore: {}", path);
-            return walletId + ".json";
+            return path;
         } catch (Exception e) {
             throw new WalletStorageException("Failed to store Canton keystore for wallet " + walletId, e);
         }
@@ -306,10 +305,9 @@ public class WalletStorage {
      */
     public CantonContext loadCanton(String relativePath) {
         try {
-            Path path = storagePath(relativePath);
             @SuppressWarnings("unchecked")
             Map<String, String> envelope = MAPPER.readValue(
-                    Files.readString(path, StandardCharsets.UTF_8), Map.class);
+                    new String(blobStore.read(relativePath), StandardCharsets.UTF_8), Map.class);
 
             HexFormat hex = HexFormat.of();
             byte[] iv         = hex.parseHex(envelope.get("iv"));
@@ -334,9 +332,9 @@ public class WalletStorage {
 
     public void delete(String relativePath) {
         try {
-            Files.deleteIfExists(storagePath(relativePath));
-        } catch (IOException e) {
-            log.warn("Failed to delete keystore file {}: {}", relativePath, e.getMessage());
+            blobStore.delete(relativePath);
+        } catch (Exception e) {
+            log.warn("Failed to delete keystore blob {}: {}", relativePath, e.getMessage());
         }
     }
 
@@ -354,18 +352,18 @@ public class WalletStorage {
     public boolean rewrapDek(String relativePath, boolean isEvm) {
         try {
             if (isEvm) {
-                Path dekPath = storagePath(relativePath.replace(".json", ".dek.bin"));
-                if (!Files.exists(dekPath)) {
+                String dekPath = relativePath.replace(".json", ".dek.bin");
+                if (!blobStore.exists(dekPath)) {
                     return false; // legacy keystore, no sidecar to rotate
                 }
-                byte[] rewrapped = kekProvider.rewrap(Files.readAllBytes(dekPath));
-                writeAtomically(dekPath, rewrapped);
+                byte[] rewrapped = kekProvider.rewrap(blobStore.read(dekPath));
+                blobStore.write(dekPath, rewrapped);
                 return true;
             }
 
-            Path path = storagePath(relativePath);
             @SuppressWarnings("unchecked")
-            Map<String, String> envelope = MAPPER.readValue(Files.readString(path, StandardCharsets.UTF_8), Map.class);
+            Map<String, String> envelope = MAPPER.readValue(
+                    new String(blobStore.read(relativePath), StandardCharsets.UTF_8), Map.class);
             if (!"2".equals(envelope.get("version"))) {
                 return false; // legacy PBKDF2 envelope, no wrapped DEK to rotate
             }
@@ -377,25 +375,14 @@ public class WalletStorage {
                     "wrappedDek", hex.formatHex(rewrapped),
                     "iv", envelope.get("iv"),
                     "ciphertext", envelope.get("ciphertext"));
-            writeAtomically(path, MAPPER.writeValueAsString(updated).getBytes(StandardCharsets.UTF_8));
+            blobStore.write(relativePath, MAPPER.writeValueAsString(updated).getBytes(StandardCharsets.UTF_8));
             return true;
         } catch (Exception e) {
             throw new WalletStorageException("Failed to rotate KEK for keystore at " + relativePath, e);
         }
     }
 
-    /** Writes via a temp file + atomic rename so a crash mid-write cannot corrupt the original. */
-    private void writeAtomically(Path target, byte[] content) throws IOException {
-        Path tmp = target.resolveSibling(target.getFileName().toString() + ".tmp-" + UUID.randomUUID());
-        Files.write(tmp, content);
-        Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-    }
-
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private Path storagePath(String relativePath) {
-        return Path.of(props.getStorageDir()).resolve(relativePath);
-    }
 
     /**
      * Resolves an AES key from the envelope map. Version 2 unwraps via KekProvider;

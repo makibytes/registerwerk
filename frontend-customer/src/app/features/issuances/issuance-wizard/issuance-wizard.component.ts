@@ -13,7 +13,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { IssuanceService } from '../../../core/api/issuance.service';
+import { IssuanceService, IssuanceCreateRequest } from '../../../core/api/issuance.service';
 import { KycService } from '../../../core/api/kyc.service';
 import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, JurisdictionRequirement } from '../../../core/models';
 
@@ -107,6 +107,50 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                   </mat-select>
                   <mat-hint>Defines the degree of on-chain representation</mat-hint>
                 </mat-form-field>
+
+                <mat-divider style="margin: 16px 0"></mat-divider>
+                <h3 class="section-heading">Economic Terms</h3>
+                <p class="section-hint">
+                  Optional at this stage, but statements, valuations, and tax reporting have
+                  nothing to work from until these are set — either here or later on the asset.
+                </p>
+
+                <div class="form-row">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Currency</mat-label>
+                    <input matInput formControlName="currency" placeholder="EUR" maxlength="3"
+                      style="text-transform:uppercase" (input)="onCurrencyInput($event)" />
+                    <mat-hint>ISO-4217 code</mat-hint>
+                    @if (detailsForm.get('currency')?.hasError('pattern')) {
+                      <mat-error>3-letter ISO code, e.g. EUR</mat-error>
+                    }
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Issue Size</mat-label>
+                    <input matInput type="number" formControlName="issueSize" placeholder="50000000" />
+                    <mat-hint>Total nominal amount</mat-hint>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Denomination</mat-label>
+                    <input matInput type="number" formControlName="denomination" placeholder="1000" />
+                    <mat-hint>Minimum tradable unit</mat-hint>
+                  </mat-form-field>
+                </div>
+
+                <div class="form-row">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Issue Date</mat-label>
+                    <input matInput type="date" formControlName="issueDate" />
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Maturity Date</mat-label>
+                    <input matInput type="date" formControlName="maturityDate" />
+                    <mat-hint>Leave blank for perpetual/equity-like instruments</mat-hint>
+                  </mat-form-field>
+                </div>
 
                 <!-- Optional term sheet upload -->
                 <div class="termsheet-upload-section">
@@ -208,6 +252,26 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                     <span class="review-value">{{ detailsForm.get('onchainLevel')?.value }}</span>
                   </div>
                   <div class="review-item">
+                    <span class="review-label">Currency</span>
+                    <span class="review-value">{{ detailsForm.get('currency')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
+                    <span class="review-label">Issue Size</span>
+                    <span class="review-value">{{ detailsForm.get('issueSize')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
+                    <span class="review-label">Denomination</span>
+                    <span class="review-value">{{ detailsForm.get('denomination')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
+                    <span class="review-label">Issue Date</span>
+                    <span class="review-value">{{ detailsForm.get('issueDate')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
+                    <span class="review-label">Maturity Date</span>
+                    <span class="review-value">{{ detailsForm.get('maturityDate')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
                     <span class="review-label">Chain</span>
                     <span class="review-value">{{ chainForm.get('chain')?.value }}</span>
                   </div>
@@ -257,6 +321,10 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
   `,
   styles: [`
     .step-form { padding: 24px 0; display: flex; flex-direction: column; gap: 4px; }
+    .section-heading { font-size: 14px; font-weight: 600; margin: 0 0 2px; color: var(--rw-text-primary); }
+    .section-hint { font-size: 12px; color: var(--rw-text-muted); margin: 0 0 12px; }
+    .form-row { display: flex; gap: 16px; }
+    .form-row mat-form-field { flex: 1; }
     .coming-soon-badge { font-size: 0.8em; opacity: 0.6; font-style: italic; }
     .full-width { width: 100%; }
     .step-actions { display: flex; gap: 12px; align-items: center; margin-top: 24px; }
@@ -347,6 +415,11 @@ export class IssuanceWizardComponent implements OnInit {
     isin:         ['', [Validators.pattern(/^[A-Z0-9]{12}$/)]],
     jurisdiction: [null as Jurisdiction | null, Validators.required],
     onchainLevel: ['SIMPLE' as OnchainLevel, Validators.required],
+    currency:     ['', [Validators.pattern(/^[A-Z]{3}$/)]],
+    issueSize:    [null as number | null],
+    denomination: [null as number | null],
+    issueDate:    [''],
+    maturityDate: [''],
   });
 
   readonly chainForm = this.fb.group({
@@ -427,6 +500,11 @@ export class IssuanceWizardComponent implements OnInit {
 
   filteredStandards = this.standardsByChain['ETHEREUM'];
 
+  onCurrencyInput(event: Event): void {
+    const value = (event.target as HTMLInputElement).value.toUpperCase();
+    this.detailsForm.get('currency')?.setValue(value, { emitEvent: false });
+  }
+
   onChainChange(chain: Chain): void {
     this.filteredStandards = this.standardsByChain[chain] ?? [];
     this.chainForm.patchValue({ tokenStandard: this.filteredStandards[0]?.value ?? null });
@@ -438,7 +516,7 @@ export class IssuanceWizardComponent implements OnInit {
     this.submitting = true;
     this.submitError = '';
 
-    const body = {
+    const body: IssuanceCreateRequest = {
       name:          this.detailsForm.value.name!,
       isin:          this.detailsForm.value.isin || null,
       jurisdiction:  this.detailsForm.value.jurisdiction || null,
@@ -446,6 +524,11 @@ export class IssuanceWizardComponent implements OnInit {
       chain:         this.chainForm.value.chain!,
       network:       this.chainForm.value.network!,
       tokenStandard: this.chainForm.value.tokenStandard!,
+      currency:      this.detailsForm.value.currency || null,
+      issueSize:     this.detailsForm.value.issueSize ?? null,
+      denomination:  this.detailsForm.value.denomination ?? null,
+      issueDate:     this.detailsForm.value.issueDate || null,
+      maturityDate:  this.detailsForm.value.maturityDate || null,
     };
 
     this.issuanceService.createIssuance(body).subscribe({

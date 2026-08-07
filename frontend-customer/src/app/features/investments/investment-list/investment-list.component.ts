@@ -74,7 +74,7 @@ interface Filters {
         <!-- ── KPI Summary ─────────────────────────────────────────────────── -->
         <div class="kpi-bar">
           <div class="kpi-item">
-            <span class="kpi-value">€ {{ totalNominal | number:'1.0-0' }}</span>
+            <span class="kpi-value">{{ totalNominal | number:'1.0-0' }} {{ totalNominalCurrency ?? '' }}</span>
             <span class="kpi-label">Total Invested</span>
           </div>
           <div class="kpi-divider"></div>
@@ -111,7 +111,7 @@ interface Filters {
                 <app-donut-chart
                   [slices]="standardSlices"
                   centerLabel="Total"
-                  [centerValue]="'€' + totalNominalShort">
+                  [centerValue]="(totalNominalCurrency ? totalNominalCurrency + ' ' : '') + totalNominalShort">
                 </app-donut-chart>
               </mat-card-content>
             </mat-card>
@@ -219,7 +219,7 @@ interface Filters {
             <ng-container matColumnDef="nominalAmount">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>Nominal Amount</th>
               <td mat-cell *matCellDef="let r" class="amount-cell">
-                {{ r.nominalAmount | number:'1.0-2' }}
+                {{ r.nominalAmount | number:'1.0-2' }} {{ r.currency ?? '' }}
               </td>
             </ng-container>
 
@@ -386,6 +386,13 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
 
   get totalNominal(): number {
     return this.allRecords.reduce((s, r) => s + r.nominalAmount, 0);
+  }
+
+  /** Null when holdings span more than one currency (or none is set) — the total is unitless then. */
+  get totalNominalCurrency(): string | null {
+    if (this.allRecords.length === 0) return null;
+    const first = this.allRecords[0].currency;
+    return first !== null && this.allRecords.every(r => r.currency === first) ? first : null;
   }
 
   get totalNominalShort(): string {

@@ -11,26 +11,29 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatTableModule } from '@angular/material/table';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
-import { MatDialogModule } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { DatePipe } from '@angular/common';
-import { forkJoin } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { EntityService } from '../../../core/api/entity.service';
 import { AdminUserService } from '../../../core/api/admin-user.service';
 import { ScreeningService } from '../../../core/api/screening.service';
 import { HolderBlockService } from '../../../core/api/holder-block.service';
+import { BeneficialOwnerService } from '../../../core/api/beneficial-owner.service';
+import { PortfolioMigrationComponent } from '../wizards/portfolio-migration/portfolio-migration.component';
 import { CorporateActionsService } from '../../../core/api/corporate-actions.service';
 import { environment } from '../../../../environments/environment';
 import { AddressComponent } from '../../../shared/components/address.component';
 import { KycService } from '../../../core/api/kyc.service';
 import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../../core/api/gas-sponsorship.service';
+import { StepUpDialogComponent } from '../../../shared/components/step-up/step-up-dialog.component';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 import {
   LegalEntity, KycDocument, LegalEntityNameHistory, EntityMergeRecordView,
   KycJurisdictionApproval, KycComplianceResponse, Jurisdiction,
-  JurisdictionRequirement, DocumentStatus, SyncStatus, ScreeningRun, HolderBlock,
+  SyncStatus, ScreeningRun, HolderBlock,
+  BeneficialOwner,
 } from '../../../core/models';
 
 import { DataStatePillComponent, StatusBadgeComponent } from '@registerwerk/ui';
@@ -66,6 +69,7 @@ interface OnchainIdentityView {
     MatTooltipModule,
     DataStatePillComponent,
     StatusBadgeComponent,
+    PortfolioMigrationComponent,
     DatePipe,
     AddressComponent,
   ],
@@ -182,6 +186,11 @@ interface OnchainIdentityView {
           }
           @if (entity.status !== 'DISSOLVED') {
             <button mat-stroked-button color="warn" (click)="dissolve()">Dissolve</button>
+          }
+          @if (entity.status !== 'CLOSED' && entity.status !== 'DISSOLVED') {
+            <button mat-stroked-button color="warn" (click)="terminate()" matTooltip="End the customer relationship: disables users, cancels open listings, revokes admin grants, moves to CLOSED. Requires step-up + a second approver.">
+              Terminate
+            </button>
           }
           <button mat-raised-button color="primary" (click)="generateToken()">
             <mat-icon>key</mat-icon>
@@ -372,6 +381,124 @@ interface OnchainIdentityView {
             }
           </div>
         </mat-tab>
+
+        <!-- Beneficial Owners (UBO) -->
+        <mat-tab label="Beneficial Owners">
+          <div class="tab-content">
+            <p style="font-size:13px;color:var(--rw-text-secondary);margin-bottom:16px">
+              Beneficial owners (GwG §3, AMLR Art. 42). Adding an owner immediately triggers a
+              sanctions/PEP screening; <code>BeneficialOwnerScreeningJob</code> re-screens active
+              owners nightly.
+            </p>
+
+            @if (ubosLoading) {
+              <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
+            } @else {
+              <table mat-table [dataSource]="beneficialOwners" style="width:100%;margin-bottom:24px">
+                <ng-container matColumnDef="name">
+                  <th mat-header-cell *matHeaderCellDef>Name</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.givenName }} {{ bo.familyName }}</td>
+                </ng-container>
+                <ng-container matColumnDef="country">
+                  <th mat-header-cell *matHeaderCellDef>Country</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.country ?? '—' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="pepStatus">
+                  <th mat-header-cell *matHeaderCellDef>PEP Status</th>
+                  <td mat-cell *matCellDef="let bo">
+                    <span [style.color]="bo.pepStatus === 'NOT_PEP' || bo.pepStatus === 'UNKNOWN' ? 'var(--rw-text-secondary)' : 'var(--rw-text-danger)'">
+                      {{ bo.pepStatus.replace('_',' ') }}
+                    </span>
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="ownershipPct">
+                  <th mat-header-cell *matHeaderCellDef>Ownership</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.ownershipPct != null ? (bo.ownershipPct + '%') : '—' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="controlType">
+                  <th mat-header-cell *matHeaderCellDef>Control Type</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.controlType.replace('_',' ') }}</td>
+                </ng-container>
+                <ng-container matColumnDef="registeredAt">
+                  <th mat-header-cell *matHeaderCellDef>Registered</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.registeredAt | date:'mediumDate' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="actions">
+                  <th mat-header-cell *matHeaderCellDef></th>
+                  <td mat-cell *matCellDef="let bo">
+                    <button mat-icon-button color="warn" matTooltip="Cease (mark no longer a beneficial owner)"
+                            (click)="ceaseBeneficialOwner(bo)">
+                      <mat-icon style="font-size:18px">person_remove</mat-icon>
+                    </button>
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="uboColumns"></tr>
+                <tr mat-row *matRowDef="let row; columns: uboColumns;"></tr>
+              </table>
+              @if (beneficialOwners.length === 0) {
+                <p style="text-align:center;padding:24px;color:var(--rw-text-secondary);font-size:13px">
+                  No beneficial owners registered for this entity.
+                </p>
+              }
+            }
+
+            <mat-divider style="margin-bottom:20px"></mat-divider>
+            <h4 style="margin:0 0 12px">Register a Beneficial Owner</h4>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+              <mat-form-field appearance="outline">
+                <mat-label>Given name</mat-label>
+                <input matInput [(ngModel)]="uboForm.givenName" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Family name</mat-label>
+                <input matInput [(ngModel)]="uboForm.familyName" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Date of birth</mat-label>
+                <input matInput type="date" [(ngModel)]="uboForm.dateOfBirth" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Nationality</mat-label>
+                <input matInput [(ngModel)]="uboForm.nationality" placeholder="DE" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Country of residence</mat-label>
+                <input matInput [(ngModel)]="uboForm.countryOfResidence" placeholder="DE" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Ownership %</mat-label>
+                <input matInput type="number" min="0" max="100" step="0.01" [(ngModel)]="uboForm.ownershipPct" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Control type</mat-label>
+                <mat-select [(ngModel)]="uboForm.controlType">
+                  <mat-option value="DIRECT_OWNERSHIP">Direct ownership</mat-option>
+                  <mat-option value="INDIRECT_OWNERSHIP">Indirect ownership</mat-option>
+                  <mat-option value="OTHER_CONTROL">Other control</mat-option>
+                  <mat-option value="LEGAL_REPRESENTATIVE">Legal representative</mat-option>
+                  <mat-option value="TRUSTEE">Trustee</mat-option>
+                </mat-select>
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Source</mat-label>
+                <input matInput [(ngModel)]="uboForm.source" placeholder="e.g. Commercial register extract" />
+              </mat-form-field>
+              <button mat-raised-button color="primary"
+                      [disabled]="!uboForm.givenName || !uboForm.familyName || uboSaving"
+                      (click)="addBeneficialOwner()">
+                <mat-icon>person_add</mat-icon>
+                Register
+              </button>
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- Portfolio Migration (investors only) -->
+        @if (entity.type === 'INVESTOR') {
+          <mat-tab label="Portfolio Migration">
+            <app-portfolio-migration [investorEntityId]="id" />
+          </mat-tab>
+        }
 
         <!-- Identities Tab (ONCHAINID) -->
         <mat-tab label="Identities">
@@ -771,12 +898,14 @@ export class CustomerDetailComponent implements OnInit {
   private readonly adminUserService = inject(AdminUserService);
   private readonly screeningService = inject(ScreeningService);
   private readonly holderBlockService = inject(HolderBlockService);
+  private readonly beneficialOwnerService = inject(BeneficialOwnerService);
   private readonly corporateActionsService = inject(CorporateActionsService);
   private readonly gasSponsorshipService = inject(GasSponsorshipService);
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
 
   loading = true;
   docsLoading = false;
@@ -794,6 +923,17 @@ export class CustomerDetailComponent implements OnInit {
   identities: OnchainIdentityView[] = [];
   screeningRuns: ScreeningRun[] = [];
   holderBlocks: HolderBlock[] = [];
+  beneficialOwners: BeneficialOwner[] = [];
+  ubosLoading = false;
+  uboSaving = false;
+  uboForm: {
+    givenName: string; familyName: string; dateOfBirth: string; nationality: string;
+    countryOfResidence: string; ownershipPct: number | null;
+    controlType: BeneficialOwner['controlType']; source: string;
+  } = {
+    givenName: '', familyName: '', dateOfBirth: '', nationality: '',
+    countryOfResidence: '', ownershipPct: null, controlType: 'DIRECT_OWNERSHIP', source: '',
+  };
 
   readonly currentYear = new Date().getFullYear();
   taxCertYear = this.currentYear - 1;
@@ -801,6 +941,7 @@ export class CustomerDetailComponent implements OnInit {
   docColumns = ['documentType', 'jurisdiction', 'fileName', 'sizeBytes', 'uploadedAt', 'actions'];
   screeningRunColumns = ['status', 'trigger', 'provider', 'startedAt', 'actions'];
   holderBlockColumns = ['blockType', 'walletAddress', 'legalBasis', 'startsAt', 'expiresAt'];
+  uboColumns = ['name', 'country', 'pepStatus', 'ownershipPct', 'controlType', 'registeredAt', 'actions'];
   showRejectForm = false;
   rejectReason = '';
 
@@ -834,6 +975,7 @@ export class CustomerDetailComponent implements OnInit {
         this.loadJurisdictionApprovals();
         this.loadScreeningRuns();
         this.loadHolderBlocks();
+        this.loadBeneficialOwners();
         if (entity.type === 'ISSUER') {
           this.loadGasPolicies();
         }
@@ -919,6 +1061,71 @@ export class CustomerDetailComponent implements OnInit {
         this.blocksLoading = false;
         this.cdr.markForCheck();
       },
+    });
+  }
+
+  loadBeneficialOwners(): void {
+    this.ubosLoading = true;
+    this.cdr.markForCheck();
+    this.beneficialOwnerService.list(this.id).subscribe({
+      next: (owners) => {
+        this.beneficialOwners = owners;
+        this.ubosLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.ubosLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  addBeneficialOwner(): void {
+    if (!this.uboForm.givenName || !this.uboForm.familyName) return;
+    this.uboSaving = true;
+    this.cdr.markForCheck();
+
+    this.beneficialOwnerService.add(this.id, {
+      person: {
+        givenName: this.uboForm.givenName,
+        familyName: this.uboForm.familyName,
+        dateOfBirth: this.uboForm.dateOfBirth || undefined,
+        nationality: this.uboForm.nationality || undefined,
+        countryOfResidence: this.uboForm.countryOfResidence || undefined,
+        country: this.uboForm.countryOfResidence || undefined,
+      },
+      ownershipPct: this.uboForm.ownershipPct ?? undefined,
+      controlType: this.uboForm.controlType,
+      source: this.uboForm.source || undefined,
+    }).subscribe({
+      next: (owner) => {
+        this.beneficialOwners = [owner, ...this.beneficialOwners];
+        this.uboForm = {
+          givenName: '', familyName: '', dateOfBirth: '', nationality: '',
+          countryOfResidence: '', ownershipPct: null, controlType: 'DIRECT_OWNERSHIP', source: '',
+        };
+        this.uboSaving = false;
+        this.cdr.markForCheck();
+        this.snackBar.open('Beneficial owner registered. Sanctions/PEP screening triggered.', 'Dismiss', { duration: 5000 });
+      },
+      error: (err) => {
+        this.uboSaving = false;
+        this.cdr.markForCheck();
+        this.snackBar.open(err?.error?.message ?? 'Failed to register beneficial owner.', 'Dismiss', { duration: 6000 });
+      },
+    });
+  }
+
+  ceaseBeneficialOwner(bo: BeneficialOwner): void {
+    if (!confirm(`Mark ${bo.givenName} ${bo.familyName} as no longer a beneficial owner?`)) return;
+    this.beneficialOwnerService.cease(this.id, bo.id).subscribe({
+      next: (updated) => {
+        this.beneficialOwners = this.beneficialOwners.map(o => o.id === updated.id ? updated : o)
+          .filter(o => !o.ceasedAt);
+        this.cdr.markForCheck();
+        this.snackBar.open('Beneficial owner ceased.', 'Dismiss', { duration: 4000 });
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to cease beneficial owner.', 'Dismiss', { duration: 6000 }),
     });
   }
 
@@ -1127,6 +1334,35 @@ export class CustomerDetailComponent implements OnInit {
   dissolve(): void {
     if (!confirm('Are you sure you want to dissolve this entity? This action cannot be undone.')) return;
     this.entityService.dissolveEntity(this.id).subscribe({ next: () => this.loadEntity() });
+  }
+
+  terminate(): void {
+    const reason = prompt(
+      'Reason for terminating this customer relationship (required for audit trail):'
+    );
+    if (!reason) return;
+
+    const ref = this.dialog.open(StepUpDialogComponent, {
+      data: {
+        requireDualControl: true,
+        reason: `Terminate customer relationship for ${this.entity?.currentName} (offboarding)`,
+        action: 'CUSTOMER_OFFBOARDING',
+      },
+      width: '500px',
+      disableClose: true,
+    });
+
+    ref.afterClosed().subscribe((result) => {
+      if (!result) return;
+
+      this.entityService.terminateEntity(this.id, reason, result.stepUpToken, result.dualControlToken!).subscribe({
+        next: () => {
+          this.snackBar.open('Customer relationship terminated. Audit event recorded.', 'Dismiss', { duration: 5000 });
+          this.loadEntity();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to terminate customer.', 'Dismiss', { duration: 6000 }),
+      });
+    });
   }
 
   recordMerger(): void {

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -318,16 +318,16 @@ import { AuthService } from './auth.service';
   `,
 })
 export class LoginComponent {
+  private readonly authService = inject(AuthService);
+  private readonly router = inject(Router);
+  private readonly snackBar = inject(MatSnackBar);
+  private readonly cdr = inject(ChangeDetectorRef);
+
   readonly form: FormGroup;
   loading = false;
 
-  constructor(
-    private readonly authService: AuthService,
-    private readonly router: Router,
-    private readonly snackBar: MatSnackBar,
-    private readonly cdr: ChangeDetectorRef,
-    fb: FormBuilder,
-  ) {
+  constructor() {
+    const fb = inject(FormBuilder);
     this.form = fb.group({
       email: ['', [Validators.required, Validators.email]],
       password: ['', Validators.required],

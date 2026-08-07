@@ -29,10 +29,14 @@ import { VaultRequestsComponent } from '../wizards/vault-requests/vault-requests
 import { NavStrikeComponent } from '../wizards/nav-strike/nav-strike.component';
 import { SlotAdminComponent } from '../wizards/slot-admin/slot-admin.component';
 import { CorporateActionsComponent } from '../wizards/corporate-actions/corporate-actions.component';
+import { RegisterInspectionsComponent } from '../wizards/register-inspections/register-inspections.component';
+import { RegisterTransferComponent } from '../wizards/register-transfer/register-transfer.component';
+import { SolanaAdminComponent } from '../wizards/solana-admin/solana-admin.component';
+import { BulkErc3643OpsComponent } from '../wizards/bulk-erc3643-ops/bulk-erc3643-ops.component';
 import { ForceGrantsComponent } from '../wizards/force-grants/force-grants.component';
 import {
   Asset, AssetDeployment, AssetDocument, AssetHolder,
-  KycComplianceResponse, DocumentStatus, VAULT_STANDARDS,
+  KycComplianceResponse, VAULT_STANDARDS,
 } from '../../../core/models';
 
 import { StatusBadgeComponent, ChainNamePipe } from '@registerwerk/ui';
@@ -70,6 +74,10 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
     NavStrikeComponent,
     SlotAdminComponent,
     CorporateActionsComponent,
+    RegisterInspectionsComponent,
+    RegisterTransferComponent,
+    SolanaAdminComponent,
+    BulkErc3643OpsComponent,
     ForceGrantsComponent,
     ConfidentialViewerPanelComponent,
   ],
@@ -260,6 +268,26 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
               <div class="field-item">
                 <div class="field-label">Decimals</div>
                 <div class="field-value">{{ asset.decimals ?? '—' }}</div>
+              </div>
+              <div class="field-item">
+                <div class="field-label">Currency</div>
+                <div class="field-value">{{ asset.currency ?? '—' }}</div>
+              </div>
+              <div class="field-item">
+                <div class="field-label">Issue Size</div>
+                <div class="field-value">{{ asset.issueSize != null ? (asset.issueSize | number) : '—' }}</div>
+              </div>
+              <div class="field-item">
+                <div class="field-label">Denomination</div>
+                <div class="field-value">{{ asset.denomination != null ? (asset.denomination | number) : '—' }}</div>
+              </div>
+              <div class="field-item">
+                <div class="field-label">Issue Date</div>
+                <div class="field-value">{{ asset.issueDate ? (asset.issueDate | date:'mediumDate') : '—' }}</div>
+              </div>
+              <div class="field-item">
+                <div class="field-label">Maturity Date</div>
+                <div class="field-value">{{ asset.maturityDate ? (asset.maturityDate | date:'mediumDate') : '—' }}</div>
               </div>
               <div class="field-item">
                 <div class="field-label">Created At</div>
@@ -478,6 +506,16 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
           <app-corporate-actions [assetId]="id" />
         </mat-tab>
 
+        <!-- Register Inspections — §10 eWpG requests to disclose this asset's register -->
+        <mat-tab label="Register Inspections">
+          <app-register-inspections [assetId]="id" />
+        </mat-tab>
+
+        <!-- Register Transfer — §§21/22 eWpG handover to a successor registry operator -->
+        <mat-tab label="Register Transfer">
+          <app-register-transfer [assetId]="id" />
+        </mat-tab>
+
         <!-- Token Admin Grants — delegatable forcedTransfer/forcedApprove/forceBurn -->
         <mat-tab label="Token Admin Grants">
           <app-force-grants [assetId]="id" />
@@ -650,6 +688,13 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
               <mat-divider style="margin:20px 0" />
               <app-vault-requests [deploymentId]="primaryDeploymentId" [latestNav]="latestVaultNav" />
             </div>
+          </mat-tab>
+        }
+
+        <!-- Solana Admin (SPL Token-2022 — Permanent Delegate forced-transfer/force-burn, freeze/thaw) -->
+        @if (isSolanaSplStandard && primaryDeploymentId) {
+          <mat-tab label="Solana Admin">
+            <app-solana-admin [assetId]="id" [deploymentId]="primaryDeploymentId" />
           </mat-tab>
         }
 
@@ -881,6 +926,13 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
             </div>
           </mat-tab>
 
+          <!-- Bulk Operations — CSV batch-mint/batch-forced-transfer/batch-burn -->
+          @if (primaryDeploymentId) {
+            <mat-tab label="Bulk Operations">
+              <app-bulk-erc3643-ops [assetId]="id" [deploymentId]="primaryDeploymentId" />
+            </mat-tab>
+          }
+
           <!-- Trusted Issuers -->
           <mat-tab label="Trusted Issuers">
             <div class="tab-content">
@@ -1056,6 +1108,13 @@ export class AssetDetailComponent implements OnInit {
 
   get isVaultStandard(): boolean {
     return !!this.asset && VAULT_STANDARDS.includes(this.asset.tokenStandard);
+  }
+
+  get isSolanaSplStandard(): boolean {
+    return !!this.asset && (
+      this.asset.tokenStandard === 'SPL' || this.asset.tokenStandard === 'SPL_2022' ||
+      this.asset.tokenStandard === 'SPL_2022_BOND' || this.asset.tokenStandard === 'SPL_2022_CONFIDENTIAL'
+    );
   }
 
   get primaryDeploymentId(): string | null {

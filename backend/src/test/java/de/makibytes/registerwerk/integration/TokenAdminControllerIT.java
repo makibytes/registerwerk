@@ -74,7 +74,8 @@ class TokenAdminControllerIT {
                 new LoginRequest(ADMIN_EMAIL, ADMIN_PASSWORD),
                 LoginResponse.class);
         assertThat(login.getStatusCode()).isEqualTo(HttpStatus.OK);
-        bearerToken = login.getBody().token();
+        // Set-Cookie header carries the bearer token now, not the body — see LoginResponse.
+        bearerToken = AuthApiIT.extractSessionToken(login);
 
         // Obtain step-up token (test profile sets step-up.allow-unenrolled=true;
         // production refuses step-up without TOTP enrolment)

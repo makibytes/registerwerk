@@ -21,9 +21,10 @@ import { numberToHex } from 'viem';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { TransactionService } from '../../../core/api/transaction.service';
 import { RegisterDocumentService } from '../../../core/api/register-document.service';
+import { BondTermsService } from '../../../core/api/bond-terms.service';
 import { AuthService } from '../../../core/auth/auth.service';
 import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
-import { Asset, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
+import { Asset, AssetBondTerms, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 
@@ -251,6 +252,33 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
             }
           </mat-card-content>
         </mat-card>
+
+        <!-- ── Bond Terms ───────────────────────────────────────────────── -->
+        @if (bondTerms) {
+          <mat-card class="section-card">
+            <mat-card-header>
+              <mat-card-title>Bond Terms</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="bond-terms-grid">
+                <div><span class="bt-label">Face value</span><span class="bt-value">{{ bondTerms.faceValue | number }} {{ bondTerms.currencyIso }}</span></div>
+                <div><span class="bt-label">Issue date</span><span class="bt-value">{{ bondTerms.issueDate }}</span></div>
+                <div><span class="bt-label">Maturity date</span><span class="bt-value">{{ bondTerms.maturityDate }}</span></div>
+                @if (bondTerms.couponRate !== null) {
+                  <div><span class="bt-label">Coupon rate</span><span class="bt-value">{{ bondTerms.couponRate | percent:'1.2-4' }}</span></div>
+                }
+                @if (bondTerms.referenceRate) {
+                  <div><span class="bt-label">Reference rate</span><span class="bt-value">{{ bondTerms.referenceRate }}{{ bondTerms.spread !== null ? ' + ' + (bondTerms.spread | percent:'1.2-4') : '' }}</span></div>
+                }
+                <div><span class="bt-label">Payment frequency</span><span class="bt-value">{{ bondTerms.paymentFrequency.replace('_', ' ') }}</span></div>
+                <div><span class="bt-label">Day count</span><span class="bt-value">{{ formatEnum(bondTerms.dayCount) }}</span></div>
+                <div><span class="bt-label">Issue price</span><span class="bt-value">{{ bondTerms.issuePrice | percent:'1.0-2' }} of face value</span></div>
+                <div><span class="bt-label">Callable</span><span class="bt-value">{{ bondTerms.callable ? 'Yes' : 'No' }}</span></div>
+                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus }}</span></div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        }
 
         <!-- ── Term Sheet ────────────────────────────────────────────────── -->
         <mat-card class="section-card">
@@ -639,6 +667,14 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
   styles: [`
     .back-link { margin-bottom: 16px; display: inline-flex; }
     .header-card, .timeline-card, .section-card { margin-bottom: 16px; }
+    .bond-terms-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px 24px;
+    }
+    .bond-terms-grid > div { display: flex; flex-direction: column; gap: 2px; }
+    .bt-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--rw-text-secondary); }
+    .bt-value { font-size: 14px; color: var(--rw-text-primary); font-weight: 600; }
     .asset-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
     .asset-title h1 { margin: 0 0 8px; font-size: 22px; }
     .asset-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -698,6 +734,7 @@ export class IssuanceDetailComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly registerDocumentService = inject(RegisterDocumentService);
+  private readonly bondTermsService = inject(BondTermsService);
   protected readonly walletService = inject(WalletService);
   private readonly fheService = inject(FheClientService);
 
@@ -720,6 +757,8 @@ export class IssuanceDetailComponent implements OnInit {
   minting = false;
   identityRegistryState: AsyncSection<null> = createAsyncSection<null>(null);
   liveHoldersState: AsyncSection<null> = { data: null, status: 'ready', hasLoaded: true };
+
+  bondTerms: AssetBondTerms | null = null;
 
   // ── Term Sheet ────────────────────────────────────────────────────────────
   termSheetDocs: AssetDocument[] = [];
@@ -804,6 +843,7 @@ export class IssuanceDetailComponent implements OnInit {
         this.loadDeployments(asset.id);
         this.loadHolders(asset.id);
         this.loadTermSheetDocs(id);
+        this.loadBondTerms(asset.id);
       },
       error: () => {
         this.loading = false;
@@ -951,6 +991,19 @@ export class IssuanceDetailComponent implements OnInit {
       next: docs => { this.termSheetDocs = docs; this.tsLoading = false; this.cdr.detectChanges(); },
       error: () => { this.tsLoading = false; this.cdr.detectChanges(); },
     });
+  }
+
+  private loadBondTerms(assetId: string): void {
+    this.bondTermsService.getBondTerms(assetId).subscribe({
+      next: (terms) => { this.bondTerms = terms; this.cdr.detectChanges(); },
+      error: () => {
+        // 404 for the (common) case of a non-bond asset — no terms to show, not an error.
+      },
+    });
+  }
+
+  formatEnum(value: string): string {
+    return value.split('_').join(' ');
   }
 
   onTermSheetFileSelected(event: Event): void {

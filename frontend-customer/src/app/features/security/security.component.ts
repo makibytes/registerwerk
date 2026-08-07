@@ -5,6 +5,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { QrCodeComponent } from '@registerwerk/ui';
 import { Subscription, interval, takeWhile } from 'rxjs';
 import { SecurityService, TwoFactorStatus } from '../../core/api/security.service';
+import { DsarService, DsarErasureResult } from '../../core/api/dsar.service';
 
 const POLL_INTERVAL_MS = 5_000;
 const POLL_LIMIT = 60; // 5 minutes
@@ -187,6 +188,21 @@ const POLL_LIMIT = 60; // 5 minutes
       justify-content: center;
       padding: 48px 0;
     }
+
+    .erasure-note {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #EFF6FF;
+      color: #1D4ED8;
+      font-size: 13px;
+      line-height: 1.5;
+
+      mat-icon { font-size: 18px; width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
+    }
   `],
   template: `
     <div class="page">
@@ -296,16 +312,51 @@ const POLL_LIMIT = 60; // 5 minutes
           </p>
         </div>
       }
+
+      <div class="card" style="margin-top: 20px;">
+        <div class="card-head">
+          <h2>Privacy &amp; data (GDPR)</h2>
+        </div>
+        <p class="body-text">
+          Export the personal data we hold on your entity (DSGVO Art. 15/20), or request erasure
+          of the fields not subject to statutory retention (DSGVO Art. 17; eWpG §15(3) — 10 years,
+          GwG §8 — 5 years). Erasure requests are reviewed by an operator within 30 days
+          (Art. 12(3)).
+        </p>
+        <div class="actions">
+          <button class="secondary" type="button" (click)="exportData()" [disabled]="exporting">
+            <mat-icon>download</mat-icon>
+            {{ exporting ? 'Preparing…' : 'Export my data' }}
+          </button>
+          <button class="secondary" type="button" (click)="requestErasure()" [disabled]="erasing || !!erasureResult">
+            <mat-icon>delete_outline</mat-icon>
+            {{ erasing ? 'Submitting…' : (erasureResult ? 'Erasure requested' : 'Request erasure') }}
+          </button>
+        </div>
+        @if (erasureResult) {
+          <div class="erasure-note">
+            <mat-icon>info</mat-icon>
+            <span>
+              {{ erasureResult.message }}
+              @if (erasureResult.dueAt) { Due by {{ erasureResult.dueAt | date: 'medium' }}. }
+            </span>
+          </div>
+        }
+      </div>
     </div>
   `,
 })
 export class SecurityComponent implements OnInit, OnDestroy {
   private readonly securityService = inject(SecurityService);
+  private readonly dsarService = inject(DsarService);
   private readonly cdr = inject(ChangeDetectorRef);
 
   status: TwoFactorStatus | null = null;
   loading = true;
   refreshing = false;
+  exporting = false;
+  erasing = false;
+  erasureResult: DsarErasureResult | null = null;
 
   private poll?: Subscription;
 
@@ -343,6 +394,48 @@ export class SecurityComponent implements OnInit, OnDestroy {
       },
       error: () => {
         this.refreshing = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  exportData(): void {
+    if (this.exporting) return;
+    this.exporting = true;
+    this.cdr.markForCheck();
+
+    this.dsarService.exportMyData().subscribe({
+      next: data => {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `registerwerk-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        this.exporting = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.exporting = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  requestErasure(): void {
+    if (this.erasing || this.erasureResult) return;
+    this.erasing = true;
+    this.cdr.markForCheck();
+
+    this.dsarService.requestErasure().subscribe({
+      next: result => {
+        this.erasureResult = result;
+        this.erasing = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.erasing = false;
         this.cdr.markForCheck();
       },
     });

@@ -5,6 +5,8 @@ import { environment } from '../../../environments/environment';
 import {
   KycComplianceResponse,
   KycDocument,
+  KycEntityStatus,
+  KycJurisdictionApproval,
   Jurisdiction,
   JurisdictionRequirement,
 } from '../models';
@@ -48,5 +50,23 @@ export class KycService {
 
   getJurisdictionRequirements(): Observable<JurisdictionRequirement[]> {
     return this.http.get<JurisdictionRequirement[]>(`${this.publicBase}/jurisdictions`);
+  }
+
+  /**
+   * Wraps `KycController.getKycStatus` (`GET /entities/{entityId}/kyc/status`), which
+   * previously had no frontend caller: the customer portal had no way for a client to see
+   * their own KYC decision despite the backend already tracking it.
+   */
+  getKycStatus(entityId: string): Observable<{ kycStatus: KycEntityStatus }> {
+    return this.http.get<{ kycStatus: KycEntityStatus }>(`${this.base}/${entityId}/kyc/status`);
+  }
+
+  /**
+   * Wraps `KycController.listJurisdictionApprovals` (`GET /entities/{entityId}/kyc/jurisdictions`),
+   * which includes `rejectionReason` — also previously uncalled from the customer portal, so a
+   * rejected client had no way to see why.
+   */
+  getJurisdictionApprovals(entityId: string): Observable<KycJurisdictionApproval[]> {
+    return this.http.get<KycJurisdictionApproval[]>(`${this.base}/${entityId}/kyc/jurisdictions`);
   }
 }

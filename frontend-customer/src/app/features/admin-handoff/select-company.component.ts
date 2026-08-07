@@ -229,7 +229,15 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
         } @else {
           <div class="entity-list">
             @for (entity of entities; track entity.id) {
-              <div class="entity-row" (click)="selectEntity(entity)" [class.disabled]="selecting === entity.id">
+              <div
+                class="entity-row"
+                role="button"
+                tabindex="0"
+                (click)="selectEntity(entity)"
+                (keydown.enter)="selectEntity(entity)"
+                (keydown.space)="selectEntity(entity)"
+                [class.disabled]="selecting === entity.id"
+              >
                 <div class="entity-icon"><mat-icon>domain</mat-icon></div>
                 <div>
                   <div class="entity-name">{{ entity.currentName }}</div>
@@ -277,8 +285,14 @@ export class SelectCompanyComponent implements OnInit {
     this.selecting = entity.id;
     this.adminService.impersonate(entity.id).subscribe({
       next: (res) => {
-        this.auth.enterImpersonation(res.token, res.entityId, res.entityName);
-        this.router.navigate(['/dashboard']);
+        this.auth.enterImpersonation(res.token, res.entityId, res.entityName).subscribe({
+          next: () => this.router.navigate(['/dashboard']),
+          error: (err) => {
+            this.selecting = null;
+            this.cdr.markForCheck();
+            this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
+          },
+        });
       },
       error: (err) => {
         this.selecting = null;

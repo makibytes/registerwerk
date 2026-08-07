@@ -7,7 +7,9 @@ import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 /**
@@ -28,5 +30,10 @@ public record AssetResponse(
     Instant createdAt,
     Instant updatedAt,
     boolean hasTermSheet,
-    String externalId
+    String externalId,
+    String currency,
+    BigDecimal issueSize,
+    BigDecimal denomination,
+    LocalDate issueDate,
+    LocalDate maturityDate
 ) {}

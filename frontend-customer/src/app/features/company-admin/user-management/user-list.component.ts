@@ -12,7 +12,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatTabsModule } from '@angular/material/tabs';
 import { forkJoin } from 'rxjs';
 import { CompanyService } from '../../../core/api/company.service';
-import { CompanyUser, IdpSettings, LegalEntity, UserRole } from '../../../core/models';
+import { CompanyUser, LegalEntity, UserRole } from '../../../core/models';
 import { InviteUserDialogComponent } from './invite-user-dialog.component';
 import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component';
 import { ExternalIdEditorComponent } from '../../../shared/components/external-id-editor.component';
@@ -56,6 +56,9 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
         </a>
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #rla4="routerLinkActive" [active]="rla4.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
+        </a>
+        <a mat-tab-link routerLink="/company-admin/beneficial-owners" routerLinkActive #rlaBo="routerLinkActive" [active]="rlaBo.isActive">
+          <mat-icon>diversity_3</mat-icon>&nbsp;Beneficial Owners
         </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>

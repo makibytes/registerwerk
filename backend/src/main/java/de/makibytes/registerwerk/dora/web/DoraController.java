@@ -14,6 +14,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -88,6 +89,36 @@ public class DoraController {
         return ResponseEntity.ok(doraService.listExpiringContracts().stream().map(ThirdPartyProviderResponse::from).toList());
     }
 
+    @PostMapping("/providers")
+    public ResponseEntity<ThirdPartyProviderResponse> createProvider(
+            @RequestBody @Valid CreateProviderRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID actorId = UUID.fromString(jwt.getSubject());
+        ThirdPartyProvider provider = doraService.createProvider(
+                req.name(), req.category(),
+                req.criticality() != null ? ThirdPartyProvider.Criticality.valueOf(req.criticality()) : null,
+                req.lei(), req.country(), req.contractStart(), req.contractEnd(),
+                Boolean.TRUE.equals(req.subOutsourcing()), req.subOutsourcingDetails(), req.primaryContact(),
+                req.slaAvailabilityPct(), req.rtoHours(), req.rpoHours(), req.notes(), actorId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ThirdPartyProviderResponse.from(provider));
+    }
+
+    @PatchMapping("/providers/{id}")
+    public ResponseEntity<ThirdPartyProviderResponse> updateProvider(
+            @PathVariable UUID id,
+            @RequestBody @Valid CreateProviderRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID actorId = UUID.fromString(jwt.getSubject());
+        ThirdPartyProvider provider = doraService.updateProvider(
+                id, req.name(), req.category(),
+                req.criticality() != null ? ThirdPartyProvider.Criticality.valueOf(req.criticality()) : null,
+                req.lei(), req.country(), req.contractStart(), req.contractEnd(),
+                Boolean.TRUE.equals(req.subOutsourcing()), req.subOutsourcingDetails(), req.primaryContact(),
+                req.slaAvailabilityPct(), req.rtoHours(), req.rpoHours(),
+                Boolean.TRUE.equals(req.notifiedAuthority()), req.notes(), actorId);
+        return ResponseEntity.ok(ThirdPartyProviderResponse.from(provider));
+    }
+
     // ── Resilience Testing ─────────────────────────────────────────────────────
 
     @GetMapping("/resilience-tests")
@@ -114,7 +145,42 @@ public class DoraController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ResilienceTestResponse.from(test));
     }
 
+    @PatchMapping("/resilience-tests/{id}")
+    public ResponseEntity<ResilienceTestResponse> updateResilienceTest(
+            @PathVariable UUID id,
+            @RequestBody @Valid UpdateResilienceTestRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID actorId = UUID.fromString(jwt.getSubject());
+        ResilienceTest test = doraService.updateResilienceTestResult(
+                id, ResilienceTest.Result.valueOf(req.result()), req.findings(), req.reportRef(), actorId);
+        return ResponseEntity.ok(ResilienceTestResponse.from(test));
+    }
+
     // ── DTOs ──────────────────────────────────────────────────────────────────
+
+    public record CreateProviderRequest(
+            @NotBlank String name,
+            String category,
+            String criticality,
+            String lei,
+            String country,
+            LocalDate contractStart,
+            LocalDate contractEnd,
+            Boolean subOutsourcing,
+            String subOutsourcingDetails,
+            String primaryContact,
+            BigDecimal slaAvailabilityPct,
+            Integer rtoHours,
+            Integer rpoHours,
+            Boolean notifiedAuthority,
+            String notes
+    ) {}
+
+    public record UpdateResilienceTestRequest(
+            @NotBlank String result,
+            String findings,
+            String reportRef
+    ) {}
 
     public record ReportIncidentRequest(
             @NotBlank String title,
@@ -156,14 +222,22 @@ public class DoraController {
 
     public record ThirdPartyProviderResponse(
             UUID id, String name, String category, String criticality,
-            String country, String contractEnd, boolean notifiedAuthority
+            String lei, String country, String contractStart, String contractEnd,
+            boolean subOutsourcing, String subOutsourcingDetails, String primaryContact,
+            BigDecimal slaAvailabilityPct, Integer rtoHours, Integer rpoHours,
+            boolean notifiedAuthority, String notifiedAt, String notes
     ) {
         static ThirdPartyProviderResponse from(ThirdPartyProvider p) {
             return new ThirdPartyProviderResponse(
                     p.getId(), p.getName(), p.getCategory(), p.getCriticality().name(),
-                    p.getCountry(),
+                    p.getLei(), p.getCountry(),
+                    p.getContractStart() != null ? p.getContractStart().toString() : null,
                     p.getContractEnd() != null ? p.getContractEnd().toString() : null,
-                    p.isNotifiedAuthority());
+                    p.isSubOutsourcing(), p.getSubOutsourcingDetails(), p.getPrimaryContact(),
+                    p.getSlaAvailabilityPct(), p.getRtoHours(), p.getRpoHours(),
+                    p.isNotifiedAuthority(),
+                    p.getNotifiedAt() != null ? p.getNotifiedAt().toString() : null,
+                    p.getNotes());
         }
     }
 

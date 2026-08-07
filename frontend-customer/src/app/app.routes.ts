@@ -83,6 +83,14 @@ export const routes: Routes = [
       {
         path: 'security',
         loadComponent: () => import('./features/security/security.component').then(m => m.SecurityComponent)
+      },
+      {
+        path: 'support',
+        loadComponent: () => import('./features/support/support-list.component').then(m => m.SupportListComponent)
+      },
+      {
+        path: 'support/:id',
+        loadComponent: () => import('./features/support/support-detail.component').then(m => m.SupportDetailComponent)
       }
     ]
   },

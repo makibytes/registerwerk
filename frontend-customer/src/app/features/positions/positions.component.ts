@@ -12,7 +12,10 @@ import { InvestmentService } from '../../core/api/investment.service';
 import { TradingService } from '../../core/api/trading.service';
 import { LendingService } from '../../core/api/lending.service';
 import { StatementService } from '../../core/api/statement.service';
+import { TaxService } from '../../core/api/tax.service';
 import { RegisterDocumentService } from '../../core/api/register-document.service';
+import { FormsModule } from '@angular/forms';
+import { MatSelectModule } from '@angular/material/select';
 import { Chain, InvestmentRecord, LendingMarket, RegisterDocumentMeta, SellableHolding } from '../../core/models';
 import { ChainLendingCapability, lendingCapabilityFor } from '../../core/lending/chain-capabilities';
 import { environment } from '../../../environments/environment';
@@ -24,6 +27,7 @@ interface PositionRow {
   isin: string | null;
   tokenStandard: string | null;
   nominalAmount: number;
+  currency: string | null;
   whitelisted: boolean;
   chain: Chain | null;
   sellable: boolean;
@@ -52,6 +56,8 @@ interface PositionRow {
     MatIconModule,
     MatCardModule,
     MatTooltipModule,
+    MatSelectModule,
+    FormsModule,
     PageHeaderComponent,
     DataTableComponent,
   ],
@@ -62,17 +68,31 @@ interface PositionRow {
           <mat-icon>picture_as_pdf</mat-icon>
           @if (downloadingStatement) { Preparing… } @else { Download Depotauszug }
         </button>
+        <mat-select class="tax-year-select" [(ngModel)]="taxCertificateYear" [disabled]="downloadingTaxCertificate">
+          @for (y of taxCertificateYears; track y) {
+            <mat-option [value]="y">{{ y }}</mat-option>
+          }
+        </mat-select>
+        <button mat-stroked-button [disabled]="downloadingTaxCertificate" (click)="downloadTaxCertificate()">
+          <mat-icon>receipt_long</mat-icon>
+          @if (downloadingTaxCertificate) { Preparing… } @else { Download Tax Certificate }
+        </button>
       </app-page-header>
 
       <div class="summary-row">
         <mat-card class="summary-card">
           <mat-card-content>
-            <div class="summary-value">{{ portfolioValue | number:'1.0-2' }}</div>
+            <div class="summary-value">
+              {{ portfolioValue | number:'1.0-2' }}
+              @if (portfolioCurrency) { <span class="summary-currency">{{ portfolioCurrency }}</span> }
+            </div>
             <div class="summary-label">
               Portfolio value
               <mat-icon
                 class="info-icon"
-                matTooltip="Sum of nominal amount for every holding; priced live via its repo/lending market where one exists, nominal otherwise.">
+                [matTooltip]="portfolioCurrency
+                  ? 'Sum of nominal amount for every holding; priced live via its repo/lending market where one exists, nominal otherwise.'
+                  : 'Sum of nominal amount for every holding — shown without a currency because holdings span more than one currency (or none is set on the underlying asset yet), so this total cannot be added meaningfully. Priced live via repo/lending market where one exists, nominal otherwise.'">
                 info_outline
               </mat-icon>
             </div>
@@ -139,6 +159,10 @@ interface PositionRow {
     </div>
   `,
   styles: [`
+    .tax-year-select {
+      width: 90px;
+      margin: 0 4px;
+    }
     .summary-row {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -147,6 +171,7 @@ interface PositionRow {
     }
     .summary-card { border-radius: 12px; }
     .summary-value { font-size: 26px; font-weight: 700; color: var(--rw-text-primary); line-height: 1.2; }
+    .summary-currency { font-size: 14px; font-weight: 600; color: var(--rw-text-secondary); margin-left: 4px; }
     .summary-label {
       display: flex;
       align-items: center;
@@ -176,6 +201,7 @@ export class PositionsComponent implements OnInit {
   private readonly tradingService = inject(TradingService);
   private readonly lendingService = inject(LendingService);
   private readonly statementService = inject(StatementService);
+  private readonly taxService = inject(TaxService);
   private readonly registerDocumentService = inject(RegisterDocumentService);
   private readonly cdr = inject(ChangeDetectorRef);
 
@@ -184,20 +210,37 @@ export class PositionsComponent implements OnInit {
   state: AsyncSectionStatus = 'pending';
   rows: PositionRow[] = [];
   portfolioValue = 0;
+  /** Null when holdings span more than one currency (or none is set) — see the tooltip. */
+  portfolioCurrency: string | null = null;
   pledgeableCount = 0;
   downloadingStatement = false;
   downloadingRegisterDocFor = new Set<string>();
+  downloadingTaxCertificate = false;
+  readonly taxCertificateYears = Array.from(
+    { length: new Date().getFullYear() - 2019 },
+    (_, i) => new Date().getFullYear() - i,
+  );
+  taxCertificateYear = this.taxCertificateYears[0];
 
   readonly columns: TableColumn[] = [
     { key: 'assetName', header: 'Asset', cell: (r: PositionRow) => r.assetName },
     { key: 'isin', header: 'ISIN', cell: (r: PositionRow) => r.isin, type: 'mono' },
     { key: 'tokenStandard', header: 'Standard', cell: (r: PositionRow) => r.tokenStandard },
-    { key: 'nominalAmount', header: 'Nominal', cell: (r: PositionRow) => String(r.nominalAmount), type: 'number' },
+    {
+      key: 'nominalAmount',
+      header: 'Nominal',
+      cell: (r: PositionRow) => r.currency ? `${r.nominalAmount} ${r.currency}` : String(r.nominalAmount),
+      type: 'number',
+    },
     {
       key: 'marketValue',
       header: 'Market value',
-      cell: (r: PositionRow) =>
-        r.marketValue !== null ? `${r.marketValue.toLocaleString()} (${r.pricedVia})` : `${r.nominalAmount} (nominal only)`,
+      cell: (r: PositionRow) => {
+        const ccy = r.currency ? ` ${r.currency}` : '';
+        return r.marketValue !== null
+          ? `${r.marketValue.toLocaleString()}${ccy} (${r.pricedVia})`
+          : `${r.nominalAmount}${ccy} (nominal only)`;
+      },
     },
     {
       key: 'whitelisted',
@@ -242,6 +285,7 @@ export class PositionsComponent implements OnInit {
             isin: inv.isin,
             tokenStandard: inv.tokenStandard,
             nominalAmount: inv.nominalAmount,
+            currency: inv.currency,
             whitelisted: inv.whitelisted,
             chain: inv.chain,
             sellable: sellableHolderIds.has(inv.id),
@@ -255,6 +299,7 @@ export class PositionsComponent implements OnInit {
 
         this.pledgeableCount = this.rows.filter((r) => r.market).length;
         this.portfolioValue = this.rows.reduce((sum, r) => sum + (r.marketValue ?? r.nominalAmount), 0);
+        this.portfolioCurrency = this.uniformCurrency();
         this.state = 'ready';
         this.cdr.markForCheck();
         this.priceMatchedRows();
@@ -264,6 +309,13 @@ export class PositionsComponent implements OnInit {
         this.cdr.markForCheck();
       },
     });
+  }
+
+  /** The shared currency across every row, or null if holdings span more than one (or none is set). */
+  private uniformCurrency(): string | null {
+    if (this.rows.length === 0) return null;
+    const first = this.rows[0].currency;
+    return first !== null && this.rows.every((r) => r.currency === first) ? first : null;
   }
 
   /** Best-effort live price for rows with a matching active lending market — see the header tooltip. */
@@ -323,6 +375,26 @@ export class PositionsComponent implements OnInit {
       },
       error: () => {
         this.downloadingStatement = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  downloadTaxCertificate(): void {
+    this.downloadingTaxCertificate = true;
+    this.taxService.downloadMyTaxCertificate(this.taxCertificateYear).subscribe({
+      next: (pdf) => {
+        const url = URL.createObjectURL(pdf);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `steuerbescheinigung-${this.taxCertificateYear}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+        this.downloadingTaxCertificate = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.downloadingTaxCertificate = false;
         this.cdr.markForCheck();
       },
     });

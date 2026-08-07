@@ -18,4 +18,8 @@ export const COMPANY_ADMIN_ROUTES: Routes = [
     path: 'org-identity',
     loadComponent: () => import('./org-identity/org-identity.component').then(m => m.OrgIdentityComponent)
   },
+  {
+    path: 'beneficial-owners',
+    loadComponent: () => import('./beneficial-owners/beneficial-owners.component').then(m => m.BeneficialOwnersComponent)
+  },
 ];

@@ -95,7 +95,9 @@ public class InvestmentController {
                 companyExternalReferenceService
                         .findExternalId(authentication, ExternalReferenceSubjectType.ASSET_HOLDER, h.getId())
                         .orElse(null),
-                a != null ? a.getChain() : null
+                a != null ? a.getChain() : null,
+                a != null ? a.getCurrency() : null,
+                a != null ? a.getDenomination() : null
         );
     }
 

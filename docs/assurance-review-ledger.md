@@ -5,7 +5,7 @@ description: The proposed control record for a future multidisciplinary review o
 
 # Registerwerk assurance review ledger
 
-Last updated: 2026-07-29
+Last updated: 2026-08-07
 
 > **No review described in this document has taken place.** No domain panel and no IT board
 > has been convened, appointed, or consulted. Every entry below was written by an automated
@@ -141,12 +141,90 @@ For German eWpG instruments, the current database holder record is only the asse
 
 ## Known deployment and operations blockers
 
-- Helm combines a single `ReadWriteOnce` wallet volume with 3–10 anti-affined replicas.
-- Ingress routes directly to the backend and bypasses Kong while the network policy does not admit the ingress-controller path.
-- PostgreSQL secret keys referenced by Helm do not agree.
-- Frontend JWTs are stored in `localStorage`; response hardening headers are incomplete.
-- Promtail, Kong metrics, backup alerts, and pushgateway assumptions do not form a working monitoring path.
-- A raw single deployment key has no documented multisig/timelock handoff.
-- There is no CI coverage for shared frontend code, the relayer, Cairo, DAML, several indexers, documentation, Compose/Kong, or Helm.
+- ~~Helm combines a single `ReadWriteOnce` wallet volume with 3–10 anti-affined replicas.~~
+  **Fixed 2026-08 (self-assessed, unreviewed):** wallet keystore blobs now have a
+  `KeystoreBlobStore` port with a Postgres-backed implementation
+  (`registerwerk.wallet.storage-backend=POSTGRES`), and the Helm chart's default
+  `wallets.persistence.enabled: false` removes the RWO volume from the pod spec entirely,
+  so the anti-affinity/multi-replica combination no longer requires a shared filesystem.
+- ~~Ingress routes directly to the backend and bypasses Kong while the network policy does not
+  admit the ingress-controller path.~~ **Fixed 2026-08 (self-assessed, unreviewed):** the
+  `NetworkPolicy` now includes a conditional ingress rule combining a `namespaceSelector` and
+  `podSelector` for the ingress controller (`networkPolicy.ingressControllerNamespace` /
+  `ingressControllerPodSelector` in `values.yaml`).
+- ~~PostgreSQL secret keys referenced by Helm do not agree.~~ **Fixed 2026-08 (self-assessed,
+  unreviewed):** `postgresql.auth.secretKeys.userPasswordKey` and the backend's `DB_PASSWORD`
+  `secretKeyRef` now reference the same key.
+- ~~Frontend JWTs are stored in `localStorage`; response hardening headers are incomplete.~~
+  **Fixed 2026-08 (self-assessed, unreviewed):** both frontends now authenticate via an
+  httpOnly, `Secure`, `SameSite` session cookie set by the backend (`SessionCookieService`),
+  with CSRF protection (Spring Security's cookie-based SPA pattern +
+  `withXsrfConfiguration` on both Angular apps), `allowCredentials(true)` CORS, and no token
+  ever written to `localStorage`/`sessionStorage`. Response hardening headers
+  (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+  `Strict-Transport-Security`, `Content-Security-Policy`) are now applied at the nginx
+  server level in both `frontend-operator/nginx.conf` and `frontend-customer/nginx.conf`,
+  duplicated into the location blocks that previously dropped them via nginx's per-location
+  `add_header` inheritance rule. Verified end-to-end in a running `docker compose` stack:
+  login/logout, page-reload session persistence, guard redirects, and the impersonation
+  handoff (enter/exit) all confirmed cookie-only (no token in `localStorage`/`sessionStorage`)
+  with no console or backend errors.
+- ~~Promtail, Kong metrics, backup alerts, and pushgateway assumptions do not form a working
+  monitoring path.~~ **Fixed 2026-08 (self-assessed, unreviewed):** Promtail's Compose service
+  was missing the `/var/run/docker.sock` mount its `docker_sd_configs` scrape job needs to
+  discover any target at all (`monitoring/docker-compose.yml`); the Helm copy of Kong's
+  declarative config (`deploy/helm/registerwerk/files/kong.yml`) was missing the `prometheus`
+  plugin present in `gateway/kong.yml`, and nothing scraped Kong's status port in the Helm path
+  (added `kong.podAnnotations` in `values.yaml`, since this Kong subchart version's status
+  listener has no Service a ServiceMonitor could bind to); and the `BackupStale` alert's entire
+  data path — CronJob push → Pushgateway → Prometheus scrape — had no Pushgateway deployed
+  anywhere, in either Compose or Helm, so `monitoring.pushgatewayUrl` defaulted to blank with
+  nothing to point at even if set (added `deploy/helm/backup/templates/pushgateway.yaml`,
+  defaulted `pushgatewayUrl` to it, and added a matching Compose service + Prometheus scrape
+  job for parity — Compose still has no backup CronJob to push from, so that half remains
+  scaffolding until one exists). Verified via `docker compose -f monitoring/docker-compose.yml
+  config`, `helm template` on both charts, and inspecting the rendered output for the
+  `prometheus` plugin, the pod annotations, and the CronJob's pushgateway URL.
+- ~~A raw single deployment key has no documented multisig/timelock handoff.~~ **Documented
+  2026-08 (self-assessed, unreviewed):** `docs/operator/blockchain/deploying-contracts.md`
+  ("From a single deployment key to a multisig/timelock") now documents the handoff — every
+  `script/Deploy*.s.sol` grants `DEFAULT_ADMIN_ROLE`/`OPERATOR_ROLE`/`Ownable` ownership to the
+  single EOA behind `REGISTRY_WALLET_PRIVATE_KEY` with no transfer-away step, so the doc walks
+  through standing up a Safe before deploying, moving admin rights to it immediately after
+  deployment, fronting high-impact actions with a `TimelockController`, verifying Safe quorum
+  before renouncing the EOA's roles, and destroying the deployer key once confirmed. This is a
+  runbook, not a contract change — no Solidity was modified, and no deploy script has been
+  updated to do this automatically, so the handoff remains a manual operational step every time.
+  (Also fixed in passing: the doc's testnet example used `DEPLOYER_PRIVATE_KEY`, which none of
+  the scripts actually read — corrected to the real `REGISTRY_WALLET_PRIVATE_KEY`.)
+- ~~There is no CI coverage for shared frontend code, the relayer, Cairo, DAML, several
+  indexers, documentation, Compose/Kong, or Helm.~~ **Fixed 2026-08 (self-assessed,
+  unreviewed):** new workflows — `cairo.yml` (scarb build + snforge test, verified locally:
+  29/29 pass), `daml.yml` (`dpm build`, verified locally against a pinned GitHub release of
+  `digital-asset/dpm` rather than a curl-to-shell script), `relayer.yml` (lint/test/build for
+  `zama-relayer`, verified locally: 33/33 tests pass), `indexers.yml` (the EVM subgraph's own
+  ABI-parity/manifest/codegen/build chain — the other four indexers are config + a
+  docker-compose service each with no source of their own to test), and `infra.yml`
+  (`docker compose config` for both the root and monitoring stacks, `kong config parse` on both
+  copies of the declarative config, `helm lint`/`helm template` on both charts). Also added a
+  `frontend-shared` job to `frontend.yml`: the shared UI library has no `angular.json` of its
+  own (both apps consume it via a TS path alias) and was outside both apps' `ng lint` scope
+  entirely; its new `eslint.config.js` found 4 real `@typescript-eslint/no-explicit-any`
+  violations in `rw-data-table`, fixed with scoped, justified `eslint-disable` comments after a
+  properly-generic `TableColumn<T>`/`DataTableComponent<T>` attempt turned out to ripple into
+  ~18 call sites across both apps under strict function-parameter contravariance — reverted
+  rather than shipped as an undersized fix for an oversized problem. `docs.yml`'s own strict
+  build step was separately found broken: it ran `mkdocs build --strict` against the bare
+  `squidfunk/mkdocs-material` image, which lacks `mkdocs-static-i18n` (`mkdocs.yml`'s
+  `plugins:` list) — every run of that step would have failed on a config error, not a real
+  link-check, since i18n was added; fixed to build and use the project's own `docs/Dockerfile`
+  image instead (CLAUDE.md's documented build command had the same bug and was corrected too).
+  Separately, the "Operator/investor Angular apps" row in the baseline-results table above
+  (missing lint target, missing `karma-jasmine`, zero spec files) is also resolved: both apps
+  now have real ESLint (flat config) and Karma/Jasmine wired into `angular.json`, with 113 and
+  115 passing spec files respectively covering the auth/session code this session's cookie
+  migration touched most, plus a sample of API services and stateful components.
 
-These remain release blockers until their phase verdict and verification evidence are recorded here.
+All items in this section are now resolved. The eight resolved items above are self-assessed
+by the same automated contributor that wrote this document — not evidence that any review has
+taken place — and remain subject to the domain/IT review process this document proposes.

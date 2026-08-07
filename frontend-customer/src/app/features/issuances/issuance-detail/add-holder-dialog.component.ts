@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, inject, Inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA, MatDialog } from '@angular/material/dialog';
@@ -85,7 +85,7 @@ export class AddHolderDialogComponent {
   saving = false;
   error = '';
 
-  constructor(@Inject(MAT_DIALOG_DATA) public data: DialogData) {}
+  readonly data = inject<DialogData>(MAT_DIALOG_DATA);
 
   pickWallet(): void {
     this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(

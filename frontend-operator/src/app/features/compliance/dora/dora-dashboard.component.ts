@@ -22,7 +22,7 @@ import { forkJoin } from 'rxjs';
 
 
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
-import { DoraService } from '../../../core/api/dora.service';
+import { DoraService, ProviderRequest } from '../../../core/api/dora.service';
 import { IctIncident, ResilienceTest, ThirdPartyProvider } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 
@@ -103,13 +103,26 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       <!-- Third-Party Providers -->
       <mat-tab label="Third-Party Providers">
         <div class="tab-content">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+            <button mat-raised-button color="primary" (click)="openProviderDialog()">
+              <mat-icon>add_business</mat-icon>
+              Register Provider
+            </button>
+          </div>
           <rw-data-table
             [columns]="providerColumns"
             [rows]="providers"
             [state]="providersState"
             filterPlaceholder="Filter providers…"
-            emptyMessage="No ICT third-party providers registered.">
+            emptyMessage="No ICT third-party providers registered."
+            [actionsTemplate]="providerActions">
           </rw-data-table>
+
+          <ng-template #providerActions let-p>
+            <button mat-icon-button (click)="openProviderDialog(p)" matTooltip="Edit provider">
+              <mat-icon>edit</mat-icon>
+            </button>
+          </ng-template>
         </div>
       </mat-tab>
 
@@ -136,8 +149,17 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             [rows]="resilienceTests"
             [state]="resilienceTestsState"
             filterPlaceholder="Filter tests…"
-            emptyMessage="No resilience tests recorded yet.">
+            emptyMessage="No resilience tests recorded yet."
+            [actionsTemplate]="testActions">
           </rw-data-table>
+
+          <ng-template #testActions let-t>
+            @if (t.result === 'FINDINGS_OPEN') {
+              <button mat-icon-button (click)="openUpdateTestDialog(t)" matTooltip="Close out findings">
+                <mat-icon>fact_check</mat-icon>
+              </button>
+            }
+          </ng-template>
         </div>
       </mat-tab>
 
@@ -312,6 +334,126 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </button>
       </mat-dialog-actions>
     </ng-template>
+
+    <!-- Register / Edit Provider Dialog -->
+    <ng-template #providerDialog>
+      <h2 mat-dialog-title>{{ providerForm.id ? 'Edit' : 'Register' }} ICT Third-Party Provider</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;min-width:460px;padding-top:8px">
+        <mat-form-field appearance="outline">
+          <mat-label>Name *</mat-label>
+          <input matInput [(ngModel)]="providerForm.name" />
+        </mat-form-field>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <mat-form-field appearance="outline">
+            <mat-label>Category</mat-label>
+            <input matInput [(ngModel)]="providerForm.category" placeholder="e.g. Cloud infrastructure" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Criticality</mat-label>
+            <mat-select [(ngModel)]="providerForm.criticality">
+              <mat-option value="STANDARD">Standard</mat-option>
+              <mat-option value="IMPORTANT">Important</mat-option>
+              <mat-option value="CRITICAL">Critical</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <mat-form-field appearance="outline">
+            <mat-label>LEI</mat-label>
+            <input matInput [(ngModel)]="providerForm.lei" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Country</mat-label>
+            <input matInput [(ngModel)]="providerForm.country" placeholder="DE" />
+          </mat-form-field>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <mat-form-field appearance="outline">
+            <mat-label>Contract start</mat-label>
+            <input matInput type="date" [(ngModel)]="providerForm.contractStart" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Contract end</mat-label>
+            <input matInput type="date" [(ngModel)]="providerForm.contractEnd" />
+          </mat-form-field>
+        </div>
+        <mat-form-field appearance="outline">
+          <mat-label>Primary contact</mat-label>
+          <input matInput [(ngModel)]="providerForm.primaryContact" />
+        </mat-form-field>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <mat-form-field appearance="outline">
+            <mat-label>SLA availability %</mat-label>
+            <input matInput type="number" step="0.01" [(ngModel)]="providerForm.slaAvailabilityPct" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>RTO (hours)</mat-label>
+            <input matInput type="number" [(ngModel)]="providerForm.rtoHours" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>RPO (hours)</mat-label>
+            <input matInput type="number" [(ngModel)]="providerForm.rpoHours" />
+          </mat-form-field>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" [(ngModel)]="providerForm.subOutsourcing" id="subOutsourcing" />
+          <label for="subOutsourcing" style="font-size:13px;cursor:pointer">Uses sub-outsourcing</label>
+        </div>
+        @if (providerForm.subOutsourcing) {
+          <mat-form-field appearance="outline">
+            <mat-label>Sub-outsourcing details</mat-label>
+            <textarea matInput rows="2" [(ngModel)]="providerForm.subOutsourcingDetails"></textarea>
+          </mat-form-field>
+        }
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" [(ngModel)]="providerForm.notifiedAuthority" id="notifiedAuthority" />
+          <label for="notifiedAuthority" style="font-size:13px;cursor:pointer">
+            Competent authority notified (Art. 28(3))
+          </label>
+        </div>
+        <mat-form-field appearance="outline">
+          <mat-label>Notes</mat-label>
+          <textarea matInput rows="2" [(ngModel)]="providerForm.notes"></textarea>
+        </mat-form-field>
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="primary" (click)="submitProvider()" [disabled]="!providerForm.name.trim()">
+          <mat-icon>save</mat-icon>
+          Save
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
+
+    <!-- Update Resilience Test Result Dialog -->
+    <ng-template #updateTestDialog>
+      <h2 mat-dialog-title>Update Resilience Test Result</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;min-width:420px;padding-top:8px">
+        <mat-form-field appearance="outline">
+          <mat-label>Result *</mat-label>
+          <mat-select [(ngModel)]="updateTestForm.result">
+            @for (r of testResults; track r) {
+              <mat-option [value]="r">{{ r.replace('_',' ') }}</mat-option>
+            }
+          </mat-select>
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Findings</mat-label>
+          <textarea matInput rows="3" [(ngModel)]="updateTestForm.findings"></textarea>
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Report reference</mat-label>
+          <input matInput [(ngModel)]="updateTestForm.reportRef" />
+        </mat-form-field>
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="primary" (click)="submitUpdateTest()" [disabled]="!updateTestForm.result">
+          <mat-icon>save</mat-icon>
+          Save
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
   `,
 })
 export class DoraDashboardComponent implements OnInit {
@@ -319,6 +461,8 @@ export class DoraDashboardComponent implements OnInit {
   @ViewChild('updateStatusDialog') updateStatusDialogTpl!: TemplateRef<unknown>;
   @ViewChild('reportToAuthorityDialog') reportToAuthorityDialogTpl!: TemplateRef<unknown>;
   @ViewChild('recordTestDialog') recordTestDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('providerDialog') providerDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('updateTestDialog') updateTestDialogTpl!: TemplateRef<unknown>;
 
   private readonly doraService = inject(DoraService);
   private readonly dialog = inject(MatDialog);
@@ -348,6 +492,16 @@ export class DoraDashboardComponent implements OnInit {
     tlptRequired: boolean; testerName: string; reportRef: string; findings: string;
   } = { testType: '', result: '', scope: '', performedAt: '', nextDueDate: '',
         tlptRequired: false, testerName: '', reportRef: '', findings: '' };
+
+  providerForm: {
+    id: string | null; name: string; category: string; criticality: string; lei: string;
+    country: string; contractStart: string; contractEnd: string; subOutsourcing: boolean;
+    subOutsourcingDetails: string; primaryContact: string; slaAvailabilityPct: number | null;
+    rtoHours: number | null; rpoHours: number | null; notifiedAuthority: boolean; notes: string;
+  } = this.emptyProviderForm();
+
+  updateTestForm: { id: string | null; result: string; findings: string; reportRef: string } =
+    { id: null, result: '', findings: '', reportRef: '' };
 
   readonly incidentColumns: TableColumn[] = [
     {
@@ -586,6 +740,90 @@ export class DoraDashboardComponent implements OnInit {
         this.snackBar.open(`Resilience test recorded (${test.result}).`, 'Dismiss', { duration: 5000 });
       },
       error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record test.', 'Dismiss', { duration: 6000 }),
+    });
+  }
+
+  private emptyProviderForm() {
+    return {
+      id: null as string | null, name: '', category: '', criticality: 'STANDARD', lei: '',
+      country: '', contractStart: '', contractEnd: '', subOutsourcing: false,
+      subOutsourcingDetails: '', primaryContact: '', slaAvailabilityPct: null as number | null,
+      rtoHours: null as number | null, rpoHours: null as number | null,
+      notifiedAuthority: false, notes: '',
+    };
+  }
+
+  openProviderDialog(provider?: ThirdPartyProvider): void {
+    this.providerForm = provider ? {
+      id: provider.id, name: provider.name, category: provider.category ?? '',
+      criticality: provider.criticality, lei: provider.lei ?? '', country: provider.country ?? '',
+      contractStart: provider.contractStart ?? '', contractEnd: provider.contractEnd ?? '',
+      subOutsourcing: provider.subOutsourcing, subOutsourcingDetails: provider.subOutsourcingDetails ?? '',
+      primaryContact: provider.primaryContact ?? '', slaAvailabilityPct: provider.slaAvailabilityPct,
+      rtoHours: provider.rtoHours, rpoHours: provider.rpoHours,
+      notifiedAuthority: provider.notifiedAuthority, notes: provider.notes ?? '',
+    } : this.emptyProviderForm();
+    this.dialog.open(this.providerDialogTpl, { width: '520px' });
+  }
+
+  submitProvider(): void {
+    if (!this.providerForm.name.trim()) return;
+    this.dialog.closeAll();
+
+    const body: ProviderRequest = {
+      name: this.providerForm.name.trim(),
+      category: this.providerForm.category || undefined,
+      criticality: this.providerForm.criticality || undefined,
+      lei: this.providerForm.lei || undefined,
+      country: this.providerForm.country || undefined,
+      contractStart: this.providerForm.contractStart || undefined,
+      contractEnd: this.providerForm.contractEnd || undefined,
+      subOutsourcing: this.providerForm.subOutsourcing,
+      subOutsourcingDetails: this.providerForm.subOutsourcingDetails || undefined,
+      primaryContact: this.providerForm.primaryContact || undefined,
+      slaAvailabilityPct: this.providerForm.slaAvailabilityPct ?? undefined,
+      rtoHours: this.providerForm.rtoHours ?? undefined,
+      rpoHours: this.providerForm.rpoHours ?? undefined,
+      notifiedAuthority: this.providerForm.notifiedAuthority,
+      notes: this.providerForm.notes || undefined,
+    };
+
+    const request$ = this.providerForm.id
+      ? this.doraService.updateProvider(this.providerForm.id, body)
+      : this.doraService.createProvider(body);
+
+    request$.subscribe({
+      next: (provider) => {
+        this.providers = this.providerForm.id
+          ? this.providers.map(p => p.id === provider.id ? provider : p)
+          : [provider, ...this.providers];
+        this.cdr.markForCheck();
+        this.snackBar.open(`Provider "${provider.name}" saved.`, 'Dismiss', { duration: 4000 });
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to save provider.', 'Dismiss', { duration: 6000 }),
+    });
+  }
+
+  openUpdateTestDialog(test: ResilienceTest): void {
+    this.updateTestForm = { id: test.id, result: test.result, findings: test.findings ?? '', reportRef: test.reportRef ?? '' };
+    this.dialog.open(this.updateTestDialogTpl, { width: '480px' });
+  }
+
+  submitUpdateTest(): void {
+    if (!this.updateTestForm.id || !this.updateTestForm.result) return;
+    this.dialog.closeAll();
+
+    this.doraService.updateResilienceTest(this.updateTestForm.id, {
+      result: this.updateTestForm.result,
+      findings: this.updateTestForm.findings || undefined,
+      reportRef: this.updateTestForm.reportRef || undefined,
+    }).subscribe({
+      next: (updated) => {
+        this.resilienceTests = this.resilienceTests.map(t => t.id === updated.id ? updated : t);
+        this.cdr.markForCheck();
+        this.snackBar.open(`Test result updated (${updated.result}).`, 'Dismiss', { duration: 4000 });
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to update test.', 'Dismiss', { duration: 6000 }),
     });
   }
 }

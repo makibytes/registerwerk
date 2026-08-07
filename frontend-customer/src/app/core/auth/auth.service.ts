@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable, of } from 'rxjs';
 import { AUTH_CONFIG } from './auth-config';
-import { decodePayload } from './local-storage-token-source';
 import { TokenSource } from './token-source';
 
 /**
@@ -95,7 +94,7 @@ export class AuthService {
 
   isImpersonating(): boolean {
     const payload = this.payload();
-    return payload ? payload['imp'] === true : false;
+    return payload ? payload['impersonating'] === true : false;
   }
 
   supportsImpersonation(): boolean {
@@ -106,12 +105,12 @@ export class AuthService {
     return this.tokens.getImpersonationMeta();
   }
 
-  enterImpersonation(impersonationToken: string, entityId: string, entityName: string): void {
-    this.tokens.enterImpersonation(impersonationToken, entityId, entityName);
+  enterImpersonation(impersonationToken: string, entityId: string, entityName: string): Observable<void> {
+    return this.tokens.enterImpersonation(impersonationToken, entityId, entityName);
   }
 
-  exitImpersonation(): void {
-    this.tokens.exitImpersonation();
+  exitImpersonation(): Observable<void> {
+    return this.tokens.exitImpersonation();
   }
 
   // ── Sign-in mode ───────────────────────────────────────────────────────────
@@ -131,6 +130,10 @@ export class AuthService {
     this.tokens.login();
   }
 
+  loginWithCredentials(email: string, password: string): Observable<void> {
+    return this.tokens.loginWithCredentials(email, password);
+  }
+
   logout(): void {
     this.tokens.logout();
   }
@@ -138,12 +141,6 @@ export class AuthService {
   // ── Private helpers ────────────────────────────────────────────────────────
 
   private payload(): Record<string, unknown> | null {
-    const token = this.getToken();
-    if (!token) return null;
-    try {
-      return decodePayload(token);
-    } catch {
-      return null;
-    }
+    return this.tokens.getProfile();
   }
 }

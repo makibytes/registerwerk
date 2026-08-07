@@ -133,6 +133,10 @@ const { operatorUrl } = environment;
             <span class="menu-alert-dot" aria-label="Two-factor authentication is not set up"></span>
           }
         </button>
+        <button mat-menu-item routerLink="/support">
+          <mat-icon>support_agent</mat-icon>
+          <span>Support</span>
+        </button>
         <button mat-menu-item (click)="logout()">
           <mat-icon>logout</mat-icon>
           <span>Sign out</span>
@@ -524,13 +528,11 @@ export class NavComponent implements OnInit {
   }
 
   switchCompany(): void {
-    this.auth.exitImpersonation();
-    this.router.navigate(['/select-company']);
+    this.auth.exitImpersonation().subscribe(() => this.router.navigate(['/select-company']));
   }
 
   exitImpersonation(): void {
-    this.auth.exitImpersonation();
-    this.router.navigate(['/select-company']);
+    this.auth.exitImpersonation().subscribe(() => this.router.navigate(['/select-company']));
   }
 
   logout(): void { this.auth.logout(); }

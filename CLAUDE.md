@@ -135,14 +135,15 @@ docker compose --profile docs up                    # docs server :8003
 docker compose --profile docs up --build docs      # http://localhost:8003
 ```
 
-Build it strictly before committing doc changes (CI enforces this via `.github/workflows/docs.yml`):
+Build it strictly before committing doc changes (CI enforces this via `.github/workflows/docs.yml`). Use the image built from `docs/Dockerfile`, not the bare `squidfunk/mkdocs-material` image — this site needs `mkdocs-static-i18n` (see `mkdocs.yml`'s `plugins:` list), which the bare image doesn't have; running `--strict` against it fails immediately with `Config value 'plugins': The "i18n" plugin is not installed`, not a real link-check failure:
 
 ```bash
+docker build -f docs/Dockerfile -t registerwerk-docs:local .
 docker run --rm -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro \
-  squidfunk/mkdocs-material:9.7.7 build --strict
+  registerwerk-docs:local build --strict
 ```
 
-For live authoring with reload, run mkdocs directly (`docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro squidfunk/mkdocs-material:9.7.7`).
+For live authoring with reload, run the same image with `mkdocs serve` (`docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro registerwerk-docs:local`).
 
 Two things to know about `docs_dir`: MkDocs builds a page for **every** `.md` under it — the explicit `nav:` only controls the sidebar, not what gets rendered or indexed — and `mkdocs serve`'s livereload polls the **entire** tree twice a second regardless of `exclude_docs`. A dormant Docusaurus install used to sit here and cost 1,722 rendered pages plus a permanent 30k-file polling loop; it has been removed, and `exclude_docs` now also lists `node_modules/`, `build/`, `.docusaurus/` so a stray `npm install` under `docs/` cannot bring it back. Use MkDocs syntax (`!!! note`), not Docusaurus (`:::note`).
 

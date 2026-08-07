@@ -31,7 +31,6 @@ import {
   TradingOrderType,
   TradingVenue,
   WalletPreferenceMode,
-  WalletTargetType,
   TokenStandard,
 } from '../../core/models';
 

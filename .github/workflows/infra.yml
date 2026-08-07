@@ -1,0 +1,89 @@
+name: Infra Config CI
+
+# Config-only validation for the pieces that have no other CI coverage: docker-compose files,
+# Kong's declarative config (both the Compose copy and its Helm-chart mirror, which must stay
+# identical per the SYNC NOTE at the top of deploy/helm/registerwerk/files/kong.yml), and both
+# Helm charts. None of this spins up the actual stack (see the "docker compose up" verification
+# in Track 0's own testing, done manually) — it only catches config that's syntactically or
+# structurally broken before it reaches a real deploy.
+
+on:
+  push:
+    branches: [main, feat/**, fix/**]
+    paths:
+      - docker-compose.yml
+      - monitoring/docker-compose.yml
+      - gateway/kong.yml
+      - deploy/helm/**
+      - .github/workflows/infra.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - docker-compose.yml
+      - monitoring/docker-compose.yml
+      - gateway/kong.yml
+      - deploy/helm/**
+
+concurrency:
+  group: infra-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    name: Docker Compose Config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate root compose file
+        run: docker compose config -q
+      - name: Validate root compose file with the docs profile
+        run: docker compose --profile docs config -q
+      - name: Validate the monitoring compose file
+        run: docker compose -f monitoring/docker-compose.yml config -q
+
+  kong-config:
+    name: Kong Declarative Config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse gateway/kong.yml
+        run: |
+          docker run --rm -e KONG_DATABASE=off \
+            -v "$PWD/gateway/kong.yml:/kong.yml:ro" \
+            kong:3.9.3 kong config parse /kong.yml
+      # Must stay identical to gateway/kong.yml (Helm can only read files inside its own chart
+      # directory, so this is a separate copy — see the SYNC NOTE at the top of the file).
+      - name: Parse deploy/helm/registerwerk/files/kong.yml
+        run: |
+          docker run --rm -e KONG_DATABASE=off \
+            -v "$PWD/deploy/helm/registerwerk/files/kong.yml:/kong.yml:ro" \
+            kong:3.9.3 kong config parse /kong.yml
+
+  helm:
+    name: Helm Lint & Template
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.3"
+      # No `helm dependency build` needed: charts/*.tgz (kong, postgresql) are already vendored
+      # and committed, so lint/template resolve against them directly without touching a
+      # chart repository.
+      - name: Lint & template the main chart
+        working-directory: deploy/helm/registerwerk
+        run: |
+          helm lint .
+          helm template test .
+      # postgresql.host/pvcName are marked REQUIRED in values.yaml with a `fail` guard when
+      # unset (they're derived from the main chart's release name at install time, which this
+      # chart deliberately can't compute on its own — see the comment in values.yaml) — set
+      # placeholders here purely so the template step can render.
+      - name: Lint & template the backup chart
+        working-directory: deploy/helm/backup
+        run: |
+          helm lint . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder
+          helm template test . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder

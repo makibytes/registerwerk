@@ -17,8 +17,9 @@ import { AuthService } from '../../core/auth/auth.service';
 import {
   KycDocument,
   KycComplianceResponse,
+  KycEntityStatus,
+  KycJurisdictionApproval,
   Jurisdiction,
-  JurisdictionRequirement,
 } from '../../core/models';
 
 const ALL_JURISDICTIONS: { value: Jurisdiction; label: string }[] = [
@@ -58,6 +59,9 @@ const ALL_DOC_TYPES = [
     <div class="page-container">
       <div class="page-header">
         <h1>KYC & Compliance Documents</h1>
+        @if (entityKycStatus) {
+          <span class="status-chip" [class]="entityStatusClass(entityKycStatus)">{{ entityKycStatus.replace('_', ' ') }}</span>
+        }
       </div>
       <p class="page-sub">
         Upload the required documents for each regulatory jurisdiction. Documents marked
@@ -70,6 +74,46 @@ const ALL_DOC_TYPES = [
         @for (jur of allJurisdictions; track jur.value) {
           <mat-tab [label]="jur.label">
             <div style="padding-top:20px">
+
+              <!-- Jurisdiction approval decision + rejection reason -->
+              @if (jurisdictionApprovals[jur.value]; as approval) {
+                @if (approval.status === 'REJECTED') {
+                  <mat-card class="decision-card rejected">
+                    <mat-card-content>
+                      <div class="decision-row">
+                        <mat-icon class="ci err">cancel</mat-icon>
+                        <span class="decision-label">KYC rejected for {{ jur.label }}</span>
+                      </div>
+                      @if (approval.rejectionReason) {
+                        <p class="decision-reason">{{ approval.rejectionReason }}</p>
+                      }
+                      <p class="decision-hint">Address the issue above and re-upload the affected document(s) below.</p>
+                    </mat-card-content>
+                  </mat-card>
+                } @else if (approval.status === 'APPROVED') {
+                  <mat-card class="decision-card approved">
+                    <mat-card-content>
+                      <div class="decision-row">
+                        <mat-icon class="ci ok">check_circle</mat-icon>
+                        <span class="decision-label">KYC approved for {{ jur.label }}</span>
+                        @if (approval.expiresAt) {
+                          <span class="decision-expiry">valid until {{ approval.expiresAt | date:'mediumDate' }}</span>
+                        }
+                      </div>
+                    </mat-card-content>
+                  </mat-card>
+                } @else if (approval.status === 'EXPIRED') {
+                  <mat-card class="decision-card rejected">
+                    <mat-card-content>
+                      <div class="decision-row">
+                        <mat-icon class="ci warn">schedule</mat-icon>
+                        <span class="decision-label">KYC expired for {{ jur.label }}</span>
+                      </div>
+                      <p class="decision-hint">Re-upload the expired document(s) below to restart review.</p>
+                    </mat-card-content>
+                  </mat-card>
+                }
+              }
 
               <!-- Compliance checklist card -->
               <mat-card style="margin-bottom:16px">
@@ -245,11 +289,26 @@ const ALL_DOC_TYPES = [
     .page-container { max-width: 960px; margin: 0 auto; padding: 16px; }
     .page-sub { color: var(--rw-text-secondary); font-size: 13px; margin: 0 0 20px; }
 
+    .page-header { display: flex; align-items: center; gap: 10px; }
+
     .status-chip {
       font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
-      &.compliant { background: rgba(16,185,129,0.12); color: #10b981; }
-      &.incomplete { background: rgba(245,158,11,0.12); color: #f59e0b; }
+      text-transform: uppercase; letter-spacing: 0.3px;
+      &.compliant, &.status-approved { background: rgba(16,185,129,0.12); color: #10b981; }
+      &.incomplete, &.status-in-progress, &.status-not-started { background: rgba(245,158,11,0.12); color: #f59e0b; }
+      &.status-rejected, &.status-expired { background: rgba(239,68,68,0.12); color: #ef4444; }
     }
+
+    .decision-card {
+      margin-bottom: 16px; border-left: 3px solid transparent;
+      &.rejected { border-left-color: #ef4444; }
+      &.approved { border-left-color: #10b981; }
+    }
+    .decision-row { display: flex; align-items: center; gap: 8px; }
+    .decision-label { font-weight: 600; font-size: 13px; }
+    .decision-expiry { margin-left: auto; font-size: 11px; color: var(--rw-text-muted); }
+    .decision-reason { margin: 8px 0 0 22px; font-size: 12.5px; color: var(--rw-text-secondary); }
+    .decision-hint { margin: 4px 0 0 22px; font-size: 11.5px; color: var(--rw-text-muted); }
 
     .compliance-summary { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
     .chip {
@@ -302,6 +361,9 @@ export class KycStatusComponent implements OnInit {
   readonly allDocTypes = ALL_DOC_TYPES;
   readonly docColumns = ['type', 'jurisdiction', 'fileName', 'size', 'uploadedAt', 'actions'];
 
+  entityKycStatus: KycEntityStatus | null = null;
+  jurisdictionApprovals: Partial<Record<Jurisdiction, KycJurisdictionApproval>> = {};
+
   compliance: Partial<Record<Jurisdiction, KycComplianceResponse>> = {};
   complianceLoading: Partial<Record<Jurisdiction, boolean>> = {};
   uploadFiles: Partial<Record<Jurisdiction, File>> = {};
@@ -312,7 +374,32 @@ export class KycStatusComponent implements OnInit {
     this.entityId = this.authService.getEntityId();
     if (this.entityId) {
       this.loadDocuments();
+      this.loadKycStatus();
+      this.loadJurisdictionApprovals();
     }
+  }
+
+  loadKycStatus(): void {
+    if (!this.entityId) return;
+    this.kycService.getKycStatus(this.entityId).subscribe({
+      next: (res) => { this.entityKycStatus = res.kycStatus; this.cdr.detectChanges(); },
+    });
+  }
+
+  loadJurisdictionApprovals(): void {
+    if (!this.entityId) return;
+    this.kycService.getJurisdictionApprovals(this.entityId).subscribe({
+      next: (approvals) => {
+        this.jurisdictionApprovals = Object.fromEntries(
+          approvals.map(a => [a.jurisdiction, a])
+        ) as Partial<Record<Jurisdiction, KycJurisdictionApproval>>;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  entityStatusClass(status: KycEntityStatus): string {
+    return 'status-' + status.toLowerCase().replace(/_/g, '-');
   }
 
   loadDocuments(): void {

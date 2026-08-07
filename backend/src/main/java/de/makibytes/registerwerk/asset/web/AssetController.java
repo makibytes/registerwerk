@@ -156,6 +156,11 @@ public class AssetController {
         patch.setJurisdiction(request.jurisdiction());
         patch.setChain(request.chain());
         patch.setNetwork(request.network());
+        patch.setCurrency(request.currency());
+        patch.setIssueSize(request.issueSize());
+        patch.setDenomination(request.denomination());
+        patch.setIssueDate(request.issueDate());
+        patch.setMaturityDate(request.maturityDate());
         return ResponseEntity.ok(toResponse(assetService.updateAsset(id, patch, extractActorId(auth)), auth, false));
     }
 
@@ -269,7 +274,12 @@ public class AssetController {
                 hasTermSheet,
                 externalRefApi
                         .findExternalId(authentication, ExternalReferenceSubjectType.ASSET, asset.getId())
-                        .orElse(null)
+                        .orElse(null),
+                asset.getCurrency(),
+                asset.getIssueSize(),
+                asset.getDenomination(),
+                asset.getIssueDate(),
+                asset.getMaturityDate()
         );
     }
 

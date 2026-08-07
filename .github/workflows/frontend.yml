@@ -6,18 +6,41 @@ on:
     paths:
       - frontend-operator/**
       - frontend-customer/**
+      - frontend-shared/**
       - .github/workflows/frontend.yml
   pull_request:
     branches: [main]
     paths:
       - frontend-operator/**
       - frontend-customer/**
+      - frontend-shared/**
 
 concurrency:
   group: frontend-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # The shared UI library has no angular.json/project of its own — both apps consume it via a
+  # TS path alias (@registerwerk/ui), so it was previously outside both apps' `ng lint` scope
+  # entirely and had no lint coverage. Its own eslint.config.js (frontend-shared/eslint.config.js)
+  # reuses frontend-operator's node_modules via the existing symlink rather than duplicating the
+  # dependency install.
+  frontend-shared:
+    name: Shared UI Library
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-operator/package-lock.json
+      - run: npm ci
+        working-directory: frontend-operator
+      - run: ./node_modules/.bin/eslint projects/ui/src
+        working-directory: frontend-shared
+
   frontend-operator:
     name: Operator Frontend
     runs-on: ubuntu-24.04
@@ -34,7 +57,7 @@ jobs:
           cache-dependency-path: frontend-operator/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: npm run test -- --watch=false --browsers=ChromeHeadless
+      - run: npm run test -- --watch=false --browsers=ChromeHeadlessCI
       - run: npm run build -- --configuration production
       - name: Trivy SCA
         uses: aquasecurity/trivy-action@master
@@ -66,7 +89,7 @@ jobs:
           cache-dependency-path: frontend-customer/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: npm run test -- --watch=false --browsers=ChromeHeadless
+      - run: npm run test -- --watch=false --browsers=ChromeHeadlessCI
       - run: npm run build -- --configuration production
       - name: Trivy SCA
         uses: aquasecurity/trivy-action@master

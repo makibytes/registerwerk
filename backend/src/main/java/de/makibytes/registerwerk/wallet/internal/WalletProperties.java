@@ -14,8 +14,11 @@ import java.nio.file.Path;
  * Configuration for the operator wallet subsystem.
  *
  * <p>The master key ({@code REGISTERWERK_WALLET_MASTER_KEY}) is the only secret needed
- * at runtime. It is used to decrypt keystore files stored at {@link #storageDir}. No
- * private-key material is kept in the database or in application properties.
+ * at runtime. With the {@code FILESYSTEM} storage backend it is used to decrypt legacy
+ * (pre-envelope) keystore files stored at {@link #storageDir}; with {@code POSTGRES}
+ * (see {@link de.makibytes.registerwerk.wallet.api.KeystoreBlobStore}) the same fallback
+ * applies but the bytes live in {@code wallet_keystore_blob} instead of on disk — which is
+ * what lets the backend run multiple replicas without a shared volume.
  *
  * <p>On startup this bean validates that:
  * <ul>
@@ -23,7 +26,8 @@ import java.nio.file.Path;
  *   <li>The legacy plaintext env vars ({@code REGISTRY_WALLET_PRIVATE_KEY},
  *       {@code REGISTRY_SOLANA_PRIVATE_KEY}) are NOT set — operators must import
  *       their keys via the operator UI.</li>
- *   <li>The storage directory exists (or can be created).</li>
+ *   <li>When the FILESYSTEM backend is selected, the storage directory exists (or can be
+ *       created) — skipped for POSTGRES, which needs no local directory at all.</li>
  * </ul>
  */
 @Component
@@ -34,6 +38,7 @@ public class WalletProperties {
 
     private String masterKey;
     private String storageDir = "/data/wallets";
+    private String storageBackend = "FILESYSTEM";
 
     /** Detected legacy vars — used only for startup validation. */
     @Value("${registerwerk.wallet.private-key:}")
@@ -69,19 +74,22 @@ public class WalletProperties {
                     "Generate a secure value with: openssl rand -base64 32");
         }
 
-        Path storagePath = Path.of(storageDir);
-        if (!Files.exists(storagePath)) {
-            try {
-                Files.createDirectories(storagePath);
-                log.info("Created wallet storage directory: {}", storagePath.toAbsolutePath());
-            } catch (Exception e) {
-                throw new IllegalStateException(
-                        "Cannot create wallet storage directory: " + storagePath, e);
+        if ("FILESYSTEM".equalsIgnoreCase(storageBackend)) {
+            Path storagePath = Path.of(storageDir);
+            if (!Files.exists(storagePath)) {
+                try {
+                    Files.createDirectories(storagePath);
+                    log.info("Created wallet storage directory: {}", storagePath.toAbsolutePath());
+                } catch (Exception e) {
+                    throw new IllegalStateException(
+                            "Cannot create wallet storage directory: " + storagePath, e);
+                }
             }
+            log.info("Wallet storage: backend=FILESYSTEM, directory={}, master-key=<set, {} chars>",
+                    storagePath.toAbsolutePath(), masterKey.length());
+        } else {
+            log.info("Wallet storage: backend={}, master-key=<set, {} chars>", storageBackend, masterKey.length());
         }
-
-        log.info("Wallet storage: directory={}, master-key=<set, {} chars>",
-                storagePath.toAbsolutePath(), masterKey.length());
     }
 
     public String getMasterKey() { return masterKey; }
@@ -89,4 +97,7 @@ public class WalletProperties {
 
     public String getStorageDir() { return storageDir; }
     public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
+
+    public String getStorageBackend() { return storageBackend; }
+    public void setStorageBackend(String storageBackend) { this.storageBackend = storageBackend; }
 }

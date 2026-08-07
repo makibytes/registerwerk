@@ -21,6 +21,24 @@ export type EntryType = 'COLLECTIVE' | 'INDIVIDUAL' | 'MIXED';
  * UI never presents a holding confirmation as if it were the legal register
  * extract. See `RegisterDocumentService`.
  */
+/** Bond economic terms — `asset.web.BondTermsController`. Present only for bond-type assets. */
+export interface AssetBondTerms {
+  assetId: string;
+  faceValue: number;
+  currencyIso: string;
+  issueDate: string;
+  maturityDate: string;
+  couponRate: number | null;
+  referenceRate: string | null;
+  spread: number | null;
+  issuePrice: number;
+  dayCount: 'ACT_360' | 'ACT_365' | 'ACT_ACT_ICMA' | 'THIRTY_360' | 'THIRTY_E_360';
+  paymentFrequency: 'ANNUAL' | 'SEMI_ANNUAL' | 'QUARTERLY' | 'MONTHLY' | 'ZERO';
+  callable: boolean;
+  callSchedule: Record<string, unknown>[] | null;
+  bondStatus: 'ACTIVE' | 'MATURED' | 'CALLED' | 'DEFAULTED' | 'REDEEMED';
+}
+
 export interface RegisterDocumentMeta {
   assetId: string;
   isin: string | null;
@@ -30,6 +48,40 @@ export interface RegisterDocumentMeta {
   docType: string;
   title: string;
   statutory: boolean;
+}
+
+/** §10 eWpG register inspection request. */
+export type InspectionLegalBasis = 'ISSUER' | 'HOLDER' | 'BENEFICIARY' | 'LEGITIMATE_INTEREST';
+export type InspectionStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'FULFILLED';
+
+export interface RegisterInspectionRequest {
+  id: string;
+  assetId: string;
+  requesterEntityId: string | null;
+  requesterName: string;
+  requesterEmail: string | null;
+  legalBasis: InspectionLegalBasis;
+  statedInterest: string | null;
+  status: InspectionStatus;
+  decisionReason: string | null;
+  decidedAt: string | null;
+  fulfilledAt: string | null;
+  createdAt: string;
+}
+
+/** GwG §3 / AMLR Art. 42 beneficial-owner (UBO) registration — read-only on the customer side. */
+export interface BeneficialOwner {
+  id: string;
+  entityId: string;
+  naturalPersonId: string;
+  givenName: string;
+  familyName: string;
+  country: string | null;
+  pepStatus: 'UNKNOWN' | 'NOT_PEP' | 'DOMESTIC_PEP' | 'FOREIGN_PEP' | 'INTERNATIONAL_PEP' | 'PEP_FAMILY' | 'PEP_ASSOCIATE';
+  ownershipPct: number | null;
+  controlType: 'DIRECT_OWNERSHIP' | 'INDIRECT_OWNERSHIP' | 'OTHER_CONTROL' | 'LEGAL_REPRESENTATIVE' | 'TRUSTEE';
+  registeredAt: string;
+  ceasedAt: string | null;
 }
 
 export interface JurisdictionRequirement {
@@ -48,18 +100,6 @@ export interface DocumentRequirement {
   maxAgeDays: number | null;
 }
 
-export interface KycJurisdictionApproval {
-  id: string;
-  entityId: string;
-  jurisdiction: Jurisdiction;
-  jurisdictionDisplayName: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
-  approvedBy?: string;
-  approvedAt?: string;
-  expiresAt?: string;
-  rejectionReason?: string;
-}
-
 export interface KycComplianceResponse {
   jurisdiction: Jurisdiction;
   jurisdictionDisplayName: string;
@@ -69,6 +109,23 @@ export interface KycComplianceResponse {
   missingCount: number;
   expiredCount: number;
   tooOldCount: number;
+}
+
+/** Overall entity-level KYC decision — distinct from a single document's review status. */
+export type KycEntityStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+
+/** Per-jurisdiction KYC approval record, including the rejection reason when applicable. */
+export interface KycJurisdictionApproval {
+  id: string;
+  entityId: string;
+  jurisdiction: Jurisdiction;
+  jurisdictionDisplayName: string;
+  status: KycEntityStatus;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  expiresAt: string | null;
+  rejectionReason: string | null;
+  overrideNote: string | null;
 }
 
 export interface DocumentStatus {
@@ -176,6 +233,11 @@ export interface Asset {
   updatedAt: string;
   hasTermSheet: boolean;
   externalId: string | null;
+  currency: string | null;
+  issueSize: number | null;
+  denomination: number | null;
+  issueDate: string | null;
+  maturityDate: string | null;
 }
 
 export interface AssetDocument {
@@ -230,6 +292,32 @@ export interface KycDocument {
   status: KycStatus;
 }
 
+/** Customer support ticket — `support.web.MeSupportTicketController`. */
+export interface SupportTicket {
+  id: string;
+  entityId: string;
+  createdBy: string;
+  subject: string;
+  description: string;
+  category: 'TECHNICAL' | 'COMPLIANCE' | 'BILLING' | 'ASSET_ISSUE' | 'TRADING' | 'ONBOARDING' | 'OTHER';
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  assignedTo?: string;
+  resolutionNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  closedAt?: string;
+}
+
+export interface SupportTicketMessage {
+  id: string;
+  authorId: string;
+  authorIsOperator: boolean;
+  body: string;
+  createdAt: string;
+}
+
 export interface PageResponse<T> {
   content: T[];
   totalElements: number;
@@ -273,6 +361,8 @@ export interface InvestmentRecord {
   updatedAt: string;
   externalId: string | null;
   chain: Chain | null;
+  currency: string | null;
+  denomination: number | null;
 }
 
 export interface InvestmentSummary {

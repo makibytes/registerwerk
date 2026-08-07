@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Observable } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -279,7 +280,7 @@ export class SlotAdminComponent implements OnInit {
     });
   }
 
-  private run(obs: { subscribe: Function }, successMsg: string, onSuccess?: () => void): void {
+  private run(obs: Observable<unknown>, successMsg: string, onSuccess?: () => void): void {
     this.busy = true;
     this.cdr.markForCheck();
     obs.subscribe({

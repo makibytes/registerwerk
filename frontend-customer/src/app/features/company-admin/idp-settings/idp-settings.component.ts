@@ -47,6 +47,9 @@ import { CompanyService } from '../../../core/api/company.service';
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #rla4="routerLinkActive" [active]="rla4.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
         </a>
+        <a mat-tab-link routerLink="/company-admin/beneficial-owners" routerLinkActive #rlaBo="routerLinkActive" [active]="rlaBo.isActive">
+          <mat-icon>diversity_3</mat-icon>&nbsp;Beneficial Owners
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 
@@ -180,7 +183,7 @@ export class IdpSettingsComponent implements OnInit {
   issuerUrl = '';
   clientId  = '';
   lifecycleManagedExternally = false;
-  identityModel: string = 'WORKFORCE_GUEST';
+  identityModel = 'WORKFORCE_GUEST';
   idpMfaTrusted = false;
 
   loadingSettings = true;

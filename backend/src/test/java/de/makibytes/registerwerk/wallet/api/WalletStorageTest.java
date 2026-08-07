@@ -4,7 +4,6 @@ import de.makibytes.registerwerk.wallet.internal.WalletProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.ECKeyPair;
 import org.web3j.crypto.Keys;
@@ -14,10 +13,9 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
@@ -31,22 +29,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  * the repo: the encrypted-at-rest storage of every operator signing key. A local
  * {@link StubKekProvider} stands in for a real KMS, matching the real interface contract
  * (fresh IV per {@code wrap()} call, so a rewrap always produces different ciphertext bytes
- * even though it unwraps to the identical plaintext DEK).
+ * even though it unwraps to the identical plaintext DEK). {@link StubKeystoreBlobStore} stands
+ * in for {@code FilesystemKeystoreBlobStore}/{@code PostgresKeystoreBlobStore} — this test
+ * exercises WalletStorage's encryption logic, not either storage backend's I/O, which each
+ * have their own coverage.
  */
 class WalletStorageTest {
 
-    @TempDir
-    Path tempDir;
-
     private WalletStorage storage;
     private StubKekProvider kekProvider;
+    private StubKeystoreBlobStore blobStore;
 
     @BeforeEach
     void setUp() {
         WalletProperties props = new WalletProperties();
-        props.setStorageDir(tempDir.toString());
         kekProvider = new StubKekProvider();
-        storage = new WalletStorage(props, kekProvider);
+        blobStore = new StubKeystoreBlobStore();
+        storage = new WalletStorage(props, kekProvider, blobStore);
     }
 
     // ── EVM round-trip ────────────────────────────────────────────────────────
@@ -61,7 +60,7 @@ class WalletStorageTest {
         Credentials loaded = storage.loadEvm(relativePath);
 
         assertThat(loaded.getEcKeyPair().getPrivateKey()).isEqualTo(pair.getPrivateKey());
-        assertThat(Files.exists(tempDir.resolve(id + ".dek.bin"))).isTrue();
+        assertThat(blobStore.exists(id + ".dek.bin")).isTrue();
     }
 
     @Test
@@ -150,16 +149,16 @@ class WalletStorageTest {
     // ── Delete ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("delete removes the keystore file")
+    @DisplayName("delete removes the keystore blob")
     void delete() throws Exception {
         ECKeyPair pair = Keys.createEcKeyPair();
         UUID id = UUID.randomUUID();
         String relativePath = storage.storeEvm(id, pair);
-        assertThat(Files.exists(tempDir.resolve(relativePath))).isTrue();
+        assertThat(blobStore.exists(relativePath)).isTrue();
 
         storage.delete(relativePath);
 
-        assertThat(Files.exists(tempDir.resolve(relativePath))).isFalse();
+        assertThat(blobStore.exists(relativePath)).isFalse();
     }
 
     // ── KEK rotation (finding #9, Phase 8) ─────────────────────────────────────
@@ -170,12 +169,12 @@ class WalletStorageTest {
         ECKeyPair pair = Keys.createEcKeyPair();
         UUID id = UUID.randomUUID();
         String relativePath = storage.storeEvm(id, pair);
-        byte[] wrappedBefore = Files.readAllBytes(tempDir.resolve(id + ".dek.bin"));
+        byte[] wrappedBefore = blobStore.read(id + ".dek.bin");
 
         boolean rotated = storage.rewrapDek(relativePath, true);
 
         assertThat(rotated).isTrue();
-        byte[] wrappedAfter = Files.readAllBytes(tempDir.resolve(id + ".dek.bin"));
+        byte[] wrappedAfter = blobStore.read(id + ".dek.bin");
         assertThat(wrappedAfter).isNotEqualTo(wrappedBefore);
         assertThat(storage.loadEvm(relativePath).getEcKeyPair().getPrivateKey()).isEqualTo(pair.getPrivateKey());
     }
@@ -186,7 +185,7 @@ class WalletStorageTest {
         ECKeyPair pair = Keys.createEcKeyPair();
         UUID id = UUID.randomUUID();
         String relativePath = storage.storeEvm(id, pair);
-        Files.delete(tempDir.resolve(id + ".dek.bin")); // simulate a pre-envelope-encryption keystore
+        blobStore.delete(id + ".dek.bin"); // simulate a pre-envelope-encryption keystore
 
         boolean rotated = storage.rewrapDek(relativePath, true);
 
@@ -200,12 +199,12 @@ class WalletStorageTest {
         new SecureRandom().nextBytes(secretKey);
         UUID id = UUID.randomUUID();
         String relativePath = storage.storeSolana(id, secretKey);
-        String envelopeBefore = Files.readString(tempDir.resolve(relativePath));
+        byte[] envelopeBefore = blobStore.read(relativePath);
 
         boolean rotated = storage.rewrapDek(relativePath, false);
 
         assertThat(rotated).isTrue();
-        String envelopeAfter = Files.readString(tempDir.resolve(relativePath));
+        byte[] envelopeAfter = blobStore.read(relativePath);
         assertThat(envelopeAfter).isNotEqualTo(envelopeBefore);
         assertThat(storage.loadSolana(relativePath)).isEqualTo(secretKey);
     }
@@ -221,10 +220,10 @@ class WalletStorageTest {
                 "iv", HexFormat.of().formatHex(new byte[12]),
                 "ciphertext", HexFormat.of().formatHex(new byte[16]));
         String relativePath = id + ".json";
-        Files.writeString(tempDir.resolve(relativePath),
-                "{" + legacyEnvelope.entrySet().stream()
-                        .map(e -> "\"" + e.getKey() + "\":\"" + e.getValue() + "\"")
-                        .collect(Collectors.joining(",")) + "}");
+        String json = "{" + legacyEnvelope.entrySet().stream()
+                .map(e -> "\"" + e.getKey() + "\":\"" + e.getValue() + "\"")
+                .collect(Collectors.joining(",")) + "}";
+        blobStore.write(relativePath, json.getBytes(StandardCharsets.UTF_8));
 
         boolean rotated = storage.rewrapDek(relativePath, false);
 
@@ -267,5 +266,25 @@ class WalletStorageTest {
                 throw new IllegalStateException(e);
             }
         }
+    }
+
+    /** In-memory {@link KeystoreBlobStore} test double — isolates these tests from any
+     *  particular storage backend's I/O. */
+    private static final class StubKeystoreBlobStore implements KeystoreBlobStore {
+        private final Map<String, byte[]> blobs = new HashMap<>();
+
+        public String name() { return "STUB"; }
+
+        public void write(String relativePath, byte[] content) { blobs.put(relativePath, content); }
+
+        public byte[] read(String relativePath) {
+            byte[] content = blobs.get(relativePath);
+            if (content == null) throw new WalletStorage.WalletStorageException("No blob at " + relativePath);
+            return content;
+        }
+
+        public boolean exists(String relativePath) { return blobs.containsKey(relativePath); }
+
+        public void delete(String relativePath) { blobs.remove(relativePath); }
     }
 }

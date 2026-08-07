@@ -51,6 +51,20 @@ export const COMPLIANCE_ROUTES: Routes = [
       ),
   },
   {
+    path: 'support-tickets',
+    loadComponent: () =>
+      import('./support-tickets/support-ticket-queue.component').then(
+        (m) => m.SupportTicketQueueComponent,
+      ),
+  },
+  {
+    path: 'support-tickets/:id',
+    loadComponent: () =>
+      import('./support-tickets/support-ticket-detail.component').then(
+        (m) => m.SupportTicketDetailComponent,
+      ),
+  },
+  {
     path: 'token-admin-grants',
     loadComponent: () =>
       import('./token-admin-grants/token-admin-grant-list.component').then(

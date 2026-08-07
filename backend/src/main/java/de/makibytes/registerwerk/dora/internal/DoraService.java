@@ -10,6 +10,9 @@ import de.makibytes.registerwerk.dora.api.ThirdPartyProvider;
 import de.makibytes.registerwerk.dora.api.ThirdPartyProviderRepository;
 import de.makibytes.registerwerk.dora.events.IctIncidentReportedEvent;
 import de.makibytes.registerwerk.dora.events.IctIncidentStatusChangedEvent;
+import de.makibytes.registerwerk.dora.events.ResilienceTestUpdatedEvent;
+import de.makibytes.registerwerk.dora.events.ThirdPartyProviderChangedEvent;
+import java.math.BigDecimal;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -174,6 +177,87 @@ public class DoraService {
                 LocalDate.now().plusDays(90));
     }
 
+    /**
+     * Registers a new critical/important ICT third-party provider in the DORA Register of
+     * Information (Art. 28). Previously the only way a {@link ThirdPartyProvider} row was ever
+     * created was {@code bootstrap.DemoDataSeeder} — a bank onboarding this system had no way
+     * to enter its own providers.
+     */
+    @Transactional
+    public ThirdPartyProvider createProvider(
+            String name, String category, ThirdPartyProvider.Criticality criticality,
+            String lei, String country, LocalDate contractStart, LocalDate contractEnd,
+            boolean subOutsourcing, String subOutsourcingDetails, String primaryContact,
+            BigDecimal slaAvailabilityPct, Integer rtoHours, Integer rpoHours, String notes,
+            UUID actorId) {
+        ThirdPartyProvider provider = new ThirdPartyProvider();
+        provider.setName(name);
+        provider.setCategory(category);
+        provider.setCriticality(criticality != null ? criticality : ThirdPartyProvider.Criticality.STANDARD);
+        provider.setLei(lei);
+        provider.setCountry(country);
+        provider.setContractStart(contractStart);
+        provider.setContractEnd(contractEnd);
+        provider.setSubOutsourcing(subOutsourcing);
+        provider.setSubOutsourcingDetails(subOutsourcingDetails);
+        provider.setPrimaryContact(primaryContact);
+        provider.setSlaAvailabilityPct(slaAvailabilityPct);
+        provider.setRtoHours(rtoHours);
+        provider.setRpoHours(rpoHours);
+        provider.setNotes(notes);
+
+        ThirdPartyProvider saved = providerRepository.save(provider);
+        log.info("DORA third-party provider registered: id={} name={} criticality={}",
+                saved.getId(), name, provider.getCriticality());
+        events.publishEvent(new ThirdPartyProviderChangedEvent(saved.getId(), "REGISTERED", actorId, "REGISTRY_ADMIN",
+                Map.of("name", name, "criticality", provider.getCriticality().name())));
+        return saved;
+    }
+
+    /**
+     * Updates an existing ICT third-party provider — all fields optional/overwriting, matching
+     * the {@code CustomerController.updateEntity} full-replace convention used elsewhere. Also
+     * the only write path for {@code notifiedAuthority}/{@code notifiedAt} (Art. 28(3) — the
+     * competent authority must be notified before entering into an arrangement with a critical
+     * provider).
+     */
+    @Transactional
+    public ThirdPartyProvider updateProvider(
+            UUID providerId, String name, String category, ThirdPartyProvider.Criticality criticality,
+            String lei, String country, LocalDate contractStart, LocalDate contractEnd,
+            boolean subOutsourcing, String subOutsourcingDetails, String primaryContact,
+            BigDecimal slaAvailabilityPct, Integer rtoHours, Integer rpoHours,
+            boolean notifiedAuthority, String notes, UUID actorId) {
+        ThirdPartyProvider provider = providerRepository.findById(providerId)
+                .orElseThrow(() -> new EntityNotFoundException("ThirdPartyProvider", providerId));
+
+        provider.setName(name);
+        provider.setCategory(category);
+        provider.setCriticality(criticality != null ? criticality : provider.getCriticality());
+        provider.setLei(lei);
+        provider.setCountry(country);
+        provider.setContractStart(contractStart);
+        provider.setContractEnd(contractEnd);
+        provider.setSubOutsourcing(subOutsourcing);
+        provider.setSubOutsourcingDetails(subOutsourcingDetails);
+        provider.setPrimaryContact(primaryContact);
+        provider.setSlaAvailabilityPct(slaAvailabilityPct);
+        provider.setRtoHours(rtoHours);
+        provider.setRpoHours(rpoHours);
+        provider.setNotes(notes);
+        boolean authorityNotificationChanged = notifiedAuthority && !provider.isNotifiedAuthority();
+        provider.setNotifiedAuthority(notifiedAuthority);
+        if (authorityNotificationChanged) {
+            provider.setNotifiedAt(Instant.now());
+        }
+
+        ThirdPartyProvider saved = providerRepository.save(provider);
+        log.info("DORA third-party provider updated: id={} name={}", saved.getId(), name);
+        events.publishEvent(new ThirdPartyProviderChangedEvent(saved.getId(), "UPDATED", actorId, "REGISTRY_ADMIN",
+                Map.of("name", name, "notifiedAuthority", notifiedAuthority)));
+        return saved;
+    }
+
     // ── Resilience Testing (Art. 24/25) ───────────────────────────────────────
 
     @Transactional
@@ -208,6 +292,28 @@ public class DoraService {
     @Transactional(readOnly = true)
     public List<ResilienceTest> listOverdueResilienceTests() {
         return resilienceTestRepository.findByNextDueDateBeforeOrderByNextDueDateAsc(LocalDate.now());
+    }
+
+    /**
+     * Updates a resilience test's result/findings — previously {@code recordResilienceTest}
+     * was the only write path, so a test recorded as {@code FINDINGS_OPEN} could never be
+     * closed out to {@code PASSED} once remediation was done.
+     */
+    @Transactional
+    public ResilienceTest updateResilienceTestResult(
+            UUID testId, ResilienceTest.Result result, String findings, String reportRef,
+            UUID actorId) {
+        ResilienceTest test = resilienceTestRepository.findById(testId)
+                .orElseThrow(() -> new EntityNotFoundException("ResilienceTest", testId));
+        test.setResult(result);
+        if (findings != null) test.setFindings(findings);
+        if (reportRef != null) test.setReportRef(reportRef);
+
+        ResilienceTest saved = resilienceTestRepository.save(test);
+        log.info("DORA resilience test updated: id={} result={}", saved.getId(), result);
+        events.publishEvent(new ResilienceTestUpdatedEvent(saved.getId(), actorId, "REGISTRY_ADMIN",
+                Map.of("result", result.name())));
+        return saved;
     }
 
     /** Daily check for overdue DORA reporting deadlines. */

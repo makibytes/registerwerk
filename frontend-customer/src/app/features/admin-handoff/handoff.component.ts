@@ -80,10 +80,13 @@ export class HandoffComponent implements OnInit {
     }
 
     if (token && entityId) {
-      this.auth.enterImpersonation(token, entityId, entityName);
-      // Clear the fragment so the token isn't in the URL bar
+      // Clear the fragment first, so the token never lingers in the address bar or history
+      // even if the exchange call below fails.
       history.replaceState(null, '', window.location.pathname);
-      this.router.navigate(['/dashboard']);
+      this.auth.enterImpersonation(token, entityId, entityName).subscribe({
+        next: () => this.router.navigate(['/dashboard']),
+        error: () => this.router.navigate(['/login']),
+      });
     } else {
       this.router.navigate(['/login']);
     }

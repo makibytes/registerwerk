@@ -370,11 +370,15 @@ code {
   white-space: nowrap;
 
   &.status-draft        { background: var(--rw-draft-bg);    color: var(--rw-draft-fg); }
-  &.status-pending      { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
-  &.status-approved     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-pending,
+  &.status-open,
+  &.status-in-progress  { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-approved,
+  &.status-resolved     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   &.status-issued       { background: var(--rw-issued-bg);   color: var(--rw-issued-fg); }
   &.status-rejected     { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
-  &.status-revoked      { background: var(--rw-revoked-bg);  color: var(--rw-revoked-fg); }
+  &.status-revoked,
+  &.status-closed       { background: var(--rw-revoked-bg);  color: var(--rw-revoked-fg); }
   &.status-whitelisted  { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   &.status-not-whitelisted { background: var(--rw-border-subtle); color: var(--rw-text-muted); }
 }

@@ -60,6 +60,9 @@ import {
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #orgRla="routerLinkActive" [active]="orgRla.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
         </a>
+        <a mat-tab-link routerLink="/company-admin/beneficial-owners" routerLinkActive #rlaBo="routerLinkActive" [active]="rlaBo.isActive">
+          <mat-icon>diversity_3</mat-icon>&nbsp;Beneficial Owners
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 
@@ -282,7 +285,7 @@ export class ExternalIdAdminComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
 
   readonly displayedColumns = ['externalId', 'subjectType', 'displayName', 'contextLabel', 'updatedAt', 'actions'];
-  readonly subjectTypeOptions: Array<{ value: ExternalReferenceSubjectType; label: string }> = [
+  readonly subjectTypeOptions: { value: ExternalReferenceSubjectType; label: string }[] = [
     { value: 'ASSET', label: 'Assets / issuances' },
     { value: 'LEGAL_ENTITY', label: 'Legal entities' },
     { value: 'ASSET_HOLDER', label: 'Asset holders / investments' },

@@ -139,7 +139,7 @@ export class SponsoredTxService {
           ? ((err as { shortMessage?: string; message?: string }).shortMessage ??
             (err as { message?: string }).message)
           : undefined;
-      throw new Error(message ?? 'Sponsored transaction failed.');
+      throw new Error(message ?? 'Sponsored transaction failed.', { cause: err });
     }
   }
 }

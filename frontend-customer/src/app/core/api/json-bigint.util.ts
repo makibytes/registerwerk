@@ -15,7 +15,7 @@
  */
 export function parseJsonPreservingBigInts(text: string): unknown {
   const safeguarded = text.replace(
-    /([:,\[]\s*)(-?\d{16,})(\s*[,}\]])/g,
+    /([:,[]\s*)(-?\d{16,})(\s*[,}\]])/g,
     (_match, before: string, digits: string, after: string) => `${before}"${digits}"${after}`,
   );
   return JSON.parse(safeguarded);

@@ -386,11 +386,14 @@ code {
   &.status-pending-approval,
   &.status-in-progress,
   &.status-pending,
+  &.status-open,
   &.status-not-started  { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-resolved     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   &.status-suspended,
   &.status-failed,
   &.status-expired      { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
   &.status-dissolved,
+  &.status-closed,
   &.status-redeemed     { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
   &.status-whitelisted  { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   // MiCA counterparty authorization (CASP register)

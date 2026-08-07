@@ -162,7 +162,9 @@ import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponen
               <mat-card class="stat-card">
                 <mat-card-content>
                   <div class="stat-value">{{ totalNominal | number:'1.0-0' }}</div>
-                  <div class="stat-label">Total Nominal (€)</div>
+                  <div class="stat-label">
+                    Total Nominal{{ totalNominalCurrency ? ' (' + totalNominalCurrency + ')' : '' }}
+                  </div>
                 </mat-card-content>
               </mat-card>
             </div>
@@ -209,7 +211,7 @@ import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponen
                         <span class="asset-name">{{ h.assetName ?? h.assetId }}</span>
                         <span class="wallet-addr">{{ h.walletAddress | slice:0:16 }}…</span>
                       </div>
-                      <span class="nominal-amount">€ {{ h.nominalAmount | number:'1.0-0' }}</span>
+                      <span class="nominal-amount">{{ h.nominalAmount | number:'1.0-0' }} {{ h.currency ?? '' }}</span>
                       <app-status-badge [status]="h.whitelisted ? 'WHITELISTED' : 'NOT_WHITELISTED'"></app-status-badge>
                       <a mat-icon-button [routerLink]="['/investments', h.id]">
                         <mat-icon>arrow_forward</mat-icon>
@@ -313,6 +315,8 @@ export class DashboardComponent implements OnInit {
   totalHoldings = 0;
   whitelistedCount = 0;
   totalNominal = 0;
+  /** Null when holdings span more than one currency (or none is set) — the total is unitless then. */
+  totalNominalCurrency: string | null = null;
   recentHoldings: InvestmentRecord[] = [];
 
   // Charts
@@ -364,6 +368,9 @@ export class DashboardComponent implements OnInit {
         this.totalHoldings    = investments.totalElements;
         this.whitelistedCount = holdings.filter(h => h.whitelisted).length;
         this.totalNominal     = holdings.reduce((sum, h) => sum + h.nominalAmount, 0);
+        this.totalNominalCurrency = holdings.length > 0 && holdings.every(h => h.currency === holdings[0].currency)
+          ? holdings[0].currency
+          : null;
         this.recentHoldings   = holdings.slice(0, 5);
 
         // Build portfolio donut chart (by token standard)

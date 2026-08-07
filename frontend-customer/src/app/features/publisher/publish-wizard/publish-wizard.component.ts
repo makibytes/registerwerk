@@ -28,6 +28,15 @@ import {
   PaymentRailView,
 } from '../../../core/models';
 
+/** Minimal EIP-1193 provider shape — just enough of `window.ethereum` for account + signing calls. */
+interface Eip1193Provider {
+  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+}
+
+function windowEthereum(): Eip1193Provider | undefined {
+  return (window as unknown as { ethereum?: Eip1193Provider }).ethereum;
+}
+
 /**
  * Guided publication flow: paste + validate the manifest, review the declared
  * permissions, sign the manifest hash with a bound org wallet, submit for review.
@@ -242,7 +251,15 @@ import {
                   <p class="rail-reference-title">Rails provided by the registry — copy a code into your manifest</p>
                   @for (rail of availableRails; track rail.code) {
                     <div class="rail-reference-row">
-                      <span class="rail-code" (click)="copyRailCode(rail.code)" matTooltip="Click to copy">{{ rail.code }}</span>
+                      <span
+                        class="rail-code"
+                        role="button"
+                        tabindex="0"
+                        (click)="copyRailCode(rail.code)"
+                        (keydown.enter)="copyRailCode(rail.code)"
+                        (keydown.space)="copyRailCode(rail.code)"
+                        matTooltip="Click to copy"
+                      >{{ rail.code }}</span>
                       <span class="rail-name">{{ rail.displayName }} · {{ rail.railType }} · {{ rail.currency }}</span>
                     </div>
                   }
@@ -355,7 +372,7 @@ export class PublishWizardComponent implements OnInit {
   submitting = false;
 
   get hasBrowserWallet(): boolean {
-    return typeof (window as any).ethereum !== 'undefined';
+    return typeof windowEthereum() !== 'undefined';
   }
 
   ngOnInit(): void {
@@ -478,8 +495,13 @@ export class PublishWizardComponent implements OnInit {
     if (!this.manifestHash) return;
     this.error = '';
     try {
-      const ethereum = (window as any).ethereum;
-      const accounts: string[] = await ethereum.request({ method: 'eth_requestAccounts' });
+      const ethereum = windowEthereum();
+      if (!ethereum) {
+        this.error = 'No browser wallet (e.g. MetaMask) detected.';
+        this.cdr.markForCheck();
+        return;
+      }
+      const accounts = (await ethereum.request({ method: 'eth_requestAccounts' })) as string[];
       const wallet = this.signerWallet.trim().toLowerCase();
       const account = accounts.find((a) => a.toLowerCase() === wallet);
       if (!account) {
@@ -487,14 +509,14 @@ export class PublishWizardComponent implements OnInit {
         this.cdr.markForCheck();
         return;
       }
-      this.signature = await ethereum.request({
+      this.signature = (await ethereum.request({
         method: 'personal_sign',
         params: [this.manifestHash, account],
-      });
+      })) as string;
       this.cdr.markForCheck();
       this.submitSignature();
-    } catch (err: any) {
-      this.error = err?.message ?? 'Browser wallet signing failed.';
+    } catch (err: unknown) {
+      this.error = err instanceof Error ? err.message : 'Browser wallet signing failed.';
       this.cdr.markForCheck();
     }
   }

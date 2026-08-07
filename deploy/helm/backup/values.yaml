@@ -34,18 +34,28 @@ serviceAccount:
   annotations: {}
 
 monitoring:
-  # Optional Prometheus Pushgateway URL — CronJob pods are ephemeral and can't be scraped
-  # directly, so a successful run pushes backup_last_success_timestamp here. Leave blank to
-  # skip (the job still runs; you just lose the BackupStale alert's data source).
-  pushgatewayUrl: ""
+  # Deploys a Pushgateway (pushgateway.yaml) in this chart's own release so the backup
+  # CronJobs — whose pods are ephemeral and can't be scraped directly — have somewhere to push
+  # backup_last_success_timestamp to. Set to false if you already run a shared Pushgateway
+  # elsewhere and just want to point pushgatewayUrl at it.
+  deployPushgateway: true
+  # In-cluster short DNS name for the Service pushgateway.yaml creates — resolves correctly as
+  # long as the backup CronJob pods run in the same namespace as this chart's own resources
+  # (already assumed elsewhere here, e.g. the unqualified "registerwerk-secrets" reference in
+  # backup-cronjob.yaml). Override if deployPushgateway is false, or if a fullnameOverride-style
+  # naming scheme is introduced later.
+  pushgatewayUrl: "http://registerwerk-pushgateway:9091"
 
 wallets:
-  # Previously nothing backed up this volume at all — permanent, unrecoverable loss of every
-  # on-chain deployer wallet's signing capability if it were ever lost (Phase 12, finding #7).
-  # restic (not WAL-G, which is Postgres-specific) backs up the encrypted keystore files
-  # directly; the master key that decrypts them is a separate concern (KMS-backed in
-  # production — see wallet.api.KekProvider — or escrowed yourself for the dev env-var path).
-  enabled: true
+  # Only relevant when the main chart's env.REGISTERWERK_WALLET_STORAGE_BACKEND is set to
+  # FILESYSTEM and wallets.persistence.enabled=true there (i.e. there is an actual PVC to back
+  # up). The default POSTGRES backend needs this disabled — wallet keystore blobs live in
+  # Postgres (wallet_keystore_blob table) and are already covered by the regular WAL-G backup
+  # (backup-cronjob.yaml). restic (not WAL-G, which is Postgres-specific) backs up the
+  # encrypted keystore files directly; the master key that decrypts them is a separate concern
+  # (KMS-backed in production — see wallet.api.KekProvider — or escrowed yourself for the dev
+  # env-var path).
+  enabled: false
   # REQUIRED if enabled — the main registerwerk chart's wallets PVC, which follows the pattern
   # "<main-chart-release-name>-wallets" (registerwerk.fullname helper + "-wallets" suffix).
   pvcName: ""

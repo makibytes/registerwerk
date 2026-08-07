@@ -80,6 +80,11 @@ public class AssetService {
         if (patch.getJurisdiction() != null) existing.setJurisdiction(patch.getJurisdiction());
         if (patch.getChain() != null) existing.setChain(patch.getChain());
         if (patch.getNetwork() != null) existing.setNetwork(patch.getNetwork());
+        if (patch.getCurrency() != null) existing.setCurrency(patch.getCurrency());
+        if (patch.getIssueSize() != null) existing.setIssueSize(patch.getIssueSize());
+        if (patch.getDenomination() != null) existing.setDenomination(patch.getDenomination());
+        if (patch.getIssueDate() != null) existing.setIssueDate(patch.getIssueDate());
+        if (patch.getMaturityDate() != null) existing.setMaturityDate(patch.getMaturityDate());
         Asset saved = assetRepository.save(existing);
         eventPublisher.publishEvent(new AssetUpdatedEvent(id, actorId, null));
         return saved;

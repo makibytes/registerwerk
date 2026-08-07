@@ -14,6 +14,20 @@ spec:
     - Egress
   ingress:
     {{- toYaml .Values.networkPolicy.ingress | nindent 4 }}
+    {{- if .Values.ingress.enabled }}
+    # Admits the cluster's ingress controller — see the comment on networkPolicy above for
+    # why this is required whenever ingress.enabled is true.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerPodSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    {{- end }}
   egress:
     # Allow DNS
     - ports:

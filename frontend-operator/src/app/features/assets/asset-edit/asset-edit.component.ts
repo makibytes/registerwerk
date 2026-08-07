@@ -135,6 +135,33 @@ import { Asset } from '../../../core/models';
                 <input matInput formControlName="issuerId" />
                 <mat-hint>UUID of the issuing entity</mat-hint>
               </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Currency</mat-label>
+                <input matInput formControlName="currency" placeholder="EUR" maxlength="3" style="text-transform:uppercase" />
+                <mat-hint>ISO-4217 code</mat-hint>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Issue Size</mat-label>
+                <input matInput type="number" formControlName="issueSize" />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Denomination</mat-label>
+                <input matInput type="number" formControlName="denomination" />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Issue Date</mat-label>
+                <input matInput type="date" formControlName="issueDate" />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Maturity Date</mat-label>
+                <input matInput type="date" formControlName="maturityDate" />
+                <mat-hint>Leave blank for perpetual/equity-like instruments</mat-hint>
+              </mat-form-field>
             </div>
 
             <mat-divider style="margin: 16px 0;" />
@@ -179,6 +206,11 @@ export class AssetEditComponent implements OnInit {
     totalSupply: [null as number | null],
     decimals: [null as number | null],
     issuerId: ['', Validators.required],
+    currency: [''],
+    issueSize: [null as number | null],
+    denomination: [null as number | null],
+    issueDate: [''],
+    maturityDate: [''],
   });
 
   ngOnInit(): void {
@@ -193,6 +225,11 @@ export class AssetEditComponent implements OnInit {
           totalSupply: asset.totalSupply ?? null,
           decimals: asset.decimals ?? null,
           issuerId: asset.issuerId,
+          currency: asset.currency ?? '',
+          issueSize: asset.issueSize ?? null,
+          denomination: asset.denomination ?? null,
+          issueDate: asset.issueDate ?? '',
+          maturityDate: asset.maturityDate ?? '',
         });
         this.loading = false;
         this.cdr.markForCheck();

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, Inject, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
@@ -174,7 +174,10 @@ export class RailFormDialogComponent implements OnInit {
   chainRows: ChainAddressRow[] = [];
   chains: ChainHealth[] = [];
 
-  constructor(@Inject(MAT_DIALOG_DATA) public data: RailFormDialogData) {
+  readonly data = inject<RailFormDialogData>(MAT_DIALOG_DATA);
+
+  constructor() {
+    const data = this.data;
     this.isEdit = !!data.rail;
     if (data.rail) {
       const r = data.rail;

@@ -108,6 +108,66 @@ export type CorporateActionType =
 export type CorporateActionStatus =
   | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT' | 'SETTLED' | 'CLOSED' | 'CANCELLED';
 
+/** §10 eWpG register inspection request. */
+export type InspectionLegalBasis = 'ISSUER' | 'HOLDER' | 'BENEFICIARY' | 'LEGITIMATE_INTEREST';
+export type InspectionStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'FULFILLED';
+
+export interface RegisterInspectionRequest {
+  id: string;
+  assetId: string;
+  requesterEntityId: string | null;
+  requesterName: string;
+  requesterEmail: string | null;
+  legalBasis: InspectionLegalBasis;
+  statedInterest: string | null;
+  status: InspectionStatus;
+  decisionReason: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  fulfilledAt: string | null;
+  createdAt: string;
+}
+
+/** §§21/22 eWpG register transfer to a successor registry operator. */
+export type TransferStatus = 'INITIATED' | 'EXPORTED' | 'HANDED_OVER' | 'COMPLETED' | 'CANCELLED';
+
+export interface RegisterTransfer {
+  id: string;
+  assetId: string;
+  successorName: string;
+  successorIdentifier: string | null;
+  reason: string;
+  status: TransferStatus;
+  exportHash: string | null;
+  onchainTxHash: string | null;
+  initiatedBy: string | null;
+  initiatedAt: string;
+  exportedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+}
+
+/** Investor-side counterpart to {@link RegisterTransfer}: moves one holding to a successor
+ *  registrar. Reuses {@link TransferStatus} — the lifecycle shape is identical. */
+export interface PortfolioMigrationRequest {
+  id: string;
+  investorEntityId: string;
+  assetId: string;
+  holderId: string;
+  destinationRegistrarName: string | null;
+  destinationRegistrarIdentifier: string | null;
+  destinationWalletAddress: string | null;
+  reason: string;
+  status: TransferStatus;
+  exportHash: string | null;
+  onchainTxHash: string | null;
+  initiatedBy: string | null;
+  initiatedAt: string;
+  exportedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+}
+
 export interface CorporateAction {
   id: string;
   assetId: string;
@@ -137,7 +197,7 @@ export interface LegalEntity {
   id: string;
   entityNumber: string;
   type: 'ISSUER' | 'INVESTOR' | 'AUDITOR';
-  status: 'PENDING_ONBOARDING' | 'ACTIVE' | 'SUSPENDED' | 'DISSOLVED';
+  status: 'PENDING_ONBOARDING' | 'ACTIVE' | 'SUSPENDED' | 'DISSOLVED' | 'CLOSED';
   currentName: string;
   leiCode?: string;
   registrationNumber?: string;
@@ -202,6 +262,41 @@ export interface KycJurisdictionApproval {
   overrideNote?: string;
 }
 
+/** GwG §3 / AMLR Art. 42 beneficial-owner (UBO) registration. */
+export interface BeneficialOwner {
+  id: string;
+  entityId: string;
+  naturalPersonId: string;
+  givenName: string;
+  familyName: string;
+  country?: string;
+  pepStatus: 'UNKNOWN' | 'NOT_PEP' | 'DOMESTIC_PEP' | 'FOREIGN_PEP' | 'INTERNATIONAL_PEP' | 'PEP_FAMILY' | 'PEP_ASSOCIATE';
+  ownershipPct?: number;
+  controlType: 'DIRECT_OWNERSHIP' | 'INDIRECT_OWNERSHIP' | 'OTHER_CONTROL' | 'LEGAL_REPRESENTATIVE' | 'TRUSTEE';
+  registeredAt: string;
+  ceasedAt?: string;
+}
+
+export interface BeneficialOwnerRequest {
+  person: {
+    givenName: string;
+    familyName: string;
+    dateOfBirth?: string;
+    nationality?: string;
+    countryOfResidence?: string;
+    taxId?: string;
+    taxIdCountry?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    postalCode?: string;
+    country?: string;
+  };
+  ownershipPct?: number;
+  controlType: BeneficialOwner['controlType'];
+  source?: string;
+}
+
 export interface KycComplianceResponse {
   jurisdiction: Jurisdiction;
   jurisdictionDisplayName: string;
@@ -241,6 +336,11 @@ export interface Asset {
   createdAt: string;
   updatedAt?: string;
   hasTermSheet: boolean;
+  currency?: string | null;
+  issueSize?: number | null;
+  denomination?: number | null;
+  issueDate?: string | null;
+  maturityDate?: string | null;
 }
 
 export interface AssetDocument {
@@ -310,6 +410,32 @@ export interface OnboardingToken {
   token: string;
   entityId: string;
   expiresAt: string;
+}
+
+/** Customer support ticket — `support.web.SupportTicketAdminController`. */
+export interface SupportTicket {
+  id: string;
+  entityId: string;
+  createdBy: string;
+  subject: string;
+  description: string;
+  category: 'TECHNICAL' | 'COMPLIANCE' | 'BILLING' | 'ASSET_ISSUE' | 'TRADING' | 'ONBOARDING' | 'OTHER';
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  assignedTo?: string;
+  resolutionNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  closedAt?: string;
+}
+
+export interface SupportTicketMessage {
+  id: string;
+  authorId: string;
+  authorIsOperator: boolean;
+  body: string;
+  createdAt: string;
 }
 
 export interface PageResponse<T> {
@@ -423,7 +549,7 @@ export interface RegistryEntityNode {
   entityNumber: string;
   currentName: string;
   storedType: 'ISSUER' | 'INVESTOR' | 'AUDITOR';
-  roles: Array<'ISSUER' | 'INVESTOR' | 'AUDITOR'>;
+  roles: ('ISSUER' | 'INVESTOR' | 'AUDITOR')[];
   status: LegalEntity['status'];
   kycStatus: LegalEntity['kycStatus'];
   issuedAssetCount: number;
@@ -632,9 +758,19 @@ export interface ThirdPartyProvider {
   name: string;
   category: string;
   criticality: ProviderCriticality;
+  lei: string | null;
   country: string | null;
+  contractStart: string | null;
   contractEnd: string | null;
+  subOutsourcing: boolean;
+  subOutsourcingDetails: string | null;
+  primaryContact: string | null;
+  slaAvailabilityPct: number | null;
+  rtoHours: number | null;
+  rpoHours: number | null;
   notifiedAuthority: boolean;
+  notifiedAt: string | null;
+  notes: string | null;
 }
 
 export type ResilienceTestType = 'VULNERABILITY_SCAN' | 'SCENARIO_BASED' | 'TLPT';

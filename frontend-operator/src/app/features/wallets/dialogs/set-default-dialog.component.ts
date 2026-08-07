@@ -37,14 +37,15 @@ import { ChainService } from '../../../core/api/chain.service';
       } @else {
         <div class="chain-list">
           @for (chain of compatibleChains(); track chain.id) {
-            <label class="chain-row">
-              <mat-checkbox [(ngModel)]="selection[chain.id]"></mat-checkbox>
-              <span class="chain-type" [class.evm]="chain.chainType === 'EVM'" [class.solana]="chain.chainType === 'SOLANA'">
-                {{ chain.chainType }}
-              </span>
-              <span class="chain-name">{{ chain.displayName }}</span>
-              <span style="font-size:11px; color: var(--rw-text-muted)">{{ chain.networkType.toLowerCase() }}</span>
-            </label>
+            <div class="chain-row">
+              <mat-checkbox [(ngModel)]="selection[chain.id]">
+                <span class="chain-type" [class.evm]="chain.chainType === 'EVM'" [class.solana]="chain.chainType === 'SOLANA'">
+                  {{ chain.chainType }}
+                </span>
+                <span class="chain-name">{{ chain.displayName }}</span>
+                <span style="font-size:11px; color: var(--rw-text-muted)">{{ chain.networkType.toLowerCase() }}</span>
+              </mat-checkbox>
+            </div>
           }
         </div>
       }

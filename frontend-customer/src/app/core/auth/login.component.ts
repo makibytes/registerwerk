@@ -4,13 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { HttpClient } from '@angular/common/http';
 import { AuthService } from './auth.service';
-import { environment } from '../../../environments/environment';
-
-interface LoginResponse {
-  token: string;
-}
 
 @Component({
   selector: 'app-login',
@@ -329,7 +323,6 @@ interface LoginResponse {
   `,
 })
 export class LoginComponent {
-  private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
@@ -356,26 +349,20 @@ export class LoginComponent {
     this.loading = true;
     this.errorMessage = '';
 
-    this.http
-      .post<LoginResponse>(`${environment.apiUrl}/public/auth/login`, {
-        email: this.email,
-        password: this.password,
-      })
-      .subscribe({
-        next: (res) => {
-          this.auth.setToken(res.token);
-          // REGISTRY_ADMIN with no entity context → company picker
-          if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
-            this.router.navigate(['/select-company']);
-          } else {
-            this.router.navigate(['/dashboard']);
-          }
-        },
-        error: () => {
-          this.loading = false;
-          this.errorMessage = 'Invalid credentials. Please check your email and password.';
-          this.cdr.markForCheck();
-        },
-      });
+    this.auth.loginWithCredentials(this.email, this.password).subscribe({
+      next: () => {
+        // REGISTRY_ADMIN with no entity context → company picker
+        if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
+          this.router.navigate(['/select-company']);
+        } else {
+          this.router.navigate(['/dashboard']);
+        }
+      },
+      error: () => {
+        this.loading = false;
+        this.errorMessage = 'Invalid credentials. Please check your email and password.';
+        this.cdr.markForCheck();
+      },
+    });
   }
 }

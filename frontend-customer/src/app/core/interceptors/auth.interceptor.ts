@@ -13,17 +13,26 @@ import { TokenSource } from '../auth/token-source';
  *   step-up check. (The operator app's interceptor has always done this; this one did not.)
  * - **Asks the {@link TokenSource} for a token rather than reading storage.** Under Entra the
  *   token has to be silently renewed when it nears expiry, which a synchronous read cannot do.
+ * - **Always sends `withCredentials: true`.** Under `CookieTokenSource` the httpOnly
+ *   `rw_session` cookie (and the `XSRF-TOKEN` cookie Angular reads for the CSRF header) only
+ *   attach to same-site-eligible requests that opt in; under Entra this is a harmless no-op
+ *   since the browser has no Registerwerk cookies to send.
  */
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   if (req.headers.has('Authorization')) {
-    return next(req);
+    return next(req.clone({ withCredentials: true }));
   }
 
   return inject(TokenSource)
     .acquireToken$()
     .pipe(
       switchMap(token =>
-        next(token ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : req)
+        next(
+          req.clone({
+            withCredentials: true,
+            ...(token ? { setHeaders: { Authorization: `Bearer ${token}` } } : {}),
+          })
+        )
       )
     );
 };

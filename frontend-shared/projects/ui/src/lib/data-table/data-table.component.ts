@@ -23,6 +23,12 @@ import { AsyncSectionStatus } from '../async-section';
 export interface TableColumn {
   key: string;
   header: string;
+  // Deliberately `any`, not generic: making TableColumn<T>/DataTableComponent<T> generic was
+  // tried and reverted — it forces every one of the ~18 call sites across both apps (each with
+  // its own row type) to add an explicit type argument under strict contravariance, which is a
+  // real but out-of-scope refactor for what this component's "any" is actually about: a single
+  // reusable table shell consumed with heterogeneous row shapes.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cell: (row: any) => string | null | undefined;
   sortable?: boolean;
   type?: 'text' | 'date' | 'badge' | 'number' | 'mono';
@@ -143,16 +149,19 @@ export interface TableColumn {
 })
 export class DataTableComponent implements OnInit, OnChanges, AfterViewInit {
   @Input({ required: true }) columns: TableColumn[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   @Input() rows: any[] = [];
   @Input() state: AsyncSectionStatus = 'ready';
   @Input() filterPlaceholder = 'Filter…';
   @Input() pageSize = 20;
   @Input() emptyMessage = 'No records found.';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   @Input() actionsTemplate?: TemplateRef<{ $implicit: any }>;
 
   @ViewChild(MatSort) sort!: MatSort;
   @ViewChild(MatPaginator) paginator!: MatPaginator;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly dataSource = new MatTableDataSource<any>([]);
   displayedColumns: string[] = [];
 

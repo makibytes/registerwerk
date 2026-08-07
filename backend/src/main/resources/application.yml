@@ -117,6 +117,14 @@ springdoc:
     enabled: ${SWAGGER_ENABLED:false}
 
 registerwerk:
+  cors:
+    # WebConfig.addCorsMappings now sets allowCredentials(true) so the httpOnly rw_session
+    # cookie (SessionCookieService) is actually sent on the operator portal's cross-origin
+    # dev-mode calls (environment.ts points straight at the backend, bypassing Kong — see its
+    # comment) — Spring rejects "*" combined with credentials at startup, so this can no longer
+    # default to a wildcard. Matches gateway/kong.yml's cors plugin origins (the customer app's
+    # path); override with a comma-separated list for any other deployment.
+    allowed-origins: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4201}
   chains:
     ethereum:
       mainnet:
@@ -197,6 +205,7 @@ registerwerk:
   wallet:
     master-key: ${REGISTERWERK_WALLET_MASTER_KEY:}
     storage-dir: ${REGISTERWERK_WALLET_DIR:/data/wallets}
+    storage-backend: ${REGISTERWERK_WALLET_STORAGE_BACKEND:FILESYSTEM}
     kek-provider: ${REGISTERWERK_WALLET_KEK_PROVIDER:}
     kms:
       key-id: ${REGISTERWERK_WALLET_KMS_KEY_ID:}

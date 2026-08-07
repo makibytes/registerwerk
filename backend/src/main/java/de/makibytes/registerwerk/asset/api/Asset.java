@@ -1,6 +1,8 @@
 package de.makibytes.registerwerk.asset.api;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 
@@ -94,6 +96,31 @@ public class Asset {
     @Column(name = "termsheet_doc_id")
     private UUID termsheetDocId;
 
+    /**
+     * ISO-4217 currency code (e.g. "EUR"). Distinct from {@code AssetBondTerms.currencyIso},
+     * which only exists for bond-standard assets and is entered separately through the
+     * bond-terms flow — this field applies to every token standard, since even a non-bond
+     * asset (an ERC-1155 fund share, an ERC-3643 equity token) needs a denomination currency
+     * for statements, valuation, and tax reporting to have anything to work from.
+     */
+    @Column(length = 3)
+    private String currency;
+
+    /** Total nominal issuance amount, in {@link #currency}. Null until set by the issuer. */
+    @Column(name = "issue_size", precision = 38, scale = 8)
+    private BigDecimal issueSize;
+
+    /** Minimum tradable/transferable unit, in {@link #currency}. Null until set by the issuer. */
+    @Column(precision = 38, scale = 8)
+    private BigDecimal denomination;
+
+    @Column(name = "issue_date")
+    private LocalDate issueDate;
+
+    /** Null for perpetual/equity-like instruments with no fixed maturity. */
+    @Column(name = "maturity_date")
+    private LocalDate maturityDate;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "public_data", columnDefinition = "jsonb")
     private Map<String, Object> publicData;
@@ -154,6 +181,21 @@ public class Asset {
 
     public UUID getTermsheetDocId() { return termsheetDocId; }
     public void setTermsheetDocId(UUID termsheetDocId) { this.termsheetDocId = termsheetDocId; }
+
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
+
+    public BigDecimal getIssueSize() { return issueSize; }
+    public void setIssueSize(BigDecimal issueSize) { this.issueSize = issueSize; }
+
+    public BigDecimal getDenomination() { return denomination; }
+    public void setDenomination(BigDecimal denomination) { this.denomination = denomination; }
+
+    public LocalDate getIssueDate() { return issueDate; }
+    public void setIssueDate(LocalDate issueDate) { this.issueDate = issueDate; }
+
+    public LocalDate getMaturityDate() { return maturityDate; }
+    public void setMaturityDate(LocalDate maturityDate) { this.maturityDate = maturityDate; }
 
     public Map<String, Object> getPublicData() { return publicData; }
     public void setPublicData(Map<String, Object> publicData) { this.publicData = publicData; }

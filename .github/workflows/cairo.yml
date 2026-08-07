@@ -1,0 +1,43 @@
+name: Cairo Contracts CI
+
+on:
+  push:
+    branches: [main, feat/**, fix/**]
+    paths: [contracts/cairo/**, .github/workflows/cairo.yml]
+  pull_request:
+    branches: [main]
+    paths: [contracts/cairo/**, .github/workflows/cairo.yml]
+
+concurrency:
+  group: cairo-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scarb-test:
+    name: Scarb Build & Starknet Foundry Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: contracts/cairo
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to match the toolchain this suite was developed and last verified against
+      # (scarb 2.18.0 / cairo 2.18.0, snforge 0.61.0) — see Scarb.toml for the corresponding
+      # edition/cairo-version pin.
+      - name: Install Scarb
+        uses: software-mansion/setup-scarb@v1
+        with:
+          scarb-version: "2.18.0"
+
+      - name: Install Starknet Foundry
+        uses: foundry-rs/setup-snfoundry@v3
+        with:
+          starknet-foundry-version: "0.61.0"
+
+      - name: Build
+        run: scarb build
+
+      - name: Test
+        run: snforge test

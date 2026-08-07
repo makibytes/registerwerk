@@ -102,9 +102,13 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
               @for (entity of filteredEntities(); track entity.id) {
                 <article
                   class="entity-card"
+                  role="button"
+                  tabindex="0"
                   [class.selected]="selectedEntityId() === entity.id"
                   [attr.data-id]="entity.id"
                   (click)="selectEntity(entity.id)"
+                  (keydown.enter)="selectEntity(entity.id)"
+                  (keydown.space)="selectEntity(entity.id); $event.preventDefault()"
                 >
                   <div class="entity-card-head">
                     <div>
@@ -161,11 +165,15 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
                   @for (entity of issuerLane(); track entity.id; let i = $index) {
                     <div
                       class="graph-node issuer"
+                      role="button"
+                      tabindex="0"
                       [class.selected]="selectedEntityId() === entity.id"
                       [class.dimmed]="selectedEntityId() !== null && selectedEntityId() !== entity.id"
                       [style.top.%]="nodeTop(i, issuerLane().length)"
                       [attr.data-id]="entity.id"
                       (click)="selectEntity(entity.id)"
+                      (keydown.enter)="selectEntity(entity.id)"
+                      (keydown.space)="selectEntity(entity.id); $event.preventDefault()"
                     >
                       <span class="graph-node-name">{{ entity.currentName }}</span>
                       <span class="graph-node-meta">{{ entity.issuedAssetCount }} assets</span>
@@ -191,11 +199,15 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
                   @for (entity of investorLane(); track entity.id; let i = $index) {
                     <div
                       class="graph-node investor"
+                      role="button"
+                      tabindex="0"
                       [class.selected]="selectedEntityId() === entity.id"
                       [class.dimmed]="selectedEntityId() !== null && selectedEntityId() !== entity.id"
                       [style.top.%]="nodeTop(i, investorLane().length)"
                       [attr.data-id]="entity.id"
                       (click)="selectEntity(entity.id)"
+                      (keydown.enter)="selectEntity(entity.id)"
+                      (keydown.space)="selectEntity(entity.id); $event.preventDefault()"
                     >
                       <span class="graph-node-name">{{ entity.currentName }}</span>
                       <span class="graph-node-meta">{{ entity.investmentCount }} holdings</span>

@@ -27,7 +27,16 @@ public class WebConfig implements WebMvcConfigurer {
             // WWW-Authenticate carries the OAuth2 claims challenge (error="insufficient_claims")
             // that the customer SPA must read to trigger an Entra step-up redirect.
             .exposedHeaders("WWW-Authenticate", "X-Total-Count")
-            .allowCredentials(false)
+            // The session token moved from the login response body into an httpOnly cookie
+            // (SessionCookieService) — the browser only attaches it cross-origin (this path:
+            // the operator portal's dev-mode direct-to-backend calls, see environment.ts) when
+            // the request opts into credentials AND the server allows them explicitly.
+            // allowCredentials(true) requires a concrete origin list, never "*" — Spring throws
+            // at startup if allowedOrigins still resolved to the wildcard default, which is a
+            // deliberate fail-fast: silently falling back to no-credentials would just turn
+            // into "operator login works locally, breaks the moment someone deploys with the
+            // property unset."
+            .allowCredentials(true)
             .maxAge(3600);
     }
 

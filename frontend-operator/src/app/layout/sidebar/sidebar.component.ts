@@ -253,6 +253,7 @@ export class SidebarComponent {
         { label: 'DORA',           icon: 'security_update_warning',   route: '/compliance/dora' },
         { label: 'Reporting',      icon: 'assessment',                route: '/compliance/reporting' },
         { label: 'DSAR Erasure',   icon: 'person_off',                route: '/compliance/dsar' },
+        { label: 'Support Tickets', icon: 'support_agent',            route: '/compliance/support-tickets' },
         { label: 'Audit Log',      icon: 'receipt_long',              route: '/audit' },
       ],
     },

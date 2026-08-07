@@ -54,25 +54,40 @@ spec:
               value: "jdbc:postgresql://{{ .Release.Name }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
             - name: DB_USER
               value: {{ .Values.postgresql.auth.username | quote }}
+            {{/* Reads straight from the Postgres subchart's own existingSecret/key
+                 (postgresql.auth.existingSecret / secretKeys.userPasswordKey, default
+                 "password") instead of expecting a second, manually-kept-in-sync copy under
+                 DB_PASSWORD in registerwerk-secrets — previously nothing wired this at all, so
+                 an operator following secret.yaml's "create the Secret manually" instructions
+                 would set DB_PASSWORD to whatever they typed, completely independent of
+                 whatever registerwerk-postgres-secret's "password" key actually contained,
+                 and the backend would fail to authenticate unless the two happened to match
+                 by luck (ledger finding: "PostgreSQL secret keys referenced by Helm do not
+                 agree"). */}}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.auth.existingSecret }}
+                  key: {{ .Values.postgresql.auth.secretKeys.userPasswordKey | default "password" }}
             {{- end }}
           envFrom:
             - secretRef:
                 name: registerwerk-secrets
                 optional: false
+          {{- if .Values.wallets.persistence.enabled }}
           volumeMounts:
             - name: wallets
               mountPath: /data/wallets
+          {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
             {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.wallets.persistence.enabled }}
       volumes:
         - name: wallets
-          {{- if .Values.wallets.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "registerwerk.fullname" . }}-wallets
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
+      {{- end }}

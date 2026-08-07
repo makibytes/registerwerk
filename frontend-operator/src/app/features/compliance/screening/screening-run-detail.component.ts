@@ -4,8 +4,6 @@ import {
   Component,
   Input,
   OnInit,
-  TemplateRef,
-  ViewChild,
   inject,
 } from '@angular/core';
 import { Router } from '@angular/router';

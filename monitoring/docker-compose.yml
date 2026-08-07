@@ -61,6 +61,10 @@ services:
     volumes:
       - /var/log:/var/log:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # promtail.yml's docker_sd_configs job discovers scrape targets by talking to the
+      # Docker daemon directly, not by reading the containers directory above — without this
+      # socket mount, service discovery finds zero targets and nothing ever ships to Loki.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./promtail.yml:/etc/promtail/config.yml:ro
     command: -config.file=/etc/promtail/config.yml
     depends_on: [loki]
@@ -76,6 +80,18 @@ services:
     ports:
       - "127.0.0.1:4317:4317"   # OTLP gRPC
       - "127.0.0.1:4318:4318"   # OTLP HTTP
+    restart: unless-stopped
+
+  # ─── Pushgateway ────────────────────────────────────────────────────────────
+  # Nothing in the Compose stack pushes a backup success metric today (there is no Compose-side
+  # backup job — WAL-G backup runs only as a k8s CronJob, see deploy/helm/backup/), so this is
+  # scaffolding: it completes the same monitoring path as the Helm chart's pushgateway.yaml and
+  # gives BackupStale (monitoring/alerts/registerwerk.yml) a real target to scrape once a backup
+  # job exists here, rather than the alert silently having no data source at all.
+  pushgateway:
+    image: prom/pushgateway:v1.11.0
+    ports:
+      - "127.0.0.1:9091:9091"
     restart: unless-stopped
 
   # ─── Alertmanager ──────────────────────────────────────────────────────────
