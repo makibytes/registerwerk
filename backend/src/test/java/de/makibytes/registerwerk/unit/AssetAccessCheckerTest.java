@@ -35,6 +35,7 @@ class AssetAccessCheckerTest {
     AssetHolderRepository holderRepository;
     BlockchainApi blockchainApi;
     AssetTokenAdminGrantRepository tokenAdminGrantRepository;
+    de.makibytes.registerwerk.asset.internal.SubscriptionOrderRepository subscriptionOrderRepository;
     AssetAccessChecker checker;
 
     static final UUID ISSUER_A = UUID.randomUUID();
@@ -50,8 +51,10 @@ class AssetAccessCheckerTest {
         holderRepository     = mock(AssetHolderRepository.class);
         blockchainApi        = mock(BlockchainApi.class);
         tokenAdminGrantRepository = mock(AssetTokenAdminGrantRepository.class);
+        subscriptionOrderRepository = mock(de.makibytes.registerwerk.asset.internal.SubscriptionOrderRepository.class);
         checker = new AssetAccessChecker(
-                assetRepository, deploymentRepository, holderRepository, blockchainApi, tokenAdminGrantRepository);
+                assetRepository, deploymentRepository, holderRepository, blockchainApi,
+                tokenAdminGrantRepository, subscriptionOrderRepository);
 
         Asset asset = new Asset();
         asset.setIssuerId(ISSUER_A);
@@ -64,7 +67,7 @@ class AssetAccessCheckerTest {
         BlockchainTransactionView txView = new BlockchainTransactionView(
                 TX_ID, null, "SUCCESS", null, null, null, null,
                 DEP_ID, ASSET_ID, null, null, null, null, null, null,
-                Instant.now(), null);
+                Instant.now(), null, null, null, null);
         when(blockchainApi.findTransaction(TX_ID)).thenReturn(Optional.of(txView));
     }
 

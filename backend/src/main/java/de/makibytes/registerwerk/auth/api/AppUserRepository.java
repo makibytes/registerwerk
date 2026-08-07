@@ -19,7 +19,14 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID>, JpaSpec
     /** Primary lookup for an Entra principal: the token's {@code oid} is stable, its email is not. */
     Optional<AppUser> findByEntraObjectId(UUID entraObjectId);
 
+    /** Primary lookup for a non-Entra OIDC principal: the token's {@code sub} is stable. */
+    Optional<AppUser> findByExternalSubject(String externalSubject);
+
     List<AppUser> findByLegalEntityIdOrderByFullNameAscEmailAsc(UUID legalEntityId);
+
+    /** Every account with any real access, for an access-review campaign snapshot — a disabled
+     *  account has nothing to recertify. */
+    List<AppUser> findByEnabledTrueOrderByEmailAsc();
 
     Optional<AppUser> findByIdAndLegalEntityId(UUID id, UUID legalEntityId);
 

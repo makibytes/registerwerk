@@ -4,10 +4,13 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.events.BlockchainTxReviewedEvent;
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +36,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -289,5 +293,57 @@ class BlockchainTransactionServiceTest {
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getActorName()).isEqualTo("system");
         assertThat(captor.getValue().getActorRole()).isEqualTo("UNKNOWN");
+    }
+
+    // ── review ────────────────────────────────────────────────────────────────
+
+    @Test
+    void review_failedTransaction_recordsNoteAndPublishesEvent() {
+        UUID id = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        tx.setStatus(BlockchainTransaction.Status.FAILED);
+        when(repository.findById(id)).thenReturn(Optional.of(tx));
+        when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        BlockchainTransaction reviewed = service.review(id, actorId, "REGISTRY_ADMIN", "Resubmitted manually.");
+
+        assertThat(reviewed.getOpsNote()).isEqualTo("Resubmitted manually.");
+        assertThat(reviewed.getOpsReviewedBy()).isEqualTo(actorId);
+        assertThat(reviewed.getOpsReviewedAt()).isNotNull();
+        verify(eventPublisher).publishEvent(any(BlockchainTxReviewedEvent.class));
+    }
+
+    @Test
+    void review_timeoutTransaction_isAccepted() {
+        UUID id = UUID.randomUUID();
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        when(repository.findById(id)).thenReturn(Optional.of(tx));
+        when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        BlockchainTransaction reviewed = service.review(id, UUID.randomUUID(), "AUDIT", "Confirmed stuck, no action needed.");
+
+        assertThat(reviewed.getOpsNote()).isEqualTo("Confirmed stuck, no action needed.");
+    }
+
+    @Test
+    void review_pendingTransaction_rejected() {
+        UUID id = UUID.randomUUID();
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        when(repository.findById(id)).thenReturn(Optional.of(tx));
+
+        assertThatThrownBy(() -> service.review(id, UUID.randomUUID(), "REGISTRY_ADMIN", "note"))
+                .isInstanceOf(InvalidStateTransitionException.class);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void review_unknownId_throwsNotFound() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.review(id, UUID.randomUUID(), "REGISTRY_ADMIN", "note"))
+                .isInstanceOf(EntityNotFoundException.class);
     }
 }

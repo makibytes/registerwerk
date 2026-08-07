@@ -1,9 +1,12 @@
 package de.makibytes.registerwerk.blockchain.api;
 
+import de.makibytes.registerwerk.blockchain.events.BlockchainTxReviewedEvent;
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,6 +102,36 @@ public class BlockchainTransactionService {
         BlockchainTransaction saved = repository.save(tx);
         log.info("Recorded blockchain tx={} method={} actor={}", txHash, methodName, actorName);
         return saved.getId();
+    }
+
+    /**
+     * Annotates a FAILED/TIMEOUT transaction as handled — the global transaction console's only
+     * write action. Not a resubmit: no nonce or unsigned calldata is captured at submission
+     * time (only display-only {@code params}), so a safe gas-bump resubmit through the shared
+     * signing path in {@link EvmContractService} isn't implemented here. This exists so ops has
+     * somewhere to record what was actually done about a stuck/reverted transaction instead of
+     * it sitting unactionable forever.
+     */
+    @Transactional
+    public BlockchainTransaction review(UUID id, UUID actorId, String actorRole, String note) {
+        BlockchainTransaction tx = repository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("BlockchainTransaction", id));
+        if (tx.getStatus() != BlockchainTransaction.Status.FAILED
+                && tx.getStatus() != BlockchainTransaction.Status.TIMEOUT) {
+            throw new InvalidStateTransitionException(
+                    "BlockchainTransaction", tx.getStatus().name(), "REVIEWED (only FAILED/TIMEOUT can be annotated)");
+        }
+        tx.setOpsNote(note);
+        tx.setOpsReviewedAt(Instant.now());
+        tx.setOpsReviewedBy(actorId);
+        BlockchainTransaction saved = repository.save(tx);
+
+        eventPublisher.publishEvent(new BlockchainTxReviewedEvent(id, actorId, actorRole, Map.of(
+                "txHash", String.valueOf(tx.getTxHash()),
+                "status", tx.getStatus().name(),
+                "note", note
+        )));
+        return saved;
     }
 
     // ── Scheduled polling ─────────────────────────────────────────────────────

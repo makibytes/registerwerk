@@ -94,6 +94,11 @@ export class AssetService {
     return this.http.get(`${this.base}/${assetId}/documents/${docId}/content`, { responseType: 'blob' });
   }
 
+  /** Full holder register as CSV — the registered DB entries, not the live on-chain balances. */
+  exportHolders(assetId: string): Observable<Blob> {
+    return this.http.get(`${this.base}/${assetId}/holders/export`, { responseType: 'blob' });
+  }
+
   deleteDocument(assetId: string, docId: string): Observable<void> {
     return this.http.delete<void>(`${this.base}/${assetId}/documents/${docId}`);
   }

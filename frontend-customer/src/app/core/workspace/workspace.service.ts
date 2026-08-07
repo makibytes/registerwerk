@@ -45,6 +45,7 @@ const WORKSPACES: Record<WorkspaceKey, WorkspaceDef> = {
       { label: 'Dashboard', route: '/dashboard', icon: 'grid_view' },
       { label: 'My Positions', route: '/positions', icon: 'account_balance_wallet' },
       { label: 'Investments', route: '/investments', icon: 'savings' },
+      { label: 'My Orders', route: '/investments/orders', icon: 'receipt_long' },
       { label: 'Marketplace', route: '/marketplace', icon: 'storefront' },
     ],
   },

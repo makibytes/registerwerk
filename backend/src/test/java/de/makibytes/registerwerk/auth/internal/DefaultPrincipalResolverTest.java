@@ -171,6 +171,85 @@ class DefaultPrincipalResolverTest {
                 .isInstanceOf(AccessDeniedException.class);
     }
 
+    // ── generic (non-Entra) OIDC — Track 6-4 ────────────────────────────────────
+
+    @Test
+    @DisplayName("a non-Entra OIDC token (no oid claim) resolves by sub, not email")
+    void oidcToken_resolvesBySubject() {
+        AppUser existing = account();
+        existing.setExternalSubject("okta-user-42");
+        existing.setAuthProvider(UserAuthProvider.OIDC);
+        when(repository.findByExternalSubject("okta-user-42")).thenReturn(Optional.of(existing));
+
+        Optional<AppUser> resolved = resolver.resolve(auth(oidcJwt()));
+
+        assertThat(resolved).contains(existing);
+        verify(repository, never()).findByEntraObjectId(any());
+    }
+
+    @Test
+    @DisplayName("an account created before external_subject existed is found by email and backfilled")
+    void oidcToken_backfillsSubjectFromEmail() {
+        AppUser legacy = account();
+        when(repository.findByExternalSubject("okta-user-42")).thenReturn(Optional.empty());
+        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.of(legacy));
+        when(repository.save(any(AppUser.class))).thenAnswer(i -> i.getArgument(0));
+
+        resolver.resolve(auth(oidcJwt()));
+
+        ArgumentCaptor<AppUser> captor = ArgumentCaptor.forClass(AppUser.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getExternalSubject()).isEqualTo("okta-user-42");
+        assertThat(captor.getValue().getAuthProvider()).isEqualTo(UserAuthProvider.OIDC);
+    }
+
+    @Test
+    @DisplayName("an unknown OIDC principal is provisioned with the token's app roles")
+    void oidcToken_provisionsNewAccount() {
+        when(repository.findByExternalSubject("okta-user-42")).thenReturn(Optional.empty());
+        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.empty());
+        when(repository.save(any(AppUser.class))).thenAnswer(i -> i.getArgument(0));
+
+        Optional<AppUser> resolved = resolver.resolve(auth(oidcJwt()));
+
+        assertThat(resolved).isPresent();
+        AppUser created = resolved.get();
+        assertThat(created.getExternalSubject()).isEqualTo("okta-user-42");
+        assertThat(created.getEmail()).isEqualTo("customer@test.local");
+        assertThat(created.getAuthProvider()).isEqualTo(UserAuthProvider.OIDC);
+        assertThat(created.isEnabled()).isTrue();
+        assertThat(created.getRoles()).containsExactly(AppUserRole.INVESTOR);
+    }
+
+    @Test
+    @DisplayName("a subject-only OIDC token (no email claim, no existing match) cannot self-provision")
+    void oidcToken_subjectOnlyWithNoMatch_isUnresolvable() {
+        when(repository.findByExternalSubject("okta-user-42")).thenReturn(Optional.empty());
+
+        Jwt jwt = Jwt.withTokenValue("t")
+                .header("alg", "RS256")
+                .claim("iss", "https://issuer.example.com/oauth2/default")
+                .claim("sub", "okta-user-42")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+
+        assertThat(resolver.resolve(auth(jwt))).isEmpty();
+    }
+
+    private Jwt oidcJwt() {
+        return Jwt.withTokenValue("t")
+                .header("alg", "RS256")
+                .claim("iss", "https://issuer.example.com/oauth2/default")
+                .claim("sub", "okta-user-42")
+                .claim("email", "customer@test.local")
+                .claim("name", "Customer User")
+                .claim("roles", List.of("INVESTOR"))
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private AppUser account() {

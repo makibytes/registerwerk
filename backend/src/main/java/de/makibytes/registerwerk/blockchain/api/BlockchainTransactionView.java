@@ -22,5 +22,8 @@ public record BlockchainTransactionView(
         Long blockNumber,
         String errorMessage,
         Instant createdAt,
-        Instant completedAt
+        Instant completedAt,
+        String opsNote,
+        Instant opsReviewedAt,
+        UUID opsReviewedBy
 ) {}

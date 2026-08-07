@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
@@ -457,11 +457,40 @@ interface BuyForm {
                             <td>{{ trade.unitPrice | number:'1.2-4' }}</td>
                             <td>{{ trade.totalPrice | number:'1.2-4' }}</td>
                             <td>{{ paymentLabel(trade.paymentOption) }}</td>
-                            <td>{{ trade.settlementStatus }}</td>
-                            <td class="mono">{{ trade.walletAddress }}</td>
                             <td>
+                              {{ trade.settlementStatus }}
+                              @if (trade.settlementStatus === 'FAILED' && trade.failureReason) {
+                                <mat-icon class="status-hint" [matTooltip]="trade.failureReason" inline="true">info</mat-icon>
+                              }
+                            </td>
+                            <td class="mono">{{ trade.walletAddress }}</td>
+                            <td class="actions-cell">
                               @if (trade.side === 'BUY' && trade.settlementStatus === 'PENDING') {
-                                <button mat-flat-button color="primary" (click)="settleTrade(trade.id)">Settle</button>
+                                <button mat-flat-button color="primary" (click)="openDeclarePaymentDialog(trade)">Declare payment</button>
+                              }
+                              @if (trade.settlementStatus === 'PENDING') {
+                                <button mat-stroked-button (click)="openCancelDialog(trade)">Cancel</button>
+                              }
+                              @if (trade.side === 'SELL' && trade.settlementStatus === 'AWAITING_SELLER_CONFIRMATION') {
+                                <button mat-flat-button color="primary" (click)="confirmPayment(trade.id)"
+                                        [matTooltip]="'Buyer declared payment reference: ' + trade.paymentReference">
+                                  Confirm receipt
+                                </button>
+                                <button mat-stroked-button color="warn" (click)="openDisputeDialog(trade)">Dispute</button>
+                              }
+                              @if (trade.side === 'BUY' && trade.settlementStatus === 'AWAITING_SELLER_CONFIRMATION') {
+                                <span class="dimmed small">Awaiting seller confirmation…</span>
+                              }
+                              @if (trade.settlementStatus === 'SETTLED') {
+                                <button mat-stroked-button (click)="downloadConfirmation(trade.id)">
+                                  <mat-icon>picture_as_pdf</mat-icon>
+                                  Confirmation
+                                </button>
+                                <button mat-stroked-button (click)="downloadIso20022Confirmation(trade.id)"
+                                        matTooltip="Download an ISO 20022-shaped settlement confirmation XML for straight-through processing">
+                                  <mat-icon>code</mat-icon>
+                                  ISO 20022
+                                </button>
                               }
                             </td>
                           </tr>
@@ -582,6 +611,62 @@ interface BuyForm {
         </mat-tab-group>
       }
     </div>
+
+    <ng-template #declarePaymentDialogTpl>
+      <h2 mat-dialog-title>Declare Payment</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:400px">
+        <p class="dimmed small" style="margin:0">
+          This records evidence of payment for the seller to independently confirm — it does not
+          settle the trade by itself. Total due: {{ activeTrade?.totalPrice | number:'1.2-4' }}.
+        </p>
+        <mat-form-field appearance="outline">
+          <mat-label>Payment reference</mat-label>
+          <input matInput [(ngModel)]="paymentReferenceInput" placeholder="Stablecoin tx hash, SEPA reference, etc.">
+        </mat-form-field>
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="primary" [disabled]="!paymentReferenceInput.trim()" (click)="submitDeclarePayment()">
+          Declare payment
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
+
+    <ng-template #disputeDialogTpl>
+      <h2 mat-dialog-title>Dispute Payment</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:400px">
+        <p class="dimmed small" style="margin:0">
+          The trade will fail and the units return to your listing. The buyer's payment
+          reference was: {{ activeTrade?.paymentReference }}.
+        </p>
+        <mat-form-field appearance="outline">
+          <mat-label>Reason</mat-label>
+          <textarea matInput rows="3" [(ngModel)]="disputeReasonInput" placeholder="e.g. no matching payment received"></textarea>
+        </mat-form-field>
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="warn" [disabled]="!disputeReasonInput.trim()" (click)="submitDisputePayment()">
+          Dispute payment
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
+
+    <ng-template #cancelDialogTpl>
+      <h2 mat-dialog-title>Cancel Trade</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:400px">
+        <mat-form-field appearance="outline">
+          <mat-label>Reason</mat-label>
+          <textarea matInput rows="3" [(ngModel)]="cancelReasonInput" placeholder="e.g. buyer changed their mind"></textarea>
+        </mat-form-field>
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button mat-dialog-close>Keep trade</button>
+        <button mat-raised-button color="warn" [disabled]="!cancelReasonInput.trim()" (click)="submitCancelTrade()">
+          Cancel trade
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
   `,
   styles: [`
     .page-container { max-width: 1320px; margin: 0 auto; padding: 32px 24px; }
@@ -598,6 +683,10 @@ interface BuyForm {
     .desk-table { width: 100%; border-collapse: collapse; }
     .desk-table th, .desk-table td { padding: 12px 10px; border-bottom: 1px solid var(--rw-border); text-align: left; vertical-align: top; font-size: 13px; }
     .desk-table th { font-size: 11px; color: var(--rw-text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+    .actions-cell { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .status-hint { font-size: 15px; width: 15px; height: 15px; vertical-align: text-bottom; margin-left: 4px; color: var(--rw-text-muted); cursor: help; }
+    .dimmed { color: var(--rw-text-secondary); }
+    .small { font-size: 12px; }
     .asset-cell, .venue-cell { display: flex; flex-direction: column; gap: 2px; }
     .asset-cell span, .venue-cell span { color: var(--rw-text-secondary); font-size: 12px; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -634,6 +723,15 @@ export class TradingDeskComponent implements OnInit {
   private readonly endpointService = inject(EndpointService);
   private readonly snackBar = inject(MatSnackBar);
   private readonly dialog = inject(MatDialog);
+
+  @ViewChild('declarePaymentDialogTpl') declarePaymentDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('disputeDialogTpl') disputeDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('cancelDialogTpl') cancelDialogTpl!: TemplateRef<unknown>;
+
+  activeTrade: TradeExecution | null = null;
+  paymentReferenceInput = '';
+  disputeReasonInput = '';
+  cancelReasonInput = '';
 
   loading = true;
   tradingDisabled = false;
@@ -830,13 +928,101 @@ export class TradingDeskComponent implements OnInit {
     });
   }
 
-  settleTrade(executionId: string): void {
-    this.tradingService.settle(executionId).subscribe({
+  openDeclarePaymentDialog(trade: TradeExecution): void {
+    this.activeTrade = trade;
+    this.paymentReferenceInput = '';
+    this.dialog.open(this.declarePaymentDialogTpl, { width: '480px' });
+  }
+
+  submitDeclarePayment(): void {
+    const trade = this.activeTrade;
+    const reference = this.paymentReferenceInput.trim();
+    if (!trade || !reference) return;
+    this.dialog.closeAll();
+    this.tradingService.declarePayment(trade.id, reference).subscribe({
       next: () => {
-        this.snackBar.open('Trade settled.', 'OK', { duration: 3000 });
+        this.snackBar.open('Payment declared — waiting for the seller to confirm receipt.', 'OK', { duration: 4000 });
         this.reload();
       },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to settle trade.', 'OK', { duration: 4000 }),
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to declare payment.', 'OK', { duration: 4000 }),
+    });
+  }
+
+  confirmPayment(executionId: string): void {
+    this.tradingService.confirmPayment(executionId).subscribe({
+      next: () => {
+        this.snackBar.open('Payment confirmed — trade settled.', 'OK', { duration: 3500 });
+        this.reload();
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to confirm payment.', 'OK', { duration: 4000 }),
+    });
+  }
+
+  openDisputeDialog(trade: TradeExecution): void {
+    this.activeTrade = trade;
+    this.disputeReasonInput = '';
+    this.dialog.open(this.disputeDialogTpl, { width: '480px' });
+  }
+
+  submitDisputePayment(): void {
+    const trade = this.activeTrade;
+    const reason = this.disputeReasonInput.trim();
+    if (!trade || !reason) return;
+    this.dialog.closeAll();
+    this.tradingService.disputePayment(trade.id, reason).subscribe({
+      next: () => {
+        this.snackBar.open('Payment disputed — trade failed and units returned to your listing.', 'OK', { duration: 4500 });
+        this.reload();
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to dispute payment.', 'OK', { duration: 4000 }),
+    });
+  }
+
+  openCancelDialog(trade: TradeExecution): void {
+    this.activeTrade = trade;
+    this.cancelReasonInput = '';
+    this.dialog.open(this.cancelDialogTpl, { width: '480px' });
+  }
+
+  submitCancelTrade(): void {
+    const trade = this.activeTrade;
+    const reason = this.cancelReasonInput.trim();
+    if (!trade || !reason) return;
+    this.dialog.closeAll();
+    this.tradingService.cancelTrade(trade.id, reason).subscribe({
+      next: () => {
+        this.snackBar.open('Trade cancelled.', 'OK', { duration: 3000 });
+        this.reload();
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to cancel trade.', 'OK', { duration: 4000 }),
+    });
+  }
+
+  downloadConfirmation(executionId: string): void {
+    this.tradingService.downloadConfirmation(executionId).subscribe({
+      next: (pdf) => {
+        const url = URL.createObjectURL(pdf);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `trade-confirmation-${executionId}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+      },
+      error: () => this.snackBar.open('Failed to generate the trade confirmation.', 'OK', { duration: 4000 }),
+    });
+  }
+
+  downloadIso20022Confirmation(executionId: string): void {
+    this.tradingService.downloadIso20022Confirmation(executionId).subscribe({
+      next: (xml) => {
+        const url = URL.createObjectURL(xml);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `trade-confirmation-${executionId}.xml`;
+        link.click();
+        URL.revokeObjectURL(url);
+      },
+      error: () => this.snackBar.open('Failed to generate the ISO 20022 confirmation.', 'OK', { duration: 4000 }),
     });
   }
 

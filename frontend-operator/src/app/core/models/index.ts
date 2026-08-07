@@ -205,6 +205,25 @@ export interface LegalEntity {
   kycStatus: 'NOT_STARTED' | 'IN_PROGRESS' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
   createdAt: string;
   updatedAt?: string;
+  clientCategory?: ClientCategory | null;
+  clientCategoryClassifiedAt?: string | null;
+  assignedRelationshipManagerId?: string | null;
+}
+
+export type ClientCategory = 'RETAIL' | 'PROFESSIONAL' | 'ELIGIBLE_COUNTERPARTY';
+export type KnowledgeExperienceLevel = 'NONE' | 'BASIC' | 'ADVANCED';
+export type RiskTolerance = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface SuitabilityAssessment {
+  id: string;
+  entityId: string;
+  knowledgeExperience: KnowledgeExperienceLevel;
+  riskTolerance: RiskTolerance;
+  investmentHorizonYears: number | null;
+  financialSituationAdequate: boolean;
+  notes: string | null;
+  assessedAt: string;
+  assessedBy: string | null;
 }
 
 export interface LegalEntityNameHistory {
@@ -341,6 +360,21 @@ export interface Asset {
   denomination?: number | null;
   issueDate?: string | null;
   maturityDate?: string | null;
+  targetMarketCategories?: ClientCategory[];
+  targetMarketMinExperience?: KnowledgeExperienceLevel | null;
+  minInvestmentAmount?: number | null;
+  maxHoldingAmount?: number | null;
+}
+
+export interface InvestorLimit {
+  id: string;
+  assetId: string;
+  investorEntityId: string;
+  minInvestmentOverride: number | null;
+  maxHoldingOverride: number | null;
+  lockupUntil: string | null;
+  updatedAt: string;
+  updatedBy: string | null;
 }
 
 export interface AssetDocument {
@@ -436,6 +470,40 @@ export interface SupportTicketMessage {
   authorIsOperator: boolean;
   body: string;
   createdAt: string;
+}
+
+export interface ChainDriftEvent {
+  id: string;
+  assetId: string;
+  deploymentId: string;
+  walletAddress: string;
+  dbBalance: number;
+  onchainBalance: number;
+  delta: number;
+  severity: 'WARNING' | 'CRITICAL';
+  status: 'OPEN' | 'RESOLVED';
+  detectedAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolutionNotes: string | null;
+}
+
+export type SubscriptionOrderStatus = 'SUBMITTED' | 'ALLOCATED' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
+
+export interface SubscriptionOrder {
+  id: string;
+  assetId: string;
+  investorEntityId: string;
+  walletAddress: string;
+  requestedAmount: number;
+  allocatedAmount: number | null;
+  status: SubscriptionOrderStatus;
+  submittedAt: string;
+  allocatedAt: string | null;
+  allocatedBy: string | null;
+  confirmedAt: string | null;
+  resultingHolderId: string | null;
+  rejectionReason: string | null;
 }
 
 export interface PageResponse<T> {

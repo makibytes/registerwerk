@@ -24,6 +24,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'my-clients',
+        loadComponent: () =>
+          import('./features/my-clients/my-clients.component').then(
+            (m) => m.MyClientsComponent
+          ),
+      },
+      {
         path: 'users',
         loadChildren: () =>
           import('./features/users/users.routes').then((m) => m.USERS_ROUTES),
@@ -96,6 +103,13 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/dapp-catalog/dapp-catalog.component').then(
             (m) => m.DappCatalogComponent
+          ),
+      },
+      {
+        path: 'transactions',
+        loadComponent: () =>
+          import('./features/transactions/transaction-console.component').then(
+            (m) => m.TransactionConsoleComponent
           ),
       },
       {

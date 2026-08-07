@@ -27,18 +27,25 @@ public interface TradeExecutionRepository extends JpaRepository<TradeExecution, 
 
     List<TradeExecution> findByBuyerEntityIdOrSellerEntityIdOrderByCreatedAtDesc(UUID buyerEntityId, UUID sellerEntityId);
 
+    /** Sums reserved units across several statuses — used so a listing's available quantity
+     *  correctly excludes units reserved by both PENDING and AWAITING_SELLER_CONFIRMATION
+     *  trades, not just one status. */
     @Query("""
         SELECT COALESCE(SUM(e.executedQuantity), 0)
         FROM TradeExecution e
         WHERE e.sellerHolderId = :sellerHolderId
-          AND e.settlementStatus = :settlementStatus
+          AND e.settlementStatus IN :settlementStatuses
         """)
-    BigDecimal sumExecutedQuantityBySellerHolderIdAndSettlementStatus(
+    BigDecimal sumExecutedQuantityBySellerHolderIdAndSettlementStatusIn(
             @Param("sellerHolderId") UUID sellerHolderId,
-            @Param("settlementStatus") SettlementStatus settlementStatus);
+            @Param("settlementStatuses") List<SettlementStatus> settlementStatuses);
 
     /** Input for {@code TradingService.timeoutStuckPendingTrades}. */
     List<TradeExecution> findBySettlementStatusAndCreatedAtBefore(SettlementStatus status, Instant cutoff);
+
+    /** Input for the seller-confirmation half of {@code TradingService.timeoutStuckPendingTrades}
+     *  — measured from when the buyer declared payment, not from trade creation. */
+    List<TradeExecution> findBySettlementStatusAndPaymentDeclaredAtBefore(SettlementStatus status, Instant cutoff);
 
     /**
      * Most recent settled trade price for an asset — the reference price surfaced alongside

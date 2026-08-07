@@ -103,6 +103,29 @@ public class LegalEntity {
     @Column(name = "kyc_expiry_date")
     private LocalDate kycExpiryDate;
 
+    /**
+     * MiFID II client category (Annex II) — null until the firm classifies the client.
+     * {@code null} deliberately means "not yet classified," not RETAIL-by-default: defaulting to
+     * the most-protected category would let an unclassified client silently pass eligibility
+     * checks on assets that restrict their target market to that category, masking the fact that
+     * classification was simply never done.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "client_category", length = 30)
+    private ClientCategory clientCategory;
+
+    @Column(name = "client_category_classified_at")
+    private Instant clientCategoryClassifiedAt;
+
+    @Column(name = "client_category_classified_by")
+    private UUID clientCategoryClassifiedBy;
+
+    /** Staff member (an {@code AppUser} with role RELATIONSHIP_MANAGER) scoped to this client
+     *  (F-BLOCKER-15) — null means unassigned. Raw UUID, same pattern as
+     *  {@code SupportTicket.assignedTo} — not a FK, since AppUser lives in a different module. */
+    @Column(name = "assigned_relationship_manager_id")
+    private UUID assignedRelationshipManagerId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -183,4 +206,16 @@ public class LegalEntity {
 
     public UUID getCreatedBy() { return createdBy; }
     public void setCreatedBy(UUID createdBy) { this.createdBy = createdBy; }
+
+    public ClientCategory getClientCategory() { return clientCategory; }
+    public void setClientCategory(ClientCategory clientCategory) { this.clientCategory = clientCategory; }
+
+    public Instant getClientCategoryClassifiedAt() { return clientCategoryClassifiedAt; }
+    public void setClientCategoryClassifiedAt(Instant clientCategoryClassifiedAt) { this.clientCategoryClassifiedAt = clientCategoryClassifiedAt; }
+
+    public UUID getClientCategoryClassifiedBy() { return clientCategoryClassifiedBy; }
+    public void setClientCategoryClassifiedBy(UUID clientCategoryClassifiedBy) { this.clientCategoryClassifiedBy = clientCategoryClassifiedBy; }
+
+    public UUID getAssignedRelationshipManagerId() { return assignedRelationshipManagerId; }
+    public void setAssignedRelationshipManagerId(UUID assignedRelationshipManagerId) { this.assignedRelationshipManagerId = assignedRelationshipManagerId; }
 }

@@ -60,7 +60,12 @@ class DefaultPrincipalResolver implements PrincipalResolver {
             return Optional.ofNullable(SecurityUtils.extractUserId(authentication))
                     .flatMap(appUserRepository::findById);
         }
-        return resolveEntraPrincipal(jwt);
+        // `oid` is an Entra-specific claim (the Microsoft identity platform's stable per-tenant
+        // user id). Its absence means the token came from some other JWKS-validated OIDC issuer
+        // (JWT_ISSUER_URI pointed at Okta/Keycloak/ForgeRock/Auth0/…), not that it's malformed.
+        return jwt.getClaimAsString("oid") != null
+                ? resolveEntraPrincipal(jwt)
+                : resolveGenericOidcPrincipal(jwt);
     }
 
     @Override
@@ -157,6 +162,90 @@ class DefaultPrincipalResolver implements PrincipalResolver {
         AppUser saved = appUserRepository.save(user);
         log.info("Provisioned account for Entra principal: id={} oid={} email={} roles={}",
                 saved.getId(), objectId, email, roles);
+        return saved;
+    }
+
+    /**
+     * Resolves a principal from a non-Entra OIDC issuer — any JWKS-validated token without an
+     * Entra {@code oid} claim. Keyed on {@code sub}, the one identifier every OIDC provider
+     * guarantees stable within its issuer, rather than the Entra-specific {@code oid}/{@code tid}
+     * this class otherwise relies on. See {@link de.makibytes.registerwerk.auth.api.UserAuthProvider#OIDC}.
+     *
+     * <p>Unlike the Entra path, provisioning a new account here requires an email claim —
+     * {@code app_user.email} is {@code NOT NULL}, and a subject-only OIDC access token (no
+     * {@code email}/{@code preferred_username}/{@code upn} scope) has nothing else to seed it
+     * with. Such a token can still authenticate once an operator has pre-provisioned the account
+     * (email match) or the subject has signed in before (externalSubject match); it just cannot
+     * self-provision on first sight, unlike Entra where Conditional Access already gated entry.
+     */
+    private Optional<AppUser> resolveGenericOidcPrincipal(Jwt jwt) {
+        String subject = jwt.getSubject();
+        String email = firstNonBlank(
+                jwt.getClaimAsString("email"),
+                jwt.getClaimAsString("preferred_username"),
+                jwt.getClaimAsString("upn"));
+
+        if (subject == null && email == null) {
+            log.warn("OIDC token carries neither a sub nor an email claim — cannot resolve an account");
+            return Optional.empty();
+        }
+
+        Optional<AppUser> bySubject = subject == null
+                ? Optional.empty()
+                : appUserRepository.findByExternalSubject(subject);
+        if (bySubject.isPresent()) {
+            return bySubject.map(user -> touchOidc(user, subject));
+        }
+
+        if (email != null) {
+            Optional<AppUser> byEmail = appUserRepository.findByEmailIgnoreCase(email);
+            if (byEmail.isPresent()) {
+                return Optional.of(touchOidc(byEmail.get(), subject));
+            }
+        }
+
+        if (email == null) {
+            log.warn("OIDC token for sub={} carries no email claim and no existing account matches — "
+                    + "cannot provision (app_user.email is required)", subject);
+            return Optional.empty();
+        }
+
+        return Optional.of(provisionOidc(jwt, subject, email));
+    }
+
+    /** Keeps the mirrored identity column current without touching roles or enabled state. */
+    private AppUser touchOidc(AppUser user, String subject) {
+        boolean dirty = false;
+        if (subject != null && !subject.equals(user.getExternalSubject())) {
+            user.setExternalSubject(subject);
+            dirty = true;
+        }
+        if (user.getAuthProvider() != UserAuthProvider.OIDC) {
+            user.setAuthProvider(UserAuthProvider.OIDC);
+            dirty = true;
+        }
+        return dirty ? appUserRepository.save(user) : user;
+    }
+
+    /** Creates an account for a non-Entra OIDC principal seen for the first time. */
+    private AppUser provisionOidc(Jwt jwt, String subject, String email) {
+        AppUser user = new AppUser();
+        user.setEmail(email);
+        user.setFullName(firstNonBlank(jwt.getClaimAsString("name"), email));
+        user.setExternalSubject(subject);
+        user.setAuthProvider(UserAuthProvider.OIDC);
+        user.setEnabled(true);
+        user.setLastLoginAt(Instant.now());
+        user.setLegalEntityId(parseUuid(claim(jwt, "entity_id", "entityId")));
+
+        Set<AppUserRole> roles = mapRoles(jwt.getClaimAsStringList("roles"));
+        if (!roles.isEmpty()) {
+            user.setRoles(roles);
+        }
+
+        AppUser saved = appUserRepository.save(user);
+        log.info("Provisioned account for generic OIDC principal: id={} sub={} email={} roles={}",
+                saved.getId(), subject, email, roles);
         return saved;
     }
 

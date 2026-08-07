@@ -373,6 +373,26 @@ export interface InvestmentSummary {
   whitelisted: boolean;
 }
 
+// ─── Subscription / Primary-market Orders ─────────────────────────────────────
+
+export type SubscriptionOrderStatus = 'SUBMITTED' | 'ALLOCATED' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
+
+export interface SubscriptionOrder {
+  id: string;
+  assetId: string;
+  investorEntityId: string;
+  walletAddress: string;
+  requestedAmount: number;
+  allocatedAmount: number | null;
+  status: SubscriptionOrderStatus;
+  submittedAt: string;
+  allocatedAt: string | null;
+  allocatedBy: string | null;
+  confirmedAt: string | null;
+  resultingHolderId: string | null;
+  rejectionReason: string | null;
+}
+
 // ─── Company / User Administration ───────────────────────────────────────────
 
 export interface CompanyUser {
@@ -446,7 +466,7 @@ export type TradingOrderType = 'MARKET' | 'LIMIT' | 'IOC' | 'FOK';
 
 export type ListingStatus = 'OPEN' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELLED';
 
-export type SettlementStatus = 'PENDING' | 'SETTLED';
+export type SettlementStatus = 'PENDING' | 'AWAITING_SELLER_CONFIRMATION' | 'SETTLED' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
 
 export type WalletPreferenceMode = 'GLOBAL_DEFAULT' | 'ASSET_TYPE_DEFAULT' | 'ENDPOINT' | 'CUSTOM_ADDRESS';
 
@@ -549,6 +569,9 @@ export interface TradeExecution {
   walletAddress: string;
   createdAt: string;
   settledAt: string | null;
+  failureReason: string | null;
+  paymentReference: string | null;
+  paymentDeclaredAt: string | null;
 }
 
 // ─── Page / Query Params ──────────────────────────────────────────────────────
@@ -839,4 +862,34 @@ export interface LendingSupplyPosition {
   walletAddress: string;
   currentClaim: string;
   lastSyncedAt: string;
+}
+
+// ─── Webhooks ───────────────────────────────────────────────────────────────
+
+export type WebhookEventType =
+  | 'KYC_APPROVED' | 'KYC_REJECTED'
+  | 'ASSET_APPROVED' | 'ASSET_REJECTED'
+  | 'SUBSCRIPTION_ORDER_ALLOCATED' | 'SUBSCRIPTION_ORDER_CONFIRMED' | 'SUBSCRIPTION_ORDER_REJECTED'
+  | 'TRADE_EXECUTED' | 'TRADE_PAYMENT_CONFIRMED' | 'TRADE_PAYMENT_DISPUTED';
+
+export interface WebhookSubscription {
+  id: string;
+  url: string;
+  eventTypes: WebhookEventType[];
+  enabled: boolean;
+  createdAt: string;
+  /** Only populated in the response to the create call. */
+  secret: string | null;
+}
+
+export type WebhookDeliveryStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
+
+export interface WebhookDelivery {
+  id: string;
+  eventType: WebhookEventType;
+  status: WebhookDeliveryStatus;
+  responseCode: number | null;
+  attemptCount: number;
+  lastAttemptedAt: string | null;
+  createdAt: string;
 }

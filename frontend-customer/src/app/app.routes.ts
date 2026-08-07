@@ -85,6 +85,10 @@ export const routes: Routes = [
         loadComponent: () => import('./features/security/security.component').then(m => m.SecurityComponent)
       },
       {
+        path: 'webhooks',
+        loadComponent: () => import('./features/webhooks/webhooks.component').then(m => m.WebhooksComponent)
+      },
+      {
         path: 'support',
         loadComponent: () => import('./features/support/support-list.component').then(m => m.SupportListComponent)
       },

@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.dora.api.IctIncident;
 import de.makibytes.registerwerk.dora.api.ResilienceTest;
 import de.makibytes.registerwerk.dora.api.ThirdPartyProvider;
 import de.makibytes.registerwerk.dora.internal.DoraService;
+import de.makibytes.registerwerk.shared.CsvWriter;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -77,6 +79,44 @@ public class DoraController {
         return ResponseEntity.ok(IctIncidentResponse.from(incident));
     }
 
+    /**
+     * Major-incident authority-notification export (DORA Art. 19) — a key/value CSV covering the
+     * general-information and classification fields the joint ESA incident-reporting RTS asks
+     * for, populated from this record. This is <b>not the certified ESA submission format</b>
+     * (this environment has no access to the authoritative RTS annexes / reporting portal
+     * schema); it is a structured starting point compliance can adapt into the actual submission,
+     * the same way {@code SteuerbescheinigungService} generates a tax-shaped document without
+     * claiming to be the Finanzamt's own form.
+     */
+    @GetMapping(value = "/incidents/{id}/authority-report", produces = "text/csv")
+    public ResponseEntity<String> exportIncidentAuthorityReport(@PathVariable UUID id) {
+        IctIncident i = doraService.getIncident(id);
+        List<String> header = List.of("field", "value");
+        List<List<Object>> rows = new ArrayList<>();
+        rows.add(List.of("Incident reference", i.getId()));
+        rows.add(List.of("Category", i.getCategory()));
+        rows.add(List.of("Severity", i.getSeverity()));
+        rows.add(List.of("Status", i.getStatus()));
+        rows.add(List.of("Title", i.getTitle()));
+        rows.add(List.of("Description", nullToEmpty(i.getDescription())));
+        rows.add(List.of("Detected at", i.getDetectedAt()));
+        rows.add(List.of("Classified as major at", nullToEmpty(i.getClassifiedAt())));
+        rows.add(List.of("Classification deadline (4h)", nullToEmpty(i.getClassificationDeadline())));
+        rows.add(List.of("Initial notification deadline (24h)", nullToEmpty(i.getInitialReportDeadline())));
+        rows.add(List.of("Final report deadline (72h)", nullToEmpty(i.getFinalReportDeadline())));
+        rows.add(List.of("Initial report submitted at", nullToEmpty(i.getInitialReportedAt())));
+        rows.add(List.of("Final report submitted at", nullToEmpty(i.getFinalReportedAt())));
+        rows.add(List.of("Authority reference", nullToEmpty(i.getAuthorityRef())));
+        rows.add(List.of("Contained at", nullToEmpty(i.getContainedAt())));
+        rows.add(List.of("Resolved at", nullToEmpty(i.getResolvedAt())));
+        rows.add(List.of("Root cause", nullToEmpty(i.getRootCause())));
+        rows.add(List.of("Remediation actions taken", nullToEmpty(i.getRemediationSteps())));
+        String csv = CsvWriter.write(header, rows);
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=\"dora-incident-report-" + id + ".csv\"")
+                .body(csv);
+    }
+
     // ── Third-Party Provider Register ─────────────────────────────────────────
 
     @GetMapping("/providers")
@@ -87,6 +127,37 @@ public class DoraController {
     @GetMapping("/providers/expiring")
     public ResponseEntity<List<ThirdPartyProviderResponse>> listExpiringContracts() {
         return ResponseEntity.ok(doraService.listExpiringContracts().stream().map(ThirdPartyProviderResponse::from).toList());
+    }
+
+    /**
+     * ICT third-party provider register export (DORA Art. 28) — a CSV covering the entity-level
+     * fields the EBA Register of Information ITS templates ask for (name, LEI, criticality,
+     * country, contract dates, sub-outsourcing, SLA/RTO/RPO). This is <b>not the certified EBA RoI
+     * XBRL/CSV taxonomy submission</b> (this environment has no access to the authoritative ITS
+     * template definitions or their exact "B_xx.xx" field codes) — see the caveat on
+     * {@link #exportIncidentAuthorityReport}, same reasoning.
+     */
+    @GetMapping(value = "/providers/register-export", produces = "text/csv")
+    public ResponseEntity<String> exportProviderRegister() {
+        List<String> header = List.of(
+                "name", "category", "criticality", "lei", "country",
+                "contractStart", "contractEnd", "subOutsourcing", "subOutsourcingDetails",
+                "primaryContact", "slaAvailabilityPct", "rtoHours", "rpoHours",
+                "notifiedAuthority", "notifiedAt", "notes");
+        List<List<Object>> rows = doraService.listProviders().stream().map(p -> List.<Object>of(
+                p.getName(), nullToEmpty(p.getCategory()), p.getCriticality(),
+                nullToEmpty(p.getLei()), nullToEmpty(p.getCountry()),
+                nullToEmpty(p.getContractStart()), nullToEmpty(p.getContractEnd()),
+                p.isSubOutsourcing() ? "Y" : "N", nullToEmpty(p.getSubOutsourcingDetails()),
+                nullToEmpty(p.getPrimaryContact()), nullToEmpty(p.getSlaAvailabilityPct()),
+                nullToEmpty(p.getRtoHours()), nullToEmpty(p.getRpoHours()),
+                p.isNotifiedAuthority() ? "Y" : "N", nullToEmpty(p.getNotifiedAt()),
+                nullToEmpty(p.getNotes())
+        )).toList();
+        String csv = CsvWriter.write(header, rows);
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=\"dora-register-of-information.csv\"")
+                .body(csv);
     }
 
     @PostMapping("/providers")
@@ -118,6 +189,8 @@ public class DoraController {
                 Boolean.TRUE.equals(req.notifiedAuthority()), req.notes(), actorId);
         return ResponseEntity.ok(ThirdPartyProviderResponse.from(provider));
     }
+
+    private static Object nullToEmpty(Object v) { return v == null ? "" : v; }
 
     // ── Resilience Testing ─────────────────────────────────────────────────────
 

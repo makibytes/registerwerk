@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Payment Disputed — Registerwerk</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .header { background: #b91c1c; color: #ffffff; padding: 32px 40px; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .body { padding: 32px 40px; color: #333333; line-height: 1.6; }
+        .body p { margin: 0 0 16px 0; }
+        .reason-box { background:#fef2f2; border-radius:6px; padding:16px; margin:24px 0; color:#7f1d1d; font-size:13px; }
+        .footer { background: #f4f6f8; padding: 20px 40px; color: #888; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Trade Payment Disputed</h1>
+    </div>
+    <div class="body">
+        <p>Dear <strong th:text="${entityName}">Entity Name</strong>,</p>
+        <p>
+            The seller has disputed the payment you declared for your trade in
+            <strong th:text="${assetName}">Asset Name</strong>. The trade has failed and no
+            units were transferred.
+        </p>
+        <div class="reason-box" th:if="${reason}">
+            <strong>Seller's stated reason:</strong> <span th:text="${reason}">Reason text</span>
+        </div>
+        <p>Please contact the seller directly to resolve the discrepancy, or reach out to support.</p>
+        <p>Kind regards,<br/>The Registerwerk Team</p>
+    </div>
+    <div class="footer">
+        This notification was sent because a trade payment you declared was disputed by the seller.
+    </div>
+</div>
+</body>
+</html>

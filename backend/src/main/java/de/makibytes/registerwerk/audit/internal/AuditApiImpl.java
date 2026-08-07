@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -55,6 +56,13 @@ class AuditApiImpl implements AuditApi {
     }
 
     @Override
+    public List<AuditEventView> findForExport(
+            String subjectType, String eventType, UUID actorId, Instant from, Instant to, Pageable pageable) {
+        return repository.findForExport(subjectType, eventType, actorId, from, to, pageable)
+                .stream().map(this::toView).toList();
+    }
+
+    @Override
     public ChainVerificationView chainVerificationStatus() {
         return toView(chainVerificationService.lastResult());
     }
@@ -70,6 +78,11 @@ class AuditApiImpl implements AuditApi {
 
     private AuditEventView toView(AuditEvent e) {
         return new AuditEventView(e.getId(), e.getEventType(), e.getSubjectType(), e.getSubjectId(),
-                e.getActorId(), e.getActorRole(), e.getPayload(), e.getOccurredAt());
+                e.getActorId(), e.getActorRole(), e.getPayload(), e.getOccurredAt(),
+                e.getSequenceNo(), hex(e.getEntryHash()), hex(e.getEntrySig()));
+    }
+
+    private static String hex(byte[] bytes) {
+        return bytes == null ? null : java.util.HexFormat.of().formatHex(bytes);
     }
 }

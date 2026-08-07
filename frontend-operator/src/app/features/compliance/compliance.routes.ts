@@ -16,6 +16,13 @@ export const COMPLIANCE_ROUTES: Routes = [
       ),
   },
   {
+    path: 'chain-drift',
+    loadComponent: () =>
+      import('./chain-drift/chain-drift-queue.component').then(
+        (m) => m.ChainDriftQueueComponent,
+      ),
+  },
+  {
     path: 'casp-register',
     loadComponent: () =>
       import('./casp-register/casp-register.component').then(
@@ -34,6 +41,20 @@ export const COMPLIANCE_ROUTES: Routes = [
     loadComponent: () =>
       import('./dora/dora-dashboard.component').then(
         (m) => m.DoraDashboardComponent,
+      ),
+  },
+  {
+    path: 'access-reviews',
+    loadComponent: () =>
+      import('./access-reviews/access-review-list.component').then(
+        (m) => m.AccessReviewListComponent,
+      ),
+  },
+  {
+    path: 'access-reviews/:id',
+    loadComponent: () =>
+      import('./access-reviews/access-review-detail.component').then(
+        (m) => m.AccessReviewDetailComponent,
       ),
   },
   {

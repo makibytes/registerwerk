@@ -86,11 +86,42 @@ public class CustomerController {
     }
 
     /**
+     * "My clients" — the entities currently assigned to the caller as relationship manager
+     * (F-BLOCKER-15). Not paginated: an RM's book is expected to be a bounded, human-sized list,
+     * unlike the operator-wide {@link #listEntities}.
+     */
+    @GetMapping("/my-clients")
+    @PreAuthorize("hasRole('RELATIONSHIP_MANAGER')")
+    public ResponseEntity<List<EntityResponse>> myClients(Authentication auth) {
+        UUID rmId = extractActorId(auth);
+        List<EntityResponse> clients = legalEntityService.listAssignedToRelationshipManager(rmId).stream()
+                .map(entity -> toResponse(entity, auth))
+                .toList();
+        return ResponseEntity.ok(clients);
+    }
+
+    /**
+     * Assigns (or, with a null body field, clears) the client-servicing relationship manager for
+     * this entity.
+     */
+    @PostMapping("/{id}/relationship-manager")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
+    public ResponseEntity<EntityResponse> assignRelationshipManager(
+            @PathVariable UUID id,
+            @RequestBody de.makibytes.registerwerk.customer.web.dto.AssignRelationshipManagerRequest request,
+            Authentication auth) {
+        LegalEntity updated = legalEntityService.assignRelationshipManager(id, request.relationshipManagerId(), extractActorId(auth));
+        return ResponseEntity.ok(toResponse(updated, auth));
+    }
+
+    /**
      * Returns a single entity by ID.
-     * Accessible by admins, auditors, and the entity's own representative.
+     * Accessible by admins, auditors, the entity's own representative, and its assigned
+     * relationship manager (read-only — F-BLOCKER-15).
      */
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @entityOwnershipChecker.isOwner(#id, authentication)")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @entityOwnershipChecker.isOwner(#id, authentication) "
+            + "or @entityOwnershipChecker.isAssignedRelationshipManager(#id, authentication)")
     public ResponseEntity<EntityResponse> getEntity(@PathVariable UUID id, Authentication auth) {
         LegalEntity entity = legalEntityService.getEntity(id);
         return ResponseEntity.ok(toResponse(entity, auth));
@@ -199,6 +230,50 @@ public class CustomerController {
         return ResponseEntity.status(HttpStatus.CREATED).body(record);
     }
 
+    /**
+     * Sets the entity's MiFID II client category (Annex II) — the firm classifies the client,
+     * never self-declared (see {@code LegalEntityService.classifyClient} Javadoc).
+     */
+    @PostMapping("/{id}/classification")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
+    public ResponseEntity<EntityResponse> classifyClient(
+            @PathVariable UUID id,
+            @RequestBody @Valid de.makibytes.registerwerk.customer.web.dto.ClassifyClientRequest request,
+            Authentication auth) {
+        LegalEntity updated = legalEntityService.classifyClient(id, request.clientCategory(), extractActorId(auth));
+        return ResponseEntity.ok(toResponse(updated, auth));
+    }
+
+    /**
+     * Records a new MiFID suitability assessment for the entity.
+     */
+    @PostMapping("/{id}/suitability-assessments")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
+    public ResponseEntity<de.makibytes.registerwerk.customer.web.dto.SuitabilityAssessmentResponse> recordSuitabilityAssessment(
+            @PathVariable UUID id,
+            @RequestBody @Valid de.makibytes.registerwerk.customer.web.dto.SuitabilityAssessmentRequest request,
+            Authentication auth) {
+        var assessment = legalEntityService.recordSuitabilityAssessment(
+                id, request.knowledgeExperience(), request.riskTolerance(), request.investmentHorizonYears(),
+                request.financialSituationAdequate(), request.notes(), extractActorId(auth));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(de.makibytes.registerwerk.customer.web.dto.SuitabilityAssessmentResponse.from(assessment));
+    }
+
+    /**
+     * Lists an entity's suitability assessment history (most recent first) — includes the owning
+     * entity itself so an investor can see their own assessment record, matching {@link #getEntity}.
+     */
+    @GetMapping("/{id}/suitability-assessments")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER') or @entityOwnershipChecker.isOwner(#id, authentication)")
+    public ResponseEntity<List<de.makibytes.registerwerk.customer.web.dto.SuitabilityAssessmentResponse>> listSuitabilityAssessments(
+            @PathVariable UUID id) {
+        var assessments = legalEntityService.listSuitabilityAssessments(id).stream()
+                .map(de.makibytes.registerwerk.customer.web.dto.SuitabilityAssessmentResponse::from)
+                .toList();
+        return ResponseEntity.ok(assessments);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private UUID extractActorId(Authentication auth) {
@@ -222,7 +297,10 @@ public class CustomerController {
                 base.registrationNumber(),
                 base.kycStatus(),
                 base.createdAt(),
-                null
+                null,
+                base.clientCategory(),
+                base.clientCategoryClassifiedAt(),
+                base.assignedRelationshipManagerId()
         );
     }
 }

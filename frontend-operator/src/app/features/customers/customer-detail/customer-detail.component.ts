@@ -22,6 +22,7 @@ import { ScreeningService } from '../../../core/api/screening.service';
 import { HolderBlockService } from '../../../core/api/holder-block.service';
 import { BeneficialOwnerService } from '../../../core/api/beneficial-owner.service';
 import { PortfolioMigrationComponent } from '../wizards/portfolio-migration/portfolio-migration.component';
+import { MifidClassificationComponent } from '../mifid-classification/mifid-classification.component';
 import { CorporateActionsService } from '../../../core/api/corporate-actions.service';
 import { environment } from '../../../../environments/environment';
 import { AddressComponent } from '../../../shared/components/address.component';
@@ -70,6 +71,7 @@ interface OnchainIdentityView {
     DataStatePillComponent,
     StatusBadgeComponent,
     PortfolioMigrationComponent,
+    MifidClassificationComponent,
     DatePipe,
     AddressComponent,
   ],
@@ -241,6 +243,28 @@ interface OnchainIdentityView {
               <div class="field-item">
                 <div class="field-label">Created At</div>
                 <div class="field-value">{{ entity.createdAt | date:'medium' }}</div>
+              </div>
+              <div class="field-item">
+                <div class="field-label">Relationship Manager</div>
+                <div class="field-value">
+                  @if (editingRm) {
+                    <div style="display:flex;gap:8px;align-items:center">
+                      <input matInput [(ngModel)]="rmIdInput" placeholder="Staff user ID (blank to clear)"
+                             style="border:1px solid var(--rw-border);border-radius:4px;padding:4px 8px;font-size:13px;width:220px" />
+                      <button mat-icon-button color="primary" (click)="saveRelationshipManager()" matTooltip="Save">
+                        <mat-icon>check</mat-icon>
+                      </button>
+                      <button mat-icon-button (click)="editingRm = false" matTooltip="Cancel">
+                        <mat-icon>close</mat-icon>
+                      </button>
+                    </div>
+                  } @else {
+                    <code>{{ entity.assignedRelationshipManagerId ?? 'Unassigned' }}</code>
+                    <button mat-icon-button (click)="startEditRelationshipManager()" matTooltip="Assign relationship manager">
+                      <mat-icon>edit</mat-icon>
+                    </button>
+                  }
+                </div>
               </div>
             </div>
           </div>
@@ -499,6 +523,11 @@ interface OnchainIdentityView {
             <app-portfolio-migration [investorEntityId]="id" />
           </mat-tab>
         }
+
+        <!-- MiFID II Classification & Suitability -->
+        <mat-tab label="MiFID Classification">
+          <app-mifid-classification [entityId]="id" />
+        </mat-tab>
 
         <!-- Identities Tab (ONCHAINID) -->
         <mat-tab label="Identities">
@@ -915,6 +944,8 @@ export class CustomerDetailComponent implements OnInit {
   blocksLoading = false;
 
   entity: LegalEntity | null = null;
+  editingRm = false;
+  rmIdInput = '';
   documents: KycDocument[] = [];
   nameHistory: LegalEntityNameHistory[] = [];
   mergeRecords: EntityMergeRecordView[] = [];
@@ -1334,6 +1365,27 @@ export class CustomerDetailComponent implements OnInit {
   dissolve(): void {
     if (!confirm('Are you sure you want to dissolve this entity? This action cannot be undone.')) return;
     this.entityService.dissolveEntity(this.id).subscribe({ next: () => this.loadEntity() });
+  }
+
+  startEditRelationshipManager(): void {
+    this.rmIdInput = this.entity?.assignedRelationshipManagerId ?? '';
+    this.editingRm = true;
+  }
+
+  saveRelationshipManager(): void {
+    const value = this.rmIdInput.trim() || null;
+    this.entityService.assignRelationshipManager(this.id, value).subscribe({
+      next: (updated) => {
+        this.entity = updated;
+        this.editingRm = false;
+        this.snackBar.open('Relationship manager updated.', 'Dismiss', { duration: 4000 });
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.snackBar.open(err?.error?.message ?? 'Failed to update relationship manager.', 'Dismiss', { duration: 5000 });
+        this.cdr.detectChanges();
+      },
+    });
   }
 
   terminate(): void {

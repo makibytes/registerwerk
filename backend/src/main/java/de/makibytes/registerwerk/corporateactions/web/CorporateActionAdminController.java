@@ -94,4 +94,15 @@ public class CorporateActionAdminController {
                 .body(pdf);
     }
 
+    @GetMapping("/{corporateActionId}/confirmation/iso20022")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT')")
+    public ResponseEntity<byte[]> iso20022Confirmation(@PathVariable UUID corporateActionId) {
+        byte[] xml = confirmationService.generateIso20022ForOperator(corporateActionId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_XML)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename("confirmation-" + corporateActionId + ".xml").build().toString())
+                .body(xml);
+    }
+
 }

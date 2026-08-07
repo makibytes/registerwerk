@@ -161,7 +161,27 @@ public class AssetController {
         patch.setDenomination(request.denomination());
         patch.setIssueDate(request.issueDate());
         patch.setMaturityDate(request.maturityDate());
+        patch.setMinInvestmentAmount(request.minInvestmentAmount());
+        patch.setMaxHoldingAmount(request.maxHoldingAmount());
         return ResponseEntity.ok(toResponse(assetService.updateAsset(id, patch, extractActorId(auth)), auth, false));
+    }
+
+    /**
+     * Sets the asset's MiFID II target market (F-BLOCKER-11) — which client categories may
+     * subscribe to or acquire it, and the minimum investor knowledge/experience required.
+     * REGISTRY_ADMIN or the asset's own issuer; unlike KYC classification (operator/compliance
+     * only), the issuer is the one who determines who a product is designed for.
+     */
+    @PutMapping("/{id}/target-market")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
+    public ResponseEntity<AssetResponse> updateTargetMarket(
+            @PathVariable UUID id,
+            @RequestBody de.makibytes.registerwerk.asset.web.dto.TargetMarketUpdateRequest request,
+            Authentication auth) {
+        java.util.Set<de.makibytes.registerwerk.customer.api.ClientCategory> categories =
+                request.categories() != null ? request.categories() : java.util.Set.of();
+        Asset updated = assetService.updateTargetMarket(id, categories, request.minExperience(), extractActorId(auth));
+        return ResponseEntity.ok(toResponse(updated, auth, false));
     }
 
     /** Submits an asset for approval (DRAFT → PENDING_APPROVAL). */
@@ -279,7 +299,11 @@ public class AssetController {
                 asset.getIssueSize(),
                 asset.getDenomination(),
                 asset.getIssueDate(),
-                asset.getMaturityDate()
+                asset.getMaturityDate(),
+                asset.getTargetMarketCategories(),
+                asset.getTargetMarketMinExperience(),
+                asset.getMinInvestmentAmount(),
+                asset.getMaxHoldingAmount()
         );
     }
 

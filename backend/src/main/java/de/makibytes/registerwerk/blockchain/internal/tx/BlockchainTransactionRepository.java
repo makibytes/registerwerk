@@ -21,4 +21,6 @@ public interface BlockchainTransactionRepository extends JpaRepository<Blockchai
     Page<BlockchainTransaction> findByActorNameOrderByCreatedAtDesc(String actorName, Pageable pageable);
 
     Page<BlockchainTransaction> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    Page<BlockchainTransaction> findByStatusOrderByCreatedAtDesc(BlockchainTransaction.Status status, Pageable pageable);
 }

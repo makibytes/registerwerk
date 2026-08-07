@@ -8,6 +8,10 @@ import {
   EntityMergeRecordView,
   PageResponse,
   EntityFilterParams,
+  ClientCategory,
+  KnowledgeExperienceLevel,
+  RiskTolerance,
+  SuitabilityAssessment,
 } from '../models';
 
 @Injectable({ providedIn: 'root' })
@@ -30,6 +34,15 @@ export class EntityService {
 
   getEntity(id: string): Observable<LegalEntity> {
     return this.http.get<LegalEntity>(`${this.base}/${id}`);
+  }
+
+  /** "My clients" — entities assigned to the caller as relationship manager (Track 5-4). */
+  myClients(): Observable<LegalEntity[]> {
+    return this.http.get<LegalEntity[]>(`${this.base}/my-clients`);
+  }
+
+  assignRelationshipManager(id: string, relationshipManagerId: string | null): Observable<LegalEntity> {
+    return this.http.post<LegalEntity>(`${this.base}/${id}/relationship-manager`, { relationshipManagerId });
   }
 
   createEntity(body: Partial<LegalEntity>): Observable<LegalEntity> {
@@ -82,5 +95,24 @@ export class EntityService {
       'X-Dual-Control-Token': dualControlToken,
     });
     return this.http.post<LegalEntity>(`${this.base}/${id}/terminate`, { reason }, { headers });
+  }
+
+  /** Sets the entity's MiFID II client category — the firm classifies the client. */
+  classifyClient(id: string, clientCategory: ClientCategory): Observable<LegalEntity> {
+    return this.http.post<LegalEntity>(`${this.base}/${id}/classification`, { clientCategory });
+  }
+
+  listSuitabilityAssessments(id: string): Observable<SuitabilityAssessment[]> {
+    return this.http.get<SuitabilityAssessment[]>(`${this.base}/${id}/suitability-assessments`);
+  }
+
+  recordSuitabilityAssessment(id: string, body: {
+    knowledgeExperience: KnowledgeExperienceLevel;
+    riskTolerance: RiskTolerance;
+    investmentHorizonYears?: number | null;
+    financialSituationAdequate: boolean;
+    notes?: string | null;
+  }): Observable<SuitabilityAssessment> {
+    return this.http.post<SuitabilityAssessment>(`${this.base}/${id}/suitability-assessments`, body);
   }
 }

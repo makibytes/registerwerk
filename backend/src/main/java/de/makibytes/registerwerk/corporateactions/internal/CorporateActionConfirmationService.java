@@ -110,6 +110,35 @@ public class CorporateActionConfirmationService {
         }
     }
 
+    /** Operator-facing: ISO 20022-shaped notification covering every holder's entry — see
+     *  {@link Iso20022CorporateActionNotificationRenderer} for the scoping caveat. */
+    @Transactional(readOnly = true)
+    public byte[] generateIso20022ForOperator(UUID corporateActionId) {
+        CorporateAction action = requireSettled(corporateActionId);
+        List<CorporateActionEntry> entries = entryRepository.findByCorporateActionId(corporateActionId);
+        Asset asset = assetRepository.findById(action.getAssetId()).orElse(null);
+        Map<UUID, LegalEntity> entitiesById = entityRepository.findAllById(
+                entries.stream().map(CorporateActionEntry::getInvestorId).filter(java.util.Objects::nonNull).toList()
+        ).stream().collect(Collectors.toMap(LegalEntity::getId, Function.identity()));
+        return Iso20022CorporateActionNotificationRenderer.render(action, asset, entries, entitiesById);
+    }
+
+    /** Investor-facing: ISO 20022-shaped notification scoped to this investor's own entry. */
+    @Transactional(readOnly = true)
+    public byte[] generateIso20022ForInvestor(UUID corporateActionId, UUID investorId) {
+        CorporateAction action = requireSettled(corporateActionId);
+        List<CorporateActionEntry> own = entryRepository.findByCorporateActionId(corporateActionId).stream()
+                .filter(e -> investorId.equals(e.getInvestorId()))
+                .toList();
+        if (own.isEmpty()) {
+            throw new EntityNotFoundException("CorporateActionEntry for investor", investorId);
+        }
+        Asset asset = assetRepository.findById(action.getAssetId()).orElse(null);
+        LegalEntity investor = entityRepository.findById(investorId).orElse(null);
+        Map<UUID, LegalEntity> entitiesById = investor != null ? Map.of(investorId, investor) : Map.of();
+        return Iso20022CorporateActionNotificationRenderer.render(action, asset, own, entitiesById);
+    }
+
     private byte[] sign(byte[] unsigned, CorporateAction action, String kind) {
         return signingService.isConfigured()
                 ? signingService.signPdf(unsigned, "Corporate action confirmation (" + kind + ") — " + action.getId())

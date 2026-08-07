@@ -167,6 +167,12 @@ public class DoraService {
     }
 
     @Transactional(readOnly = true)
+    public IctIncident getIncident(UUID id) {
+        return incidentRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("IctIncident", id));
+    }
+
+    @Transactional(readOnly = true)
     public List<ThirdPartyProvider> listProviders() {
         return providerRepository.findAll();
     }

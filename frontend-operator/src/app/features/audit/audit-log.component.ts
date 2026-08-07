@@ -11,6 +11,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatNativeDateModule } from '@angular/material/core';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { DatePipe, JsonPipe } from '@angular/common';
 import { AuditService } from '../../core/api/audit.service';
 import { AuditEvent, ChainVerificationResult } from '../../core/models';
@@ -124,10 +125,21 @@ type ReportMode = 'all' | 'kyc-overrides';
   template: `
     <div class="page-header">
       <h1>Audit Log</h1>
-      <button mat-stroked-button (click)="clearFilters()">
-        <mat-icon>clear</mat-icon>
-        Clear Filters
-      </button>
+      <div style="display:flex;gap:8px">
+        <button mat-stroked-button (click)="exportEvents()">
+          <mat-icon>download</mat-icon>
+          Export (CSV)
+        </button>
+        <button mat-stroked-button (click)="exportEventsSigned()"
+                matTooltip="CSV with per-row hash-chain columns, Ed25519-signed for independent verification">
+          <mat-icon>verified</mat-icon>
+          Signed export
+        </button>
+        <button mat-stroked-button (click)="clearFilters()">
+          <mat-icon>clear</mat-icon>
+          Clear Filters
+        </button>
+      </div>
     </div>
 
     <div class="chain-status-card" [class.valid]="chainStatus?.valid === true"
@@ -277,6 +289,7 @@ type ReportMode = 'all' | 'kyc-overrides';
 })
 export class AuditLogComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
   private readonly auditService = inject(AuditService);
 
   readonly displayedColumns = [
@@ -370,6 +383,60 @@ export class AuditLogComponent implements OnInit {
   private toIsoDateTime(date: string, bound: 'start' | 'end'): string | undefined {
     if (!date) return undefined;
     return bound === 'start' ? `${date}T00:00:00Z` : `${date}T23:59:59Z`;
+  }
+
+  /** CSV/evidence export for the currently-applied filters — a compliance officer or auditor
+   *  previously had no way to get a data extract for a date range or case without DB access. */
+  exportEvents(): void {
+    this.auditService.exportEvents({
+      eventType: this.filterEventType || undefined,
+      subjectType: this.filterSubjectType || undefined,
+      from: this.toIsoDateTime(this.filterFrom, 'start'),
+      to: this.toIsoDateTime(this.filterTo, 'end'),
+    }).subscribe({
+      next: blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audit-export-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+      error: () => this.snackBar.open('Failed to export audit events.', 'Close', { duration: 4000 }),
+    });
+  }
+
+  /** Same filters as {@link exportEvents}, but the CSV carries each row's hash-chain position
+   *  and signature, and the whole export is itself Ed25519-signed (headers) so an auditor can
+   *  verify the exact file they received against `/audit/signing-key`. */
+  exportEventsSigned(): void {
+    this.auditService.exportEventsSigned({
+      eventType: this.filterEventType || undefined,
+      subjectType: this.filterSubjectType || undefined,
+      from: this.toIsoDateTime(this.filterFrom, 'start'),
+      to: this.toIsoDateTime(this.filterTo, 'end'),
+    }).subscribe({
+      next: response => {
+        const blob = response.body;
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audit-export-signed-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        const signed = response.headers.get('X-Export-Signed') === 'true';
+        this.snackBar.open(
+          signed
+            ? `Signed with ${response.headers.get('X-Audit-Signing-Key-Name')} — digest ${response.headers.get('X-Export-Digest-Sha256')?.slice(0, 16)}…`
+            : 'No signing key configured in this environment — export is unsigned.',
+          'Close',
+          { duration: 8000 },
+        );
+      },
+      error: () => this.snackBar.open('Failed to export signed audit events.', 'Close', { duration: 4000 }),
+    });
   }
 
   onReportModeChange(): void {

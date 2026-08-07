@@ -233,6 +233,13 @@ export class SidebarComponent {
       ],
     },
     {
+      label: 'Client Servicing',
+      roles: ['RELATIONSHIP_MANAGER'],
+      items: [
+        { label: 'My Clients', icon: 'contact_page', route: '/my-clients' },
+      ],
+    },
+    {
       label: 'Registry',
       roles: ['REGISTRY_ADMIN', 'AUDIT'],
       items: [
@@ -247,10 +254,12 @@ export class SidebarComponent {
       roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'],
       items: [
         { label: 'Screening',      icon: 'policy',                    route: '/compliance/screening' },
+        { label: 'Chain Drift',    icon: 'sync_problem',              route: '/compliance/chain-drift' },
         { label: 'Holder Blocks',  icon: 'gavel',                     route: '/compliance/holder-blocks' },
         { label: 'Token Admin Grants', icon: 'admin_panel_settings',  route: '/compliance/token-admin-grants' },
         { label: 'CASP Register',  icon: 'verified_user',             route: '/compliance/casp-register' },
         { label: 'DORA',           icon: 'security_update_warning',   route: '/compliance/dora' },
+        { label: 'Access Reviews', icon: 'fact_check',                route: '/compliance/access-reviews' },
         { label: 'Reporting',      icon: 'assessment',                route: '/compliance/reporting' },
         { label: 'DSAR Erasure',   icon: 'person_off',                route: '/compliance/dsar' },
         { label: 'Support Tickets', icon: 'support_agent',            route: '/compliance/support-tickets' },
@@ -276,6 +285,16 @@ export class SidebarComponent {
         { label: 'Network Nodes', icon: 'cable',     route: '/network-nodes' },
         { label: 'Endpoints',     icon: 'contacts',  route: '/endpoints' },
         { label: 'Users',         icon: 'group',     route: '/users' },
+      ],
+    },
+    {
+      // Matches BlockchainTransactionController's REGISTRY_ADMIN/AUDIT access exactly — a
+      // separate section from Infrastructure (REGISTRY_ADMIN-only) rather than widening that
+      // one, since Wallets/Network Nodes/Endpoints/Users are genuinely REGISTRY_ADMIN-specific.
+      label: 'Operations',
+      roles: ['REGISTRY_ADMIN', 'AUDIT'],
+      items: [
+        { label: 'Transactions', icon: 'receipt_long', route: '/transactions' },
       ],
     },
   ];

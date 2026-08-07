@@ -85,8 +85,27 @@ public class AssetService {
         if (patch.getDenomination() != null) existing.setDenomination(patch.getDenomination());
         if (patch.getIssueDate() != null) existing.setIssueDate(patch.getIssueDate());
         if (patch.getMaturityDate() != null) existing.setMaturityDate(patch.getMaturityDate());
+        if (patch.getMinInvestmentAmount() != null) existing.setMinInvestmentAmount(patch.getMinInvestmentAmount());
+        if (patch.getMaxHoldingAmount() != null) existing.setMaxHoldingAmount(patch.getMaxHoldingAmount());
         Asset saved = assetRepository.save(existing);
         eventPublisher.publishEvent(new AssetUpdatedEvent(id, actorId, null));
+        return saved;
+    }
+
+    /**
+     * Sets the asset's MiFID II target market (product governance) — an explicit replace, not a
+     * merge, since "which categories may buy this" is a single coherent decision, unlike the
+     * other patchable fields on {@link #updateAsset}. An empty {@code categories} set means
+     * unrestricted (see {@link Asset#isEligibleForTargetMarket}).
+     */
+    public Asset updateTargetMarket(UUID id, java.util.Set<de.makibytes.registerwerk.customer.api.ClientCategory> categories,
+                                     de.makibytes.registerwerk.customer.api.KnowledgeExperienceLevel minExperience, UUID actorId) {
+        Asset existing = getAsset(id);
+        existing.setTargetMarketCategories(categories);
+        existing.setTargetMarketMinExperience(minExperience);
+        Asset saved = assetRepository.save(existing);
+        eventPublisher.publishEvent(new AssetUpdatedEvent(id, actorId, null));
+        log.info("Updated target market for asset: id={} categories={} minExperience={}", id, categories, minExperience);
         return saved;
     }
 

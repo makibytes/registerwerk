@@ -48,6 +48,12 @@ class BlockchainApiImpl implements BlockchainApi {
     }
 
     @Override
+    public Page<BlockchainTransactionView> findTransactionsByStatus(String status, Pageable pageable) {
+        BlockchainTransaction.Status parsed = BlockchainTransaction.Status.valueOf(status);
+        return repository.findByStatusOrderByCreatedAtDesc(parsed, pageable).map(this::toView);
+    }
+
+    @Override
     public Optional<BlockchainTransactionView> findByTxHash(String txHash) {
         return repository.findByTxHash(txHash).map(this::toView);
     }
@@ -59,6 +65,7 @@ class BlockchainApiImpl implements BlockchainApi {
                 tx.getContractAddress(), tx.getDeploymentId(), tx.getAssetId(),
                 tx.getActorName(), tx.getActorRole(), tx.getParams(),
                 tx.getGasUsed(), tx.getBlockNumber(), tx.getErrorMessage(),
-                tx.getCreatedAt(), tx.getCompletedAt());
+                tx.getCreatedAt(), tx.getCompletedAt(),
+                tx.getOpsNote(), tx.getOpsReviewedAt(), tx.getOpsReviewedBy());
     }
 }

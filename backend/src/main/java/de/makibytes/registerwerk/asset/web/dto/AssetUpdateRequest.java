@@ -24,5 +24,7 @@ public record AssetUpdateRequest(
     @Positive BigDecimal issueSize,
     @Positive BigDecimal denomination,
     LocalDate issueDate,
-    LocalDate maturityDate
+    LocalDate maturityDate,
+    @Positive BigDecimal minInvestmentAmount,
+    @Positive BigDecimal maxHoldingAmount
 ) {}

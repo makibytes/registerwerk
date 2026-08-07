@@ -96,6 +96,10 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                 <mat-icon>send</mat-icon>
               </button>
             }
+            <button mat-icon-button (click)="exportIncidentAuthorityReport(inc)"
+                    matTooltip="Download Art. 19 authority-report export (CSV)">
+              <mat-icon>description</mat-icon>
+            </button>
           </ng-template>
         </div>
       </mat-tab>
@@ -103,7 +107,12 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       <!-- Third-Party Providers -->
       <mat-tab label="Third-Party Providers">
         <div class="tab-content">
-          <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+            <button mat-stroked-button (click)="exportProviderRegister()"
+                    matTooltip="Download Art. 28 Register of Information export (CSV)">
+              <mat-icon>download</mat-icon>
+              Export Register
+            </button>
             <button mat-raised-button color="primary" (click)="openProviderDialog()">
               <mat-icon>add_business</mat-icon>
               Register Provider
@@ -713,6 +722,29 @@ export class DoraDashboardComponent implements OnInit {
       },
       error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to report to authority.', 'Dismiss', { duration: 6000 }),
     });
+  }
+
+  exportIncidentAuthorityReport(incident: IctIncident): void {
+    this.doraService.exportIncidentAuthorityReport(incident.id).subscribe({
+      next: (csv) => this.triggerDownload(csv, `dora-incident-report-${incident.id}.csv`),
+      error: () => this.snackBar.open('Failed to generate the authority-report export.', 'Dismiss', { duration: 4000 }),
+    });
+  }
+
+  exportProviderRegister(): void {
+    this.doraService.exportProviderRegister().subscribe({
+      next: (csv) => this.triggerDownload(csv, 'dora-register-of-information.csv'),
+      error: () => this.snackBar.open('Failed to generate the register export.', 'Dismiss', { duration: 4000 }),
+    });
+  }
+
+  private triggerDownload(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   openRecordTestDialog(): void {

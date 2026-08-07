@@ -189,4 +189,26 @@ class DoraServiceTest {
         assertThat(captor.getValue().payload()).containsEntry("authorityRef", "BaFin-Ref-2026-001")
                 .containsEntry("isFinalReport", true);
     }
+
+    // ── getIncident (Track 7-1) ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("getIncident returns the incident when it exists")
+    void getIncident_found_returnsIt() {
+        UUID incidentId = UUID.randomUUID();
+        IctIncident incident = new IctIncident();
+        when(incidentRepository.findById(incidentId)).thenReturn(Optional.of(incident));
+
+        assertThat(doraService.getIncident(incidentId)).isSameAs(incident);
+    }
+
+    @Test
+    @DisplayName("getIncident throws EntityNotFoundException when it doesn't exist")
+    void getIncident_notFound_throws() {
+        UUID incidentId = UUID.randomUUID();
+        when(incidentRepository.findById(incidentId)).thenReturn(Optional.empty());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> doraService.getIncident(incidentId))
+                .isInstanceOf(de.makibytes.registerwerk.shared.EntityNotFoundException.class);
+    }
 }

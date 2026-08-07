@@ -52,6 +52,7 @@ export type AppUserRole =
   | 'REGISTRY_ADMIN'
   | 'AUDIT'
   | 'COMPLIANCE_OFFICER'
+  | 'RELATIONSHIP_MANAGER'
   | 'COMPANY_ADMIN'
   | 'ISSUER'
   | 'INVESTOR'

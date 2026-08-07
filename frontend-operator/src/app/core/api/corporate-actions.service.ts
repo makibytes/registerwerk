@@ -38,4 +38,12 @@ export class CorporateActionsService {
     }
     return this.http.post<CorporateAction>(`${this.base}/${corporateActionId}/approve-settlement`, {}, { headers });
   }
+
+  downloadConfirmation(corporateActionId: string): Observable<Blob> {
+    return this.http.get(`${this.base}/${corporateActionId}/confirmation`, { responseType: 'blob' });
+  }
+
+  downloadIso20022Confirmation(corporateActionId: string): Observable<Blob> {
+    return this.http.get(`${this.base}/${corporateActionId}/confirmation/iso20022`, { responseType: 'blob' });
+  }
 }

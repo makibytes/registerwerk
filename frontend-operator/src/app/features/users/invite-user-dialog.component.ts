@@ -15,6 +15,7 @@ const OPERATOR_ROLES: { value: AppUserRole; label: string }[] = [
   { value: 'REGISTRY_ADMIN', label: 'Registry Admin (Operator)' },
   { value: 'AUDIT', label: 'Audit (Operator)' },
   { value: 'COMPLIANCE_OFFICER', label: 'Compliance Officer (Operator)' },
+  { value: 'RELATIONSHIP_MANAGER', label: 'Relationship Manager (Operator)' },
 ];
 
 const COMPANY_ROLES: { value: AppUserRole; label: string }[] = [

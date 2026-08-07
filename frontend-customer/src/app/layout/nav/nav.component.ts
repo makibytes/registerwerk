@@ -137,6 +137,10 @@ const { operatorUrl } = environment;
           <mat-icon>support_agent</mat-icon>
           <span>Support</span>
         </button>
+        <button mat-menu-item routerLink="/webhooks">
+          <mat-icon>webhook</mat-icon>
+          <span>Webhooks</span>
+        </button>
         <button mat-menu-item (click)="logout()">
           <mat-icon>logout</mat-icon>
           <span>Sign out</span>

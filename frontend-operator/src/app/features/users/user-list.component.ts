@@ -20,7 +20,7 @@ import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component
 import { User2faDialogComponent } from './user-2fa-dialog.component';
 
 const ALL_ROLES: AppUserRole[] = [
-  'REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER',
+  'REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER', 'RELATIONSHIP_MANAGER',
   'COMPANY_ADMIN', 'ISSUER', 'INVESTOR', 'TRADER'
 ];
 
@@ -28,6 +28,7 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
   REGISTRY_ADMIN: 'Registry Admin',
   AUDIT: 'Audit',
   COMPLIANCE_OFFICER: 'Compliance Officer',
+  RELATIONSHIP_MANAGER: 'Relationship Manager',
   COMPANY_ADMIN: 'Company Admin',
   ISSUER: 'Issuer',
   INVESTOR: 'Investor',
@@ -449,7 +450,7 @@ export class UserListComponent implements OnInit {
   }
 
   isOperatorRole(role: AppUserRole): boolean {
-    return ['REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER'].includes(role);
+    return ['REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER', 'RELATIONSHIP_MANAGER'].includes(role);
   }
 
   private loadUsers(): void {

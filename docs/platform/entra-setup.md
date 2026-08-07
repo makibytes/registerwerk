@@ -30,6 +30,17 @@ to that page, so a user at a desktop can continue on the phone that will hold th
 support only email OTP, SMS (a paid add-on) and passkeys. Customers must be members or B2B guests
 in a workforce tenant, or federated from their own.
 
+**This runbook is Entra-specific, but JWT validation is not.** `JWT_ISSUER_URI` is a plain OIDC
+issuer URL resolved via standard discovery (`JwtDecoders.fromIssuerLocation`) — pointing it at
+Okta, Keycloak, ForgeRock, Auth0, or any other OIDC-compliant IdP validates tokens correctly, and
+`DefaultPrincipalResolver` resolves/provisions such principals by their `sub` claim (tagged
+`UserAuthProvider.OIDC`), independent of `ENTRA_ENABLED`. What does *not* work outside Entra is
+everything downstream of Microsoft Graph: 2FA status on `/security`, Conditional Access step-up
+auth contexts, and the operator support console (sections 2–3 below) — those degrade gracefully
+("this account does not sign in through Microsoft Entra ID") rather than erroring, but there is no
+equivalent Graph-style directory integration for another IdP in this codebase. Building one would
+need testing against that provider's actual admin API, which this repository has no access to.
+
 ---
 
 ## 1. App registrations

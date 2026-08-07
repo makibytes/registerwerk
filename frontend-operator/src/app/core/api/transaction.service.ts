@@ -22,6 +22,9 @@ export interface TxRecord {
   errorMessage: string | null;
   createdAt: string;
   completedAt: string | null;
+  opsNote: string | null;
+  opsReviewedAt: string | null;
+  opsReviewedBy: string | null;
 }
 
 export interface TxPage {
@@ -57,6 +60,24 @@ export class TransactionService {
     if (deploymentId) url += `&deploymentId=${deploymentId}`;
     if (assetId) url += `&assetId=${assetId}`;
     return this.http.get<TxPage>(url);
+  }
+
+  /**
+   * Cross-asset "what broke overnight" view — REGISTRY_ADMIN/AUDIT only, since it isn't scoped
+   * to a single asset/deployment the caller has been checked against.
+   */
+  listByStatus(status: TxRecord['status'], page = 0, size = 50): Observable<TxPage> {
+    return this.http.get<TxPage>(`${this.base}?status=${status}&page=${page}&size=${size}`);
+  }
+
+  /**
+   * Annotates a FAILED/TIMEOUT transaction as handled. Not a resubmit — the backend doesn't
+   * capture a nonce or unsigned calldata at submission time, so it can't safely rebuild and
+   * re-sign a replacement transaction; this just records what ops actually did about it
+   * (usually out-of-band, via the chain's own tooling).
+   */
+  review(id: string, note: string): Observable<TxRecord> {
+    return this.http.post<TxRecord>(`${this.base}/${id}/review`, { note });
   }
 
   /**

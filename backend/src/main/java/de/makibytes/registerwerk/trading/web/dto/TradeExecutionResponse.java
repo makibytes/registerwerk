@@ -32,5 +32,6 @@ public record TradeExecutionResponse(
         Instant createdAt,
         Instant settledAt,
         String failureReason,
-        String paymentReference) {
+        String paymentReference,
+        Instant paymentDeclaredAt) {
 }

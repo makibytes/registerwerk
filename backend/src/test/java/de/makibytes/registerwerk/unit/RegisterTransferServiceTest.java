@@ -177,7 +177,7 @@ class RegisterTransferServiceTest {
         when(deploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of());
 
         AuditEventView event1 = new AuditEventView(UUID.randomUUID(), "ASSET_CREATED", "Asset", ASSET_ID,
-                UUID.randomUUID(), "REGISTRY_ADMIN", Map.of(), java.time.Instant.now());
+                UUID.randomUUID(), "REGISTRY_ADMIN", Map.of(), java.time.Instant.now(), 1L, "ab", null);
         // First page reports isLast=false, forcing the service to fetch a second page.
         when(auditApi.findBySubject(eq("Asset"), eq(ASSET_ID), argThat(p -> p.getPageNumber() == 0)))
                 .thenReturn(new PageImpl<>(List.of(event1), Pageable.ofSize(500), 501));

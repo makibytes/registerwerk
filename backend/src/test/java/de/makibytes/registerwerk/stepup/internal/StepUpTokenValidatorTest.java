@@ -97,16 +97,37 @@ class StepUpTokenValidatorTest {
     }
 
     @Test
-    @DisplayName("rejects an approver who has since been demoted from REGISTRY_ADMIN")
+    @DisplayName("rejects an approver who has since been demoted to a non-approver-eligible role")
     void rejects_approverDemotedSinceTokenMint() {
         when(jwtDecoder.decode("raw-token")).thenReturn(approverJwt());
         AppUser demoted = enabledAdmin();
-        demoted.setRoles(Set.of(AppUserRole.COMPLIANCE_OFFICER));
+        demoted.setRoles(Set.of(AppUserRole.INVESTOR));
         when(appUserRepository.findById(approverId)).thenReturn(Optional.of(demoted));
 
         assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("no longer an enabled REGISTRY_ADMIN");
+    }
+
+    @Test
+    @DisplayName("accepts a currently-enabled COMPLIANCE_OFFICER approver — segregation of duties, not just dual REGISTRY_ADMIN")
+    void accepts_complianceOfficerApprover() {
+        Jwt complianceJwt = Jwt.withTokenValue("raw-token")
+                .header("alg", "HS256")
+                .subject(approverId.toString())
+                .claim("roles", List.of("COMPLIANCE_OFFICER"))
+                .claim("acr", "stepup")
+                .claim("stepup_scope", "FORCE_BURN")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(600))
+                .build();
+        when(jwtDecoder.decode("raw-token")).thenReturn(complianceJwt);
+        AppUser complianceOfficer = enabledAdmin();
+        complianceOfficer.setRoles(Set.of(AppUserRole.COMPLIANCE_OFFICER));
+        when(appUserRepository.findById(approverId)).thenReturn(Optional.of(complianceOfficer));
+
+        assertThatCode(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+                .doesNotThrowAnyException();
     }
 
     @Test

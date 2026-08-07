@@ -76,6 +76,15 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
                     Approve settlement
                   </button>
                 }
+                @if (a.status === 'SETTLED' || a.status === 'CLOSED') {
+                  <button mat-icon-button matTooltip="Download confirmation (PDF)" (click)="downloadConfirmation(a)">
+                    <mat-icon>picture_as_pdf</mat-icon>
+                  </button>
+                  <button mat-icon-button matTooltip="Download ISO 20022-shaped confirmation (XML)"
+                          (click)="downloadIso20022Confirmation(a)">
+                    <mat-icon>code</mat-icon>
+                  </button>
+                }
               </div>
             </div>
           }
@@ -205,5 +214,28 @@ export class CorporateActionsComponent implements OnInit {
         },
       });
     });
+  }
+
+  downloadConfirmation(action: CorporateAction): void {
+    this.corporateActionsService.downloadConfirmation(action.id).subscribe({
+      next: (pdf) => this.triggerDownload(pdf, `confirmation-${action.id}.pdf`),
+      error: () => this.snackBar.open('Failed to generate the confirmation.', 'Dismiss', { duration: 4000 }),
+    });
+  }
+
+  downloadIso20022Confirmation(action: CorporateAction): void {
+    this.corporateActionsService.downloadIso20022Confirmation(action.id).subscribe({
+      next: (xml) => this.triggerDownload(xml, `confirmation-${action.id}.xml`),
+      error: () => this.snackBar.open('Failed to generate the ISO 20022 confirmation.', 'Dismiss', { duration: 4000 }),
+    });
+  }
+
+  private triggerDownload(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 }

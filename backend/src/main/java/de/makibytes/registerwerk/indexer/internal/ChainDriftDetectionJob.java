@@ -205,10 +205,17 @@ class ChainDriftDetectionJob {
             // One OPEN event per (deployment, wallet): refresh if present, insert otherwise.
             // The recorded on-chain balance is the reconstruction after netting out pending
             // off-chain settlement, so (db_balance − onchain_balance) equals the flagged delta.
+            // NOTE: the space after "AND" below is a required `\s` escape, not a stray edit —
+            // Java text blocks strip trailing whitespace from every line, so a plain trailing
+            // space here is silently dropped and "AND" glues directly onto walletMatchSql
+            // (e.g. "ANDLOWER(...)"), which Postgres rejects outright as invalid syntax. That
+            // exact bug shipped for a time: every refresh attempt threw, was swallowed by the
+            // catch below, and no OPEN drift event was ever actually refreshed or logged past
+            // its first detection — confirmed by reproducing the literal concatenated SQL string.
             int refreshed = jdbc.update("""
                 UPDATE chain_drift_event
                 SET db_balance = ?, onchain_balance = ?, severity = ?, detected_at = now()
-                WHERE deployment_id = ? AND """ + walletMatchSql + """
+                WHERE deployment_id = ? AND\s""" + walletMatchSql + """
                  AND status = 'OPEN'
                 """, dbBalance, effectiveIndexed, severity, deploymentId, wallet);
             if (refreshed == 0) {

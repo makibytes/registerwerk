@@ -30,6 +30,8 @@ import { NavStrikeComponent } from '../wizards/nav-strike/nav-strike.component';
 import { SlotAdminComponent } from '../wizards/slot-admin/slot-admin.component';
 import { CorporateActionsComponent } from '../wizards/corporate-actions/corporate-actions.component';
 import { RegisterInspectionsComponent } from '../wizards/register-inspections/register-inspections.component';
+import { SubscriptionOrdersComponent } from '../wizards/subscription-orders/subscription-orders.component';
+import { InvestorLimitsComponent } from '../wizards/investor-limits/investor-limits.component';
 import { RegisterTransferComponent } from '../wizards/register-transfer/register-transfer.component';
 import { SolanaAdminComponent } from '../wizards/solana-admin/solana-admin.component';
 import { BulkErc3643OpsComponent } from '../wizards/bulk-erc3643-ops/bulk-erc3643-ops.component';
@@ -75,6 +77,8 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
     SlotAdminComponent,
     CorporateActionsComponent,
     RegisterInspectionsComponent,
+    SubscriptionOrdersComponent,
+    InvestorLimitsComponent,
     RegisterTransferComponent,
     SolanaAdminComponent,
     BulkErc3643OpsComponent,
@@ -389,6 +393,12 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
         <!-- Holders -->
         <mat-tab label="Holders">
           <div class="tab-content">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+              <button mat-stroked-button (click)="exportHolderRegister()">
+                <mat-icon>download</mat-icon>
+                Export Register (CSV)
+              </button>
+            </div>
             @if (holdersLoading) {
               <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
             } @else {
@@ -504,6 +514,16 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
         <!-- Corporate Actions — coupon/dividend/split/redemption/call lifecycle -->
         <mat-tab label="Corporate Actions">
           <app-corporate-actions [assetId]="id" />
+        </mat-tab>
+
+        <!-- Subscription Orders — primary-market submit/allocate/confirm/reject flow -->
+        <mat-tab label="Subscription Orders">
+          <app-subscription-orders [assetId]="id" />
+        </mat-tab>
+
+        <!-- Investor Limits — per-investor min-investment/max-holding/lockup overrides -->
+        <mat-tab label="Investor Limits">
+          <app-investor-limits [assetId]="id" />
         </mat-tab>
 
         <!-- Register Inspections — §10 eWpG requests to disclose this asset's register -->
@@ -1644,6 +1664,20 @@ export class AssetDetailComponent implements OnInit {
       a.download = doc.fileName ?? 'term_sheet';
       a.click();
       URL.revokeObjectURL(url);
+    });
+  }
+
+  exportHolderRegister(): void {
+    this.assetService.exportHolders(this.id).subscribe({
+      next: blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `holder-register-${this.id}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+      error: () => this.snackBar.open('Failed to export holder register.', 'Close', { duration: 4000 }),
     });
   }
 

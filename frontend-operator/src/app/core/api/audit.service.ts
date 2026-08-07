@@ -1,8 +1,15 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpParams, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { AuditEvent, AuditFilterParams, ChainVerificationResult, PageResponse } from '../models';
+
+export interface SigningKeyInfo {
+  configured: boolean;
+  name: string | null;
+  publicKeyBase64: string | null;
+  createdAt: string | null;
+}
 
 @Injectable({ providedIn: 'root' })
 export class AuditService {
@@ -40,6 +47,37 @@ export class AuditService {
     if (params.size != null) httpParams = httpParams.set('size', params.size.toString());
 
     return this.http.get<PageResponse<AuditEvent>>(`${this.auditBase}/reports/kyc-overrides`, { params: httpParams });
+  }
+
+  /** CSV/evidence export for a date range or case, honoring the current search filters. */
+  exportEvents(params: AuditFilterParams = {}): Observable<Blob> {
+    let httpParams = new HttpParams();
+    if (params.eventType) httpParams = httpParams.set('eventType', params.eventType);
+    if (params.subjectType) httpParams = httpParams.set('subjectType', params.subjectType);
+    if (params.actorId) httpParams = httpParams.set('actorId', params.actorId);
+    if (params.from) httpParams = httpParams.set('from', params.from);
+    if (params.to) httpParams = httpParams.set('to', params.to);
+    return this.http.get(`${this.base}/export`, { params: httpParams, responseType: 'blob' });
+  }
+
+  /** Signed evidence export — same filters, plus per-row hash-chain columns and an Ed25519
+   *  signature over the exported bytes (see response headers). Returns the full response so the
+   *  caller can read the signature/digest headers alongside the CSV body. */
+  exportEventsSigned(params: AuditFilterParams = {}): Observable<HttpResponse<Blob>> {
+    let httpParams = new HttpParams();
+    if (params.eventType) httpParams = httpParams.set('eventType', params.eventType);
+    if (params.subjectType) httpParams = httpParams.set('subjectType', params.subjectType);
+    if (params.actorId) httpParams = httpParams.set('actorId', params.actorId);
+    if (params.from) httpParams = httpParams.set('from', params.from);
+    if (params.to) httpParams = httpParams.set('to', params.to);
+    return this.http.get(`${this.base}/export/signed`, {
+      params: httpParams, responseType: 'blob', observe: 'response',
+    });
+  }
+
+  /** The Ed25519 public key needed to independently verify a signed export / per-row signature. */
+  signingKey(): Observable<SigningKeyInfo> {
+    return this.http.get<SigningKeyInfo>(`${this.auditBase}/signing-key`);
   }
 
   getEvent(id: string): Observable<AuditEvent> {

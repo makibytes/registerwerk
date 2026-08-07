@@ -69,6 +69,16 @@ pg_restore -h new-host -U registerwerk -d registerwerk \
   /backups/registerwerk_$(date +%Y%m%d).dump
 ```
 
+**`scripts/dr-restore-drill.sh` automates this fallback path** (pg_dump the running `postgres`
+compose service → restore into a disposable container → compare every table's row count →
+report an RTO figure) and, with `--record-dora <backend-base-url> <bearer-token>`, files the
+result as a real `SCENARIO_BASED` entry in `POST /api/v1/dora/resilience-tests` — a continuity
+drill an operator actually ran, not a demo-seeded placeholder. It deliberately does not exercise
+§2a (wal-g/S3) — that needs real backup-bucket credentials — and does not recompute the audit
+hash chain itself; it prints the `/api/v1/audit/chain/verify` command to run against the restored
+target for that. Run it periodically (e.g. quarterly) and after any schema change that touches
+migrations, to keep the "tested" in "tested continuity" current.
+
 ---
 
 ## 3. Backend Restore

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KYC Rejected — Registerwerk</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .header { background: #b91c1c; color: #ffffff; padding: 32px 40px; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .badge { display: inline-block; background: #fee2e2; color: #b91c1c; font-weight: bold; padding: 6px 16px; border-radius: 20px; font-size: 14px; margin-bottom: 16px; }
+        .body { padding: 32px 40px; color: #333333; line-height: 1.6; }
+        .body p { margin: 0 0 16px 0; }
+        .reason-box { background:#fef2f2; border-radius:6px; padding:16px; margin:24px 0; color:#7f1d1d; font-size:13px; }
+        .footer { background: #f4f6f8; padding: 20px 40px; color: #888; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>KYC Verification Rejected</h1>
+    </div>
+    <div class="body">
+        <span class="badge">&#10007; REJECTED</span>
+        <p>Dear <strong th:text="${entityName}">Entity Name</strong>,</p>
+        <p>
+            Your KYC (Know Your Customer) verification could not be approved by the
+            Registerwerk compliance team.
+        </p>
+        <div class="reason-box" th:if="${reason}">
+            <strong>Reason:</strong> <span th:text="${reason}">Reason text</span>
+        </div>
+        <p>Please review and resubmit your documentation, or contact support if you believe this was made in error.</p>
+        <p>Kind regards,<br/>The Registerwerk Compliance Team</p>
+    </div>
+    <div class="footer">
+        This notification was sent because your KYC documents were reviewed and rejected.
+    </div>
+</div>
+</body>
+</html>

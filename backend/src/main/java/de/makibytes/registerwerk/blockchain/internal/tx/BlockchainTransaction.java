@@ -69,6 +69,20 @@ public class BlockchainTransaction {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /**
+     * Operator annotation for a FAILED/TIMEOUT transaction, once handled — usually out-of-band
+     * via the chain's own tooling, since TIMEOUT is currently terminal (see the global
+     * transaction console's Javadoc for why an automated gas-bump resubmit isn't implemented).
+     */
+    @Column(name = "ops_note", columnDefinition = "text")
+    private String opsNote;
+
+    @Column(name = "ops_reviewed_at")
+    private Instant opsReviewedAt;
+
+    @Column(name = "ops_reviewed_by")
+    private UUID opsReviewedBy;
+
     // ── Getters & Setters ──────────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -119,4 +133,13 @@ public class BlockchainTransaction {
 
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
+
+    public String getOpsNote() { return opsNote; }
+    public void setOpsNote(String opsNote) { this.opsNote = opsNote; }
+
+    public Instant getOpsReviewedAt() { return opsReviewedAt; }
+    public void setOpsReviewedAt(Instant opsReviewedAt) { this.opsReviewedAt = opsReviewedAt; }
+
+    public UUID getOpsReviewedBy() { return opsReviewedBy; }
+    public void setOpsReviewedBy(UUID opsReviewedBy) { this.opsReviewedBy = opsReviewedBy; }
 }

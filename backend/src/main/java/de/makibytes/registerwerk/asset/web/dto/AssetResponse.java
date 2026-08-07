@@ -2,7 +2,9 @@ package de.makibytes.registerwerk.asset.web.dto;
 
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
+import de.makibytes.registerwerk.customer.api.KnowledgeExperienceLevel;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
@@ -10,6 +12,7 @@ import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -35,5 +38,9 @@ public record AssetResponse(
     BigDecimal issueSize,
     BigDecimal denomination,
     LocalDate issueDate,
-    LocalDate maturityDate
+    LocalDate maturityDate,
+    Set<ClientCategory> targetMarketCategories,
+    KnowledgeExperienceLevel targetMarketMinExperience,
+    BigDecimal minInvestmentAmount,
+    BigDecimal maxHoldingAmount
 ) {}

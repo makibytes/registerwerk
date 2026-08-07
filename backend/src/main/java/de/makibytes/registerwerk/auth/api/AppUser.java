@@ -94,6 +94,15 @@ public class AppUser {
     @Column(name = "entra_mfa_checked_at")
     private Instant entraMfaCheckedAt;
 
+    // ── Generic (non-Entra) OIDC ───────────────────────────────────────────
+    /**
+     * OIDC {@code sub} claim for a principal resolved via a non-Entra issuer (Okta, Keycloak,
+     * ForgeRock, Auth0, …, configured via {@code JWT_ISSUER_URI}). The one identifier every OIDC
+     * provider guarantees stable, unlike Entra's {@code oid}. Null for LOCAL and ENTRA accounts.
+     */
+    @Column(name = "external_subject")
+    private String externalSubject;
+
     @PreUpdate
     void onUpdate() {
         this.updatedAt = Instant.now();
@@ -166,4 +175,7 @@ public class AppUser {
 
     public Instant getEntraMfaCheckedAt() { return entraMfaCheckedAt; }
     public void setEntraMfaCheckedAt(Instant v) { this.entraMfaCheckedAt = v; }
+
+    public String getExternalSubject() { return externalSubject; }
+    public void setExternalSubject(String externalSubject) { this.externalSubject = externalSubject; }
 }

@@ -57,12 +57,24 @@ export class DoraService {
     return this.http.post<IctIncident>(`${this.base}/incidents/${id}/report-to-authority`, body);
   }
 
+  /** DORA Art. 19 major-incident authority-report export — a structured starting point, not the
+   *  certified ESA submission format. See `DoraController.exportIncidentAuthorityReport`. */
+  exportIncidentAuthorityReport(id: string): Observable<Blob> {
+    return this.http.get(`${this.base}/incidents/${id}/authority-report`, { responseType: 'blob' });
+  }
+
   listProviders(): Observable<ThirdPartyProvider[]> {
     return this.http.get<ThirdPartyProvider[]>(`${this.base}/providers`);
   }
 
   listExpiringProviders(): Observable<ThirdPartyProvider[]> {
     return this.http.get<ThirdPartyProvider[]>(`${this.base}/providers/expiring`);
+  }
+
+  /** DORA Art. 28 Register of Information export — a structured starting point, not the
+   *  certified EBA RoI taxonomy submission. See `DoraController.exportProviderRegister`. */
+  exportProviderRegister(): Observable<Blob> {
+    return this.http.get(`${this.base}/providers/register-export`, { responseType: 'blob' });
   }
 
   /** Wraps `DoraController.createProvider` — previously the RoI had no write path outside

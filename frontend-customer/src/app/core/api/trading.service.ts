@@ -70,7 +70,32 @@ export class TradingService {
     return this.http.get<TradeExecution[]>(`${this.base}/history`);
   }
 
-  settle(executionId: string): Observable<TradeExecution> {
-    return this.http.post<TradeExecution>(`${this.base}/history/${executionId}/settle`, {});
+  /** Buyer declares payment on a PENDING trade. This does NOT settle the trade — it moves to
+   *  AWAITING_SELLER_CONFIRMATION and waits for the seller to independently confirm receipt. */
+  declarePayment(executionId: string, paymentReference: string): Observable<TradeExecution> {
+    return this.http.post<TradeExecution>(`${this.base}/history/${executionId}/settle`, { paymentReference });
+  }
+
+  /** Seller confirms receipt of the buyer's declared payment — this is what actually credits
+   *  the register. */
+  confirmPayment(executionId: string): Observable<TradeExecution> {
+    return this.http.post<TradeExecution>(`${this.base}/history/${executionId}/confirm-payment`, {});
+  }
+
+  /** Seller disputes the buyer's declared payment (claims it was never received). */
+  disputePayment(executionId: string, reason: string): Observable<TradeExecution> {
+    return this.http.post<TradeExecution>(`${this.base}/history/${executionId}/dispute-payment`, { reason });
+  }
+
+  cancelTrade(executionId: string, reason: string): Observable<TradeExecution> {
+    return this.http.post<TradeExecution>(`${this.base}/history/${executionId}/cancel`, { reason });
+  }
+
+  downloadConfirmation(executionId: string): Observable<Blob> {
+    return this.http.get(`${this.base}/history/${executionId}/confirmation`, { responseType: 'blob' });
+  }
+
+  downloadIso20022Confirmation(executionId: string): Observable<Blob> {
+    return this.http.get(`${this.base}/history/${executionId}/confirmation/iso20022`, { responseType: 'blob' });
   }
 }

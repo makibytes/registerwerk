@@ -11,23 +11,30 @@ import org.hibernate.type.SqlTypes;
 
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
+import de.makibytes.registerwerk.customer.api.KnowledgeExperienceLevel;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.deployment.api.EntryType;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "asset")
@@ -128,6 +135,37 @@ public class Asset {
     @Column(name = "last_holder_sync_time")
     private Instant lastHolderSyncTime;
 
+    /**
+     * MiFID II target market (product governance) — which client categories this asset may be
+     * distributed to. Empty means unrestricted (backward-compatible default: existing assets and
+     * demo data predate this field and must not suddenly become un-subscribable). Checked by
+     * {@link #isEligibleForTargetMarket}, called from both the primary-market subscription flow
+     * and secondary-market trade settlement.
+     */
+    @ElementCollection(targetClass = ClientCategory.class)
+    @CollectionTable(name = "asset_target_market_category", joinColumns = @JoinColumn(name = "asset_id"))
+    @Enumerated(EnumType.STRING)
+    @Column(name = "client_category", nullable = false, length = 30)
+    private Set<ClientCategory> targetMarketCategories = new LinkedHashSet<>();
+
+    /** Minimum investor knowledge/experience this asset's target market requires. Null = no
+     *  minimum. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "target_market_min_experience", length = 20)
+    private KnowledgeExperienceLevel targetMarketMinExperience;
+
+    /**
+     * Default per-investor minimum subscription/acquisition amount and maximum total holding
+     * (F-BLOCKER-12) — null means unrestricted. A specific investor's effective limits are these
+     * defaults unless overridden by an {@code InvestorLimit} row for that investor (e.g. a
+     * negotiated cornerstone-investor exception).
+     */
+    @Column(name = "min_investment_amount", precision = 38, scale = 8)
+    private BigDecimal minInvestmentAmount;
+
+    @Column(name = "max_holding_amount", precision = 38, scale = 8)
+    private BigDecimal maxHoldingAmount;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -205,4 +243,41 @@ public class Asset {
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+
+    public Set<ClientCategory> getTargetMarketCategories() { return targetMarketCategories; }
+    public void setTargetMarketCategories(Set<ClientCategory> targetMarketCategories) {
+        this.targetMarketCategories = targetMarketCategories != null ? targetMarketCategories : new LinkedHashSet<>();
+    }
+
+    public KnowledgeExperienceLevel getTargetMarketMinExperience() { return targetMarketMinExperience; }
+    public void setTargetMarketMinExperience(KnowledgeExperienceLevel targetMarketMinExperience) {
+        this.targetMarketMinExperience = targetMarketMinExperience;
+    }
+
+    public BigDecimal getMinInvestmentAmount() { return minInvestmentAmount; }
+    public void setMinInvestmentAmount(BigDecimal minInvestmentAmount) { this.minInvestmentAmount = minInvestmentAmount; }
+
+    public BigDecimal getMaxHoldingAmount() { return maxHoldingAmount; }
+    public void setMaxHoldingAmount(BigDecimal maxHoldingAmount) { this.maxHoldingAmount = maxHoldingAmount; }
+
+    /**
+     * True if an investor with the given classification/experience is within this asset's
+     * target market. An unrestricted asset (no categories configured) admits everyone —
+     * existing/demo assets predate this field and must keep working. A restricted asset rejects
+     * an investor with no {@code investorCategory} at all (unclassified), since "not yet
+     * classified" can never satisfy a positive target-market requirement.
+     */
+    public boolean isEligibleForTargetMarket(ClientCategory investorCategory, KnowledgeExperienceLevel investorExperience) {
+        if (!targetMarketCategories.isEmpty()) {
+            if (investorCategory == null || !targetMarketCategories.contains(investorCategory)) {
+                return false;
+            }
+        }
+        if (targetMarketMinExperience != null) {
+            if (investorExperience == null || investorExperience.compareTo(targetMarketMinExperience) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

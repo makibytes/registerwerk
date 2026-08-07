@@ -43,4 +43,19 @@ public class MeCorporateActionConfirmationController {
                         ContentDisposition.attachment().filename("confirmation-" + corporateActionId + ".pdf").build().toString())
                 .body(pdf);
     }
+
+    @GetMapping("/api/v1/me/corporate-actions/{corporateActionId}/confirmation/iso20022")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> myIso20022Confirmation(@PathVariable UUID corporateActionId, Authentication auth) {
+        UUID entityId = SecurityUtils.extractEntityId(auth);
+        if (entityId == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        byte[] xml = confirmationService.generateIso20022ForInvestor(corporateActionId, entityId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_XML)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename("confirmation-" + corporateActionId + ".xml").build().toString())
+                .body(xml);
+    }
 }
