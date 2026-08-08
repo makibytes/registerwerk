@@ -5,6 +5,7 @@ import { DashboardComponent } from './dashboard.component';
 import { EntityService } from '../../core/api/entity.service';
 import { AssetService } from '../../core/api/asset.service';
 import { AuditService } from '../../core/api/audit.service';
+import { AuthService } from '../../core/auth/auth.service';
 import { Asset, AuditEvent, LegalEntity, PageResponse } from '../../core/models';
 
 function page<T>(content: T[], totalElements = content.length): PageResponse<T> {
@@ -19,6 +20,7 @@ describe('DashboardComponent', () => {
   let entityServiceSpy: jasmine.SpyObj<EntityService>;
   let assetServiceSpy: jasmine.SpyObj<AssetService>;
   let auditServiceSpy: jasmine.SpyObj<AuditService>;
+  let authServiceSpy: jasmine.SpyObj<AuthService>;
 
   function createComponent() {
     const fixture = TestBed.createComponent(DashboardComponent);
@@ -29,6 +31,8 @@ describe('DashboardComponent', () => {
     entityServiceSpy = jasmine.createSpyObj('EntityService', ['getEntities']);
     assetServiceSpy = jasmine.createSpyObj('AssetService', ['getAssets']);
     auditServiceSpy = jasmine.createSpyObj('AuditService', ['searchEvents']);
+    authServiceSpy = jasmine.createSpyObj('AuthService', ['hasRole']);
+    authServiceSpy.hasRole.and.callFake((role) => role === 'REGISTRY_ADMIN');
 
     TestBed.configureTestingModule({
       imports: [DashboardComponent],
@@ -37,6 +41,7 @@ describe('DashboardComponent', () => {
         { provide: EntityService, useValue: entityServiceSpy },
         { provide: AssetService, useValue: assetServiceSpy },
         { provide: AuditService, useValue: auditServiceSpy },
+        { provide: AuthService, useValue: authServiceSpy },
       ],
     });
   });
@@ -70,9 +75,12 @@ describe('DashboardComponent', () => {
 
   it('computes the asset status breakdown and issuedAssets count from the fetched page', () => {
     entityServiceSpy.getEntities.and.returnValue(of(page<LegalEntity>([])));
-    assetServiceSpy.getAssets.and.returnValue(of(page<Asset>([
-      asset('ISSUED'), asset('ISSUED'), asset('DRAFT'), asset('SUSPENDED'),
-    ])));
+    assetServiceSpy.getAssets.and.returnValues(
+      of(page<Asset>([
+        asset('ISSUED'), asset('ISSUED'), asset('DRAFT'), asset('SUSPENDED'),
+      ])),
+      of(page<Asset>([], 2)),
+    );
     auditServiceSpy.searchEvents.and.returnValue(of(page<AuditEvent>([])));
 
     const fixture = createComponent();
@@ -99,7 +107,7 @@ describe('DashboardComponent', () => {
     const component = fixture.componentInstance;
 
     const issuedSlice = component.assetDonutSlices.find(s => s.label === 'ISSUED');
-    expect(issuedSlice?.color).toBe('#10b981');
+    expect(issuedSlice?.color).toBe('var(--rw-issued-fg)');
     expect(issuedSlice?.value).toBe(1);
 
     // Labels have underscores replaced with spaces (e.g. PENDING_APPROVAL -> "PENDING APPROVAL")
@@ -127,5 +135,18 @@ describe('DashboardComponent', () => {
     const fixture = createComponent();
     expect(() => fixture.detectChanges()).not.toThrow();
     expect(fixture.componentInstance.loading).toBeFalse();
+    expect(fixture.componentInstance.hasLoadFailures).toBeTrue();
+  });
+
+  it('does not request registry-wide data for roles without registry overview access', () => {
+    authServiceSpy.hasRole.and.returnValue(false);
+
+    const fixture = createComponent();
+    fixture.detectChanges();
+
+    expect(entityServiceSpy.getEntities).not.toHaveBeenCalled();
+    expect(assetServiceSpy.getAssets).not.toHaveBeenCalled();
+    expect(auditServiceSpy.searchEvents).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.textContent).toContain('Your operator workspace is ready');
   });
 });

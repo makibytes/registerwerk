@@ -17,12 +17,15 @@ import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -35,6 +38,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/org-identity")
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+@Validated
 public class OrgIdentityAdminController {
 
     private final OrgRegistrationService registrationService;
@@ -72,8 +76,8 @@ public class OrgIdentityAdminController {
     @GetMapping("/orgs")
     public ResponseEntity<PageResponse<OrgRegistrationResponse>> listOrgs(
             @RequestParam(required = false) OrgRegistrationStatus status,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(200) int size) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         var result = status != null
                 ? registrationRepository.findByStatus(status, pageable)
@@ -117,8 +121,8 @@ public class OrgIdentityAdminController {
     public ResponseEntity<MemberWalletResponse> removeWallet(
             @PathVariable UUID id, @PathVariable UUID walletId, Authentication auth) {
         registrationService.require(id);
-        var wallet = memberWalletService.removeWallet(
-                walletId, null, SecurityUtils.extractUserId(auth), primaryRole(auth));
+        var wallet = memberWalletService.removeWalletFromOrg(
+                id, walletId, SecurityUtils.extractUserId(auth), primaryRole(auth));
         return ResponseEntity.ok(MemberWalletResponse.from(wallet));
     }
 

@@ -4,21 +4,25 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { Router } from '@angular/router';
 import { errorInterceptor } from './error.interceptor';
 import { AuthService } from '../auth/auth.service';
+import { MatSnackBar } from '@angular/material/snack-bar';
 
 describe('errorInterceptor', () => {
   let httpMock: HttpTestingController;
   let http: HttpClient;
   let authServiceSpy: jasmine.SpyObj<AuthService>;
+  let snackBarSpy: jasmine.SpyObj<MatSnackBar>;
   let router: Router;
 
   beforeEach(() => {
-    authServiceSpy = jasmine.createSpyObj('AuthService', ['logout']);
+    authServiceSpy = jasmine.createSpyObj('AuthService', ['clearSession']);
+    snackBarSpy = jasmine.createSpyObj('MatSnackBar', ['open']);
 
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(withInterceptors([errorInterceptor])),
         provideHttpClientTesting(),
         { provide: AuthService, useValue: authServiceSpy },
+        { provide: MatSnackBar, useValue: snackBarSpy },
       ],
     });
 
@@ -31,15 +35,25 @@ describe('errorInterceptor', () => {
 
   afterEach(() => httpMock.verify());
 
-  it('logs out and redirects to /login on a 401', () => {
+  it('clears local session state and redirects to /login on a 401 without an HTTP logout loop', () => {
     let errored = false;
     http.get('/api/v1/protected').subscribe({ error: () => (errored = true) });
 
     httpMock.expectOne('/api/v1/protected').flush('nope', { status: 401, statusText: 'Unauthorized' });
 
     expect(errored).toBeTrue();
-    expect(authServiceSpy.logout).toHaveBeenCalled();
+    expect(authServiceSpy.clearSession).toHaveBeenCalled();
     expect(router.navigate).toHaveBeenCalledWith(['/login']);
+  });
+
+  it('leaves an invalid-login response on the login page for the form to handle', () => {
+    http.post('/api/v1/public/auth/login', {}).subscribe({ error: () => undefined });
+
+    httpMock.expectOne('/api/v1/public/auth/login')
+      .flush('invalid', { status: 401, statusText: 'Unauthorized' });
+
+    expect(authServiceSpy.clearSession).toHaveBeenCalled();
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 
   it('does not log out on a 403, but still propagates the error', () => {
@@ -49,8 +63,9 @@ describe('errorInterceptor', () => {
     httpMock.expectOne('/api/v1/forbidden').flush('nope', { status: 403, statusText: 'Forbidden' });
 
     expect(errored).toBeTrue();
-    expect(authServiceSpy.logout).not.toHaveBeenCalled();
+    expect(authServiceSpy.clearSession).not.toHaveBeenCalled();
     expect(router.navigate).not.toHaveBeenCalled();
+    expect(snackBarSpy.open).toHaveBeenCalled();
   });
 
   it('propagates network errors (status 0) without logging out', () => {
@@ -60,7 +75,8 @@ describe('errorInterceptor', () => {
     httpMock.expectOne('/api/v1/unreachable').error(new ProgressEvent('error'), { status: 0 });
 
     expect(errored).toBeTrue();
-    expect(authServiceSpy.logout).not.toHaveBeenCalled();
+    expect(authServiceSpy.clearSession).not.toHaveBeenCalled();
+    expect(snackBarSpy.open).toHaveBeenCalled();
   });
 
   it('passes through successful responses untouched', () => {
@@ -70,7 +86,7 @@ describe('errorInterceptor', () => {
     httpMock.expectOne('/api/v1/ok').flush({ ok: true });
 
     expect(body).toEqual({ ok: true });
-    expect(authServiceSpy.logout).not.toHaveBeenCalled();
+    expect(authServiceSpy.clearSession).not.toHaveBeenCalled();
     expect(router.navigate).not.toHaveBeenCalled();
   });
 });

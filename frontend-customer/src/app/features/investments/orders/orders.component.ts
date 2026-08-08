@@ -59,7 +59,7 @@ import { AddressComponent } from '../../../shared/components/address.component';
               <mat-label>Requested amount</mat-label>
               <input matInput type="number" [(ngModel)]="form.requestedAmount" min="0">
             </mat-form-field>
-            <button mat-flat-button color="primary" [disabled]="submitting || !canSubmit" (click)="submitOrder()">
+            <button mat-flat-button color="primary" type="button" [disabled]="submitting || !canSubmit" (click)="submitOrder()">
               <mat-icon>send</mat-icon>
               {{ submitting ? 'Submitting…' : 'Submit Order' }}
             </button>
@@ -69,8 +69,14 @@ import { AddressComponent } from '../../../shared/components/address.component';
 
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
+      } @else if (loadError) {
+        <div class="content-card load-error" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <span>Orders could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
       } @else {
-        <mat-card>
+        <mat-card class="table-card">
           <table mat-table [dataSource]="orders" class="mat-elevation-z0">
             <ng-container matColumnDef="assetId">
               <th mat-header-cell *matHeaderCellDef>Asset</th>
@@ -100,10 +106,10 @@ import { AddressComponent } from '../../../shared/components/address.component';
               <th mat-header-cell *matHeaderCellDef></th>
               <td mat-cell *matCellDef="let o" class="actions-cell">
                 @if (o.status === 'SUBMITTED') {
-                  <button mat-stroked-button [disabled]="actingOn === o.id" (click)="cancel(o)">Cancel</button>
+                  <button mat-stroked-button type="button" [disabled]="!!actingOn" (click)="cancel(o)">Cancel</button>
                 }
                 @if (o.status === 'ALLOCATED') {
-                  <button mat-flat-button color="primary" [disabled]="actingOn === o.id" (click)="confirm(o)">
+                  <button mat-flat-button color="primary" type="button" [disabled]="!!actingOn" (click)="confirm(o)">
                     Confirm ({{ o.allocatedAmount | number:'1.0-2' }})
                   </button>
                 }
@@ -134,6 +140,10 @@ import { AddressComponent } from '../../../shared/components/address.component';
     .actions-cell { display: flex; gap: 8px; justify-content: flex-end; }
     .rejection-reason { font-size: 12px; color: var(--rw-text-danger); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .empty-row { text-align: center; padding: 32px; color: var(--rw-text-muted); }
+    .table-card { overflow-x: auto; }
+    .table-card table { min-width: 820px; }
+    .load-error { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; padding-block: 40px; color: var(--rw-text-secondary); }
+    .load-error mat-icon { color: var(--rw-text-danger); }
   `],
 })
 export class OrdersComponent implements OnInit {
@@ -143,6 +153,7 @@ export class OrdersComponent implements OnInit {
 
   orders: SubscriptionOrder[] = [];
   loading = true;
+  loadError = false;
   submitting = false;
   actingOn: string | null = null;
 
@@ -161,8 +172,9 @@ export class OrdersComponent implements OnInit {
     this.load();
   }
 
-  private load(): void {
+  load(): void {
     this.loading = true;
+    this.loadError = false;
     this.orderService.myOrders().subscribe({
       next: (orders) => {
         this.orders = orders;
@@ -171,13 +183,14 @@ export class OrdersComponent implements OnInit {
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.markForCheck();
       },
     });
   }
 
   submitOrder(): void {
-    if (!this.canSubmit) return;
+    if (this.submitting || !this.canSubmit) return;
     this.submitting = true;
     this.orderService.submit(this.form.assetId.trim(), this.form.walletAddress.trim(), this.form.requestedAmount!).subscribe({
       next: () => {
@@ -196,6 +209,7 @@ export class OrdersComponent implements OnInit {
   }
 
   cancel(order: SubscriptionOrder): void {
+    if (this.actingOn) return;
     this.actingOn = order.id;
     this.orderService.cancel(order.id).subscribe({
       next: () => {
@@ -213,6 +227,7 @@ export class OrdersComponent implements OnInit {
   }
 
   confirm(order: SubscriptionOrder): void {
+    if (this.actingOn) return;
     this.actingOn = order.id;
     this.orderService.confirm(order.id).subscribe({
       next: () => {

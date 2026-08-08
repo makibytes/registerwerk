@@ -35,6 +35,20 @@ import { AuthService } from '../../core/auth/auth.service';
         color: #9CA3AF;
         margin: 0;
       }
+
+
+      button {
+        margin-top: 20px;
+        border: 1px solid rgba(45,212,191,0.35);
+        border-radius: 8px;
+        padding: 9px 14px;
+        background: rgba(45,212,191,0.12);
+        color: #5EEAD4;
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+      }
     }
   `],
   template: `
@@ -47,9 +61,19 @@ import { AuthService } from '../../core/auth/auth.service';
             each user. Registerwerk cannot act on a customer's behalf in this mode. Ask the
             customer to sign in themselves, or use the operator portal's read-only views.
           </p>
+          <button type="button" (click)="goToLogin()">Return to sign in</button>
+        </div>
+      } @else if (failed) {
+        <div class="notice" role="alert">
+          <h1>Impersonation could not be started</h1>
+          <p>The handoff link is invalid, expired, or has already been used. Return to the operator portal and start a new impersonation session.</p>
+          <button type="button" (click)="goToLogin()">Return to sign in</button>
         </div>
       } @else {
-        <mat-spinner diameter="40" />
+        <div class="notice" role="status">
+          <mat-spinner diameter="40" />
+          <p>Starting the secure customer session…</p>
+        </div>
       }
     </div>
   `,
@@ -64,31 +88,35 @@ export class HandoffComponent implements OnInit {
    * link that cannot work — saying why beats an unexplained redirect.
    */
   unsupported = false;
+  failed = false;
 
   ngOnInit(): void {
     const fragment = window.location.hash.slice(1);
     const params = new URLSearchParams(fragment);
     const token = params.get('token');
     const entityId = params.get('entityId');
-    const entityName = decodeURIComponent(params.get('entityName') ?? '');
+    const entityName = params.get('entityName') ?? '';
+
+    // Remove secrets and metadata before doing any asynchronous work. URLSearchParams already
+    // decodes values; a second decodeURIComponent call could throw for legitimate '%' names.
+    history.replaceState(null, '', window.location.pathname);
 
     if (!this.auth.supportsImpersonation()) {
-      // Drop the fragment regardless, so a token never lingers in the address bar or history.
-      history.replaceState(null, '', window.location.pathname);
       this.unsupported = true;
       return;
     }
 
     if (token && entityId) {
-      // Clear the fragment first, so the token never lingers in the address bar or history
-      // even if the exchange call below fails.
-      history.replaceState(null, '', window.location.pathname);
       this.auth.enterImpersonation(token, entityId, entityName).subscribe({
         next: () => this.router.navigate(['/dashboard']),
-        error: () => this.router.navigate(['/login']),
+        error: () => { this.failed = true; },
       });
     } else {
-      this.router.navigate(['/login']);
+      this.failed = true;
     }
+  }
+
+  goToLogin(): void {
+    this.router.navigate(['/login']);
   }
 }

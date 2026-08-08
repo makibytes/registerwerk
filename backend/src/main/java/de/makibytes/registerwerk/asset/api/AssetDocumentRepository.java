@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface AssetDocumentRepository extends JpaRepository<AssetDocument, UUID> {
@@ -15,4 +16,6 @@ public interface AssetDocumentRepository extends JpaRepository<AssetDocument, UU
             UUID assetId, AssetDocumentType documentType);
 
     boolean existsByAssetIdAndDeletedAtIsNull(UUID assetId);
+
+    Optional<AssetDocument> findByIdAndAssetIdAndDeletedAtIsNull(UUID id, UUID assetId);
 }

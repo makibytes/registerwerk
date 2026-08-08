@@ -91,7 +91,7 @@ public class CompanyController {
     @PutMapping("/idp")
     public ResponseEntity<CompanyIdpSettingsResponse> saveIdpSettings(
             Authentication authentication,
-            @RequestBody CompanyIdpSettingsRequest request) {
+            @Valid @RequestBody CompanyIdpSettingsRequest request) {
         companyUserService.syncAuthenticatedPrincipal(authentication);
         return ResponseEntity.ok(companyUserService.saveIdpSettings(authentication, request));
     }

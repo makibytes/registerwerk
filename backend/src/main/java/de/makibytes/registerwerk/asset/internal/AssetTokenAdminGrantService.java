@@ -81,10 +81,23 @@ public class AssetTokenAdminGrantService {
         return saved;
     }
 
-    public AssetTokenAdminGrant revoke(UUID grantId, UUID revokedBy, String actorRole, String reason,
-                                       UUID dualControlApproverId) {
-        AssetTokenAdminGrant g = repository.findById(grantId)
+    public AssetTokenAdminGrant revokeForAsset(UUID assetId, UUID grantId, UUID revokedBy, String actorRole,
+                                               String reason, UUID dualControlApproverId) {
+        AssetTokenAdminGrant grant = repository.findByIdAndAssetId(grantId, assetId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetTokenAdminGrant", grantId));
+        return revoke(grant, revokedBy, actorRole, reason, dualControlApproverId);
+    }
+
+    public AssetTokenAdminGrant revokeEntityWide(UUID entityId, UUID grantId, UUID revokedBy, String actorRole,
+                                                 String reason, UUID dualControlApproverId) {
+        AssetTokenAdminGrant grant = repository.findByIdAndEntityIdAndAssetIdIsNull(grantId, entityId)
+                .orElseThrow(() -> new EntityNotFoundException("AssetTokenAdminGrant", grantId));
+        return revoke(grant, revokedBy, actorRole, reason, dualControlApproverId);
+    }
+
+    private AssetTokenAdminGrant revoke(AssetTokenAdminGrant g, UUID revokedBy, String actorRole, String reason,
+                                        UUID dualControlApproverId) {
+        UUID grantId = g.getId();
         if (g.getStatus() != AssetTokenAdminGrant.Status.ACTIVE) {
             throw new IllegalStateException("Cannot revoke grant " + grantId + " — status is " + g.getStatus());
         }

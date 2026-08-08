@@ -18,3 +18,17 @@ export const authGuard: CanActivateFn = () => {
     map(authenticated => authenticated ? true : router.createUrlTree(['/login']))
   );
 };
+
+/**
+ * Keeps operator navigation aligned with the backend's coarse-grained role policies. This is a
+ * usability guard only; every API endpoint remains the security boundary.
+ */
+export const roleGuard: CanActivateFn = (route) => {
+  const authService = inject(AuthService);
+  const router = inject(Router);
+  const roles = route.data['roles'] as readonly string[] | undefined;
+
+  return !roles?.length || roles.some((role) => authService.hasRole(role))
+    ? true
+    : router.createUrlTree(['/dashboard']);
+};

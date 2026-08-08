@@ -34,10 +34,19 @@ import { SupportTicket } from '../../core/models';
     DataTableComponent,
     PageHeaderComponent,
   ],
+  styles: [`
+    .create-dialog-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-top: 8px;
+      width: min(420px, calc(100vw - 64px));
+    }
+  `],
   template: `
     <div class="page-container">
       <app-page-header title="Support" subtitle="Reach out with a technical, compliance, billing, or trading question.">
-        <button mat-raised-button color="primary" (click)="openCreateDialog()">
+        <button mat-raised-button color="primary" type="button" (click)="openCreateDialog()">
           <mat-icon>add</mat-icon>
           New Ticket
         </button>
@@ -49,11 +58,12 @@ import { SupportTicket } from '../../core/models';
         [state]="state"
         filterPlaceholder="Filter tickets…"
         emptyMessage="No support tickets yet."
-        [actionsTemplate]="rowActions">
+        [actionsTemplate]="rowActions"
+        (retry)="loadTickets()">
       </rw-data-table>
 
       <ng-template #rowActions let-t>
-        <button mat-icon-button color="primary" (click)="open(t)" matTooltip="Open ticket">
+        <button mat-icon-button color="primary" type="button" (click)="open(t)" matTooltip="Open ticket">
           <mat-icon>open_in_new</mat-icon>
         </button>
       </ng-template>
@@ -61,7 +71,7 @@ import { SupportTicket } from '../../core/models';
 
     <ng-template #createDialogTpl>
       <h2 mat-dialog-title>New Support Ticket</h2>
-      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:420px">
+      <mat-dialog-content class="create-dialog-content">
         <mat-form-field appearance="outline">
           <mat-label>Subject</mat-label>
           <input matInput [(ngModel)]="createForm.subject" />
@@ -93,8 +103,8 @@ import { SupportTicket } from '../../core/models';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="primary" type="button"
                 [disabled]="!createForm.subject || !createForm.description || creating"
                 (click)="submitCreate()">
           <mat-icon>send</mat-icon>
@@ -159,11 +169,13 @@ export class SupportListComponent implements OnInit {
   }
 
   submitCreate(): void {
-    if (!this.createForm.subject || !this.createForm.description) return;
+    const subject = this.createForm.subject.trim();
+    const description = this.createForm.description.trim();
+    if (this.creating || !subject || !description) return;
     this.creating = true;
     this.cdr.markForCheck();
 
-    this.supportService.create(this.createForm.subject, this.createForm.description, this.createForm.category, this.createForm.priority).subscribe({
+    this.supportService.create(subject, description, this.createForm.category, this.createForm.priority).subscribe({
       next: (ticket) => {
         this.dialog.closeAll();
         this.creating = false;

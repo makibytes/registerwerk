@@ -66,6 +66,7 @@ import {
             [columns]="permissionColumns"
             [rows]="permissions"
             [state]="permissionState"
+            (retry)="loadPermissions()"
             filterPlaceholder="Filter by code or name…"
             emptyMessage="No permissions defined yet."
             [actionsTemplate]="permissionActions">
@@ -90,6 +91,7 @@ import {
             [columns]="issuerColumns"
             [rows]="issuers"
             [state]="issuerState"
+            (retry)="loadIssuers()"
             filterPlaceholder="Filter by address…"
             emptyMessage="No trusted claim issuers registered."
             [actionsTemplate]="issuerActions">

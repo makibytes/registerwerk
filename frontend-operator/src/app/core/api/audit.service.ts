@@ -54,6 +54,7 @@ export class AuditService {
     let httpParams = new HttpParams();
     if (params.eventType) httpParams = httpParams.set('eventType', params.eventType);
     if (params.subjectType) httpParams = httpParams.set('subjectType', params.subjectType);
+    if (params.subjectId) httpParams = httpParams.set('subjectId', params.subjectId);
     if (params.actorId) httpParams = httpParams.set('actorId', params.actorId);
     if (params.from) httpParams = httpParams.set('from', params.from);
     if (params.to) httpParams = httpParams.set('to', params.to);
@@ -67,6 +68,7 @@ export class AuditService {
     let httpParams = new HttpParams();
     if (params.eventType) httpParams = httpParams.set('eventType', params.eventType);
     if (params.subjectType) httpParams = httpParams.set('subjectType', params.subjectType);
+    if (params.subjectId) httpParams = httpParams.set('subjectId', params.subjectId);
     if (params.actorId) httpParams = httpParams.set('actorId', params.actorId);
     if (params.from) httpParams = httpParams.set('from', params.from);
     if (params.to) httpParams = httpParams.set('to', params.to);

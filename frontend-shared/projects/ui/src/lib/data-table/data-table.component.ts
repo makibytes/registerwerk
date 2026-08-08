@@ -5,6 +5,8 @@ import {
   Input,
   OnChanges,
   OnInit,
+  Output,
+  EventEmitter,
   SimpleChanges,
   TemplateRef,
   ViewChild,
@@ -17,6 +19,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatButtonModule } from '@angular/material/button';
 import { StatusBadgeComponent } from '../status-badge/status-badge.component';
 import { AsyncSectionStatus } from '../async-section';
 
@@ -49,6 +52,7 @@ export interface TableColumn {
     MatFormFieldModule,
     MatIconModule,
     MatProgressSpinnerModule,
+    MatButtonModule,
     StatusBadgeComponent,
   ],
   styles: [`
@@ -57,20 +61,25 @@ export interface TableColumn {
     .filter-field { width: 280px; font-size: 13px; }
     .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--rw-border); }
     .rw-table { width: 100%; font-size: 13px; }
-    th.mat-header-cell { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--rw-text-muted); white-space: nowrap; padding: 10px 16px; }
-    td.mat-cell { padding: 10px 16px; vertical-align: middle; color: var(--rw-text-primary); }
-    tr.mat-row:hover td { background: var(--rw-table-row-hover, rgba(255,255,255,0.03)); cursor: default; }
+    th.mat-mdc-header-cell { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--rw-text-muted); white-space: nowrap; padding: 10px 16px; }
+    td.mat-mdc-cell { padding: 10px 16px; vertical-align: middle; color: var(--rw-text-primary); }
+    tr.mat-mdc-row:hover td { background: var(--rw-table-row-hover, rgba(255,255,255,0.03)); cursor: default; }
     .cell-mono { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
     .cell-number { text-align: right; font-variant-numeric: tabular-nums; }
     td.actions-cell { white-space: nowrap; width: 1px; }
-    .state-row { display: flex; align-items: center; justify-content: center; padding: 48px 0; gap: 12px; color: var(--rw-text-muted); font-size: 13px; }
+    .state-row { display: flex; align-items: center; justify-content: center; padding: 48px 16px; gap: 12px; color: var(--rw-text-muted); font-size: 13px; text-align: center; }
+    .state-row.error { flex-wrap: wrap; }
     .empty-icon { font-size: 32px; width: 32px; height: 32px; color: var(--rw-text-muted); opacity: 0.4; }
+    @media (max-width: 640px) {
+      .toolbar { align-items: stretch; flex-direction: column; }
+      .filter-field { width: 100%; }
+    }
   `],
   template: `
     <div class="toolbar">
       <mat-form-field class="filter-field" appearance="outline" subscriptSizing="dynamic">
         <mat-icon matPrefix>search</mat-icon>
-        <input matInput [placeholder]="filterPlaceholder" (input)="applyFilter($event)" />
+        <input matInput [placeholder]="filterPlaceholder" [attr.aria-label]="filterPlaceholder" (input)="applyFilter($event)" />
       </mat-form-field>
       <ng-content select="[tableToolbar]"></ng-content>
     </div>
@@ -81,9 +90,10 @@ export interface TableColumn {
         <span>Loading…</span>
       </div>
     } @else if (state === 'error') {
-      <div class="state-row">
+      <div class="state-row error" role="alert">
         <mat-icon class="empty-icon">error_outline</mat-icon>
         <span>Failed to load data. Please try again.</span>
+        <button mat-stroked-button type="button" (click)="retry.emit()">Retry</button>
       </div>
     } @else {
       <div class="table-wrap">
@@ -155,6 +165,7 @@ export class DataTableComponent implements OnInit, OnChanges, AfterViewInit {
   @Input() filterPlaceholder = 'Filter…';
   @Input() pageSize = 20;
   @Input() emptyMessage = 'No records found.';
+  @Output() readonly retry = new EventEmitter<void>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   @Input() actionsTemplate?: TemplateRef<{ $implicit: any }>;
 

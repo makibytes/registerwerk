@@ -145,6 +145,12 @@ public class PaymentRailAdminService {
     private void applyFields(PaymentRail rail, String displayName, PaymentRailType railType, String currency,
                              Integer decimals, String description, String issuerName, String issuerLei,
                              String micarAuthorization, boolean emtFlag, String whitePaperUrl, boolean redemptionAtPar) {
+        if (railType == PaymentRailType.STABLECOIN && decimals == null) {
+            throw new IllegalArgumentException("decimals is required for stablecoin payment rails");
+        }
+        if (decimals != null && (decimals < 0 || decimals > 255)) {
+            throw new IllegalArgumentException("decimals must be between 0 and 255");
+        }
         rail.setDisplayName(displayName);
         rail.setRailType(railType);
         rail.setCurrency(currency);
@@ -167,6 +173,10 @@ public class PaymentRailAdminService {
     }
 
     private void replaceChainAddresses(PaymentRail rail, Map<UUID, String> chainAddresses) {
+        if (!rail.getRailType().isChainBound() && chainAddresses != null && !chainAddresses.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Chain addresses are not allowed for off-chain payment rails");
+        }
         chainAddressRepository.deleteByPaymentRailId(rail.getId());
         if (chainAddresses == null || chainAddresses.isEmpty()) {
             return;

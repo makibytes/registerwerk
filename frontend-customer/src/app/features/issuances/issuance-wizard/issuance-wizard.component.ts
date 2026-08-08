@@ -60,7 +60,6 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                     <mat-error>Name is required</mat-error>
                   }
                 </mat-form-field>
-
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>ISIN (optional)</mat-label>
                   <input matInput formControlName="isin" placeholder="DE000XXXXXX0" />
@@ -79,6 +78,9 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                   </mat-select>
                   <mat-hint>Regulatory jurisdiction for this security issuance</mat-hint>
                 </mat-form-field>
+                @if (jurisdictionProfilesError) {
+                  <p class="error-message" role="alert">{{ jurisdictionProfilesError }}</p>
+                }
 
                 @if (selectedJurisdictionProfile) {
                   <div class="jurisdiction-requirements">
@@ -162,7 +164,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                     <div class="termsheet-file-selected">
                       <mat-icon style="color:#10b981">check_circle</mat-icon>
                       <span>{{ selectedTermSheetFile.name }}</span>
-                      <button mat-icon-button (click)="clearTermSheet()">
+                      <button mat-icon-button type="button" (click)="clearTermSheet()">
                         <mat-icon>close</mat-icon>
                       </button>
                     </div>
@@ -182,7 +184,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </div>
 
                 <div class="step-actions">
-                  <button mat-raised-button color="primary" matStepperNext [disabled]="detailsForm.invalid">
+                  <button mat-raised-button color="primary" type="button" matStepperNext [disabled]="detailsForm.invalid">
                     Next
                     <mat-icon>arrow_forward</mat-icon>
                   </button>
@@ -224,8 +226,8 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </mat-form-field>
 
                 <div class="step-actions">
-                  <button mat-button matStepperPrevious>Back</button>
-                  <button mat-raised-button color="primary" matStepperNext [disabled]="chainForm.invalid">
+                  <button mat-button type="button" matStepperPrevious>Back</button>
+                  <button mat-raised-button color="primary" type="button" matStepperNext [disabled]="chainForm.invalid">
                     Next
                     <mat-icon>arrow_forward</mat-icon>
                   </button>
@@ -294,10 +296,11 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 }
 
                 <div class="step-actions">
-                  <button mat-button matStepperPrevious>Back</button>
+                  <button mat-button type="button" matStepperPrevious>Back</button>
                   <button
                     mat-raised-button
                     color="primary"
+                    type="button"
                     [disabled]="submitting"
                     (click)="submit()"
                   >
@@ -389,6 +392,7 @@ export class IssuanceWizardComponent implements OnInit {
   submitError = '';
   selectedTermSheetFile: File | null = null;
   jurisdictionProfiles: JurisdictionRequirement[] = [];
+  jurisdictionProfilesError = '';
 
   readonly jurisdictions: { value: Jurisdiction; label: string }[] = [
     { value: 'DE_EWPG', label: 'Germany — eWpG / BaFin' },
@@ -405,19 +409,23 @@ export class IssuanceWizardComponent implements OnInit {
   ngOnInit(): void {
     this.kycService.getJurisdictionRequirements().subscribe({
       next: (profiles) => { this.jurisdictionProfiles = profiles; this.cdr.markForCheck(); },
+      error: () => {
+        this.jurisdictionProfilesError = 'Jurisdiction-specific document requirements could not be loaded.';
+        this.cdr.markForCheck();
+      },
     });
   }
 
   // ── Form groups ────────────────────────────────────────────────────────────
 
   readonly detailsForm = this.fb.group({
-    name:         ['', Validators.required],
+    name:         ['', [Validators.required, Validators.maxLength(200)]],
     isin:         ['', [Validators.pattern(/^[A-Z0-9]{12}$/)]],
     jurisdiction: [null as Jurisdiction | null, Validators.required],
     onchainLevel: ['SIMPLE' as OnchainLevel, Validators.required],
     currency:     ['', [Validators.pattern(/^[A-Z]{3}$/)]],
-    issueSize:    [null as number | null],
-    denomination: [null as number | null],
+    issueSize:    [null as number | null, Validators.min(0.00000001)],
+    denomination: [null as number | null, Validators.min(0.00000001)],
     issueDate:    [''],
     maturityDate: [''],
   });
@@ -513,12 +521,25 @@ export class IssuanceWizardComponent implements OnInit {
   // ── Submit ─────────────────────────────────────────────────────────────────
 
   submit(): void {
+    if (this.submitting) return;
+    if (this.detailsForm.invalid || this.chainForm.invalid) {
+      this.detailsForm.markAllAsTouched();
+      this.chainForm.markAllAsTouched();
+      this.submitError = 'Complete all required fields before creating the issuance.';
+      return;
+    }
+    const issueDate = this.detailsForm.value.issueDate;
+    const maturityDate = this.detailsForm.value.maturityDate;
+    if (issueDate && maturityDate && maturityDate < issueDate) {
+      this.submitError = 'Maturity date cannot be before the issue date.';
+      return;
+    }
     this.submitting = true;
     this.submitError = '';
 
     const body: IssuanceCreateRequest = {
-      name:          this.detailsForm.value.name!,
-      isin:          this.detailsForm.value.isin || null,
+      name:          this.detailsForm.value.name!.trim(),
+      isin:          this.detailsForm.value.isin?.trim().toUpperCase() || null,
       jurisdiction:  this.detailsForm.value.jurisdiction || null,
       onchainLevel:  this.detailsForm.value.onchainLevel!,
       chain:         this.chainForm.value.chain!,
@@ -533,16 +554,17 @@ export class IssuanceWizardComponent implements OnInit {
 
     this.issuanceService.createIssuance(body).subscribe({
       next: (asset) => {
-        this.submitting = false;
-        this.cdr.markForCheck();
         if (this.selectedTermSheetFile) {
-          // Upload term sheet asynchronously after creation (non-blocking for navigation)
           this.issuanceService.uploadDocument(asset.id, this.selectedTermSheetFile).subscribe({
-            error: () => this.snackBar.open('Issuance created, but term sheet upload failed.', 'Close', { duration: 5000 }),
+            next: () => this.finishCreation(asset.id, 'Issuance and term sheet created successfully.'),
+            error: () => {
+              this.snackBar.open('Issuance created, but term sheet upload failed.', 'Close', { duration: 6000 });
+              this.finishCreation(asset.id);
+            },
           });
+        } else {
+          this.finishCreation(asset.id, 'Issuance created successfully!');
         }
-        this.snackBar.open('Issuance created successfully!', 'OK', { duration: 3000 });
-        this.router.navigate(['/issuances', asset.id]);
       },
       error: (err) => {
         this.submitting = false;
@@ -553,10 +575,25 @@ export class IssuanceWizardComponent implements OnInit {
   }
 
   onTermSheetSelected(event: Event): void {
-    this.selectedTermSheetFile = (event.target as HTMLInputElement).files?.[0] ?? null;
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    input.value = '';
+    if (file && file.size > 20 * 1024 * 1024) {
+      this.selectedTermSheetFile = null;
+      this.snackBar.open('The term sheet must not exceed 20 MB.', 'Close', { duration: 5000 });
+      return;
+    }
+    this.selectedTermSheetFile = file;
   }
 
   clearTermSheet(): void {
     this.selectedTermSheetFile = null;
+  }
+
+  private finishCreation(assetId: string, message?: string): void {
+    this.submitting = false;
+    this.cdr.markForCheck();
+    if (message) this.snackBar.open(message, 'OK', { duration: 3000 });
+    this.router.navigate(['/issuances', assetId]);
   }
 }

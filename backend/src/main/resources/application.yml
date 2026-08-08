@@ -14,9 +14,18 @@ spring:
     scheduling:
       simple:
         concurrency-limit: 16
+      shutdown:
+        # Let in-flight scheduled persistence work finish during a graceful application stop.
+        await-termination: true
+        await-termination-period: 30s
     execution:
       simple:
         concurrency-limit: 64
+      shutdown:
+        # Modulith event listeners carry audit/compliance side effects.  Abruptly cancelling
+        # them at shutdown creates avoidable replay work and can leave external calls half-done.
+        await-termination: true
+        await-termination-period: 30s
 
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/registerwerk}
@@ -32,7 +41,6 @@ spring:
       ddl-auto: validate
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           lob:
             non_contextual_creation: true
@@ -66,6 +74,17 @@ spring:
     type: caffeine
     caffeine:
       spec: maximumSize=1000,expireAfterWrite=30s
+
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 200
+
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
 
   thymeleaf:
     # Notification services resolve templates relative to the templates root, e.g. "email/welcome".
@@ -462,6 +481,8 @@ registerwerk:
         api-key: ${REGISTERWERK_TRADING_VENUE_TALOS_API_KEY:}
   travel-rule:
     protocol: ${REGISTERWERK_TRAVEL_RULE_PROTOCOL:NOOP}
+    # Credential for inbound IVMS-101 delivery. Blank disables the public inbox (fail closed).
+    inbox-api-key: ${REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY:}
     # Art. 14(5) TFR: ownership verification threshold for self-hosted addresses.
     # NOTE: this is NOT a messaging threshold — TFR has no de minimis for CASP-to-CASP transfers.
     self-hosted-verification-threshold-eur: ${REGISTERWERK_TRAVEL_RULE_SELF_HOSTED_VERIFICATION_THRESHOLD_EUR:1000}
@@ -473,6 +494,7 @@ registerwerk:
       vasp-did: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_VASP_DID:}
     trp:
       endpoint: ${REGISTERWERK_TRAVEL_RULE_TRP_ENDPOINT:}
+      # PEM certificate + unencrypted PKCS#8 PEM private key. Invalid/partial mTLS config fails startup.
       mtls-cert-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_CERT:}
       mtls-key-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY:}
       directory-url: ${REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL:https://trp.notabene.id/directory}

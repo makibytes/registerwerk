@@ -142,8 +142,7 @@ public class AssetController {
     }
 
     /** Updates an asset (full or partial — all fields optional). */
-    @PutMapping("/{id}")
-    @PatchMapping("/{id}")
+    @RequestMapping(path = "/{id}", method = {RequestMethod.PUT, RequestMethod.PATCH})
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
     public ResponseEntity<AssetResponse> updateAsset(
             @PathVariable UUID id,
@@ -176,7 +175,7 @@ public class AssetController {
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
     public ResponseEntity<AssetResponse> updateTargetMarket(
             @PathVariable UUID id,
-            @RequestBody de.makibytes.registerwerk.asset.web.dto.TargetMarketUpdateRequest request,
+            @Valid @RequestBody de.makibytes.registerwerk.asset.web.dto.TargetMarketUpdateRequest request,
             Authentication auth) {
         java.util.Set<de.makibytes.registerwerk.customer.api.ClientCategory> categories =
                 request.categories() != null ? request.categories() : java.util.Set.of();
@@ -205,9 +204,9 @@ public class AssetController {
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<Void> rejectAsset(
             @PathVariable UUID id,
-            @RequestBody Map<String, String> body,
+            @RequestBody @Valid de.makibytes.registerwerk.asset.web.dto.AssetRejectionRequest body,
             Authentication auth) {
-        assetLifecycleService.reject(id, body.getOrDefault("reason", ""), extractActorId(auth));
+        assetLifecycleService.reject(id, body.reason().trim(), extractActorId(auth));
         return ResponseEntity.noContent().build();
     }
 

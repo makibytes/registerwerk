@@ -80,6 +80,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             [columns]="incidentColumns"
             [rows]="incidents"
             [state]="incidentsState"
+            (retry)="load()"
             filterPlaceholder="Filter incidents…"
             emptyMessage="No open incidents. All systems operational."
             [actionsTemplate]="incidentActions">
@@ -122,6 +123,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             [columns]="providerColumns"
             [rows]="providers"
             [state]="providersState"
+            (retry)="load()"
             filterPlaceholder="Filter providers…"
             emptyMessage="No ICT third-party providers registered."
             [actionsTemplate]="providerActions">
@@ -157,6 +159,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             [columns]="resilienceTestColumns"
             [rows]="resilienceTests"
             [state]="resilienceTestsState"
+            (retry)="load()"
             filterPlaceholder="Filter tests…"
             emptyMessage="No resilience tests recorded yet."
             [actionsTemplate]="testActions">

@@ -162,6 +162,23 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
       padding: 32px;
       color: var(--rw-text-muted);
     }
+
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--rw-text-danger);
+    }
+
+    .table-scroll { overflow-x: auto; }
+    table { min-width: 860px; }
+
+    @media (max-width: 640px) {
+      .page-header { align-items: flex-start; gap: 12px; flex-direction: column; }
+      .filter-row mat-form-field { width: 100%; }
+    }
   `],
   template: `
     <div class="page-header">
@@ -211,7 +228,14 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
 
       @if (loading) {
         <div class="spinner-container"><mat-spinner diameter="36" /></div>
+      } @else if (loadError) {
+        <div class="request-error" role="alert">
+          <mat-icon>cloud_off</mat-icon>
+          <span>Users could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="loadUsers()">Retry</button>
+        </div>
       } @else {
+        <div class="table-scroll">
         <table mat-table [dataSource]="users" class="full-width-table">
           <ng-container matColumnDef="user">
             <th mat-header-cell *matHeaderCellDef>User</th>
@@ -312,6 +336,7 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
             <td [attr.colspan]="columns.length">No users found.</td>
           </tr>
         </table>
+        </div>
 
         <mat-paginator
           [length]="totalElements"
@@ -338,6 +363,7 @@ export class UserListComponent implements OnInit {
   pageIndex = 0;
   pageSize = 25;
   loading = true;
+  loadError = false;
 
   searchQuery = '';
   selectedRole = '';
@@ -453,8 +479,9 @@ export class UserListComponent implements OnInit {
     return ['REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER', 'RELATIONSHIP_MANAGER'].includes(role);
   }
 
-  private loadUsers(): void {
+  loadUsers(): void {
     this.loading = true;
+    this.loadError = false;
     this.adminUserService.listUsers({
       search: this.searchQuery || undefined,
       role: this.selectedRole || undefined,
@@ -467,10 +494,12 @@ export class UserListComponent implements OnInit {
         this.users = page.content;
         this.totalElements = page.totalElements;
         this.loading = false;
+        this.loadError = false;
         this.cdr.detectChanges();
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.detectChanges();
       },
     });

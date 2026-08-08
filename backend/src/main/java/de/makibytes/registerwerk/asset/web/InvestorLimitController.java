@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.internal.InvestorLimitService;
 import de.makibytes.registerwerk.asset.web.dto.InvestorLimitRequest;
 import de.makibytes.registerwerk.asset.web.dto.InvestorLimitResponse;
 import de.makibytes.registerwerk.shared.SecurityUtils;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -46,7 +47,7 @@ public class InvestorLimitController {
     public ResponseEntity<InvestorLimitResponse> setLimit(
             @PathVariable UUID assetId,
             @PathVariable UUID investorEntityId,
-            @RequestBody InvestorLimitRequest request,
+            @RequestBody @Valid InvestorLimitRequest request,
             Authentication auth) {
         InvestorLimit saved = service.setLimit(
                 assetId, investorEntityId, request.minInvestmentOverride(),
@@ -56,8 +57,9 @@ public class InvestorLimitController {
 
     @DeleteMapping("/{investorEntityId}")
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
-    public ResponseEntity<Void> deleteLimit(@PathVariable UUID assetId, @PathVariable UUID investorEntityId) {
-        service.deleteLimit(assetId, investorEntityId);
+    public ResponseEntity<Void> deleteLimit(@PathVariable UUID assetId, @PathVariable UUID investorEntityId,
+                                            Authentication auth) {
+        service.deleteLimit(assetId, investorEntityId, SecurityUtils.extractUserId(auth));
         return ResponseEntity.noContent().build();
     }
 }

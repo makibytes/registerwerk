@@ -14,6 +14,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { KycService } from '../../core/api/kyc.service';
 import { AuthService } from '../../core/auth/auth.service';
+import { downloadBlob } from '../../core/utils/download.util';
 import {
   KycDocument,
   KycComplianceResponse,
@@ -129,11 +130,14 @@ const ALL_DOC_TYPES = [
                 </mat-card-header>
                 <mat-card-content>
                   @if (!compliance[jur.value]) {
-                    <button mat-stroked-button (click)="loadCompliance(jur.value)" [disabled]="complianceLoading[jur.value]">
+                    <button mat-stroked-button type="button" (click)="loadCompliance(jur.value)" [disabled]="complianceLoading[jur.value]">
                       @if (complianceLoading[jur.value]) { <mat-spinner diameter="16" /> }
                       @else { <mat-icon>refresh</mat-icon> }
                       Load checklist
                     </button>
+                    @if (complianceError[jur.value]) {
+                      <p class="inline-error" role="alert">Checklist could not be loaded. Try again.</p>
+                    }
                   } @else {
                     @let cr = compliance[jur.value]!;
                     @if (!cr.fullyCompliant) {
@@ -166,7 +170,7 @@ const ALL_DOC_TYPES = [
                             <span class="check-note err-text">missing</span>
                           }
                           @if (doc.mandatory && (!doc.present || doc.expired || doc.tooOld)) {
-                            <button mat-button color="primary" class="quick-upload-btn"
+                            <button mat-button color="primary" class="quick-upload-btn" type="button"
                                     (click)="quickUpload(jur.value, doc.documentType)">
                               <mat-icon>upload</mat-icon> Upload
                             </button>
@@ -184,7 +188,7 @@ const ALL_DOC_TYPES = [
                   <mat-card-title style="font-size:14px">Upload Document for {{ jur.label }}</mat-card-title>
                 </mat-card-header>
                 <mat-card-content style="padding-top:8px">
-                  <div class="upload-row">
+                  <div class="upload-row" [id]="'upload-' + jur.value">
                     <mat-form-field appearance="outline" style="min-width:240px">
                       <mat-label>Document Type</mat-label>
                       <mat-select [(ngModel)]="uploadDocType[jur.value]">
@@ -201,7 +205,7 @@ const ALL_DOC_TYPES = [
                         (change)="onFileSelected($event, jur.value)" hidden />
                     </label>
 
-                    <button mat-raised-button color="primary"
+                    <button mat-raised-button color="primary" type="button"
                             [disabled]="!uploadFiles[jur.value] || !uploadDocType[jur.value] || uploadLoading[jur.value]"
                             (click)="upload(jur.value)">
                       @if (uploadLoading[jur.value]) { <mat-spinner diameter="18" style="margin-right:8px" /> }
@@ -224,10 +228,16 @@ const ALL_DOC_TYPES = [
               <mat-card-content>
                 @if (loading) {
                   <div style="display:flex;justify-content:center;padding:40px"><mat-spinner diameter="40" /></div>
+                } @else if (documentsLoadError) {
+                  <div class="document-error" role="alert">
+                    <mat-icon>error_outline</mat-icon>
+                    <span>Documents could not be loaded.</span>
+                    <button mat-stroked-button type="button" (click)="loadDocuments()">Retry</button>
+                  </div>
                 } @else if (documents.length === 0) {
                   <p style="text-align:center;color:var(--rw-text-muted);padding:32px">No documents uploaded yet.</p>
                 } @else {
-                  <table mat-table [dataSource]="documents" style="width:100%">
+                  <div class="table-wrap"><table mat-table [dataSource]="documents" style="width:100%">
                     <ng-container matColumnDef="type">
                       <th mat-header-cell *matHeaderCellDef>Type</th>
                       <td mat-cell *matCellDef="let d">{{ formatDocType(d.documentType) }}</td>
@@ -251,10 +261,10 @@ const ALL_DOC_TYPES = [
                     <ng-container matColumnDef="actions">
                       <th mat-header-cell *matHeaderCellDef></th>
                       <td mat-cell *matCellDef="let d">
-                        <button mat-icon-button matTooltip="Download" (click)="download(d)">
+                        <button mat-icon-button type="button" matTooltip="Download" (click)="download(d)">
                           <mat-icon>download</mat-icon>
                         </button>
-                        <button mat-icon-button color="warn"
+                        <button mat-icon-button color="warn" type="button"
                                 [matTooltip]="d.status === 'APPROVED' ? 'Approved documents are part of the compliance record and cannot be deleted here' : 'Delete'"
                                 [disabled]="d.status === 'APPROVED'"
                                 (click)="deleteDoc(d)">
@@ -264,7 +274,7 @@ const ALL_DOC_TYPES = [
                     </ng-container>
                     <tr mat-header-row *matHeaderRowDef="docColumns"></tr>
                     <tr mat-row *matRowDef="let row; columns: docColumns;"></tr>
-                  </table>
+                  </table></div>
                 }
               </mat-card-content>
             </mat-card>
@@ -280,8 +290,8 @@ const ALL_DOC_TYPES = [
         <p>Delete <strong>{{ doc.fileName }}</strong>? This cannot be undone.</p>
       </mat-dialog-content>
       <mat-dialog-actions align="end">
-        <button mat-button mat-dialog-close>Cancel</button>
-        <button mat-flat-button color="warn" [mat-dialog-close]="true">Delete</button>
+        <button mat-button type="button" mat-dialog-close>Cancel</button>
+        <button mat-flat-button color="warn" type="button" [mat-dialog-close]="true">Delete</button>
       </mat-dialog-actions>
     </ng-template>
   `,
@@ -342,6 +352,11 @@ const ALL_DOC_TYPES = [
       &:hover { border-color: var(--rw-accent); }
       &.has-file { border-color: #10b981; color: var(--rw-text-primary); }
     }
+    .inline-error { color: var(--rw-text-danger); font-size: 12px; margin: 8px 0 0; }
+    .document-error { display: grid; justify-items: center; gap: 10px; padding: 40px 16px; color: var(--rw-text-secondary); text-align: center; }
+    .document-error mat-icon { color: var(--rw-text-danger); }
+    .table-wrap { overflow-x: auto; }
+    .table-wrap table { min-width: 760px; }
   `],
 })
 export class KycStatusComponent implements OnInit {
@@ -356,6 +371,7 @@ export class KycStatusComponent implements OnInit {
   entityId: string | null = null;
   documents: KycDocument[] = [];
   loading = false;
+  documentsLoadError = false;
 
   readonly allJurisdictions = ALL_JURISDICTIONS;
   readonly allDocTypes = ALL_DOC_TYPES;
@@ -366,6 +382,7 @@ export class KycStatusComponent implements OnInit {
 
   compliance: Partial<Record<Jurisdiction, KycComplianceResponse>> = {};
   complianceLoading: Partial<Record<Jurisdiction, boolean>> = {};
+  complianceError: Partial<Record<Jurisdiction, boolean>> = {};
   uploadFiles: Partial<Record<Jurisdiction, File>> = {};
   uploadDocType: Partial<Record<Jurisdiction, string>> = {};
   uploadLoading: Partial<Record<Jurisdiction, boolean>> = {};
@@ -405,23 +422,32 @@ export class KycStatusComponent implements OnInit {
   loadDocuments(): void {
     if (!this.entityId) return;
     this.loading = true;
+    this.documentsLoadError = false;
     this.kycService.listDocuments(this.entityId).subscribe({
       next: (docs) => { this.documents = docs; this.loading = false; this.cdr.detectChanges(); },
-      error: () => { this.loading = false; this.cdr.detectChanges(); },
+      error: () => {
+        this.documents = [];
+        this.loading = false;
+        this.documentsLoadError = true;
+        this.cdr.detectChanges();
+      },
     });
   }
 
   loadCompliance(jur: Jurisdiction): void {
     if (!this.entityId) return;
     this.complianceLoading = { ...this.complianceLoading, [jur]: true };
+    this.complianceError = { ...this.complianceError, [jur]: false };
     this.kycService.getCompliance(this.entityId, jur).subscribe({
       next: (result) => {
         this.compliance = { ...this.compliance, [jur]: result };
         this.complianceLoading = { ...this.complianceLoading, [jur]: false };
+        this.complianceError = { ...this.complianceError, [jur]: false };
         this.cdr.detectChanges();
       },
       error: () => {
         this.complianceLoading = { ...this.complianceLoading, [jur]: false };
+        this.complianceError = { ...this.complianceError, [jur]: true };
         this.cdr.detectChanges();
       },
     });
@@ -436,7 +462,7 @@ export class KycStatusComponent implements OnInit {
     this.uploadDocType = { ...this.uploadDocType, [jur]: docType };
     // Scroll to the upload section in this tab — it sits after the checklist
     setTimeout(() => {
-      const uploadSection = document.querySelector('.upload-row');
+      const uploadSection = document.getElementById(`upload-${jur}`);
       uploadSection?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 50);
   }
@@ -450,7 +476,7 @@ export class KycStatusComponent implements OnInit {
     this.kycService.uploadDocument(this.entityId, file, docType, jur).subscribe({
       next: (doc) => {
         this.documents = [...this.documents, doc];
-        this.uploadFiles = { ...this.uploadFiles, [jur]: undefined as unknown as File };
+        this.uploadFiles = { ...this.uploadFiles, [jur]: undefined };
         this.uploadDocType = { ...this.uploadDocType, [jur]: '' };
         this.uploadLoading = { ...this.uploadLoading, [jur]: false };
         this.cdr.detectChanges();
@@ -470,13 +496,9 @@ export class KycStatusComponent implements OnInit {
     if (!this.entityId) return;
     this.kycService.downloadDocument(this.entityId, doc.id).subscribe({
       next: (blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = doc.fileName;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, doc.fileName);
       },
+      error: () => this.snackBar.open('Document could not be downloaded.', 'Dismiss', { duration: 5000 }),
     });
   }
 
@@ -494,6 +516,7 @@ export class KycStatusComponent implements OnInit {
             this.cdr.detectChanges();
             this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
           },
+          error: () => this.snackBar.open('Document could not be deleted.', 'Dismiss', { duration: 5000 }),
         });
       });
   }

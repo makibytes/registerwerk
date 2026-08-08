@@ -12,7 +12,11 @@ public interface ScreeningRunRepository extends JpaRepository<ScreeningRun, UUID
 
     ScreeningRun findTopByEntityIdOrderByStartedAtDesc(UUID entityId);
 
+    ScreeningRun findTopByEntityIdAndProviderOrderByStartedAtDesc(UUID entityId, String provider);
+
     ScreeningRun findTopByNaturalPersonIdOrderByStartedAtDesc(UUID naturalPersonId);
+
+    ScreeningRun findTopByNaturalPersonIdAndProviderOrderByStartedAtDesc(UUID naturalPersonId, String provider);
 
     List<ScreeningRun> findByEntityIdOrderByStartedAtDesc(UUID entityId);
 

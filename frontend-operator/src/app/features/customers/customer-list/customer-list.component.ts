@@ -21,6 +21,7 @@ import { EntityService } from '../../../core/api/entity.service';
 import { LegalEntity } from '../../../core/models';
 import { StatusBadgeComponent } from '@registerwerk/ui';
 import { DatePipe } from '@angular/common';
+import { AuthService } from '../../../core/auth/auth.service';
 
 @Component({
   selector: 'app-customer-list',
@@ -64,14 +65,33 @@ import { DatePipe } from '@angular/common';
       padding: 48px;
       color: var(--rw-text-muted);
     }
+
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--rw-text-danger);
+    }
+
+    .table-scroll { overflow-x: auto; }
+    table { min-width: 820px; }
+
+    @media (max-width: 640px) {
+      .page-header { align-items: flex-start; gap: 12px; flex-direction: column; }
+      .filter-row mat-form-field { width: 100%; }
+    }
   `],
   template: `
     <div class="page-header">
       <h1>Customers</h1>
+      @if (canCreate) {
       <button mat-raised-button color="primary" (click)="createNew()">
         <mat-icon>add</mat-icon>
         New Entity
       </button>
+      }
     </div>
 
     <div class="content-card">
@@ -120,7 +140,14 @@ import { DatePipe } from '@angular/common';
         <div class="spinner-container">
           <mat-spinner diameter="40" />
         </div>
+      } @else if (loadError) {
+        <div class="request-error" role="alert">
+          <mat-icon>cloud_off</mat-icon>
+          <span>Customers could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="loadData()">Retry</button>
+        </div>
       } @else {
+        <div class="table-scroll">
         <table mat-table [dataSource]="dataSource" class="full-width-table">
           <ng-container matColumnDef="entityNumber">
             <th mat-header-cell *matHeaderCellDef>Entity Number</th>
@@ -162,7 +189,8 @@ import { DatePipe } from '@angular/common';
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let row">
               <div class="actions-cell">
-                <button mat-icon-button color="primary" (click)="viewEntity(row)" matTooltip="View details">
+                <button mat-icon-button color="primary" (click)="$event.stopPropagation(); viewEntity(row)"
+                        [attr.aria-label]="'View ' + row.currentName" matTooltip="View details">
                   <mat-icon>open_in_new</mat-icon>
                 </button>
               </div>
@@ -172,6 +200,7 @@ import { DatePipe } from '@angular/common';
           <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
           <tr mat-row *matRowDef="let row; columns: displayedColumns;" style="cursor:pointer" (click)="viewEntity(row)"></tr>
         </table>
+        </div>
 
         @if (dataSource.data.length === 0) {
           <div class="no-data">No entities found.</div>
@@ -193,6 +222,9 @@ export class CustomerListComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly entityService = inject(EntityService);
   private readonly router = inject(Router);
+  private readonly auth = inject(AuthService);
+
+  readonly canCreate = this.auth.hasRole('REGISTRY_ADMIN');
 
   readonly displayedColumns = [
     'entityNumber',
@@ -206,6 +238,7 @@ export class CustomerListComponent implements OnInit {
 
   dataSource = new MatTableDataSource<LegalEntity>([]);
   loading = false;
+  loadError = false;
   totalElements = 0;
   pageSize = 25;
   pageIndex = 0;
@@ -224,6 +257,7 @@ export class CustomerListComponent implements OnInit {
 
   loadData(): void {
     this.loading = true;
+    this.loadError = false;
     this.entityService
       .getEntities({
         search: this.searchText || undefined,
@@ -238,10 +272,12 @@ export class CustomerListComponent implements OnInit {
           this.dataSource.data = resp.content;
           this.totalElements = resp.totalElements;
           this.loading = false;
+          this.loadError = false;
           this.cdr.detectChanges();
         },
         error: () => {
           this.loading = false;
+          this.loadError = true;
           this.cdr.detectChanges();
         },
       });

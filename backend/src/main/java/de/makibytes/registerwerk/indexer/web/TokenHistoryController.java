@@ -41,8 +41,9 @@ public class TokenHistoryController {
      * across all its deployments.
      */
     @GetMapping("/assets/{assetId}/history")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
-            + "or @assetAccessChecker.canRead(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#deploymentId, #assetId) and "
+            + "(hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
+            + "or @assetAccessChecker.canRead(#assetId, authentication))")
     public ResponseEntity<PageResponse<TokenTransferResponse>> getAssetHistory(
             @PathVariable UUID assetId,
             Pageable pageable,
@@ -56,8 +57,9 @@ public class TokenHistoryController {
      * Returns a paginated list of token transfers linked to a specific deployment of an asset.
      */
     @GetMapping("/assets/{assetId}/deployments/{deploymentId}/history")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
-            + "or @assetAccessChecker.canRead(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#deploymentId, #assetId) and "
+            + "(hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
+            + "or @assetAccessChecker.canRead(#assetId, authentication))")
     public ResponseEntity<PageResponse<TokenTransferResponse>> getDeploymentHistory(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,

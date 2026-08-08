@@ -11,6 +11,7 @@ import de.makibytes.registerwerk.marketplace.internal.ManifestSigningService;
 import de.makibytes.registerwerk.marketplace.internal.PaymentMethodResolver;
 import de.makibytes.registerwerk.marketplace.web.dto.MarketplaceDtos.CreateListingRequest;
 import de.makibytes.registerwerk.marketplace.web.dto.MarketplaceDtos.ListingResponse;
+import de.makibytes.registerwerk.marketplace.web.dto.MarketplaceDtos.ManifestContentResponse;
 import de.makibytes.registerwerk.marketplace.web.dto.MarketplaceDtos.ManifestValidationResponse;
 import de.makibytes.registerwerk.marketplace.web.dto.MarketplaceDtos.PaymentMethodResponse;
 import de.makibytes.registerwerk.marketplace.web.dto.MarketplaceDtos.RequiredPermissionResponse;
@@ -19,11 +20,13 @@ import de.makibytes.registerwerk.marketplace.web.dto.MarketplaceDtos.VersionResp
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,6 +39,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/marketplace")
 @PreAuthorize("hasAnyRole('DAPP_PUBLISHER','COMPANY_ADMIN')")
+@Validated
 public class MarketplacePublisherController {
 
     private final ListingLifecycleService lifecycleService;
@@ -108,7 +112,7 @@ public class MarketplacePublisherController {
     @PutMapping(value = "/listings/{listingId}/versions/{versionId}/manifest", consumes = "application/json")
     public ResponseEntity<ManifestValidationResponse> putManifest(
             @PathVariable UUID listingId, @PathVariable UUID versionId,
-            @RequestBody String manifestRaw, Authentication auth) {
+            @RequestBody @Size(max = 1_000_000) String manifestRaw, Authentication auth) {
         DappListing listing = requireOwnListing(listingId, auth);
         DappVersion version = requireVersionOf(listing, versionId);
 
@@ -117,6 +121,18 @@ public class MarketplacePublisherController {
         return ResponseEntity.ok(new ManifestValidationResponse(
                 result.valid(), result.errors(),
                 result.valid() ? signingService.manifestHash(manifestRaw) : null));
+    }
+
+    /**
+     * Returns the exact bytes previously validated by this publisher. Ownership is checked before
+     * the version is resolved so version identifiers cannot expose another publisher's manifest.
+     */
+    @GetMapping("/listings/{listingId}/versions/{versionId}/manifest")
+    public ResponseEntity<ManifestContentResponse> getManifest(
+            @PathVariable UUID listingId, @PathVariable UUID versionId, Authentication auth) {
+        DappListing listing = requireOwnListing(listingId, auth);
+        DappVersion version = requireVersionOf(listing, versionId);
+        return ResponseEntity.ok(new ManifestContentResponse(version.getManifestRaw()));
     }
 
     @GetMapping("/listings/{listingId}/versions/{versionId}/permissions")

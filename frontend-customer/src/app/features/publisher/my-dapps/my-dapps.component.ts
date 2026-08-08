@@ -70,12 +70,13 @@ import { DappListingView, OrgRegistrationView } from '../../../core/models';
 
     .error-message { color: var(--rw-text-danger); font-size: 13px; margin: 8px 0 0; }
     .dialog-hint { font-size: 12px; color: var(--rw-text-muted); margin: 0; }
+    .table-wrap { overflow-x: auto; }
   `],
   template: `
     <div class="page-container">
       <div class="page-header">
         <h1>My dApps</h1>
-        <button mat-raised-button color="primary" (click)="openCreateDialog()">
+        <button mat-raised-button color="primary" type="button" (click)="openCreateDialog()">
           <mat-icon>add</mat-icon>
           New dApp
         </button>
@@ -87,6 +88,16 @@ import { DappListingView, OrgRegistrationView } from '../../../core/models';
 
       @if (loading) {
         <div class="empty-state"><mat-spinner diameter="36" style="margin:0 auto"></mat-spinner></div>
+      } @else if (error) {
+        <mat-card>
+          <mat-card-content>
+            <div class="empty-state" role="alert">
+              <mat-icon>cloud_off</mat-icon>
+              <p>{{ error }}</p>
+              <button mat-stroked-button type="button" (click)="load()">Retry</button>
+            </div>
+          </mat-card-content>
+        </mat-card>
       } @else if (listings.length === 0) {
         <mat-card>
           <mat-card-content>
@@ -99,6 +110,7 @@ import { DappListingView, OrgRegistrationView } from '../../../core/models';
       } @else {
         <mat-card>
           <mat-card-content>
+            <div class="table-wrap">
             <table mat-table [dataSource]="listings" style="width:100%">
               <ng-container matColumnDef="name">
                 <th mat-header-cell *matHeaderCellDef>dApp</th>
@@ -122,7 +134,7 @@ import { DappListingView, OrgRegistrationView } from '../../../core/models';
               <ng-container matColumnDef="actions">
                 <th mat-header-cell *matHeaderCellDef></th>
                 <td mat-cell *matCellDef="let l" style="text-align:right">
-                  <button mat-stroked-button color="primary" (click)="openWizard(l)">
+                  <button mat-stroked-button color="primary" type="button" (click)="openWizard(l)">
                     <mat-icon>edit_note</mat-icon>
                     {{ l.status === 'DRAFT' || l.status === 'REJECTED' ? 'Continue' : 'New version' }}
                   </button>
@@ -131,18 +143,16 @@ import { DappListingView, OrgRegistrationView } from '../../../core/models';
               <tr mat-header-row *matHeaderRowDef="columns"></tr>
               <tr mat-row *matRowDef="let row; columns: columns"></tr>
             </table>
+            </div>
           </mat-card-content>
         </mat-card>
-      }
-      @if (error) {
-        <p class="error-message">{{ error }}</p>
       }
     </div>
 
     <!-- Create listing dialog -->
     <ng-template #createDialog>
       <h2 mat-dialog-title>New dApp listing</h2>
-      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:460px">
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
         <p class="dialog-hint">
           The slug becomes your dApp's permanent marketplace identifier
           (onchain dappId = keccak256(slug)) and your permission namespace
@@ -165,14 +175,17 @@ import { DappListingView, OrgRegistrationView } from '../../../core/models';
           </mat-select>
           <mat-hint>Your org must be registered onchain on this chain</mat-hint>
         </mat-form-field>
+        @if (orgsLoading) {
+          <mat-spinner diameter="24" aria-label="Loading organization chains"></mat-spinner>
+        }
         @if (dialogError) {
           <p class="error-message">{{ dialogError }}</p>
         }
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
-                [disabled]="!isValidSlug(newSlug) || !newName.trim() || !newChainId || creating"
+        <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="primary" type="button"
+                [disabled]="orgsLoading || !isValidSlug(newSlug) || !newName.trim() || !newChainId || creating"
                 (click)="createListing()">
           <mat-icon>add</mat-icon>
           Create
@@ -202,12 +215,15 @@ export class MyDappsComponent implements OnInit {
   newChainId: string | null = null;
   creating = false;
   dialogError = '';
+  orgsLoading = false;
 
   ngOnInit(): void {
     this.load();
   }
 
   load(): void {
+    this.loading = true;
+    this.error = '';
     this.marketplaceService.myListings().subscribe({
       next: (listings) => {
         this.listings = listings;
@@ -231,25 +247,40 @@ export class MyDappsComponent implements OnInit {
     this.newName = '';
     this.newChainId = null;
     this.dialogError = '';
+    this.orgs = [];
+    this.orgsLoading = true;
     this.orgIdentityService.myOrgs().subscribe({
       next: (orgs) => {
         this.orgs = orgs.filter((org) => org.status === 'ACTIVE');
         this.newChainId = this.orgs[0]?.chainConfigId ?? null;
+        this.orgsLoading = false;
+        if (this.orgs.length === 0) {
+          this.dialogError = 'No active onchain organization is available. Complete organization setup first.';
+        }
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.orgsLoading = false;
+        this.dialogError = 'Could not load your organization chains. Close this dialog and try again.';
         this.cdr.markForCheck();
       },
     });
-    this.dialog.open(this.createDialogTpl, { width: '520px' });
+    this.dialog.open(this.createDialogTpl, { width: '520px', maxWidth: '95vw' });
   }
 
   createListing(): void {
+    const slug = this.newSlug.trim().toLowerCase();
+    const name = this.newName.trim();
+    const chainConfigId = this.newChainId;
+    if (this.creating || !this.isValidSlug(slug) || !name || !chainConfigId) return;
     this.creating = true;
     this.dialogError = '';
 
     this.marketplaceService
       .createListing({
-        slug: this.newSlug.trim().toLowerCase(),
-        name: this.newName.trim(),
-        chainConfigId: this.newChainId!,
+        slug,
+        name,
+        chainConfigId,
       })
       .subscribe({
         next: (listing) => {

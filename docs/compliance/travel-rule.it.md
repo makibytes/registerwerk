@@ -96,11 +96,18 @@ Registerwerk riceve anche messaggi Travel Rule da altri VASP quando trasferiscon
 POST /api/v1/public/travel-rule/inbox
 ```
 
-Questo endpoint è accessibile pubblicamente (non è richiesto JWT) ma richiede mTLS lato Kong per impedire lo spoofing. Al ricevimento:
+Questo endpoint non richiede un JWT Registerwerk, ma non è anonimo. Configurare
+`REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY`; la controparte deve inviarlo in
+`X-Travel-Rule-Api-Key`. Una configurazione vuota disabilita la casella in ingresso. Inoltre,
+`X-Vasp-Id` deve corrispondere a `originatingVasp.vaspId` nel payload. In produzione è consigliato
+mTLS come secondo livello; la configurazione Kong inclusa non configura certificati client. Al ricevimento:
 
-1. Il payload `Ivms101` viene convalidato e archiviato come `TravelRuleMessage` con stato `RECEIVED`
-2. Il record `token_transfer` corrispondente è collegato tramite `transferRef`
-3. Se il VASP di origine è sconosciuto o il payload non è valido, il messaggio viene archiviato come `SUSPICIOUS` e contrassegnato per la revisione del `COMPLIANCE_OFFICER`
+1. Vengono convalidati la credenziale, la corrispondenza dell'identità VASP, i numeri di conto e il riferimento del trasferimento.
+2. Il payload `Ivms101` viene archiviato una sola volta come `TravelRuleMessage` con stato `RECEIVED`; i riferimenti ripetuti dello stesso VASP vengono ignorati.
+3. I payload non validi vengono respinti con HTTP 400 e non sono archiviati come messaggi Travel Rule attendibili.
+
+La chiave API condivisa autentica l'accesso alla casella in ingresso, non l'identità di un singolo
+VASP. In produzione utilizzare mTLS per controparte o controlli gateway equivalenti basati sull'identità.
 
 ---
 
@@ -122,7 +129,7 @@ Le ricerche VASP vengono memorizzate nella cache per 30 secondi utilizzando la c
 |---|---|---|
 | Trasferimento da CASP a CASP | **Qualsiasi importo** | È richiesta la trasmissione completa IVMS-101 — nessuna soglia de minimis (TFR Art. 14–16) |
 | Wallet CASP verso self-hosted | ≤ 1.000 € | Raccogliere e conservare le informazioni sull'ordinante (`UNHOSTED_RECORDED`) |
-| Wallet CASP verso self-hosted | > 1.000 € | Verificare inoltre la titolarità/il controllo dell'indirizzo (Art. 14(5)) — `UNHOSTED_VERIFY_REQUIRED` |
+| Wallet CASP verso self-hosted | > 1.000 € | Bloccare l'esecuzione finché non è verificata la titolarità/il controllo dell'indirizzo (Art. 14(5)) — `UNHOSTED_VERIFY_REQUIRED` |
 | Autocustodia della stessa entità | Qualsiasi importo | Al di fuori dell'obbligo di trasmissione da CASP a CASP — registrato |
 | Controparte CASP ma nessun adattatore di protocollo configurato | Qualsiasi importo | **Il trasferimento è rifiutato (fail closed)** — eseguirlo senza le informazioni richieste violerebbe l'Art. 14 |
 

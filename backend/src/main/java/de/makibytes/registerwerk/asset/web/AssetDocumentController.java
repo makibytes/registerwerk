@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -38,7 +39,7 @@ public class AssetDocumentController {
      * Accepted formats: PDF, HTML, plain text, Markdown, JSON, XML, DOCX.
      */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canRead(#assetId, authentication)")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
     public ResponseEntity<AssetDocumentResponse> uploadDocument(
             @PathVariable UUID assetId,
             @RequestParam("file") MultipartFile file,
@@ -73,7 +74,7 @@ public class AssetDocumentController {
     public ResponseEntity<AssetDocumentResponse> getDocument(
             @PathVariable UUID assetId,
             @PathVariable UUID docId) {
-        return ResponseEntity.ok(toResponse(termSheetService.getDocument(docId)));
+        return ResponseEntity.ok(toResponse(termSheetService.getDocument(assetId, docId)));
     }
 
     /**
@@ -84,11 +85,12 @@ public class AssetDocumentController {
     public ResponseEntity<byte[]> downloadContent(
             @PathVariable UUID assetId,
             @PathVariable UUID docId) {
-        AssetDocument doc = termSheetService.getDocument(docId);
-        byte[] content = termSheetService.getDocumentContent(docId);
+        AssetDocument doc = termSheetService.getDocument(assetId, docId);
+        byte[] content = termSheetService.getDocumentContent(assetId, docId);
         return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION,
-                "attachment; filename=\"" + (doc.getFileName() != null ? doc.getFileName() : "document") + "\"")
+            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                    .filename(doc.getFileName() != null ? doc.getFileName() : "document", java.nio.charset.StandardCharsets.UTF_8)
+                    .build().toString())
             .contentType(MediaType.parseMediaType(doc.getMimeType()))
             .body(content);
     }
@@ -102,7 +104,7 @@ public class AssetDocumentController {
             @PathVariable UUID assetId,
             @PathVariable UUID docId,
             Authentication auth) {
-        termSheetService.softDeleteDocument(docId, extractActorId(auth));
+        termSheetService.softDeleteDocument(assetId, docId, extractActorId(auth));
         return ResponseEntity.noContent().build();
     }
 
@@ -116,7 +118,7 @@ public class AssetDocumentController {
     public ResponseEntity<AssetDocumentResponse> syncFromChain(
             @PathVariable UUID assetId,
             @RequestBody @Valid TermSheetSyncRequest request) {
-        AssetDocument doc = termSheetService.syncFromChain(request.deploymentId());
+        AssetDocument doc = termSheetService.syncFromChain(assetId, request.deploymentId());
         return ResponseEntity.ok(toResponse(doc));
     }
 

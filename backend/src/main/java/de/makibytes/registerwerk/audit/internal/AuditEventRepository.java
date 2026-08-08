@@ -31,6 +31,39 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
         value = """
             select *
             from audit_event e
+            where (cast(:subjectType as text) is null or e.subject_type = :subjectType)
+              and (cast(:subjectId as uuid) is null or e.subject_id = :subjectId)
+              and (cast(:eventType as text) is null or e.event_type = :eventType)
+              and (cast(:actorId as uuid) is null or e.actor_id = :actorId)
+              and (cast(:fromTs as timestamptz) is null or e.occurred_at >= cast(:fromTs as timestamptz))
+              and (cast(:toTs as timestamptz) is null or e.occurred_at <= cast(:toTs as timestamptz))
+            order by e.occurred_at desc
+            """,
+        countQuery = """
+            select count(*)
+            from audit_event e
+            where (cast(:subjectType as text) is null or e.subject_type = :subjectType)
+              and (cast(:subjectId as uuid) is null or e.subject_id = :subjectId)
+              and (cast(:eventType as text) is null or e.event_type = :eventType)
+              and (cast(:actorId as uuid) is null or e.actor_id = :actorId)
+              and (cast(:fromTs as timestamptz) is null or e.occurred_at >= cast(:fromTs as timestamptz))
+              and (cast(:toTs as timestamptz) is null or e.occurred_at <= cast(:toTs as timestamptz))
+            """,
+        nativeQuery = true
+    )
+    Page<AuditEvent> findFiltered(
+        @Param("subjectType") String subjectType,
+        @Param("subjectId") UUID subjectId,
+        @Param("eventType") String eventType,
+        @Param("actorId") UUID actorId,
+        @Param("fromTs") Instant fromTs,
+        @Param("toTs") Instant toTs,
+        Pageable pageable);
+
+    @Query(
+        value = """
+            select *
+            from audit_event e
             where e.event_type = 'KYC_JURISDICTION_APPROVED'
               and e.payload ->> 'overrideApplied' = 'true'
               and (:jurisdiction is null or e.payload ->> 'jurisdiction' = :jurisdiction)
@@ -67,6 +100,7 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
             select *
             from audit_event e
             where (cast(:subjectType as text) is null or e.subject_type = :subjectType)
+              and (cast(:subjectId as uuid) is null or e.subject_id = :subjectId)
               and (cast(:eventType as text) is null or e.event_type = :eventType)
               and (cast(:actorId as uuid) is null or e.actor_id = :actorId)
               and (cast(:fromTs as timestamptz) is null or e.occurred_at >= cast(:fromTs as timestamptz))
@@ -77,6 +111,7 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
     )
     List<AuditEvent> findForExport(
         @Param("subjectType") String subjectType,
+        @Param("subjectId") UUID subjectId,
         @Param("eventType") String eventType,
         @Param("actorId") UUID actorId,
         @Param("fromTs") Instant fromTs,

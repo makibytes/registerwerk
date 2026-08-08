@@ -10,7 +10,10 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
-RUN addgroup -S ewpg && adduser -S ewpg -G ewpg \
+# The Temurin tag can lag patched Alpine packages even when the JVM itself is current. Upgrade the
+# small runtime layer during the build so fixable base-image CVEs do not survive into production.
+RUN apk upgrade --no-cache \
+    && addgroup -S ewpg && adduser -S ewpg -G ewpg \
     && mkdir -p /data/wallets /app/cds \
     && chown -R ewpg:ewpg /data /app/cds
 COPY --from=builder /app/target/*.jar app.jar

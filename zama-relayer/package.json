@@ -2,6 +2,9 @@
   "name": "registerwerk-zama-relayer",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "description": "Registerwerk's own sidecar wrapping @zama-fhe/relayer-sdk — the encrypt/decrypt lifecycle piece Zama ships no Java client for. Not an external dependency: this is Registerwerk's code, built and shipped in this monorepo.",
   "type": "commonjs",
   "main": "dist/index.js",
@@ -15,7 +18,7 @@
   "dependencies": {
     "@zama-fhe/relayer-sdk": "^0.4.4",
     "express": "^4.21.2",
-    "viem": "^2.55.4"
+    "viem": "^2.55.11"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

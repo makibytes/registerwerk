@@ -11,8 +11,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { ChainService } from '../../core/api/chain.service';
 import { ChainHealth, RpcNode } from '../../core/models';
-import { interval, Subscription } from 'rxjs';
-import { switchMap, startWith } from 'rxjs/operators';
+import { EMPTY, Subject, Subscription, catchError, exhaustMap, finalize, merge, timer } from 'rxjs';
 import { AddNodeDialogComponent } from './add-node-dialog.component';
 
 @Component({
@@ -67,8 +66,10 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
       animation: spin 2s linear infinite;
     }
 
+    .refresh-info.error { color: var(--rw-text-danger); }
+    .refresh-info.error mat-icon { animation: none; }
+
     @keyframes spin {
-      from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
     }
 
@@ -328,13 +329,26 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
       padding: 32px 20px;
       text-align: center;
       color: var(--rw-text-muted);
-      font-size: 13px;
     }
 
     .loading-state {
       padding: 60px 0;
       text-align: center;
       color: var(--rw-text-muted);
+    }
+
+    .loading-state.error {
+      display: grid;
+      justify-items: center;
+      gap: 10px;
+      color: var(--rw-text-danger);
+    }
+
+    @media (max-width: 720px) {
+      .page-header { align-items: flex-start; gap: 12px; flex-direction: column; }
+      .chain-header { align-items: flex-start; flex-wrap: wrap; }
+      .chain-badges { width: 100%; flex-wrap: wrap; }
+      table { min-width: 780px; }
     }
 
     .failures-text {
@@ -357,6 +371,12 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
           <mat-icon>refresh</mat-icon>
           <span>Refreshing…</span>
         </div>
+      } @else if (loadError()) {
+        <div class="refresh-info error">
+          <mat-icon>sync_problem</mat-icon>
+          <span>Last refresh failed</span>
+          <button mat-button type="button" (click)="refresh()">Retry</button>
+        </div>
       } @else {
         <div class="refresh-info">
           <mat-icon style="animation: none; opacity: 0.5">schedule</mat-icon>
@@ -367,6 +387,12 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
 
     @if (chains().length === 0 && loading()) {
       <div class="loading-state">Loading node health data…</div>
+    } @else if (chains().length === 0 && loadError()) {
+      <div class="loading-state error" role="alert">
+        <mat-icon>cloud_off</mat-icon>
+        <span>Node health data could not be loaded.</span>
+        <button mat-stroked-button type="button" (click)="refresh()">Retry</button>
+      </div>
     }
 
     @for (chain of chains(); track chain.id) {
@@ -508,30 +534,32 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
   readonly chains  = signal<ChainHealth[]>([]);
   readonly loading = signal(false);
+  readonly loadError = signal(false);
 
   private pollSub?: Subscription;
+  private readonly refreshTrigger = new Subject<void>();
 
-  ngOnInit() {
-    this.pollSub = interval(30_000).pipe(
-      startWith(0),
-      switchMap(() => {
+  ngOnInit(): void {
+    this.pollSub = merge(timer(0, 30_000), this.refreshTrigger).pipe(
+      exhaustMap(() => {
         this.loading.set(true);
-        return this.chainService.getHealth();
+        return this.chainService.getHealth().pipe(
+          catchError(() => {
+            this.loadError.set(true);
+            return EMPTY;
+          }),
+          finalize(() => this.loading.set(false)),
+        );
       }),
-    ).subscribe({
-      next: data => {
-        this.chains.set(data);
-        this.loading.set(false);
-      },
-      error: err => {
-        console.error('Failed to load RPC health data:', err);
-        this.loading.set(false);
-      },
+    ).subscribe((data) => {
+      this.chains.set(data);
+      this.loadError.set(false);
     });
   }
 
-  ngOnDestroy() {
+  ngOnDestroy(): void {
     this.pollSub?.unsubscribe();
+    this.refreshTrigger.complete();
   }
 
   toggleEnabled(chain: ChainHealth, node: RpcNode, enabled: boolean) {
@@ -541,7 +569,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
     call.subscribe({
       next: () => {
-        node.enabled = enabled;
+        this.updateNode(chain.id, node.id, { enabled });
         this.snackBar.open(enabled ? 'Node started' : 'Node stopped', 'OK', { duration: 2500 });
       },
       error: () => {
@@ -556,7 +584,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
     const newValue = !node.exclusive;
     this.chainService.setExclusive(chain.id, node.id, newValue).subscribe({
       next: () => {
-        node.exclusive = newValue;
+        this.updateNode(chain.id, node.id, { exclusive: newValue });
         this.snackBar.open(
           newValue ? 'Node pinned — all traffic routed here' : 'Node unpinned',
           'OK', { duration: 2500 });
@@ -570,7 +598,9 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
     this.chainService.deleteNode(chain.id, node.id).subscribe({
       next: () => {
-        chain.nodes = chain.nodes.filter(n => n.id !== node.id);
+        this.chains.update((chains) => chains.map((current) => current.id === chain.id
+          ? { ...current, nodes: current.nodes.filter((candidate) => candidate.id !== node.id) }
+          : current));
         this.snackBar.open('Node removed', 'OK', { duration: 2500 });
       },
       error: () => this.snackBar.open('Failed to remove node', 'OK', { duration: 3000 }),
@@ -587,7 +617,9 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
       if (!result) return;
       this.chainService.addNode(chain.id, result.url, result.label).subscribe({
         next: node => {
-          chain.nodes.push(node);
+          this.chains.update((chains) => chains.map((current) => current.id === chain.id
+            ? { ...current, nodes: [...current.nodes, node] }
+            : current));
           this.snackBar.open('Node added — health check will run shortly', 'OK', { duration: 3000 });
         },
         error: () => this.snackBar.open('Failed to add node', 'OK', { duration: 3000 }),
@@ -605,7 +637,16 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
     return `${h}h ago`;
   }
 
-  private refresh() {
-    this.chainService.getHealth().subscribe(data => this.chains.set(data));
+  refresh(): void {
+    this.refreshTrigger.next();
+  }
+
+  private updateNode(chainId: string, nodeId: string, changes: Partial<RpcNode>): void {
+    this.chains.update((chains) => chains.map((chain) => chain.id === chainId
+      ? {
+          ...chain,
+          nodes: chain.nodes.map((node) => node.id === nodeId ? { ...node, ...changes } : node),
+        }
+      : chain));
   }
 }

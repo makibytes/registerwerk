@@ -172,6 +172,7 @@ public class Erc3643LifecycleService {
     public void addComplianceModule(
             UUID suiteId, String moduleAddress, String moduleType, Map<String, Object> params,
             UUID actorId, String actorRole) {
+        validateComplianceModule(moduleAddress, moduleType, params);
         log.info(
             "Adding compliance module type={} at address={} to suite={}",
             moduleType, moduleAddress, suiteId);
@@ -214,6 +215,54 @@ public class Erc3643LifecycleService {
 
         eventPublisher.publishEvent(new ComplianceModuleAddedEvent(suiteId, actorId, actorRole,
                 Map.of("moduleAddress", moduleAddress, "moduleType", moduleType)));
+    }
+
+    private static void validateComplianceModule(
+            String moduleAddress, String moduleType, Map<String, Object> params) {
+        if (moduleAddress == null || !moduleAddress.matches("^0x[0-9a-fA-F]{40}$")) {
+            throw new IllegalArgumentException("moduleAddress must be a valid EVM address");
+        }
+        if (moduleType == null || moduleType.isBlank()) {
+            throw new IllegalArgumentException("moduleType is required");
+        }
+        if (params == null) {
+            throw new IllegalArgumentException("parameters is required (use an empty object when unused)");
+        }
+        positiveIntParameter(params, "maxInvestors", false);
+        positiveIntParameter(params, "transferCooldown", true);
+        if (params.containsKey("maxBalance")) {
+            try {
+                if (new java.math.BigInteger(params.get("maxBalance").toString()).signum() <= 0) {
+                    throw new IllegalArgumentException("maxBalance must be greater than zero");
+                }
+            } catch (NumberFormatException | NullPointerException ex) {
+                throw new IllegalArgumentException("maxBalance must be a positive integer", ex);
+            }
+        }
+        if (params.containsKey("blockedCountries")) {
+            if (!(params.get("blockedCountries") instanceof List<?> countries)) {
+                throw new IllegalArgumentException("blockedCountries must be an array of numeric country codes");
+            }
+            for (Object country : countries) {
+                if (!(country instanceof Number number)
+                        || number.intValue() < 1 || number.intValue() > 999) {
+                    throw new IllegalArgumentException(
+                            "blockedCountries entries must be ISO 3166 numeric codes from 1 to 999");
+                }
+            }
+        }
+    }
+
+    private static void positiveIntParameter(Map<String, Object> params, String name, boolean allowZero) {
+        if (!params.containsKey(name)) {
+            return;
+        }
+        Object value = params.get(name);
+        if (!(value instanceof Number number)
+                || (allowZero ? number.intValue() < 0 : number.intValue() <= 0)) {
+            throw new IllegalArgumentException(name + (allowZero
+                    ? " must be zero or greater" : " must be greater than zero"));
+        }
     }
 
     /**

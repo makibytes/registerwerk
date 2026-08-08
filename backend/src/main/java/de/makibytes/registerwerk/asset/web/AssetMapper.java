@@ -22,6 +22,10 @@ public interface AssetMapper {
     @Mapping(target = "publicData", ignore = true)
     @Mapping(target = "entryType", ignore = true)
     @Mapping(target = "lastHolderSyncTime", ignore = true)
+    @Mapping(target = "targetMarketCategories", ignore = true)
+    @Mapping(target = "targetMarketMinExperience", ignore = true)
+    @Mapping(target = "minInvestmentAmount", ignore = true)
+    @Mapping(target = "maxHoldingAmount", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     Asset toEntity(AssetCreateRequest request);

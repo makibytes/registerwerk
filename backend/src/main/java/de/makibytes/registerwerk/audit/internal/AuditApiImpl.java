@@ -46,6 +46,14 @@ class AuditApiImpl implements AuditApi {
     }
 
     @Override
+    public Page<AuditEventView> findFiltered(
+            String subjectType, UUID subjectId, String eventType, UUID actorId,
+            Instant from, Instant to, Pageable pageable) {
+        return repository.findFiltered(subjectType, subjectId, eventType, actorId, from, to, pageable)
+                .map(this::toView);
+    }
+
+    @Override
     public Optional<AuditEventView> findById(UUID id) {
         return repository.findById(id).map(this::toView);
     }
@@ -57,8 +65,9 @@ class AuditApiImpl implements AuditApi {
 
     @Override
     public List<AuditEventView> findForExport(
-            String subjectType, String eventType, UUID actorId, Instant from, Instant to, Pageable pageable) {
-        return repository.findForExport(subjectType, eventType, actorId, from, to, pageable)
+            String subjectType, UUID subjectId, String eventType, UUID actorId,
+            Instant from, Instant to, Pageable pageable) {
+        return repository.findForExport(subjectType, subjectId, eventType, actorId, from, to, pageable)
                 .stream().map(this::toView).toList();
     }
 

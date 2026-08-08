@@ -1,3 +1,5 @@
 package de.makibytes.registerwerk.webhook.web.dto;
 
-public record SetEnabledRequest(boolean enabled) {}
+import jakarta.validation.constraints.NotNull;
+
+public record SetEnabledRequest(@NotNull Boolean enabled) {}

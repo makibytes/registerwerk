@@ -74,9 +74,17 @@ describe('TradingService', () => {
     req.flush({});
   });
 
-  it('settle() POSTs to the execution-scoped settle URL with an empty body', () => {
-    service.settle('exec-1').subscribe();
+  it('declarePayment() POSTs the buyer payment reference to the execution-scoped settle URL', () => {
+    service.declarePayment('exec-1', 'SEPA-123').subscribe();
     const req = httpMock.expectOne(`${base}/history/exec-1/settle`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ paymentReference: 'SEPA-123' });
+    req.flush({});
+  });
+
+  it('confirmPayment() POSTs an empty body to the seller confirmation URL', () => {
+    service.confirmPayment('exec-1').subscribe();
+    const req = httpMock.expectOne(`${base}/history/exec-1/confirm-payment`);
     expect(req.request.method).toBe('POST');
     expect(req.request.body).toEqual({});
     req.flush({});

@@ -20,6 +20,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
 import { AccessReviewCampaign, AccessReviewService } from '../../../core/api/access-review.service';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
+import { AuthService } from '../../../core/auth/auth.service';
 
 /**
  * Entitlement-review (access recertification) campaigns — BAIT and every bank's IAM policy
@@ -45,16 +46,19 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     <app-page-header
       title="Access Reviews"
       subtitle="Periodic entitlement recertification — every enabled account's roles, attested by a second reviewer">
-      <button mat-raised-button color="primary" (click)="openStartDialog()">
-        <mat-icon>playlist_add_check</mat-icon>
-        Start Campaign
-      </button>
+      @if (canStartCampaign) {
+        <button mat-raised-button color="primary" (click)="openStartDialog()">
+          <mat-icon>playlist_add_check</mat-icon>
+          Start Campaign
+        </button>
+      }
     </app-page-header>
 
     <rw-data-table
       [columns]="columns"
       [rows]="campaigns"
       [state]="state"
+      (retry)="load()"
       emptyMessage="No access review campaigns yet."
       [actionsTemplate]="campaignActions">
     </rw-data-table>
@@ -103,6 +107,9 @@ export class AccessReviewListComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly router = inject(Router);
+  private readonly auth = inject(AuthService);
+
+  readonly canStartCampaign = this.auth.hasRole('REGISTRY_ADMIN');
 
   campaigns: AccessReviewCampaign[] = [];
   state: AsyncSectionStatus = 'pending';

@@ -67,7 +67,7 @@ public class EntityTokenAdminGrantController {
         UUID revokedBy = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
         return ResponseEntity.ok(
-                service.revoke(grantId, revokedBy, actorRole, req.reason(), approverId));
+                service.revokeEntityWide(entityId, grantId, revokedBy, actorRole, req.reason(), approverId));
     }
 
 }

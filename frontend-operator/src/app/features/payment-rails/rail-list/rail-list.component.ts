@@ -44,6 +44,7 @@ const RAIL_TYPE_LABELS: Record<string, string> = {
       [columns]="columns"
       [rows]="rails"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by code or name…"
       emptyMessage="No payment rails configured yet."
       [actionsTemplate]="actions">

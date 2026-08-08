@@ -28,9 +28,16 @@ import { LegalEntity } from '../../core/models';
     <div class="content-card">
       @if (loading) {
         <div class="spinner-container"><mat-spinner diameter="40" /></div>
+      } @else if (loadError) {
+        <div class="request-error" role="alert">
+          <mat-icon>cloud_off</mat-icon>
+          <span>Your assigned clients could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
       } @else if (clients.length === 0) {
         <div class="no-data">No clients are currently assigned to you.</div>
       } @else {
+        <div class="table-scroll">
         <table mat-table [dataSource]="clients" class="full-width-table">
           <ng-container matColumnDef="entityNumber">
             <th mat-header-cell *matHeaderCellDef>Entity Number</th>
@@ -59,7 +66,8 @@ import { LegalEntity } from '../../core/models';
           <ng-container matColumnDef="actions">
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let row">
-              <button mat-icon-button color="primary" (click)="viewEntity(row)">
+              <button mat-icon-button color="primary" (click)="$event.stopPropagation(); viewEntity(row)"
+                      [attr.aria-label]="'View ' + row.currentName">
                 <mat-icon>open_in_new</mat-icon>
               </button>
             </td>
@@ -68,12 +76,19 @@ import { LegalEntity } from '../../core/models';
           <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
           <tr mat-row *matRowDef="let row; columns: displayedColumns;" style="cursor:pointer" (click)="viewEntity(row)"></tr>
         </table>
+        </div>
       }
     </div>
   `,
   styles: [`
     .spinner-container { display: flex; justify-content: center; padding: 48px; }
     .no-data { text-align: center; padding: 48px; color: var(--rw-text-muted); }
+    .request-error { display: grid; justify-items: center; gap: 12px; padding: 48px 20px; text-align: center; color: var(--rw-text-danger); }
+    .table-scroll { overflow-x: auto; }
+    table { min-width: 780px; }
+    @media (max-width: 640px) {
+      .page-header { align-items: flex-start; gap: 12px; flex-direction: column; }
+    }
   `],
 })
 export class MyClientsComponent implements OnInit {
@@ -83,6 +98,7 @@ export class MyClientsComponent implements OnInit {
 
   clients: LegalEntity[] = [];
   loading = false;
+  loadError = false;
 
   readonly displayedColumns = ['entityNumber', 'currentName', 'type', 'status', 'kycStatus', 'clientCategory', 'actions'];
 
@@ -92,13 +108,15 @@ export class MyClientsComponent implements OnInit {
 
   load(): void {
     this.loading = true;
+    this.loadError = false;
     this.entityService.myClients().subscribe({
       next: (clients) => {
         this.clients = clients;
         this.loading = false;
+        this.loadError = false;
         this.cdr.detectChanges();
       },
-      error: () => { this.loading = false; this.cdr.detectChanges(); },
+      error: () => { this.loading = false; this.loadError = true; this.cdr.detectChanges(); },
     });
   }
 

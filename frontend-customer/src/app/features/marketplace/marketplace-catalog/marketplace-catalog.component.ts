@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  OnDestroy,
   OnInit,
   inject,
 } from '@angular/core';
@@ -44,6 +45,11 @@ import { CatalogCardView } from '../../../core/models';
       margin: 16px 0 20px;
 
       mat-form-field { max-width: 320px; flex: 1; }
+    }
+
+    .dapp-link {
+      color: inherit;
+      text-decoration: none;
     }
 
     .dapp-card {
@@ -133,6 +139,12 @@ import { CatalogCardView } from '../../../core/models';
 
       @if (loading) {
         <div class="empty-state"><mat-spinner diameter="36" style="margin:0 auto"></mat-spinner></div>
+      } @else if (error) {
+        <div class="empty-state" role="alert">
+          <mat-icon>cloud_off</mat-icon>
+          <p>{{ error }}</p>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
       } @else if (cards.length === 0) {
         <div class="empty-state">
           <mat-icon>storefront</mat-icon>
@@ -141,8 +153,10 @@ import { CatalogCardView } from '../../../core/models';
       } @else {
         <div class="card-grid">
           @for (card of cards; track card.slug) {
-            <mat-card class="dapp-card" [routerLink]="['/marketplace', card.slug]">
-              <mat-card-content>
+            <a class="dapp-link" [routerLink]="['/marketplace', card.slug]"
+               [attr.aria-label]="'View ' + card.name">
+              <mat-card class="dapp-card">
+                <mat-card-content>
                 <div class="dapp-card-title">
                   <mat-icon>widgets</mat-icon>
                   {{ card.name }}
@@ -169,18 +183,16 @@ import { CatalogCardView } from '../../../core/models';
                 <p class="dapp-card-publisher" style="margin-top:10px">
                   Updated {{ card.updatedAt | date: 'mediumDate' }}
                 </p>
-              </mat-card-content>
-            </mat-card>
+                </mat-card-content>
+              </mat-card>
+            </a>
           }
         </div>
-      }
-      @if (error) {
-        <p class="error-message">{{ error }}</p>
       }
     </div>
   `,
 })
-export class MarketplaceCatalogComponent implements OnInit {
+export class MarketplaceCatalogComponent implements OnInit, OnDestroy {
   private readonly marketplaceService = inject(MarketplaceService);
   private readonly cdr = inject(ChangeDetectorRef);
 
@@ -193,6 +205,7 @@ export class MarketplaceCatalogComponent implements OnInit {
   category = '';
 
   private filterTimeout: ReturnType<typeof setTimeout> | null = null;
+  private requestId = 0;
 
   ngOnInit(): void {
     this.load();
@@ -201,7 +214,17 @@ export class MarketplaceCatalogComponent implements OnInit {
         this.categories = categories;
         this.cdr.markForCheck();
       },
+      error: () => {
+        // Category filtering is optional; browsing and free-text search still work.
+        this.categories = [];
+        this.cdr.markForCheck();
+      },
     });
+  }
+
+  ngOnDestroy(): void {
+    if (this.filterTimeout) clearTimeout(this.filterTimeout);
+    this.requestId++;
   }
 
   onFilterChange(): void {
@@ -210,6 +233,7 @@ export class MarketplaceCatalogComponent implements OnInit {
   }
 
   load(): void {
+    const requestId = ++this.requestId;
     this.loading = true;
     this.error = '';
     this.cdr.markForCheck();
@@ -218,11 +242,13 @@ export class MarketplaceCatalogComponent implements OnInit {
       .browse({ query: this.query || undefined, category: this.category || undefined })
       .subscribe({
         next: (page) => {
+          if (requestId !== this.requestId) return;
           this.cards = page.content;
           this.loading = false;
           this.cdr.markForCheck();
         },
         error: (err) => {
+          if (requestId !== this.requestId) return;
           this.error = err?.error?.message ?? 'Failed to load the marketplace catalog.';
           this.loading = false;
           this.cdr.markForCheck();

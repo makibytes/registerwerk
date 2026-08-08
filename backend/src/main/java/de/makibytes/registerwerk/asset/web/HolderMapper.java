@@ -28,6 +28,7 @@ public interface HolderMapper {
     @Mapping(target = "disposalRestrictions", ignore = true)
     @Mapping(target = "legalCapacityNote", ignore = true)
     @Mapping(target = "lastStatementAt", ignore = true)
+    @Mapping(target = "removedAt", ignore = true)
     AssetHolder toEntity(HolderCreateRequest request);
 
     /**

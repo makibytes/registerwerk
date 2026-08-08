@@ -149,6 +149,7 @@ import {
       [columns]="walletColumns"
       [rows]="wallets"
       [state]="walletState"
+      (retry)="loadWallets()"
       filterPlaceholder="Filter by address, label, role…"
       emptyMessage="No wallets bound to this organization."
       [actionsTemplate]="walletActions">

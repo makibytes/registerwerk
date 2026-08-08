@@ -3,19 +3,32 @@ package de.makibytes.registerwerk.travelrule.internal;
 import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.travelrule.api.Ivms101;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleProtocolPort;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
-import java.io.FileInputStream;
+import java.net.http.HttpClient;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.KeyFactory;
 import java.security.KeyStore;
+import java.security.PrivateKey;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.time.Duration;
+import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -37,12 +50,14 @@ class TrpAdapter implements TravelRuleProtocolPort {
     private final RestClient directoryClient;
     private final TravelRuleProperties.Trp config;
     private final ObjectMapper mapper;
+    private final SSLContext sslContext;
 
     TrpAdapter(TravelRuleProperties properties, ObjectMapper mapper) {
         this.config = properties.getTrp();
         this.mapper = mapper;
-        this.directoryClient = RestClient.builder()
-                .baseUrl(config.getDirectoryUrl())
+        this.sslContext = loadSslContext(config.getMtlsCertPath(), config.getMtlsKeyPath());
+        this.directoryClient = client(config.getDirectoryUrl(), null)
+                .mutate()
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .build();
         log.info("TrpAdapter initialized, endpoint={}", config.getEndpoint());
@@ -69,11 +84,10 @@ class TrpAdapter implements TravelRuleProtocolPort {
                         .orElse(config.getEndpoint());
 
                 if (endpoint == null || endpoint.isBlank()) {
-                    log.warn("TRP: no endpoint found for beneficiary VASP; skipping transfer {}", transferId);
-                    return "trp-noop-" + transferId;
+                    throw new IllegalStateException("No TRP delivery endpoint is configured");
                 }
 
-                RestClient mTlsClient = buildMtlsClient(endpoint);
+                RestClient mTlsClient = client(endpoint, sslContext);
                 String body = mapper.writeValueAsString(Map.of(
                         "transferId", transferId.toString(),
                         "ivms101", payload
@@ -114,36 +128,88 @@ class TrpAdapter implements TravelRuleProtocolPort {
                     String.valueOf(response.getOrDefault("country", "")),
                     String.valueOf(response.getOrDefault("endpoint", ""))
             ));
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw directoryUnavailable(walletAddress, e);
         } catch (Exception e) {
-            log.debug("TRP VASP lookup for address={} failed: {}", walletAddress, e.getMessage());
-            return Optional.empty();
+            throw directoryUnavailable(walletAddress, e);
         }
     }
 
-    private RestClient buildMtlsClient(String endpoint) {
-        if (config.getMtlsCertPath() == null || config.getMtlsCertPath().isBlank()) {
-            return RestClient.builder().baseUrl(endpoint).build();
+    private static ComplianceGateException directoryUnavailable(String walletAddress, Exception cause) {
+        return new ComplianceGateException(
+                "TRP VASP directory lookup failed for wallet " + walletAddress
+                        + "; beneficiary type cannot be established safely", cause);
+    }
+
+    private static RestClient client(String endpoint, SSLContext context) {
+        HttpClient.Builder http = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10));
+        if (context != null) {
+            http.sslContext(context);
+        }
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(http.build());
+        requestFactory.setReadTimeout(Duration.ofSeconds(30));
+        return RestClient.builder()
+                .requestFactory(requestFactory)
+                .baseUrl(endpoint)
+                .build();
+    }
+
+    private static SSLContext loadSslContext(String certificatePath, String privateKeyPath) {
+        boolean hasCertificate = certificatePath != null && !certificatePath.isBlank();
+        boolean hasPrivateKey = privateKeyPath != null && !privateKeyPath.isBlank();
+        if (!hasCertificate && !hasPrivateKey) {
+            return null;
+        }
+        if (hasCertificate != hasPrivateKey) {
+            throw new IllegalStateException(
+                    "TRP mTLS requires both a PEM certificate and a PKCS#8 PEM private key");
         }
         try {
             KeyStore ks = KeyStore.getInstance("PKCS12");
-            try (FileInputStream fis = new FileInputStream(config.getMtlsCertPath())) {
-                ks.load(fis, null);
+            ks.load(null, null);
+            Certificate certificate;
+            try (var input = Files.newInputStream(Path.of(certificatePath))) {
+                certificate = CertificateFactory.getInstance("X.509").generateCertificate(input);
             }
+            PrivateKey privateKey = readPkcs8PrivateKey(Path.of(privateKeyPath));
+            char[] password = new char[0];
+            ks.setKeyEntry("trp-client", privateKey, password, new Certificate[]{certificate});
+
             KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-            kmf.init(ks, null);
+            kmf.init(ks, password);
 
             TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
             tmf.init((KeyStore) null);
 
             SSLContext sslContext = SSLContext.getInstance("TLS");
             sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-
-            return RestClient.builder()
-                    .baseUrl(endpoint)
-                    .build();
+            return sslContext;
         } catch (Exception e) {
-            log.warn("TRP mTLS setup failed, falling back to plain TLS: {}", e.getMessage());
-            return RestClient.builder().baseUrl(endpoint).build();
+            throw new IllegalStateException("TRP mTLS configuration is invalid", e);
         }
+    }
+
+    private static PrivateKey readPkcs8PrivateKey(Path path) throws Exception {
+        String pem = Files.readString(path);
+        if (!pem.contains("-----BEGIN PRIVATE KEY-----")) {
+            throw new IllegalArgumentException("TRP private key must be unencrypted PKCS#8 PEM");
+        }
+        String base64 = pem
+                .replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "")
+                .replaceAll("\\s", "");
+        PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(Base64.getDecoder().decode(base64));
+        for (String algorithm : List.of("RSA", "EC", "Ed25519")) {
+            try {
+                return KeyFactory.getInstance(algorithm).generatePrivate(keySpec);
+            } catch (Exception ignored) {
+                // Try the next supported key algorithm.
+            }
+        }
+        throw new IllegalArgumentException("Unsupported TRP private-key algorithm");
     }
 }

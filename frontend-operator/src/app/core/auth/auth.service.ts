@@ -80,10 +80,19 @@ export class AuthService {
     });
   }
 
-  private finishLogout(): void {
+  /**
+   * Drops only the browser-side view of the session. Used for a server-reported 401: calling
+   * logout() from the HTTP error interceptor would make another HTTP request through that same
+   * interceptor and can recurse indefinitely when the logout endpoint also returns 401.
+   */
+  clearSession(): void {
     this._profile = null;
     this._initialized$ = null;
     this._isAuthenticated$.next(false);
+  }
+
+  private finishLogout(): void {
+    this.clearSession();
     this.router.navigate(['/login']);
   }
 

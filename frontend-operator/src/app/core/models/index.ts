@@ -348,7 +348,7 @@ export interface Asset {
   isin?: string;
   tokenStandard: TokenStandard;
   onchainLevel: 'NONE' | 'SIMPLE' | 'CONTROL';
-  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEEMED';
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEEMED' | 'TRANSFERRED_OUT';
   jurisdiction?: Jurisdiction;
   totalSupply?: number;
   decimals?: number;

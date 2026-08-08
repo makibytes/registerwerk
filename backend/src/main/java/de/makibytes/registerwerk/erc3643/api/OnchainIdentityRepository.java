@@ -23,6 +23,8 @@ public interface OnchainIdentityRepository extends JpaRepository<OnchainIdentity
      */
     List<OnchainIdentity> findByLegalEntityId(UUID legalEntityId);
 
+    Optional<OnchainIdentity> findByIdAndLegalEntityId(UUID id, UUID legalEntityId);
+
     /** Pending ONCHAINID deployments awaiting their receipt (placeholder address prefix). */
     List<OnchainIdentity> findByIdentityAddressStartingWithAndDeployedByTxIsNotNull(String addressPrefix);
 }

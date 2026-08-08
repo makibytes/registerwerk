@@ -49,18 +49,26 @@ interface LoanRow extends LendingPosition {
         </a>
       </app-page-header>
 
+      @if (state === 'ready' && marketsLoadFailed) {
+        <p class="warning-text" role="status">
+          <mat-icon>info_outline</mat-icon>
+          Market details are temporarily unavailable; repayment is disabled until you retry.
+        </p>
+      }
+
       <rw-data-table
         [columns]="columns"
         [rows]="rows"
         [state]="state"
         filterPlaceholder="Filter loans…"
         emptyMessage="No open or past loans yet."
-        [actionsTemplate]="actions">
+        [actionsTemplate]="actions"
+        (retry)="load()">
       </rw-data-table>
 
       <ng-template #actions let-row>
         @if (row.status === 'OPEN') {
-          <button mat-stroked-button (click)="openRepay(row, repayDialog)">
+          <button mat-stroked-button type="button" (click)="openRepay(row, repayDialog)">
             <mat-icon>payments</mat-icon>
             Repay
           </button>
@@ -73,15 +81,15 @@ interface LoanRow extends LendingPosition {
           <p>Outstanding debt: {{ formatUnits(data.row.currentDebt) }}</p>
           <mat-form-field appearance="outline" class="full-width">
             <mat-label>Amount to repay</mat-label>
-            <input matInput type="number" [(ngModel)]="repayAmount" />
+            <input matInput type="number" min="0.000001" [max]="outstandingAmount(data.row)" [(ngModel)]="repayAmount" />
           </mat-form-field>
           @if (repayError) {
             <p class="error-text">{{ repayError }}</p>
           }
         </mat-dialog-content>
         <mat-dialog-actions align="end">
-          <button mat-button [mat-dialog-close]="null" [disabled]="repaying">Cancel</button>
-          <button mat-flat-button color="primary" [disabled]="repaying" (click)="confirmRepay(data.row)">
+          <button mat-button type="button" [mat-dialog-close]="null" [disabled]="repaying">Cancel</button>
+          <button mat-flat-button color="primary" type="button" [disabled]="repaying || repayAmount <= 0" (click)="confirmRepay(data.row)">
             @if (repaying) { Repaying… } @else { Repay }
           </button>
         </mat-dialog-actions>
@@ -91,6 +99,8 @@ interface LoanRow extends LendingPosition {
   styles: [`
     .full-width { width: 100%; margin-top: 8px; }
     .error-text { color: #dc2626; font-size: 12.5px; }
+    .warning-text { display: flex; align-items: center; gap: 7px; color: var(--rw-text-warning); font-size: 12px; }
+    .warning-text mat-icon { font-size: 16px; height: 16px; width: 16px; }
   `],
 })
 export class OpenLoansComponent implements OnInit {
@@ -107,6 +117,7 @@ export class OpenLoansComponent implements OnInit {
   repayAmount = 0;
   repaying = false;
   repayError: string | null = null;
+  marketsLoadFailed = false;
 
   private marketsById = new Map<string, LendingMarket>();
 
@@ -123,21 +134,33 @@ export class OpenLoansComponent implements OnInit {
     this.load();
   }
 
-  private load(): void {
+  load(): void {
     this.state = 'pending';
+    this.rows = [];
+    this.marketsLoadFailed = false;
     forkJoin({
-      positions: this.lendingService.myPositions().pipe(catchError(() => of<LendingPosition[]>([]))),
+      positions: this.lendingService.myPositions(),
       markets: this.lendingService.listMarkets().pipe(
         map((markets) => {
           this.marketsById = new Map(markets.map((m) => [m.id, m]));
           return markets;
         }),
-        catchError(() => of<LendingMarket[]>([])),
+        catchError(() => {
+          this.marketsLoadFailed = true;
+          return of<LendingMarket[]>([]);
+        }),
       ),
-    }).subscribe(({ positions }) => {
-      this.rows = positions.map((p) => this.toRow(p));
-      this.state = 'ready';
-      this.cdr.markForCheck();
+    }).subscribe({
+      next: ({ positions }) => {
+        this.rows = positions.map((p) => this.toRow(p));
+        this.state = 'ready';
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.rows = [];
+        this.state = 'error';
+        this.cdr.markForCheck();
+      },
     });
   }
 
@@ -160,6 +183,10 @@ export class OpenLoansComponent implements OnInit {
     return (Number(raw) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 });
   }
 
+  outstandingAmount(row: LoanRow): number {
+    return Number(row.currentDebt) / 1e6;
+  }
+
   openRepay(row: LoanRow, template: TemplateRef<{ $implicit: LoanRow }>): void {
     this.repayAmount = Number(row.currentDebt) / 1e6;
     this.repayError = null;
@@ -168,7 +195,15 @@ export class OpenLoansComponent implements OnInit {
 
   async confirmRepay(row: LoanRow): Promise<void> {
     const market = this.marketsById.get(row.marketId);
-    if (!market) return;
+    const outstanding = Number(row.currentDebt) / 1e6;
+    if (!market) {
+      this.repayError = this.marketsLoadFailed ? 'Market details are unavailable. Reload the page and try again.' : 'Market not found.';
+      return;
+    }
+    if (!Number.isFinite(this.repayAmount) || this.repayAmount <= 0 || this.repayAmount > outstanding) {
+      this.repayError = `Enter an amount between 0 and ${outstanding.toLocaleString()}.`;
+      return;
+    }
     this.repaying = true;
     this.repayError = null;
     this.cdr.markForCheck();

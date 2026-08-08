@@ -158,4 +158,18 @@ describe('AuthService', () => {
       expect(result).toBeTrue();
     });
   });
+
+  describe('clearSession()', () => {
+    it('clears state without making a logout request or navigating', () => {
+      service.loginWithCredentials('admin@example.com', 'hunter2').subscribe();
+      httpMock.expectOne(`${environment.apiUrl}/public/auth/login`).flush(profile);
+
+      service.clearSession();
+
+      expect(service.isAuthenticatedSnapshot()).toBeFalse();
+      expect(service.getUserRoles()).toEqual([]);
+      httpMock.expectNone(`${environment.apiUrl}/public/auth/logout`);
+      expect(router.navigate).not.toHaveBeenCalled();
+    });
+  });
 });

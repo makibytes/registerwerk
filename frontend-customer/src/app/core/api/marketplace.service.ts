@@ -80,6 +80,12 @@ export class MarketplaceService {
     );
   }
 
+  manifest(listingId: string, versionId: string): Observable<{ manifestRaw: string | null }> {
+    return this.http.get<{ manifestRaw: string | null }>(
+      `${this.base}/listings/${listingId}/versions/${versionId}/manifest`,
+    );
+  }
+
   versionPermissions(listingId: string, versionId: string): Observable<DappRequiredPermissionView[]> {
     return this.http.get<DappRequiredPermissionView[]>(
       `${this.base}/listings/${listingId}/versions/${versionId}/permissions`,

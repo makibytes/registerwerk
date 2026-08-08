@@ -5,6 +5,11 @@
   "projects": {
     "registerwerk-operator": {
       "projectType": "application",
+      "cli": {
+        "cache": {
+          "enabled": false
+        }
+      },
       "schematics": {
         "@schematics/angular:component": {
           "style": "scss",
@@ -28,12 +33,26 @@
               "src/assets"
             ],
             "styles": [
+              "node_modules/@fontsource-variable/manrope/wght.css",
+              "node_modules/@fontsource/ibm-plex-mono/latin-400.css",
+              "node_modules/@fontsource/ibm-plex-mono/latin-500.css",
+              "node_modules/@fontsource/material-icons/index.css",
               "src/styles.scss"
             ],
             "scripts": []
           },
           "configurations": {
             "production": {
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": true
+                },
+                "fonts": {
+                  "inline": false
+                }
+              },
               "budgets": [
                 {
                   "type": "initial",
@@ -60,6 +79,16 @@
               "sourceMap": true
             },
             "testnet": {
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": true
+                },
+                "fonts": {
+                  "inline": false
+                }
+              },
               "budgets": [
                 {
                   "type": "initial",
@@ -109,6 +138,10 @@
               "src/assets"
             ],
             "styles": [
+              "node_modules/@fontsource-variable/manrope/wght.css",
+              "node_modules/@fontsource/ibm-plex-mono/latin-400.css",
+              "node_modules/@fontsource/ibm-plex-mono/latin-500.css",
+              "node_modules/@fontsource/material-icons/index.css",
               "src/styles.scss"
             ],
             "scripts": []

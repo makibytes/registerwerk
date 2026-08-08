@@ -185,6 +185,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         [columns]="hitColumns"
         [rows]="openHits"
         [state]="hitsState"
+        (retry)="loadRun()"
         filterPlaceholder="Filter hits…"
         emptyMessage="No unresolved hits for this run."
         [actionsTemplate]="hitActions">

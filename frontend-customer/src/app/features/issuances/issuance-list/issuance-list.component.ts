@@ -73,6 +73,12 @@ interface IssuanceFilters {
 
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
+      } @else if (loadError) {
+        <div class="content-card load-error" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <p>Issuances could not be loaded.</p>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
       } @else {
 
         <!-- ── KPI bar ────────────────────────────────────────────────────── -->
@@ -195,7 +201,7 @@ interface IssuanceFilters {
         </mat-card>
 
         <!-- ── Table ──────────────────────────────────────────────────────── -->
-        <mat-card>
+        <mat-card class="table-card">
           <table mat-table [dataSource]="dataSource" matSort class="mat-elevation-z0">
 
             <ng-container matColumnDef="assetNumber">
@@ -338,6 +344,11 @@ interface IssuanceFilters {
       border-radius: var(--rw-radius-sm);
     }
     .empty-row { text-align: center; padding: 32px; color: var(--rw-text-muted); }
+    .table-card { overflow-x: auto; }
+    .table-card table { min-width: 760px; }
+    .load-error { display: grid; justify-items: center; gap: 10px; padding-block: 48px; text-align: center; }
+    .load-error mat-icon { color: var(--rw-text-danger); }
+    .load-error p { margin: 0; color: var(--rw-text-secondary); }
   `],
 })
 export class IssuanceListComponent implements OnInit, AfterViewInit {
@@ -350,6 +361,7 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
   allIssuances: Asset[] = [];
   dataSource = new MatTableDataSource<Asset>();
   loading = true;
+  loadError = false;
 
   filters: IssuanceFilters = {
     search: '',
@@ -437,6 +449,12 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  load(): void {
+    this.loading = true;
+    this.loadError = false;
     this.issuanceService.getIssuances({ page: 0, size: 200, sort: 'createdAt,desc' }).subscribe({
       next: (res) => {
         this.allIssuances = res.content;
@@ -447,6 +465,7 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.detectChanges();
       },
     });

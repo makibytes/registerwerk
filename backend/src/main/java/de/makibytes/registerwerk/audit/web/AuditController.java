@@ -22,6 +22,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 import de.makibytes.registerwerk.audit.AuditApi;
 import de.makibytes.registerwerk.audit.api.AuditEventView;
@@ -34,6 +37,7 @@ import de.makibytes.registerwerk.shared.api.PageResponse;
 @RestController
 @RequestMapping("/api/v1/audit")
 @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT')")
+@Validated
 public class AuditController {
 
     /** Hard cap on a single export, independent of what the caller requests — audit_event is a
@@ -58,14 +62,14 @@ public class AuditController {
             @RequestParam(required = false) UUID subjectId,
             @RequestParam(required = false) String eventType,
             @RequestParam(required = false) UUID actorId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             Pageable pageable) {
 
-        if (subjectType != null && subjectId != null) {
-            return ResponseEntity.ok(PageResponse.of(auditApi.findBySubject(subjectType, subjectId, pageable)));
-        } else if (eventType != null) {
-            return ResponseEntity.ok(PageResponse.of(auditApi.findByEventType(eventType, pageable)));
-        } else if (actorId != null) {
-            return ResponseEntity.ok(PageResponse.of(auditApi.findByActor(actorId, pageable)));
+        if (subjectType != null || subjectId != null || eventType != null || actorId != null
+                || from != null || to != null) {
+            return ResponseEntity.ok(PageResponse.of(
+                    auditApi.findFiltered(subjectType, subjectId, eventType, actorId, from, to, pageable)));
         }
         return ResponseEntity.ok(PageResponse.of(auditApi.findAll(pageable)));
     }
@@ -89,13 +93,15 @@ public class AuditController {
     @GetMapping(value = "/events/export", produces = "text/csv")
     public ResponseEntity<String> exportEvents(
             @RequestParam(required = false) String subjectType,
+            @RequestParam(required = false) UUID subjectId,
             @RequestParam(required = false) String eventType,
             @RequestParam(required = false) UUID actorId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
-            @RequestParam(defaultValue = "" + MAX_EXPORT_ROWS) int limit) {
-        Pageable pageable = PageRequest.of(0, Math.min(limit, MAX_EXPORT_ROWS), Sort.by("occurredAt").ascending());
-        List<AuditEventView> events = auditApi.findForExport(subjectType, eventType, actorId, from, to, pageable);
+            @RequestParam(defaultValue = "" + MAX_EXPORT_ROWS) @Min(1) @Max(MAX_EXPORT_ROWS) int limit) {
+        Pageable pageable = PageRequest.of(0, limit, Sort.by("occurredAt").ascending());
+        List<AuditEventView> events = auditApi.findForExport(
+                subjectType, subjectId, eventType, actorId, from, to, pageable);
         String csv = toCsv(events);
         return ResponseEntity.ok()
                 .header("Content-Disposition", "attachment; filename=\"audit-export.csv\"")
@@ -129,13 +135,15 @@ public class AuditController {
     @GetMapping(value = "/events/export/signed", produces = "text/csv")
     public ResponseEntity<String> exportEventsSigned(
             @RequestParam(required = false) String subjectType,
+            @RequestParam(required = false) UUID subjectId,
             @RequestParam(required = false) String eventType,
             @RequestParam(required = false) UUID actorId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
-            @RequestParam(defaultValue = "" + MAX_EXPORT_ROWS) int limit) {
-        Pageable pageable = PageRequest.of(0, Math.min(limit, MAX_EXPORT_ROWS), Sort.by("occurredAt").ascending());
-        List<AuditEventView> events = auditApi.findForExport(subjectType, eventType, actorId, from, to, pageable);
+            @RequestParam(defaultValue = "" + MAX_EXPORT_ROWS) @Min(1) @Max(MAX_EXPORT_ROWS) int limit) {
+        Pageable pageable = PageRequest.of(0, limit, Sort.by("occurredAt").ascending());
+        List<AuditEventView> events = auditApi.findForExport(
+                subjectType, subjectId, eventType, actorId, from, to, pageable);
         String csv = toSignedCsv(events);
         byte[] digest = sha256(csv.getBytes(StandardCharsets.UTF_8));
         String digestHex = HexFormat.of().formatHex(digest);

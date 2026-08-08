@@ -13,7 +13,6 @@ import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
-import de.makibytes.registerwerk.kyc.api.S3DocumentStorageAdapter;
 import org.p2p.solanaj.core.PublicKey;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.slf4j.Logger;
@@ -37,6 +36,7 @@ import org.web3j.protocol.core.methods.response.EthCall;
 import org.web3j.utils.Numeric;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -73,12 +73,12 @@ public class TermSheetOnChainFetchService {
         Numeric.toHexString(Hash.sha3("TERM_SHEET".getBytes(StandardCharsets.UTF_8)));
 
     private static final int MAX_INLINE_BYTES = 5 * 1024 * 1024;
+    private static final int MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(30);
 
     private final BlockchainClientRegistry clientRegistry;
     private final AssetRepository assetRepository;
     private final AssetDocumentRepository assetDocumentRepository;
-    private final S3DocumentStorageAdapter s3Adapter;
     private final ContractAddressConfig contractAddressConfig;
     private final HttpClient httpClient;
 
@@ -89,12 +89,10 @@ public class TermSheetOnChainFetchService {
             BlockchainClientRegistry clientRegistry,
             AssetRepository assetRepository,
             AssetDocumentRepository assetDocumentRepository,
-            S3DocumentStorageAdapter s3Adapter,
             ContractAddressConfig contractAddressConfig) {
         this.clientRegistry = clientRegistry;
         this.assetRepository = assetRepository;
         this.assetDocumentRepository = assetDocumentRepository;
-        this.s3Adapter = s3Adapter;
         this.contractAddressConfig = contractAddressConfig;
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(HTTP_TIMEOUT)
@@ -330,25 +328,32 @@ public class TermSheetOnChainFetchService {
                         .timeout(HTTP_TIMEOUT)
                         .GET()
                         .build();
-                var response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+                var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
                 int status = response.statusCode();
 
-                if (status >= 300 && status < 400) {
-                    String location = response.headers().firstValue("Location").orElse(null);
-                    if (location == null) {
-                        throw new IllegalStateException("Redirect " + status + " without Location header");
+                try (InputStream responseBody = response.body()) {
+                    if (status >= 300 && status < 400) {
+                        String location = response.headers().firstValue("Location").orElse(null);
+                        if (location == null) {
+                            throw new IllegalStateException("Redirect " + status + " without Location header");
+                        }
+                        target = target.resolve(location);
+                        rejectInternalAddress(target);
+                        continue;
                     }
-                    target = target.resolve(location);
-                    rejectInternalAddress(target);
-                    continue;
-                }
 
-                if (status < 200 || status >= 300) {
-                    throw new IllegalStateException(
-                            "HTTP " + status + " fetching term sheet: " + target);
+                    if (status < 200 || status >= 300) {
+                        throw new IllegalStateException(
+                                "HTTP " + status + " fetching term sheet: " + target);
+                    }
+                    byte[] content = responseBody.readNBytes(MAX_DOWNLOAD_BYTES + 1);
+                    if (content.length > MAX_DOWNLOAD_BYTES) {
+                        throw new IllegalStateException(
+                                "Term sheet exceeds the maximum download size of 20 MB");
+                    }
+                    log.info("Downloaded {} bytes from {}", content.length, target);
+                    return content;
                 }
-                log.info("Downloaded {} bytes from {}", response.body().length, target);
-                return response.body();
             }
             throw new IllegalStateException("Too many redirects fetching term sheet: " + resolvedUrl);
         } catch (InterruptedException e) {
@@ -375,9 +380,13 @@ public class TermSheetOnChainFetchService {
         String header = dataUri.substring(5, commaIdx);
         String data = dataUri.substring(commaIdx + 1);
         if (header.contains(";base64")) {
-            return Base64.getDecoder().decode(data);
+            byte[] decoded = Base64.getDecoder().decode(data);
+            requireDownloadSize(decoded);
+            return decoded;
         }
-        return data.getBytes(StandardCharsets.UTF_8);
+        byte[] decoded = data.getBytes(StandardCharsets.UTF_8);
+        requireDownloadSize(decoded);
+        return decoded;
     }
 
     private String detectMimeType(String uri, byte[] content) {
@@ -413,12 +422,13 @@ public class TermSheetOnChainFetchService {
     private AssetDocument persist(AssetDeployment deployment, AssetDocumentSource source,
                                   OnChainDocumentRef ref, byte[] content, String mimeType,
                                   TermSheetService service) {
+        verifyOnChainHash(ref.hash(), content);
         AssetDocument doc = new AssetDocument();
         doc.setAssetId(deployment.getAssetId());
         doc.setDocumentType(AssetDocumentType.TERM_SHEET);
         doc.setSource(source);
         doc.setMimeType(mimeType);
-        doc.setFileName(deriveFileName(ref.uri(), mimeType));
+        doc.setFileName(TermSheetService.safeFileName(deriveFileName(ref.uri(), mimeType)));
         doc.setChain(deployment.getChain());
         doc.setNetwork(deployment.getNetwork());
         doc.setOnchainDocName(TERM_SHEET_HEX);
@@ -440,8 +450,25 @@ public class TermSheetOnChainFetchService {
             String s3Key = "termsheets/" + assetId + "/" + UUID.randomUUID() + "/" + doc.getFileName();
             doc.setStorageRef(s3Key);
             AssetDocument saved = service.saveDocument(doc);
-            s3Adapter.upload(s3Key, content, mimeType);
+            service.uploadS3(s3Key, content, mimeType);
             return saved;
+        }
+    }
+
+    static void verifyOnChainHash(String expectedHash, byte[] content) {
+        if (expectedHash == null) {
+            return; // Solana metadata currently carries a URI but no ERC-1643 content hash.
+        }
+        String actual = Numeric.toHexString(Hash.sha3(content));
+        if (!actual.equalsIgnoreCase(expectedHash)) {
+            throw new IllegalStateException(
+                    "Downloaded term sheet does not match its on-chain content hash");
+        }
+    }
+
+    static void requireDownloadSize(byte[] content) {
+        if (content.length > MAX_DOWNLOAD_BYTES) {
+            throw new IllegalArgumentException("Term sheet exceeds the maximum download size of 20 MB");
         }
     }
 

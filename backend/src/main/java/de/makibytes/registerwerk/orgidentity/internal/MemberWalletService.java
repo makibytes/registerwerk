@@ -151,6 +151,21 @@ public class MemberWalletService {
         if (expectedEntityId != null && !registration.getLegalEntityId().equals(expectedEntityId)) {
             throw new EntityNotFoundException("OrgMemberWallet", memberWalletId);
         }
+        return removeWallet(wallet, registration, actorId, actorRole);
+    }
+
+    /** Operator route variant that binds the wallet ID to the org registration in its URL. */
+    public OrgMemberWallet removeWalletFromOrg(UUID orgRegistrationId, UUID memberWalletId,
+                                                UUID actorId, String actorRole) {
+        OrgMemberWallet wallet = walletRepository.findByIdAndOrgRegistrationId(memberWalletId, orgRegistrationId)
+                .orElseThrow(() -> new EntityNotFoundException("OrgMemberWallet", memberWalletId));
+        OrgRegistration registration = registrationRepository.findById(orgRegistrationId)
+                .orElseThrow(() -> new EntityNotFoundException("OrgRegistration", orgRegistrationId));
+        return removeWallet(wallet, registration, actorId, actorRole);
+    }
+
+    private OrgMemberWallet removeWallet(OrgMemberWallet wallet, OrgRegistration registration,
+                                          UUID actorId, String actorRole) {
         if (wallet.getStatus() == MemberWalletStatus.REMOVED) {
             throw new InvalidStateTransitionException("Wallet binding already removed");
         }

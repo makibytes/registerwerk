@@ -9,6 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.ObjectMapper;
 
@@ -23,6 +24,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,12 +46,12 @@ class AuditControllerTest {
     @DisplayName("exportEventsSigned includes hash-chain columns and a signature when a signing key is configured")
     void exportEventsSigned_configured_includesSignature() {
         AuditController controller = new AuditController(auditApi, objectMapper, Optional.of(signingKeyProvider));
-        when(auditApi.findForExport(any(), any(), any(), any(), any(), any(Pageable.class)))
+        when(auditApi.findForExport(any(), any(), any(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(List.of(sampleEvent()));
         when(signingKeyProvider.sign(any())).thenReturn(new byte[]{1, 2, 3});
         when(signingKeyProvider.name()).thenReturn("gcp-kms-ed25519");
 
-        ResponseEntity<String> response = controller.exportEventsSigned(null, null, null, null, null, 50_000);
+        ResponseEntity<String> response = controller.exportEventsSigned(null, null, null, null, null, null, 50_000);
 
         assertThat(response.getBody()).contains("sequenceNo", "entryHash", "entrySig", "42", "deadbeef", "cafebabe");
         assertThat(response.getHeaders().getFirst("X-Export-Signed")).isEqualTo("true");
@@ -62,11 +64,11 @@ class AuditControllerTest {
     @DisplayName("the export digest header is the real SHA-256 of the exported CSV bytes")
     void exportEventsSigned_digestMatchesCsvBytes() throws Exception {
         AuditController controller = new AuditController(auditApi, objectMapper, Optional.of(signingKeyProvider));
-        when(auditApi.findForExport(any(), any(), any(), any(), any(), any(Pageable.class)))
+        when(auditApi.findForExport(any(), any(), any(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(List.of(sampleEvent()));
         when(signingKeyProvider.sign(any())).thenReturn(new byte[]{9});
 
-        ResponseEntity<String> response = controller.exportEventsSigned(null, null, null, null, null, 50_000);
+        ResponseEntity<String> response = controller.exportEventsSigned(null, null, null, null, null, null, 50_000);
 
         byte[] expectedDigest = MessageDigest.getInstance("SHA-256")
                 .digest(response.getBody().getBytes(StandardCharsets.UTF_8));
@@ -78,10 +80,10 @@ class AuditControllerTest {
     @DisplayName("exportEventsSigned falls back to an unsigned export when no signing key is configured")
     void exportEventsSigned_notConfigured_fallsBackUnsigned() {
         AuditController controller = new AuditController(auditApi, objectMapper, Optional.empty());
-        when(auditApi.findForExport(any(), any(), any(), any(), any(), any(Pageable.class)))
+        when(auditApi.findForExport(any(), any(), any(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(List.of(sampleEvent()));
 
-        ResponseEntity<String> response = controller.exportEventsSigned(null, null, null, null, null, 50_000);
+        ResponseEntity<String> response = controller.exportEventsSigned(null, null, null, null, null, null, 50_000);
 
         assertThat(response.getHeaders().getFirst("X-Export-Signed")).isEqualTo("false");
         assertThat(response.getHeaders().getFirst("X-Export-Signature-Ed25519")).isNull();
@@ -116,5 +118,21 @@ class AuditControllerTest {
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
         assertThat(response.getBody().configured()).isFalse();
         assertThat(response.getBody().publicKeyBase64()).isNull();
+    }
+
+    @Test
+    @DisplayName("searchEvents forwards combined filters instead of silently ignoring date ranges")
+    void searchEvents_combinedFilters_areApplied() {
+        AuditController controller = new AuditController(auditApi, objectMapper, Optional.empty());
+        UUID subjectId = UUID.randomUUID();
+        Instant from = Instant.parse("2026-08-01T00:00:00Z");
+        Instant to = Instant.parse("2026-08-01T23:59:59Z");
+        Pageable pageable = Pageable.ofSize(25);
+        when(auditApi.findFiltered("ASSET", subjectId, "ASSET_APPROVED", null, from, to, pageable))
+                .thenReturn(Page.empty(pageable));
+
+        controller.searchEvents("ASSET", subjectId, "ASSET_APPROVED", null, from, to, pageable);
+
+        verify(auditApi).findFiltered("ASSET", subjectId, "ASSET_APPROVED", null, from, to, pageable);
     }
 }

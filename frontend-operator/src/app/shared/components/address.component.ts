@@ -58,6 +58,7 @@ import { EndpointDialogComponent } from './endpoint-dialog.component';
       color: var(--rw-accent);
     }
     .addr-add:hover { color: var(--rw-accent); opacity: 1 !important; }
+    .addr-add:focus-visible { opacity: 1; }
   `],
   template: `
     @if (name) {
@@ -66,19 +67,19 @@ import { EndpointDialogComponent } from './endpoint-dialog.component';
       <span class="addr-name" [matTooltip]="address">{{ resolved }}</span>
     } @else {
       <span class="addr-short" [matTooltip]="address">{{ shortened }}</span>
-      <button class="addr-btn addr-add" (click)="openEndpointDialog($event)"
-              matTooltip="Add to address book">
+      <button class="addr-btn addr-add" type="button" (click)="openEndpointDialog($event)"
+              aria-label="Add address to address book" matTooltip="Add to address book">
         <mat-icon>bookmark_add</mat-icon>
       </button>
     }
 
-    <button class="addr-btn" (click)="copy($event)" matTooltip="Copy address">
+    <button class="addr-btn" type="button" (click)="copy($event)" aria-label="Copy address" matTooltip="Copy address">
       <mat-icon>content_copy</mat-icon>
     </button>
 
-    @if (explorerUrl) {
-      <a class="addr-btn" [href]="explorerUrl + '/address/' + address" target="_blank" rel="noopener"
-         matTooltip="View in explorer">
+    @if (explorerAddressUrl) {
+      <a class="addr-btn" [href]="explorerAddressUrl" target="_blank" rel="noopener noreferrer"
+         aria-label="View address in block explorer" matTooltip="View in explorer">
         <mat-icon>open_in_new</mat-icon>
       </a>
     }
@@ -94,6 +95,7 @@ export class AddressComponent implements OnChanges {
   private readonly resolution = inject(AddressResolutionService);
 
   resolvedName$: Observable<string | null> = of(null);
+  explorerAddressUrl: string | null = null;
 
   ngOnChanges(): void {
     if (this.address && !this.name) {
@@ -101,6 +103,7 @@ export class AddressComponent implements OnChanges {
     } else {
       this.resolvedName$ = of(null);
     }
+    this.explorerAddressUrl = this.buildExplorerUrl();
   }
 
 
@@ -116,6 +119,8 @@ export class AddressComponent implements OnChanges {
     event.stopPropagation();
     navigator.clipboard.writeText(this.address).then(() => {
       this.snackBar.open('Address copied', '', { duration: 1800 });
+    }).catch(() => {
+      this.snackBar.open('Could not copy address', 'Dismiss', { duration: 3000 });
     });
   }
 
@@ -125,5 +130,17 @@ export class AddressComponent implements OnChanges {
       width: '420px',
       data: { address: this.address },
     });
+  }
+
+  private buildExplorerUrl(): string | null {
+    if (!this.explorerUrl || !this.address) return null;
+    try {
+      const base = new URL(this.explorerUrl);
+      if (!['http:', 'https:'].includes(base.protocol)) return null;
+      base.pathname = `${base.pathname.replace(/\/$/, '')}/address/${encodeURIComponent(this.address)}`;
+      return base.href;
+    } catch {
+      return null;
+    }
   }
 }

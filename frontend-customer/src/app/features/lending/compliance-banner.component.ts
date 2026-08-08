@@ -74,10 +74,10 @@ export class LendingComplianceBannerComponent {
 
   get jurisdictionLabel(): string {
     const jurisdiction = this.market?.jurisdiction;
-    return jurisdiction ? JURISDICTION_LABELS[jurisdiction] : 'Germany (eWpG)';
+    return jurisdiction ? JURISDICTION_LABELS[jurisdiction] : 'jurisdiction-specific controls';
   }
 
   get micarApplicable(): boolean | null {
-    return this.market?.micarApplicable ?? false;
+    return this.market ? this.market.micarApplicable : null;
   }
 }

@@ -8,6 +8,7 @@ import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 
 import { StatusBadgeComponent } from '@registerwerk/ui';
 import { SupportService } from '../../core/api/support.service';
@@ -26,6 +27,7 @@ import { SupportTicket, SupportTicketMessage } from '../../core/models';
     MatFormFieldModule,
     MatInputModule,
     MatProgressSpinnerModule,
+    MatSnackBarModule,
     StatusBadgeComponent,
   ],
   styles: [`
@@ -43,11 +45,14 @@ import { SupportTicket, SupportTicketMessage } from '../../core/models';
     .reply-row { display: flex; gap: 12px; align-items: flex-end; }
     .spinner-wrap { display: flex; justify-content: center; padding: 48px 0; }
     .closed-note { font-size: 12px; color: var(--rw-text-muted); padding: 12px 0; text-align: center; }
+    .error-state { display: grid; justify-items: center; gap: 10px; padding: 48px 16px; color: var(--rw-text-secondary); text-align: center; }
+    .error-state mat-icon { color: var(--rw-text-danger); }
+    .thread-error { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; color: var(--rw-text-danger); font-size: 12px; }
   `],
   template: `
     <div class="page-container">
       <div class="back-row">
-        <button mat-button routerLink="/support">
+        <button mat-button type="button" routerLink="/support">
           <mat-icon>arrow_back</mat-icon>
           Back to Support
         </button>
@@ -55,6 +60,12 @@ import { SupportTicket, SupportTicketMessage } from '../../core/models';
 
       @if (loading) {
         <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
+      } @else if (loadError) {
+        <div class="error-state" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <span>This support ticket could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
       } @else if (ticket) {
         <div class="ticket-header">
           <h2>{{ ticket.subject }}</h2>
@@ -82,6 +93,12 @@ import { SupportTicket, SupportTicketMessage } from '../../core/models';
         }
 
         <div class="thread">
+          @if (messagesError) {
+            <div class="thread-error" role="alert">
+              Replies could not be loaded.
+              <button mat-button type="button" (click)="loadMessages()">Retry</button>
+            </div>
+          }
           @for (m of messages; track m.id) {
             <div class="message" [class.mine]="!m.authorIsOperator" [class.operator]="m.authorIsOperator">
               <div class="message-meta">{{ m.authorIsOperator ? 'Registerwerk Support' : 'You' }} · {{ m.createdAt | date:'medium' }}</div>
@@ -101,7 +118,7 @@ import { SupportTicket, SupportTicketMessage } from '../../core/models';
               <mat-label>Reply</mat-label>
               <textarea matInput rows="2" [(ngModel)]="replyBody"></textarea>
             </mat-form-field>
-            <button mat-raised-button color="primary" [disabled]="!replyBody.trim() || sending" (click)="sendReply()">
+            <button mat-raised-button color="primary" type="button" [disabled]="!replyBody.trim() || sending" (click)="sendReply()">
               <mat-icon>send</mat-icon>
               Send
             </button>
@@ -115,21 +132,30 @@ export class SupportDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly supportService = inject(SupportService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
 
   id!: string;
   ticket: SupportTicket | null = null;
   messages: SupportTicketMessage[] = [];
   loading = true;
+  loadError = false;
+  messagesError = false;
   sending = false;
   replyBody = '';
 
   ngOnInit(): void {
-    this.id = this.route.snapshot.paramMap.get('id')!;
+    this.id = this.route.snapshot.paramMap.get('id') ?? '';
+    if (!this.id) {
+      this.loading = false;
+      this.loadError = true;
+      return;
+    }
     this.load();
   }
 
   load(): void {
     this.loading = true;
+    this.loadError = false;
     this.cdr.markForCheck();
     this.supportService.get(this.id).subscribe({
       next: (ticket) => {
@@ -140,15 +166,22 @@ export class SupportDetailComponent implements OnInit {
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.markForCheck();
       },
     });
   }
 
   loadMessages(): void {
+    this.messagesError = false;
     this.supportService.messages(this.id).subscribe({
       next: (messages) => {
         this.messages = messages;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.messages = [];
+        this.messagesError = true;
         this.cdr.markForCheck();
       },
     });
@@ -169,6 +202,7 @@ export class SupportDetailComponent implements OnInit {
       error: () => {
         this.sending = false;
         this.cdr.markForCheck();
+        this.snackBar.open('Reply could not be sent. Please try again.', 'Dismiss', { duration: 5000 });
       },
     });
   }

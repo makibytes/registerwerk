@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.api.InvestorLimit;
 import de.makibytes.registerwerk.asset.api.InvestorLimitGate;
 import de.makibytes.registerwerk.asset.api.InvestorLimitRepository;
 import de.makibytes.registerwerk.asset.events.InvestorLimitSetEvent;
+import de.makibytes.registerwerk.asset.events.InvestorLimitDeletedEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,6 +74,13 @@ public class InvestorLimitService implements InvestorLimitGate {
     /** Creates or replaces the override row for this (asset, investor) pair. */
     public InvestorLimit setLimit(UUID assetId, UUID investorEntityId, BigDecimal minInvestmentOverride,
                                    BigDecimal maxHoldingOverride, LocalDate lockupUntil, UUID actorId) {
+        requirePositive("minInvestmentOverride", minInvestmentOverride);
+        requirePositive("maxHoldingOverride", maxHoldingOverride);
+        if (minInvestmentOverride != null && maxHoldingOverride != null
+                && minInvestmentOverride.compareTo(maxHoldingOverride) > 0) {
+            throw new IllegalArgumentException(
+                    "minInvestmentOverride must not exceed maxHoldingOverride");
+        }
         InvestorLimit limit = repository.findByAssetIdAndInvestorEntityId(assetId, investorEntityId)
                 .orElseGet(() -> {
                     InvestorLimit created = new InvestorLimit();
@@ -101,10 +109,18 @@ public class InvestorLimitService implements InvestorLimitGate {
         return repository.findByAssetIdAndInvestorEntityId(assetId, investorEntityId);
     }
 
-    public void deleteLimit(UUID assetId, UUID investorEntityId) {
+    public void deleteLimit(UUID assetId, UUID investorEntityId, UUID actorId) {
         InvestorLimit limit = repository.findByAssetIdAndInvestorEntityId(assetId, investorEntityId)
                 .orElseThrow(() -> new EntityNotFoundException("InvestorLimit", investorEntityId));
         repository.delete(limit);
+        events.publishEvent(new InvestorLimitDeletedEvent(limit.getId(), actorId, null, Map.of(
+                "assetId", assetId.toString(), "investorEntityId", investorEntityId.toString())));
         log.info("Deleted investor limit: assetId={} investorEntityId={}", assetId, investorEntityId);
+    }
+
+    private static void requirePositive(String field, BigDecimal value) {
+        if (value != null && value.signum() <= 0) {
+            throw new IllegalArgumentException(field + " must be greater than zero");
+        }
     }
 }

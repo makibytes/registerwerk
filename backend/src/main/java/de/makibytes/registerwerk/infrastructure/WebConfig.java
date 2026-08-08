@@ -6,10 +6,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
 import org.springframework.web.client.RestClient;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.List;
+import java.time.Duration;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
@@ -43,6 +45,9 @@ public class WebConfig implements WebMvcConfigurer {
     @Bean
     @Scope(BeanDefinition.SCOPE_PROTOTYPE)
     public RestClient.Builder restClientBuilder() {
-        return RestClient.builder();
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofSeconds(10));
+        requestFactory.setReadTimeout(Duration.ofSeconds(30));
+        return RestClient.builder().requestFactory(requestFactory);
     }
 }

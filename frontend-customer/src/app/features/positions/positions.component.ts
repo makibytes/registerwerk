@@ -14,9 +14,11 @@ import { LendingService } from '../../core/api/lending.service';
 import { StatementService } from '../../core/api/statement.service';
 import { TaxService } from '../../core/api/tax.service';
 import { RegisterDocumentService } from '../../core/api/register-document.service';
+import { downloadBlob } from '../../core/utils/download.util';
 import { FormsModule } from '@angular/forms';
 import { MatSelectModule } from '@angular/material/select';
-import { Chain, InvestmentRecord, LendingMarket, RegisterDocumentMeta, SellableHolding } from '../../core/models';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { Chain, LendingMarket, RegisterDocumentMeta, SellableHolding } from '../../core/models';
 import { ChainLendingCapability, lendingCapabilityFor } from '../../core/lending/chain-capabilities';
 import { environment } from '../../../environments/environment';
 
@@ -58,6 +60,7 @@ interface PositionRow {
     MatTooltipModule,
     MatSelectModule,
     FormsModule,
+    MatSnackBarModule,
     PageHeaderComponent,
     DataTableComponent,
   ],
@@ -79,6 +82,7 @@ interface PositionRow {
         </button>
       </app-page-header>
 
+      @if (state === 'ready') {
       <div class="summary-row">
         <mat-card class="summary-card">
           <mat-card-content>
@@ -111,6 +115,13 @@ interface PositionRow {
           </mat-card-content>
         </mat-card>
       </div>
+      @if (partialDataWarning) {
+        <p class="partial-warning" role="status">
+          <mat-icon>info_outline</mat-icon>
+          Some trading, lending, or register-document details are temporarily unavailable.
+        </p>
+      }
+      }
 
       <rw-data-table
         [columns]="columns"
@@ -118,7 +129,8 @@ interface PositionRow {
         [state]="state"
         filterPlaceholder="Filter positions…"
         emptyMessage="No holdings yet."
-        [actionsTemplate]="actions">
+        [actionsTemplate]="actions"
+        (retry)="load()">
       </rw-data-table>
 
       <ng-template #actions let-row>
@@ -129,6 +141,7 @@ interface PositionRow {
         @if (row.registerDoc) {
           <button
             mat-stroked-button
+            type="button"
             [disabled]="downloadingRegisterDocFor.has(row.assetId)"
             [matTooltip]="row.registerDoc.statutory
               ? row.registerDoc.title + ' (§19 eWpG statutory register statement)'
@@ -193,6 +206,8 @@ interface PositionRow {
 
       mat-icon { font-size: 14px; width: 14px; height: 14px; }
     }
+    .partial-warning { display: flex; align-items: center; gap: 7px; color: var(--rw-text-warning); font-size: 12px; }
+    .partial-warning mat-icon { font-size: 16px; height: 16px; width: 16px; }
   `],
 })
 export class PositionsComponent implements OnInit {
@@ -204,6 +219,7 @@ export class PositionsComponent implements OnInit {
   private readonly taxService = inject(TaxService);
   private readonly registerDocumentService = inject(RegisterDocumentService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
 
   @ViewChild('actions', { static: true }) actions!: TemplateRef<{ $implicit: PositionRow }>;
 
@@ -213,6 +229,7 @@ export class PositionsComponent implements OnInit {
   /** Null when holdings span more than one currency (or none is set) — see the tooltip. */
   portfolioCurrency: string | null = null;
   pledgeableCount = 0;
+  partialDataWarning = false;
   downloadingStatement = false;
   downloadingRegisterDocFor = new Set<string>();
   downloadingTaxCertificate = false;
@@ -254,21 +271,24 @@ export class PositionsComponent implements OnInit {
     this.load();
   }
 
-  private load(): void {
+  load(): void {
     this.state = 'pending';
+    this.rows = [];
+    this.partialDataWarning = false;
     forkJoin({
       investments: this.investmentService.getMyInvestments({ page: 0, size: 200 }).pipe(
         map((page) => page.content),
-        catchError(() => of<InvestmentRecord[]>([])),
       ),
       sellable: this.tradingService.listSellableHoldings().pipe(
-        catchError(() => of<SellableHolding[]>([])),
+        catchError(() => { this.partialDataWarning = true; return of<SellableHolding[]>([]); }),
       ),
       markets: environment.lendingEnabled
-        ? this.lendingService.listMarkets('ACTIVE').pipe(catchError(() => of<LendingMarket[]>([])))
+        ? this.lendingService.listMarkets('ACTIVE').pipe(
+            catchError(() => { this.partialDataWarning = true; return of<LendingMarket[]>([]); })
+          )
         : of<LendingMarket[]>([]),
       registerDocs: this.registerDocumentService.listAvailable().pipe(
-        catchError(() => of<RegisterDocumentMeta[]>([])),
+        catchError(() => { this.partialDataWarning = true; return of<RegisterDocumentMeta[]>([]); }),
       ),
     }).subscribe({
       next: ({ investments, sellable, markets, registerDocs }) => {
@@ -305,6 +325,7 @@ export class PositionsComponent implements OnInit {
         this.priceMatchedRows();
       },
       error: () => {
+        this.rows = [];
         this.state = 'error';
         this.cdr.markForCheck();
       },
@@ -344,18 +365,14 @@ export class PositionsComponent implements OnInit {
     this.downloadingRegisterDocFor.add(row.assetId);
     this.registerDocumentService.download(row.assetId).subscribe({
       next: (pdf) => {
-        const url = URL.createObjectURL(pdf);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `registerauszug-${row.assetId}.pdf`;
-        link.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(pdf, `registerauszug-${row.assetId}.pdf`);
         this.downloadingRegisterDocFor.delete(row.assetId);
         this.cdr.markForCheck();
       },
       error: () => {
         this.downloadingRegisterDocFor.delete(row.assetId);
         this.cdr.markForCheck();
+        this.snackBar.open('Register document could not be downloaded.', 'Dismiss', { duration: 5000 });
       },
     });
   }
@@ -364,18 +381,14 @@ export class PositionsComponent implements OnInit {
     this.downloadingStatement = true;
     this.statementService.downloadMyStatement().subscribe({
       next: (pdf) => {
-        const url = URL.createObjectURL(pdf);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `depotauszug-${new Date().toISOString().slice(0, 10)}.pdf`;
-        link.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(pdf, `depotauszug-${new Date().toISOString().slice(0, 10)}.pdf`);
         this.downloadingStatement = false;
         this.cdr.markForCheck();
       },
       error: () => {
         this.downloadingStatement = false;
         this.cdr.markForCheck();
+        this.snackBar.open('The portfolio statement could not be downloaded.', 'Dismiss', { duration: 5000 });
       },
     });
   }
@@ -384,18 +397,14 @@ export class PositionsComponent implements OnInit {
     this.downloadingTaxCertificate = true;
     this.taxService.downloadMyTaxCertificate(this.taxCertificateYear).subscribe({
       next: (pdf) => {
-        const url = URL.createObjectURL(pdf);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `steuerbescheinigung-${this.taxCertificateYear}.pdf`;
-        link.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(pdf, `steuerbescheinigung-${this.taxCertificateYear}.pdf`);
         this.downloadingTaxCertificate = false;
         this.cdr.markForCheck();
       },
       error: () => {
         this.downloadingTaxCertificate = false;
         this.cdr.markForCheck();
+        this.snackBar.open('The tax certificate could not be downloaded.', 'Dismiss', { duration: 5000 });
       },
     });
   }

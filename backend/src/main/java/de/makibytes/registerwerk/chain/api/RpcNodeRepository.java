@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface RpcNodeRepository extends JpaRepository<RpcNode, UUID> {
@@ -30,4 +31,6 @@ public interface RpcNodeRepository extends JpaRepository<RpcNode, UUID> {
     /** Backs the RPC-node-health alerting gauge — checkAllNodes() already persists this
      *  status every ~30s via saveAll(), but nothing ever counted it. */
     long countByHealthyFalse();
+
+    Optional<RpcNode> findByIdAndChainConfig_Id(UUID id, UUID chainConfigId);
 }

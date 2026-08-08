@@ -2,6 +2,12 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
+  quartz:
+    # Integration tests do not exercise scheduled Quartz work. Starting ten non-daemon worker
+    # threads per cached application context slowed JVM shutdown and let work outlive its
+    # Testcontainers database.
+    auto-startup: false
+
   datasource:
     # overridden at runtime by @DynamicPropertySource in integration tests
     url: jdbc:postgresql://localhost:5432/registerwerk_test
@@ -22,6 +28,12 @@ spring:
     port: 3025
 
 registerwerk:
+  screening:
+    open-sanctions:
+      # Keep the production adapter bean (and therefore fail-closed gate semantics) active, but
+      # never let integration tests contact a public compliance provider. Connection refusal on
+      # loopback is immediate and is recorded as the expected ERROR screening result.
+      base-url: http://127.0.0.1:1
   auth:
     dev-secret: "registerwerk-test-jwt-secret-not-for-production!!"
     step-up:

@@ -101,6 +101,7 @@ import {
       [columns]="grantColumns"
       [rows]="grants"
       [state]="grantState"
+      (retry)="loadGrants()"
       filterPlaceholder="Filter by entity, role…"
       emptyMessage="No organizations hold this permission yet."
       [actionsTemplate]="grantActions">

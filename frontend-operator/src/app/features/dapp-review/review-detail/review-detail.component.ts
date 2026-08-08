@@ -258,7 +258,7 @@ interface DiffLine {
                     @if (method.issuerLei) { · LEI {{ method.issuerLei }} }
                     @if (method.redemptionAtPar) { · redeemable at par }
                     @if (method.whitePaperUrl) {
-                      · <a [href]="method.whitePaperUrl" target="_blank" rel="noopener">white paper</a>
+                      · <a [href]="method.whitePaperUrl" target="_blank" rel="noopener noreferrer">white paper</a>
                     }
                   </p>
                 } @else {

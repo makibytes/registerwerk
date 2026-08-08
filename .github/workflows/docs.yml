@@ -6,12 +6,14 @@ on:
     paths:
       - 'mkdocs.yml'
       - 'docs/**'
+      - 'scripts/verify-docs-language-switcher.mjs'
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
     paths:
       - 'mkdocs.yml'
       - 'docs/**'
+      - 'scripts/verify-docs-language-switcher.mjs'
       - '.github/workflows/docs.yml'
 
 permissions:
@@ -28,6 +30,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify runtime language-link origin handling
+        run: node scripts/verify-docs-language-switcher.mjs
 
       # The compose `docs` profile ships an image built from docs/Dockerfile, not the bare
       # upstream squidfunk/mkdocs-material image — this site requires mkdocs-static-i18n

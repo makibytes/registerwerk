@@ -51,7 +51,7 @@ import { MatInputModule } from '@angular/material/input';
           </mat-form-field>
 
           @if (error) {
-            <p class="error-message">{{ error }}</p>
+            <p class="error-message" role="alert">{{ error }}</p>
           }
         </mat-card-content>
 
@@ -60,6 +60,7 @@ import { MatInputModule } from '@angular/material/input';
           <button
             mat-raised-button
             color="primary"
+            type="button"
             [disabled]="!token.trim()"
             (click)="proceed()"
           >

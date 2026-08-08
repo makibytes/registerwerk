@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  OnDestroy,
   OnInit,
   TemplateRef,
   ViewChild,
@@ -21,6 +22,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
 import { TransactionService, TxRecord } from '../../core/api/transaction.service';
 import { AsyncSectionStatus } from '../../core/async/async-section';
+import { Subscription } from 'rxjs';
 
 /**
  * Cross-asset "what broke overnight" view — previously `transaction.service.ts` had exactly one
@@ -66,6 +68,7 @@ import { AsyncSectionStatus } from '../../core/async/async-section';
       [columns]="columns"
       [rows]="transactions"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by method, actor, chain…"
       emptyMessage="No transactions with this status."
       [actionsTemplate]="rowActions">
@@ -86,7 +89,7 @@ import { AsyncSectionStatus } from '../../core/async/async-section';
 
     <ng-template #reviewDialogTpl>
       <h2 mat-dialog-title>Resolve Transaction</h2>
-      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:440px">
+      <mat-dialog-content class="review-dialog-content">
         @if (selected) {
           <div class="tx-summary">
             <div><span class="label">Method</span>{{ selected.methodName }}</div>
@@ -102,10 +105,10 @@ import { AsyncSectionStatus } from '../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!reviewNote.trim()" (click)="submitReview()">
+        <button mat-stroked-button mat-dialog-close [disabled]="reviewing">Cancel</button>
+        <button mat-raised-button color="primary" [disabled]="!reviewNote.trim() || reviewing" (click)="submitReview()">
           <mat-icon>fact_check</mat-icon>
-          Resolve
+          {{ reviewing ? 'Resolving…' : 'Resolve' }}
         </button>
       </mat-dialog-actions>
     </ng-template>
@@ -133,9 +136,19 @@ import { AsyncSectionStatus } from '../../core/async/async-section';
         color: var(--rw-text-secondary);
       }
     }
+    .review-dialog-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-top: 8px;
+      width: min(440px, 80vw);
+    }
+    @media (max-width: 560px) {
+      .tx-summary { grid-template-columns: 1fr; }
+    }
   `],
 })
-export class TransactionConsoleComponent implements OnInit {
+export class TransactionConsoleComponent implements OnInit, OnDestroy {
   @ViewChild('reviewDialogTpl') reviewDialogTpl!: TemplateRef<unknown>;
 
   private readonly transactionService = inject(TransactionService);
@@ -148,6 +161,8 @@ export class TransactionConsoleComponent implements OnInit {
   statusFilter: TxRecord['status'] = 'FAILED';
   selected: TxRecord | null = null;
   reviewNote = '';
+  reviewing = false;
+  private loadSubscription?: Subscription;
 
   readonly columns: TableColumn[] = [
     { key: 'status', header: 'Status', cell: (t: TxRecord) => t.status, type: 'badge' },
@@ -163,6 +178,10 @@ export class TransactionConsoleComponent implements OnInit {
     this.load();
   }
 
+  ngOnDestroy(): void {
+    this.loadSubscription?.unsubscribe();
+  }
+
   onStatusChange(status: TxRecord['status']): void {
     this.statusFilter = status;
     this.load();
@@ -172,7 +191,8 @@ export class TransactionConsoleComponent implements OnInit {
     this.state = 'pending';
     this.cdr.markForCheck();
 
-    this.transactionService.listByStatus(this.statusFilter).subscribe({
+    this.loadSubscription?.unsubscribe();
+    this.loadSubscription = this.transactionService.listByStatus(this.statusFilter).subscribe({
       next: (page) => {
         this.transactions = page.content;
         this.state = 'ready';
@@ -188,21 +208,27 @@ export class TransactionConsoleComponent implements OnInit {
   openReviewDialog(tx: TxRecord): void {
     this.selected = tx;
     this.reviewNote = '';
+    this.reviewing = false;
     this.dialog.open(this.reviewDialogTpl, { width: '520px' });
   }
 
   submitReview(): void {
     if (!this.selected || !this.reviewNote.trim()) return;
     const id = this.selected.id;
-    this.dialog.closeAll();
+    this.reviewing = true;
+    this.cdr.markForCheck();
 
     this.transactionService.review(id, this.reviewNote.trim()).subscribe({
       next: () => {
+        this.reviewing = false;
+        this.dialog.closeAll();
         this.snackBar.open('Transaction resolved.', 'Dismiss', { duration: 4000 });
         this.load();
       },
       error: (err) => {
+        this.reviewing = false;
         this.snackBar.open(err?.error?.message ?? 'Failed to resolve transaction.', 'Dismiss', { duration: 6000 });
+        this.cdr.markForCheck();
       },
     });
   }

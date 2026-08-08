@@ -17,6 +17,8 @@ public interface OrgMemberWalletRepository extends JpaRepository<OrgMemberWallet
     /** Every wallet a given app user has bound, regardless of status — callers filter as needed. */
     List<OrgMemberWallet> findByAppUserId(UUID appUserId);
 
+    Optional<OrgMemberWallet> findByIdAndOrgRegistrationId(UUID id, UUID orgRegistrationId);
+
     long countByOrgRegistrationIdAndStatus(UUID orgRegistrationId, MemberWalletStatus status);
 
     /** The live (pending or active) binding of a wallet on a chain, if any. */

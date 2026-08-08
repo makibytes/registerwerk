@@ -9,6 +9,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AssetService } from '../../../core/api/asset.service';
 import { Asset } from '../../../core/models';
 
@@ -25,6 +26,7 @@ import { Asset } from '../../../core/models';
     MatIconModule,
     MatProgressSpinnerModule,
     MatDividerModule,
+    MatSnackBarModule,
   ],
   styles: [`
     .back-row { margin-bottom: 12px; }
@@ -50,6 +52,7 @@ import { Asset } from '../../../core/models';
     }
 
     .spinner-wrap { display: flex; justify-content: center; padding: 40px; }
+    .request-error { display: grid; justify-items: center; gap: 12px; padding: 40px 20px; color: var(--rw-text-danger); text-align: center; }
   `],
   template: `
     <div class="back-row">
@@ -61,6 +64,12 @@ import { Asset } from '../../../core/models';
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
+    } @else if (loadError) {
+      <div class="request-error" role="alert">
+        <mat-icon>cloud_off</mat-icon>
+        <span>The asset could not be loaded for editing.</span>
+        <button mat-stroked-button type="button" (click)="loadAsset()">Retry</button>
+      </div>
     } @else {
       <mat-card class="form-card">
         <mat-card-header>
@@ -193,9 +202,11 @@ export class AssetEditComponent implements OnInit {
   private readonly assetService = inject(AssetService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
 
   loading = true;
   submitting = false;
+  loadError = false;
 
   readonly form = this.fb.group({
     name: ['', Validators.required],
@@ -214,6 +225,12 @@ export class AssetEditComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.loadAsset();
+  }
+
+  loadAsset(): void {
+    this.loading = true;
+    this.loadError = false;
     this.assetService.getAsset(this.id).subscribe({
       next: (asset: Asset) => {
         this.form.patchValue({
@@ -232,21 +249,35 @@ export class AssetEditComponent implements OnInit {
           maturityDate: asset.maturityDate ?? '',
         });
         this.loading = false;
+        this.loadError = false;
         this.cdr.markForCheck();
       },
-      error: () => { this.loading = false; this.cdr.markForCheck(); },
+      error: () => { this.loading = false; this.loadError = true; this.cdr.markForCheck(); },
     });
   }
 
   submit(): void {
-    if (this.form.invalid) return;
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
     this.submitting = true;
-    this.assetService.updateAsset(this.id, this.form.value as Partial<Asset>).subscribe({
+    const value = this.form.getRawValue();
+    this.assetService.updateAsset(this.id, {
+      ...value,
+      currency: value.currency?.trim().toUpperCase(),
+      isin: value.isin?.trim().toUpperCase(),
+      issuerId: value.issuerId?.trim(),
+    } as Partial<Asset>).subscribe({
       next: () => {
         this.submitting = false;
         this.router.navigate(['/assets', this.id]);
       },
-      error: () => { this.submitting = false; },
+      error: (err) => {
+        this.submitting = false;
+        this.snackBar.open(err?.error?.message ?? 'Failed to save the asset.', 'Dismiss', { duration: 5000 });
+        this.cdr.markForCheck();
+      },
     });
   }
 

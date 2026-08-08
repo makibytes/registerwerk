@@ -3,9 +3,12 @@ package de.makibytes.registerwerk.kyc.api;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface BeneficialOwnerRepository extends JpaRepository<BeneficialOwner, UUID> {
+
+    Optional<BeneficialOwner> findByIdAndEntityId(UUID id, UUID entityId);
     List<BeneficialOwner> findByEntityIdAndCeasedAtIsNull(UUID entityId);
     List<BeneficialOwner> findByNaturalPersonId(UUID naturalPersonId);
 

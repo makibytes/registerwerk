@@ -2,6 +2,7 @@ import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from './auth.service';
@@ -223,6 +224,10 @@ import { AuthService } from './auth.service';
       text-align: center;
     }
 
+    @media (max-width: 480px) {
+      .card { padding: 30px 22px; }
+    }
+
     .onboarding-link {
       font-size: 13px;
       color: rgba(255,255,255,0.35);
@@ -257,7 +262,7 @@ import { AuthService } from './auth.service';
             Sign in with Microsoft
           </button>
         } @else {
-        <form (ngSubmit)="onSubmit()">
+        <form (ngSubmit)="onSubmit()" [attr.aria-busy]="loading">
           <div class="field-group">
             <div>
               <label class="field-label" for="email">Email address</label>
@@ -269,6 +274,8 @@ import { AuthService } from './auth.service';
                 name="email"
                 required
                 autocomplete="email"
+                autocapitalize="none"
+                spellcheck="false"
                 placeholder="you@company.com"
               />
             </div>
@@ -286,7 +293,7 @@ import { AuthService } from './auth.service';
                   autocomplete="current-password"
                   placeholder="••••••••"
                 />
-                <button type="button" class="toggle-btn" (click)="hidePassword = !hidePassword" [attr.aria-label]="'Toggle password'">
+                <button type="button" class="toggle-btn" (click)="hidePassword = !hidePassword" [attr.aria-label]="hidePassword ? 'Show password' : 'Hide password'">
                   <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
                 </button>
               </div>
@@ -294,7 +301,7 @@ import { AuthService } from './auth.service';
           </div>
 
           @if (errorMessage) {
-            <div class="error-msg">
+            <div class="error-msg" role="alert">
               <mat-icon>error_outline</mat-icon>
               {{ errorMessage }}
             </div>
@@ -345,11 +352,13 @@ export class LoginComponent {
   }
 
   onSubmit(): void {
-    if (!this.email || !this.password) return;
+    const email = this.email.trim().toLowerCase();
+    if (this.loading || !email || !this.password) return;
+    this.email = email;
     this.loading = true;
     this.errorMessage = '';
 
-    this.auth.loginWithCredentials(this.email, this.password).subscribe({
+    this.auth.loginWithCredentials(email, this.password).subscribe({
       next: () => {
         // REGISTRY_ADMIN with no entity context → company picker
         if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
@@ -358,9 +367,11 @@ export class LoginComponent {
           this.router.navigate(['/dashboard']);
         }
       },
-      error: () => {
+      error: (err: HttpErrorResponse) => {
         this.loading = false;
-        this.errorMessage = 'Invalid credentials. Please check your email and password.';
+        this.errorMessage = err.status === 0 || err.status >= 500
+          ? 'The sign-in service is unavailable. Please try again shortly.'
+          : 'Invalid credentials. Please check your email and password.';
         this.cdr.markForCheck();
       },
     });

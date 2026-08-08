@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -71,37 +71,38 @@ import { OnboardingTokenInfo } from '../../../core/models';
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Admin Email</mat-label>
-              <input matInput type="email" [(ngModel)]="adminEmail" required placeholder="admin@company.com" />
+              <input matInput type="email" [(ngModel)]="adminEmail" required autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="admin@company.com" />
               <mat-icon matSuffix>email</mat-icon>
             </mat-form-field>
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Full Name</mat-label>
-              <input matInput [(ngModel)]="adminName" required placeholder="Jane Smith" />
+              <input matInput [(ngModel)]="adminName" required autocomplete="name" placeholder="Jane Smith" />
               <mat-icon matSuffix>person</mat-icon>
             </mat-form-field>
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Password</mat-label>
-              <input matInput [type]="hidePassword ? 'password' : 'text'" [(ngModel)]="password" required />
-              <button mat-icon-button matSuffix type="button" (click)="hidePassword = !hidePassword">
+              <input matInput [type]="hidePassword ? 'password' : 'text'" [(ngModel)]="password" required minlength="8" autocomplete="new-password" />
+              <button mat-icon-button matSuffix type="button" [attr.aria-label]="hidePassword ? 'Show password' : 'Hide password'" (click)="hidePassword = !hidePassword">
                 <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
               </button>
             </mat-form-field>
 
             @if (submitError) {
-              <p class="error-message">{{ submitError }}</p>
+              <p class="error-message" role="alert">{{ submitError }}</p>
             }
           }
         </mat-card-content>
 
         @if (!loading && !tokenError && !success && tokenInfo) {
           <mat-card-actions align="end">
-            <button mat-button routerLink="/login">Cancel</button>
+            <button mat-button type="button" routerLink="/login">Cancel</button>
             <button
               mat-raised-button
+              type="button"
               color="primary"
-              [disabled]="submitting || !adminEmail || !adminName || !password"
+              [disabled]="submitting || !adminEmail.trim() || !adminName.trim() || password.length < 8"
               (click)="complete()"
             >
               @if (submitting) {
@@ -161,7 +162,7 @@ import { OnboardingTokenInfo } from '../../../core/models';
     .loading-overlay { display: flex; justify-content: center; padding: 48px; }
   `]
 })
-export class RedeemTokenComponent implements OnInit {
+export class RedeemTokenComponent implements OnInit, OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -179,6 +180,7 @@ export class RedeemTokenComponent implements OnInit {
   submitting = false;
   submitError = '';
   success = false;
+  private redirectTimer: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
     this.token = this.route.snapshot.paramMap.get('token') ?? '';
@@ -209,14 +211,17 @@ export class RedeemTokenComponent implements OnInit {
   }
 
   complete(): void {
+    const adminEmail = this.adminEmail.trim().toLowerCase();
+    const adminName = this.adminName.trim();
+    if (this.submitting || !adminEmail || !adminName || this.password.length < 8) return;
     this.submitting = true;
     this.submitError = '';
 
     this.http
       .post(`${environment.apiUrl}/onboarding/complete`, {
         token: this.token,
-        adminEmail: this.adminEmail,
-        adminName: this.adminName,
+        adminEmail,
+        adminName,
         password: this.password,
       })
       .subscribe({
@@ -224,7 +229,7 @@ export class RedeemTokenComponent implements OnInit {
           this.submitting = false;
           this.success = true;
           this.cdr.detectChanges();
-          setTimeout(() => this.router.navigate(['/login']), 3000);
+          this.redirectTimer = setTimeout(() => this.router.navigate(['/login']), 3000);
         },
         error: (err) => {
           this.submitting = false;
@@ -233,5 +238,9 @@ export class RedeemTokenComponent implements OnInit {
           this.cdr.detectChanges();
         },
       });
+  }
+
+  ngOnDestroy(): void {
+    if (this.redirectTimer) clearTimeout(this.redirectTimer);
   }
 }

@@ -69,7 +69,7 @@ export const routes: Routes = [
       },
       {
         path: 'company-admin',
-        canActivate: [roleGuard(['COMPANY_ADMIN'])],
+        canActivate: [roleGuard(['COMPANY_ADMIN', 'REGISTRY_ADMIN'])],
         loadChildren: () => import('./features/company-admin/company-admin.routes').then(m => m.COMPANY_ADMIN_ROUTES)
       },
       {

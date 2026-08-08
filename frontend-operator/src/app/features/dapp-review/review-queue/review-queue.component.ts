@@ -31,6 +31,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       [columns]="columns"
       [rows]="queue"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by dApp, publisher…"
       emptyMessage="No submissions waiting for review."
       [actionsTemplate]="rowActions">

@@ -52,6 +52,12 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
     .message-meta { font-size: 11px; color: var(--rw-text-muted); margin-bottom: 4px; }
     .reply-row { display: flex; gap: 12px; align-items: flex-end; }
     .spinner-wrap { display: flex; justify-content: center; padding: 48px 0; }
+    .load-error { display: grid; justify-items: center; gap: 10px; padding: 48px 16px; color: var(--rw-text-secondary); text-align: center; }
+    @media (max-width: 620px) {
+      .page-container { padding: 0; }
+      .message { max-width: 95%; }
+      .reply-row { align-items: stretch; flex-direction: column; }
+    }
   `],
   template: `
     <div class="page-container">
@@ -81,6 +87,7 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
               }
             </div>
           </div>
+          @if (canManage) {
           <div class="ticket-actions">
             @if (!ticket.assignedTo || ticket.assignedTo !== myUserId) {
               <button mat-stroked-button (click)="assignToMe()">
@@ -105,6 +112,7 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
               </button>
             }
           </div>
+          }
         </div>
 
         <mat-card class="description-card">
@@ -128,7 +136,12 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
             </div>
           }
           @if (messages.length === 0) {
-            <p style="text-align:center;color:var(--rw-text-secondary);font-size:13px;padding:16px">No messages yet.</p>
+            <p style="text-align:center;color:var(--rw-text-secondary);font-size:13px;padding:16px">
+              {{ messagesError ? 'Messages could not be loaded.' : 'No messages yet.' }}
+            </p>
+            @if (messagesError) {
+              <button mat-button type="button" (click)="loadMessages()">Retry messages</button>
+            }
           }
         </div>
 
@@ -141,6 +154,12 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
             <mat-icon>send</mat-icon>
             Send
           </button>
+        </div>
+      } @else if (loadError) {
+        <div class="load-error" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <span>Ticket details could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
         </div>
       }
     </div>
@@ -176,10 +195,13 @@ export class SupportTicketDetailComponent implements OnInit {
   ticket: SupportTicket | null = null;
   messages: SupportTicketMessage[] = [];
   loading = true;
+  loadError = false;
+  messagesError = false;
   sending = false;
   replyBody = '';
   resolutionNotes = '';
   readonly myUserId = this.authService.getUserId();
+  readonly canManage = this.authService.hasRole('REGISTRY_ADMIN') || this.authService.hasRole('COMPLIANCE_OFFICER');
 
   ngOnInit(): void {
     this.id = this.route.snapshot.paramMap.get('id')!;
@@ -188,6 +210,7 @@ export class SupportTicketDetailComponent implements OnInit {
 
   load(): void {
     this.loading = true;
+    this.loadError = false;
     this.cdr.markForCheck();
     this.supportService.get(this.id).subscribe({
       next: (ticket) => {
@@ -197,16 +220,24 @@ export class SupportTicketDetailComponent implements OnInit {
         this.loadMessages();
       },
       error: () => {
+        this.ticket = null;
         this.loading = false;
+        this.loadError = true;
         this.cdr.markForCheck();
       },
     });
   }
 
   loadMessages(): void {
+    this.messagesError = false;
     this.supportService.messages(this.id).subscribe({
       next: (messages) => {
         this.messages = messages;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.messages = [];
+        this.messagesError = true;
         this.cdr.markForCheck();
       },
     });
@@ -226,6 +257,7 @@ export class SupportTicketDetailComponent implements OnInit {
       },
       error: () => {
         this.sending = false;
+        this.snackBar.open('Reply could not be sent.', 'Dismiss', { duration: 5000 });
         this.cdr.markForCheck();
       },
     });

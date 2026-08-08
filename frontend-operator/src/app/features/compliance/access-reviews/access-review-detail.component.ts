@@ -21,6 +21,7 @@ import { forkJoin } from 'rxjs';
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
 import { AccessReviewCampaign, AccessReviewItem, AccessReviewService } from '../../../core/api/access-review.service';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
+import { AuthService } from '../../../core/auth/auth.service';
 
 @Component({
   selector: 'app-access-review-detail',
@@ -44,7 +45,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         <mat-icon>arrow_back</mat-icon>
         All Campaigns
       </button>
-      @if (campaign?.status === 'OPEN') {
+      @if (campaign?.status === 'OPEN' && canCloseCampaign) {
         <button mat-raised-button color="primary" [disabled]="pendingCount() > 0" (click)="closeCampaign()"
                 [matTooltip]="pendingCount() > 0 ? pendingCount() + ' item(s) still awaiting a decision' : 'Close campaign'">
           <mat-icon>task_alt</mat-icon>
@@ -68,6 +69,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       [columns]="columns"
       [rows]="items"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by email…"
       emptyMessage="No items in this campaign."
       [actionsTemplate]="itemActions">
@@ -140,6 +142,9 @@ export class AccessReviewDetailComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
+  private readonly auth = inject(AuthService);
+
+  readonly canCloseCampaign = this.auth.hasRole('REGISTRY_ADMIN');
 
   campaign: AccessReviewCampaign | null = null;
   items: AccessReviewItem[] = [];

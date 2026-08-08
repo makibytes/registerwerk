@@ -32,6 +32,10 @@
     <greenmail.version>2.1.7</greenmail.version>
     <awssdk.version>2.44.14</awssdk.version>
     <shedlock.version>6.9.2</shedlock.version>
+    <!-- Narrow security patch overrides until the next Spring Boot BOM release carries them. -->
+    <netty.version>4.2.16.Final</netty.version>
+    <postgresql.version>42.7.12</postgresql.version>
+    <bouncycastle.version>1.84</bouncycastle.version>
     <!--
       Testcontainers requires a sufficiently new Docker API.
       Force a safe floor for test JVMs so host-level API pinning (e.g. 1.32)
@@ -48,6 +52,29 @@
         <version>${spring-modulith.version}</version>
         <type>pom</type>
         <scope>import</scope>
+      </dependency>
+      <!-- Solanaj and the PDF-signing stack use different Bouncy Castle artifact lines. Keep
+           both on the same patched release instead of letting nearest-dependency mediation
+           retain older vulnerable providers in the executable jar. -->
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcprov-jdk15to18</artifactId>
+        <version>${bouncycastle.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcprov-jdk18on</artifactId>
+        <version>${bouncycastle.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcutil-jdk18on</artifactId>
+        <version>${bouncycastle.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcpkix-jdk18on</artifactId>
+        <version>${bouncycastle.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -261,7 +288,7 @@
     <dependency>
       <groupId>org.bouncycastle</groupId>
       <artifactId>bcpkix-jdk18on</artifactId>
-      <version>1.79</version>
+      <version>${bouncycastle.version}</version>
     </dependency>
 
     <!-- ── AOP (for @RequiresStepUp enforcement) ─────────────────────────── -->
@@ -390,6 +417,10 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
+          <!-- JDK 25 still permits Mockito's inline mock maker to self-attach, but future
+               releases will reject dynamic agent loading.  Load it explicitly and retain
+               JaCoCo's lifecycle-provided argLine via late property evaluation. -->
+          <argLine>@{argLine} -javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar</argLine>
           <systemPropertyVariables>
             <api.version>${docker.api.test.version}</api.version>
           </systemPropertyVariables>
@@ -400,6 +431,7 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
         <configuration>
+          <argLine>@{argLine} -javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar</argLine>
           <systemPropertyVariables>
             <api.version>${docker.api.test.version}</api.version>
           </systemPropertyVariables>

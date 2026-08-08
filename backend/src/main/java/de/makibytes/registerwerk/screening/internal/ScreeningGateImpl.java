@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.screening.internal;
 
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
+import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -21,13 +22,19 @@ class ScreeningGateImpl implements ScreeningGate {
     private final ScreeningRunRepository runRepository;
     private final ScreeningHitRepository hitRepository;
     private final ScreeningService screeningService;
+    private final List<String> providerNames;
 
     ScreeningGateImpl(ScreeningRunRepository runRepository,
                       ScreeningHitRepository hitRepository,
-                      ScreeningService screeningService) {
+                      ScreeningService screeningService,
+                      List<SanctionsScreeningPort> providers) {
         this.runRepository = runRepository;
         this.hitRepository = hitRepository;
         this.screeningService = screeningService;
+        this.providerNames = providers.stream()
+                .map(SanctionsScreeningPort::providerName)
+                .distinct()
+                .toList();
     }
 
     @Override
@@ -37,16 +44,22 @@ class ScreeningGateImpl implements ScreeningGate {
 
     @Override
     public boolean hasUnresolvedHit(UUID entityId) {
-        ScreeningRun latest = runRepository.findTopByEntityIdOrderByStartedAtDesc(entityId);
-        return blocksApproval(latest);
+        if (providerNames.isEmpty()) {
+            return true;
+        }
+        return providerNames.stream()
+                .map(provider -> runRepository.findTopByEntityIdAndProviderOrderByStartedAtDesc(entityId, provider))
+                .anyMatch(this::blocksApproval);
     }
 
     @Override
     public boolean hasUnresolvedBeneficialOwnerHit(UUID entityId) {
         List<UUID> personIds = runRepository.findNaturalPersonIdsByEntityLinkedRuns(entityId);
         for (UUID personId : personIds) {
-            ScreeningRun latest = runRepository.findTopByNaturalPersonIdOrderByStartedAtDesc(personId);
-            if (blocksApproval(latest)) {
+            if (providerNames.isEmpty() || providerNames.stream()
+                    .map(provider -> runRepository.findTopByNaturalPersonIdAndProviderOrderByStartedAtDesc(
+                            personId, provider))
+                    .anyMatch(this::blocksApproval)) {
                 return true;
             }
         }

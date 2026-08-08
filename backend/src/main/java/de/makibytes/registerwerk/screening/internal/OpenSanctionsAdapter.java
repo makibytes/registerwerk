@@ -38,9 +38,10 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
     private final RestClient client;
 
     OpenSanctionsAdapter(
+            RestClient.Builder restClientBuilder,
             @Value("${registerwerk.screening.open-sanctions.base-url:https://api.opensanctions.org}") String baseUrl,
             @Value("${registerwerk.screening.open-sanctions.api-key:}") String apiKey) {
-        RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
+        RestClient.Builder builder = restClientBuilder.baseUrl(baseUrl);
         if (apiKey != null && !apiKey.isBlank()) {
             builder.defaultHeader("Authorization", "ApiKey " + apiKey);
         }

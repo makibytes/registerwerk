@@ -9,12 +9,15 @@ import de.makibytes.registerwerk.deployment.api.VaultNavStrike;
 import de.makibytes.registerwerk.deployment.api.VaultNavStrikeRepository;
 import de.makibytes.registerwerk.deployment.api.VaultRequest;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.VaultRequestStatus;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigInteger;
@@ -28,6 +31,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/deployments/{depId}")
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+@Validated
 public class VaultController {
 
     private final Erc4626AdminPort erc4626AdminService;
@@ -50,7 +54,7 @@ public class VaultController {
             @PathVariable UUID depId,
             @Valid @RequestBody NavStrikeRequest request,
             Authentication auth) {
-        UUID actorId = actorIdFrom(auth);
+        UUID actorId = SecurityUtils.extractUserId(auth);
         UUID txId = erc4626AdminService.strikeNav(
                 depId, request.navPerShare(), request.effectiveAt(),
                 null, request.reportDocId(), actorId, SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
@@ -67,38 +71,30 @@ public class VaultController {
     @GetMapping("/vault-requests")
     public ResponseEntity<List<VaultRequest>> listVaultRequests(
             @PathVariable UUID depId,
-            @RequestParam(required = false, defaultValue = "PENDING") String status) {
+            @RequestParam(defaultValue = "PENDING") VaultRequestStatus status) {
         var dep = deploymentRepository.findById(depId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", depId));
-        return ResponseEntity.ok(erc7540AdminService.listPendingRequests(dep.getAssetId()));
+        return ResponseEntity.ok(erc7540AdminService.listRequests(dep.getAssetId(), status));
     }
 
     @PostMapping("/vault-requests/{requestId}/fulfill")
     public ResponseEntity<TxSubmissionResponse> fulfillVaultRequest(
             @PathVariable UUID depId,
-            @PathVariable BigInteger requestId,
+            @PathVariable @Positive BigInteger requestId,
             @Valid @RequestBody FulfillVaultRequestBody body,
             Authentication auth) {
-        UUID txId = erc7540AdminService.fulfillDepositRequest(depId, requestId, body.navAtFulfill(),
-                actorIdFrom(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        UUID txId = erc7540AdminService.fulfillRequest(depId, requestId, body.navAtFulfill(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
     @PostMapping("/vault-requests/{requestId}/cancel")
     public ResponseEntity<TxSubmissionResponse> cancelVaultRequest(
             @PathVariable UUID depId,
-            @PathVariable BigInteger requestId,
+            @PathVariable @Positive BigInteger requestId,
             Authentication auth) {
-        UUID txId = erc7540AdminService.cancelDepositRequest(depId, requestId, actorIdFrom(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        UUID txId = erc7540AdminService.cancelRequest(depId, requestId,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
-
-    private UUID actorIdFrom(Authentication auth) {
-        try {
-            return UUID.fromString(auth.getName());
-        } catch (IllegalArgumentException e) {
-            return UUID.nameUUIDFromBytes(auth.getName().getBytes());
-        }
-    }
-
 }

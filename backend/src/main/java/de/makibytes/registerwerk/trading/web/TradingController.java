@@ -6,13 +6,14 @@ import de.makibytes.registerwerk.trading.api.TradingAssetType;
 import de.makibytes.registerwerk.trading.api.TradingVenueCode;
 import de.makibytes.registerwerk.trading.web.dto.*;
 import de.makibytes.registerwerk.shared.api.PageResponse;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.trading.internal.TradingService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -187,26 +188,14 @@ public class TradingController {
     }
 
     private UUID extractEntityId(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof Jwt jwt) {
-            String entityId = jwt.getClaimAsString("entity_id");
-            if (entityId == null) {
-                entityId = jwt.getClaimAsString("entityId");
-            }
-            if (entityId != null) {
-                return UUID.fromString(entityId);
-            }
+        UUID entityId = SecurityUtils.extractEntityId(authentication);
+        if (entityId == null) {
+            throw new AccessDeniedException("Authenticated entity context is required for trading");
         }
-        throw new IllegalArgumentException("Authenticated entity context is required for trading");
+        return entityId;
     }
 
     private UUID extractActorId(Authentication authentication) {
-        if (authentication == null) {
-            return null;
-        }
-        try {
-            return UUID.fromString(authentication.getName());
-        } catch (IllegalArgumentException ignored) {
-            return null;
-        }
+        return SecurityUtils.extractUserId(authentication);
     }
 }

@@ -29,9 +29,9 @@ class TalosVenueAdapter implements TradingVenueAdapter {
     private final RestClient rest;
     private final TradingVenueMetadata meta;
 
-    TalosVenueAdapter(TradingProperties properties) {
+    TalosVenueAdapter(TradingProperties properties, RestClient.Builder restClientBuilder) {
         TradingProperties.VenueProperties cfg = properties.venue(TradingVenueCode.TALOS);
-        this.rest = RestClient.builder()
+        this.rest = restClientBuilder
                 .baseUrl(cfg.getBaseUrl())
                 .defaultHeader("Authorization", "Bearer " + cfg.getApiKey())
                 .build();

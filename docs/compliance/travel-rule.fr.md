@@ -119,13 +119,19 @@ portefeuilles gérés par Registerwerk. Le point de terminaison de la boîte de 
 POST /api/v1/public/travel-rule/inbox
 ```
 
-Ce point de terminaison est accessible publiquement (aucun JWT requis) mais nécessite le mTLS côté Kong pour
-empêcher l'usurpation. À réception :
+Ce point de terminaison ne requiert pas de JWT Registerwerk, mais il n'est pas anonyme. Configurez
+`REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY` ; la contrepartie doit l'envoyer dans
+`X-Travel-Rule-Api-Key`. Une valeur vide désactive la boîte de réception. De plus, `X-Vasp-Id`
+doit correspondre à `originatingVasp.vaspId` dans le payload. En production, mTLS est recommandé
+comme seconde couche ; la configuration Kong fournie ne configure pas de certificats clients. À réception :
 
-1. La charge utile `Ivms101` est validée et stockée sous forme de `TravelRuleMessage` avec le statut `RECEIVED`
-2. L'enregistrement `token_transfer` correspondant est lié via `transferRef`
-3. Si le VASP donneur d'ordre est inconnu ou si la charge utile est mal formée, le message est stocké avec le
-   statut `SUSPICIOUS` et signalé pour examen par le `COMPLIANCE_OFFICER`
+1. Le justificatif d'accès, la concordance de l'identité VASP, les numéros de compte et la référence de transfert sont validés.
+2. La charge utile `Ivms101` est stockée une seule fois sous forme de `TravelRuleMessage` avec le statut `RECEIVED` ; les références répétées du même VASP sont ignorées.
+3. Les charges utiles non valides sont rejetées avec HTTP 400 et ne sont pas stockées comme messages Travel Rule fiables.
+
+La clé API partagée authentifie l'accès à la boîte de réception, pas l'identité d'un VASP
+individuel. En production, utilisez le mTLS par contrepartie ou des contrôles de passerelle
+équivalents tenant compte de l'identité.
 
 ---
 
@@ -150,7 +156,7 @@ existante.
 |---|---|---|
 | Transfert CASP vers CASP | **Tout montant** | Transmission complète IVMS-101 requise — aucun de minimis (TFR art. 14–16) |
 | Portefeuille CASP vers auto-hébergé | ≤ 1 000 € | Collecter et conserver les informations sur le donneur d'ordre (`UNHOSTED_RECORDED`) |
-| Portefeuille CASP vers auto-hébergé | > 1 000 € | Vérifier en outre la propriété/le contrôle de l'adresse (art. 14(5)) — `UNHOSTED_VERIFY_REQUIRED` |
+| Portefeuille CASP vers auto-hébergé | > 1 000 € | Bloquer l'exécution jusqu'à vérification de la propriété/du contrôle de l'adresse (art. 14(5)) — `UNHOSTED_VERIFY_REQUIRED` |
 | Auto-conservation au sein d'une même entité | Tout montant | Hors obligation de transmission CASP à CASP — enregistré |
 | Contrepartie CASP mais aucun adaptateur de protocole configuré | Tout montant | **Le transfert est rejeté (fail closed)** — l'exécuter sans les informations requises violerait l'art. 14 |
 

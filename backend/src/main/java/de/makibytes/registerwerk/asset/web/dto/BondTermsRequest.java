@@ -4,13 +4,17 @@ import de.makibytes.registerwerk.deployment.api.DayCountConvention;
 import de.makibytes.registerwerk.deployment.api.PaymentFrequency;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Request body for {@code POST /api/v1/assets/{assetId}/bond-terms}.
@@ -28,10 +32,10 @@ import java.util.Map;
  * @param callSchedule      Optional list of call dates and call prices.
  */
 public record BondTermsRequest(
-        @NotNull @Positive
+        @NotNull @Positive @Digits(integer = 20, fraction = 18)
         BigDecimal faceValue,
 
-        @NotBlank @Size(min = 3, max = 3)
+        @NotBlank @Pattern(regexp = "[A-Za-z]{3}", message = "must be a three-letter ISO-4217 code")
         String currencyIso,
 
         @NotNull
@@ -40,12 +44,13 @@ public record BondTermsRequest(
         @NotNull
         LocalDate maturityDate,
 
-        @Positive
+        @DecimalMin("0") @Digits(integer = 2, fraction = 8)
         BigDecimal couponRate,
 
+        @Size(max = 32)
         String referenceRate,
 
-        @Positive
+        @Digits(integer = 2, fraction = 8)
         BigDecimal spread,
 
         @NotNull
@@ -56,5 +61,27 @@ public record BondTermsRequest(
 
         boolean callable,
 
-        List<Map<String, Object>> callSchedule
-) {}
+        @Valid @Size(max = 100)
+        List<CallScheduleEntry> callSchedule
+) {
+    public record CallScheduleEntry(
+            @NotNull LocalDate callDate,
+            @NotNull @Positive @Digits(integer = 10, fraction = 8) BigDecimal callPrice) {}
+
+    @AssertTrue(message = "maturityDate must be after issueDate")
+    public boolean isDateRangeValid() {
+        return issueDate == null || maturityDate == null || maturityDate.isAfter(issueDate);
+    }
+
+    @AssertTrue(message = "callSchedule is only allowed for callable bonds and dates must be between issue and maturity")
+    public boolean isCallScheduleValid() {
+        if (callSchedule == null || callSchedule.isEmpty()) {
+            return true;
+        }
+        if (!callable || issueDate == null || maturityDate == null) {
+            return false;
+        }
+        return callSchedule.stream().allMatch(entry -> entry != null && entry.callDate() != null
+                && entry.callDate().isAfter(issueDate) && entry.callDate().isBefore(maturityDate));
+    }
+}

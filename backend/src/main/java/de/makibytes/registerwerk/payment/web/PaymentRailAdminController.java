@@ -131,7 +131,12 @@ public class PaymentRailAdminController {
     private static Map<UUID, String> toAddressMap(List<ChainAddressRequest> chainAddresses) {
         Map<UUID, String> map = new LinkedHashMap<>();
         if (chainAddresses != null) {
-            chainAddresses.forEach(address -> map.put(address.chainConfigId(), address.tokenAddress()));
+            chainAddresses.forEach(address -> {
+                if (map.putIfAbsent(address.chainConfigId(), address.tokenAddress()) != null) {
+                    throw new IllegalArgumentException(
+                            "Duplicate chainConfigId in payment-rail addresses: " + address.chainConfigId());
+                }
+            });
         }
         return map;
     }

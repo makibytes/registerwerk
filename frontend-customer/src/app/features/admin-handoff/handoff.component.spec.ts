@@ -60,23 +60,25 @@ describe('HandoffComponent', () => {
     expect(router.navigate).toHaveBeenCalledWith(['/dashboard']);
   });
 
-  it('navigates to /login when the token exchange fails', () => {
+  it('shows a recoverable failure notice when the token exchange fails', () => {
     window.location.hash = '#token=bad-tok&entityId=ent-1&entityName=Acme';
     authService.supportsImpersonation.and.returnValue(true);
     authService.enterImpersonation.and.returnValue(throwError(() => new Error('exchange failed')));
 
-    createComponent();
+    const fixture = createComponent();
 
-    expect(router.navigate).toHaveBeenCalledWith(['/login']);
+    expect(fixture.componentInstance.failed).toBe(true);
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 
-  it('navigates straight to /login when the fragment carries no token', () => {
+  it('shows a failure notice when the fragment carries no token', () => {
     window.location.hash = '';
     authService.supportsImpersonation.and.returnValue(true);
 
-    createComponent();
+    const fixture = createComponent();
 
     expect(authService.enterImpersonation).not.toHaveBeenCalled();
-    expect(router.navigate).toHaveBeenCalledWith(['/login']);
+    expect(fixture.componentInstance.failed).toBe(true);
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 });

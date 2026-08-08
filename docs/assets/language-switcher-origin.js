@@ -7,8 +7,10 @@
  * so this works for `http://nibbler:8003`, TLS deployments, and a reverse-proxy host alike.
  */
 (() => {
+  const languageLinkSelector = '.md-select__link[hreflang]';
+
   const preserveCurrentOrigin = () => {
-    document.querySelectorAll('.md-select__link[hreflang]').forEach((link) => {
+    document.querySelectorAll(languageLinkSelector).forEach((link) => {
       const href = link.getAttribute('href');
       if (!href) return;
 
@@ -25,4 +27,11 @@
   } else {
     preserveCurrentOrigin();
   }
+
+  // Material may replace header content after navigation or a colour-scheme change. Reapply to
+  // newly rendered selector links instead of relying on a single DOMContentLoaded pass.
+  new MutationObserver(preserveCurrentOrigin).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
 })();

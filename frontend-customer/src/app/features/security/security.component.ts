@@ -6,6 +6,8 @@ import { QrCodeComponent } from '@registerwerk/ui';
 import { Subscription, interval, takeWhile } from 'rxjs';
 import { SecurityService, TwoFactorStatus } from '../../core/api/security.service';
 import { DsarService, DsarErasureResult } from '../../core/api/dsar.service';
+import { downloadBlob } from '../../core/utils/download.util';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 
 const POLL_INTERVAL_MS = 5_000;
 const POLL_LIMIT = 60; // 5 minutes
@@ -25,7 +27,7 @@ const POLL_LIMIT = 60; // 5 minutes
 @Component({
   selector: 'app-security',
   standalone: true,
-  imports: [DatePipe, MatIconModule, MatProgressSpinnerModule, QrCodeComponent],
+  imports: [DatePipe, MatIconModule, MatProgressSpinnerModule, MatSnackBarModule, QrCodeComponent],
   styles: [`
     .page {
       max-width: 720px;
@@ -251,7 +253,7 @@ const POLL_LIMIT = 60; // 5 minutes
               <p class="checked-at">Last checked {{ status.checkedAt | date: 'medium' }}</p>
             }
             <div class="actions" style="margin-top: 20px;">
-              <a class="btn secondary" [href]="status.setupUrl" target="_blank" rel="noopener">
+              <a class="btn secondary" [href]="status.setupUrl" target="_blank" rel="noopener noreferrer">
                 <mat-icon>open_in_new</mat-icon> Manage at Microsoft
               </a>
               <button class="secondary" type="button" (click)="recheck()" [disabled]="refreshing">
@@ -293,7 +295,7 @@ const POLL_LIMIT = 60; // 5 minutes
             </div>
 
             <div class="actions">
-              <a class="btn primary" [href]="status.setupUrl" target="_blank" rel="noopener"
+              <a class="btn primary" [href]="status.setupUrl" target="_blank" rel="noopener noreferrer"
                  (click)="startPolling()">
                 <mat-icon>open_in_new</mat-icon> Set up now
               </a>
@@ -310,6 +312,7 @@ const POLL_LIMIT = 60; // 5 minutes
             Two-factor status could not be loaded. Refresh the page, or manage your sign-in
             methods at Microsoft directly.
           </p>
+          <button class="secondary" type="button" (click)="loadStatus()">Retry</button>
         </div>
       }
 
@@ -350,6 +353,7 @@ export class SecurityComponent implements OnInit, OnDestroy {
   private readonly securityService = inject(SecurityService);
   private readonly dsarService = inject(DsarService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
 
   status: TwoFactorStatus | null = null;
   loading = true;
@@ -361,6 +365,11 @@ export class SecurityComponent implements OnInit, OnDestroy {
   private poll?: Subscription;
 
   ngOnInit(): void {
+    this.loadStatus();
+  }
+
+  loadStatus(): void {
+    this.loading = true;
     this.securityService.getTwoFactorStatus().subscribe({
       next: status => {
         this.status = status;
@@ -368,6 +377,7 @@ export class SecurityComponent implements OnInit, OnDestroy {
         this.cdr.markForCheck();
       },
       error: () => {
+        this.status = null;
         this.loading = false;
         this.cdr.markForCheck();
       },
@@ -395,6 +405,7 @@ export class SecurityComponent implements OnInit, OnDestroy {
       error: () => {
         this.refreshing = false;
         this.cdr.markForCheck();
+        this.snackBar.open('Two-factor status could not be refreshed.', 'Dismiss', { duration: 5000 });
       },
     });
   }
@@ -407,24 +418,21 @@ export class SecurityComponent implements OnInit, OnDestroy {
     this.dsarService.exportMyData().subscribe({
       next: data => {
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `registerwerk-data-export-${new Date().toISOString().slice(0, 10)}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, `registerwerk-data-export-${new Date().toISOString().slice(0, 10)}.json`);
         this.exporting = false;
         this.cdr.markForCheck();
       },
       error: () => {
         this.exporting = false;
         this.cdr.markForCheck();
+        this.snackBar.open('Your data export could not be prepared.', 'Dismiss', { duration: 5000 });
       },
     });
   }
 
   requestErasure(): void {
     if (this.erasing || this.erasureResult) return;
+    if (!confirm('Submit a personal-data erasure request for operator review?')) return;
     this.erasing = true;
     this.cdr.markForCheck();
 
@@ -437,6 +445,7 @@ export class SecurityComponent implements OnInit, OnDestroy {
       error: () => {
         this.erasing = false;
         this.cdr.markForCheck();
+        this.snackBar.open('The erasure request could not be submitted.', 'Dismiss', { duration: 5000 });
       },
     });
   }

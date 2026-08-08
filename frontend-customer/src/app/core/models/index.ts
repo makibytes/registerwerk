@@ -6,7 +6,8 @@ export type AssetStatus =
   | 'APPROVED'
   | 'ISSUED'
   | 'SUSPENDED'
-  | 'REDEEMED';
+  | 'REDEEMED'
+  | 'TRANSFERRED_OUT';
 
 export type Jurisdiction = 'DE_EWPG' | 'LU_CSSF' | 'FR_AMF' | 'LI_TVTG';
 

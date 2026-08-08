@@ -3,6 +3,8 @@ package de.makibytes.registerwerk.screening.internal;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort;
+import de.makibytes.registerwerk.screening.api.NaturalPersonScreeningSubjectResolver;
+import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningSubjectDto;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 /**
  * Verifies the four-eyes controls on screening-hit acceptance:
@@ -46,6 +49,9 @@ class ScreeningServiceAcceptHitTest {
     @Mock
     private LegalEntityRepository legalEntityRepository;
 
+    @Mock
+    private NaturalPersonScreeningSubjectResolver naturalPersonResolver;
+
     private ScreeningService service;
     private SimpleMeterRegistry meterRegistry;
 
@@ -58,7 +64,7 @@ class ScreeningServiceAcceptHitTest {
         meterRegistry = new SimpleMeterRegistry();
         service = new ScreeningService(
                 List.<SanctionsScreeningPort>of(), runRepository, hitRepository, events, legalEntityRepository,
-                meterRegistry);
+                meterRegistry, naturalPersonResolver);
     }
 
     private double gauge(String name) {
@@ -140,6 +146,47 @@ class ScreeningServiceAcceptHitTest {
     }
 
     @Test
+    void registeredEntityScreeningUsesCanonicalRegistryData() {
+        UUID entityId = UUID.randomUUID();
+        LegalEntity entity = new LegalEntity();
+        entity.setCurrentName("Canonical GmbH");
+        entity.setRegistrationCountry("DE");
+        entity.setLeiCode("529900TESTCANONICAL01");
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+        SanctionsScreeningPort provider = org.mockito.Mockito.mock(SanctionsScreeningPort.class);
+        when(provider.providerName()).thenReturn("test-provider");
+        when(provider.screenEntity(any())).thenReturn(List.of());
+        java.util.concurrent.atomic.AtomicReference<ScreeningRun> savedRun =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        when(runRepository.save(any(ScreeningRun.class))).thenAnswer(inv -> {
+            ScreeningRun run = inv.getArgument(0);
+            savedRun.set(run);
+            return run;
+        });
+        when(runRepository.findTopByEntityIdOrderByStartedAtDesc(entityId))
+                .thenAnswer(inv -> savedRun.get());
+        ScreeningService canonicalService = new ScreeningService(
+                List.of(provider), runRepository, hitRepository, events, legalEntityRepository,
+                new SimpleMeterRegistry(), naturalPersonResolver);
+
+        canonicalService.screenRegisteredEntity(entityId, ScreeningTrigger.MANUAL);
+
+        org.mockito.ArgumentCaptor<ScreeningSubjectDto> subject =
+                org.mockito.ArgumentCaptor.forClass(ScreeningSubjectDto.class);
+        verify(provider).screenEntity(subject.capture());
+        assertThat(subject.getValue().name()).isEqualTo("Canonical GmbH");
+        assertThat(subject.getValue().countryCode()).isEqualTo("DE");
+    }
+
+    @Test
+    void screeningFailsClosedWhenNoProviderIsConfigured() {
+        assertThatThrownBy(() -> service.screenEntity(
+                UUID.randomUUID(), "Test GmbH", "DE", null, ScreeningTrigger.MANUAL))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No sanctions-screening provider");
+    }
+
+    @Test
     @DisplayName("periodicRefresh() tracks succeeded/failed separately and updates the failures gauge")
     void periodicRefresh_tracksSucceededAndFailedSeparately() {
         UUID okEntity = UUID.randomUUID();
@@ -164,7 +211,9 @@ class ScreeningServiceAcceptHitTest {
         // wouldn't be visible through it.
         SimpleMeterRegistry ownRegistry = new SimpleMeterRegistry();
         ScreeningService serviceWithProvider = new ScreeningService(
-                List.of(provider), runRepository, hitRepository, events, legalEntityRepository, ownRegistry);
+                List.of(provider), runRepository, hitRepository, events, legalEntityRepository, ownRegistry,
+                naturalPersonResolver);
+        ScreeningRefreshJob refreshJob = new ScreeningRefreshJob(runRepository, serviceWithProvider, ownRegistry);
 
         // The very first save() call inside screenEntity() (before its own try/catch) throws for
         // failingEntity's run — screenEntity() itself never catches provider-level orchestration
@@ -177,7 +226,7 @@ class ScreeningServiceAcceptHitTest {
             return run;
         }).when(runRepository).save(any(ScreeningRun.class));
 
-        serviceWithProvider.periodicRefresh();
+        refreshJob.periodicRefresh();
 
         assertThat(ownRegistry.get("registerwerk_screening_periodic_refresh_last_failures").gauge().value()).isEqualTo(1.0);
     }

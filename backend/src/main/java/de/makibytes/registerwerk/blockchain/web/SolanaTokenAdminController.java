@@ -41,7 +41,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/assets/{assetId}/deployments/{depId}/solana-admin")
-@PreAuthorize("hasRole('REGISTRY_ADMIN')")
+@PreAuthorize("hasRole('REGISTRY_ADMIN') and @deploymentAccessChecker.belongsToAsset(#depId, #assetId)")
 public class SolanaTokenAdminController {
 
     private final SolanaTokenAdminService adminService;
@@ -65,9 +65,10 @@ public class SolanaTokenAdminController {
     public ResponseEntity<TxSubmissionResponse> forcedTransfer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @Valid @RequestBody SolanaForcedTransferRequest request, Authentication auth) {
+        AssetDeployment deployment = loadDeployment(assetId, depId);
         String txHash = adminService.permanentDelegateTransfer(
                 depId, request.fromTokenAccount(), request.toTokenAccount(), request.amount(), request.decimals()).join();
-        return accepted(recordAndAudit(depId, txHash, "solanaForcedTransfer", Map.of(
+        return accepted(recordAndAudit(deployment, txHash, "solanaForcedTransfer", Map.of(
                 "fromTokenAccount", request.fromTokenAccount(),
                 "toTokenAccount", request.toTokenAccount(),
                 "amount", request.amount().toString(),
@@ -80,9 +81,10 @@ public class SolanaTokenAdminController {
     public ResponseEntity<TxSubmissionResponse> forceBurn(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @Valid @RequestBody SolanaForceBurnRequest request, Authentication auth) {
+        AssetDeployment deployment = loadDeployment(assetId, depId);
         String txHash = adminService.permanentDelegateBurn(
                 depId, request.tokenAccount(), request.amount(), request.decimals()).join();
-        return accepted(recordAndAudit(depId, txHash, "solanaForceBurn", Map.of(
+        return accepted(recordAndAudit(deployment, txHash, "solanaForceBurn", Map.of(
                 "tokenAccount", request.tokenAccount(),
                 "amount", request.amount().toString(),
                 "legalBasis", request.legalBasis()
@@ -93,8 +95,9 @@ public class SolanaTokenAdminController {
     public ResponseEntity<TxSubmissionResponse> freeze(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @Valid @RequestBody SolanaTokenAccountRequest request, Authentication auth) {
+        AssetDeployment deployment = loadDeployment(assetId, depId);
         String txHash = adminService.freezeTokenAccount(depId, request.tokenAccount()).join();
-        return accepted(recordAndAudit(depId, txHash, "solanaFreeze",
+        return accepted(recordAndAudit(deployment, txHash, "solanaFreeze",
                 Map.of("tokenAccount", request.tokenAccount()), auth));
     }
 
@@ -102,8 +105,9 @@ public class SolanaTokenAdminController {
     public ResponseEntity<TxSubmissionResponse> thaw(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @Valid @RequestBody SolanaTokenAccountRequest request, Authentication auth) {
+        AssetDeployment deployment = loadDeployment(assetId, depId);
         String txHash = adminService.thawTokenAccount(depId, request.tokenAccount()).join();
-        return accepted(recordAndAudit(depId, txHash, "solanaThaw",
+        return accepted(recordAndAudit(deployment, txHash, "solanaThaw",
                 Map.of("tokenAccount", request.tokenAccount()), auth));
     }
 
@@ -114,9 +118,9 @@ public class SolanaTokenAdminController {
      * to the tamper-evident audit log. {@link SolanaTokenAdminService} itself stays free of
      * audit/tx-tracking wiring so its existing unit tests (which call it directly) keep working.
      */
-    private UUID recordAndAudit(UUID depId, String txHash, String methodName, Map<String, Object> params, Authentication auth) {
-        AssetDeployment dep = deploymentRepository.findById(depId)
-                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", depId));
+    private UUID recordAndAudit(AssetDeployment dep, String txHash, String methodName,
+                                Map<String, Object> params, Authentication auth) {
+        UUID depId = dep.getId();
         UUID actorId = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
 
@@ -124,6 +128,11 @@ public class SolanaTokenAdminController {
 
         return txService.record(txHash, methodName, depId, dep.getAssetId(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
+    }
+
+    private AssetDeployment loadDeployment(UUID assetId, UUID depId) {
+        return deploymentRepository.findByIdAndAssetId(depId, assetId)
+                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", depId));
     }
 
     private static ResponseEntity<TxSubmissionResponse> accepted(UUID txId) {

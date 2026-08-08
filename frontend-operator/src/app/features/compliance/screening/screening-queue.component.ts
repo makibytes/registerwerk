@@ -55,6 +55,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       [columns]="columns"
       [rows]="hits"
       [state]="state"
+      (retry)="loadQueue()"
       filterPlaceholder="Filter by subject, list, field…"
       emptyMessage="No open screening hits. All entities are clear."
       [actionsTemplate]="rowActions">

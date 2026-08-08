@@ -19,6 +19,9 @@ import de.makibytes.registerwerk.customer.api.SuitabilityAssessment;
 import de.makibytes.registerwerk.customer.api.SuitabilityAssessmentRepository;
 import de.makibytes.registerwerk.customer.events.ClientClassifiedEvent;
 import de.makibytes.registerwerk.customer.events.SuitabilityAssessmentRecordedEvent;
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
+import de.makibytes.registerwerk.auth.api.AppUserRole;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,6 +63,9 @@ class LegalEntityServiceTest {
 
     @Mock
     private EntityNumberGenerator entityNumberGenerator;
+
+    @Mock
+    private AppUserRepository appUserRepository;
 
     @InjectMocks
     private LegalEntityService legalEntityService;
@@ -320,6 +326,10 @@ class LegalEntityServiceTest {
         when(legalEntityRepository.save(any(LegalEntity.class))).thenAnswer(inv -> inv.getArgument(0));
         UUID rmId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
+        AppUser manager = new AppUser();
+        manager.setEnabled(true);
+        manager.setRoles(java.util.Set.of(AppUserRole.RELATIONSHIP_MANAGER));
+        when(appUserRepository.findById(rmId)).thenReturn(Optional.of(manager));
 
         LegalEntity result = legalEntityService.assignRelationshipManager(entity.getId(), rmId, actorId);
 
@@ -329,6 +339,23 @@ class LegalEntityServiceTest {
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().entityId()).isEqualTo(entity.getId());
         assertThat(captor.getValue().relationshipManagerId()).isEqualTo(rmId);
+    }
+
+    @Test
+    @DisplayName("assignRelationshipManager rejects users without the relationship-manager role")
+    void assignRelationshipManager_rejectsWrongRole() {
+        LegalEntity entity = buildEntity();
+        UUID userId = UUID.randomUUID();
+        AppUser user = new AppUser();
+        user.setEnabled(true);
+        user.setRoles(java.util.Set.of(AppUserRole.REGISTRY_ADMIN));
+        when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
+        when(appUserRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> legalEntityService.assignRelationshipManager(
+                entity.getId(), userId, UUID.randomUUID()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("RELATIONSHIP_MANAGER");
     }
 
     @Test

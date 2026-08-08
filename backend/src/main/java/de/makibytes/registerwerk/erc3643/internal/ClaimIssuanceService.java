@@ -151,10 +151,10 @@ public class ClaimIssuanceService {
      * @param actorId   ID of the user revoking the claim (for audit)
      * @param actorRole role of the user revoking the claim (for audit)
      */
-    public void revokeClaim(UUID claimId, UUID actorId, String actorRole) {
+    public void revokeClaim(UUID identityId, UUID claimId, UUID actorId, String actorRole) {
         log.info("Revoking claim={}", claimId);
 
-        OnchainClaim claim = claimRepository.findById(claimId)
+        OnchainClaim claim = claimRepository.findByIdAndOnchainIdentityId(claimId, identityId)
             .orElseThrow(() -> new EntityNotFoundException("OnchainClaim", claimId));
 
         if (claim.getRevokedAt() != null) {

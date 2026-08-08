@@ -49,14 +49,14 @@ public class RpcNodeController {
     /** Manually enables (un-stops) a node. */
     @PostMapping("/{nodeId}/enable")
     public ResponseEntity<Void> enable(@PathVariable UUID chainId, @PathVariable UUID nodeId) {
-        rpcNodeService.enable(nodeId);
+        rpcNodeService.enable(chainId, nodeId);
         return ResponseEntity.noContent().build();
     }
 
     /** Manually stops (disables) a node. Traffic is routed away from it. */
     @PostMapping("/{nodeId}/disable")
     public ResponseEntity<Void> disable(@PathVariable UUID chainId, @PathVariable UUID nodeId) {
-        rpcNodeService.disable(nodeId);
+        rpcNodeService.disable(chainId, nodeId);
         return ResponseEntity.noContent().build();
     }
 
@@ -66,14 +66,14 @@ public class RpcNodeController {
             @PathVariable UUID chainId,
             @PathVariable UUID nodeId,
             @RequestParam boolean value) {
-        rpcNodeService.setExclusive(nodeId, value);
+        rpcNodeService.setExclusive(chainId, nodeId, value);
         return ResponseEntity.noContent().build();
     }
 
     /** Removes a node permanently. */
     @DeleteMapping("/{nodeId}")
     public ResponseEntity<Void> delete(@PathVariable UUID chainId, @PathVariable UUID nodeId) {
-        rpcNodeService.delete(nodeId);
+        rpcNodeService.delete(chainId, nodeId);
         return ResponseEntity.noContent().build();
     }
 }

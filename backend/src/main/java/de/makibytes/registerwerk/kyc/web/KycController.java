@@ -12,6 +12,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.ContentDisposition;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -38,8 +39,11 @@ import de.makibytes.registerwerk.kyc.web.dto.JurisdictionApprovalRequest;
 import de.makibytes.registerwerk.kyc.web.dto.KycComplianceResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycDocumentResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycJurisdictionApprovalResponse;
+import de.makibytes.registerwerk.kyc.web.dto.KycApprovalRequest;
+import de.makibytes.registerwerk.kyc.web.dto.KycRejectionRequest;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import jakarta.validation.Valid;
 
 /**
  * REST controller for KYC document management and KYC status operations.
@@ -70,7 +74,8 @@ public class KycController {
      * regulatory jurisdiction. Omitting it makes the document universal (satisfies any jurisdiction).
      */
     @PostMapping(value = "/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPANY_ADMIN')")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or " +
+            "(hasRole('COMPANY_ADMIN') and @entityOwnershipChecker.isOwner(#entityId, authentication))")
     public ResponseEntity<KycDocumentResponse> uploadDocument(
             @PathVariable UUID entityId,
             @RequestParam("file") MultipartFile file,
@@ -113,11 +118,13 @@ public class KycController {
     public ResponseEntity<byte[]> downloadDocument(
             @PathVariable UUID entityId,
             @PathVariable UUID docId) {
-        KycDocument doc = kycDocumentRepository.findById(docId)
+        KycDocument doc = kycDocumentRepository.findByIdAndLegalEntityIdAndDeletedAtIsNull(docId, entityId)
             .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException("KycDocument", docId));
-        byte[] content = documentService.retrieveContent(docId);
+        byte[] content = documentService.retrieveContent(entityId, docId);
         return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + doc.getFileName() + "\"")
+            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                    .filename(doc.getFileName() != null ? doc.getFileName() : "document", java.nio.charset.StandardCharsets.UTF_8)
+                    .build().toString())
             .contentType(MediaType.parseMediaType(doc.getMimeType()))
             .body(content);
     }
@@ -131,7 +138,7 @@ public class KycController {
             @PathVariable UUID entityId,
             @PathVariable UUID docId,
             Authentication auth) {
-        documentService.softDeleteDocument(docId, extractActorId(auth), primaryRole(auth));
+        documentService.softDeleteDocument(entityId, docId, extractActorId(auth), primaryRole(auth));
         return ResponseEntity.noContent().build();
     }
 
@@ -143,11 +150,10 @@ public class KycController {
     @RequiresStepUp(requireSecondApprover = true, reason = "KYC_APPROVE")
     public ResponseEntity<Void> approveKyc(
             @PathVariable UUID entityId,
-            @RequestBody Map<String, String> body,
+            @RequestBody(required = false) @Valid KycApprovalRequest body,
             Authentication auth) {
-        LocalDate expiryDate = body.containsKey("expiryDate")
-            ? LocalDate.parse(body.get("expiryDate"))
-            : LocalDate.now().plusYears(1);
+        LocalDate expiryDate = body != null && body.expiryDate() != null
+            ? body.expiryDate() : LocalDate.now().plusYears(1);
         kycService.approveKyc(entityId, expiryDate, extractActorId(auth));
         return ResponseEntity.noContent().build();
     }
@@ -160,9 +166,9 @@ public class KycController {
     @RequiresStepUp(requireSecondApprover = true, reason = "KYC_REJECT")
     public ResponseEntity<Void> rejectKyc(
             @PathVariable UUID entityId,
-            @RequestBody Map<String, String> body,
+            @RequestBody @Valid KycRejectionRequest body,
             Authentication auth) {
-        kycService.rejectKyc(entityId, body.getOrDefault("reason", ""), extractActorId(auth));
+        kycService.rejectKyc(entityId, body.reason().trim(), extractActorId(auth));
         return ResponseEntity.noContent().build();
     }
 
@@ -211,7 +217,7 @@ public class KycController {
     public ResponseEntity<KycJurisdictionApprovalResponse> approveJurisdiction(
             @PathVariable UUID entityId,
             @PathVariable Jurisdiction jurisdiction,
-            @RequestBody(required = false) JurisdictionApprovalRequest body,
+            @RequestBody(required = false) @Valid JurisdictionApprovalRequest body,
             Authentication auth) {
         LocalDate expiresAt = (body != null && body.expiresAt() != null)
             ? body.expiresAt()
@@ -255,10 +261,10 @@ public class KycController {
     public ResponseEntity<KycJurisdictionApprovalResponse> rejectJurisdiction(
             @PathVariable UUID entityId,
             @PathVariable Jurisdiction jurisdiction,
-            @RequestBody Map<String, String> body,
+            @RequestBody @Valid KycRejectionRequest body,
             Authentication auth) {
         KycJurisdictionApproval saved = kycService.rejectKycForJurisdiction(
-            entityId, jurisdiction, body.getOrDefault("reason", ""), extractActorId(auth));
+            entityId, jurisdiction, body.reason().trim(), extractActorId(auth));
         return ResponseEntity.ok(toJurisdictionApprovalResponse(saved));
     }
 

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject, Input } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, OnInit, inject, Input, ViewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -38,6 +38,7 @@ import {
 } from '../../../core/models';
 
 import { DataStatePillComponent, StatusBadgeComponent } from '@registerwerk/ui';
+import { AuthService } from '../../../core/auth/auth.service';
 
 interface OnchainIdentityView {
   id: string;
@@ -94,6 +95,7 @@ interface OnchainIdentityView {
       .entity-actions {
         display: flex;
         gap: 8px;
+        flex-wrap: wrap;
       }
     }
 
@@ -153,12 +155,26 @@ interface OnchainIdentityView {
       padding: 40px;
     }
 
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 40px 20px;
+      color: var(--rw-text-danger);
+      text-align: center;
+    }
+
     .reject-form {
       margin-top: 12px;
       display: flex;
       flex-direction: column;
       gap: 12px;
       max-width: 480px;
+    }
+
+    @media (max-width: 720px) {
+      .entity-header { gap: 16px; flex-direction: column; }
+      .kyc-actions { align-items: flex-start; flex-direction: column; }
     }
   `],
   template: `
@@ -171,6 +187,12 @@ interface OnchainIdentityView {
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
+    } @else if (loadError) {
+      <div class="request-error" role="alert">
+        <mat-icon>cloud_off</mat-icon>
+        <span>The customer could not be loaded.</span>
+        <button mat-stroked-button type="button" (click)="loadEntity()">Retry</button>
+      </div>
     } @else if (entity) {
       <div class="entity-header">
         <div class="entity-title">
@@ -180,6 +202,7 @@ interface OnchainIdentityView {
           <app-status-badge [status]="entity.status" />
         </div>
         <div class="entity-actions">
+          @if (canMutate) {
           @if (entity.status === 'ACTIVE') {
             <button mat-stroked-button color="warn" (click)="suspend()">Suspend</button>
           }
@@ -202,6 +225,7 @@ interface OnchainIdentityView {
             <mat-icon>open_in_new</mat-icon>
             Open as Company
           </button>
+          }
         </div>
       </div>
 
@@ -247,7 +271,7 @@ interface OnchainIdentityView {
               <div class="field-item">
                 <div class="field-label">Relationship Manager</div>
                 <div class="field-value">
-                  @if (editingRm) {
+                  @if (canMutate && editingRm) {
                     <div style="display:flex;gap:8px;align-items:center">
                       <input matInput [(ngModel)]="rmIdInput" placeholder="Staff user ID (blank to clear)"
                              style="border:1px solid var(--rw-border);border-radius:4px;padding:4px 8px;font-size:13px;width:220px" />
@@ -260,9 +284,11 @@ interface OnchainIdentityView {
                     </div>
                   } @else {
                     <code>{{ entity.assignedRelationshipManagerId ?? 'Unassigned' }}</code>
+                    @if (canMutate) {
                     <button mat-icon-button (click)="startEditRelationshipManager()" matTooltip="Assign relationship manager">
                       <mat-icon>edit</mat-icon>
                     </button>
+                    }
                   }
                 </div>
               </div>
@@ -273,6 +299,7 @@ interface OnchainIdentityView {
         <!-- KYC Documents -->
         <mat-tab label="KYC Documents">
           <div class="tab-content">
+            @if (canMutate) {
             <div class="kyc-actions">
               <label>
                 <input #fileInput type="file" style="display:none" (change)="onFileSelected($event)" />
@@ -281,6 +308,7 @@ interface OnchainIdentityView {
                 </button>
               </label>
             </div>
+            }
 
             @if (docsLoading) {
               <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
@@ -390,6 +418,7 @@ interface OnchainIdentityView {
                     </p>
                   }
 
+                  @if (canMutate) {
                   <div style="display:flex;gap:8px">
                     <button mat-raised-button color="primary" (click)="approveJurisdiction(jur)"
                             [disabled]="jurActionLoading[jur]">
@@ -400,6 +429,7 @@ interface OnchainIdentityView {
                       <mat-icon>cancel</mat-icon> Reject
                     </button>
                   </div>
+                  }
                 </mat-card-content>
               </mat-card>
             }
@@ -450,10 +480,12 @@ interface OnchainIdentityView {
                 <ng-container matColumnDef="actions">
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let bo">
+                    @if (canMutate) {
                     <button mat-icon-button color="warn" matTooltip="Cease (mark no longer a beneficial owner)"
                             (click)="ceaseBeneficialOwner(bo)">
                       <mat-icon style="font-size:18px">person_remove</mat-icon>
                     </button>
+                    }
                   </td>
                 </ng-container>
                 <tr mat-header-row *matHeaderRowDef="uboColumns"></tr>
@@ -466,6 +498,7 @@ interface OnchainIdentityView {
               }
             }
 
+            @if (canMutate) {
             <mat-divider style="margin-bottom:20px"></mat-divider>
             <h4 style="margin:0 0 12px">Register a Beneficial Owner</h4>
             <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
@@ -514,29 +547,34 @@ interface OnchainIdentityView {
                 Register
               </button>
             </div>
+            }
           </div>
         </mat-tab>
 
         <!-- Portfolio Migration (investors only) -->
-        @if (entity.type === 'INVESTOR') {
+        @if (canMutate && entity.type === 'INVESTOR') {
           <mat-tab label="Portfolio Migration">
             <app-portfolio-migration [investorEntityId]="id" />
           </mat-tab>
         }
 
         <!-- MiFID II Classification & Suitability -->
-        <mat-tab label="MiFID Classification">
-          <app-mifid-classification [entityId]="id" />
-        </mat-tab>
+        @if (canMutate) {
+          <mat-tab label="MiFID Classification">
+            <app-mifid-classification [entityId]="id" />
+          </mat-tab>
+        }
 
         <!-- Identities Tab (ONCHAINID) -->
         <mat-tab label="Identities">
           <div class="tab-content">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
               <strong>On-Chain Identities (ONCHAINID)</strong>
+              @if (canMutate) {
               <button mat-raised-button color="primary" (click)="deployIdentity()">
                 <mat-icon>add</mat-icon> Deploy ONCHAINID
               </button>
+              }
             </div>
             @if (identitiesLoading) {
               <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
@@ -574,6 +612,7 @@ interface OnchainIdentityView {
                         <span style="font-size:12px;color:var(--rw-text-secondary)">No claims issued</span>
                       }
                      </div>
+                     @if (canMutate) {
                      <div style="display:flex;gap:8px">
                        <button mat-stroked-button color="primary" (click)="issueKycClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
                          <mat-icon>verified</mat-icon> Issue KYC Claim
@@ -582,11 +621,12 @@ interface OnchainIdentityView {
                          Issue AML Claim
                        </button>
                      </div>
+                     }
                    </mat-card-content>
                 </mat-card>
               } @empty {
                 <p style="text-align:center;padding:24px;color:var(--rw-text-secondary)">
-                  No ONCHAINID deployed yet. Click "Deploy ONCHAINID" to create one on a supported chain.
+                  {{ canMutate ? 'No ONCHAINID deployed yet. Click "Deploy ONCHAINID" to create one on a supported chain.' : 'No ONCHAINID identities are deployed.' }}
                 </p>
               }
             }
@@ -635,7 +675,7 @@ interface OnchainIdentityView {
                 <p class="text-muted" style="text-align:center;padding:16px">No merge records.</p>
               }
 
-              @if (entity && entity.status !== 'DISSOLVED') {
+              @if (canMutate && entity && entity.status !== 'DISSOLVED') {
                 <mat-divider style="margin:16px 0" />
                 <h4 style="margin:0 0 8px">Record a Merger</h4>
                 <p class="hint-text" style="margin:0 0 8px;font-size:12px;color:var(--rw-text-secondary)">
@@ -684,11 +724,13 @@ interface OnchainIdentityView {
                   Active legal blocks on this entity's wallets
                 </div>
               </div>
-              <button mat-stroked-button color="warn"
-                      [routerLink]="'/compliance/holder-blocks'">
-                <mat-icon>gavel</mat-icon>
-                Manage Blocks
-              </button>
+              @if (canMutate) {
+                <button mat-stroked-button color="warn"
+                        [routerLink]="'/compliance/holder-blocks'">
+                  <mat-icon>gavel</mat-icon>
+                  Manage Blocks
+                </button>
+              }
             </div>
 
             @if (blocksLoading) {
@@ -739,6 +781,7 @@ interface OnchainIdentityView {
                 pay their own gas.
               </p>
 
+              @if (canMutate) {
               <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:20px;flex-wrap:wrap">
                 <mat-form-field appearance="outline">
                   <mat-label>Sponsor</mat-label>
@@ -756,6 +799,7 @@ interface OnchainIdentityView {
                   Set default
                 </button>
               </div>
+              }
 
               @if (gasPoliciesLoading) {
                 <div class="spinner-wrap"><mat-spinner diameter="28" /></div>
@@ -783,7 +827,7 @@ interface OnchainIdentityView {
                     <th mat-header-cell *matHeaderCellDef>Created</th>
                     <td mat-cell *matCellDef="let p">
                       {{ p.createdAt | date:'mediumDate' }}
-                      @if (p.active) {
+                      @if (p.active && canMutate) {
                         <button mat-icon-button color="warn" matTooltip="Deactivate" (click)="deactivateGasPolicy(p)">
                           <mat-icon style="font-size:18px">delete</mat-icon>
                         </button>
@@ -855,12 +899,14 @@ interface OnchainIdentityView {
                   GwG §10 ongoing monitoring — last {{ screeningRuns.length }} run(s)
                 </div>
               </div>
-              <button mat-stroked-button color="primary"
-                      (click)="reScreenEntity()"
-                      [disabled]="screeningLoading">
-                <mat-icon>search</mat-icon>
-                Re-screen Now
-              </button>
+              @if (canMutate) {
+                <button mat-stroked-button color="primary"
+                        (click)="reScreenEntity()"
+                        [disabled]="screeningLoading">
+                  <mat-icon>search</mat-icon>
+                  Re-screen Now
+                </button>
+              }
             </div>
 
             @if (screeningLoading) {
@@ -935,8 +981,12 @@ export class CustomerDetailComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly snackBar = inject(MatSnackBar);
   private readonly dialog = inject(MatDialog);
+  private readonly auth = inject(AuthService);
+
+  readonly canMutate = this.auth.hasRole('REGISTRY_ADMIN');
 
   loading = true;
+  loadError = false;
   docsLoading = false;
   historyLoading = false;
   identitiesLoading = false;
@@ -989,16 +1039,20 @@ export class CustomerDetailComponent implements OnInit {
   gasMonthlyCapEth: number | null = 0.5;
   readonly gasPolicyColumns = ['scope', 'sponsor', 'monthlyCapEth', 'active', 'createdAt'];
 
+  @ViewChild('fileInput') private fileInput?: ElementRef<HTMLInputElement>;
+
   ngOnInit(): void {
     this.loadEntity();
   }
 
   loadEntity(): void {
     this.loading = true;
+    this.loadError = false;
     this.entityService.getEntity(this.id).subscribe({
       next: (entity) => {
         this.entity = entity;
         this.loading = false;
+        this.loadError = false;
         this.cdr.markForCheck();
         this.loadDocuments();
         this.loadHistory();
@@ -1013,6 +1067,7 @@ export class CustomerDetailComponent implements OnInit {
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.markForCheck();
       },
     });
@@ -1038,7 +1093,7 @@ export class CustomerDetailComponent implements OnInit {
       monthlyCapEth: this.gasMonthlyCapEth ?? undefined,
     }).subscribe({
       next: () => this.loadGasPolicies(),
-      error: () => this.loadGasPolicies(),
+      error: (err) => this.showActionError('Failed to save gas sponsorship policy.', err),
     });
   }
 
@@ -1046,6 +1101,7 @@ export class CustomerDetailComponent implements OnInit {
     if (!confirm('Deactivate this gas sponsorship policy?')) return;
     this.gasSponsorshipService.deactivate(policy.id).subscribe({
       next: () => this.loadGasPolicies(),
+      error: (err) => this.showActionError('Failed to deactivate gas sponsorship policy.', err),
     });
   }
 
@@ -1072,6 +1128,7 @@ export class CustomerDetailComponent implements OnInit {
         this.screeningRuns = [run, ...this.screeningRuns];
         this.cdr.markForCheck();
       },
+      error: (err) => this.showActionError('Failed to start screening.', err),
     });
   }
 
@@ -1163,12 +1220,14 @@ export class CustomerDetailComponent implements OnInit {
   downloadStatement(): void {
     this.corporateActionsService.downloadPositionStatement(this.id).subscribe({
       next: (blob) => triggerBlobDownload(blob, `depotauszug-${this.id}-${new Date().toISOString().split('T')[0]}.pdf`),
+      error: (err) => this.showActionError('Failed to generate position statement.', err),
     });
   }
 
   downloadTaxCert(): void {
     this.corporateActionsService.downloadTaxCertificate(this.id, this.taxCertYear).subscribe({
       next: (blob) => triggerBlobDownload(blob, `steuerbescheinigung-${this.id}-${this.taxCertYear}.pdf`),
+      error: (err) => this.showActionError('Failed to generate tax certificate.', err),
     });
   }
 
@@ -1254,8 +1313,7 @@ export class CustomerDetailComponent implements OnInit {
   }
 
   uploadDoc(): void {
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
-    input?.click();
+    this.fileInput?.nativeElement.click();
   }
 
   onFileSelected(event: Event): void {
@@ -1263,17 +1321,15 @@ export class CustomerDetailComponent implements OnInit {
     if (!file) return;
     this.kycService.uploadDocument(this.id, file, 'GENERAL').subscribe({
       next: () => this.loadDocuments(),
+      error: (err) => this.showActionError('Failed to upload KYC document.', err),
     });
+    (event.target as HTMLInputElement).value = '';
   }
 
   downloadDoc(doc: KycDocument): void {
-    this.kycService.downloadDocument(this.id, doc.id).subscribe((blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = doc.fileName;
-      a.click();
-      URL.revokeObjectURL(url);
+    this.kycService.downloadDocument(this.id, doc.id).subscribe({
+      next: (blob) => triggerBlobDownload(blob, doc.fileName),
+      error: (err) => this.showActionError('Failed to download KYC document.', err),
     });
   }
 
@@ -1289,6 +1345,7 @@ export class CustomerDetailComponent implements OnInit {
           this.identities.forEach(identity => this.issueKycClaim(identity));
         }
       },
+      error: (err) => this.showActionError('Failed to approve KYC.', err),
     });
   }
 
@@ -1320,7 +1377,8 @@ export class CustomerDetailComponent implements OnInit {
       `${environment.apiUrl}/entities/${this.id}/onchain-identity`,
       { chainConfigId }
     ).subscribe({
-      next: (identity) => { this.identities = [...this.identities, identity]; },
+      next: (identity) => { this.identities = [...this.identities, identity]; this.cdr.markForCheck(); },
+      error: (err) => this.showActionError('Failed to deploy on-chain identity.', err),
     });
   }
 
@@ -1332,6 +1390,7 @@ export class CustomerDetailComponent implements OnInit {
       { expiresAt: expiresAt.toISOString() }
     ).subscribe({
       next: () => this.loadIdentities(),
+      error: (err) => this.showActionError('Failed to issue KYC claim.', err),
     });
   }
 
@@ -1341,6 +1400,7 @@ export class CustomerDetailComponent implements OnInit {
       {}
     ).subscribe({
       next: () => this.loadIdentities(),
+      error: (err) => this.showActionError('Failed to issue AML claim.', err),
     });
   }
 
@@ -1351,20 +1411,30 @@ export class CustomerDetailComponent implements OnInit {
         this.rejectReason = '';
         this.loadEntity();
       },
+      error: (err) => this.showActionError('Failed to reject KYC.', err),
     });
   }
 
   suspend(): void {
-    this.entityService.suspendEntity(this.id).subscribe({ next: () => this.loadEntity() });
+    this.entityService.suspendEntity(this.id).subscribe({
+      next: () => this.loadEntity(),
+      error: (err) => this.showActionError('Failed to suspend customer.', err),
+    });
   }
 
   reactivate(): void {
-    this.entityService.reactivateEntity(this.id).subscribe({ next: () => this.loadEntity() });
+    this.entityService.reactivateEntity(this.id).subscribe({
+      next: () => this.loadEntity(),
+      error: (err) => this.showActionError('Failed to reactivate customer.', err),
+    });
   }
 
   dissolve(): void {
     if (!confirm('Are you sure you want to dissolve this entity? This action cannot be undone.')) return;
-    this.entityService.dissolveEntity(this.id).subscribe({ next: () => this.loadEntity() });
+    this.entityService.dissolveEntity(this.id).subscribe({
+      next: () => this.loadEntity(),
+      error: (err) => this.showActionError('Failed to dissolve customer.', err),
+    });
   }
 
   startEditRelationshipManager(): void {
@@ -1440,11 +1510,30 @@ export class CustomerDetailComponent implements OnInit {
 
   openAsCompany(): void {
     if (!this.entity) return;
+    const handoffTab = window.open('', '_blank');
+    if (handoffTab) {
+      handoffTab.opener = null;
+      handoffTab.document.title = 'Opening customer portal…';
+    }
     this.adminUserService.impersonate(this.entity.id).subscribe({
       next: (res) => {
-        window.open(res.handoffUrl, '_blank');
+        let url: URL;
+        try {
+          url = new URL(res.handoffUrl, window.location.origin);
+          if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported protocol');
+        } catch {
+          handoffTab?.close();
+          this.snackBar.open('The server returned an invalid customer-portal URL.', 'Dismiss', { duration: 6000 });
+          return;
+        }
+        if (handoffTab) {
+          handoffTab.location.replace(url.href);
+        } else {
+          this.snackBar.open('The customer portal was blocked. Allow pop-ups and try again.', 'Dismiss', { duration: 6000 });
+        }
       },
       error: (err) => {
+        handoffTab?.close();
         this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
       },
     });
@@ -1453,13 +1542,20 @@ export class CustomerDetailComponent implements OnInit {
   goBack(): void {
     this.router.navigate(['/customers']);
   }
+
+  private showActionError(fallback: string, error: { error?: { message?: string } }): void {
+    this.snackBar.open(error?.error?.message ?? fallback, 'Dismiss', { duration: 6000 });
+    this.cdr.markForCheck();
+  }
 }
 
 function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

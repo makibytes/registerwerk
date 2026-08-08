@@ -8,6 +8,10 @@ on:
     branches: [main]
     paths: [zama-relayer/**, .github/workflows/relayer.yml]
 
+permissions:
+  contents: read
+  security-events: write
+
 concurrency:
   group: relayer-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -28,14 +32,18 @@ jobs:
           cache: npm
           cache-dependency-path: zama-relayer/package-lock.json
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm test
       - run: npm run build
-      - name: Trivy SCA
-        uses: aquasecurity/trivy-action@master
+      - name: Build production container
+        run: docker build -t registerwerk-zama-relayer:ci .
+      - name: Scan production container
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          scan-type: fs
-          scan-ref: zama-relayer
+          version: v0.73.0
+          scan-type: image
+          image-ref: registerwerk-zama-relayer:ci
           format: sarif
           output: trivy-relayer.sarif
           severity: HIGH,CRITICAL

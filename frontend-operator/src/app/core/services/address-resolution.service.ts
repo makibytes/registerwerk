@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, Observable, map } from 'rxjs';
+import { BehaviorSubject, Observable, map, retry, timer } from 'rxjs';
 import { EndpointService } from '../api/endpoint.service';
 
 /**
@@ -48,7 +48,9 @@ export class AddressResolutionService {
     this.pending.clear();
     this.batchTimer = null;
 
-    this.endpointService.resolveAddresses(batch).subscribe({
+    this.endpointService.resolveAddresses(batch).pipe(
+      retry({ count: 2, delay: (_error, retryCount) => timer(retryCount * 500) }),
+    ).subscribe({
       next: resp => {
         for (const addr of batch) {
           this.cache.set(addr, resp.resolutions[addr] ?? null);

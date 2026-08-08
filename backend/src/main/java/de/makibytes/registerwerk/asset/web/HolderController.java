@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.web.dto.HolderCreateRequest;
+import de.makibytes.registerwerk.asset.web.dto.WhitelistHolderRequest;
 import de.makibytes.registerwerk.asset.web.dto.HolderResponse;
 import de.makibytes.registerwerk.asset.web.dto.LiveHolderResponse;
 import de.makibytes.registerwerk.shared.api.PageResponse;
@@ -120,9 +121,9 @@ public class HolderController {
             @PathVariable UUID assetId,
             @PathVariable UUID holderId,
             Authentication authentication,
-            @RequestBody de.makibytes.registerwerk.asset.web.dto.SingleEntryAttributesUpdateRequest request) {
+            @RequestBody @Valid de.makibytes.registerwerk.asset.web.dto.SingleEntryAttributesUpdateRequest request) {
         AssetHolder holder = holderService.updateSingleEntryAttributes(
-            holderId,
+            assetId, holderId,
             request.isConsumer(),
             request.thirdPartyRights(),
             request.disposalRestrictions(),
@@ -187,7 +188,7 @@ public class HolderController {
             @PathVariable UUID holderId,
             Authentication auth) {
         UUID actorId = extractActorId(auth);
-        holderService.removeHolder(holderId, actorId, SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        holderService.removeHolder(assetId, holderId, actorId, SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 
@@ -200,9 +201,12 @@ public class HolderController {
     public ResponseEntity<Void> whitelistHolder(
             @PathVariable UUID assetId,
             @PathVariable UUID holderId,
-            @RequestBody Map<String, String> body) {
-        UUID deploymentId = UUID.fromString(body.get("deploymentId"));
-        AssetHolder holder = holderService.getHolder(holderId);
+            @RequestBody @Valid WhitelistHolderRequest body) {
+        UUID deploymentId = body.deploymentId();
+        assetDeploymentRepository.findByIdAndAssetId(deploymentId, assetId)
+                .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException(
+                        "AssetDeployment", deploymentId));
+        AssetHolder holder = holderService.getHolder(assetId, holderId);
         whitelistService.whitelist(deploymentId, holder.getWalletAddress());
         return ResponseEntity.noContent().build();
     }
@@ -219,7 +223,8 @@ public class HolderController {
      * @return list of live holders with balance, identity, and whitelist status
      */
     @GetMapping("/{depId}/live")
-    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication))")
     public ResponseEntity<List<LiveHolderResponse>> getLiveHolders(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {

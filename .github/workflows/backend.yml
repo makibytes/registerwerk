@@ -8,6 +8,10 @@ on:
     branches: [main]
     paths: [backend/**, .github/workflows/backend.yml]
 
+permissions:
+  contents: read
+  security-events: write
+
 concurrency:
   group: backend-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -90,13 +94,19 @@ jobs:
           name: owasp-dependency-check
           path: backend/target/dependency-check-report.json
 
-      - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
+      # Scan what is actually deployed. A source-tree scan cannot see patched/unpatched Alpine
+      # packages and does not reliably resolve every transitive dependency inside the Boot jar.
+      - name: Build production container
+        run: docker build -t registerwerk-backend:ci .
+
+      - name: Scan production container
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          scan-type: fs
-          scan-ref: backend
+          version: v0.73.0
+          scan-type: image
+          image-ref: registerwerk-backend:ci
           format: sarif
-          output: trivy-fs.sarif
+          output: trivy-backend.sarif
           severity: HIGH,CRITICAL
           exit-code: "1"
 
@@ -104,4 +114,4 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: trivy-fs.sarif
+          sarif_file: trivy-backend.sarif

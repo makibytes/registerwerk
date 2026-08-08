@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { Router, UrlTree } from '@angular/router';
 import { Observable, of } from 'rxjs';
-import { authGuard } from './auth.guard';
+import { authGuard, roleGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 
 describe('authGuard', () => {
@@ -15,8 +15,14 @@ describe('authGuard', () => {
     );
   }
 
+  function runRoleGuard(roles: string[]): boolean | UrlTree {
+    return TestBed.runInInjectionContext(
+      () => roleGuard({ data: { roles } } as never, {} as never) as boolean | UrlTree
+    );
+  }
+
   beforeEach(() => {
-    authServiceSpy = jasmine.createSpyObj('AuthService', ['ensureInitialized']);
+    authServiceSpy = jasmine.createSpyObj('AuthService', ['ensureInitialized', 'hasRole']);
 
     TestBed.configureTestingModule({
       providers: [{ provide: AuthService, useValue: authServiceSpy }],
@@ -44,5 +50,20 @@ describe('authGuard', () => {
       expect(router.createUrlTree).toHaveBeenCalledWith(['/login']);
       done();
     });
+  });
+
+  it('allows a route when the user has any required role', () => {
+    authServiceSpy.hasRole.and.callFake((role) => role === 'AUDIT');
+
+    expect(runRoleGuard(['REGISTRY_ADMIN', 'AUDIT'])).toBeTrue();
+  });
+
+  it('redirects unauthorized roles to the role-aware dashboard', () => {
+    authServiceSpy.hasRole.and.returnValue(false);
+    const dashboardTree = router.createUrlTree(['/dashboard']);
+    (router.createUrlTree as jasmine.Spy).and.returnValue(dashboardTree);
+
+    expect(runRoleGuard(['REGISTRY_ADMIN'])).toBe(dashboardTree);
+    expect(router.createUrlTree).toHaveBeenCalledWith(['/dashboard']);
   });
 });

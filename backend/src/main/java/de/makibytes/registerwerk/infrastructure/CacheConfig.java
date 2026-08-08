@@ -20,6 +20,9 @@ public class CacheConfig {
             Caffeine.newBuilder()
                 .expireAfterWrite(30, TimeUnit.SECONDS)
                 .maximumSize(1000)
+                // Spring Boot registers these caches with Micrometer. Without statistics,
+                // cache hit/miss/eviction meters exist but remain unavailable at runtime.
+                .recordStats()
         );
         return manager;
     }

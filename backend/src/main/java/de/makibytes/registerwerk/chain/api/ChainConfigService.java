@@ -67,6 +67,7 @@ public class ChainConfigService {
      * @throws IllegalArgumentException if the identifier is already in use
      */
     public ChainConfig create(ChainConfig config) {
+        validateConfig(config, false);
         chainConfigRepository.findByIdentifier(config.getIdentifier()).ifPresent(existing -> {
             throw new IllegalArgumentException(
                     "ChainConfig with identifier '" + config.getIdentifier() + "' already exists");
@@ -83,6 +84,7 @@ public class ChainConfigService {
      * Only non-null fields in {@code patch} are applied.
      */
     public ChainConfig update(UUID id, ChainConfig patch) {
+        validateConfig(patch, true);
         ChainConfig existing = getById(id);
 
         if (patch.getDisplayName() != null)       existing.setDisplayName(patch.getDisplayName());
@@ -105,6 +107,7 @@ public class ChainConfigService {
         ChainConfig config = getById(id);
         config.setEnabled(true);
         chainConfigRepository.save(config);
+        eventPublisher.publishEvent(new ChainUpdatedEvent(config.getId(), null, null));
         log.info("Enabled ChainConfig: id={}, identifier={}", id, config.getIdentifier());
     }
 
@@ -113,6 +116,7 @@ public class ChainConfigService {
         ChainConfig config = getById(id);
         config.setEnabled(false);
         chainConfigRepository.save(config);
+        eventPublisher.publishEvent(new ChainUpdatedEvent(config.getId(), null, null));
         log.info("Disabled ChainConfig: id={}, identifier={}", id, config.getIdentifier());
     }
 
@@ -124,5 +128,40 @@ public class ChainConfigService {
         log.info("Refreshing blockchain client registry from chain_config...");
         eventPublisher.publishEvent(new ChainConfigUpdatedEvent(null));
         log.info("Blockchain client registry refresh complete.");
+    }
+
+    private static void validateConfig(ChainConfig config, boolean patch) {
+        if (!patch) {
+            if (config.getIdentifier() == null || config.getIdentifier().isBlank()) {
+                throw new IllegalArgumentException("Chain identifier is required");
+            }
+            if (config.getDisplayName() == null || config.getDisplayName().isBlank()) {
+                throw new IllegalArgumentException("Chain displayName is required");
+            }
+            if (config.getChainType() == null || config.getNetworkType() == null) {
+                throw new IllegalArgumentException("Chain type and network type are required");
+            }
+            if (config.getRpcUrl() == null || config.getRpcUrl().isBlank()) {
+                throw new IllegalArgumentException("Chain rpcUrl is required");
+            }
+        }
+        if (config.getDisplayName() != null && config.getDisplayName().isBlank()) {
+            throw new IllegalArgumentException("Chain displayName must not be blank");
+        }
+        if (config.getChainId() != null && config.getChainId() <= 0) {
+            throw new IllegalArgumentException("Chain chainId must be greater than zero");
+        }
+        requireHttpUrl("rpcUrl", config.getRpcUrl());
+        requireHttpUrl("blockExplorerUrl", config.getBlockExplorerUrl());
+        requireHttpUrl("graphNodeUrl", config.getGraphNodeUrl());
+        if (config.getWsUrl() != null && !config.getWsUrl().matches("wss?://\\S+")) {
+            throw new IllegalArgumentException("Chain wsUrl must use ws or wss");
+        }
+    }
+
+    private static void requireHttpUrl(String field, String value) {
+        if (value != null && !value.matches("https?://\\S+")) {
+            throw new IllegalArgumentException("Chain " + field + " must use http or https");
+        }
     }
 }

@@ -4,7 +4,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { EMPTY } from 'rxjs';
-import { debounceTime, distinctUntilChanged, switchMap } from 'rxjs/operators';
+import { catchError, debounceTime, distinctUntilChanged, switchMap } from 'rxjs/operators';
 import { MatStepperModule, MatStepper } from '@angular/material/stepper';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -53,6 +53,16 @@ import type { Address } from 'viem';
 
       @if (loading) {
         <div class="loading-row"><mat-spinner diameter="32"></mat-spinner></div>
+      } @else if (loadError) {
+        <mat-card class="section-card">
+          <mat-card-content role="alert">
+            <mat-icon class="warn-icon">cloud_off</mat-icon>
+            <p>{{ loadError }}</p>
+            @if (holderId) {
+              <button mat-stroked-button type="button" (click)="load()">Retry</button>
+            }
+          </mat-card-content>
+        </mat-card>
       } @else if (!market) {
         <mat-card class="section-card">
           <mat-card-content>
@@ -92,7 +102,7 @@ import type { Address } from 'viem';
                     Pledging keeps this holding's coupon and redemption rights intact — you're borrowing against
                     it, not selling it. Repay any time to reclaim your full position.
                   </p>
-                  <button mat-flat-button color="primary" (click)="stepper.next()">Continue</button>
+                  <button mat-flat-button color="primary" type="button" (click)="stepper.next()">Continue</button>
                 </div>
               </mat-step>
 
@@ -104,7 +114,7 @@ import type { Address } from 'viem';
                       <mat-icon>check_circle</mat-icon>
                       Connected as <code>{{ wallet.address() }}</code>
                     </p>
-                    <button mat-flat-button color="primary" (click)="onWalletConfirmed(stepper)">Continue</button>
+                    <button mat-flat-button color="primary" type="button" (click)="onWalletConfirmed(stepper)">Continue</button>
                   } @else {
                     @if (wallet.isConnected() && !walletMatchesHolding) {
                       <p class="error-text">
@@ -113,7 +123,7 @@ import type { Address } from 'viem';
                         wallet extension and reconnect.
                       </p>
                     }
-                    <button mat-flat-button color="primary" [disabled]="wallet.connecting()" (click)="connect()">
+                    <button mat-flat-button color="primary" type="button" [disabled]="wallet.connecting()" (click)="connect()">
                       @if (wallet.connecting()) {
                         <mat-spinner diameter="18"></mat-spinner>
                       } @else {
@@ -132,12 +142,14 @@ import type { Address } from 'viem';
                 <form [formGroup]="amountsForm" class="step-body">
                   <mat-form-field appearance="outline" class="full-width">
                     <mat-label>Collateral to pledge</mat-label>
-                    <input matInput type="number" formControlName="collateralAmount" />
+                    <input matInput type="number" min="1" step="1" formControlName="collateralAmount" />
                     <mat-hint>Up to your full holding of {{ investment?.nominalAmount }} units</mat-hint>
                   </mat-form-field>
 
                   @if (quoting) {
                     <div class="quote-row"><mat-spinner diameter="18"></mat-spinner> Fetching live terms…</div>
+                  } @else if (quoteError) {
+                    <p class="error-text" role="alert">{{ quoteError }}</p>
                   } @else if (quote) {
                     <div class="quote-card">
                       <div><span class="label">Price / unit</span><span class="value">{{ formatUnits(quote.pricePerUnit, 6) }}</span></div>
@@ -148,7 +160,7 @@ import type { Address } from 'viem';
 
                     <mat-form-field appearance="outline" class="full-width">
                       <mat-label>Amount to borrow (stablecoin)</mat-label>
-                      <input matInput type="number" formControlName="borrowAmount" />
+                      <input matInput type="number" min="0.000001" step="0.000001" formControlName="borrowAmount" />
                       <mat-hint>Max {{ formatUnits(quote.maxBorrowAmount, 6) }} at this collateral amount</mat-hint>
                       @if (amountsForm.get('borrowAmount')?.hasError('max')) {
                         <mat-error>Exceeds the max borrow for this collateral amount</mat-error>
@@ -156,7 +168,7 @@ import type { Address } from 'viem';
                     </mat-form-field>
                   }
 
-                  <button mat-flat-button color="primary" [disabled]="!quote || amountsForm.invalid" (click)="stepper.next()">
+                  <button mat-flat-button color="primary" type="button" [disabled]="!quote || amountsForm.invalid" (click)="stepper.next()">
                     Continue
                   </button>
                 </form>
@@ -171,7 +183,7 @@ import type { Address } from 'viem';
                       <div><span class="label">Borrowing</span><span class="value">{{ amountsForm.value.borrowAmount }} (stablecoin)</span></div>
                     </div>
 
-                    <button mat-flat-button color="primary" [disabled]="executing" (click)="execute()">
+                    <button mat-flat-button color="primary" type="button" [disabled]="executing" (click)="execute()">
                       @if (executing) {
                         <mat-spinner diameter="18"></mat-spinner>
                         {{ executionStage }}
@@ -232,11 +244,14 @@ export class BorrowStepperComponent implements OnInit {
   @ViewChild('stepper') stepperRef?: MatStepper;
 
   loading = true;
+  holderId = '';
+  loadError = '';
   investment: InvestmentRecord | null = null;
   market: LendingMarket | null = null;
 
   quoting = false;
   quote: LendingQuote | null = null;
+  quoteError = '';
 
   executing = false;
   executionStage = '';
@@ -274,26 +289,50 @@ export class BorrowStepperComponent implements OnInit {
       switchMap((amount) => {
         if (!this.market || !amount || amount <= 0) {
           this.quote = null;
+          this.quoteError = '';
           return EMPTY;
         }
         this.quoting = true;
+        this.quoteError = '';
         this.cdr.markForCheck();
-        return this.lendingService.quote(this.market.id, String(amount));
+        return this.lendingService.quote(this.market.id, String(amount)).pipe(
+          catchError(() => {
+            this.quote = null;
+            this.quoting = false;
+            this.quoteError = 'A live quote could not be loaded. Change the amount or try again.';
+            this.cdr.markForCheck();
+            return EMPTY;
+          }),
+        );
       }),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe({
       next: (quote) => this.onQuoteLoaded(quote),
-      error: () => {
-        this.quote = null;
-        this.quoting = false;
-        this.cdr.markForCheck();
-      },
     });
 
-    const holderId = this.route.snapshot.paramMap.get('holderId')!;
-    this.investmentService.getInvestment(holderId).subscribe({
+    this.holderId = this.route.snapshot.paramMap.get('holderId')?.trim() ?? '';
+    if (!this.holderId) {
+      this.loading = false;
+      this.loadError = 'The holding address is incomplete.';
+      return;
+    }
+    this.load();
+  }
+
+  load(): void {
+    if (!this.holderId) return;
+    this.loading = true;
+    this.loadError = '';
+    this.investment = null;
+    this.market = null;
+    this.investmentService.getInvestment(this.holderId).subscribe({
       next: (investment) => {
         this.investment = investment;
+        this.amountsForm.get('collateralAmount')?.setValidators([
+          Validators.required,
+          Validators.min(1),
+          Validators.max(investment.nominalAmount),
+        ]);
         // Programmatic initial value — emitEvent:false so it doesn't itself go through the
         // debounced valueChanges pipeline above; fetched explicitly below once market is known.
         this.amountsForm.patchValue({ collateralAmount: investment.nominalAmount }, { emitEvent: false });
@@ -302,15 +341,19 @@ export class BorrowStepperComponent implements OnInit {
             this.market = markets.find((m) => m.collateralAssetId === investment.assetId) ?? null;
             this.loading = false;
             this.cdr.markForCheck();
-            if (this.market) this.fetchQuote(investment.nominalAmount);
+            if (this.market) {
+              this.amountsForm.get('collateralAmount')?.setValue(investment.nominalAmount);
+            }
           },
           error: () => {
+            this.loadError = 'Active lending markets could not be loaded.';
             this.loading = false;
             this.cdr.markForCheck();
           },
         });
       },
-      error: () => {
+      error: (err) => {
+        this.loadError = err?.error?.message ?? 'The holding could not be loaded.';
         this.loading = false;
         this.cdr.markForCheck();
       },
@@ -328,22 +371,6 @@ export class BorrowStepperComponent implements OnInit {
 
   onWalletConfirmed(stepper: MatStepper): void {
     stepper.next();
-  }
-
-  /** Explicit one-off fetch (initial load) — subsequent user edits go through the debounced
-   *  valueChanges pipeline wired in {@link ngOnInit} instead. */
-  private fetchQuote(amount: number): void {
-    if (!this.market || !amount || amount <= 0) return;
-    this.quoting = true;
-    this.cdr.markForCheck();
-    this.lendingService.quote(this.market.id, String(amount)).subscribe({
-      next: (quote) => this.onQuoteLoaded(quote),
-      error: () => {
-        this.quote = null;
-        this.quoting = false;
-        this.cdr.markForCheck();
-      },
-    });
   }
 
   private onQuoteLoaded(quote: LendingQuote): void {
@@ -368,15 +395,18 @@ export class BorrowStepperComponent implements OnInit {
   }
 
   async execute(): Promise<void> {
-    if (!this.market) return;
+    const collateralHuman = this.amountsForm.value.collateralAmount ?? 0;
+    const borrowAmountHuman = this.amountsForm.value.borrowAmount ?? 0;
+    if (!this.market || this.executing || this.amountsForm.invalid || !this.quote
+        || !this.walletMatchesHolding || !Number.isSafeInteger(collateralHuman)
+        || !Number.isSafeInteger(borrowAmountHuman * 1_000_000)) return;
     this.executing = true;
     this.executionError = null;
     this.cdr.markForCheck();
 
     try {
-      const collateralAmount = BigInt(Math.trunc(this.amountsForm.value.collateralAmount ?? 0));
-      const borrowAmountHuman = this.amountsForm.value.borrowAmount ?? 0;
-      const borrowAmount = BigInt(Math.trunc(borrowAmountHuman * 1e6));
+      const collateralAmount = BigInt(collateralHuman);
+      const borrowAmount = BigInt(borrowAmountHuman * 1_000_000);
       const marketAddress = this.market.marketAddress as Address;
       const collateralToken = this.market.collateralTokenAddress as Address;
 

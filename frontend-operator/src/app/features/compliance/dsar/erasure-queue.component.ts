@@ -53,6 +53,7 @@ type ResolveMode = 'complete' | 'reject';
       [columns]="columns"
       [rows]="requests"
       [state]="state"
+      (retry)="loadQueue()"
       filterPlaceholder="Filter by entity, requester…"
       emptyMessage="No open erasure requests."
       [actionsTemplate]="rowActions">

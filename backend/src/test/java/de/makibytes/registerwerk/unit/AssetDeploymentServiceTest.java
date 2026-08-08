@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
+import de.makibytes.registerwerk.asset.internal.AssetDeploymentCompletionWriter;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
@@ -66,6 +67,9 @@ class AssetDeploymentServiceTest {
 
     @Mock
     private EvmContractService evmContractService;
+
+    @Mock
+    private AssetDeploymentCompletionWriter completionWriter;
 
     @InjectMocks
     private AssetDeploymentService assetDeploymentService;
@@ -389,30 +393,21 @@ class AssetDeploymentServiceTest {
         asset.setTokenStandard(TokenStandard.ERC20);
 
         when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
-        AssetDeployment[] holder = new AssetDeployment[1];
         when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
             AssetDeployment dep = invocation.getArgument(0);
             if (dep.getId() == null) {
                 dep.setId(deploymentId);
             }
-            holder[0] = dep;
             return dep;
         });
-        when(assetDeploymentRepository.findById(deploymentId))
-                .thenAnswer(invocation -> Optional.ofNullable(holder[0]));
         when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.ETHEREUM), eq(Network.TESTNET), any()))
                 .thenReturn(CompletableFuture.completedFuture(
                         new TokenDeploymentResult("0xtxhash", "0xdeadbeef00000000000000000000000000000001")));
 
         assetDeploymentService.deploy(assetId, Chain.ETHEREUM, Network.TESTNET, actorId);
 
-        assertThat(holder[0].getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
-        assertThat(holder[0].getContractAddress()).isEqualTo("0xdeadbeef00000000000000000000000000000001");
-        assertThat(holder[0].getDeployedAt()).isNotNull();
-
-        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(events.capture());
-        assertThat(events.getAllValues()).anySatisfy(e -> assertThat(e).isInstanceOf(DeploymentConfirmedEvent.class));
+        verify(completionWriter).markSubmitted(eq(deploymentId), eq(actorId),
+                eq(new TokenDeploymentResult("0xtxhash", "0xdeadbeef00000000000000000000000000000001")));
     }
 
     @Test
@@ -426,29 +421,22 @@ class AssetDeploymentServiceTest {
         asset.setTokenStandard(TokenStandard.ERC20);
 
         when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
-        AssetDeployment[] holder = new AssetDeployment[1];
         when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
             AssetDeployment dep = invocation.getArgument(0);
             if (dep.getId() == null) {
                 dep.setId(deploymentId);
             }
-            holder[0] = dep;
             return dep;
         });
-        when(assetDeploymentRepository.findById(deploymentId))
-                .thenAnswer(invocation -> Optional.ofNullable(holder[0]));
         CompletableFuture<TokenDeploymentResult> failed = new CompletableFuture<>();
         failed.completeExceptionally(new RuntimeException("boom"));
         when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.ETHEREUM), eq(Network.TESTNET), any()))
                 .thenReturn(failed);
 
-        assetDeploymentService.deploy(assetId, Chain.ETHEREUM, Network.TESTNET, UUID.randomUUID());
+        UUID actorId = UUID.randomUUID();
+        assetDeploymentService.deploy(assetId, Chain.ETHEREUM, Network.TESTNET, actorId);
 
-        assertThat(holder[0].getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.FAILED);
-
-        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(events.capture());
-        assertThat(events.getAllValues()).anySatisfy(e -> assertThat(e).isInstanceOf(DeploymentFailedEvent.class));
+        verify(completionWriter).markFailed(eq(deploymentId), eq(actorId), any(Throwable.class));
     }
 
     @Test

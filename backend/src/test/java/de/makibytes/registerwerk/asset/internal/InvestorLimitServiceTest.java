@@ -11,6 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -145,7 +146,37 @@ class InvestorLimitServiceTest {
     void deleteLimit_throwsWhenNotFound() {
         when(repository.findByAssetIdAndInvestorEntityId(assetId, investorId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.deleteLimit(assetId, investorId))
+        assertThatThrownBy(() -> service.deleteLimit(assetId, investorId, UUID.randomUUID()))
                 .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("setLimit rejects non-positive and internally inconsistent monetary overrides")
+    void setLimit_rejectsInvalidMonetaryOverrides() {
+        UUID actorId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> service.setLimit(
+                assetId, investorId, BigDecimal.ZERO, null, null, actorId))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than zero");
+        assertThatThrownBy(() -> service.setLimit(
+                assetId, investorId, new BigDecimal("1000"), new BigDecimal("500"), null, actorId))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must not exceed");
+    }
+
+    @Test
+    @DisplayName("deleteLimit publishes an auditable deletion event")
+    void deleteLimit_publishesEvent() {
+        InvestorLimit existing = new InvestorLimit();
+        ReflectionTestUtils.setField(existing, "id", UUID.randomUUID());
+        existing.setAssetId(assetId);
+        existing.setInvestorEntityId(investorId);
+        when(repository.findByAssetIdAndInvestorEntityId(assetId, investorId)).thenReturn(Optional.of(existing));
+
+        service.deleteLimit(assetId, investorId, UUID.randomUUID());
+
+        verify(repository).delete(existing);
+        verify(events).publishEvent(any(de.makibytes.registerwerk.asset.events.InvestorLimitDeletedEvent.class));
     }
 }

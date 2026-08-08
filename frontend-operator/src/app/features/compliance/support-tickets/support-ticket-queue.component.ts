@@ -51,6 +51,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       [columns]="columns"
       [rows]="tickets"
       [state]="state"
+      (retry)="loadQueue()"
       filterPlaceholder="Filter by subject, entity…"
       emptyMessage="No tickets match this filter."
       [actionsTemplate]="rowActions">

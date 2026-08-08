@@ -30,6 +30,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -56,6 +57,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
 @DisplayName("KYC jurisdiction approval integration tests")
 class KycJurisdictionApprovalIT {
@@ -107,7 +109,33 @@ class KycJurisdictionApprovalIT {
             EntityResponse.class
         );
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        return response.getBody().id();
+        UUID entityId = response.getBody().id();
+        awaitInitialScreening(entityId);
+        return entityId;
+    }
+
+    /**
+     * Entity onboarding publishes screening asynchronously.  Wait for that run before seeding
+     * any follow-up result so a late ERROR cannot nondeterministically become the latest result
+     * after the fixture's CLEAR row.
+     */
+    private void awaitInitialScreening(UUID entityId) {
+        Instant deadline = Instant.now().plusSeconds(5);
+        while (Instant.now().isBefore(deadline)) {
+            boolean completed = screeningRunRepository.findByEntityIdOrderByStartedAtDesc(entityId).stream()
+                .anyMatch(run -> "OPEN_SANCTIONS".equals(run.getProvider())
+                    && run.getStatus() != ScreeningStatus.PENDING);
+            if (completed) {
+                return;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for initial screening", e);
+            }
+        }
+        throw new AssertionError("Initial screening did not complete for entity " + entityId);
     }
 
     private HttpHeaders authHeaders(String... roles) {
@@ -221,7 +249,9 @@ class KycJurisdictionApprovalIT {
         ScreeningRun run = new ScreeningRun();
         run.setEntityId(entityId);
         run.setTriggerType(ScreeningTrigger.ENTITY_ONBOARDING);
-        run.setProvider("TEST");
+        // The gate evaluates the latest result of every configured provider.  A clearance
+        // under an arbitrary fixture-only name must not mask an OPEN_SANCTIONS failure.
+        run.setProvider("OPEN_SANCTIONS");
         run.setStatus(ScreeningStatus.CLEAR);
         run.setStartedAt(Instant.now());
         run.setCompletedAt(Instant.now());
@@ -239,7 +269,7 @@ class KycJurisdictionApprovalIT {
     }
 
     @Test
-    @DisplayName("Jurisdiction approval is blocked when no sanctions screening exists (fail closed)")
+    @DisplayName("Jurisdiction approval is blocked when no successful sanctions screening exists (fail closed)")
     void approvalBlockedWithoutScreening() {
         UUID entityId = createEntityAndGetId("Unscreened Entity GmbH");
         addMandatoryDeEwpgDocs(entityId);

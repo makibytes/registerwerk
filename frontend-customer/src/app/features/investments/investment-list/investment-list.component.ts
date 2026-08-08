@@ -69,6 +69,12 @@ interface Filters {
 
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
+      } @else if (loadError) {
+        <div class="content-card load-error" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <p>Investments could not be loaded.</p>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
       } @else {
 
         <!-- ── KPI Summary ─────────────────────────────────────────────────── -->
@@ -190,7 +196,7 @@ interface Filters {
         </mat-card>
 
         <!-- ── Table ──────────────────────────────────────────────────────── -->
-        <mat-card>
+        <mat-card class="table-card">
           <table mat-table [dataSource]="dataSource" matSort class="mat-elevation-z0">
 
             <ng-container matColumnDef="assetName">
@@ -349,6 +355,11 @@ interface Filters {
       cursor: help;
     }
     .empty-row { text-align: center; padding: 32px; color: var(--rw-text-muted); }
+    .table-card { overflow-x: auto; }
+    .table-card table { min-width: 920px; }
+    .load-error { display: grid; justify-items: center; gap: 10px; padding-block: 48px; text-align: center; }
+    .load-error mat-icon { color: var(--rw-text-danger); }
+    .load-error p { margin: 0; color: var(--rw-text-secondary); }
   `],
 })
 export class InvestmentListComponent implements OnInit, AfterViewInit {
@@ -361,6 +372,7 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
   allRecords: InvestmentRecord[] = [];
   dataSource = new MatTableDataSource<InvestmentRecord>();
   loading = true;
+  loadError = false;
 
   filters: Filters = {
     search: '',
@@ -454,6 +466,12 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  load(): void {
+    this.loading = true;
+    this.loadError = false;
     this.investmentService
       .getMyInvestments({ page: 0, size: 200, sort: 'acquisitionDate,desc' })
       .subscribe({
@@ -466,6 +484,7 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
         },
         error: () => {
           this.loading = false;
+          this.loadError = true;
           this.cdr.detectChanges();
         },
       });

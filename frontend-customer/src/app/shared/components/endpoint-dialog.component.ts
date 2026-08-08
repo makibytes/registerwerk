@@ -56,8 +56,8 @@ export interface EndpointDialogData {
     </mat-dialog-content>
     <mat-dialog-actions style="padding: 0 24px 20px">
       <div class="actions">
-        <button mat-button mat-dialog-close [disabled]="saving">Cancel</button>
-        <button mat-flat-button color="primary" [disabled]="!name.trim() || saving" (click)="submit()">
+        <button mat-button type="button" mat-dialog-close [disabled]="saving">Cancel</button>
+        <button mat-flat-button color="primary" type="button" [disabled]="!name.trim() || saving" (click)="submit()">
           {{ saving ? 'Saving…' : 'Save' }}
         </button>
       </div>
@@ -79,7 +79,7 @@ export class EndpointDialogComponent {
   saving = false;
 
   submit(): void {
-    if (!this.name.trim()) return;
+    if (this.saving || !this.name.trim()) return;
     this.saving = true;
     this.endpointService.createEndpoint({
       address: this.data.address,

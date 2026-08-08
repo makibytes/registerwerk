@@ -7,12 +7,15 @@ import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -25,6 +28,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/transactions")
 @PreAuthorize("isAuthenticated()")
+@Validated
 public class BlockchainTransactionController {
 
     private final BlockchainApi blockchainApi;
@@ -51,8 +55,8 @@ public class BlockchainTransactionController {
             @RequestParam(required = false) UUID deploymentId,
             @RequestParam(required = false) UUID assetId,
             @RequestParam(required = false) String status,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(200) int size) {
 
         Pageable pageable = PageRequest.of(page, size);
 

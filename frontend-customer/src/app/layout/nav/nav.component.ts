@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, inject, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, HostListener, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -6,6 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { SecurityService } from '../../core/api/security.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { WorkspaceKey, WorkspaceService } from '../../core/workspace/workspace.service';
@@ -25,6 +26,7 @@ const { operatorUrl } = environment;
     MatMenuModule,
     MatDividerModule,
     MatTooltipModule,
+    MatSnackBarModule,
   ],
   template: `
     @if (isImpersonating || canImpersonate) {
@@ -33,17 +35,17 @@ const { operatorUrl } = environment;
         @if (isImpersonating) {
           <span>Acting as <strong>{{ impersonationEntityName }}</strong></span>
           <div class="imp-actions">
-            <button class="imp-btn" (click)="switchCompany()">Switch company</button>
-            <button class="imp-btn imp-btn-exit" (click)="exitImpersonation()">Exit impersonation</button>
+            <button class="imp-btn" type="button" (click)="switchCompany()">Switch company</button>
+            <button class="imp-btn imp-btn-exit" type="button" (click)="exitImpersonation()">Exit impersonation</button>
           </div>
         } @else {
           <span>Admin mode — no company selected</span>
           <div class="imp-actions">
-            <button class="imp-btn" (click)="selectCompany()">Select company</button>
+            <button class="imp-btn" type="button" (click)="selectCompany()">Select company</button>
           </div>
         }
         @if (operatorUrl) {
-          <a [href]="operatorUrl" target="_blank" class="imp-btn imp-btn-portal">
+          <a [href]="operatorUrl" target="_blank" rel="noopener noreferrer" class="imp-btn imp-btn-portal">
             Operator Console ↗
           </a>
         }
@@ -91,12 +93,25 @@ const { operatorUrl } = environment;
             class="nav-link"
             [routerLink]="link.route"
             routerLinkActive="active"
+            (click)="closeMobileMenu()"
           >
             <mat-icon>{{ link.icon }}</mat-icon>
             <span>{{ link.label }}</span>
           </a>
         }
       </nav>
+
+      <button
+        class="mobile-menu-toggle"
+        mat-icon-button
+        type="button"
+        aria-label="Toggle navigation"
+        aria-controls="mobile-navigation"
+        [attr.aria-expanded]="mobileMenuOpen"
+        (click)="toggleMobileMenu()"
+      >
+        <mat-icon>{{ mobileMenuOpen ? 'close' : 'menu' }}</mat-icon>
+      </button>
 
       <div class="spacer"></div>
 
@@ -147,6 +162,28 @@ const { operatorUrl } = environment;
         </button>
       </mat-menu>
     </header>
+
+    @if (mobileMenuOpen) {
+      <nav id="mobile-navigation" class="mobile-nav" aria-label="Mobile navigation">
+        @for (link of workspaceLinks; track link.route) {
+          <a
+            class="mobile-nav-link"
+            [routerLink]="link.route"
+            routerLinkActive="active"
+            (click)="closeMobileMenu()"
+          >
+            <mat-icon>{{ link.icon }}</mat-icon>
+            <span>{{ link.label }}</span>
+          </a>
+        }
+        <a class="mobile-nav-link" routerLink="/kyc" routerLinkActive="active" (click)="closeMobileMenu()">
+          <mat-icon>verified_user</mat-icon><span>KYC status</span>
+        </a>
+        <a class="mobile-nav-link" routerLink="/endpoints" routerLinkActive="active" (click)="closeMobileMenu()">
+          <mat-icon>contacts</mat-icon><span>Endpoints</span>
+        </a>
+      </nav>
+    }
   `,
   styles: [`
     .impersonation-bar {
@@ -274,7 +311,6 @@ const { operatorUrl } = environment;
       color: var(--rw-nav-fg) !important;
       height: auto !important;
       font-weight: 600 !important;
-      transition: background 0.15s ease !important;
 
       mat-icon:not(.chevron) {
         font-size: 17px;
@@ -332,7 +368,6 @@ const { operatorUrl } = environment;
       font-size: 13px;
       font-weight: 500;
       transition: background 0.15s ease, color 0.15s ease;
-      letter-spacing: 0.1px;
 
       mat-icon {
         font-size: 16px;
@@ -366,7 +401,6 @@ const { operatorUrl } = environment;
       border-radius: 8px !important;
       color: var(--rw-nav-fg) !important;
       height: auto !important;
-      transition: background 0.15s ease !important;
 
       &:hover { background: var(--rw-nav-hover-bg) !important; }
     }
@@ -460,6 +494,100 @@ const { operatorUrl } = environment;
       margin-left: 8px;
       flex-shrink: 0;
     }
+
+    .mobile-menu-toggle,
+    .mobile-nav {
+      display: none;
+    }
+
+    @media (max-width: 1100px) {
+      .nav-bar {
+        padding-inline: 12px;
+      }
+
+      .nav-links,
+      .utility-icon {
+        display: none;
+      }
+
+      .mobile-menu-toggle {
+        display: inline-flex;
+        color: var(--rw-nav-fg);
+      }
+
+      .mobile-nav {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 6px;
+        padding: 12px 16px 16px;
+        border-bottom: 1px solid var(--rw-nav-border);
+        background: var(--rw-nav-bg);
+        box-shadow: var(--rw-shadow-md);
+        position: relative;
+        z-index: 98;
+      }
+
+      .mobile-nav-link {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-radius: var(--rw-radius);
+        color: var(--rw-nav-fg);
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+
+        mat-icon {
+          color: var(--rw-nav-accent);
+          font-size: 18px;
+          height: 18px;
+          width: 18px;
+        }
+
+        &:hover,
+        &.active {
+          background: var(--rw-nav-active-bg);
+          color: var(--rw-nav-fg-active);
+        }
+      }
+
+    }
+
+    @media (max-width: 720px) {
+      .brand-text,
+      .user-label,
+      .user-btn .chevron,
+      .workspace-label,
+      .divider-v {
+        display: none;
+      }
+
+      .workspace-switch span,
+      .workspace-switch .chevron {
+        display: none;
+      }
+
+      .impersonation-bar {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        padding: 9px 12px;
+
+        .imp-actions {
+          margin-left: 0;
+          order: 3;
+          width: 100%;
+        }
+
+        .imp-btn-portal {
+          margin-left: auto;
+        }
+      }
+
+      .mobile-nav {
+        grid-template-columns: 1fr;
+      }
+    }
   `]
 })
 export class NavComponent implements OnInit {
@@ -468,6 +596,7 @@ export class NavComponent implements OnInit {
   private readonly workspaceService = inject(WorkspaceService);
   private readonly securityService = inject(SecurityService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
   readonly isTestEnv = environment.testEnvironment;
   readonly operatorUrl = operatorUrl;
 
@@ -476,6 +605,7 @@ export class NavComponent implements OnInit {
   isImpersonating = false;
   canImpersonate = false;
   impersonationEntityName = '';
+  mobileMenuOpen = false;
 
   /**
    * Marks the Security menu entry when no second factor is registered.
@@ -525,6 +655,21 @@ export class NavComponent implements OnInit {
   switchWorkspace(key: WorkspaceKey): void {
     this.workspaceService.setWorkspace(key);
     this.activeWorkspace = this.workspaceService.activeWorkspace();
+    this.closeMobileMenu();
+    this.router.navigate(['/dashboard']);
+  }
+
+  toggleMobileMenu(): void {
+    this.mobileMenuOpen = !this.mobileMenuOpen;
+  }
+
+  closeMobileMenu(): void {
+    this.mobileMenuOpen = false;
+  }
+
+  @HostListener('document:keydown.escape')
+  closeMobileMenuOnEscape(): void {
+    this.closeMobileMenu();
   }
 
   selectCompany(): void {
@@ -532,11 +677,22 @@ export class NavComponent implements OnInit {
   }
 
   switchCompany(): void {
-    this.auth.exitImpersonation().subscribe(() => this.router.navigate(['/select-company']));
+    this.leaveImpersonation();
   }
 
   exitImpersonation(): void {
-    this.auth.exitImpersonation().subscribe(() => this.router.navigate(['/select-company']));
+    this.leaveImpersonation();
+  }
+
+  private leaveImpersonation(): void {
+    this.auth.exitImpersonation().subscribe({
+      next: () => this.router.navigate(['/select-company']),
+      error: () => this.snackBar.open(
+        'Could not leave impersonation mode. Please try again.',
+        'Dismiss',
+        { duration: 6000, panelClass: 'snack-error' }
+      ),
+    });
   }
 
   logout(): void { this.auth.logout(); }

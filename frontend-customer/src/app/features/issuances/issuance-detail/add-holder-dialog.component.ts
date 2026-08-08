@@ -36,7 +36,7 @@ interface DialogData {
     <mat-dialog-content>
       <mat-form-field appearance="outline" class="full-width">
         <mat-label>Wallet Address</mat-label>
-        <input matInput [(ngModel)]="walletAddress" placeholder="0x..." />
+        <input matInput [(ngModel)]="walletAddress" placeholder="0x..." autocomplete="off" />
         <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
                 (click)="pickWallet()">
           <mat-icon style="font-size:18px">contacts</mat-icon>
@@ -56,11 +56,12 @@ interface DialogData {
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-button type="button" mat-dialog-close>Cancel</button>
       <button
         mat-raised-button
         color="primary"
-        [disabled]="saving || !walletAddress || !nominalAmount"
+        type="button"
+        [disabled]="saving || !walletAddress.trim() || !isValidAmount()"
         (click)="save()"
       >
         @if (saving) { <mat-spinner diameter="18"></mat-spinner> }
@@ -90,7 +91,7 @@ export class AddHolderDialogComponent {
   pickWallet(): void {
     this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
       AddressPickerDialogComponent,
-      { data: { mode: 'WALLET', title: 'Select holder wallet' }, width: '560px' }
+      { data: { mode: 'WALLET', title: 'Select holder wallet' }, width: '560px', maxWidth: '95vw' }
     ).afterClosed().subscribe(addr => {
       if (addr) {
         this.walletAddress = addr;
@@ -100,14 +101,14 @@ export class AddHolderDialogComponent {
   }
 
   save(): void {
-    if (!this.walletAddress || !this.nominalAmount) return;
+    if (this.saving || !this.walletAddress.trim() || !this.isValidAmount()) return;
     this.saving = true;
     this.error = '';
 
     this.issuanceService
       .addHolder(this.data.assetId, {
-        walletAddress: this.walletAddress,
-        nominalAmount: this.nominalAmount,
+        walletAddress: this.walletAddress.trim(),
+        nominalAmount: this.nominalAmount!,
       })
       .subscribe({
         next: (holder) => this.dialogRef.close(holder),
@@ -117,5 +118,11 @@ export class AddHolderDialogComponent {
           this.cdr.markForCheck(); // zoneless: error state must re-render
         },
       });
+  }
+
+  isValidAmount(): boolean {
+    return this.nominalAmount !== null
+      && Number.isFinite(this.nominalAmount)
+      && this.nominalAmount > 0;
   }
 }

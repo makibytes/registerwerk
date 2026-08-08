@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.integration;
 
 import de.makibytes.registerwerk.auth.web.dto.LoginRequest;
 import de.makibytes.registerwerk.auth.web.dto.LoginResponse;
+import de.makibytes.registerwerk.deployment.api.DeploymentAccessChecker;
 import de.makibytes.registerwerk.stepup.web.dto.StepUpRequest;
 import de.makibytes.registerwerk.stepup.web.dto.StepUpResponse;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,8 +19,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -27,6 +30,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 /**
  * Integration tests for TokenAdminController:
@@ -37,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
 @DisplayName("TokenAdminController integration tests — step-up auth enforcement")
 class TokenAdminControllerIT {
@@ -52,6 +58,14 @@ class TokenAdminControllerIT {
 
     @Autowired
     TestRestTemplate rest;
+
+    /**
+     * This test targets the step-up aspect, not nested deployment ownership.  Permit the
+     * synthetic IDs through that independent guard so the response proves whether execution
+     * reached the controller/service boundary.
+     */
+    @MockitoBean
+    DeploymentAccessChecker deploymentAccessChecker;
 
     String bearerToken;
     String stepUpToken;
@@ -69,6 +83,8 @@ class TokenAdminControllerIT {
 
     @BeforeEach
     void authenticate() {
+        when(deploymentAccessChecker.belongsToAsset(any(), any())).thenReturn(true);
+
         ResponseEntity<LoginResponse> login = rest.postForEntity(
                 "/api/v1/public/auth/login",
                 new LoginRequest(ADMIN_EMAIL, ADMIN_PASSWORD),
@@ -91,15 +107,15 @@ class TokenAdminControllerIT {
     }
 
     @Test
-    @DisplayName("pause without step-up token → 403 Forbidden")
-    void pause_withoutStepUp_returns403() {
+    @DisplayName("supply-cap change without step-up token → 403 Forbidden")
+    void setSupplyCap_withoutStepUp_returns403() {
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(bearerToken); // regular token, no acr=stepup
         h.setContentType(MediaType.APPLICATION_JSON);
 
         var response = rest.postForEntity(
-                "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/pause",
-                new HttpEntity<>(Map.of(), h),
+                "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/set-supply-cap",
+                new HttpEntity<>(Map.of("newCap", 1_000), h),
                 Map.class);
 
         // The @RequiresStepUp aspect blocks when acr!=stepup — expects 403
@@ -107,15 +123,15 @@ class TokenAdminControllerIT {
     }
 
     @Test
-    @DisplayName("pause with step-up token — passes auth gate (404 for non-existent deployment)")
-    void pause_withStepUpToken_passesAuthGate() {
+    @DisplayName("supply-cap change with step-up token passes auth gate")
+    void setSupplyCap_withStepUpToken_passesAuthGate() {
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(stepUpToken); // token with acr=stepup
         h.setContentType(MediaType.APPLICATION_JSON);
 
         var response = rest.postForEntity(
-                "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/pause",
-                new HttpEntity<>(Map.of(), h),
+                "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/set-supply-cap",
+                new HttpEntity<>(Map.of("newCap", 1_000), h),
                 Map.class);
 
         // Auth gate passed — 404 because no such deployment exists, not 403

@@ -4,7 +4,6 @@ import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.travelrule.api.Ivms101;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleProtocolPort;
 import de.makibytes.registerwerk.travelrule.events.TravelRuleMessageReceivedEvent;
-import de.makibytes.registerwerk.travelrule.events.TravelRuleMessageSentEvent;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -71,15 +70,18 @@ public class TravelRuleService {
     private final ObjectMapper objectMapper;
     private final CaspRegistryService caspRegistry;
     private final ApplicationEventPublisher eventPublisher;
+    private final TravelRuleCompletionWriter completionWriter;
 
     TravelRuleService(List<TravelRuleProtocolPort> protocols, JdbcTemplate jdbc,
                       ObjectMapper objectMapper, CaspRegistryService caspRegistry,
-                      ApplicationEventPublisher eventPublisher, MeterRegistry meterRegistry) {
+                      ApplicationEventPublisher eventPublisher, MeterRegistry meterRegistry,
+                      TravelRuleCompletionWriter completionWriter) {
         this.protocols = protocols;
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.caspRegistry = caspRegistry;
         this.eventPublisher = eventPublisher;
+        this.completionWriter = completionWriter;
 
         // Live-queried at scrape time — send() sets STATUS_FAILED on the async completion
         // callback's failure path, but nothing ever counted it (repo-wide alerting-gap follow-up).
@@ -97,7 +99,7 @@ public class TravelRuleService {
      * @throws IllegalStateException if the beneficiary is a VASP but no Travel Rule
      *         protocol adapter is configured (transfer must not proceed)
      */
-    @Transactional
+    @Transactional(noRollbackFor = ComplianceGateException.class)
     public boolean checkAndSend(UUID assetId, String fromWallet, String toWallet,
                                 BigDecimal amountEur, Ivms101.TravelRuleMessage payload) {
         return checkAndSend(assetId, fromWallet, toWallet, amountEur, null, null, payload);
@@ -112,7 +114,7 @@ public class TravelRuleService {
      * self-hosted-verification threshold check, which stays EUR-denominated and — absent a real
      * EUR value — conservatively fails closed exactly as before.
      */
-    @Transactional
+    @Transactional(noRollbackFor = ComplianceGateException.class)
     public boolean checkAndSend(UUID assetId, String fromWallet, String toWallet, BigDecimal amountEur,
                                 BigDecimal nativeAmount, String nativeSymbol, Ivms101.TravelRuleMessage payload) {
         Optional<TravelRuleProtocolPort.VaspInfo> vasp = resolveVasp(toWallet);
@@ -129,6 +131,9 @@ public class TravelRuleService {
                 log.warn("Travel Rule: transfer of {} EUR to self-hosted wallet {} exceeds the " +
                         "Art. 14(5) TFR threshold — ownership/control verification required before execution.",
                         amountEur, toWallet);
+                throw new ComplianceGateException(
+                        "Travel Rule: ownership/control of self-hosted wallet " + toWallet
+                                + " must be verified before executing this transfer (TFR Art. 14(5))");
             } else {
                 log.info("Travel Rule: self-hosted beneficiary wallet={}, originator info recorded.", toWallet);
             }
@@ -140,7 +145,7 @@ public class TravelRuleService {
         // before propagating so the audit trail shows the blocked attempt.
         try {
             caspRegistry.assertCounterpartyPermitted(vasp.get().vaspId());
-        } catch (IllegalStateException micaBlock) {
+        } catch (ComplianceGateException micaBlock) {
             recordMessage(UUID.randomUUID(), assetId, fromWallet, toWallet, amountEur, nativeAmount, nativeSymbol,
                     "OUTBOUND", STATUS_BLOCKED_MICA, vasp.get().vaspId(),
                     micaBlock.getMessage(), payload);
@@ -169,14 +174,12 @@ public class TravelRuleService {
             if (ex != null) {
                 log.error("Travel Rule: failed to send message for transfer fromWallet={}: {}",
                         fromWallet, ex.getMessage());
-                updateStatus(messageId, STATUS_FAILED, ex.getMessage());
+                completionWriter.markFailed(messageId, ex.getMessage());
             } else {
                 log.info("Travel Rule: message sent. protocol={} protocolMsgId={}",
                         protocol.protocolName(), protocolMessageId);
-                markSent(messageId, protocol.protocolName(), protocolMessageId);
-                eventPublisher.publishEvent(new TravelRuleMessageSentEvent(messageId, null, "SYSTEM", Map.of(
-                        "protocol", protocol.protocolName(), "beneficiaryVaspId", vasp.get().vaspId()
-                )));
+                completionWriter.markSent(messageId, protocol.protocolName(), protocolMessageId,
+                        vasp.get().vaspId());
             }
         });
         return true;
@@ -185,25 +188,64 @@ public class TravelRuleService {
     /** Handles an inbound Travel Rule message received from another VASP. */
     @Transactional
     public void receiveInbound(String fromVaspId, Ivms101.TravelRuleMessage payload) {
+        String transferReference = validateInbound(fromVaspId, payload);
         log.info("Travel Rule: inbound message from VASP={}", fromVaspId);
-        String toWallet = payload.beneficiary() != null && !payload.beneficiary().isEmpty()
-                ? payload.beneficiary().get(0).accountNumber() : null;
-        String fromWallet = payload.originator() != null && !payload.originator().isEmpty()
-                ? payload.originator().get(0).accountNumber() : null;
+        String toWallet = payload.beneficiary().get(0).accountNumber();
+        String fromWallet = payload.originator().get(0).accountNumber();
 
         UUID messageId = UUID.randomUUID();
-        jdbc.update("""
+        int inserted = jdbc.update("""
             INSERT INTO travel_rule_message
               (id, direction, status, originator_vasp_did, originator_wallet, beneficiary_wallet,
-               ivms101_payload, received_at, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?::jsonb,?,now(),now())
+               ivms101_payload, protocol_message_id, received_at, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?::jsonb,?,?,now(),now())
+            ON CONFLICT DO NOTHING
             """,
             messageId, "INBOUND", STATUS_RECEIVED, fromVaspId, fromWallet, toWallet,
-            serializePayload(payload), Instant.now());
+            serializePayload(payload), transferReference, Instant.now());
+
+        if (inserted == 0) {
+            log.info("Travel Rule: ignored replay from VASP={} transferReference={}",
+                    fromVaspId, transferReference);
+            return;
+        }
 
         eventPublisher.publishEvent(new TravelRuleMessageReceivedEvent(messageId, null, "SYSTEM", Map.of(
-                "originatorVaspId", fromVaspId != null ? fromVaspId : ""
+                "originatorVaspId", fromVaspId, "transferReference", transferReference
         )));
+    }
+
+    private static String validateInbound(String fromVaspId, Ivms101.TravelRuleMessage payload) {
+        if (fromVaspId == null || fromVaspId.isBlank()) {
+            throw new IllegalArgumentException("X-Vasp-Id is required");
+        }
+        if (payload == null || payload.originatingVasp() == null
+                || payload.originatingVasp().originatingVasp() == null) {
+            throw new IllegalArgumentException("originatingVasp identity is required");
+        }
+        String payloadVaspId = payload.originatingVasp().originatingVasp().vaspId();
+        if (payloadVaspId == null || !fromVaspId.equalsIgnoreCase(payloadVaspId.trim())) {
+            throw new IllegalArgumentException("X-Vasp-Id must match originatingVasp.vaspId");
+        }
+        if (payload.originator() == null || payload.originator().isEmpty()
+                || payload.originator().get(0) == null
+                || isBlank(payload.originator().get(0).accountNumber())) {
+            throw new IllegalArgumentException("At least one originator accountNumber is required");
+        }
+        if (payload.beneficiary() == null || payload.beneficiary().isEmpty()
+                || payload.beneficiary().get(0) == null
+                || isBlank(payload.beneficiary().get(0).accountNumber())) {
+            throw new IllegalArgumentException("At least one beneficiary accountNumber is required");
+        }
+        if (payload.transferDetails() == null
+                || isBlank(payload.transferDetails().transactionIdentifier())) {
+            throw new IllegalArgumentException("transferDetails.transactionIdentifier is required");
+        }
+        return payload.transferDetails().transactionIdentifier().trim();
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private Optional<TravelRuleProtocolPort.VaspInfo> resolveVasp(String walletAddress) {
@@ -236,25 +278,11 @@ public class TravelRuleService {
             amount, currencySymbol, errorMessage, serializePayload(payload));
     }
 
-    private void updateStatus(UUID messageId, String status, String errorMessage) {
-        jdbc.update("UPDATE travel_rule_message SET status=?, error_message=?, updated_at=now() WHERE id=?",
-                status, errorMessage, messageId);
-    }
-
-    private void markSent(UUID messageId, String protocolName, String protocolMessageId) {
-        jdbc.update("""
-            UPDATE travel_rule_message
-            SET status=?, protocol=?, protocol_message_id=?, sent_at=now(), updated_at=now()
-            WHERE id=?
-            """,
-            STATUS_SENT, protocolName, protocolMessageId, messageId);
-    }
-
     private String serializePayload(Ivms101.TravelRuleMessage payload) {
         try {
             return objectMapper.writeValueAsString(payload);
         } catch (Exception e) {
-            return "{}";
+            throw new IllegalArgumentException("IVMS-101 payload could not be serialized", e);
         }
     }
 

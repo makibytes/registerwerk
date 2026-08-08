@@ -58,7 +58,7 @@ describe('SidebarComponent', () => {
     const fixture = createComponent();
 
     const labels = fixture.componentInstance.visibleSections.map(s => s.label);
-    expect(labels).toEqual(['Overview', 'Registry', 'Compliance', 'Ecosystem', 'Infrastructure']);
+    expect(labels).toEqual(['Overview', 'Registry', 'Compliance', 'Ecosystem', 'Infrastructure', 'Operations']);
   });
 
   it('renders one nav-section-label per visible section in the template', () => {
@@ -69,7 +69,19 @@ describe('SidebarComponent', () => {
       fixture.nativeElement.querySelectorAll('.nav-section-label') as NodeListOf<HTMLElement>
     ).map(el => el.textContent?.trim());
 
-    expect(renderedLabels).toEqual(['Overview', 'Registry', 'Compliance', 'Ecosystem', 'Infrastructure']);
+    expect(renderedLabels).toEqual(['Overview', 'Registry', 'Compliance', 'Ecosystem', 'Infrastructure', 'Operations']);
+  });
+
+  it('only exposes audit-authorized compliance and operations links to AUDIT users', () => {
+    authServiceSpy.hasRole.and.callFake((role: string) => role === 'AUDIT');
+    const fixture = createComponent();
+
+    const sections = fixture.componentInstance.visibleSections;
+    expect(sections.map(section => section.label)).toEqual(['Overview', 'Registry', 'Compliance', 'Operations']);
+    expect(sections.find(section => section.label === 'Compliance')?.items.map(item => item.label))
+      .toEqual(['Chain Drift', 'Support Tickets', 'Audit Log']);
+    expect(sections.find(section => section.label === 'Registry')?.items.map(item => item.label))
+      .toEqual(['Assets', 'Customers', 'Registry']);
   });
 
   it('exposes the configured customer-portal URL from the environment', () => {

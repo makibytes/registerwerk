@@ -53,6 +53,19 @@ import type { Address } from 'viem';
 
       @if (loading) {
         <div class="loading-row"><mat-spinner diameter="32"></mat-spinner></div>
+      } @else if (loadError) {
+        <mat-card class="form-card">
+          <mat-card-content role="alert">
+            <p class="error-text">{{ loadError }}</p>
+            <button mat-stroked-button type="button" (click)="load()">Retry</button>
+          </mat-card-content>
+        </mat-card>
+      } @else if (markets.length === 0) {
+        <mat-card class="form-card">
+          <mat-card-content>
+            <p>No active supply markets are available yet.</p>
+          </mat-card-content>
+        </mat-card>
       } @else {
         <mat-card class="form-card">
           <mat-card-content>
@@ -67,18 +80,24 @@ import type { Address } from 'viem';
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Amount</mat-label>
-              <input matInput type="number" [(ngModel)]="amount" />
+              <input matInput type="number" min="0.000001" step="0.000001" [(ngModel)]="amount" />
             </mat-form-field>
 
             @if (actionError) {
-              <p class="error-text">{{ actionError }}</p>
+              <p class="error-text" role="alert">{{ actionError }}</p>
+            }
+            @if (positionsError) {
+              <p class="error-text" role="alert">
+                {{ positionsError }}
+                <button mat-button type="button" (click)="load()">Retry</button>
+              </p>
             }
 
             <div class="action-row">
-              <button mat-flat-button color="primary" [disabled]="acting || !selectedMarketId" (click)="supply()">
+              <button mat-flat-button color="primary" type="button" [disabled]="acting || !selectedMarketId || !isValidAmount()" (click)="supply()">
                 @if (acting === 'supply') { Supplying… } @else { Supply }
               </button>
-              <button mat-stroked-button [disabled]="acting || !selectedMarketId" (click)="withdraw()">
+              <button mat-stroked-button type="button" [disabled]="acting || !selectedMarketId || !isValidAmount() || !!positionsError" (click)="withdraw()">
                 @if (acting === 'withdraw') { Withdrawing… } @else { Withdraw }
               </button>
             </div>
@@ -129,19 +148,36 @@ export class SupplyEarnComponent implements OnInit {
   amount = 0;
   acting: 'supply' | 'withdraw' | null = null;
   actionError: string | null = null;
+  loadError = '';
+  positionsError = '';
 
   ngOnInit(): void {
     this.load();
   }
 
-  private load(): void {
+  load(): void {
+    this.loading = true;
+    this.loadError = '';
+    this.positionsError = '';
+    let marketsFailed = false;
+    let positionsFailed = false;
     forkJoin({
-      markets: this.lendingService.listMarkets('ACTIVE').pipe(catchError(() => of<LendingMarket[]>([]))),
-      positions: this.lendingService.supplyPositions().pipe(catchError(() => of<LendingSupplyPosition[]>([]))),
+      markets: this.lendingService.listMarkets('ACTIVE').pipe(catchError(() => {
+        marketsFailed = true;
+        return of<LendingMarket[]>([]);
+      })),
+      positions: this.lendingService.supplyPositions().pipe(catchError(() => {
+        positionsFailed = true;
+        return of<LendingSupplyPosition[]>([]);
+      })),
     }).subscribe(({ markets, positions }) => {
       this.markets = markets;
       this.positions = positions;
-      this.selectedMarketId = markets[0]?.id ?? null;
+      if (marketsFailed) this.loadError = 'Supply markets could not be loaded.';
+      if (positionsFailed) this.positionsError = 'Your existing supply positions could not be loaded.';
+      if (!markets.some((market) => market.id === this.selectedMarketId)) {
+        this.selectedMarketId = markets[0]?.id ?? null;
+      }
       this.loading = false;
       this.cdr.markForCheck();
     });
@@ -162,7 +198,7 @@ export class SupplyEarnComponent implements OnInit {
 
   async supply(): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    if (!market) return;
+    if (!market || this.acting || !this.isValidAmount()) return;
     this.acting = 'supply';
     this.actionError = null;
     this.cdr.markForCheck();
@@ -173,7 +209,7 @@ export class SupplyEarnComponent implements OnInit {
       }
       const marketAddress = market.marketAddress as Address;
       const loanToken = market.loanTokenAddress as Address;
-      const amountUnits = BigInt(Math.trunc(this.amount * 1e6));
+      const amountUnits = BigInt(Math.round(this.amount * 1e6));
 
       const allowance = await this.wallet.readContract<bigint>({
         address: loanToken,
@@ -210,7 +246,13 @@ export class SupplyEarnComponent implements OnInit {
 
   async withdraw(): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    if (!market) return;
+    const amountUnitsNumber = Math.round(this.amount * 1e6);
+    const position = this.positions.find((candidate) => candidate.marketId === market?.id);
+    if (!market || this.acting || !this.isValidAmount()) return;
+    if (!position || BigInt(amountUnitsNumber) > BigInt(position.currentClaim)) {
+      this.actionError = 'The withdrawal exceeds your current claim in this market.';
+      return;
+    }
     this.acting = 'withdraw';
     this.actionError = null;
     this.cdr.markForCheck();
@@ -219,7 +261,7 @@ export class SupplyEarnComponent implements OnInit {
       if (!this.wallet.isConnected()) {
         await this.wallet.connect();
       }
-      const amountUnits = BigInt(Math.trunc(this.amount * 1e6));
+      const amountUnits = BigInt(amountUnitsNumber);
       const hash = await this.wallet.writeContract({
         address: market.marketAddress as Address,
         abi: repoMarketAbi,
@@ -235,5 +277,12 @@ export class SupplyEarnComponent implements OnInit {
       this.acting = null;
       this.cdr.markForCheck();
     }
+  }
+
+  isValidAmount(): boolean {
+    const amountUnits = this.amount * 1e6;
+    return Number.isFinite(this.amount)
+      && this.amount > 0
+      && Number.isSafeInteger(amountUnits);
   }
 }

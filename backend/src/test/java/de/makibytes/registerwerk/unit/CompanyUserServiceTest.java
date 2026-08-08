@@ -152,10 +152,12 @@ class CompanyUserServiceTest {
     @DisplayName("saveIdpSettings never writes a client secret — the column is not populated at all")
     void saveIdpSettings_neverStoresAClientSecret() {
         LegalEntity entity = buildEntity();
+        UUID customerTenant = UUID.randomUUID();
         when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
 
         service.saveIdpSettings(authentication,
-            new CompanyIdpSettingsRequest("https://idp.example/realms/x", "client-123"));
+            new CompanyIdpSettingsRequest(
+                "https://login.microsoftonline.com/" + customerTenant + "/v2.0", "client-123"));
 
         // Inbound B2B federation is configured tenant-to-tenant in the IdP; Registerwerk never
         // runs an authorization-code flow against a customer's tenant, so it has no use for
@@ -164,15 +166,16 @@ class CompanyUserServiceTest {
     }
 
     @Test
-    @DisplayName("a non-Entra issuer URL is stored without inventing a tenant id")
-    void saveIdpSettings_nonEntraIssuer_leavesTenantIdNull() {
+    @DisplayName("an issuer URL without a tenant UUID is rejected")
+    void saveIdpSettings_nonTenantIssuerIsRejected() {
         LegalEntity entity = buildEntity();
         when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
 
-        service.saveIdpSettings(authentication,
-            new CompanyIdpSettingsRequest("https://keycloak.example/realms/customer", "client-123"));
-
-        assertThat(entity.getIdpTenantId()).isNull();
+        assertThatThrownBy(() -> service.saveIdpSettings(authentication,
+            new CompanyIdpSettingsRequest("https://keycloak.example/realms/customer", "client-123")))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("tenant UUID");
+        verify(legalEntityRepository, never()).save(any());
     }
 
     @Test

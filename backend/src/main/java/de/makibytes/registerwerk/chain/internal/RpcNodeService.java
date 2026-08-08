@@ -6,6 +6,8 @@ import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeResponse;
+import de.makibytes.registerwerk.chain.events.RpcNodeChangedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,10 +24,13 @@ public class RpcNodeService {
 
     private final RpcNodeRepository rpcNodeRepository;
     private final ChainConfigRepository chainConfigRepository;
+    private final ApplicationEventPublisher events;
 
-    public RpcNodeService(RpcNodeRepository rpcNodeRepository, ChainConfigRepository chainConfigRepository) {
+    public RpcNodeService(RpcNodeRepository rpcNodeRepository, ChainConfigRepository chainConfigRepository,
+                          ApplicationEventPublisher events) {
         this.rpcNodeRepository = rpcNodeRepository;
         this.chainConfigRepository = chainConfigRepository;
+        this.events = events;
     }
 
     @Transactional(readOnly = true)
@@ -49,21 +54,24 @@ public class RpcNodeService {
         node.setEnabled(true);
 
         RpcNode saved = rpcNodeRepository.save(node);
+        events.publishEvent(new RpcNodeChangedEvent(saved.getId(), null, null, "ADDED", chainConfigId));
         log.info("Added RPC node: id={}, url={}, chain={}", saved.getId(), url, chain.getIdentifier());
         return saved;
     }
 
-    public void enable(UUID nodeId) {
-        RpcNode node = getById(nodeId);
+    public void enable(UUID chainId, UUID nodeId) {
+        RpcNode node = getById(chainId, nodeId);
         node.setEnabled(true);
         rpcNodeRepository.save(node);
+        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null, "ENABLED", chainId));
         log.info("Enabled RPC node: id={}, url={}", nodeId, node.getUrl());
     }
 
-    public void disable(UUID nodeId) {
-        RpcNode node = getById(nodeId);
+    public void disable(UUID chainId, UUID nodeId) {
+        RpcNode node = getById(chainId, nodeId);
         node.setEnabled(false);
         rpcNodeRepository.save(node);
+        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null, "DISABLED", chainId));
         log.info("Disabled RPC node: id={}, url={}", nodeId, node.getUrl());
     }
 
@@ -71,16 +79,19 @@ public class RpcNodeService {
      * Toggles the exclusive flag for a node. When exclusive is set, only nodes
      * with exclusive=true (per chain) are considered for routing.
      */
-    public void setExclusive(UUID nodeId, boolean exclusive) {
-        RpcNode node = getById(nodeId);
+    public void setExclusive(UUID chainId, UUID nodeId, boolean exclusive) {
+        RpcNode node = getById(chainId, nodeId);
         node.setExclusive(exclusive);
         rpcNodeRepository.save(node);
+        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null,
+                exclusive ? "PINNED" : "UNPINNED", chainId));
         log.info("Set RPC node exclusive={}: id={}, url={}", exclusive, nodeId, node.getUrl());
     }
 
-    public void delete(UUID nodeId) {
-        RpcNode node = getById(nodeId);
+    public void delete(UUID chainId, UUID nodeId) {
+        RpcNode node = getById(chainId, nodeId);
         rpcNodeRepository.delete(node);
+        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null, "DELETED", chainId));
         log.info("Deleted RPC node: id={}, url={}", nodeId, node.getUrl());
     }
 
@@ -104,8 +115,8 @@ public class RpcNodeService {
         );
     }
 
-    private RpcNode getById(UUID id) {
-        return rpcNodeRepository.findById(id)
+    private RpcNode getById(UUID chainId, UUID id) {
+        return rpcNodeRepository.findByIdAndChainConfig_Id(id, chainId)
                 .orElseThrow(() -> new EntityNotFoundException("RpcNode", id));
     }
 }

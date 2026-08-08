@@ -44,6 +44,9 @@ import { CompanyService } from '../../../core/api/company.service';
         <a mat-tab-link routerLink="/company-admin/idp" routerLinkActive #rla2="routerLinkActive" [active]="rla2.isActive">
           <mat-icon>vpn_key</mat-icon>&nbsp;IdP Settings
         </a>
+        <a mat-tab-link routerLink="/company-admin/external-ids" routerLinkActive #rla3="routerLinkActive" [active]="rla3.isActive">
+          <mat-icon>tag</mat-icon>&nbsp;External IDs
+        </a>
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #rla4="routerLinkActive" [active]="rla4.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
         </a>
@@ -65,6 +68,12 @@ import { CompanyService } from '../../../core/api/company.service';
         <mat-card-content>
           @if (loadingSettings) {
             <div class="loading-overlay"><mat-spinner diameter="36"></mat-spinner></div>
+          } @else if (loadError) {
+            <div class="load-error" role="alert">
+              <mat-icon>error_outline</mat-icon>
+              <span>Identity-provider settings could not be loaded.</span>
+              <button mat-stroked-button type="button" (click)="load()">Retry</button>
+            </div>
           } @else {
             <p class="info-text">
               Connect an OIDC-compliant Identity Provider. Once configured, users from
@@ -113,16 +122,17 @@ import { CompanyService } from '../../../core/api/company.service';
             </p>
 
             @if (saveError) {
-              <p class="error-message">{{ saveError }}</p>
+              <p class="error-message" role="alert">{{ saveError }}</p>
             }
           }
         </mat-card-content>
 
-        @if (!loadingSettings) {
+        @if (!loadingSettings && !loadError) {
           <mat-card-actions align="end">
-            <button mat-button (click)="reset()">Reset</button>
+            <button mat-button type="button" (click)="reset()">Reset</button>
             <button
               mat-raised-button
+              type="button"
               color="primary"
               [disabled]="saving || !issuerUrl || !clientId"
               (click)="save()"
@@ -164,6 +174,8 @@ import { CompanyService } from '../../../core/api/company.service';
       color: var(--rw-text-muted, #6B7280);
     }
     .error-message { color: var(--rw-text-danger); font-size: 13px; }
+    .load-error { display: grid; justify-items: center; gap: 10px; padding: 40px 16px; color: var(--rw-text-secondary); text-align: center; }
+    .load-error mat-icon { color: var(--rw-text-danger); }
     .managed-banner {
       margin: 0 0 16px;
       padding: 12px 14px;
@@ -187,6 +199,7 @@ export class IdpSettingsComponent implements OnInit {
   idpMfaTrusted = false;
 
   loadingSettings = true;
+  loadError = false;
   saving = false;
   saveError = '';
 
@@ -195,6 +208,12 @@ export class IdpSettingsComponent implements OnInit {
   private origClientId  = '';
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  load(): void {
+    this.loadingSettings = true;
+    this.loadError = false;
     this.companyService.getIdpSettings().subscribe({
       next: (s) => {
         this.issuerUrl  = s.issuerUrl;
@@ -207,18 +226,29 @@ export class IdpSettingsComponent implements OnInit {
         this.loadingSettings = false;
         this.cdr.markForCheck();
       },
-      error: () => { this.loadingSettings = false; this.cdr.markForCheck(); },
+      error: () => {
+        this.loadingSettings = false;
+        this.loadError = true;
+        this.cdr.markForCheck();
+      },
     });
   }
 
   save(): void {
+    if (this.saving) return;
+    const issuerUrl = this.normalizeIssuerUrl(this.issuerUrl);
+    const clientId = this.clientId.trim();
+    if (!issuerUrl || !clientId) {
+      this.saveError = 'Enter a valid HTTP(S) issuer URL and client ID.';
+      return;
+    }
     this.saving = true;
     this.saveError = '';
 
     this.companyService
       .saveIdpSettings({
-        issuerUrl: this.issuerUrl,
-        clientId:  this.clientId,
+        issuerUrl,
+        clientId,
       })
       .subscribe({
         next: () => {
@@ -250,6 +280,18 @@ export class IdpSettingsComponent implements OnInit {
         return 'Member accounts in the registry operator’s tenant';
       default:
         return 'Local accounts';
+    }
+  }
+
+  private normalizeIssuerUrl(value: string): string | null {
+    try {
+      const url = new URL(value.trim());
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+      url.hash = '';
+      url.search = '';
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      return null;
     }
   }
 }

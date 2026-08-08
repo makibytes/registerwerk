@@ -9,6 +9,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { EntityService } from '../../../core/api/entity.service';
 
 @Component({
@@ -24,6 +25,7 @@ import { EntityService } from '../../../core/api/entity.service';
     MatIconModule,
     MatProgressSpinnerModule,
     MatDividerModule,
+    MatSnackBarModule,
   ],
   styles: [`
     .back-row { margin-bottom: 12px; }
@@ -149,6 +151,7 @@ export class CreateEntityComponent {
   private readonly entityService = inject(EntityService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
 
   submitting = false;
 
@@ -161,15 +164,26 @@ export class CreateEntityComponent {
   });
 
   submit(): void {
-    if (this.form.invalid) return;
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
     this.submitting = true;
-    this.entityService.createEntity(this.form.value as Record<string, string>).subscribe({
+    const value = this.form.getRawValue();
+    this.entityService.createEntity({
+      ...value,
+      currentName: value.currentName?.trim(),
+      registrationNumber: value.registrationNumber?.trim(),
+      registrationCountry: value.registrationCountry?.trim().toUpperCase(),
+      leiCode: value.leiCode?.trim().toUpperCase(),
+    } as Record<string, string>).subscribe({
       next: (entity) => {
         this.submitting = false;
         this.router.navigate(['/onboarding/token', entity.id]);
       },
-      error: () => {
+      error: (err) => {
         this.submitting = false;
+        this.snackBar.open(err?.error?.message ?? 'Failed to create the entity.', 'Dismiss', { duration: 5000 });
         this.cdr.markForCheck();
       },
     });

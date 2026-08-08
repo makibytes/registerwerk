@@ -31,7 +31,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
     .page-subtitle { font-size: 13px; color: var(--rw-text-secondary); margin: 4px 0 0; }
     .header-actions { display: flex; gap: 8px; }
 
-    .content-card { background: var(--rw-surface); border: 1px solid var(--rw-border); border-radius: 10px; overflow: hidden; }
+    .content-card { background: var(--rw-surface); border: 1px solid var(--rw-border); border-radius: 10px; overflow-x: auto; }
 
     table { width: 100%; border-collapse: collapse; }
     thead th { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--rw-text-muted); padding: 12px 20px; text-align: left; border-bottom: 1px solid var(--rw-border); }
@@ -52,6 +52,11 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
     .empty-state { padding: 60px 24px; text-align: center; }
     .empty-state mat-icon { font-size: 40px; width: 40px; height: 40px; color: var(--rw-text-muted); margin-bottom: 12px; }
     .empty-state p { color: var(--rw-text-muted); font-size: 14px; margin: 4px 0; }
+    @media (max-width: 700px) {
+      .page-header { gap: 12px; flex-direction: column; }
+      .header-actions { flex-wrap: wrap; }
+      table { min-width: 820px; }
+    }
   `],
   template: `
     <div class="page-header">
@@ -74,7 +79,18 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
     </div>
 
     <div class="content-card">
-      @if (wallets().length === 0) {
+      @if (loading()) {
+        <div class="empty-state" role="status">
+          <mat-icon>hourglass_top</mat-icon>
+          <p>Loading wallets…</p>
+        </div>
+      } @else if (loadError()) {
+        <div class="empty-state" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <p><strong>Wallets could not be loaded</strong></p>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
+      } @else if (wallets().length === 0) {
         <div class="empty-state">
           <mat-icon>wallet</mat-icon>
           <p><strong>No wallets configured</strong></p>
@@ -137,12 +153,28 @@ export class WalletsListComponent implements OnInit {
 
   readonly wallets  = signal<OperatorWallet[]>([]);
   readonly defaults = signal<WalletDefault[]>([]);
+  readonly loading = signal(true);
+  readonly loadError = signal(false);
 
-  ngOnInit() { this.load(); }
+  ngOnInit(): void { this.load(); }
 
-  private load() {
-    this.walletService.listWallets().subscribe(w => this.wallets.set(w));
-    this.walletService.listDefaults().subscribe(d => this.defaults.set(d));
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(false);
+    forkJoin({
+      wallets: this.walletService.listWallets(),
+      defaults: this.walletService.listDefaults(),
+    }).subscribe({
+      next: ({ wallets, defaults }) => {
+        this.wallets.set(wallets);
+        this.defaults.set(defaults);
+        this.loading.set(false);
+      },
+      error: () => {
+        this.loading.set(false);
+        this.loadError.set(true);
+      },
+    });
   }
 
   chainLabel(chainId: string): string {
@@ -199,8 +231,10 @@ export class WalletsListComponent implements OnInit {
     if (!confirm(`Export raw private key for "${wallet.name}"?\n\nKeep this secret. Anyone with this key controls the wallet.`)) return;
     this.walletService.exportRaw(wallet.id).subscribe({
       next: key => {
-        navigator.clipboard.writeText(key).then(() =>
-          this.snackBar.open('Private key copied to clipboard — store it safely!', 'OK', { duration: 6000 }));
+        navigator.clipboard.writeText(key).then(
+          () => this.snackBar.open('Private key copied to clipboard — store it safely!', 'OK', { duration: 6000 }),
+          () => this.snackBar.open('Private key export succeeded, but clipboard access was denied.', 'OK', { duration: 6000 }),
+        );
       },
       error: () => this.snackBar.open('Export failed', 'OK', { duration: 3000 }),
     });

@@ -140,6 +140,12 @@ public class ListingLifecycleService {
     public ManifestValidationService.ValidationResult putManifest(DappListing listing, DappVersion version,
                                                                   String manifestRaw, UUID actorId, String actorRole) {
         requireVersionStatus(version, DappVersionStatus.DRAFT);
+        if (manifestRaw == null || manifestRaw.isBlank()) {
+            throw new IllegalArgumentException("Manifest content is required");
+        }
+        if (manifestRaw.length() > 1_000_000) {
+            throw new IllegalArgumentException("Manifest exceeds the 1,000,000 character limit");
+        }
 
         var result = validationService.validate(manifestRaw, listing.getSlug(), listing.getChainConfigId());
         if (!result.valid()) {

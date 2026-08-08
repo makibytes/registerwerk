@@ -1,5 +1,9 @@
 package de.makibytes.registerwerk.customer.web.dto;
 
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
 /**
  * Identity-provider settings a company administrator may edit.
  *
@@ -13,6 +17,15 @@ package de.makibytes.registerwerk.customer.web.dto;
  * a customer vouching for their own MFA is a privilege-escalation path.
  */
 public record CompanyIdpSettingsRequest(
-    String issuerUrl,
-    String clientId
-) {}
+    @Size(max = 512) @Pattern(regexp = "^$|https://\\S+") String issuerUrl,
+    @Size(max = 255) String clientId
+) {
+    @AssertTrue(message = "issuerUrl and clientId must either both be set or both be empty")
+    public boolean isCompletePair() {
+        return isBlank(issuerUrl) == isBlank(clientId);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+}

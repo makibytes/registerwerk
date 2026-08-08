@@ -4,8 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
-import { WalletService } from '../../../core/api/wallet.service';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { ChainHealth } from '../../../core/models';
 import { OperatorWallet } from '../../../core/models';
 import { ChainService } from '../../../core/api/chain.service';
@@ -13,7 +12,7 @@ import { ChainService } from '../../../core/api/chain.service';
 @Component({
   selector: 'app-set-default-dialog',
   standalone: true,
-  imports: [CommonModule, FormsModule, MatButtonModule, MatCheckboxModule, MatDialogModule, MatSnackBarModule],
+  imports: [CommonModule, FormsModule, MatButtonModule, MatCheckboxModule, MatDialogModule, MatProgressSpinnerModule],
   styles: [`
     h2 { margin: 0 0 4px; font-size: 17px; font-weight: 700; }
     .subtitle { font-size: 13px; color: var(--rw-text-muted); margin: 0 0 16px; }
@@ -24,6 +23,7 @@ import { ChainService } from '../../../core/api/chain.service';
     .chain-type.solana { background: rgba(153,69,255,.12); color: #9945FF; }
     .chain-name { font-size: 13px; font-weight: 500; color: var(--rw-text-primary); flex: 1; }
     .no-chains { font-size: 13px; color: var(--rw-text-muted); padding: 16px 0; text-align: center; }
+    .no-chains.error { color: var(--rw-text-danger); }
     .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   `],
   template: `
@@ -32,7 +32,14 @@ import { ChainService } from '../../../core/api/chain.service';
       <p class="subtitle">Select chains where "{{ data.wallet.name }}" will be used as the default signer.</p>
     </div>
     <mat-dialog-content style="padding: 0 24px 8px">
-      @if (compatibleChains().length === 0) {
+      @if (loading()) {
+        <div class="no-chains"><mat-spinner diameter="28" /></div>
+      } @else if (loadError()) {
+        <div class="no-chains error" role="alert">
+          <p>Compatible chains could not be loaded.</p>
+          <button mat-stroked-button type="button" (click)="loadChains()">Retry</button>
+        </div>
+      } @else if (compatibleChains().length === 0) {
         <p class="no-chains">No compatible chains found for {{ data.wallet.type }} wallets.</p>
       } @else {
         <div class="chain-list">
@@ -53,28 +60,43 @@ import { ChainService } from '../../../core/api/chain.service';
     <mat-dialog-actions style="padding: 0 24px 20px">
       <div class="actions">
         <button mat-button mat-dialog-close>Cancel</button>
-        <button mat-flat-button color="primary" [disabled]="selectedCount === 0" (click)="submit()">Apply</button>
+        <button mat-flat-button color="primary" [disabled]="loading() || loadError() || selectedCount === 0" (click)="submit()">Apply</button>
       </div>
     </mat-dialog-actions>
   `,
 })
 export class SetDefaultDialogComponent implements OnInit {
   private readonly dialogRef  = inject(MatDialogRef<SetDefaultDialogComponent>);
-  private readonly walletService = inject(WalletService);
   private readonly chainService  = inject(ChainService);
-  private readonly snackBar      = inject(MatSnackBar);
   readonly data: { wallet: OperatorWallet } = inject(MAT_DIALOG_DATA);
 
   compatibleChains = signal<ChainHealth[]>([]);
+  loading = signal(true);
+  loadError = signal(false);
   selection: Record<string, boolean> = {};
 
   get selectedCount() { return Object.values(this.selection).filter(Boolean).length; }
 
   ngOnInit() {
-    this.chainService.getHealth().subscribe(chains => {
-      const filtered = chains.filter(c => c.chainType === this.data.wallet.type);
-      this.compatibleChains.set(filtered);
-      filtered.forEach(c => this.selection[c.id] = this.data.wallet.defaultForChains.includes(c.id));
+    this.loadChains();
+  }
+
+  loadChains(): void {
+    this.loading.set(true);
+    this.loadError.set(false);
+    this.chainService.getHealth().subscribe({
+      next: (chains) => {
+        const filtered = chains.filter(c => c.chainType === this.data.wallet.type);
+        this.selection = Object.fromEntries(
+          filtered.map(c => [c.id, this.data.wallet.defaultForChains.includes(c.id)]),
+        );
+        this.compatibleChains.set(filtered);
+        this.loading.set(false);
+      },
+      error: () => {
+        this.loading.set(false);
+        this.loadError.set(true);
+      },
     });
   }
 

@@ -14,6 +14,7 @@ import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.web.dto.AssetDocumentResponse;
 import de.makibytes.registerwerk.kyc.web.dto.JurisdictionRequirementResponse;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -98,7 +99,9 @@ public class PublicController {
         byte[] content = termSheetService.getDocumentContent(doc.getId());
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION,
-                "attachment; filename=\"" + (doc.getFileName() != null ? doc.getFileName() : "term_sheet") + "\"")
+                ContentDisposition.attachment()
+                    .filename(doc.getFileName() != null ? doc.getFileName() : "term_sheet")
+                    .build().toString())
             .contentType(MediaType.parseMediaType(doc.getMimeType()))
             .body(content);
     }

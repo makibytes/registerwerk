@@ -13,6 +13,8 @@ public interface AssetDeploymentRepository extends JpaRepository<AssetDeployment
 
     List<AssetDeployment> findByAssetId(UUID assetId);
 
+    Optional<AssetDeployment> findByIdAndAssetId(UUID id, UUID assetId);
+
     List<AssetDeployment> findByChainAndNetwork(Chain chain, Network network);
 
     Optional<AssetDeployment> findByChainAndNetworkAndContractAddress(

@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.util.List;
 import java.util.UUID;
@@ -47,7 +48,7 @@ public class AdminErasureRequestController {
     @PostMapping("/{id}/complete")
     @RequiresStepUp(requireSecondApprover = true, reason = "DSAR_ERASURE_COMPLETE")
     public ResponseEntity<ErasureRequestResponse> complete(
-            @PathVariable UUID id, @RequestBody(required = false) ResolveErasureRequest req, Authentication auth,
+            @PathVariable UUID id, @RequestBody(required = false) @Valid ResolveErasureRequest req, Authentication auth,
             @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         UUID operatorId = SecurityUtils.extractUserId(auth);
         String note = req != null ? req.note() : null;
@@ -58,7 +59,7 @@ public class AdminErasureRequestController {
     @PostMapping("/{id}/reject")
     @RequiresStepUp(reason = "DSAR_ERASURE_REJECT")
     public ResponseEntity<ErasureRequestResponse> reject(
-            @PathVariable UUID id, @RequestBody(required = false) ResolveErasureRequest req, Authentication auth) {
+            @PathVariable UUID id, @RequestBody(required = false) @Valid ResolveErasureRequest req, Authentication auth) {
         UUID operatorId = SecurityUtils.extractUserId(auth);
         String note = req != null ? req.note() : null;
         return ResponseEntity.ok(ErasureRequestResponse.from(erasureService.reject(id, operatorId, note)));

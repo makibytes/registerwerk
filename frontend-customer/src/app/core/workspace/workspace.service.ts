@@ -8,6 +8,7 @@ export interface WorkspaceNavLink {
   label: string;
   route: string;
   icon: string;
+  roles?: readonly string[];
 }
 
 export interface WorkspaceDef {
@@ -32,7 +33,7 @@ const WORKSPACES: Record<WorkspaceKey, WorkspaceDef> = {
       ...(environment.lendingEnabled
         ? [{ label: 'Liquidity', route: '/lending', icon: 'water_drop' }]
         : []),
-      { label: 'Trading Desk', route: '/trading', icon: 'candlestick_chart' },
+      { label: 'Trading Desk', route: '/trading', icon: 'candlestick_chart', roles: ['TRADER', 'REGISTRY_ADMIN'] },
       { label: 'My Positions', route: '/positions', icon: 'account_balance_wallet' },
       { label: 'Marketplace', route: '/marketplace', icon: 'storefront' },
     ],
@@ -44,8 +45,8 @@ const WORKSPACES: Record<WorkspaceKey, WorkspaceDef> = {
     links: [
       { label: 'Dashboard', route: '/dashboard', icon: 'grid_view' },
       { label: 'My Positions', route: '/positions', icon: 'account_balance_wallet' },
-      { label: 'Investments', route: '/investments', icon: 'savings' },
-      { label: 'My Orders', route: '/investments/orders', icon: 'receipt_long' },
+      { label: 'Investments', route: '/investments', icon: 'savings', roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
+      { label: 'My Orders', route: '/investments/orders', icon: 'receipt_long', roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
       { label: 'Marketplace', route: '/marketplace', icon: 'storefront' },
     ],
   },
@@ -55,9 +56,9 @@ const WORKSPACES: Record<WorkspaceKey, WorkspaceDef> = {
     icon: 'description',
     links: [
       { label: 'Dashboard', route: '/dashboard', icon: 'grid_view' },
-      { label: 'Issuances', route: '/issuances', icon: 'description' },
-      { label: 'My dApps', route: '/publisher', icon: 'widgets' },
-      { label: 'Company Admin', route: '/company-admin', icon: 'manage_accounts' },
+      { label: 'Issuances', route: '/issuances', icon: 'description', roles: ['ISSUER', 'REGISTRY_ADMIN'] },
+      { label: 'My dApps', route: '/publisher', icon: 'widgets', roles: ['DAPP_PUBLISHER', 'COMPANY_ADMIN', 'REGISTRY_ADMIN'] },
+      { label: 'Company Admin', route: '/company-admin', icon: 'manage_accounts', roles: ['COMPANY_ADMIN', 'REGISTRY_ADMIN'] },
       { label: 'Marketplace', route: '/marketplace', icon: 'storefront' },
     ],
   },
@@ -88,16 +89,17 @@ export class WorkspaceService {
   eligibleWorkspaces(): WorkspaceDef[] {
     return DEFAULT_PRIORITY
       .filter((key) => ELIGIBILITY[key].some((role) => this.auth.hasRole(role)))
-      .map((key) => WORKSPACES[key]);
+      .map((key) => this.withAccessibleLinks(WORKSPACES[key]));
   }
 
   /** The active workspace definition, initializing from storage or the eligible default. */
   activeWorkspace(): WorkspaceDef {
     const key = this.resolveActiveKey();
-    return WORKSPACES[key];
+    return this.withAccessibleLinks(WORKSPACES[key]);
   }
 
   setWorkspace(key: WorkspaceKey): void {
+    if (!this.isEligible(key)) return;
     this._current.set(key);
     try {
       localStorage.setItem(STORAGE_KEY, key);
@@ -125,6 +127,15 @@ export class WorkspaceService {
 
   private isEligible(key: WorkspaceKey): boolean {
     return ELIGIBILITY[key].some((role) => this.auth.hasRole(role));
+  }
+
+  private withAccessibleLinks(workspace: WorkspaceDef): WorkspaceDef {
+    return {
+      ...workspace,
+      links: workspace.links.filter(link =>
+        !link.roles || link.roles.some(role => this.auth.hasRole(role))
+      ),
+    };
   }
 
   private readStored(): WorkspaceKey | null {

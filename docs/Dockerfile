@@ -31,6 +31,9 @@ ENV BACKEND_URL=${BACKEND_URL}
 RUN mkdocs build --strict
 
 FROM nginx:1.30.4-alpine
+RUN sed -i 's/^worker_processes.*/worker_processes 2;/' /etc/nginx/nginx.conf
 COPY --from=build /docs/site /usr/share/nginx/html
 COPY docs/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+    CMD wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1

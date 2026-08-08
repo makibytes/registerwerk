@@ -1,12 +1,9 @@
 package de.makibytes.registerwerk.travelrule.internal;
 
 import de.makibytes.registerwerk.travelrule.api.CaspAuthorizationStatus;
-import de.makibytes.registerwerk.travelrule.events.CaspRegisterImportedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -42,25 +39,22 @@ public class CaspRegisterImportService {
 
     private static final Logger log = LoggerFactory.getLogger(CaspRegisterImportService.class);
     private static final int MAX_REPORTED_ERRORS = 20;
+    private static final int MAX_CSV_CHARS = 5_000_000;
 
-    private final CaspRegistryService registryService;
-    private final CaspAuthorizationRepository repository;
-    private final ApplicationEventPublisher eventPublisher;
+    private final CaspRegisterImportWriter writer;
 
-    CaspRegisterImportService(CaspRegistryService registryService,
-                              CaspAuthorizationRepository repository,
-                              ApplicationEventPublisher eventPublisher) {
-        this.registryService = registryService;
-        this.repository = repository;
-        this.eventPublisher = eventPublisher;
+    CaspRegisterImportService(CaspRegisterImportWriter writer) {
+        this.writer = writer;
     }
 
     public record ImportResult(int created, int updated, int failed, List<String> errors) {}
 
-    @Transactional
     public ImportResult importCsv(String csvContent, String source, UUID actorId, String actorRole) {
         if (csvContent == null || csvContent.isBlank()) {
             return new ImportResult(0, 0, 0, List.of("Empty file."));
+        }
+        if (csvContent.length() > MAX_CSV_CHARS) {
+            throw new IllegalArgumentException("CSV import exceeds the 5,000,000 character limit");
         }
         String[] lines = csvContent.split("\\R");
         char delimiter = detectDelimiter(lines[0]);
@@ -107,9 +101,8 @@ public class CaspRegisterImportService {
                 entry.setNotes(trimToNull(cell(cells, header, "notes")));
                 entry.setSource(source);
 
-                boolean exists = repository.findByVaspDidIgnoreCase(entry.getVaspDid()).isPresent();
-                registryService.upsert(entry);
-                if (exists) {
+                boolean existed = writer.upsert(entry, actorId, actorRole);
+                if (existed) {
                     updated++;
                 } else {
                     created++;
@@ -123,9 +116,7 @@ public class CaspRegisterImportService {
         }
         log.info("CASP register import: {} created, {} updated, {} failed (source: {})",
                 created, updated, failed, source);
-        eventPublisher.publishEvent(new CaspRegisterImportedEvent(UUID.randomUUID(), actorId, actorRole, Map.of(
-                "source", source, "created", created, "updated", updated, "failed", failed
-        )));
+        writer.recordCompleted(source, created, updated, failed, actorId, actorRole);
         return new ImportResult(created, updated, failed, errors);
     }
 

@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.erc3643.api.OnchainClaim;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -21,4 +22,6 @@ public interface OnchainClaimRepository extends JpaRepository<OnchainClaim, UUID
      * Useful for checking whether a required claim topic is satisfied.
      */
     List<OnchainClaim> findByOnchainIdentityIdAndTopic(UUID onchainIdentityId, long topic);
+
+    Optional<OnchainClaim> findByIdAndOnchainIdentityId(UUID id, UUID onchainIdentityId);
 }

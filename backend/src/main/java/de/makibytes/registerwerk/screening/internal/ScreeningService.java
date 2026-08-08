@@ -5,18 +5,18 @@ import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort;
 import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
+import de.makibytes.registerwerk.screening.api.NaturalPersonScreeningSubjectResolver;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningHitDto;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningSubjectDto;
 import de.makibytes.registerwerk.screening.events.SanctionsHitAcceptedEvent;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import java.math.BigDecimal;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.scheduling.annotation.Scheduled;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,7 +25,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Orchestrates sanctions/PEP screening runs.
@@ -47,18 +46,15 @@ public class ScreeningService {
     private final ScreeningHitRepository hitRepository;
     private final ApplicationEventPublisher events;
     private final LegalEntityRepository legalEntityRepository;
-
-    // Snapshot of periodicRefresh()'s last run — no table records a "refresh run" as a whole
-    // (only per-entity ScreeningRun rows), so this in-memory counter is what backs the
-    // periodic-refresh-failures gauge (repo-wide alerting-gap follow-up).
-    private final AtomicInteger lastPeriodicRefreshFailures = new AtomicInteger(0);
+    private final NaturalPersonScreeningSubjectResolver naturalPersonResolver;
 
     ScreeningService(List<SanctionsScreeningPort> providers,
                      ScreeningRunRepository runRepository,
                      ScreeningHitRepository hitRepository,
                      ApplicationEventPublisher events,
                      LegalEntityRepository legalEntityRepository,
-                     MeterRegistry meterRegistry) {
+                     MeterRegistry meterRegistry,
+                     NaturalPersonScreeningSubjectResolver naturalPersonResolver) {
         // Live query at scrape time, like the chain-drift gauge — a hit sitting open too long is
         // exactly the GwG §10 timeliness risk this metric exists to catch.
         Gauge.builder("registerwerk_sanctions_oldest_open_hit_seconds", hitRepository,
@@ -75,20 +71,34 @@ public class ScreeningService {
                                 ScreeningStatus.ERROR, Instant.now().minus(RECENT_ERROR_WINDOW)))
                 .description("Count of ScreeningRun rows with status=ERROR in the last 24h")
                 .register(meterRegistry);
-        Gauge.builder("registerwerk_screening_periodic_refresh_last_failures", lastPeriodicRefreshFailures,
-                        AtomicInteger::get)
-                .description("Number of entities that failed re-screening in the most recent daily periodic refresh")
-                .register(meterRegistry);
         this.providers = providers;
         this.runRepository = runRepository;
         this.hitRepository = hitRepository;
         this.events = events;
         this.legalEntityRepository = legalEntityRepository;
+        this.naturalPersonResolver = naturalPersonResolver;
+    }
+
+    @Transactional
+    public ScreeningRun screenRegisteredEntity(UUID entityId, ScreeningTrigger trigger) {
+        LegalEntity entity = legalEntityRepository.findById(entityId)
+                .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
+        return screenEntity(entityId, entity.getCurrentName(), entity.getRegistrationCountry(),
+                entity.getLeiCode(), trigger);
     }
 
     @Transactional
     public ScreeningRun screenEntity(UUID entityId, String entityName, String countryCode,
                                      String lei, ScreeningTrigger trigger) {
+        if (entityName == null || entityName.isBlank()) {
+            throw new IllegalArgumentException("Entity name is required for screening");
+        }
+        if (trigger == null) {
+            throw new IllegalArgumentException("Screening trigger is required");
+        }
+        if (providers.isEmpty()) {
+            throw new IllegalStateException("No sanctions-screening provider is configured");
+        }
         log.info("Screening entity={} trigger={}", entityId, trigger);
         for (SanctionsScreeningPort provider : providers) {
             ScreeningRun run = new ScreeningRun();
@@ -133,8 +143,26 @@ public class ScreeningService {
 
     /** Screen a natural person (beneficial owner, UBO). GwG §11 Abs. 1 Nr. 4. */
     @Transactional
+    public ScreeningRun screenRegisteredNaturalPerson(UUID naturalPersonId, ScreeningTrigger trigger) {
+        NaturalPersonScreeningSubjectResolver.NaturalPersonScreeningSubject subject = naturalPersonResolver
+                .findById(naturalPersonId)
+                .orElseThrow(() -> new EntityNotFoundException("NaturalPerson", naturalPersonId));
+        return screenNaturalPerson(naturalPersonId, subject.fullName(), subject.countryCode(), trigger);
+    }
+
+    /** Screen a natural person (beneficial owner, UBO). GwG §11 Abs. 1 Nr. 4. */
+    @Transactional
     public ScreeningRun screenNaturalPerson(UUID naturalPersonId, String fullName,
                                              String countryCode, ScreeningTrigger trigger) {
+        if (fullName == null || fullName.isBlank()) {
+            throw new IllegalArgumentException("Natural-person name is required for screening");
+        }
+        if (trigger == null) {
+            throw new IllegalArgumentException("Screening trigger is required");
+        }
+        if (providers.isEmpty()) {
+            throw new IllegalStateException("No sanctions-screening provider is configured");
+        }
         log.info("Screening natural_person={} trigger={}", naturalPersonId, trigger);
         for (SanctionsScreeningPort provider : providers) {
             ScreeningRun run = new ScreeningRun();
@@ -238,41 +266,4 @@ public class ScreeningService {
         }
     }
 
-    /** Daily re-screen of all entities and natural persons (GwG §10 ongoing monitoring). */
-    @SchedulerLock(name = "screeningPeriodicRefresh", lockAtMostFor = "PT2H")
-    @Scheduled(cron = "0 0 1 * * *")
-    @Transactional
-    public void periodicRefresh() {
-        log.info("Starting periodic sanctions re-screening...");
-        List<UUID> entityIds = runRepository.findDistinctActiveEntityIds();
-        // Previously the closing log reported entityIds.size() as "re-screened" — that's the
-        // ATTEMPTED count, not succeeded, so a 100%-failed run logged as if it were healthy
-        // (repo-wide alerting-gap follow-up: track succeeded/failed explicitly).
-        int succeeded = 0;
-        int failed = 0;
-        for (UUID entityId : entityIds) {
-            try {
-                // Load the entity's current data — a screening query without a name
-                // matches nothing and would record a meaningless run.
-                LegalEntity entity = legalEntityRepository.findById(entityId).orElse(null);
-                if (entity == null) {
-                    log.warn("Periodic screening: entity {} no longer exists, skipping.", entityId);
-                    continue;
-                }
-                screenEntity(entityId, entity.getCurrentName(), entity.getRegistrationCountry(),
-                        entity.getLeiCode(), ScreeningTrigger.PERIODIC_REFRESH);
-                succeeded++;
-            } catch (Exception e) {
-                failed++;
-                log.error("Periodic screening failed for entity={}", entityId, e);
-            }
-        }
-        lastPeriodicRefreshFailures.set(failed);
-        if (failed > 0) {
-            log.warn("Periodic screening complete: {} succeeded, {} FAILED of {} attempted.",
-                    succeeded, failed, entityIds.size());
-        } else {
-            log.info("Periodic screening complete: {} entities re-screened.", succeeded);
-        }
-    }
 }

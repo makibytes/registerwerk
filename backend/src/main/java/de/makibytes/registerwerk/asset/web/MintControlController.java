@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.internal.MintControlSyncJob;
 import de.makibytes.registerwerk.deployment.api.MintControlRule;
 import de.makibytes.registerwerk.asset.web.dto.MintControlRuleCreateRequest;
 import de.makibytes.registerwerk.asset.web.dto.MintControlRuleResponse;
+import de.makibytes.registerwerk.asset.web.dto.MintControlRuleUpdateRequest;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -53,7 +54,7 @@ public class MintControlController {
         rule.setMaxAmount(request.maxAmount());
         UUID actorId = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
-        MintControlRule created = mintControlService.createRule(depId, rule, actorId, actorRole);
+        MintControlRule created = mintControlService.createRule(assetId, depId, rule, actorId, actorRole);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
     }
 
@@ -65,7 +66,7 @@ public class MintControlController {
     public ResponseEntity<List<MintControlRuleResponse>> listRules(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {
-        List<MintControlRule> rules = mintControlService.listRules(depId);
+        List<MintControlRule> rules = mintControlService.listRules(assetId, depId);
         return ResponseEntity.ok(rules.stream().map(this::toResponse).toList());
     }
 
@@ -79,7 +80,7 @@ public class MintControlController {
             @PathVariable UUID assetId,
             @PathVariable UUID depId,
             @PathVariable UUID ruleId,
-            @RequestBody MintControlRuleCreateRequest request,
+            @RequestBody @Valid MintControlRuleUpdateRequest request,
             Authentication auth) {
         MintControlRule patch = new MintControlRule();
         patch.setTargetAddress(request.targetAddress());
@@ -87,7 +88,8 @@ public class MintControlController {
         patch.setMaxAmount(request.maxAmount());
         UUID actorId = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
-        MintControlRule updated = mintControlService.updateRule(ruleId, patch, actorId, actorRole);
+        mintControlService.requireDeployment(assetId, depId);
+        MintControlRule updated = mintControlService.updateRule(depId, ruleId, patch, actorId, actorRole);
         return ResponseEntity.ok(toResponse(updated));
     }
 
@@ -103,7 +105,8 @@ public class MintControlController {
             Authentication auth) {
         UUID actorId = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
-        mintControlService.deactivateRule(ruleId, actorId, actorRole);
+        mintControlService.requireDeployment(assetId, depId);
+        mintControlService.deactivateRule(depId, ruleId, actorId, actorRole);
         return ResponseEntity.noContent().build();
     }
 
@@ -115,7 +118,8 @@ public class MintControlController {
     public ResponseEntity<Void> syncRules(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {
-        mintControlSyncJob.syncFromChain();
+        mintControlService.requireDeployment(assetId, depId);
+        mintControlSyncJob.syncDeployment(depId);
         return ResponseEntity.accepted().build();
     }
 

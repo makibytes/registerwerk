@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.web.dto.ChainConfigCreateRequest;
 import de.makibytes.registerwerk.chain.web.dto.ChainConfigResponse;
 import de.makibytes.registerwerk.chain.web.dto.ChainHealthResponse;
+import de.makibytes.registerwerk.chain.web.dto.ChainConfigUpdateRequest;
 import de.makibytes.registerwerk.chain.web.ChainConfigMapper;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -75,7 +76,7 @@ public class ChainConfigController {
     @PatchMapping("/{id}")
     public ResponseEntity<ChainConfigResponse> updateChain(
             @PathVariable UUID id,
-            @RequestBody ChainConfigCreateRequest request) {
+            @RequestBody @Valid ChainConfigUpdateRequest request) {
         // Map the incoming request fields onto a patch entity; null-valued fields will be ignored.
         ChainConfig patch = new ChainConfig();
         patch.setDisplayName(request.displayName());
@@ -111,7 +112,7 @@ public class ChainConfigController {
     @PostMapping("/refresh")
     public ResponseEntity<Void> refreshClients() {
         chainConfigService.refreshBlockchainClients();
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 
     /**

@@ -29,12 +29,12 @@ import { CompanyUser, UserRole } from '../../../core/models';
     <mat-dialog-content>
       <mat-form-field appearance="outline" class="full-width">
         <mat-label>Email</mat-label>
-        <input matInput type="email" [(ngModel)]="email" required placeholder="colleague@company.com" />
+        <input matInput type="email" maxlength="320" autocomplete="email" [(ngModel)]="email" required placeholder="colleague@company.com" />
       </mat-form-field>
 
       <mat-form-field appearance="outline" class="full-width">
         <mat-label>Full Name</mat-label>
-        <input matInput [(ngModel)]="name" required placeholder="Jane Smith" />
+        <input matInput maxlength="200" autocomplete="name" [(ngModel)]="name" required placeholder="Jane Smith" />
       </mat-form-field>
 
       <mat-form-field appearance="outline" class="full-width">
@@ -47,16 +47,17 @@ import { CompanyUser, UserRole } from '../../../core/models';
       </mat-form-field>
 
       @if (error) {
-        <p class="error-message">{{ error }}</p>
+        <p class="error-message" role="alert">{{ error }}</p>
       }
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-button type="button" mat-dialog-close>Cancel</button>
       <button
         mat-raised-button
         color="primary"
-        [disabled]="saving || !email || !name || selectedRoles.length === 0"
+        type="button"
+        [disabled]="saving || !isValidEmail() || !name.trim() || selectedRoles.length === 0"
         (click)="invite()"
       >
         @if (saving) { <mat-spinner diameter="18"></mat-spinner> }
@@ -90,11 +91,14 @@ export class InviteUserDialogComponent {
   ];
 
   invite(): void {
+    const email = this.email.trim().toLowerCase();
+    const name = this.name.trim();
+    if (this.saving || !this.isValidEmail() || !name || this.selectedRoles.length === 0) return;
     this.saving = true;
     this.error = '';
 
     this.companyService
-      .inviteUser({ email: this.email, name: this.name, roles: this.selectedRoles })
+      .inviteUser({ email, name, roles: [...new Set(this.selectedRoles)] })
       .subscribe({
         next: (user) => this.dialogRef.close(user),
         error: (err) => {
@@ -103,5 +107,9 @@ export class InviteUserDialogComponent {
           this.cdr.markForCheck();
         },
       });
+  }
+
+  isValidEmail(): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.email.trim());
   }
 }

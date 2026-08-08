@@ -133,10 +133,12 @@ class BeneficialOwnerServiceTest {
         UUID entityId = UUID.randomUUID();
         BeneficialOwner bo = new BeneficialOwner();
         bo.setEntityId(entityId);
-        when(beneficialOwnerRepository.findById(boId)).thenReturn(Optional.of(bo));
+        ReflectionTestUtils.setField(bo, "id", boId);
+        when(beneficialOwnerRepository.findByIdAndEntityId(boId, entityId)).thenReturn(Optional.of(bo));
         when(beneficialOwnerRepository.save(any(BeneficialOwner.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        BeneficialOwner result = service.ceaseBeneficialOwner(boId, UUID.randomUUID(), "REGISTRY_ADMIN");
+        BeneficialOwner result = service.ceaseBeneficialOwner(
+                entityId, boId, UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(result.getCeasedAt()).isNotNull();
         ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
@@ -148,11 +150,14 @@ class BeneficialOwnerServiceTest {
     @DisplayName("ceaseBeneficialOwner rejects an already-ceased link")
     void ceaseBeneficialOwner_rejectsAlreadyCeased() {
         UUID boId = UUID.randomUUID();
+        UUID entityId = UUID.randomUUID();
         BeneficialOwner bo = new BeneficialOwner();
+        bo.setEntityId(entityId);
         bo.setCeasedAt(java.time.Instant.now());
-        when(beneficialOwnerRepository.findById(boId)).thenReturn(Optional.of(bo));
+        when(beneficialOwnerRepository.findByIdAndEntityId(boId, entityId)).thenReturn(Optional.of(bo));
 
-        assertThatThrownBy(() -> service.ceaseBeneficialOwner(boId, UUID.randomUUID(), "REGISTRY_ADMIN"))
+        assertThatThrownBy(() -> service.ceaseBeneficialOwner(
+                entityId, boId, UUID.randomUUID(), "REGISTRY_ADMIN"))
                 .isInstanceOf(InvalidStateTransitionException.class);
     }
 }

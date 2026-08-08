@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.VaultRequest;
 import de.makibytes.registerwerk.deployment.api.VaultRequestRepository;
 import de.makibytes.registerwerk.deployment.api.VaultRequestStatus;
+import de.makibytes.registerwerk.deployment.api.VaultRequestType;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
@@ -70,55 +71,44 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
 
     public UUID fulfillDepositRequest(UUID deploymentId, BigInteger onChainRequestId,
                                       BigDecimal navAtFulfill, UUID actorId, String actorRole) {
-        log.info("Fulfilling deposit request={} on deployment={} at NAV={}",
-                onChainRequestId, deploymentId, navAtFulfill);
-
         AssetDeployment dep = requireDeployment(deploymentId);
-
-        Function fn = new Function("fulfillDepositRequest",
-                Collections.singletonList(new Uint256(onChainRequestId)),
-                Collections.emptyList());
-
-        UUID txId = submitEvm(dep, fn, "fulfillDepositRequest",
-                Map.of("requestId", onChainRequestId.toString(), "navAtFulfill", navAtFulfill.toPlainString()),
-                actorId, actorRole);
-
-        vaultRequestRepository.findByAssetIdAndRequestId(dep.getAssetId(), onChainRequestId)
-                .ifPresent(req -> {
-                    req.setRequestStatus(VaultRequestStatus.FULFILLED);
-                    req.setFulfilledAt(Instant.now());
-                    req.setNavAtFulfill(navAtFulfill);
-                    vaultRequestRepository.save(req);
-                });
-
-        return txId;
+        VaultRequest request = requirePendingRequest(dep, onChainRequestId, VaultRequestType.DEPOSIT);
+        return fulfill(dep, request, navAtFulfill, actorId, actorRole);
     }
 
     // ── Fulfill redeem request ────────────────────────────────────────────────
 
     public UUID fulfillRedeemRequest(UUID deploymentId, BigInteger onChainRequestId,
                                      BigDecimal navAtFulfill, UUID actorId, String actorRole) {
-        log.info("Fulfilling redeem request={} on deployment={} at NAV={}",
-                onChainRequestId, deploymentId, navAtFulfill);
-
         AssetDeployment dep = requireDeployment(deploymentId);
+        VaultRequest request = requirePendingRequest(dep, onChainRequestId, VaultRequestType.REDEEM);
+        return fulfill(dep, request, navAtFulfill, actorId, actorRole);
+    }
 
-        Function fn = new Function("fulfillRedeemRequest",
-                Collections.singletonList(new Uint256(onChainRequestId)),
+    @Override
+    public UUID fulfillRequest(UUID deploymentId, BigInteger onChainRequestId,
+                               BigDecimal navAtFulfill, UUID actorId, String actorRole) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        VaultRequest request = requirePendingRequest(dep, onChainRequestId, null);
+        return fulfill(dep, request, navAtFulfill, actorId, actorRole);
+    }
+
+    private UUID fulfill(AssetDeployment dep, VaultRequest request, BigDecimal navAtFulfill,
+                         UUID actorId, String actorRole) {
+        String functionName = request.getRequestType() == VaultRequestType.DEPOSIT
+                ? "fulfillDepositRequest" : "fulfillRedeemRequest";
+        log.info("Fulfilling {} request={} on deployment={} at NAV={}",
+                request.getRequestType(), request.getRequestId(), dep.getId(), navAtFulfill);
+        Function fn = new Function(functionName,
+                Collections.singletonList(new Uint256(request.getRequestId())),
                 Collections.emptyList());
-
-        UUID txId = submitEvm(dep, fn, "fulfillRedeemRequest",
-                Map.of("requestId", onChainRequestId.toString(), "navAtFulfill", navAtFulfill.toPlainString()),
-                actorId, actorRole);
-
-        vaultRequestRepository.findByAssetIdAndRequestId(dep.getAssetId(), onChainRequestId)
-                .ifPresent(req -> {
-                    req.setRequestStatus(VaultRequestStatus.FULFILLED);
-                    req.setFulfilledAt(Instant.now());
-                    req.setNavAtFulfill(navAtFulfill);
-                    vaultRequestRepository.save(req);
-                });
-
+        UUID txId = submitEvm(dep, fn, functionName,
+                Map.of("requestId", request.getRequestId().toString(),
+                        "navAtFulfill", navAtFulfill.toPlainString()), actorId, actorRole);
+        request.setRequestStatus(VaultRequestStatus.FULFILLED);
+        request.setFulfilledAt(Instant.now());
+        request.setNavAtFulfill(navAtFulfill);
+        vaultRequestRepository.save(request);
         return txId;
     }
 
@@ -126,36 +116,42 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
 
     public UUID cancelDepositRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId, String actorRole) {
         log.info("Cancelling deposit request={} on deployment={}", onChainRequestId, deploymentId);
-        return cancelRequest(deploymentId, onChainRequestId, "cancelDepositRequest", actorId, actorRole);
+        return cancelExpectedRequest(
+                deploymentId, onChainRequestId, VaultRequestType.DEPOSIT, actorId, actorRole);
     }
 
     public UUID cancelRedeemRequest(UUID deploymentId, BigInteger onChainRequestId, UUID actorId, String actorRole) {
         log.info("Cancelling redeem request={} on deployment={}", onChainRequestId, deploymentId);
-        return cancelRequest(deploymentId, onChainRequestId, "cancelRedeemRequest", actorId, actorRole);
+        return cancelExpectedRequest(
+                deploymentId, onChainRequestId, VaultRequestType.REDEEM, actorId, actorRole);
     }
 
-    private UUID cancelRequest(UUID deploymentId, BigInteger onChainRequestId, String fnName,
-                               UUID actorId, String actorRole) {
+    @Override
+    public UUID cancelRequest(UUID deploymentId, BigInteger onChainRequestId,
+                              UUID actorId, String actorRole) {
+        return cancelExpectedRequest(deploymentId, onChainRequestId, null, actorId, actorRole);
+    }
+
+    private UUID cancelExpectedRequest(UUID deploymentId, BigInteger onChainRequestId,
+                                       VaultRequestType expectedType, UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
+        VaultRequest request = requirePendingRequest(dep, onChainRequestId, expectedType);
+        String fnName = request.getRequestType() == VaultRequestType.DEPOSIT
+                ? "cancelDepositRequest" : "cancelRedeemRequest";
         Function fn = new Function(fnName,
                 Collections.singletonList(new Uint256(onChainRequestId)),
                 Collections.emptyList());
         UUID txId = submitEvm(dep, fn, fnName, Map.of("requestId", onChainRequestId.toString()), actorId, actorRole);
-
-        vaultRequestRepository.findByAssetIdAndRequestId(dep.getAssetId(), onChainRequestId)
-                .ifPresent(req -> {
-                    req.setRequestStatus(VaultRequestStatus.CANCELLED);
-                    vaultRequestRepository.save(req);
-                });
-
+        request.setRequestStatus(VaultRequestStatus.CANCELLED);
+        vaultRequestRepository.save(request);
         return txId;
     }
 
     // ── Query ─────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public List<VaultRequest> listPendingRequests(UUID assetId) {
-        return vaultRequestRepository.findByAssetIdAndRequestStatus(assetId, VaultRequestStatus.PENDING);
+    public List<VaultRequest> listRequests(UUID assetId, VaultRequestStatus status) {
+        return vaultRequestRepository.findByAssetIdAndRequestStatus(assetId, status);
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -167,6 +163,23 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
             throw new IllegalStateException("Vault contract not yet deployed: deploymentId=" + deploymentId);
         }
         return dep;
+    }
+
+    private VaultRequest requirePendingRequest(AssetDeployment deployment, BigInteger requestId,
+                                               VaultRequestType expectedType) {
+        VaultRequest request = vaultRequestRepository
+                .findByAssetIdAndRequestId(deployment.getAssetId(), requestId)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "VaultRequest", "requestId", requestId.toString()));
+        if (expectedType != null && request.getRequestType() != expectedType) {
+            throw new IllegalArgumentException("Vault request " + requestId + " is "
+                    + request.getRequestType() + ", not " + expectedType);
+        }
+        if (request.getRequestStatus() != VaultRequestStatus.PENDING) {
+            throw new IllegalStateException("Vault request " + requestId + " is already "
+                    + request.getRequestStatus());
+        }
+        return request;
     }
 
     /**

@@ -3,12 +3,15 @@ package de.makibytes.registerwerk.registertransfer.web;
 import de.makibytes.registerwerk.registertransfer.api.RegisterInspectionRequest;
 import de.makibytes.registerwerk.registertransfer.internal.RegisterInspectionService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,6 +28,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/register-inspections")
+@Validated
 public class RegisterInspectionController {
 
     private final RegisterInspectionService inspectionService;
@@ -73,8 +77,8 @@ public class RegisterInspectionController {
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN','COMPLIANCE_OFFICER')")
     public Page<RegisterInspectionRequest> listForAsset(
             @PathVariable UUID assetId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return inspectionService.listForAsset(assetId, PageRequest.of(page, Math.min(size, 100)));
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return inspectionService.listForAsset(assetId, PageRequest.of(page, size));
     }
 }

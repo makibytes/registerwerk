@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -57,7 +58,8 @@ public class WebhookSubscriptionController {
     }
 
     @PutMapping("/{id}/enabled")
-    public ResponseEntity<Void> setEnabled(@PathVariable UUID id, @RequestBody SetEnabledRequest request, Authentication auth) {
+    public ResponseEntity<Void> setEnabled(@PathVariable UUID id, @RequestBody @Valid SetEnabledRequest request,
+                                           Authentication auth) {
         service.setEnabled(requireEntityId(auth), id, request.enabled());
         return ResponseEntity.noContent().build();
     }
@@ -77,7 +79,7 @@ public class WebhookSubscriptionController {
     private UUID requireEntityId(Authentication auth) {
         UUID entityId = SecurityUtils.extractEntityId(auth);
         if (entityId == null) {
-            throw new IllegalArgumentException("Authenticated entity context is required");
+            throw new AccessDeniedException("Authenticated entity context is required");
         }
         return entityId;
     }

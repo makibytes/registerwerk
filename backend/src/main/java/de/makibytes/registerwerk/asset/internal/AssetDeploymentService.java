@@ -67,6 +67,7 @@ public class AssetDeploymentService {
     private final Erc3643DeploymentPort erc3643DeploymentPort;
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
+    private final AssetDeploymentCompletionWriter completionWriter;
 
     public AssetDeploymentService(
             AssetDeploymentRepository assetDeploymentRepository,
@@ -75,7 +76,8 @@ public class AssetDeploymentService {
             TokenDeploymentPort tokenDeploymentPort,
             Erc3643DeploymentPort erc3643DeploymentPort,
             BlockchainClientRegistry blockchainClientRegistry,
-            EvmContractService evmContractService) {
+            EvmContractService evmContractService,
+            AssetDeploymentCompletionWriter completionWriter) {
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
@@ -83,6 +85,7 @@ public class AssetDeploymentService {
         this.erc3643DeploymentPort = erc3643DeploymentPort;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
+        this.completionWriter = completionWriter;
     }
 
     /**
@@ -116,37 +119,11 @@ public class AssetDeploymentService {
         txFuture.whenComplete((result, ex) -> {
             if (ex != null) {
                 log.error("Deployment failed for deploymentId={}", deploymentId, ex);
-                assetDeploymentRepository.findById(deploymentId).ifPresent(dep -> {
-                    dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.FAILED);
-                    assetDeploymentRepository.save(dep);
-                });
-                eventPublisher.publishEvent(new DeploymentFailedEvent(
-                        deploymentId, actorId, null, ex.getMessage()));
+                completionWriter.markFailed(deploymentId, actorId, ex);
             } else {
                 log.info("Deployment tx sent: deploymentId={}, txHash={}, contractAddress={}",
                         deploymentId, result.txHash(), result.contractAddress());
-                assetDeploymentRepository.findById(deploymentId).ifPresent(dep -> {
-                    dep.setDeployedByTx(result.txHash());
-                    if (result.contractAddress() != null && !result.contractAddress().isBlank()) {
-                        // The chains reaching this branch (EVM's standard token/vault types via
-                        // send(), which already waits for a mined, non-reverted receipt before
-                        // returning; Starknet's UDC precomputation; a Stellar issuer account) all
-                        // know the real, final address by the time we have it here — so this is
-                        // a genuine confirmation, not just an early hint. Previously this only
-                        // stored the address and left status at PENDING, relying on a separate
-                        // syncFromChain() call that keyed confirmation on TransactionReceipt
-                        // .getContractAddress() — always null for factory/CREATE2-pattern
-                        // deployments, so every one of these deployments was later marked FAILED.
-                        dep.setContractAddress(result.contractAddress());
-                        dep.setDeployedAt(Instant.now());
-                        dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
-                        assetDeploymentRepository.save(dep);
-                        eventPublisher.publishEvent(new DeploymentConfirmedEvent(
-                                deploymentId, actorId, null, result.contractAddress(), result.txHash()));
-                    } else {
-                        assetDeploymentRepository.save(dep);
-                    }
-                });
+                completionWriter.markSubmitted(deploymentId, actorId, result);
             }
         });
 
@@ -173,6 +150,13 @@ public class AssetDeploymentService {
     @Transactional(readOnly = true)
     public AssetDeployment getDeployment(UUID deploymentId) {
         return assetDeploymentRepository.findById(deploymentId)
+            .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+    }
+
+    /** Resolves a deployment only when it is actually nested below the supplied asset. */
+    @Transactional(readOnly = true)
+    public AssetDeployment getDeployment(UUID assetId, UUID deploymentId) {
+        return assetDeploymentRepository.findByIdAndAssetId(deploymentId, assetId)
             .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
     }
 
@@ -207,6 +191,16 @@ public class AssetDeploymentService {
      */
     public void syncFromChain(UUID deploymentId) {
         AssetDeployment deployment = getDeployment(deploymentId);
+        syncFromChain(deployment);
+    }
+
+    /** Same operation with an explicit parent/child ownership invariant for REST resources. */
+    public void syncFromChain(UUID assetId, UUID deploymentId) {
+        syncFromChain(getDeployment(assetId, deploymentId));
+    }
+
+    private void syncFromChain(AssetDeployment deployment) {
+        UUID deploymentId = deployment.getId();
         String txHash = deployment.getDeployedByTx();
 
         if (txHash == null || txHash.isBlank() || txHash.startsWith("0x-PENDING")) {

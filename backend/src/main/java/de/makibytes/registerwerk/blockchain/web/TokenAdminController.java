@@ -79,7 +79,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1/assets/{assetId}/deployments/{depId}/admin")
-@PreAuthorize("hasRole('REGISTRY_ADMIN')")
+@PreAuthorize("hasRole('REGISTRY_ADMIN') and @deploymentAccessChecker.belongsToAsset(#depId, #assetId)")
 public class TokenAdminController {
 
     private static final Logger log = LoggerFactory.getLogger(TokenAdminController.class);
@@ -167,7 +167,8 @@ public class TokenAdminController {
     }
 
     @PostMapping("/forced-transfer")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
     public ResponseEntity<TxSubmissionResponse> forcedTransfer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -178,7 +179,8 @@ public class TokenAdminController {
     }
 
     @PostMapping("/forced-transfer-single")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
     public ResponseEntity<TxSubmissionResponse> forcedTransferSingle(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -189,7 +191,8 @@ public class TokenAdminController {
     }
 
     @PostMapping("/forced-approve")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_APPROVE_OVERRIDE")
     public ResponseEntity<TxSubmissionResponse> forcedApprove(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -200,7 +203,8 @@ public class TokenAdminController {
     }
 
     @PostMapping("/force-burn")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> forceBurn(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -211,7 +215,8 @@ public class TokenAdminController {
     }
 
     @PostMapping("/force-burn-single")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> forceBurnSingle(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -228,7 +233,8 @@ public class TokenAdminController {
      * is and is not verified end-to-end without a live relayer.
      */
     @PostMapping("/force-burn-confidential")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> forceBurnConfidential(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -244,7 +250,8 @@ public class TokenAdminController {
      * {@code ConfidentialERC20.addViewer}'s doc comment on the additive/non-retroactive ACL model.
      */
     @PostMapping("/confidential-add-viewer")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     public ResponseEntity<TxSubmissionResponse> confidentialAddViewer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ConfidentialViewerRequest request, Authentication auth) {
@@ -258,7 +265,8 @@ public class TokenAdminController {
      * retroactively revoke access to already-granted ciphertext handles.
      */
     @PostMapping("/confidential-remove-viewer")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     public ResponseEntity<TxSubmissionResponse> confidentialRemoveViewer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ConfidentialViewerRequest request, Authentication auth) {
@@ -316,7 +324,8 @@ public class TokenAdminController {
 
     /** Forced transfer (issuer-authority, e.g. regulatory recovery). */
     @PostMapping("/force-transfer-canton")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
     public ResponseEntity<CantonUpdateResponse> forceTransferCanton(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -331,7 +340,8 @@ public class TokenAdminController {
 
     /** Burns Canton tokens from a specific holding. */
     @PostMapping("/burn-holding")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<CantonUpdateResponse> burnHolding(
             @PathVariable UUID assetId, @PathVariable UUID depId,

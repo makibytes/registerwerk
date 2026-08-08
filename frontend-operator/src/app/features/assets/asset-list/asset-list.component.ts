@@ -14,6 +14,7 @@ import { DatePipe } from '@angular/common';
 import { AssetService } from '../../../core/api/asset.service';
 import { Asset } from '../../../core/models';
 import { StatusBadgeComponent } from '@registerwerk/ui';
+import { AuthService } from '../../../core/auth/auth.service';
 
 @Component({
   selector: 'app-asset-list',
@@ -54,6 +55,18 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
       padding: 48px;
       color: var(--rw-text-muted);
     }
+
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--rw-text-danger);
+    }
+
+    .table-scroll { overflow-x: auto; }
+    table { min-width: 820px; }
 
     code.isin {
       font-size: 12px;
@@ -108,7 +121,14 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
         <div class="spinner-container">
           <mat-spinner diameter="40" />
         </div>
+      } @else if (loadError) {
+        <div class="request-error" role="alert">
+          <mat-icon>cloud_off</mat-icon>
+          <span>Assets could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="loadData()">Retry</button>
+        </div>
       } @else {
+        <div class="table-scroll">
         <table mat-table [dataSource]="dataSource" class="full-width-table">
           <ng-container matColumnDef="assetNumber">
             <th mat-header-cell *matHeaderCellDef>Asset Number</th>
@@ -151,18 +171,23 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
           <ng-container matColumnDef="actions">
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let row">
-              <button mat-icon-button color="primary" (click)="viewAsset(row)" matTooltip="View">
+              <button mat-icon-button color="primary" (click)="$event.stopPropagation(); viewAsset(row)"
+                      [attr.aria-label]="'View ' + row.name" matTooltip="View">
                 <mat-icon>open_in_new</mat-icon>
               </button>
-              <button mat-icon-button (click)="editAsset(row)" matTooltip="Edit">
-                <mat-icon>edit</mat-icon>
-              </button>
+              @if (canEdit) {
+                <button mat-icon-button (click)="$event.stopPropagation(); editAsset(row)"
+                        [attr.aria-label]="'Edit ' + row.name" matTooltip="Edit">
+                  <mat-icon>edit</mat-icon>
+                </button>
+              }
             </td>
           </ng-container>
 
           <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
           <tr mat-row *matRowDef="let row; columns: displayedColumns;" style="cursor:pointer" (click)="viewAsset(row)"></tr>
         </table>
+        </div>
 
         @if (dataSource.data.length === 0) {
           <div class="no-data">No assets found.</div>
@@ -184,6 +209,9 @@ export class AssetListComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly assetService = inject(AssetService);
   private readonly router = inject(Router);
+  private readonly auth = inject(AuthService);
+
+  readonly canEdit = this.auth.hasRole('REGISTRY_ADMIN');
 
   readonly displayedColumns = [
     'assetNumber', 'name', 'isin', 'tokenStandard', 'status', 'createdAt', 'actions',
@@ -191,6 +219,7 @@ export class AssetListComponent implements OnInit {
 
   dataSource = new MatTableDataSource<Asset>([]);
   loading = false;
+  loadError = false;
   totalElements = 0;
   pageSize = 25;
   pageIndex = 0;
@@ -207,6 +236,7 @@ export class AssetListComponent implements OnInit {
 
   loadData(): void {
     this.loading = true;
+    this.loadError = false;
     this.assetService
       .getAssets({
         search: this.searchText || undefined,
@@ -220,10 +250,12 @@ export class AssetListComponent implements OnInit {
           this.dataSource.data = resp.content;
           this.totalElements = resp.totalElements;
           this.loading = false;
+          this.loadError = false;
           this.cdr.detectChanges();
         },
         error: () => {
           this.loading = false;
+          this.loadError = true;
           this.cdr.detectChanges();
         },
       });

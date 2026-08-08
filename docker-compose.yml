@@ -64,6 +64,7 @@ services:
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-}
       ENTRA_ENABLED: ${ENTRA_ENABLED:-false}
+      REGISTERWERK_PRODUCTION_MODE: ${REGISTERWERK_PRODUCTION_MODE:-false}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
       JWT_DEV_SECRET: ${JWT_DEV_SECRET:-registerwerk-dev-jwt-secret-change-in-production!!}
@@ -134,6 +135,16 @@ services:
       REGISTERWERK_TRADING_VENUE_TALOS_ENABLED: ${REGISTERWERK_TRADING_VENUE_TALOS_ENABLED:-true}
       REGISTERWERK_TRADING_VENUE_TALOS_BASE_URL: ${REGISTERWERK_TRADING_VENUE_TALOS_BASE_URL:-}
       REGISTERWERK_TRADING_VENUE_TALOS_API_KEY: ${REGISTERWERK_TRADING_VENUE_TALOS_API_KEY:-}
+      REGISTERWERK_TRAVEL_RULE_PROTOCOL: ${REGISTERWERK_TRAVEL_RULE_PROTOCOL:-NOOP}
+      REGISTERWERK_TRAVEL_RULE_NOTABENE_BASE_URL: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_BASE_URL:-https://api.notabene.id}
+      REGISTERWERK_TRAVEL_RULE_NOTABENE_API_KEY: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_API_KEY:-}
+      REGISTERWERK_TRAVEL_RULE_NOTABENE_VASP_DID: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_VASP_DID:-}
+      REGISTERWERK_TRAVEL_RULE_TRP_ENDPOINT: ${REGISTERWERK_TRAVEL_RULE_TRP_ENDPOINT:-}
+      REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL: ${REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL:-https://trp.notabene.id/directory}
+      REGISTERWERK_TRAVEL_RULE_TRP_MTLS_CERT: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_CERT:-}
+      REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY:-}
+      # Shared credential for inbound IVMS-101 delivery. Blank disables the public inbox.
+      REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY: ${REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY:-}
       # Confidential (Zama fhEVM) tokens — the operator-initiated encrypt/decrypt path only;
       # investor/issuer/auditor self-decrypt and investor confidential-transfer encryption happen
       # entirely client-side in the frontends (FheClientService), never through this backend.
@@ -230,7 +241,7 @@ services:
     healthcheck:
       # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
       # resolves to ::1 first inside the container and the probe is refused.
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -259,7 +270,7 @@ services:
     healthcheck:
       # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
       # resolves to ::1 first inside the container and the probe is refused.
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -370,7 +381,7 @@ services:
     healthcheck:
       # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
       # resolves to ::1 first inside the container and the probe is refused.
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

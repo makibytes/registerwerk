@@ -11,6 +11,8 @@ import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -53,7 +55,8 @@ public class ScreeningController {
      */
     @GetMapping("/hits")
     public ResponseEntity<List<OpenHitResponse>> listOpenHits(
-            @RequestParam(defaultValue = "open") String status) {
+            @RequestParam(defaultValue = "open")
+            @Pattern(regexp = "open", message = "only the open work queue is supported") String status) {
         List<ScreeningHit> hits = hitRepository.findByAcceptedIsNullOrderByCreatedAtDesc();
         if (hits.isEmpty()) return ResponseEntity.ok(List.of());
 
@@ -85,20 +88,19 @@ public class ScreeningController {
     /** Trigger on-demand screening for a legal entity (e.g. after name change). */
     @PostMapping("/entities/{entityId}/screen")
     public ResponseEntity<ScreeningRunResponse> screenEntity(
-            @PathVariable UUID entityId,
-            @RequestBody @Valid ScreenEntityRequest req) {
-        ScreeningRun run = screeningService.screenEntity(
-                entityId, req.name(), req.countryCode(), req.lei(), ScreeningTrigger.MANUAL);
+            @PathVariable UUID entityId) {
+        // Always screen the canonical registry record. Accepting a caller-supplied name here
+        // allowed a run attached to entity A to actually screen an unrelated, benign name.
+        ScreeningRun run = screeningService.screenRegisteredEntity(entityId, ScreeningTrigger.MANUAL);
         return ResponseEntity.ok(ScreeningRunResponse.from(run));
     }
 
     /** Trigger on-demand screening for a natural person (beneficial owner). */
     @PostMapping("/persons/{personId}/screen")
     public ResponseEntity<ScreeningRunResponse> screenPerson(
-            @PathVariable UUID personId,
-            @RequestBody @Valid ScreenPersonRequest req) {
-        ScreeningRun run = screeningService.screenNaturalPerson(
-                personId, req.fullName(), req.countryCode(), ScreeningTrigger.MANUAL);
+            @PathVariable UUID personId) {
+        ScreeningRun run = screeningService.screenRegisteredNaturalPerson(
+                personId, ScreeningTrigger.MANUAL);
         return ResponseEntity.ok(ScreeningRunResponse.from(run));
     }
 
@@ -134,19 +136,8 @@ public class ScreeningController {
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
-    public record ScreenEntityRequest(
-            String name,
-            String countryCode,
-            String lei
-    ) {}
-
-    public record ScreenPersonRequest(
-            @NotBlank String fullName,
-            String countryCode
-    ) {}
-
     public record AcceptHitRequest(
-            @NotBlank String reason
+            @NotBlank @Size(max = 2000) String reason
     ) {}
 
     /** Enriched open-hit DTO combining hit + run context for the global work-queue. */

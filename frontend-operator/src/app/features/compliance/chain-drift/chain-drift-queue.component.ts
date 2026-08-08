@@ -22,6 +22,7 @@ import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerw
 import { ChainDriftService } from '../../../core/api/chain-drift.service';
 import { ChainDriftEvent } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
+import { AuthService } from '../../../core/auth/auth.service';
 
 /**
  * Case management for {@code chain_drift_event} — a registry-vs-chain balance divergence
@@ -59,13 +60,14 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       [columns]="columns"
       [rows]="events"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by wallet, asset…"
       emptyMessage="No drift events. The registry and indexed chain balances agree."
       [actionsTemplate]="rowActions">
     </rw-data-table>
 
     <ng-template #rowActions let-event>
-      @if (event.status === 'OPEN') {
+      @if (event.status === 'OPEN' && canResolve) {
         <button mat-stroked-button color="primary" (click)="openResolveDialog(event)">
           <mat-icon>task_alt</mat-icon>
           Resolve
@@ -136,6 +138,9 @@ export class ChainDriftQueueComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly auth = inject(AuthService);
+
+  readonly canResolve = this.auth.hasRole('REGISTRY_ADMIN') || this.auth.hasRole('COMPLIANCE_OFFICER');
 
   events: ChainDriftEvent[] = [];
   state: AsyncSectionStatus = 'pending';

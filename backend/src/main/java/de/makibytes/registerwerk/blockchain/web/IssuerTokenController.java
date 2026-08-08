@@ -45,7 +45,8 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1/assets/{assetId}/deployments/{depId}/issuer")
-@PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+@PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+        "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication))")
 public class IssuerTokenController {
 
     private static final Logger log = LoggerFactory.getLogger(IssuerTokenController.class);
@@ -91,7 +92,8 @@ public class IssuerTokenController {
     }
 
     @PostMapping("/forced-transfer")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "ISSUER_FORCED_TRANSFER_EWG24")
     public ResponseEntity<TxSubmissionResponse> forcedTransfer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -103,7 +105,8 @@ public class IssuerTokenController {
     }
 
     @PostMapping("/forced-approve")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
     @RequiresStepUp(requireSecondApprover = true, reason = "ISSUER_FORCED_APPROVE_OVERRIDE")
     public ResponseEntity<TxSubmissionResponse> forcedApprove(
             @PathVariable UUID assetId, @PathVariable UUID depId,

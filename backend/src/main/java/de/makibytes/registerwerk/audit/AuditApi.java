@@ -21,6 +21,10 @@ public interface AuditApi {
 
     Page<AuditEventView> findAll(Pageable pageable);
 
+    Page<AuditEventView> findFiltered(
+            String subjectType, UUID subjectId, String eventType, UUID actorId,
+            Instant from, Instant to, Pageable pageable);
+
     Optional<AuditEventView> findById(UUID id);
 
     Page<AuditEventView> findKycOverrideApprovals(String jurisdiction, Instant from, Instant to, Pageable pageable);
@@ -31,7 +35,8 @@ public interface AuditApi {
      * unbounded dump of a partitioned, potentially very large table.
      */
     List<AuditEventView> findForExport(
-            String subjectType, String eventType, UUID actorId, Instant from, Instant to, Pageable pageable);
+            String subjectType, UUID subjectId, String eventType, UUID actorId,
+            Instant from, Instant to, Pageable pageable);
 
     /** Most recently computed hash-chain verification result, without triggering a new scan. */
     ChainVerificationView chainVerificationStatus();

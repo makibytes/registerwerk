@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { roleGuard } from '../../core/auth/auth.guard';
 
 export const ASSET_ROUTES: Routes = [
   {
@@ -17,6 +18,8 @@ export const ASSET_ROUTES: Routes = [
   },
   {
     path: ':id/edit',
+    canActivate: [roleGuard],
+    data: { roles: ['REGISTRY_ADMIN'] },
     loadComponent: () =>
       import('./asset-edit/asset-edit.component').then(
         (m) => m.AssetEditComponent
@@ -24,6 +27,8 @@ export const ASSET_ROUTES: Routes = [
   },
   {
     path: ':id/wizards/bond-issuance',
+    canActivate: [roleGuard],
+    data: { roles: ['REGISTRY_ADMIN'] },
     loadComponent: () =>
       import('./wizards/bond-issuance/bond-issuance-wizard.component').then(
         (m) => m.BondIssuanceWizardComponent
@@ -32,6 +37,8 @@ export const ASSET_ROUTES: Routes = [
   },
   {
     path: ':id/wizards/vault-setup',
+    canActivate: [roleGuard],
+    data: { roles: ['REGISTRY_ADMIN'] },
     loadComponent: () =>
       import('./wizards/vault-setup/vault-setup-wizard.component').then(
         (m) => m.VaultSetupWizardComponent

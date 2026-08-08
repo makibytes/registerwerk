@@ -146,7 +146,18 @@ public class TradingService {
         List<CompanyTraderWalletDefault> existing = walletDefaultRepository.findByLegalEntityId(entityId);
         walletDefaultRepository.deleteAll(existing);
         if (request.walletDefaults() != null) {
+            java.util.Set<TradingAssetType> assetTypes = new java.util.HashSet<>();
+            boolean globalDefaultSeen = false;
             for (CompanyTraderWalletDefaultRequest walletDefault : request.walletDefaults()) {
+                if (walletDefault.assetType() == null) {
+                    if (globalDefaultSeen) {
+                        throw new IllegalArgumentException("Only one global wallet default is allowed");
+                    }
+                    globalDefaultSeen = true;
+                } else if (!assetTypes.add(walletDefault.assetType())) {
+                    throw new IllegalArgumentException(
+                            "Duplicate wallet default for asset type " + walletDefault.assetType());
+                }
                 CompanyTraderWalletDefault entity = new CompanyTraderWalletDefault();
                 entity.setLegalEntityId(entityId);
                 entity.setAssetType(walletDefault.assetType());

@@ -18,6 +18,7 @@ import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerw
 import { RegulatoryReportingService } from '../../../core/api/regulatory-reporting.service';
 import { RegulatorySubmission } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
+import { AuthService } from '../../../core/auth/auth.service';
 
 @Component({
   selector: 'app-regulatory-reporting',
@@ -74,6 +75,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       subtitle="Opt-in, non-production draft exports. Output is DRAFT_UNVALIDATED and transport state is not authority filing state.">
     </app-page-header>
 
+    @if (canGenerate) {
     <div class="generate-grid">
       <!-- DAC8/CARF Card -->
       <mat-card class="gen-card">
@@ -127,11 +129,14 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       </mat-card>
     </div>
 
+    }
+
     <h3>Recent Submissions</h3>
     <rw-data-table
       [columns]="submissionColumns"
       [rows]="submissions"
       [state]="state"
+      (retry)="loadSubmissions()"
       filterPlaceholder="Filter submissions…"
       emptyMessage="No report submissions on record.">
     </rw-data-table>
@@ -141,13 +146,16 @@ export class RegulatoryReportingComponent implements OnInit {
   private readonly service = inject(RegulatoryReportingService);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly auth = inject(AuthService);
 
   submissions: RegulatorySubmission[] = [];
   state: AsyncSectionStatus = 'pending';
 
+  readonly canGenerate = this.auth.hasRole('REGISTRY_ADMIN');
+
   readonly currentYear = new Date().getFullYear();
   dac8Year = this.currentYear - 1;
-  mifirDate = new Date(Date.now() - 86400000).toISOString().split('T')[0]; // yesterday
+  mifirDate = this.toLocalDate(new Date(Date.now() - 86_400_000));
 
   generatingDac8 = false;
   generatingMifir = false;
@@ -231,7 +239,7 @@ export class RegulatoryReportingComponent implements OnInit {
         this.generatingDac8 = false;
         this.cdr.markForCheck();
         this.snackBar.open(res.message, 'Dismiss', { duration: 7000 });
-        setTimeout(() => this.loadSubmissions(), 3000);
+        this.loadSubmissions();
       },
       error: (err) => {
         this.generatingDac8 = false;
@@ -250,7 +258,7 @@ export class RegulatoryReportingComponent implements OnInit {
         this.generatingMifir = false;
         this.cdr.markForCheck();
         this.snackBar.open(res.message, 'Dismiss', { duration: 7000 });
-        setTimeout(() => this.loadSubmissions(), 3000);
+        this.loadSubmissions();
       },
       error: (err) => {
         this.generatingMifir = false;
@@ -258,5 +266,10 @@ export class RegulatoryReportingComponent implements OnInit {
         this.snackBar.open(err?.error?.message ?? 'Failed to generate MiFIR report.', 'Dismiss', { duration: 6000 });
       },
     });
+  }
+
+  private toLocalDate(date: Date): string {
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 10);
   }
 }

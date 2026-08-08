@@ -11,9 +11,18 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.mock.http.MockHttpInputMessage;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
@@ -77,5 +86,44 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         verify(eventPublisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("an invalid path-variable type is reported as a 400 without echoing its value")
+    void handleTypeMismatch_returnsSafeBadRequest() {
+        when(request.getRequestURI()).thenReturn("/api/v1/assets/not-a-uuid");
+        MethodArgumentTypeMismatchException exception = new MethodArgumentTypeMismatchException(
+                "not-a-uuid", UUID.class, "id", null, new IllegalArgumentException("conversion failed"));
+
+        ResponseEntity<?> response = handler.handleTypeMismatch(exception, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).extracting("message").isEqualTo("Invalid value for parameter 'id'");
+    }
+
+    @Test
+    @DisplayName("malformed JSON is reported as a 400 instead of falling through to a 500")
+    void handleUnreadableMessage_returnsBadRequest() {
+        when(request.getRequestURI()).thenReturn("/api/v1/assets");
+        MockHttpInputMessage input = new MockHttpInputMessage("{".getBytes(StandardCharsets.UTF_8));
+        HttpMessageNotReadableException exception = new HttpMessageNotReadableException("bad JSON", input);
+
+        ResponseEntity<?> response = handler.handleUnreadableMessage(exception, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).extracting("message").isEqualTo("Request body is missing or malformed");
+    }
+
+    @Test
+    @DisplayName("an unsupported HTTP method is reported as 405")
+    void handleMethodNotSupported_returnsMethodNotAllowed() {
+        when(request.getMethod()).thenReturn(HttpMethod.TRACE.name());
+        when(request.getRequestURI()).thenReturn("/api/v1/assets");
+        HttpRequestMethodNotSupportedException exception =
+                new HttpRequestMethodNotSupportedException("TRACE", List.of("GET"));
+
+        ResponseEntity<?> response = handler.handleMethodNotSupported(exception, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
     }
 }

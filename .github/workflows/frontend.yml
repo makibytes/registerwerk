@@ -15,6 +15,10 @@ on:
       - frontend-customer/**
       - frontend-shared/**
 
+permissions:
+  contents: read
+  security-events: write
+
 concurrency:
   group: frontend-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -56,14 +60,19 @@ jobs:
           cache: npm
           cache-dependency-path: frontend-operator/package-lock.json
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run test -- --watch=false --browsers=ChromeHeadlessCI
       - run: npm run build -- --configuration production
-      - name: Trivy SCA
-        uses: aquasecurity/trivy-action@master
+      - name: Build production container
+        run: docker build -f frontend-operator/Dockerfile -t registerwerk-operator:ci .
+        working-directory: .
+      - name: Scan production container
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          scan-type: fs
-          scan-ref: frontend-operator
+          version: v0.73.0
+          scan-type: image
+          image-ref: registerwerk-operator:ci
           format: sarif
           output: trivy-op.sarif
           severity: HIGH,CRITICAL
@@ -88,14 +97,19 @@ jobs:
           cache: npm
           cache-dependency-path: frontend-customer/package-lock.json
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run test -- --watch=false --browsers=ChromeHeadlessCI
       - run: npm run build -- --configuration production
-      - name: Trivy SCA
-        uses: aquasecurity/trivy-action@master
+      - name: Build production container
+        run: docker build -f frontend-customer/Dockerfile -t registerwerk-customer:ci .
+        working-directory: .
+      - name: Scan production container
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          scan-type: fs
-          scan-ref: frontend-customer
+          version: v0.73.0
+          scan-type: image
+          image-ref: registerwerk-customer:ci
           format: sarif
           output: trivy-cust.sarif
           severity: HIGH,CRITICAL

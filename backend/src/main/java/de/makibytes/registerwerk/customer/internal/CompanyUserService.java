@@ -244,9 +244,13 @@ public class CompanyUserService {
         UUID entityId = requireEntityId(authentication);
         UUID actorId = SecurityUtils.extractUserId(authentication);
         LegalEntity entity = getEntity(entityId);
+        UUID tenantId = tenantIdFromIssuerUrl(request.issuerUrl());
+        if (request.issuerUrl() != null && !request.issuerUrl().isBlank() && tenantId == null) {
+            throw new IllegalArgumentException("issuerUrl must contain a valid tenant UUID");
+        }
         entity.setIdpIssuerUrl(blankToNull(request.issuerUrl()));
         entity.setIdpClientId(blankToNull(request.clientId()));
-        entity.setIdpTenantId(tenantIdFromIssuerUrl(request.issuerUrl()));
+        entity.setIdpTenantId(tenantId);
         legalEntityRepository.save(entity);
 
         eventPublisher.publishEvent(new CompanyIdpSettingsUpdatedEvent(entity.getId(), actorId, null, null));
@@ -440,8 +444,8 @@ public class CompanyUserService {
     /**
      * Extracts the tenant id from an Entra issuer URL such as
      * {@code https://login.microsoftonline.com/<tenant-id>/v2.0}, so federated users can later be
-     * recognised by the {@code tid} on their token. Returns null for anything that is not
-     * recognisably an Entra issuer — a non-Entra IdP is recorded but not tenant-matched.
+     * recognised by the {@code tid} on their token. Returns null when no tenant UUID can be
+     * extracted; callers reject such settings instead of storing an issuer that can never match.
      */
     private static UUID tenantIdFromIssuerUrl(String issuerUrl) {
         if (issuerUrl == null || issuerUrl.isBlank()) {

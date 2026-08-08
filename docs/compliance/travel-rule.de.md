@@ -107,11 +107,20 @@ Registerwerk empfängt auch Travel-Rule-Nachrichten von anderen VASPs, wenn dies
 POST /api/v1/public/travel-rule/inbox
 ```
 
-Dieser Endpunkt ist öffentlich zugänglich (kein JWT erforderlich), erfordert jedoch Kong-seitiges mTLS, um Spoofing zu verhindern. Beim Empfang:
+Dieser Endpunkt benötigt kein Registerwerk-JWT, ist aber nicht anonym. Konfigurieren Sie
+`REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY`; Gegenstellen müssen den Wert im Header
+`X-Travel-Rule-Api-Key` senden. Eine leere Konfiguration deaktiviert den Posteingang. Zusätzlich
+muss `X-Vasp-Id` mit `originatingVasp.vaspId` im Payload übereinstimmen. Ein produktives Gateway
+sollte mTLS als zweite Schutzschicht ergänzen; die mitgelieferte Kong-Konfiguration richtet keine
+Client-Zertifikate ein. Beim Empfang:
 
-1. Die `Ivms101`-Nutzlast wird validiert und als `TravelRuleMessage` mit dem Status `RECEIVED` gespeichert.
-2. Der entsprechende `token_transfer`-Datensatz wird über `transferRef` verknüpft.
-3. Ist der Auftraggeber-VASP unbekannt oder die Nutzlast fehlerhaft, wird die Nachricht als `SUSPICIOUS` gespeichert und für die Überprüfung durch `COMPLIANCE_OFFICER` markiert.
+1. Zugangsdaten, VASP-Identitätsabgleich, Kontonummern und Übertragungsreferenz werden validiert.
+2. Die `Ivms101`-Nutzlast wird einmalig als `TravelRuleMessage` mit dem Status `RECEIVED` gespeichert; wiederholte Übertragungsreferenzen desselben VASP werden ignoriert.
+3. Ungültige Nutzlasten werden mit HTTP 400 abgelehnt und nicht als vertrauenswürdige Travel-Rule-Nachrichten gespeichert.
+
+Der gemeinsame API-Schlüssel authentifiziert den Zugriff auf den Posteingang, nicht die Identität
+eines einzelnen VASP. Verwenden Sie in Produktion je Gegenstelle mTLS oder gleichwertige
+identitätsbezogene Gateway-Kontrollen.
 
 ---
 
@@ -133,7 +142,7 @@ VASP-Abfragen werden über die bestehende Caffeine-Cache-Konfiguration 30 Sekund
 |---|---|---|
 | CASP-zu-CASP-Übertragung | **Beliebiger Betrag** | Vollständige IVMS-101-Übertragung erforderlich — keine De-minimis-Grenze (TFR Art. 14–16) |
 | CASP an selbstgehostete Wallet | ≤ 1.000 € | Auftraggeberinformationen erfassen und speichern (`UNHOSTED_RECORDED`) |
-| CASP an selbstgehostete Wallet | > 1.000 € | Zusätzlich Besitz/Kontrolle über die Adresse überprüfen (Art. 14(5)) — `UNHOSTED_VERIFY_REQUIRED` |
+| CASP an selbstgehostete Wallet | > 1.000 € | Ausführung blockieren, bis Besitz/Kontrolle über die Adresse überprüft ist (Art. 14(5)) — `UNHOSTED_VERIFY_REQUIRED` |
 | Selbstverwahrung durch dieselbe Einheit | Beliebiger Betrag | Außerhalb der CASP-zu-CASP-Übermittlungspflicht — wird aufgezeichnet |
 | CASP-Gegenpartei, aber kein Protokolladapter konfiguriert | Beliebiger Betrag | **Übertragung wird abgelehnt (Fail-Closed / Abweisung im Fehlerfall)** — eine Ausführung ohne die erforderlichen Informationen würde gegen Art. 14 verstoßen |
 

@@ -69,7 +69,7 @@ public class DeploymentController {
     public ResponseEntity<DeploymentResponse> getDeployment(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {
-        AssetDeployment deployment = assetDeploymentService.getDeployment(depId);
+        AssetDeployment deployment = assetDeploymentService.getDeployment(assetId, depId);
         return ResponseEntity.ok(deploymentMapper.toResponse(deployment));
     }
 
@@ -81,7 +81,7 @@ public class DeploymentController {
     public ResponseEntity<Void> syncDeployment(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {
-        assetDeploymentService.syncFromChain(depId);
+        assetDeploymentService.syncFromChain(assetId, depId);
         return ResponseEntity.accepted().build();
     }
 

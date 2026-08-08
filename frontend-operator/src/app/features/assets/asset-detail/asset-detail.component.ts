@@ -48,6 +48,7 @@ import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-top
 import { TransactionService, TxRecord } from '../../../core/api/transaction.service';
 import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../shared/components/address-picker-dialog.component';
 import { ConfidentialViewerPanelComponent } from '../../../shared/components/confidential-viewer-panel/confidential-viewer-panel.component';
+import { AuthService } from '../../../core/auth/auth.service';
 
 @Component({
   selector: 'app-asset-detail',
@@ -145,6 +146,15 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
 
     .spinner-wrap { display: flex; justify-content: center; padding: 40px; }
 
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 40px 20px;
+      color: var(--rw-text-danger);
+      text-align: center;
+    }
+
     .jurisdiction-badge {
       font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
       background: rgba(99,102,241,0.12); color: #6366f1;
@@ -206,6 +216,12 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
+    } @else if (loadError) {
+      <div class="request-error" role="alert">
+        <mat-icon>cloud_off</mat-icon>
+        <span>The asset could not be loaded.</span>
+        <button mat-stroked-button type="button" (click)="loadAsset()">Retry</button>
+      </div>
     } @else if (asset) {
       <div class="asset-header">
         <div class="asset-title">
@@ -218,6 +234,7 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
           }
         </div>
         <div class="asset-actions">
+          @if (canMutate) {
           @if (asset.status === 'PENDING_APPROVAL') {
             <button mat-raised-button color="primary" (click)="approve()">Approve</button>
           }
@@ -237,6 +254,7 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
             <mat-icon>edit</mat-icon>
             Edit
           </button>
+          }
         </div>
       </div>
 
@@ -430,6 +448,7 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
           <div class="tab-content">
             <div class="termsheet-header">
               <h3>Term Sheet Documents</h3>
+              @if (canMutate) {
               <label>
                 <input #tsFileInput type="file"
                   accept=".pdf,.html,.htm,.txt,.md,.json,.xml,.docx"
@@ -445,6 +464,7 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
                   <mat-icon>cloud_download</mat-icon>
                   @if (tsSyncing) { Syncing… } @else { Sync from Chain }
                 </button>
+              }
               }
             </div>
 
@@ -499,9 +519,11 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
                         <mat-icon>download</mat-icon>
                       </button>
                     }
-                    <button mat-icon-button matTooltip="Delete" color="warn" (click)="deleteTermSheet(d)">
-                      <mat-icon>delete_outline</mat-icon>
-                    </button>
+                    @if (canMutate) {
+                      <button mat-icon-button matTooltip="Delete" color="warn" (click)="deleteTermSheet(d)">
+                        <mat-icon>delete_outline</mat-icon>
+                      </button>
+                    }
                   </td>
                 </ng-container>
                 <tr mat-header-row *matHeaderRowDef="termSheetColumns"></tr>
@@ -511,6 +533,7 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
           </div>
         </mat-tab>
 
+        @if (canMutate) {
         <!-- Corporate Actions — coupon/dividend/split/redemption/call lifecycle -->
         <mat-tab label="Corporate Actions">
           <app-corporate-actions [assetId]="id" />
@@ -540,9 +563,10 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
         <mat-tab label="Token Admin Grants">
           <app-force-grants [assetId]="id" />
         </mat-tab>
+        }
 
         <!-- Mint Control (only if CONTROL level) -->
-        @if (asset.onchainLevel === 'CONTROL') {
+        @if (canMutate && asset.onchainLevel === 'CONTROL') {
           <mat-tab label="Mint Control">
             <div class="tab-content">
               <h3 style="font-size:16px;font-weight:500;margin-bottom:16px">Mint Tokens</h3>
@@ -669,6 +693,7 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
                   }
                 </div>
 
+                @if (canMutate) {
                 <h3 style="font-size:14px;font-weight:500;margin:0 0 12px">Set a deployment-specific override</h3>
                 <div class="mint-form">
                   <mat-form-field appearance="outline">
@@ -695,13 +720,14 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
                     }
                   </div>
                 </div>
+                }
               }
             </div>
           </mat-tab>
         }
 
         <!-- Vault (ERC-4626 / ERC-7540 tokenized funds — NAV strikes + redemption requests) -->
-        @if (isVaultStandard && primaryDeploymentId) {
+        @if (canMutate && isVaultStandard && primaryDeploymentId) {
           <mat-tab label="Vault">
             <div class="tab-content">
               <app-nav-strike [deploymentId]="primaryDeploymentId" />
@@ -712,14 +738,14 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
         }
 
         <!-- Solana Admin (SPL Token-2022 — Permanent Delegate forced-transfer/force-burn, freeze/thaw) -->
-        @if (isSolanaSplStandard && primaryDeploymentId) {
+        @if (canMutate && isSolanaSplStandard && primaryDeploymentId) {
           <mat-tab label="Solana Admin">
             <app-solana-admin [assetId]="id" [deploymentId]="primaryDeploymentId" />
           </mat-tab>
         }
 
         <!-- Slots (ERC-3525 semi-fungible bonds — tranche admin, regulatory token ops) -->
-        @if (isErc3525 && primaryDeploymentId) {
+        @if (canMutate && isErc3525 && primaryDeploymentId) {
           <mat-tab label="Slots">
             <div class="tab-content">
               <app-slot-admin [deploymentId]="primaryDeploymentId" />
@@ -770,9 +796,11 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
             <div class="tab-content">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <strong>Registered Investors</strong>
+                @if (canMutate) {
                 <button mat-raised-button color="primary" (click)="openRegisterInvestorDialog()">
                   <mat-icon>person_add</mat-icon> Register Investor
                 </button>
+                }
               </div>
               @if (irLoading) {
                 <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
@@ -791,9 +819,11 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
                   <ng-container matColumnDef="actions">
                     <th mat-header-cell *matHeaderCellDef></th>
                     <td mat-cell *matCellDef="let e">
+                      @if (canMutate) {
                       <button mat-icon-button color="warn" (click)="removeInvestor(e)" [matTooltip]="'Remove from IdentityRegistry'">
                         <mat-icon>person_remove</mat-icon>
                       </button>
+                      }
                     </td>
                   </ng-container>
                   <tr mat-header-row *matHeaderRowDef="irColumns"></tr>
@@ -846,6 +876,7 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
                 </table>
               }
 
+              @if (canMutate) {
               <!-- Admin Actions -->
               <mat-divider style="margin:24px 0" />
               <h4 style="font-size:14px;font-weight:500;margin-bottom:12px">Regulatory Actions</h4>
@@ -943,11 +974,12 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
                   </div>
                 </div>
               </div>
+              }
             </div>
           </mat-tab>
 
           <!-- Bulk Operations — CSV batch-mint/batch-forced-transfer/batch-burn -->
-          @if (primaryDeploymentId) {
+          @if (canMutate && primaryDeploymentId) {
             <mat-tab label="Bulk Operations">
               <app-bulk-erc3643-ops [assetId]="id" [deploymentId]="primaryDeploymentId" />
             </mat-tab>
@@ -958,9 +990,11 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
             <div class="tab-content">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <strong>Trusted Claim Issuers</strong>
+                @if (canMutate) {
                 <button mat-raised-button color="primary" (click)="openAddIssuerDialog()">
                   <mat-icon>add</mat-icon> Add Issuer
                 </button>
+                }
               </div>
               @if (issuersLoading) {
                 <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
@@ -969,7 +1003,7 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
                   <ng-container matColumnDef="address"><th mat-header-cell *matHeaderCellDef>Issuer Address</th><td mat-cell *matCellDef="let i"><app-address [address]="i.issuerAddress" /></td></ng-container>
                   <ng-container matColumnDef="topics"><th mat-header-cell *matHeaderCellDef>Claim Topics</th><td mat-cell *matCellDef="let i">{{ i.claimTopics.join(', ') }}</td></ng-container>
                   <ng-container matColumnDef="added"><th mat-header-cell *matHeaderCellDef>Added</th><td mat-cell *matCellDef="let i">{{ i.addedAt | date:'mediumDate' }}</td></ng-container>
-                  <ng-container matColumnDef="actions"><th mat-header-cell *matHeaderCellDef></th><td mat-cell *matCellDef="let i"><button mat-icon-button color="warn" (click)="removeIssuer(i)"><mat-icon>delete</mat-icon></button></td></ng-container>
+                  <ng-container matColumnDef="actions"><th mat-header-cell *matHeaderCellDef></th><td mat-cell *matCellDef="let i">@if (canMutate) { <button mat-icon-button color="warn" (click)="removeIssuer(i)"><mat-icon>delete</mat-icon></button> }</td></ng-container>
                   <tr mat-header-row *matHeaderRowDef="issuerColumns"></tr>
                   <tr mat-row *matRowDef="let row; columns: issuerColumns;"></tr>
                 </table>
@@ -985,9 +1019,11 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
             <div class="tab-content">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <strong>Required Claim Topics</strong>
+                @if (canMutate) {
                 <button mat-raised-button color="primary" (click)="openAddClaimTopicDialog()">
                   <mat-icon>add</mat-icon> Add Topic
                 </button>
+                }
               </div>
               @if (topicsLoading) {
                 <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
@@ -1071,8 +1107,12 @@ export class AssetDetailComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly auth = inject(AuthService);
+
+  readonly canMutate = this.auth.hasRole('REGISTRY_ADMIN');
 
   loading = true;
+  loadError = false;
   deploymentsLoading = false;
   holdersLoading = false;
 
@@ -1184,10 +1224,12 @@ export class AssetDetailComponent implements OnInit {
 
   loadAsset(): void {
     this.loading = true;
+    this.loadError = false;
     this.assetService.getAsset(this.id).subscribe({
       next: (asset) => {
         this.asset = asset;
         this.loading = false;
+        this.loadError = false;
         this.cdr.markForCheck();
         this.loadDeployments();
         this.loadHolders();
@@ -1196,7 +1238,7 @@ export class AssetDetailComponent implements OnInit {
           this.loadKycCompliance(asset.id);
         }
       },
-      error: () => { this.loading = false; this.cdr.markForCheck(); },
+      error: () => { this.loading = false; this.loadError = true; this.cdr.markForCheck(); },
     });
   }
 
@@ -1304,6 +1346,7 @@ export class AssetDetailComponent implements OnInit {
           this.cdr.markForCheck();
           this.snackBar.open('Rule created.', 'OK', { duration: 2000 });
         },
+        error: (err) => this.showActionError('Failed to create rule.', err),
       });
     });
   }
@@ -1316,6 +1359,7 @@ export class AssetDetailComponent implements OnInit {
         this.mintRules = this.mintRules.filter(r => r.id !== rule.id);
         this.snackBar.open('Rule deactivated.', 'OK', { duration: 2000 });
       },
+      error: (err) => this.showActionError('Failed to deactivate rule.', err),
     });
   }
 
@@ -1388,6 +1432,7 @@ export class AssetDetailComponent implements OnInit {
             this.loadIdentityRegistry(depId);
             this.snackBar.open('Investor registered.', 'OK', { duration: 2000 });
           },
+          error: (err) => this.showActionError('Failed to register investor.', err),
         });
       });
   }
@@ -1400,6 +1445,7 @@ export class AssetDetailComponent implements OnInit {
         this.loadIdentityRegistry(depId);
         this.snackBar.open('Investor removed.', 'OK', { duration: 2000 });
       },
+      error: (err) => this.showActionError('Failed to remove investor.', err),
     });
   }
 
@@ -1415,6 +1461,7 @@ export class AssetDetailComponent implements OnInit {
             this.loadTrustedIssuers(depId);
             this.snackBar.open('Trusted issuer added.', 'OK', { duration: 2000 });
           },
+          error: (err) => this.showActionError('Failed to add trusted issuer.', err),
         });
       });
   }
@@ -1427,6 +1474,7 @@ export class AssetDetailComponent implements OnInit {
         this.trustedIssuers = this.trustedIssuers.filter(i => i.id !== issuer.id);
         this.snackBar.open('Trusted issuer removed.', 'OK', { duration: 2000 });
       },
+      error: (err) => this.showActionError('Failed to remove trusted issuer.', err),
     });
   }
 
@@ -1442,6 +1490,7 @@ export class AssetDetailComponent implements OnInit {
             this.loadClaimTopics(depId);
             this.snackBar.open('Claim topic added.', 'OK', { duration: 2000 });
           },
+          error: (err) => this.showActionError('Failed to add claim topic.', err),
         });
       });
   }
@@ -1469,6 +1518,7 @@ export class AssetDetailComponent implements OnInit {
     if (!depId || !confirm('Pause all token transfers?')) return;
     this.erc3643Service.pause(this.id, depId).subscribe({
       next: (r) => this.txService.track(r.txId, 'Pause token'),
+      error: (err) => this.showActionError('Failed to pause token.', err),
     });
   }
 
@@ -1477,6 +1527,7 @@ export class AssetDetailComponent implements OnInit {
     if (!depId) return;
     this.erc3643Service.unpause(this.id, depId).subscribe({
       next: (r) => this.txService.track(r.txId, 'Unpause token'),
+      error: (err) => this.showActionError('Failed to unpause token.', err),
     });
   }
 
@@ -1486,6 +1537,7 @@ export class AssetDetailComponent implements OnInit {
     const addr = this.freezeAddress;
     this.erc3643Service.freezeAddress(this.id, depId, addr).subscribe({
       next: (r) => { this.txService.track(r.txId, `Freeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; },
+      error: (err) => this.showActionError('Failed to freeze address.', err),
     });
   }
 
@@ -1495,6 +1547,7 @@ export class AssetDetailComponent implements OnInit {
     const addr = this.freezeAddress;
     this.erc3643Service.unfreezeAddress(this.id, depId, addr).subscribe({
       next: (r) => { this.txService.track(r.txId, `Unfreeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; },
+      error: (err) => this.showActionError('Failed to unfreeze address.', err),
     });
   }
 
@@ -1510,6 +1563,7 @@ export class AssetDetailComponent implements OnInit {
         this.txService.track(r.txId, 'Forced transfer');
         this.forceFrom = ''; this.forceTo = ''; this.forceAmount = ''; this.forceReason = '';
       },
+      error: (err) => this.showActionError('Forced transfer failed.', err),
     });
   }
 
@@ -1525,6 +1579,7 @@ export class AssetDetailComponent implements OnInit {
         this.txService.track(r.txId, 'Force burn');
         this.forceBurnFrom = ''; this.forceBurnAmount = ''; this.forceBurnLegalBasis = '';
       },
+      error: (err) => this.showActionError('Forced burn failed.', err),
     });
   }
 
@@ -1539,25 +1594,40 @@ export class AssetDetailComponent implements OnInit {
   }
 
   approve(): void {
-    this.assetService.approveAsset(this.id).subscribe({ next: () => this.loadAsset() });
+    this.assetService.approveAsset(this.id).subscribe({
+      next: () => this.loadAsset(),
+      error: (err) => this.showActionError('Failed to approve asset.', err),
+    });
   }
 
   issue(): void {
-    this.assetService.issueAsset(this.id).subscribe({ next: () => this.loadAsset() });
+    this.assetService.issueAsset(this.id).subscribe({
+      next: () => this.loadAsset(),
+      error: (err) => this.showActionError('Failed to issue asset.', err),
+    });
   }
 
   suspend(): void {
-    this.assetService.suspendAsset(this.id).subscribe({ next: () => this.loadAsset() });
+    this.assetService.suspendAsset(this.id).subscribe({
+      next: () => this.loadAsset(),
+      error: (err) => this.showActionError('Failed to suspend asset.', err),
+    });
   }
 
   /** Correction path for a wrongful suspend — moves the asset back to ISSUED. */
   reactivate(): void {
-    this.assetService.reactivateAsset(this.id).subscribe({ next: () => this.loadAsset() });
+    this.assetService.reactivateAsset(this.id).subscribe({
+      next: () => this.loadAsset(),
+      error: (err) => this.showActionError('Failed to reactivate asset.', err),
+    });
   }
 
   redeem(): void {
     if (!confirm('Redeem this asset? This is a final action.')) return;
-    this.assetService.redeemAsset(this.id).subscribe({ next: () => this.loadAsset() });
+    this.assetService.redeemAsset(this.id).subscribe({
+      next: () => this.loadAsset(),
+      error: (err) => this.showActionError('Failed to redeem asset.', err),
+    });
   }
 
   mintTokens(): void {
@@ -1570,6 +1640,7 @@ export class AssetDetailComponent implements OnInit {
         this.mintAmount = null;
         this.loadHolders();
       },
+      error: (err) => this.showActionError('Mint failed.', err),
     });
   }
 
@@ -1583,6 +1654,7 @@ export class AssetDetailComponent implements OnInit {
         this.burnAmount = null;
         this.loadHolders();
       },
+      error: (err) => this.showActionError('Burn failed.', err),
     });
   }
 
@@ -1657,25 +1729,16 @@ export class AssetDetailComponent implements OnInit {
   }
 
   downloadTermSheet(doc: AssetDocument): void {
-    this.assetService.downloadDocument(this.id, doc.id).subscribe(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = doc.fileName ?? 'term_sheet';
-      a.click();
-      URL.revokeObjectURL(url);
+    this.assetService.downloadDocument(this.id, doc.id).subscribe({
+      next: (blob) => this.download(blob, doc.fileName ?? 'term_sheet'),
+      error: (err) => this.showActionError('Failed to download term sheet.', err),
     });
   }
 
   exportHolderRegister(): void {
     this.assetService.exportHolders(this.id).subscribe({
       next: blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `holder-register-${this.id}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
+        this.download(blob, `holder-register-${this.id}.csv`);
       },
       error: () => this.snackBar.open('Failed to export holder register.', 'Close', { duration: 4000 }),
     });
@@ -1683,10 +1746,13 @@ export class AssetDetailComponent implements OnInit {
 
   deleteTermSheet(doc: AssetDocument): void {
     if (!confirm('Delete this document?')) return;
-    this.assetService.deleteDocument(this.id, doc.id).subscribe(() => {
-      this.termSheetDocs = this.termSheetDocs.filter(d => d.id !== doc.id);
-      if (this.termSheetDocs.length === 0 && this.asset) this.asset.hasTermSheet = false;
-      this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
+    this.assetService.deleteDocument(this.id, doc.id).subscribe({
+      next: () => {
+        this.termSheetDocs = this.termSheetDocs.filter(d => d.id !== doc.id);
+        if (this.termSheetDocs.length === 0 && this.asset) this.asset.hasTermSheet = false;
+        this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
+      },
+      error: (err) => this.showActionError('Failed to delete document.', err),
     });
   }
 
@@ -1703,5 +1769,20 @@ export class AssetDetailComponent implements OnInit {
 
   goBack(): void {
     this.router.navigate(['/assets']);
+  }
+
+  private showActionError(fallback: string, error: { error?: { message?: string } }): void {
+    this.snackBar.open(error?.error?.message ?? fallback, 'Dismiss', { duration: 5000 });
+  }
+
+  private download(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 }

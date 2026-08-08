@@ -43,6 +43,7 @@ import {
       [columns]="columns"
       [rows]="listings"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by name, slug, publisher…"
       emptyMessage="No listings yet."
       [actionsTemplate]="rowActions">

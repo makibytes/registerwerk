@@ -7,6 +7,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 import java.time.Instant;
 import java.util.List;
@@ -26,15 +28,15 @@ public final class PaymentRailDtos {
             @NotBlank @Size(max = 200) String displayName,
             @NotNull PaymentRailType railType,
             @NotBlank @Pattern(regexp = "^[A-Z]{3}$", message = "currency must be an ISO-4217 code") String currency,
-            Integer decimals,
+            @Min(0) @Max(255) Integer decimals,
             @Size(max = 1000) String description,
             @Size(max = 200) String issuerName,
             @Size(max = 20) String issuerLei,
             @Size(max = 200) String micarAuthorization,
             boolean emtFlag,
-            @Size(max = 500) String whitePaperUrl,
+            @Size(max = 500) @Pattern(regexp = "^$|https://\\S+$", message = "must use HTTPS") String whitePaperUrl,
             boolean redemptionAtPar,
-            List<@Valid ChainAddressRequest> chainAddresses) {}
+            @Size(max = 100) List<@Valid ChainAddressRequest> chainAddresses) {}
 
     public record ChainAddressResponse(UUID chainConfigId, String chainIdentifier, String tokenAddress) {}
 

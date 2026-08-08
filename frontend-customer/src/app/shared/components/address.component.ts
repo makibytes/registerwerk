@@ -62,19 +62,19 @@ import { EndpointDialogComponent } from './endpoint-dialog.component';
       <span class="addr-name" [matTooltip]="address">{{ resolved }}</span>
     } @else {
       <span class="addr-short" [matTooltip]="address">{{ shortened }}</span>
-      <button class="addr-btn addr-add" (click)="openEndpointDialog($event)"
-              matTooltip="Add to address book">
+      <button class="addr-btn addr-add" type="button" (click)="openEndpointDialog($event)"
+              matTooltip="Add to address book" aria-label="Add address to address book">
         <mat-icon>bookmark_add</mat-icon>
       </button>
     }
 
-    <button class="addr-btn" (click)="copy($event)" matTooltip="Copy address">
+    <button class="addr-btn" type="button" (click)="copy($event)" matTooltip="Copy address" aria-label="Copy address">
       <mat-icon>content_copy</mat-icon>
     </button>
 
-    @if (explorerUrl) {
-      <a class="addr-btn" [href]="explorerUrl + '/address/' + address" target="_blank" rel="noopener"
-         matTooltip="View in explorer">
+    @if (explorerAddressUrl; as externalAddressUrl) {
+      <a class="addr-btn" [href]="externalAddressUrl" target="_blank" rel="noopener noreferrer"
+         matTooltip="View in explorer" aria-label="View address in block explorer">
         <mat-icon>open_in_new</mat-icon>
       </a>
     }
@@ -102,6 +102,7 @@ export class AddressComponent implements OnChanges {
   get shortened(): string {
     if (!this.address) return '';
     const a = this.address;
+    if (a.length <= 16) return a;
     return a.startsWith('0x')
       ? a.slice(0, 8) + '…' + a.slice(-6)
       : a.slice(0, 6) + '…' + a.slice(-6);
@@ -109,16 +110,37 @@ export class AddressComponent implements OnChanges {
 
   copy(event: Event): void {
     event.stopPropagation();
-    navigator.clipboard.writeText(this.address).then(() => {
-      this.snackBar.open('Address copied', '', { duration: 1800 });
-    });
+    if (!navigator.clipboard) {
+      this.snackBar.open('Clipboard access is unavailable.', 'Dismiss', { duration: 4000 });
+      return;
+    }
+    navigator.clipboard.writeText(this.address).then(
+      () => this.snackBar.open('Address copied', '', { duration: 1800 }),
+      () => this.snackBar.open('Could not copy the address.', 'Dismiss', { duration: 4000 }),
+    );
   }
 
   openEndpointDialog(event: Event): void {
     event.stopPropagation();
     this.dialog.open(EndpointDialogComponent, {
       width: '420px',
+      maxWidth: '95vw',
       data: { address: this.address },
     });
+  }
+
+  get explorerAddressUrl(): string | null {
+    if (!this.explorerUrl || !this.address) return null;
+    try {
+      const base = new URL(this.explorerUrl);
+      if (base.protocol !== 'https:' && base.protocol !== 'http:') return null;
+      const path = `${base.pathname.replace(/\/$/, '')}/address/${encodeURIComponent(this.address)}`;
+      base.pathname = path;
+      base.search = '';
+      base.hash = '';
+      return base.toString();
+    } catch {
+      return null;
+    }
   }
 }

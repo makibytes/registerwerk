@@ -108,7 +108,7 @@ public class CustomerController {
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
     public ResponseEntity<EntityResponse> assignRelationshipManager(
             @PathVariable UUID id,
-            @RequestBody de.makibytes.registerwerk.customer.web.dto.AssignRelationshipManagerRequest request,
+            @RequestBody @Valid de.makibytes.registerwerk.customer.web.dto.AssignRelationshipManagerRequest request,
             Authentication auth) {
         LegalEntity updated = legalEntityService.assignRelationshipManager(id, request.relationshipManagerId(), extractActorId(auth));
         return ResponseEntity.ok(toResponse(updated, auth));

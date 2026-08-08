@@ -56,6 +56,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       [columns]="columns"
       [rows]="orgs"
       [state]="state"
+      (retry)="loadOrgs()"
       filterPlaceholder="Filter by entity, address, chain…"
       emptyMessage="No organizations registered yet."
       [actionsTemplate]="rowActions">

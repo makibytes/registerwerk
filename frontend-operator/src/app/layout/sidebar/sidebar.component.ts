@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, output } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
@@ -9,6 +9,7 @@ interface NavItem {
   label: string;
   icon: string;
   route: string;
+  roles?: string[];
 }
 
 interface NavSection {
@@ -124,7 +125,7 @@ interface NavSection {
         background: var(--rw-sidebar-hover-bg);
         color: var(--rw-sidebar-fg-hover);
 
-        mat-icon { color: rgba(255,255,255,0.7); }
+        mat-icon { color: var(--rw-sidebar-icon-hover); }
       }
 
       &.active {
@@ -163,7 +164,7 @@ interface NavSection {
       color: rgba(245,158,11,0.8);
       font-size: 11px;
       font-weight: 600;
-      font-family: 'Manrope', sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       cursor: pointer;
       text-decoration: none;
       letter-spacing: 0.2px;
@@ -192,7 +193,7 @@ interface NavSection {
       </div>
     </div>
 
-    <nav class="nav-section">
+    <nav class="nav-section" aria-label="Operator navigation">
       @for (section of visibleSections; track section.label) {
         <div class="nav-section-label">{{ section.label }}</div>
         @for (item of section.items; track item.route) {
@@ -201,9 +202,10 @@ interface NavSection {
             [routerLink]="item.route"
             routerLinkActive="active"
             [routerLinkActiveOptions]="{ exact: item.route === '/dashboard' }"
+            (click)="navigated.emit()"
           >
             <mat-icon>{{ item.icon }}</mat-icon>
-            {{ item.label }}
+            <span>{{ item.label }}</span>
           </a>
         }
       }
@@ -212,7 +214,7 @@ interface NavSection {
     <div class="sidebar-footer">
       <div class="sidebar-footer-text">Registerwerk v1.0</div>
       @if (customerUrl) {
-        <a [href]="customerUrl" target="_blank" class="portal-switch-btn"
+        <a [href]="customerUrl" target="_blank" rel="noopener noreferrer" class="portal-switch-btn"
            matTooltip="Open Customer Portal in a new tab">
           <mat-icon>open_in_new</mat-icon>
           Customer
@@ -224,6 +226,7 @@ interface NavSection {
 export class SidebarComponent {
   private readonly auth = inject(AuthService);
 
+  readonly navigated = output<void>();
   readonly customerUrl = environment.customerUrl;
   readonly navSections: NavSection[] = [
     {
@@ -246,24 +249,24 @@ export class SidebarComponent {
         { label: 'Assets',     icon: 'account_balance_wallet', route: '/assets' },
         { label: 'Customers',  icon: 'people_outline',         route: '/customers' },
         { label: 'Registry',   icon: 'hub',                    route: '/registry' },
-        { label: 'Onboarding', icon: 'person_add_alt',         route: '/onboarding' },
+        { label: 'Onboarding', icon: 'person_add_alt', route: '/onboarding', roles: ['REGISTRY_ADMIN'] },
       ],
     },
     {
       label: 'Compliance',
       roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'],
       items: [
-        { label: 'Screening',      icon: 'policy',                    route: '/compliance/screening' },
-        { label: 'Chain Drift',    icon: 'sync_problem',              route: '/compliance/chain-drift' },
-        { label: 'Holder Blocks',  icon: 'gavel',                     route: '/compliance/holder-blocks' },
-        { label: 'Token Admin Grants', icon: 'admin_panel_settings',  route: '/compliance/token-admin-grants' },
-        { label: 'CASP Register',  icon: 'verified_user',             route: '/compliance/casp-register' },
-        { label: 'DORA',           icon: 'security_update_warning',   route: '/compliance/dora' },
-        { label: 'Access Reviews', icon: 'fact_check',                route: '/compliance/access-reviews' },
-        { label: 'Reporting',      icon: 'assessment',                route: '/compliance/reporting' },
-        { label: 'DSAR Erasure',   icon: 'person_off',                route: '/compliance/dsar' },
-        { label: 'Support Tickets', icon: 'support_agent',            route: '/compliance/support-tickets' },
-        { label: 'Audit Log',      icon: 'receipt_long',              route: '/audit' },
+        { label: 'Screening', icon: 'policy', route: '/compliance/screening', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+        { label: 'Chain Drift', icon: 'sync_problem', route: '/compliance/chain-drift', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        { label: 'Holder Blocks', icon: 'gavel', route: '/compliance/holder-blocks', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+        { label: 'Token Admin Grants', icon: 'admin_panel_settings', route: '/compliance/token-admin-grants', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+        { label: 'CASP Register', icon: 'verified_user', route: '/compliance/casp-register', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+        { label: 'DORA', icon: 'security_update_warning', route: '/compliance/dora', roles: ['REGISTRY_ADMIN'] },
+        { label: 'Access Reviews', icon: 'fact_check', route: '/compliance/access-reviews', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+        { label: 'Reporting', icon: 'assessment', route: '/compliance/reporting', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+        { label: 'DSAR Erasure', icon: 'person_off', route: '/compliance/dsar', roles: ['REGISTRY_ADMIN'] },
+        { label: 'Support Tickets', icon: 'support_agent', route: '/compliance/support-tickets', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        { label: 'Audit Log', icon: 'receipt_long', route: '/audit', roles: ['REGISTRY_ADMIN', 'AUDIT'] },
       ],
     },
     {
@@ -300,8 +303,14 @@ export class SidebarComponent {
   ];
 
   get visibleSections(): NavSection[] {
-    return this.navSections.filter(
-      (section) => !section.roles || section.roles.some((role) => this.auth.hasRole(role)),
-    );
+    return this.navSections
+      .filter((section) => !section.roles || section.roles.some((role) => this.auth.hasRole(role)))
+      .map((section) => ({
+        ...section,
+        items: section.items.filter(
+          (item) => !item.roles || item.roles.some((role) => this.auth.hasRole(role)),
+        ),
+      }))
+      .filter((section) => section.items.length > 0);
   }
 }

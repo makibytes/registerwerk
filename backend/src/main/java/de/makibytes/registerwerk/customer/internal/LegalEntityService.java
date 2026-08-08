@@ -1,5 +1,8 @@
 package de.makibytes.registerwerk.customer.internal;
 
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
+import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.customer.events.EntityCreatedEvent;
 import de.makibytes.registerwerk.customer.events.EntityUpdatedEvent;
 import de.makibytes.registerwerk.customer.events.EntitySuspendedEvent;
@@ -55,6 +58,7 @@ public class LegalEntityService {
     private final SuitabilityAssessmentRepository suitabilityAssessmentRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final EntityNumberGenerator entityNumberGenerator;
+    private final AppUserRepository appUserRepository;
 
     public LegalEntityService(
             LegalEntityRepository legalEntityRepository,
@@ -62,13 +66,15 @@ public class LegalEntityService {
             EntityMergeRecordRepository entityMergeRecordRepository,
             SuitabilityAssessmentRepository suitabilityAssessmentRepository,
             ApplicationEventPublisher eventPublisher,
-            EntityNumberGenerator entityNumberGenerator) {
+            EntityNumberGenerator entityNumberGenerator,
+            AppUserRepository appUserRepository) {
         this.legalEntityRepository = legalEntityRepository;
         this.entityNameHistoryRepository = entityNameHistoryRepository;
         this.entityMergeRecordRepository = entityMergeRecordRepository;
         this.suitabilityAssessmentRepository = suitabilityAssessmentRepository;
         this.eventPublisher = eventPublisher;
         this.entityNumberGenerator = entityNumberGenerator;
+        this.appUserRepository = appUserRepository;
     }
 
     /**
@@ -277,13 +283,18 @@ public class LegalEntityService {
 
     /**
      * Assigns (or reassigns, or clears with {@code relationshipManagerId=null}) the client-servicing
-     * relationship manager for this entity (F-BLOCKER-15). Does not validate that
-     * {@code relationshipManagerId} actually holds the RELATIONSHIP_MANAGER role — {@code auth} is
-     * a separate module and this follows the same raw-UUID, unvalidated-assignee convention as
-     * {@code SupportTicket.assignedTo}.
+     * relationship manager for this entity (F-BLOCKER-15).
      */
     public LegalEntity assignRelationshipManager(UUID entityId, UUID relationshipManagerId, UUID actorId) {
         LegalEntity entity = getEntity(entityId);
+        if (relationshipManagerId != null) {
+            AppUser manager = appUserRepository.findById(relationshipManagerId)
+                    .orElseThrow(() -> new EntityNotFoundException("AppUser", relationshipManagerId));
+            if (!manager.isEnabled() || !manager.getRoles().contains(AppUserRole.RELATIONSHIP_MANAGER)) {
+                throw new IllegalArgumentException(
+                        "Assigned user must be enabled and have the RELATIONSHIP_MANAGER role");
+            }
+        }
         entity.setAssignedRelationshipManagerId(relationshipManagerId);
         LegalEntity saved = legalEntityRepository.save(entity);
         eventPublisher.publishEvent(new RelationshipManagerAssignedEvent(entityId, actorId, null, relationshipManagerId));

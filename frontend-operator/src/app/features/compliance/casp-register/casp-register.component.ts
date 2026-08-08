@@ -132,6 +132,7 @@ const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
       [columns]="columns"
       [rows]="entries"
       [state]="state"
+      (retry)="reload()"
       filterPlaceholder="Filter by name, DID, LEI, member state…"
       emptyMessage="No counterparties recorded yet. Add the CASPs you exchange Travel Rule messages with."
       [actionsTemplate]="rowActions">

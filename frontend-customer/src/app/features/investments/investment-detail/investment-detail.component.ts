@@ -28,6 +28,7 @@ import { AssetBondTerms, AssetDeployment, InspectionLegalBasis, InvestmentRecord
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { AuthService } from '../../../core/auth/auth.service';
+import { downloadBlob } from '../../../core/utils/download.util';
 import { environment } from '../../../../environments/environment';
 
 /** Minimal ABI fragments for the two confidential-token calls this component makes directly
@@ -204,11 +205,11 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                   }
                 </span>
               </div>
-              <button mat-stroked-button [disabled]="downloadingRegisterDoc" (click)="downloadRegisterDocument()">
+              <button mat-stroked-button type="button" [disabled]="downloadingRegisterDoc" (click)="downloadRegisterDocument()">
                 <mat-icon>picture_as_pdf</mat-icon>
                 @if (downloadingRegisterDoc) { Preparing… } @else { Download }
               </button>
-              <button mat-stroked-button (click)="openInspectionDialog()"
+              <button mat-stroked-button type="button" (click)="openInspectionDialog()"
                       matTooltip="Ask the operator to disclose this asset's register (§10 eWpG)">
                 <mat-icon>visibility</mat-icon>
                 Request Register Inspection
@@ -219,7 +220,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
 
         <ng-template #inspectionDialogTpl>
           <h2 mat-dialog-title>Request Register Inspection (§10 eWpG)</h2>
-          <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:380px">
+          <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
             <p style="margin:0;font-size:13px;color:var(--rw-text-secondary)">
               Issuers, holders, and beneficiaries have a statutory right to inspect this asset's
               register. Other applicants must state a legitimate interest for operator review.
@@ -236,13 +237,13 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
             @if (inspectionForm.legalBasis === 'LEGITIMATE_INTEREST') {
               <mat-form-field appearance="outline">
                 <mat-label>Stated interest</mat-label>
-                <textarea matInput rows="3" [(ngModel)]="inspectionForm.statedInterest"></textarea>
+                <textarea matInput rows="3" maxlength="5000" [(ngModel)]="inspectionForm.statedInterest"></textarea>
               </mat-form-field>
             }
           </mat-dialog-content>
           <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-            <button mat-stroked-button mat-dialog-close>Cancel</button>
-            <button mat-raised-button color="primary"
+            <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
+            <button mat-raised-button color="primary" type="button"
                     [disabled]="submittingInspection || (inspectionForm.legalBasis === 'LEGITIMATE_INTEREST' && !inspectionForm.statedInterest.trim())"
                     (click)="submitInspectionRequest()">
               <mat-icon>send</mat-icon>
@@ -368,21 +369,21 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                             <div class="reg-form">
                               <mat-form-field appearance="outline" style="width:100%">
                                 <mat-label>Optional note to operator</mat-label>
-                                <textarea matInput [(ngModel)]="registrationNote" rows="2"
+                                <textarea matInput [(ngModel)]="registrationNote" rows="2" maxlength="2000"
                                           placeholder="e.g. Requested at onboarding meeting 2025-01-10"></textarea>
                               </mat-form-field>
                               <div style="display:flex;gap:8px">
-                                <button mat-raised-button color="primary"
+                                <button mat-raised-button color="primary" type="button"
                                         (click)="submitRegistrationRequest()"
                                         [disabled]="registrationSubmitting">
                                   <mat-icon>send</mat-icon>
                                   {{ registrationSubmitting ? 'Submitting…' : 'Submit Request' }}
                                 </button>
-                                <button mat-stroked-button (click)="showRegistrationForm = false">Cancel</button>
+                                <button mat-stroked-button type="button" (click)="showRegistrationForm = false">Cancel</button>
                               </div>
                             </div>
                           } @else {
-                            <button mat-stroked-button color="primary"
+                            <button mat-stroked-button color="primary" type="button"
                                     (click)="showRegistrationForm = true"
                                     style="margin-top:8px;width:fit-content"
                                     [disabled]="deploymentsSection.data.length === 0">
@@ -402,6 +403,11 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                     </div>
                   </div>
                 </div>
+              } @else if (identitySection.status === 'error') {
+                <p class="confidential-error" role="alert">
+                  Identity status could not be loaded.
+                  <button mat-button type="button" (click)="retryIdentityStatus()">Retry</button>
+                </p>
               }
             </mat-card-content>
           </mat-card>
@@ -449,15 +455,15 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                 <div class="confidential-transfer-form">
                   <mat-form-field appearance="outline">
                     <mat-label>Recipient address</mat-label>
-                    <input matInput [(ngModel)]="transferTo" placeholder="0x…" />
+                    <input matInput [(ngModel)]="transferTo" placeholder="0x…" autocomplete="off" />
                   </mat-form-field>
                   <mat-form-field appearance="outline">
                     <mat-label>Amount</mat-label>
-                    <input matInput type="number" [(ngModel)]="transferAmount" min="0" />
+                    <input matInput type="number" [(ngModel)]="transferAmount" min="1" step="1" />
                   </mat-form-field>
                   <button mat-flat-button color="primary"
                           (click)="submitConfidentialTransfer()"
-                          [disabled]="transferring || !transferTo || transferAmount === null || deploymentsSection.data.length === 0">
+                          [disabled]="transferring || !isValidWalletAddress(transferTo) || !isValidTransferAmount() || deploymentsSection.data.length === 0">
                     <mat-icon>send</mat-icon>
                     {{ transferring ? 'Encrypting & submitting…' : 'Transfer' }}
                   </button>
@@ -479,7 +485,13 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
             <app-data-state-pill [status]="deploymentsSection.status" />
           </mat-card-header>
           <mat-card-content>
-            @if (deploymentsSection.data.length > 0) {
+            @if (deploymentsSection.status === 'error') {
+              <p class="confidential-error" role="alert">
+                Chain deployments could not be loaded.
+                <button mat-button type="button" (click)="retryDeployments()">Retry</button>
+              </p>
+            } @else if (deploymentsSection.data.length > 0) {
+              <div class="table-wrap">
               <table mat-table [dataSource]="deploymentsSection.data" class="mat-elevation-z0">
                 <ng-container matColumnDef="chain">
                   <th mat-header-cell *matHeaderCellDef>Chain</th>
@@ -506,11 +518,22 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                 <tr mat-header-row *matHeaderRowDef="deploymentColumns"></tr>
                 <tr mat-row *matRowDef="let r; columns: deploymentColumns;"></tr>
               </table>
+              </div>
             } @else {
               <p class="empty-text">
                 @if (deploymentsSection.status === 'pending') { Deployment data is still loading. }
                 @else { No deployments recorded yet. }
               </p>
+            }
+          </mat-card-content>
+        </mat-card>
+      } @else {
+        <mat-card>
+          <mat-card-content class="load-error" role="alert">
+            <mat-icon>cloud_off</mat-icon>
+            <p>{{ loadError || 'Investment not found.' }}</p>
+            @if (holderId) {
+              <button mat-stroked-button type="button" (click)="load()">Retry</button>
             }
           </mat-card-content>
         </mat-card>
@@ -605,6 +628,9 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
 
       mat-icon { font-size: 18px; width: 18px; height: 18px; }
     }
+    .table-wrap { overflow-x: auto; }
+    .load-error { text-align: center; padding: 48px 16px; color: var(--rw-text-secondary); }
+    .load-error mat-icon { color: var(--rw-text-danger); }
   `],
 })
 export class InvestmentDetailComponent implements OnInit {
@@ -651,6 +677,8 @@ export class InvestmentDetailComponent implements OnInit {
   transferring = false;
   transferError: string | null = null;
   transferSuccess: string | null = null;
+  holderId = '';
+  loadError = '';
 
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status'];
 
@@ -663,8 +691,21 @@ export class InvestmentDetailComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    const holderId = this.route.snapshot.paramMap.get('holderId')!;
-    this.investmentService.getInvestment(holderId).subscribe({
+    this.holderId = this.route.snapshot.paramMap.get('holderId')?.trim() ?? '';
+    if (!this.holderId) {
+      this.loading = false;
+      this.loadError = 'The investment address is incomplete.';
+      return;
+    }
+    this.load();
+  }
+
+  load(): void {
+    if (!this.holderId) return;
+    this.loading = true;
+    this.loadError = '';
+    this.record = null;
+    this.investmentService.getInvestment(this.holderId).subscribe({
       next: (record) => {
         this.record = record;
         this.loading = false;
@@ -673,7 +714,8 @@ export class InvestmentDetailComponent implements OnInit {
         this.loadRegisterDocMeta(record.assetId);
         this.loadBondTerms(record.assetId);
       },
-      error: () => {
+      error: (err) => {
+        this.loadError = err?.error?.message ?? 'Failed to load the investment.';
         this.loading = false;
         this.cdr.detectChanges();
       },
@@ -713,12 +755,7 @@ export class InvestmentDetailComponent implements OnInit {
     this.downloadingRegisterDoc = true;
     this.registerDocumentService.download(this.record.assetId).subscribe({
       next: (pdf) => {
-        const url = URL.createObjectURL(pdf);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `registerauszug-${this.record!.assetId}.pdf`;
-        link.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(pdf, `registerauszug-${this.record!.assetId}.pdf`);
         this.downloadingRegisterDoc = false;
         this.cdr.detectChanges();
       },
@@ -732,11 +769,11 @@ export class InvestmentDetailComponent implements OnInit {
 
   openInspectionDialog(): void {
     this.inspectionForm = { legalBasis: 'HOLDER', statedInterest: '' };
-    this.dialog.open(this.inspectionDialogTpl, { width: '460px' });
+    this.dialog.open(this.inspectionDialogTpl, { width: '460px', maxWidth: '95vw' });
   }
 
   submitInspectionRequest(): void {
-    if (!this.record) return;
+    if (!this.record || this.submittingInspection) return;
     if (this.inspectionForm.legalBasis === 'LEGITIMATE_INTEREST' && !this.inspectionForm.statedInterest.trim()) return;
 
     this.submittingInspection = true;
@@ -747,7 +784,7 @@ export class InvestmentDetailComponent implements OnInit {
       this.authService.getUserName() ?? this.authService.getUserEmail() ?? 'Unknown requester',
       this.authService.getUserEmail() ?? '',
       this.inspectionForm.legalBasis,
-      this.inspectionForm.statedInterest || undefined,
+      this.inspectionForm.statedInterest.trim() || undefined,
       this.authService.getEntityId() ?? undefined,
     ).subscribe({
       next: () => {
@@ -765,7 +802,7 @@ export class InvestmentDetailComponent implements OnInit {
   }
 
   submitRegistrationRequest(): void {
-    if (!this.record || this.deploymentsSection.data.length === 0) return;
+    if (!this.record || this.deploymentsSection.data.length === 0 || this.registrationSubmitting) return;
     this.registrationSubmitting = true;
     this.cdr.detectChanges();
 
@@ -774,7 +811,7 @@ export class InvestmentDetailComponent implements OnInit {
       assetId: this.record.assetId,
       deploymentId: deployment.id,
       walletAddress: this.record.walletAddress,
-      note: this.registrationNote || undefined,
+      note: this.registrationNote.trim() || undefined,
     }).subscribe({
       next: () => {
         this.registrationRequested = true;
@@ -833,9 +870,31 @@ export class InvestmentDetailComponent implements OnInit {
     });
   }
 
+  retryDeployments(): void {
+    if (this.record) this.loadDeployments(this.record.assetId, this.record.walletAddress);
+  }
+
+  retryIdentityStatus(): void {
+    const deployment = this.deploymentsSection.data[0];
+    if (this.record && deployment) {
+      this.loadIdentityStatus(this.record.assetId, deployment.id, this.record.walletAddress);
+    }
+  }
+
+  isValidWalletAddress(address: string): boolean {
+    return /^0x[0-9a-fA-F]{40}$/.test(address.trim());
+  }
+
+  isValidTransferAmount(): boolean {
+    return this.transferAmount !== null
+      && Number.isSafeInteger(this.transferAmount)
+      && this.transferAmount > 0;
+  }
+
   // ── Confidential balance reveal + transfer (fully client-side — see FheClientService) ────
 
   async connectWallet(): Promise<void> {
+    if (this.connecting) return;
     this.connecting = true;
     this.cdr.detectChanges();
     try {
@@ -849,7 +908,7 @@ export class InvestmentDetailComponent implements OnInit {
   }
 
   async revealMyBalance(): Promise<void> {
-    if (!this.record || this.deploymentsSection.data.length === 0) return;
+    if (!this.record || this.deploymentsSection.data.length === 0 || this.revealing) return;
     this.revealing = true;
     this.revealError = null;
     this.cdr.detectChanges();
@@ -874,8 +933,8 @@ export class InvestmentDetailComponent implements OnInit {
   }
 
   async submitConfidentialTransfer(): Promise<void> {
-    if (!this.record || this.deploymentsSection.data.length === 0
-        || !this.transferTo || this.transferAmount === null) {
+    if (!this.record || this.deploymentsSection.data.length === 0 || this.transferring
+        || !this.isValidWalletAddress(this.transferTo) || !this.isValidTransferAmount()) {
       return;
     }
     this.transferring = true;
@@ -883,6 +942,7 @@ export class InvestmentDetailComponent implements OnInit {
     this.transferSuccess = null;
     this.cdr.detectChanges();
     try {
+      const amount = this.transferAmount!;
       const dep = this.deploymentsSection.data[0];
       const ctx = await firstValueFrom(this.issuanceService.getConfidentialContext(this.record.assetId, dep.id));
       const userAddress = this.walletService.address();
@@ -890,12 +950,12 @@ export class InvestmentDetailComponent implements OnInit {
         throw new Error('Wallet not connected.');
       }
       const { handle, inputProof } = await this.fheService.encrypt64(
-        ctx.contractAddress as `0x${string}`, userAddress, BigInt(this.transferAmount), ctx.chainId);
+        ctx.contractAddress as `0x${string}`, userAddress, BigInt(amount), ctx.chainId);
       const txHash = await this.walletService.writeContract({
         address: ctx.contractAddress as `0x${string}`,
         abi: CONFIDENTIAL_TRANSFER_ABI,
         functionName: 'confidentialTransfer',
-        args: [this.transferTo as `0x${string}`, handle, inputProof],
+        args: [this.transferTo.trim() as `0x${string}`, handle, inputProof],
       });
       this.transferSuccess = `Transfer submitted: ${txHash}`;
       this.transferTo = '';
