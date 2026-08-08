@@ -75,17 +75,33 @@ public class SessionController {
      * one) or the stashed token has since expired.
      */
     @PostMapping("/exit-impersonation")
-    public ResponseEntity<Void> exitImpersonation(HttpServletRequest request) {
+    public ResponseEntity<Void> exitImpersonation(Authentication auth, HttpServletRequest request) {
+        // A stale client action must not turn a regular admin session into a logout. Clear an
+        // orphaned restore cookie, but leave the active, non-impersonating session untouched.
+        if (!SecurityUtils.isImpersonatingAdmin(auth)) {
+            return ResponseEntity.noContent()
+                    .header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString())
+                    .build();
+        }
+
         var stashed = cookies.readAdminSessionCookie(request);
         if (stashed.isEmpty()) {
             return ResponseEntity.noContent()
                     .header(HttpHeaders.SET_COOKIE, cookies.clearSessionCookie().toString())
+                    .header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString())
                     .build();
         }
 
+        Jwt adminSession;
         try {
-            jwtDecoder.decode(stashed.get()); // throws if expired/malformed
+            adminSession = jwtDecoder.decode(stashed.get()); // throws if expired/malformed
         } catch (JwtException e) {
+            return ResponseEntity.noContent()
+                    .header(HttpHeaders.SET_COOKIE, cookies.clearSessionCookie().toString())
+                    .header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString())
+                    .build();
+        }
+        if (!isRestorableAdminSession(adminSession)) {
             return ResponseEntity.noContent()
                     .header(HttpHeaders.SET_COOKIE, cookies.clearSessionCookie().toString())
                     .header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString())
@@ -96,5 +112,12 @@ public class SessionController {
                 .header(HttpHeaders.SET_COOKIE, cookies.sessionCookie(stashed.get()).toString())
                 .header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString())
                 .build();
+    }
+
+    private boolean isRestorableAdminSession(Jwt session) {
+        var roles = session.getClaimAsStringList("roles");
+        return !Boolean.TRUE.equals(session.getClaimAsBoolean("imp"))
+                && roles != null
+                && roles.contains("REGISTRY_ADMIN");
     }
 }

@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -143,6 +144,10 @@ public class Asset {
      * and secondary-market trade settlement.
      */
     @ElementCollection(targetClass = ClientCategory.class)
+    // AssetResponse includes this collection. AssetService initializes it while its read
+    // transaction is open; batch fetching keeps a paginated asset response from becoming an
+    // N+1 query when the controller maps detached entities with open-in-view disabled.
+    @BatchSize(size = 50)
     @CollectionTable(name = "asset_target_market_category", joinColumns = @JoinColumn(name = "asset_id"))
     @Enumerated(EnumType.STRING)
     @Column(name = "client_category", nullable = false, length = 30)

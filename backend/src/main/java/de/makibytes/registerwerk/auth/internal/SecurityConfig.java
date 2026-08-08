@@ -30,6 +30,7 @@ import org.springframework.security.oauth2.server.resource.web.authentication.Be
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -94,7 +95,7 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             PrincipalResolver principalResolver,
-            CookieBearerTokenResolver cookieBearerTokenResolver,
+            SessionCookieService sessionCookieService,
             // Named explicitly: two JwtDecoder beans exist (this one and localHs256JwtDecoder),
             // so resolving the resource server's decoder by type alone is ambiguous.
             @Qualifier("jwtDecoder") JwtDecoder jwtDecoder) throws Exception {
@@ -133,11 +134,22 @@ public class SecurityConfig {
                 .anyRequest().denyAll()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
-                .bearerTokenResolver(cookieBearerTokenResolver)
+                // Deliberately NOT given a cookie-aware bearerTokenResolver here — the default
+                // (header-only) resolver stays wired to oauth2ResourceServer() so that Spring
+                // Security's automatic "requests carrying a bearer token are CSRF-exempt" rule
+                // (added whenever csrf() and oauth2ResourceServer() are both configured) only
+                // ever exempts genuine Authorization-header requests, never the ambient
+                // rw_session cookie. See SessionCookieAuthorizationHeaderFilter's Javadoc.
                 .jwt(jwt -> jwt
                     .decoder(jwtDecoder)
                     .jwtAuthenticationConverter(jwtAuthenticationConverter()))
             )
+            // Synthesizes an Authorization header from the rw_session cookie for requests that
+            // don't carry one — positioned after CsrfFilter (so CSRF validation still sees the
+            // original, header-less request) and before BearerTokenAuthenticationFilter (so the
+            // resource server still authenticates the request normally).
+            .addFilterAfter(new SessionCookieAuthorizationHeaderFilter(sessionCookieService),
+                            CsrfFilter.class)
             // Runs after the bearer token has been validated and an Authentication established,
             // so it can swap Entra's identifiers for Registerwerk's. See the filter's Javadoc
             // for why this is a filter rather than a change to ~100 call sites.

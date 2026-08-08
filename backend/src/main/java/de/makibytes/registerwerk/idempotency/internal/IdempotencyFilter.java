@@ -54,8 +54,7 @@ class IdempotencyFilter extends OncePerRequestFilter {
         }
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        // SecurityUtils.extractEntityId does not itself null-check its argument.
-        UUID entityId = authentication != null ? SecurityUtils.extractEntityId(authentication) : null;
+        UUID entityId = SecurityUtils.extractEntityId(authentication);
         if (entityId == null) {
             chain.doFilter(request, response);
             return;

@@ -23,6 +23,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/public/auth")
@@ -52,6 +55,10 @@ public class AuthController {
         LoginResult result = authService.login(req.email(), req.password());
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookies.sessionCookie(result.token()).toString())
+                // A successful fresh login must never inherit an admin session left by an
+                // interrupted impersonation flow; otherwise a later exit could restore the
+                // wrong identity.
+                .header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString())
                 .body(toResponse(result));
     }
 
@@ -95,19 +102,36 @@ public class AuthController {
         } catch (JwtException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
+        UUID entityId;
         if (!Boolean.TRUE.equals(jwt.getClaimAsBoolean("imp"))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        try {
+            entityId = UUID.fromString(jwt.getClaimAsString("entityId"));
+        } catch (IllegalArgumentException | NullPointerException e) {
+            // A signed JWT with an `imp` marker but no well-formed target is not a valid
+            // handoff token. Return a normal authorization failure instead of leaking a 500.
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
         ResponseEntity.BodyBuilder response = ResponseEntity.ok();
-        cookies.readSessionCookie(request).ifPresent(existing ->
-                response.header(HttpHeaders.SET_COOKIE, cookies.adminSessionCookie(existing).toString()));
+        Optional<String> stashedAdminSession = cookies.readAdminSessionCookie(request);
+        boolean hasRestorableAdminSession = stashedAdminSession
+                .filter(this::isRestorableAdminSession)
+                .isPresent();
+        if (stashedAdminSession.isPresent() && !hasRestorableAdminSession) {
+            response.header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString());
+        }
+        if (!hasRestorableAdminSession) {
+            cookies.readSessionCookie(request)
+                    .filter(this::isRestorableAdminSession)
+                    .ifPresent(existing -> response.header(
+                        HttpHeaders.SET_COOKIE, cookies.adminSessionCookie(existing).toString()));
+        }
         response.header(HttpHeaders.SET_COOKIE, cookies.sessionCookie(req.token()).toString());
 
-        String entityIdClaim = jwt.getClaimAsString("entityId");
-        String entityName = entityIdClaim != null
-                ? entityDisplayNameResolver.resolveName(java.util.UUID.fromString(entityIdClaim))
-                : null;
+        String entityIdClaim = entityId.toString();
+        String entityName = entityDisplayNameResolver.resolveName(entityId);
 
         return response.body(new LoginResponse(
                 jwt.getSubject(),
@@ -132,5 +156,18 @@ public class AuthController {
                 false,
                 Instant.now().plusSeconds(result.ttlSeconds()).getEpochSecond()
         );
+    }
+
+    /** Only a locally authenticated, non-impersonating registry administrator can be restored. */
+    private boolean isRestorableAdminSession(String token) {
+        try {
+            Jwt session = jwtDecoder.decode(token);
+            List<String> roles = session.getClaimAsStringList("roles");
+            return !Boolean.TRUE.equals(session.getClaimAsBoolean("imp"))
+                    && roles != null
+                    && roles.contains("REGISTRY_ADMIN");
+        } catch (JwtException e) {
+            return false;
+        }
     }
 }

@@ -915,11 +915,16 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 // Optimism Sepolia
                 new NodeDef("OPTIMISM_SEPOLIA", "https://sepolia.optimism.io", "OP Labs", true),
                 new NodeDef("OPTIMISM_SEPOLIA", "https://optimism-sepolia.publicnode.com", "PublicNode", true),
-                // Fhenix / Inco
-                new NodeDef("FHENIX_MAINNET", "https://api.fhenix.zone:7747", "Fhenix", true),
-                new NodeDef("FHENIX_HELIUM", "https://api.helium.fhenix.zone:7747", "Fhenix", true),
-                new NodeDef("INCO_MAINNET", "https://mainnet.inco.org", "Inco", true),
-                new NodeDef("INCO_RIVEST", "https://validator.rivest.inco.org", "Inco", true),
+                // Fhenix / Inco — both experimental/withdrawn confidential-EVM testnets with no
+                // reachable public endpoint (same finding V2__disable_unreachable_seed_rpc_nodes.sql
+                // disabled these exact URLs for). Seeded disabled: SEED_DEMO_DATA=true reruns this
+                // reconciliation on every startup, so leaving these `true` here silently re-enabled
+                // them and made RpcNodeHealthService probe dead hosts forever, one SSLHandshake/DNS
+                // WARN per node per backoff round.
+                new NodeDef("FHENIX_MAINNET", "https://api.fhenix.zone:7747", "Fhenix", false),
+                new NodeDef("FHENIX_HELIUM", "https://api.helium.fhenix.zone:7747", "Fhenix", false),
+                new NodeDef("INCO_MAINNET", "https://mainnet.inco.org", "Inco", false),
+                new NodeDef("INCO_RIVEST", "https://validator.rivest.inco.org", "Inco", false),
                 // Starknet (stub chains — disabled nodes visible in operator UI)
                 new NodeDef("STARKNET_MAINNET", "https://rpc.starknet.lava.build", "Lava", false),
                 new NodeDef("STARKNET_MAINNET", "https://api.cartridge.gg/x/starknet/mainnet", "Cartridge", false),

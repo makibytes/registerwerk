@@ -47,6 +47,12 @@ extra_css:
   - assets/brand.css
   - assets/i18n.css
 
+# mkdocs-static-i18n emits root-relative language links. Explicitly bind them to the browser's
+# current origin at runtime so a docs instance reached on a non-default port (for example
+# http://nibbler:8003) keeps that port when changing language.
+extra_javascript:
+  - assets/language-switcher-origin.js
+
 plugins:
   # Order matters: i18n must come first so that it can reconfigure the theme and hand
   # the per-language page sets to search.

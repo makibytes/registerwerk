@@ -109,6 +109,12 @@ services:
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME}
       MAIL_PASSWORD: ${MAIL_PASSWORD}
+      # The frontends proxy /api/ on their own origin in the production build, but the
+      # browser's Origin header reaches the backend through nginx/Kong. Keep Spring's CORS
+      # allow-list derived from the deployable frontend URLs so a remote demo host (for example
+      # nibbler.local) does not get an "Invalid CORS request" 403 before login credentials are
+      # even evaluated. An explicit list remains available for separate-origin deployments.
+      REGISTERWERK_CORS_ALLOWED_ORIGINS: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:-${OPERATOR_FRONTEND_URL:-http://localhost:4200},${CUSTOMER_FRONTEND_URL:-http://localhost:4201}}
       CUSTOMER_FRONTEND_URL: ${CUSTOMER_FRONTEND_URL:-http://localhost:4201}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
@@ -343,19 +349,20 @@ services:
   # twice a second, forever, and that was the single largest source of idle CPU on the host).
   #
   # Consequence of prebuilding: docs changes now need `docker compose --profile docs up --build
-  # docs` to appear. For live authoring, run mkdocs on the host instead:
-  #   docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro \
-  #     -v $PWD/docs:/docs/docs:ro squidfunk/mkdocs-material:9.7.7
+  # docs` to appear. For live authoring, build docs/Dockerfile's `build` stage and run its
+  # MkDocs `serve` command; see CLAUDE.md for the complete command.
   docs:
     # Built rather than pulled: the stock mkdocs-material image has no
-    # mkdocs-static-i18n, which is what makes the site multilingual.
+    # mkdocs-static-i18n, which is what makes the site multilingual. Context is the repo root
+    # (not ./docs) because docs/Dockerfile COPYs mkdocs.yml from there and builds the site at
+    # image-build time — no bind mounts here, the running container is plain static nginx.
     build:
-      context: ./docs
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docs/Dockerfile
+      network: host
+      args:
+        BACKEND_URL: ${BACKEND_URL:-http://localhost:8080}
     image: registerwerk-docs:local
-    volumes:
-      - ./mkdocs.yml:/docs/mkdocs.yml:ro
-      - ./docs:/docs/docs:ro
     ports:
       - "${DOCS_BIND_ADDR:-0.0.0.0}:8003:80"
     profiles: [docs]

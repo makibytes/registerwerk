@@ -169,12 +169,22 @@ plugins:
       message: "Access denied by IP restriction policy."
 
   # CORS — set the deployed frontend origins here per environment.
+  #
+  # Both the localhost and 127.0.0.1 spelling are listed for each port: a browser's Origin
+  # header is whatever hostname the address bar actually used, and "localhost" vs "127.0.0.1"
+  # are different origins to CORS even though they reach the same machine. For a frontend
+  # deployed on a remote host, Compose derives Spring's enforcing allow-list from
+  # OPERATOR_FRONTEND_URL and CUSTOMER_FRONTEND_URL. Update this list too only when a browser
+  # calls Kong directly from a separate origin; the same-origin frontend proxy does not require
+  # Kong CORS response headers.
   - name: cors
     service: registerwerk-backend
     config:
       origins:
         - http://localhost:4200
         - http://localhost:4201
+        - http://127.0.0.1:4200
+        - http://127.0.0.1:4201
       methods:
         - GET
         - POST

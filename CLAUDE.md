@@ -139,11 +139,17 @@ Build it strictly before committing doc changes (CI enforces this via `.github/w
 
 ```bash
 docker build -f docs/Dockerfile -t registerwerk-docs:local .
-docker run --rm -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro \
-  registerwerk-docs:local build --strict
 ```
 
-For live authoring with reload, run the same image with `mkdocs serve` (`docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro registerwerk-docs:local`).
+`docs/Dockerfile` runs `mkdocs build --strict` during `docker build`; its final image is nginx, so
+do not append `build --strict` to `docker run` (nginx has no such command). For live authoring
+with reload, build the MkDocs stage explicitly and run its `serve` command:
+
+```bash
+docker build --target build -f docs/Dockerfile -t registerwerk-docs:authoring .
+docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro \
+  registerwerk-docs:authoring serve -a 0.0.0.0:8000
+```
 
 Two things to know about `docs_dir`: MkDocs builds a page for **every** `.md` under it — the explicit `nav:` only controls the sidebar, not what gets rendered or indexed — and `mkdocs serve`'s livereload polls the **entire** tree twice a second regardless of `exclude_docs`. A dormant Docusaurus install used to sit here and cost 1,722 rendered pages plus a permanent 30k-file polling loop; it has been removed, and `exclude_docs` now also lists `node_modules/`, `build/`, `.docusaurus/` so a stray `npm install` under `docs/` cannot bring it back. Use MkDocs syntax (`!!! note`), not Docusaurus (`:::note`).
 

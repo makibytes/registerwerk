@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import org.hibernate.Hibernate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -53,19 +54,31 @@ public class AssetService {
     @Transactional(readOnly = true)
     public Asset getAsset(UUID id) {
         return assetRepository.findById(id)
+            .map(this::initializeTargetMarketCategories)
             .orElseThrow(() -> new EntityNotFoundException("Asset", id));
     }
 
     @Transactional(readOnly = true)
     public Page<Asset> listAssets(UUID issuerId, AssetStatus status, Pageable pageable) {
+        Page<Asset> assets;
         if (issuerId != null && status != null) {
-            return assetRepository.findByIssuerIdAndStatus(issuerId, status, pageable);
+            assets = assetRepository.findByIssuerIdAndStatus(issuerId, status, pageable);
         } else if (issuerId != null) {
-            return assetRepository.findByIssuerId(issuerId, pageable);
+            assets = assetRepository.findByIssuerId(issuerId, pageable);
         } else if (status != null) {
-            return assetRepository.findByStatus(status, pageable);
+            assets = assetRepository.findByStatus(status, pageable);
+        } else {
+            assets = assetRepository.findAll(pageable);
         }
-        return assetRepository.findAll(pageable);
+        // The web layer maps the returned entities after this transaction closes
+        // (spring.jpa.open-in-view=false). Initialize every relationship that AssetResponse
+        // needs here rather than letting a controller or JSON mapper trigger lazy I/O later.
+        return assets.map(this::initializeTargetMarketCategories);
+    }
+
+    private Asset initializeTargetMarketCategories(Asset asset) {
+        Hibernate.initialize(asset.getTargetMarketCategories());
+        return asset;
     }
 
     public Asset updateAsset(UUID id, Asset patch, UUID actorId) {

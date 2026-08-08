@@ -42,10 +42,6 @@ jobs:
       - name: Build the docs container image
         run: docker build -f docs/Dockerfile -t registerwerk-docs:ci .
 
-      # --strict promotes broken internal links to build failures.
-      - name: Build documentation (strict)
-        run: |
-          docker run --rm \
-            -v "$PWD/mkdocs.yml:/docs/mkdocs.yml:ro" \
-            -v "$PWD/docs:/docs/docs:ro" \
-            registerwerk-docs:ci build --strict
+      # docs/Dockerfile runs `mkdocs build --strict` in its build stage. The resulting image is
+      # deliberately a static nginx image, so running `build --strict` *after* this step would
+      # try to execute a command named "build" in nginx and fail with exit 127.
