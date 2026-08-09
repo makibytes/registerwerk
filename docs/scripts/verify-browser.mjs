@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 
 const baseUrl = process.env.DOCS_BASE_URL ?? 'http://127.0.0.1:8003';
+const docsOrigin = new URL(baseUrl).origin;
 const browser = await chromium.launch();
 const page = await browser.newPage();
 const pageErrors = [];
@@ -35,18 +36,29 @@ try {
   await page.waitForFunction(() => document.body.dataset.mdColorScheme === 'slate');
   assert.equal(await page.locator('body').getAttribute('data-md-color-scheme'), 'slate');
 
-  const germanLink = page.locator('.md-select__link[hreflang="de"]').first();
-  await germanLink.waitFor();
-  const germanUrl = new URL(await germanLink.getAttribute('href'));
-  assert.equal(germanUrl.port, '8003');
-  assert.equal(germanUrl.origin, baseUrl);
+  // Test a nested page: Material normalises contextual language destinations without their
+  // trailing slash, which exercises nginx's directory redirect. The redirect must be relative;
+  // an absolute redirect would use the container's internal port 80 and drop public port 8003.
+  await page.goto(new URL('/customer/intro/', docsOrigin).href, { waitUntil: 'networkidle' });
+  const redirectResponse = await page.request.get(
+    new URL('/fr/customer/intro', docsOrigin).href,
+    { maxRedirects: 0 },
+  );
+  assert.equal(redirectResponse.status(), 301);
+  assert.equal(redirectResponse.headers().location, '/fr/customer/intro/');
 
-  await germanLink.locator('xpath=ancestor::div[contains(@class, "md-select")]//button').click();
-  await germanLink.click();
+  const frenchLink = page.locator('.md-select__link[hreflang="fr"]').first();
+  await frenchLink.waitFor();
+  const frenchUrl = new URL(await frenchLink.getAttribute('href'));
+  assert.equal(frenchUrl.port, '8003');
+  assert.equal(frenchUrl.origin, docsOrigin);
+
+  await frenchLink.locator('xpath=ancestor::div[contains(@class, "md-select")]//button').click();
+  await frenchLink.click();
   await page.waitForLoadState('networkidle');
   const switchedUrl = new URL(page.url());
   assert.equal(switchedUrl.port, '8003');
-  assert.match(switchedUrl.pathname, /^\/de\//);
+  assert.equal(switchedUrl.pathname, '/fr/customer/intro/');
   assert.equal(await page.locator('body').getAttribute('data-md-color-scheme'), 'slate');
 
   assert.deepEqual(pageErrors, [], `Docs runtime emitted errors: ${pageErrors.join('; ')}`);
