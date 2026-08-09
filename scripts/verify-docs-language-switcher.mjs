@@ -8,6 +8,7 @@ const links = [
   fakeLink('/fr/customer/dashboard/?tab=kyc#documents'),
 ];
 let observerCallback;
+const documentListeners = new Map();
 
 const location = new URL('http://nibbler.local:8003/de/customer/dashboard/');
 const context = {
@@ -19,6 +20,10 @@ const context = {
     querySelectorAll: (selector) => {
       assert.equal(selector, '.md-select__link[hreflang]');
       return links;
+    },
+    addEventListener: (type, callback, capture) => {
+      assert.equal(capture, true);
+      documentListeners.set(type, callback);
     },
   },
   MutationObserver: class {
@@ -45,6 +50,10 @@ const replacement = fakeLink('/it/customer/dashboard/');
 links.push(replacement);
 observerCallback();
 assert.equal(replacement.href, 'http://nibbler.local:8003/it/customer/dashboard/');
+
+const lastMomentReplacement = fakeLink('http://nibbler.local/es/customer/dashboard/');
+documentListeners.get('click')({ target: { closest: () => lastMomentReplacement } });
+assert.equal(lastMomentReplacement.href, 'http://nibbler.local:8003/es/customer/dashboard/');
 
 console.log('Docs language links preserve the active scheme, host, and port.');
 

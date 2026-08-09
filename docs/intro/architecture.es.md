@@ -16,8 +16,8 @@ graph TB
     U["Browser"]
 
     subgraph Frontends
-        FO["Operator Frontend<br/>Angular 21 · :4200"]
-        FC["Customer Frontend<br/>Angular 21 · :4201"]
+        FO["Operator Frontend<br/>Angular 22 · :4200"]
+        FC["Customer Frontend<br/>Angular 22 · :4201"]
     end
 
     subgraph Gateway

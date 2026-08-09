@@ -149,10 +149,10 @@ geprüft werden.
 | Backend `./mvnw verify -B` | Baseline außerhalb der eingeschränkten Sandbox bestanden; F0-011-kombinierte gezielte Unit-/Migrationssuite besteht 20/20 | Geplante Jobs laufen nach dem Herunterfahren der Testanwendung weiter, erzeugen umfangreiche Datenbankfehler und verzögern das Herunterfahren des Forks; tatsächlicher JaCoCo-Wert liegt bei ca. 45,0 % Line / 38,6 % Branch gegenüber einem Gate von 36 % / 23 % und widersprüchlicher 70-%-Dokumentation |
 | Foundry `forge test -q` | 449 bestanden, 31 übersprungen nach dem ersten genehmigten Batch; unabhängiger Re-Run mit Exit-Code 0 | Regressionstests decken jetzt ERC-3525-Address-Transfer-Erhaltung, ERC-7540-synchronen Bypass, Repo-Withdrawal-Rundung und eindeutige Marktbewertung ab |
 | Cairo `snforge test` | 29/29 bestanden | Cairo-Oberfläche benötigt weiterhin fachliche/Sicherheitsüberprüfung |
-| Vertraulicher Relayer | Lint bestanden; 33/33 Tests bestanden | Abhängigkeitsprüfung meldete 21 Befunde mit hohem Schweregrad; Lockfile fehlte vor der Baseline-Installation |
-| EVM-Subgraph | 16 ABI-Contracts / 71 Handler, 25 Projektionsstatus-Entitäten, Multi-Instanz-Renderer, Codegen, alle Mapping-Builds und gekennzeichnete Deployment-Gates bestehen | Reorg/Finalität, Live-Replay/Abgleich und RPC-Bytecode-Identität bleiben ausstehend; Abhängigkeitsprüfung meldet weiterhin 45 Befunde, darunter zwei kritische |
-| Operator-/Investor-Angular-Apps | CI-Befehle scheitern | Beide Workflows rufen ein fehlendes Lint-Target auf; Karma erwartet fehlendes `karma-jasmine`; keine Spec-Dateien gefunden |
-| Docusaurus-Dokumentation | Englische und deutsche Produktions-Builds bestehen nach Korrekturen an Aussagen/Build | Abhängigkeitsprüfung meldete weiterhin 37 Befunde, darunter zwei kritische |
+| Vertraulicher Relayer | TypeScript-6-Lint/Build und 33/33 Vitest-Tests bestanden | Express-5-/ESM-Migration abgeschlossen; Abhängigkeitsprüfung meldet keine Befunde |
+| EVM-Subgraph | 16 ABI-Contracts / 71 Handler, 25 Projektionsstatus-Entitäten, Multi-Instanz-Renderer, Codegen und alle Mapping-Builds bestehen | Produktionsprüfung ist sauber; ein ausschließlich vorgelagerter Graph-CLI-`decompress`-Pfad wird durch die ausführbare Allowlist in `SECURITY-EXCEPTIONS.md` isoliert |
+| Operator-/Investor-Angular-Apps | Angular-22-Lint/Build bestanden; 124 Operator- und 125 Kunden-Vitest-Tests bestehen | Native zonenlose Laufzeit und Angular-Build/Vitest ersetzen Karma |
+| MkDocs-Dokumentation | Strikter Fünf-Sprachen-Image-Build und Browser-Tests bestehen | Mermaid, Theme-Umschaltung und Sprachenwechsel mit Origin/Port sind abgedeckt; Produktionsprüfung ist sauber |
 | DAML | Nicht ausgeführt | `dpm` ist in der aktuellen Umgebung nicht verfügbar |
 
 ## Bekannte Blocker bei Deployment und Betrieb

@@ -2,11 +2,12 @@ package de.makibytes.registerwerk.marketplace.internal;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SchemaValidatorsConfig;
-import com.networknt.schema.SpecVersion;
-import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.Error;
+import com.networknt.schema.InputFormat;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SchemaRegistryConfig;
+import com.networknt.schema.dialect.Dialects;
 import de.makibytes.registerwerk.orgidentity.api.PermissionDefinitionRepository;
 import de.makibytes.registerwerk.payment.api.PaymentRail;
 import de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository;
@@ -61,7 +62,7 @@ public class ManifestValidationService {
     public record ValidationResult(boolean valid, List<String> errors, ParsedManifest manifest) {}
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final JsonSchema schema;
+    private final Schema schema;
     private final PermissionDefinitionRepository permissionDefinitionRepository;
     private final PaymentRailRepository paymentRailRepository;
     private final PaymentRailChainAddressRepository paymentRailChainAddressRepository;
@@ -75,13 +76,14 @@ public class ManifestValidationService {
         this.schema = loadSchema();
     }
 
-    private JsonSchema loadSchema() {
+    private Schema loadSchema() {
         try (InputStream in = new ClassPathResource("schemas/dapp-manifest.schema.json").getInputStream()) {
-            SchemaValidatorsConfig config = SchemaValidatorsConfig.builder()
+            SchemaRegistryConfig config = SchemaRegistryConfig.builder()
                     .formatAssertionsEnabled(true)
                     .build();
-            return JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
-                    .getSchema(objectMapper.readTree(in), config);
+            SchemaRegistry registry = SchemaRegistry.withDialect(Dialects.getDraft202012(),
+                    builder -> builder.schemaRegistryConfig(config));
+            return registry.getSchema(in, InputFormat.JSON);
         } catch (IOException e) {
             throw new IllegalStateException("Cannot load dapp-manifest.schema.json", e);
         }
@@ -102,8 +104,8 @@ public class ManifestValidationService {
             return new ValidationResult(false, List.of("Manifest is not valid JSON: " + e.getMessage()), null);
         }
 
-        Set<ValidationMessage> schemaErrors = schema.validate(root);
-        schemaErrors.stream().map(ValidationMessage::getMessage).forEach(errors::add);
+        List<Error> schemaErrors = schema.validate(manifestRaw, InputFormat.JSON);
+        schemaErrors.stream().map(Error::getMessage).forEach(errors::add);
         if (!errors.isEmpty()) {
             return new ValidationResult(false, errors, null);
         }

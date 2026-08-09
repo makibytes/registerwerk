@@ -7,6 +7,7 @@ on:
       - 'mkdocs.yml'
       - 'docs/**'
       - 'scripts/verify-docs-language-switcher.mjs'
+      - 'docker-compose.yml'
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
@@ -14,6 +15,7 @@ on:
       - 'mkdocs.yml'
       - 'docs/**'
       - 'scripts/verify-docs-language-switcher.mjs'
+      - 'docker-compose.yml'
       - '.github/workflows/docs.yml'
 
 permissions:
@@ -33,7 +35,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install docs test dependencies
+        working-directory: docs
+        run: npm ci
 
       - name: Verify runtime language-link origin handling
         run: node scripts/verify-docs-language-switcher.mjs
@@ -50,6 +58,17 @@ jobs:
       # promoting a config error to a build failure that nothing caught.
       - name: Build the docs container image
         run: docker build -f docs/Dockerfile -t registerwerk-docs:ci .
+
+      - name: Verify docs runtime behavior
+        run: |
+          npx --prefix docs playwright install --with-deps chromium
+          docker run --rm -d --name registerwerk-docs-ci -p 8003:80 registerwerk-docs:ci
+          trap 'docker stop registerwerk-docs-ci' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:8003/healthz && break
+            sleep 1
+          done
+          npm --prefix docs run test:browser
 
       # docs/Dockerfile runs `mkdocs build --strict` in its build stage. The resulting image is
       # deliberately a static nginx image, so running `build --strict` *after* this step would

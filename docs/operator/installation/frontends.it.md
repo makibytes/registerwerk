@@ -4,7 +4,7 @@ title: Configurazione del frontend
 
 # Configurazione frontend { #frontend-setup }
 
-Entrambi i frontend sono applicazioni Angular 21 autonome con rilevamento delle modifiche senza zone.
+Entrambi i frontend sono applicazioni Angular 22 autonome con rilevamento delle modifiche zoneless nativo.
 
 ## Frontend operatore (porta 4200) { #operator-frontend-port-4200 }
 
@@ -48,7 +48,7 @@ Oppure utilizza il Dockerfile incluso in ciascuna directory frontend.
 
 ## Rilevamento modifiche senza zone { #zoneless-change-detection }
 
-Entrambe le app utilizzano `provideZonelessChangeDetection()` invece di Zone.js. Ciò significa:
+Angular 22 esegue entrambe le app senza zone per impostazione predefinita; non è richiesto un provider esplicito. Ciò significa:
 - Nessun `zone.js` in `polyfills` (l'array è vuoto)
 - Il rilevamento delle modifiche viene attivato esplicitamente dai signal di Angular e da `markForCheck()`
 - Dimensioni del bundle più piccole, prestazioni migliori

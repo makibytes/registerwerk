@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
-import type { RelayerConfig } from '../config';
-import { getFheInstance } from '../fheInstance';
-import { fromHex } from '../hex';
+import type { RelayerConfig } from '../config.js';
+import { getFheInstance } from '../fheInstance.js';
+import { fromHex } from '../hex.js';
 
 /**
  * `POST /v1/public-decrypt` — decrypts a handle the contract itself has made publicly

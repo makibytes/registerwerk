@@ -9,18 +9,30 @@
 (() => {
   const languageLinkSelector = '.md-select__link[hreflang]';
 
-  const preserveCurrentOrigin = () => {
-    document.querySelectorAll(languageLinkSelector).forEach((link) => {
-      const href = link.getAttribute('href');
-      if (!href) return;
+  const preserveLinkOrigin = (link) => {
+    const href = link.getAttribute('href');
+    if (!href) return;
 
-      const destination = new URL(href, window.location.href);
-      link.href = new URL(
-        `${destination.pathname}${destination.search}${destination.hash}`,
-        window.location.origin,
-      ).href;
-    });
+    const destination = new URL(href, window.location.href);
+    link.href = new URL(
+      `${destination.pathname}${destination.search}${destination.hash}`,
+      window.location.origin,
+    ).href;
   };
+
+  const preserveCurrentOrigin = () => {
+    document.querySelectorAll(languageLinkSelector).forEach(preserveLinkOrigin);
+  };
+
+  // Reapply synchronously at interaction time as well. This closes the small window between
+  // Material replacing the language menu and MutationObserver delivering its callback.
+  const preserveInteractedLinkOrigin = (event) => {
+    const link = event.target?.closest?.(languageLinkSelector);
+    if (link) preserveLinkOrigin(link);
+  };
+
+  document.addEventListener('pointerdown', preserveInteractedLinkOrigin, true);
+  document.addEventListener('click', preserveInteractedLinkOrigin, true);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', preserveCurrentOrigin, { once: true });

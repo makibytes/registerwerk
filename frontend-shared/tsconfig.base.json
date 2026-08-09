@@ -9,7 +9,6 @@
     "noFallthroughCasesInSwitch": true,
     "sourceMap": true,
     "declaration": false,
-    "downlevelIteration": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "esModuleInterop": true,

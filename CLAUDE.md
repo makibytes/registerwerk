@@ -9,8 +9,8 @@ Reference implementation for an electronic-securities registry that models issua
 ```
 backend/              Spring Boot 4.1 / Java 25 — single API monolith (Spring Modulith 2.1)
 contracts/            Foundry smart contracts (EVM + confidential)
-frontend-operator/    Angular 21 — operator admin portal (:4200)
-frontend-customer/    Angular 21 — customer portal (:4201)
+frontend-operator/    Angular 22 — operator admin portal (:4200)
+frontend-customer/    Angular 22 — customer portal (:4201)
 gateway/              Kong declarative config
 indexer/              Off-chain event indexers (EVM + Solana)
 docker-compose.yml    / .env.example
@@ -73,7 +73,8 @@ Modules: `asset`, `audit`, `auth`, `blockchain`, `chain`, `customer`, `deploymen
 
 ## Frontend (both apps)
 
-**Angular 21, standalone components, `provideZonelessChangeDetection()`.**
+**Angular 22, standalone components, native zoneless change detection.** Angular 22 is zoneless
+by default, so neither Zone.js nor an explicit `provideZonelessChangeDetection()` provider is used.
 
 **Critical patterns:**
 - `standalone: true` everywhere — no NgModules

@@ -1,9 +1,9 @@
 import express, { type Express, type Request, type Response } from 'express';
-import type { RelayerConfig } from './config';
-import { requireApiKey } from './auth';
-import { encryptInputRouter } from './routes/encryptInput';
-import { operatorDecryptRouter } from './routes/operatorDecrypt';
-import { publicDecryptRouter } from './routes/publicDecrypt';
+import type { RelayerConfig } from './config.js';
+import { requireApiKey } from './auth.js';
+import { encryptInputRouter } from './routes/encryptInput.js';
+import { operatorDecryptRouter } from './routes/operatorDecrypt.js';
+import { publicDecryptRouter } from './routes/publicDecrypt.js';
 
 /**
  * Builds the Express app without starting it — kept separate from `index.ts`'s `listen()` call

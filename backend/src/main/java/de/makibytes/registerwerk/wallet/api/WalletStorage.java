@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.wallet.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.wallet.internal.WalletProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +22,7 @@ import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Low-level encrypted keystore I/O for operator wallets. Where the resulting bytes physically

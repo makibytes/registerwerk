@@ -1,8 +1,8 @@
 import { Router, type Request, type Response } from 'express';
-import type { RelayerConfig } from '../config';
-import { getFheInstance } from '../fheInstance';
-import { loadOperatorAccount, signUserDecryptRequest } from '../operatorSigner';
-import { fromHex } from '../hex';
+import type { RelayerConfig } from '../config.js';
+import { getFheInstance } from '../fheInstance.js';
+import { loadOperatorAccount, signUserDecryptRequest } from '../operatorSigner.js';
+import { fromHex } from '../hex.js';
 
 /**
  * `POST /v1/operator-decrypt` — headless decryption for the registry operator/auditor viewer

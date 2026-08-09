@@ -1,4 +1,4 @@
-FROM node:22.23.2-alpine AS builder
+FROM node:24.19.0-alpine AS builder
 WORKDIR /app/frontend-customer
 # Lockfile copied alongside package.json so the build can use `npm ci` — `npm install` re-resolved
 # dependency ranges at build time, which meant two builds of the same commit could ship different

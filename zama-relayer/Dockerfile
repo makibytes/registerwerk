@@ -1,4 +1,4 @@
-FROM node:22.23.2-alpine AS builder
+FROM node:24.19.0-alpine AS builder
 WORKDIR /app
 # python3/make/g++: some transitive deps (e.g. keccak) fall back to a native addon build on
 # platforms without prebuilt binaries — alpine (musl) sometimes needs this. node-tfhe/tkms
@@ -10,7 +10,7 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
-FROM node:22.23.2-alpine
+FROM node:24.19.0-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./

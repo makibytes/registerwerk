@@ -4,7 +4,7 @@ title: Frontend-Setup
 
 # Frontend-Setup
 
-Beide Frontends sind eigenständige Angular-21-Anwendungen mit zonenloser Change Detection.
+Beide Frontends sind eigenständige Angular-22-Anwendungen mit nativer zonenloser Change Detection.
 
 ## Operator-Frontend (Port 4200)
 
@@ -48,7 +48,7 @@ Oder verwenden Sie das mitgelieferte Dockerfile im jeweiligen Frontend-Verzeichn
 
 ## Zonenlose Change Detection
 
-Beide Apps verwenden `provideZonelessChangeDetection()` anstelle von Zone.js. Das bedeutet:
+Angular 22 führt beide Apps standardmäßig zonenlos aus; ein expliziter Provider ist nicht nötig. Das bedeutet:
 - Kein `zone.js` in `polyfills` (das Array ist leer)
 - Change Detection wird explizit durch Angular Signals und `markForCheck()` ausgelöst
 - Kleinere Bundle-Größe, bessere Performance

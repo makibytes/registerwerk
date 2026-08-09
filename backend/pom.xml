@@ -21,21 +21,24 @@
   <properties>
     <java.version>25</java.version>
     <spring-modulith.version>2.1.0</spring-modulith.version>
-    <web3j.version>4.12.3</web3j.version>
+    <web3j.version>6.0.0</web3j.version>
     <solanaj.version>1.28.0</solanaj.version>
     <daml-bindings.version>3.5.3</daml-bindings.version>
     <grpc.version>1.82.0</grpc.version>
     <mapstruct.version>1.6.3</mapstruct.version>
-    <springdoc.version>3.0.3</springdoc.version>
-    <testcontainers.version>1.21.4</testcontainers.version>
+    <springdoc.version>3.1.0</springdoc.version>
+    <testcontainers.version>2.0.5</testcontainers.version>
     <jacoco.version>0.8.15</jacoco.version>
-    <greenmail.version>2.1.7</greenmail.version>
-    <awssdk.version>2.44.14</awssdk.version>
-    <shedlock.version>6.9.2</shedlock.version>
+    <greenmail.version>2.1.12</greenmail.version>
+    <awssdk.version>2.51.3</awssdk.version>
+    <shedlock.version>7.7.0</shedlock.version>
     <!-- Narrow security patch overrides until the next Spring Boot BOM release carries them. -->
     <netty.version>4.2.16.Final</netty.version>
-    <postgresql.version>42.7.12</postgresql.version>
-    <bouncycastle.version>1.84</bouncycastle.version>
+    <postgresql.version>42.7.13</postgresql.version>
+    <!-- Bouncy Castle publishes the provider artifacts at 1.85.2 while the PKIX/utility
+         artifacts currently use 1.85. Keep each artifact on its newest compatible patch. -->
+    <bouncycastle.provider.version>1.85.2</bouncycastle.provider.version>
+    <bouncycastle.pkix.version>1.85</bouncycastle.pkix.version>
     <!--
       Testcontainers requires a sufficiently new Docker API.
       Force a safe floor for test JVMs so host-level API pinning (e.g. 1.32)
@@ -53,28 +56,27 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
-      <!-- Solanaj and the PDF-signing stack use different Bouncy Castle artifact lines. Keep
-           both on the same patched release instead of letting nearest-dependency mediation
-           retain older vulnerable providers in the executable jar. -->
+      <!-- Solanaj and the PDF-signing stack use different Bouncy Castle artifact lines. Pin
+           every provider/PKIX artifact so dependency mediation cannot retain older releases. -->
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcprov-jdk15to18</artifactId>
-        <version>${bouncycastle.version}</version>
+        <version>${bouncycastle.provider.version}</version>
       </dependency>
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcprov-jdk18on</artifactId>
-        <version>${bouncycastle.version}</version>
+        <version>${bouncycastle.provider.version}</version>
       </dependency>
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcutil-jdk18on</artifactId>
-        <version>${bouncycastle.version}</version>
+        <version>${bouncycastle.pkix.version}</version>
       </dependency>
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcpkix-jdk18on</artifactId>
-        <version>${bouncycastle.version}</version>
+        <version>${bouncycastle.pkix.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -148,7 +150,7 @@
     <dependency>
       <groupId>com.networknt</groupId>
       <artifactId>json-schema-validator</artifactId>
-      <version>1.5.9</version>
+      <version>3.0.6</version>
     </dependency>
 
     <!-- ── Blockchain — EVM ────────────────────────────────────────────────── -->
@@ -201,7 +203,7 @@
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-kms</artifactId>
-      <version>2.94.0</version>
+      <version>2.98.0</version>
       <optional>true</optional>
     </dependency>
     <!-- ── Apache MINA SSHD SFTP (regulatory report filing) ─────────────── -->
@@ -288,7 +290,7 @@
     <dependency>
       <groupId>org.bouncycastle</groupId>
       <artifactId>bcpkix-jdk18on</artifactId>
-      <version>${bouncycastle.version}</version>
+      <version>${bouncycastle.pkix.version}</version>
     </dependency>
 
     <!-- ── AOP (for @RequiresStepUp enforcement) ─────────────────────────── -->
@@ -348,13 +350,13 @@
     </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
-      <artifactId>junit-jupiter</artifactId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
       <version>${testcontainers.version}</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
-      <artifactId>postgresql</artifactId>
+      <artifactId>testcontainers-postgresql</artifactId>
       <version>${testcontainers.version}</version>
       <scope>test</scope>
     </dependency>

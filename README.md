@@ -190,8 +190,8 @@ registerwerk/
 │       └── factory/          AssetTokenFactory (CREATE2)
 ├── zama-relayer/             Node/TS sidecar wrapping @zama-fhe/relayer-sdk (opt-in, no Java SDK exists)
 ├── gateway/                  Kong declarative config + plugins
-├── frontend-operator/        Angular 21 — registry operator UI
-└── frontend-customer/        Angular 21 — issuer / investor UI
+├── frontend-operator/        Angular 22 — registry operator UI
+└── frontend-customer/        Angular 22 — issuer / investor UI
 ```
 
 Each backend module follows the pattern `<module>/api/` (public surface), `<module>/internal/` (private), `<module>/events/` (typed domain events), `<module>/web/` (REST layer). See `CLAUDE.md` for the current full module list — it changes faster than this README.

@@ -15,20 +15,35 @@
 # Build context is the repo root, because mkdocs.yml lives there and docs/hooks.py is referenced
 # from it as `docs/hooks.py`.
 
+FROM node:24.19.0-alpine AS docs-assets
+WORKDIR /assets
+COPY docs/package.json docs/package-lock.json ./
+RUN npm ci --omit=dev
+
 FROM squidfunk/mkdocs-material:9.7.7 AS build
 RUN pip install --no-cache-dir "mkdocs-static-i18n[material]==1.2.3"
 WORKDIR /docs
 COPY mkdocs.yml ./
 COPY docs/ ./docs/
+# Material otherwise downloads Mermaid from unpkg at runtime. The docs CSP correctly disallows
+# third-party scripts, so provide the pinned renderer locally before Material's bundle starts.
+COPY --from=docs-assets /assets/node_modules/mermaid/dist/mermaid.min.js \
+  ./docs/assets/vendor/mermaid-11.16.1.min.js
 
 # hooks.py substitutes {{ backend_url }} into pages. This used to be read from the environment at
 # serve time; now that the site is prebuilt it is necessarily a build-time value. Override with
 # `--build-arg BACKEND_URL=...` (compose passes it through, see docker-compose.yml).
 ARG BACKEND_URL=http://localhost:8080
 ENV BACKEND_URL=${BACKEND_URL}
+ARG DOCS_SITE_URL=http://localhost:8003/
+ENV DOCS_SITE_URL=${DOCS_SITE_URL}
 
 # --strict so a broken link fails the image build rather than shipping quietly.
-RUN mkdocs build --strict
+RUN mkdocs build --strict \
+    && for locale in de es fr it; do \
+         cp site/sitemap.xml "site/${locale}/sitemap.xml"; \
+         cp site/sitemap.xml.gz "site/${locale}/sitemap.xml.gz"; \
+       done
 
 FROM nginx:1.30.4-alpine
 RUN sed -i 's/^worker_processes.*/worker_processes 2;/' /etc/nginx/nginx.conf

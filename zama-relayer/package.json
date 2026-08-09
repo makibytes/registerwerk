@@ -3,32 +3,30 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "description": "Registerwerk's own sidecar wrapping @zama-fhe/relayer-sdk — the encrypt/decrypt lifecycle piece Zama ships no Java client for. Not an external dependency: this is Registerwerk's code, built and shipped in this monorepo.",
-  "type": "commonjs",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "test": "jest",
+    "test": "vitest run",
     "lint": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@zama-fhe/relayer-sdk": "^0.4.4",
-    "express": "^4.21.2",
+    "express": "^5.2.1",
     "viem": "^2.55.11"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/jest": "^29.5.14",
-    "@types/node": "^22.10.2",
-    "@types/supertest": "^6.0.2",
-    "jest": "^29.7.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.3",
+    "@types/supertest": "^7.2.1",
     "supertest": "^7.0.0",
-    "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
-    "typescript": "~5.9.0"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

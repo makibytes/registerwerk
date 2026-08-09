@@ -102,7 +102,7 @@ export class WorkspaceService {
     if (!this.isEligible(key)) return;
     this._current.set(key);
     try {
-      localStorage.setItem(STORAGE_KEY, key);
+      window.localStorage.setItem(STORAGE_KEY, key);
     } catch {
       // Storage can be unavailable (private browsing, quota) — the in-memory signal still works
       // for the rest of this session, it just won't be remembered on next login.
@@ -140,7 +140,7 @@ export class WorkspaceService {
 
   private readStored(): WorkspaceKey | null {
     try {
-      const value = localStorage.getItem(STORAGE_KEY);
+      const value = window.localStorage.getItem(STORAGE_KEY);
       return value === 'INVESTOR' || value === 'TRADER' || value === 'ISSUER' ? value : null;
     } catch {
       return null;

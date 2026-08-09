@@ -1,0 +1,17 @@
+{
+  "name": "registerwerk-docs-assets",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "test:browser": "node ./scripts/verify-browser.mjs"
+  },
+  "dependencies": {
+    "mermaid": "11.16.1"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

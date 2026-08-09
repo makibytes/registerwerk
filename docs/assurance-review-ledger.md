@@ -133,10 +133,10 @@ For German eWpG instruments, the current database holder record is only the asse
 | Backend `./mvnw verify -B` | Baseline passed outside the constrained sandbox; F0-011 combined targeted unit/migration suite passes 20/20 | Scheduled jobs continue after test application teardown, generate large database errors, and delay fork shutdown; actual JaCoCo is about 45.0% line / 38.6% branch versus a 36% / 23% gate and conflicting 70% documentation |
 | Foundry `forge test -q` | 449 passed, 31 skipped after the first approved batch; independent rerun exited 0 | Regression tests now cover ERC-3525 address-transfer conservation, ERC-7540 synchronous bypass, repo withdrawal rounding and unique market valuation |
 | Cairo `snforge test` | 29/29 passed | Cairo surface still needs domain/security review |
-| Confidential relayer | Lint passed; 33/33 tests passed | Dependency audit reported 21 high-severity findings; lockfile was absent before baseline install |
-| EVM subgraph | 16 ABI contracts / 71 handlers, 25 projection-status entities, multi-instance renderer, codegen, all mapping builds and labelled deployment gates pass | Reorg/finality, live replay/reconciliation and RPC bytecode identity remain pending; dependency audit still reports 45 findings including two critical |
-| Operator/investor Angular apps | CI commands fail | Both workflows call a missing lint target; Karma expects missing `karma-jasmine`; no spec files were found |
-| Docusaurus docs | English and German production builds pass after truth/build corrections | Dependency audit still reported 37 findings including two critical |
+| Confidential relayer | TypeScript 6 lint/build and 33/33 Vitest tests pass | Express 5 / native ESM migration complete; dependency audit reports zero findings |
+| EVM subgraph | 16 ABI contracts / 71 handlers, 25 projection-status entities, multi-instance renderer, codegen and all mapping builds pass | Production audit is clean; one upstream-only Graph CLI `decompress` path is isolated by the executable allowlist in `SECURITY-EXCEPTIONS.md` |
+| Operator/investor Angular apps | Angular 22 lint/build pass; 124 operator and 125 customer Vitest tests pass | Native zoneless runtime and the Angular build/Vitest toolchain replace the legacy Karma setup |
+| MkDocs documentation | Strict five-language image build and browser tests pass | Mermaid, theme switching and runtime language-origin/port preservation are covered; production dependency audit is clean |
 | DAML | Not run | `dpm` is unavailable in the current environment |
 
 ## Known deployment and operations blockers
@@ -221,9 +221,9 @@ For German eWpG instruments, the current database holder record is only the asse
   image instead (CLAUDE.md's documented build command had the same bug and was corrected too).
   Separately, the "Operator/investor Angular apps" row in the baseline-results table above
   (missing lint target, missing `karma-jasmine`, zero spec files) is also resolved: both apps
-  now have real ESLint (flat config) and Karma/Jasmine wired into `angular.json`, with 113 and
-  115 passing spec files respectively covering the auth/session code this session's cookie
-  migration touched most, plus a sample of API services and stateful components.
+  now have real ESLint (flat config) and Vitest wired into `angular.json`: 124 operator tests
+  across 17 spec files and 125 customer tests across 19 spec files cover auth/session behavior,
+  API services and stateful components.
 
 All items in this section are now resolved. The eight resolved items above are self-assessed
 by the same automated contributor that wrote this document — not evidence that any review has

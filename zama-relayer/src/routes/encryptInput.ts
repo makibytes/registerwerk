@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
-import type { RelayerConfig } from '../config';
-import { getFheInstance } from '../fheInstance';
-import { toHex } from '../hex';
+import type { RelayerConfig } from '../config.js';
+import { getFheInstance } from '../fheInstance.js';
+import { toHex } from '../hex.js';
 
 const UINT64_MAX = (1n << 64n) - 1n;
 

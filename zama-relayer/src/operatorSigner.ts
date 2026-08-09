@@ -1,6 +1,6 @@
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import type { KmsUserDecryptEIP712Type } from '@zama-fhe/relayer-sdk/node';
-import type { RelayerConfig } from './config';
+import type { RelayerConfig } from './config.js';
 
 /**
  * Signs the Zama KMS's `UserDecryptRequestVerification` EIP-712 payload with the dedicated

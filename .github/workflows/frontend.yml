@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend-operator/package-lock.json
       - run: npm ci
@@ -56,13 +56,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend-operator/package-lock.json
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
-      - run: npm run test -- --watch=false --browsers=ChromeHeadlessCI
+      - run: npm run test -- --watch=false
       - run: npm run build -- --configuration production
       - name: Build production container
         run: docker build -f frontend-operator/Dockerfile -t registerwerk-operator:ci .
@@ -93,13 +93,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend-customer/package-lock.json
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
-      - run: npm run test -- --watch=false --browsers=ChromeHeadlessCI
+      - run: npm run test -- --watch=false
       - run: npm run build -- --configuration production
       - name: Build production container
         run: docker build -f frontend-customer/Dockerfile -t registerwerk-customer:ci .

@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.19.0"
       - run: node scripts/verify-claims.test.mjs
       - run: node scripts/verify-claims.mjs
       - name: Enforce append-only claim history against pull-request base
@@ -44,7 +44,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.19.0"
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.19.0"
       - uses: actions/setup-java@v4
         with:
           java-version: "25"
@@ -76,7 +76,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: indexer/evm/subgraph/package-lock.json
       # validate-abi-parity.mjs diffs the checked-in subgraph ABIs against the canonical

@@ -20,9 +20,9 @@ function decodePayload(token: string): Record<string, unknown> {
  * **Why not `@azure/msal-angular`.** It offers `MsalService` (a thin wrapper over
  * `PublicClientApplication`), `MsalGuard` and `MsalInterceptor`. This app has its own
  * `authGuard`/`roleGuard` and its own `authInterceptor`, so the only piece it would use is the
- * wrapper — and taking the dependency would tie the app to msal-angular's Angular version
- * support (v4 tops out at Angular 20; we are on 21). Using msal-browser, which has no Angular
- * peer dependency, sidesteps that entirely — along with msal-angular v5's strict
+ * wrapper — and taking the dependency would unnecessarily couple upgrades to msal-angular's
+ * Angular peer-version range. Using msal-browser, which has no Angular peer dependency,
+ * sidesteps that entirely — along with msal-angular's strict
  * `protectedResourceMap` matching, a well-known source of silent 401s.
  *
  * **Why MSAL is imported dynamically.** `app.config.ts` has to reference this class statically to

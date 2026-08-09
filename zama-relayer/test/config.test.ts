@@ -1,4 +1,5 @@
-import { loadConfig } from '../src/config';
+import { describe, expect, it } from 'vitest';
+import { loadConfig } from '../src/config.js';
 
 const OPERATOR_KEY = `0x${'1'.repeat(64)}`;
 const API_KEY = 'test-relayer-api-key';

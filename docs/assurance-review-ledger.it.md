@@ -132,10 +132,10 @@ Per gli strumenti eWpG tedeschi, il record del titolare del database corrente è
 | Backend `./mvnw verify -B` | La linea di base è passata all'esterno della sandbox vincolata; F0-011 combinati unità mirate/suite di migrazione passano 20/20 | I processi pianificati continuano dopo lo smontaggio dell'applicazione di test, generano errori di database di grandi dimensioni e ritardano l'arresto del fork; il JaCoCo effettivo è circa 45,0% linea / 38,6% ramo contro un 36% / 23% gate e una documentazione contrastante del 70% |
 | Foundry `forge test -q` | 449 approvati, 31 saltati dopo il primo lotto approvato; ripetizione indipendente terminata 0 | I test di regressione ora coprono la conservazione del trasferimento di indirizzo ERC-3525, il bypass sincrono ERC-7540, l'arrotondamento dei prelievi pronti contro termine e la valutazione di mercato unica |
 | Cairo `snforge test` | 29/29 passato | La superficie Cairo necessita ancora di revisione del dominio/sicurezza |
-| Relè confidenziale | Il lint è passato; 33/33 test superati | L'audit di dipendenza ha riportato 21 risultati di elevata gravità; il file di lock era assente prima dell'installazione di base |
-| EVM sottografo | 16 contratti ABI/71 gestori, 25 entità con stato di proiezione, renderer multiistanza, codegen, tutte le build di mappatura e le porte di distribuzione etichettate superano | Riorganizzazione/finalità, riproduzione live/riconciliazione e identità bytecode RPC rimangono in sospeso; il controllo delle dipendenze riporta ancora 45 risultati, inclusi due critici |
-| Operatore/investitore App Angular | I comandi CI falliscono | Entrambi i flussi di lavoro richiamano una destinazione di lint mancante; Karma prevede la mancanza di `karma-jasmine`; nessun file delle specifiche trovato |
-| Docusaurus documenti | Le build di produzione inglese e tedesca passano dopo le correzioni Truth/Build | L'audit delle dipendenze ha comunque riportato 37 risultati, inclusi due critici |
+| Relè confidenziale | Lint/build TypeScript 6 e 33/33 test Vitest superati | Migrazione Express 5 / ESM completata; audit delle dipendenze senza risultati |
+| Sottografo EVM | 16 ABI / 71 gestori, 25 entità di proiezione, renderer multiistanza, codegen e build superati | Audit di produzione pulito; un percorso upstream Graph CLI verso `decompress` è isolato dall'allowlist eseguibile in `SECURITY-EXCEPTIONS.md` |
+| App Angular operatore/investitore | Lint/build Angular 22 superati; 124 test operatore e 125 test cliente Vitest passano | Runtime zoneless nativo e Angular build/Vitest sostituiscono Karma |
+| Documentazione MkDocs | Build rigorosa in cinque lingue e test browser superati | Mermaid, cambio tema e conservazione di origine/porta nel cambio lingua sono coperti; audit di produzione pulito |
 | DAML | Non eseguito | `dpm` non è disponibile nell'ambiente corrente |
 
 ## Blocchi operativi e di distribuzione noti { #known-deployment-and-operations-blockers }
