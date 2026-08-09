@@ -211,7 +211,7 @@ const { operatorUrl } = environment;
         font-weight: 700;
         padding: 3px 10px;
         cursor: pointer;
-        font-family: 'Manrope', sans-serif;
+        font-family: 'Manrope Variable', sans-serif;
 
         &:hover { background: rgba(255,255,255,0.25); }
       }

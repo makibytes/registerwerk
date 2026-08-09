@@ -418,6 +418,64 @@ class AuthApiIT {
     }
 
     @Test
+    @DisplayName("Cookie authentication rotates CSRF token and keeps browser mutations usable")
+    void sessionCookie_rotatesCsrfTokenForNextMutation() {
+        ResponseEntity<String> bootstrapResponse = restTemplate.getForEntity(
+            url("/api/v1/public/auth/config"),
+            String.class
+        );
+        String bootstrapCsrfToken = extractCookieValue(bootstrapResponse, "XSRF-TOKEN");
+
+        HttpHeaders loginHeaders = new HttpHeaders();
+        loginHeaders.add(HttpHeaders.COOKIE, "XSRF-TOKEN=" + bootstrapCsrfToken);
+        loginHeaders.set("X-XSRF-TOKEN", bootstrapCsrfToken);
+        ResponseEntity<LoginResponse> loginResponse = restTemplate.exchange(
+            url("/api/v1/public/auth/login"),
+            HttpMethod.POST,
+            new HttpEntity<>(new LoginRequest(ADMIN_EMAIL, ADMIN_PASSWORD), loginHeaders),
+            LoginResponse.class
+        );
+        String sessionToken = extractSessionToken(loginResponse);
+
+        HttpHeaders readHeaders = new HttpHeaders();
+        readHeaders.add(HttpHeaders.COOKIE,
+            "rw_session=" + sessionToken + "; XSRF-TOKEN=" + bootstrapCsrfToken);
+        ResponseEntity<String> readResponse = restTemplate.exchange(
+            url("/api/v1/entities"),
+            HttpMethod.GET,
+            new HttpEntity<>(readHeaders),
+            String.class
+        );
+
+        assertThat(readResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<String> csrfCookies = setCookies(readResponse).stream()
+            .filter(cookie -> cookie.startsWith("XSRF-TOKEN="))
+            .toList();
+        assertThat(csrfCookies)
+            .as("the rotated token must be written after Spring expires the old token")
+            .isNotEmpty();
+        String rotatedCsrfToken = csrfCookies.stream()
+            .map(cookie -> cookie.substring("XSRF-TOKEN=".length()).split(";", 2)[0])
+            .filter(value -> !value.isBlank())
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("No replacement CSRF token in response: " + csrfCookies));
+        assertThat(rotatedCsrfToken).isNotEqualTo(bootstrapCsrfToken);
+
+        HttpHeaders mutationHeaders = new HttpHeaders();
+        mutationHeaders.add(HttpHeaders.COOKIE,
+            "rw_session=" + sessionToken + "; XSRF-TOKEN=" + rotatedCsrfToken);
+        mutationHeaders.set("X-XSRF-TOKEN", rotatedCsrfToken);
+        ResponseEntity<Void> mutationResponse = restTemplate.exchange(
+            url("/api/v1/auth/exit-impersonation"),
+            HttpMethod.POST,
+            new HttpEntity<>(mutationHeaders),
+            Void.class
+        );
+
+        assertThat(mutationResponse.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
     @DisplayName("Session cookie alone does not exempt a mutating request from CSRF validation")
     void sessionCookie_withoutCsrfToken_isRejectedOnMutatingRequest() {
         ResponseEntity<LoginResponse> loginResponse = restTemplate.postForEntity(

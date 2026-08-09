@@ -113,7 +113,7 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 9px;
       padding: 11px 14px;
-      font-family: 'Manrope', sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 14px;
       font-weight: 500;
       color: #FFFFFF;
@@ -217,7 +217,7 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
         cursor: pointer;
         font-size: 12px;
         color: rgba(255,255,255,0.25);
-        font-family: 'Manrope', sans-serif;
+        font-family: 'Manrope Variable', sans-serif;
 
         &:hover { color: rgba(255,255,255,0.5); }
       }

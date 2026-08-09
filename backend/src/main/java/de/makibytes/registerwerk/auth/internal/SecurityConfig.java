@@ -28,9 +28,9 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.session.SessionManagementFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -155,10 +155,13 @@ public class SecurityConfig {
             // for why this is a filter rather than a change to ~100 call sites.
             .addFilterAfter(new EntraPrincipalNormalizationFilter(principalResolver),
                             BearerTokenAuthenticationFilter.class)
-            // Forces the XSRF-TOKEN cookie to be (re-)written on every response — see
-            // SpaCsrfConfig's Javadoc for why the default CsrfTokenRequestHandler alone
-            // wouldn't reliably do this for a REST API with no server-rendered forms.
-            .addFilterAfter(new SpaCsrfConfig.CsrfCookieFilter(), BasicAuthenticationFilter.class);
+            // SessionManagementFilter invokes CsrfAuthenticationStrategy after a cookie-backed
+            // bearer token is authenticated. That strategy deliberately expires the pre-login
+            // token and installs a fresh deferred token. This filter therefore MUST run after
+            // SessionManagementFilter: running it after BasicAuthenticationFilter is still too
+            // early and leaves the deletion cookie as the final response header, so Angular has
+            // no XSRF-TOKEN for its first mutating request (notably impersonation).
+            .addFilterAfter(new SpaCsrfConfig.CsrfCookieFilter(), SessionManagementFilter.class);
 
         return http.build();
     }

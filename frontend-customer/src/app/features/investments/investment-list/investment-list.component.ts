@@ -1,5 +1,4 @@
 import {
-  AfterViewInit,
   ChangeDetectorRef,
   Component,
   OnInit,
@@ -362,12 +361,19 @@ interface Filters {
     .load-error p { margin: 0; color: var(--rw-text-secondary); }
   `],
 })
-export class InvestmentListComponent implements OnInit, AfterViewInit {
+export class InvestmentListComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly investmentService = inject(InvestmentService);
 
-  @ViewChild(MatSort) sort!: MatSort;
-  @ViewChild(MatPaginator) paginator!: MatPaginator;
+  @ViewChild(MatSort)
+  set sort(sort: MatSort | undefined) {
+    if (sort) this.dataSource.sort = sort;
+  }
+
+  @ViewChild(MatPaginator)
+  set paginator(paginator: MatPaginator | undefined) {
+    if (paginator) this.dataSource.paginator = paginator;
+  }
 
   allRecords: InvestmentRecord[] = [];
   dataSource = new MatTableDataSource<InvestmentRecord>();
@@ -466,6 +472,17 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   ngOnInit(): void {
+    this.dataSource.sortingDataAccessor = (item, column) => {
+      switch (column) {
+        case 'assetName':        return item.assetName ?? '';
+        case 'tokenStandard':    return item.tokenStandard ?? '';
+        case 'nominalAmount':    return item.nominalAmount;
+        case 'acquisitionDate':  return item.acquisitionDate ?? '';
+        case 'whitelisted':      return item.whitelisted ? 1 : 0;
+        case 'assetStatus':      return item.assetStatus ?? '';
+        default:                 return '';
+      }
+    };
     this.load();
   }
 
@@ -488,22 +505,6 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
           this.cdr.detectChanges();
         },
       });
-  }
-
-  ngAfterViewInit(): void {
-    this.dataSource.sort = this.sort;
-    this.dataSource.paginator = this.paginator;
-    this.dataSource.sortingDataAccessor = (item, column) => {
-      switch (column) {
-        case 'assetName':        return item.assetName ?? '';
-        case 'tokenStandard':    return item.tokenStandard ?? '';
-        case 'nominalAmount':    return item.nominalAmount;
-        case 'acquisitionDate':  return item.acquisitionDate ?? '';
-        case 'whitelisted':      return item.whitelisted ? 1 : 0;
-        case 'assetStatus':      return item.assetStatus ?? '';
-        default:                 return '';
-      }
-    };
   }
 
   applyFilters(): void {

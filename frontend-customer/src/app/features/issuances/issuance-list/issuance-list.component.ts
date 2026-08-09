@@ -1,5 +1,4 @@
 import {
-  AfterViewInit,
   ChangeDetectorRef,
   Component,
   OnInit,
@@ -351,12 +350,19 @@ interface IssuanceFilters {
     .load-error p { margin: 0; color: var(--rw-text-secondary); }
   `],
 })
-export class IssuanceListComponent implements OnInit, AfterViewInit {
+export class IssuanceListComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly issuanceService = inject(IssuanceService);
 
-  @ViewChild(MatSort) sort!: MatSort;
-  @ViewChild(MatPaginator) paginator!: MatPaginator;
+  @ViewChild(MatSort)
+  set sort(sort: MatSort | undefined) {
+    if (sort) this.dataSource.sort = sort;
+  }
+
+  @ViewChild(MatPaginator)
+  set paginator(paginator: MatPaginator | undefined) {
+    if (paginator) this.dataSource.paginator = paginator;
+  }
 
   allIssuances: Asset[] = [];
   dataSource = new MatTableDataSource<Asset>();
@@ -449,6 +455,17 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   ngOnInit(): void {
+    this.dataSource.sortingDataAccessor = (item, column) => {
+      switch (column) {
+        case 'assetNumber':   return item.assetNumber;
+        case 'name':          return item.name;
+        case 'tokenStandard': return item.tokenStandard ?? '';
+        case 'status':        return item.status;
+        case 'chain':         return item.chain ?? '';
+        case 'createdAt':     return item.createdAt;
+        default:              return '';
+      }
+    };
     this.load();
   }
 
@@ -469,22 +486,6 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
         this.cdr.detectChanges();
       },
     });
-  }
-
-  ngAfterViewInit(): void {
-    this.dataSource.sort = this.sort;
-    this.dataSource.paginator = this.paginator;
-    this.dataSource.sortingDataAccessor = (item, column) => {
-      switch (column) {
-        case 'assetNumber':   return item.assetNumber;
-        case 'name':          return item.name;
-        case 'tokenStandard': return item.tokenStandard ?? '';
-        case 'status':        return item.status;
-        case 'chain':         return item.chain ?? '';
-        case 'createdAt':     return item.createdAt;
-        default:              return '';
-      }
-    };
   }
 
   applyFilters(): void {

@@ -312,7 +312,7 @@ import {
     }
 
     .wizard-title {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 2rem;
       font-weight: 800;
       color: #f0f4ff;
@@ -342,7 +342,7 @@ import {
     }
 
     .step-heading {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 1.125rem;
       font-weight: 700;
       color: #e2e8f8;

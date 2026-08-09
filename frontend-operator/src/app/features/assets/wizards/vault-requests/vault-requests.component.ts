@@ -133,7 +133,7 @@ import { VaultRequest } from '../../../../core/models';
     }
 
     .req-title {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 1rem;
       font-weight: 700;
       color: #e2e8f8;

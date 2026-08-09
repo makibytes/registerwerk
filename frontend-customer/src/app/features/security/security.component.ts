@@ -139,7 +139,7 @@ const POLL_LIMIT = 60; // 5 minutes
       padding: 0 18px;
       border-radius: 9px;
       border: none;
-      font-family: 'Manrope', sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 14px;
       font-weight: 600;
       cursor: pointer;

@@ -54,7 +54,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
             <mat-step [stepControl]="detailsForm" label="Details">
               <form [formGroup]="detailsForm" class="step-form">
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Issuance Name *</mat-label>
+                  <mat-label>Issuance Name</mat-label>
                   <input matInput formControlName="name" placeholder="e.g. Green Bond 2025" />
                   @if (detailsForm.get('name')?.hasError('required') && detailsForm.get('name')?.touched) {
                     <mat-error>Name is required</mat-error>
@@ -70,7 +70,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Jurisdiction *</mat-label>
+                  <mat-label>Jurisdiction</mat-label>
                   <mat-select formControlName="jurisdiction">
                     @for (j of jurisdictions; track j.value) {
                       <mat-option [value]="j.value">{{ j.label }}</mat-option>
@@ -101,7 +101,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 }
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Onchain Level *</mat-label>
+                  <mat-label>Onchain Level</mat-label>
                   <mat-select formControlName="onchainLevel">
                     @for (lvl of onchainLevels; track lvl.value) {
                       <mat-option [value]="lvl.value">{{ lvl.label }}</mat-option>
@@ -196,7 +196,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
             <mat-step [stepControl]="chainForm" label="Chain &amp; Standard">
               <form [formGroup]="chainForm" class="step-form">
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Blockchain *</mat-label>
+                  <mat-label>Blockchain</mat-label>
                   <mat-select formControlName="chain" (valueChange)="onChainChange($event)">
                     @for (c of chains; track c.value) {
                       <mat-option [value]="c.value" [disabled]="c.comingSoon === true">
@@ -207,7 +207,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Network *</mat-label>
+                  <mat-label>Network</mat-label>
                   <mat-select formControlName="network">
                     <mat-option value="MAINNET">Mainnet</mat-option>
                     <mat-option value="TESTNET">Testnet</mat-option>
@@ -215,7 +215,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Token Standard *</mat-label>
+                  <mat-label>Token Standard</mat-label>
                   <mat-select formControlName="tokenStandard">
                     @for (std of filteredStandards; track std.value) {
                       <mat-option [value]="std.value" [disabled]="std.comingSoon === true">

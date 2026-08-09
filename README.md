@@ -19,7 +19,7 @@ is intentional (see "Why two paths?" below), not a stopgap.
               ┌──────▼──────┐                 ┌──────▼──────┐
               │  frontend-  │                 │  frontend-  │
               │  operator   │                 │  customer   │
-              │ (Angular21) │                 │ (Angular21) │
+              │ (Angular22) │                 │ (Angular22) │
               └──────┬──────┘                 └──────┬──────┘
                      │ nginx /api/ ->                │ nginx /api/ ->
                      │ backend:8080 directly         │ kong:8000

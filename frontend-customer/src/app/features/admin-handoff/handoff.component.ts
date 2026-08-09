@@ -21,7 +21,7 @@ import { AuthService } from '../../core/auth/auth.service';
       max-width: 460px;
       text-align: center;
       color: #E5E7EB;
-      font-family: 'Manrope', sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
 
       h1 {
         font-size: 20px;
