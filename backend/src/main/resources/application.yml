@@ -458,7 +458,7 @@ registerwerk:
     batch-size: ${REGISTERWERK_DRIFT_BATCH_SIZE:500}
   lending:
     local-demo-backend-rpc-url: ${LENDING_LOCAL_DEMO_BACKEND_RPC_URL:http://anvil:8545}
-    local-demo-public-rpc-url: ${LENDING_LOCAL_DEMO_PUBLIC_RPC_URL:http://localhost:8545}
+    local-demo-public-rpc-url: ${LENDING_LOCAL_DEMO_PUBLIC_RPC_URL:http://localhost:18545}
     # Fail closed until legal, custody, oracle, liquidation, and operating controls have
     # completed release review. Both flags are required; enabling only one refuses startup
     # or endpoint/service access.

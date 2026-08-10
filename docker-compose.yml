@@ -16,8 +16,10 @@ services:
   # ─── Disposable local EVM ─────────────────────────────────────────────────
   # The demo's lending screens require real contract bytecode and live balances; seeded DB
   # addresses alone are intentionally rejected by the backend's on-chain verification.
+  # Port 8545 remains private to the Compose network. The host uses 18545 by default so this
+  # disposable node cannot collide with a real node listening on the conventional port.
   anvil:
-    image: ghcr.io/foundry-rs/foundry:v1.5.1
+    image: ghcr.io/foundry-rs/foundry:v1.7.1
     logging: *default-logging
     entrypoint: ["anvil"]
     command:
@@ -28,15 +30,17 @@ services:
       - "--state"
       - "/data/anvil-state.json"
     ports:
-      - "${ANVIL_BIND_ADDR:-0.0.0.0}:8545:8545"
+      - "${ANVIL_BIND_ADDR:-0.0.0.0}:${ANVIL_HOST_PORT:-18545}:8545"
     volumes:
       - anvil_state:/data
     healthcheck:
-      test: ["CMD-SHELL", "cast block-number --rpc-url http://127.0.0.1:8545 >/dev/null || exit 1"]
-      interval: 2s
-      timeout: 2s
-      retries: 20
-      start_period: 5s
+      # An open TCP socket is insufficient: require a JSON-RPC response from the configured
+      # demo chain. This URL is evaluated inside the Anvil container, hence port 8545.
+      test: ["CMD-SHELL", "test \"$$(cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null)\" = \"11155111\""]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
     restart: unless-stopped
 
   demo-onchain-deploy:
@@ -47,9 +51,20 @@ services:
     image: registerwerk-contracts-demo:local
     logging: *default-logging
     command:
-      - >-
-        forge script script/DeployLocalLendingDemo.s.sol:DeployLocalLendingDemo
-        --rpc-url http://anvil:8545 --broadcast --non-interactive
+      - |
+        set -eu
+        attempts=0
+        until chain_id="$$(cast chain-id --rpc-url http://anvil:8545 2>/dev/null)" \
+          && [ "$$chain_id" = "11155111" ]; do
+          attempts=$$((attempts + 1))
+          if [ "$$attempts" -ge 60 ]; then
+            echo "Anvil did not become ready on the Compose network (expected chain 11155111)" >&2
+            exit 1
+          fi
+          sleep 1
+        done
+        exec forge script script/DeployLocalLendingDemo.s.sol:DeployLocalLendingDemo \
+          --rpc-url http://anvil:8545 --broadcast --non-interactive
     working_dir: /contracts
     user: "0:0"
     environment:
@@ -134,7 +149,7 @@ services:
       ETH_MAINNET_RPC: ${ETH_MAINNET_RPC}
       ETH_SEPOLIA_RPC: ${ETH_SEPOLIA_RPC:-http://anvil:8545}
       LENDING_LOCAL_DEMO_BACKEND_RPC_URL: http://anvil:8545
-      LENDING_LOCAL_DEMO_PUBLIC_RPC_URL: ${ANVIL_PUBLIC_RPC_URL:-http://localhost:8545}
+      LENDING_LOCAL_DEMO_PUBLIC_RPC_URL: ${ANVIL_PUBLIC_RPC_URL:-http://localhost:18545}
       POLYGON_MAINNET_RPC: ${POLYGON_MAINNET_RPC}
       POLYGON_AMOY_RPC: ${POLYGON_AMOY_RPC}
       BASE_MAINNET_RPC: ${BASE_MAINNET_RPC}

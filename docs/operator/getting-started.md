@@ -112,8 +112,13 @@ When the browser is on another host (for example `nibbler.local`), also set the 
 
 ```dotenv
 SEED_DEMO_DATA=true
-ANVIL_PUBLIC_RPC_URL=http://nibbler.local:8545
+ANVIL_HOST_PORT=18545
+ANVIL_PUBLIC_RPC_URL=http://nibbler.local:18545
 ```
+
+`ANVIL_HOST_PORT` is only the published host/browser port. Backend and deployment containers
+always connect to `http://anvil:8545` on the Compose network. Using `localhost` or port `18545`
+inside those containers points at the wrong network namespace and results in connection refused.
 
 Add that RPC to a disposable browser wallet as chain ID `11155111`. The Anvil mnemonic is the standard public development mnemonic:
 

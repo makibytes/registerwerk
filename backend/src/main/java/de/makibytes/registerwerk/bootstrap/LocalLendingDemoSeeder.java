@@ -59,7 +59,7 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
     @Value("${registerwerk.lending.local-demo-backend-rpc-url:http://anvil:8545}")
     private String backendRpcUrl;
 
-    @Value("${registerwerk.lending.local-demo-public-rpc-url:http://localhost:8545}")
+    @Value("${registerwerk.lending.local-demo-public-rpc-url:http://localhost:18545}")
     private String publicRpcUrl;
 
     private final AssetRepository assets;
