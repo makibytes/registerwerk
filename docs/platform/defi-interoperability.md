@@ -113,11 +113,15 @@ for Registerwerk, not a legally approved product.** It also fits the "don't
 build a DEX" constraint perfectly, since collateralized lending was never an order book to
 begin with.
 
-## `EwpgRepoFacility` — the primary exit-liquidity mechanism
+## `EwpgRepoFacility` — legacy-named collateralized-lending example { #ewpgrepofacility-the-primary-exit-liquidity-mechanism }
 
-`contracts/src/examples/EwpgRepoFacility.sol` is a reference repo/collateralized-lending
+Despite its historical contract name, `contracts/src/examples/EwpgRepoFacility.sol` is a reference collateralized-lending
 facility with deliberately asymmetric gating. Production use is blocked pending legal
 characterization, custody/control, liquidation, oracle, insolvency, and smart-contract approval:
+
+It is **not** the platform's conventional repo implementation: it has no bilateral RFQ, private
+dealer quote, title-transfer opening sale, fixed repurchase amount, margin-call workflow, or
+two-party closing settlement. Those live in the separate [Repo Desk](../customer/lifecycle/repo-trading.md).
 
 - **Lender side (`deposit`/`withdraw`) is open to any stablecoin holder** — no
   `RegisterwerkGated` check at all. Depositors only ever hold a claim on pooled stablecoin;
@@ -174,7 +178,7 @@ like the other two flagship examples — see
 `CompliantSecondaryMarket` and `StablecoinAmm` remain tested Solidity only (no manifest, not
 seeded as marketplace listings).
 
-## `EwpgRepoMarket` / `EwpgRepoVault` — the isolated-market evolution
+## `EwpgRepoMarket` / `EwpgRepoVault` — legacy-named isolated lending markets
 
 `contracts/src/lending/` is the Morpho-Blue-style evolution of `EwpgRepoFacility`, additive to
 it (both can run against the same ecosystem — see `script/DeployRepoMarkets.s.sol`). Where the

@@ -20,7 +20,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { Chain, LendingMarket, RegisterDocumentMeta, SellableHolding } from '../../core/models';
 import { ChainLendingCapability, lendingCapabilityFor } from '../../core/lending/chain-capabilities';
-import { environment } from '../../../environments/environment';
+import { PlatformCapabilitiesService } from '../../core/feature/platform-capabilities';
 
 interface PositionRow {
   holderId: string;
@@ -211,7 +211,7 @@ interface PositionRow {
   `],
 })
 export class PositionsComponent implements OnInit {
-  readonly lendingEnabled = environment.lendingEnabled;
+  private readonly capabilities = inject(PlatformCapabilitiesService);
   private readonly investmentService = inject(InvestmentService);
   private readonly tradingService = inject(TradingService);
   private readonly lendingService = inject(LendingService);
@@ -220,6 +220,10 @@ export class PositionsComponent implements OnInit {
   private readonly registerDocumentService = inject(RegisterDocumentService);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly snackBar = inject(MatSnackBar);
+
+  get lendingEnabled(): boolean {
+    return this.capabilities.lendingEnabled();
+  }
 
   @ViewChild('actions', { static: true }) actions!: TemplateRef<{ $implicit: PositionRow }>;
 
@@ -282,7 +286,7 @@ export class PositionsComponent implements OnInit {
       sellable: this.tradingService.listSellableHoldings().pipe(
         catchError(() => { this.partialDataWarning = true; return of<SellableHolding[]>([]); }),
       ),
-      markets: environment.lendingEnabled
+      markets: this.lendingEnabled
         ? this.lendingService.listMarkets('ACTIVE').pipe(
             catchError(() => { this.partialDataWarning = true; return of<LendingMarket[]>([]); })
           )

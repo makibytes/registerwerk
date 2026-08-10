@@ -12,6 +12,7 @@ import { MsalTokenSource } from './core/auth/msal-token-source';
 import { TokenSource } from './core/auth/token-source';
 import { authInterceptor } from './core/interceptors/auth.interceptor';
 import { errorInterceptor } from './core/interceptors/error.interceptor';
+import { PLATFORM_CAPABILITIES, PlatformCapabilities } from './core/feature/platform-capabilities';
 
 /**
  * Builds the application providers for a given sign-in mode.
@@ -20,7 +21,7 @@ import { errorInterceptor } from './core/interceptors/error.interceptor';
  * `PublicClientApplication` must be constructed with a `clientId` and `authority` already known
  * — see `main.ts`, which fetches them before bootstrapping.
  */
-export function appConfig(cfg: AuthConfig): ApplicationConfig {
+export function appConfig(cfg: AuthConfig, capabilities: PlatformCapabilities): ApplicationConfig {
   return {
     providers: [
       provideRouter(routes, withComponentInputBinding()),
@@ -29,6 +30,7 @@ export function appConfig(cfg: AuthConfig): ApplicationConfig {
         withXsrfConfiguration({ cookieName: 'XSRF-TOKEN', headerName: 'X-XSRF-TOKEN' })
       ),
       { provide: AUTH_CONFIG, useValue: cfg },
+      { provide: PLATFORM_CAPABILITIES, useValue: capabilities },
       {
         provide: TokenSource,
         useClass: cfg.mode === 'ENTRA' ? MsalTokenSource : CookieTokenSource,

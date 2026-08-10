@@ -3,6 +3,10 @@ import { AppComponent } from './app/app.component';
 import { appConfig } from './app/app.config';
 import { AuthConfig, LOCAL_AUTH_CONFIG } from './app/core/auth/auth-config';
 import { environment } from './environments/environment';
+import {
+  DISABLED_PLATFORM_CAPABILITIES,
+  PlatformCapabilities,
+} from './app/core/feature/platform-capabilities';
 
 /**
  * Fetches the sign-in configuration before Angular starts.
@@ -31,10 +35,29 @@ async function loadAuthConfig(): Promise<AuthConfig> {
   }
 }
 
-loadAuthConfig()
-  .then(cfg =>
+async function loadPlatformCapabilities(): Promise<PlatformCapabilities> {
+  try {
+    const response = await fetch(`${environment.apiUrl}/public/platform-capabilities`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      console.warn(`[capabilities] Endpoint returned ${response.status}; optional features stay disabled.`);
+      return DISABLED_PLATFORM_CAPABILITIES;
+    }
+    return (await response.json()) as PlatformCapabilities;
+  } catch (err) {
+    console.warn('[capabilities] Endpoint unreachable; optional features stay disabled.', err);
+    return DISABLED_PLATFORM_CAPABILITIES;
+  }
+}
+
+Promise.all([loadAuthConfig(), loadPlatformCapabilities()])
+  .then(([cfg, capabilities]) =>
     // The build-time override exists so MSAL can be exercised locally without an Entra-configured
     // backend. Applied last, so it wins over whatever the server reported.
-    bootstrapApplication(AppComponent, appConfig({ ...cfg, ...environment.authConfigOverride }))
+    bootstrapApplication(
+      AppComponent,
+      appConfig({ ...cfg, ...environment.authConfigOverride }, capabilities),
+    )
   )
   .catch(err => console.error(err));

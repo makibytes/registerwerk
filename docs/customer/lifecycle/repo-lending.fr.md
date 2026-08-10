@@ -1,9 +1,9 @@
 ---
-title: 5. Pension livrée et financement
+title: 5b. Prêt garanti par titres
 description: Emprunter des liquidités contre un titre que vous conservez — garantie, quotité de financement, intérêts, réalisation, et ce qui peut mal tourner.
 ---
 
-# Étape 5 — Pension livrée et financement
+# Étape 5b — Prêt garanti par titres
 
 *L'investisseur a besoin de liquidités. Mais l'obligation lui plaît et il ne veut pas la vendre.*
 
@@ -11,6 +11,9 @@ Il l'utilise donc comme **garantie** : il la nantit, emprunte contre elle, et la
 
 !!! info "Disponibilité"
     Le financement est une fonctionnalité que l'opérateur active par déploiement. Si vous ne voyez pas **Liquidity** dans l'espace Trader, elle est désactivée dans votre registre. C'est aussi la partie la plus récente et la moins éprouvée de la plateforme — voir la [revue de conformité](../../compliance/lending-facility-review.md) pour les constats ouverts.
+
+!!! note "Ce n'est pas une pension livrée"
+    Cette fonction est un prêt garanti on-chain dans un pool, et non une vente bilatérale avec rachat convenu. Pour les RFQ repo, les cotations privées et le règlement bilatéral, utilisez le [Repo Desk](repo-trading.md) séparé.
 
 ---
 

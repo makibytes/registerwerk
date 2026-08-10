@@ -118,6 +118,12 @@ by default, so neither Zone.js nor an explicit `provideZonelessChangeDetection()
 
 ## Development
 
+### Mandatory final browser verification
+
+After any frontend, documentation UI, authentication, routing, CSS, icon/font, or user-facing workflow change, always run final smoke checks in **headless Google Chrome/Chromium** against the built, running containers. Exercise every affected role and view (including impersonation when relevant), verify navigation and primary actions, and fail the check on uncaught page exceptions, browser console errors, failed same-origin API requests, or missing/broken visual assets. Capture screenshots for visual review; Angular compilation and API-only tests are not substitutes for this browser check. Record the checked routes and result in the final response. If Chrome cannot run in the environment, state that explicitly instead of claiming the UI was verified.
+
+With the local demo stack running, execute `cd docs && npm run test:frontends && npm run test:browser`. The frontend suite uses the seeded trader and local operator accounts, writes desktop/mobile screenshots to `/tmp/registerwerk-headless`, and accepts `CUSTOMER_BASE_URL`, `OPERATOR_BASE_URL`, credential, and screenshot-directory environment overrides.
+
 ```bash
 docker compose up --build                    # full stack
 docker compose up --build frontend-operator  # rebuild one service

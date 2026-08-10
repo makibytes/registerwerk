@@ -77,11 +77,15 @@ That is the entire financial product. Everything that follows is the machinery f
 
     An investor wants out before maturity. Somebody else wants in. How the two find each other, and how the swap is made safe.
 
--   **5. [Repo and lending](repo-lending.md)**
+-   **5a. [Repo trading](repo-trading.md)**
+
+    A trader negotiates a fixed-term sale and repurchase with named counterparties, then manages both settlement legs, margin and close.
+
+-   **5b. [Securities-backed lending](repo-lending.md)**
 
     ---
 
-    An investor wants cash but wants to keep the bond. They pledge it as collateral and borrow against it — the oldest trick in financial markets, rebuilt on-chain.
+    An investor wants pooled, open-ended financing. They pledge the bond into an isolated on-chain market and borrow against it.
 
 -   **6. [Corporate actions and redemption](redemption.md)**
 

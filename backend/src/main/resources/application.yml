@@ -457,11 +457,19 @@ registerwerk:
     check-interval-ms: ${REGISTERWERK_DRIFT_CHECK_INTERVAL_MS:900000}
     batch-size: ${REGISTERWERK_DRIFT_BATCH_SIZE:500}
   lending:
+    local-demo-backend-rpc-url: ${LENDING_LOCAL_DEMO_BACKEND_RPC_URL:http://anvil:8545}
+    local-demo-public-rpc-url: ${LENDING_LOCAL_DEMO_PUBLIC_RPC_URL:http://localhost:8545}
     # Fail closed until legal, custody, oracle, liquidation, and operating controls have
     # completed release review. Both flags are required; enabling only one refuses startup
     # or endpoint/service access.
     enabled: ${REGISTERWERK_LENDING_ENABLED:false}
     release-approved: ${REGISTERWERK_LENDING_RELEASE_APPROVED:false}
+    # Optional output of contracts/script/DeployLocalLendingDemo.s.sol. Only the demo seeder
+    # reads it; production deployments leave it blank.
+    local-demo-addresses-file: ${REGISTERWERK_LENDING_LOCAL_DEMO_ADDRESSES_FILE:}
+  repo-desk:
+    enabled: ${REGISTERWERK_REPO_DESK_ENABLED:false}
+    release-approved: ${REGISTERWERK_REPO_DESK_RELEASE_APPROVED:false}
   trading:
     enabled: ${REGISTERWERK_TRADING_ENABLED:true}
     venues:

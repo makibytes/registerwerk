@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.audit.internal;
 
 import de.makibytes.registerwerk.audit.api.AuditableEvent;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Immutable;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import java.time.Instant;
@@ -15,6 +16,7 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "audit_event")
+@Immutable
 public class AuditEvent {
 
     @Id

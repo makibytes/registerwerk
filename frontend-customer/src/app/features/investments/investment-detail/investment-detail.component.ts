@@ -29,7 +29,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { AuthService } from '../../../core/auth/auth.service';
 import { downloadBlob } from '../../../core/utils/download.util';
-import { environment } from '../../../../environments/environment';
+import { PlatformCapabilitiesService } from '../../../core/feature/platform-capabilities';
 
 /** Minimal ABI fragments for the two confidential-token calls this component makes directly
  *  on-chain — reading a balance handle and submitting an investor-initiated confidential
@@ -634,7 +634,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
   `],
 })
 export class InvestmentDetailComponent implements OnInit {
-  readonly lendingEnabled = environment.lendingEnabled;
+  private readonly capabilities = inject(PlatformCapabilitiesService);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly investmentService = inject(InvestmentService);
@@ -649,6 +649,10 @@ export class InvestmentDetailComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
   protected readonly walletService = inject(WalletService);
   private readonly fheService = inject(FheClientService);
+
+  get lendingEnabled(): boolean {
+    return this.capabilities.lendingEnabled();
+  }
 
   record: InvestmentRecord | null = null;
   loading = true;

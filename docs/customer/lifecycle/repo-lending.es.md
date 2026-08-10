@@ -1,9 +1,9 @@
 ---
-title: 5. Repo y financiación
+title: 5b. Préstamo garantizado por valores
 description: Tomar prestado efectivo contra un valor que usted conserva — garantía, relación préstamo-valor, intereses, ejecución y qué puede salir mal.
 ---
 
-# Etapa 5 — Repo y financiación
+# Etapa 5b — Préstamo garantizado por valores
 
 *El inversor necesita efectivo. Pero le gusta el bono y no quiere venderlo.*
 
@@ -11,6 +11,9 @@ Así que lo utiliza como **garantía**: lo pignora, pide prestado contra él y l
 
 !!! info "Disponibilidad"
     La financiación es una función que el operador habilita por despliegue. Si no ve **Liquidity** en el espacio Trader, está desactivada en su registro. Es además la parte más reciente y menos probada de la plataforma — véase la [revisión de cumplimiento](../../compliance/lending-facility-review.md) para los hallazgos abiertos.
+
+!!! note "Esto no es un repo"
+    Esta función es un préstamo garantizado on-chain dentro de un pool, no una venta bilateral con recompra acordada. Para RFQ repo, cotizaciones privadas y liquidación bilateral, use el [Repo Desk](repo-trading.md) separado.
 
 ---
 

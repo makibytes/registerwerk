@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { AuthService } from '../auth/auth.service';
-import { environment } from '../../../environments/environment';
+import { PlatformCapabilitiesService } from '../feature/platform-capabilities';
 
 export type WorkspaceKey = 'INVESTOR' | 'TRADER' | 'ISSUER';
 
@@ -9,6 +9,7 @@ export interface WorkspaceNavLink {
   route: string;
   icon: string;
   roles?: readonly string[];
+  feature?: 'lending' | 'repoDesk';
 }
 
 export interface WorkspaceDef {
@@ -30,9 +31,8 @@ const WORKSPACES: Record<WorkspaceKey, WorkspaceDef> = {
     icon: 'candlestick_chart',
     links: [
       { label: 'Dashboard', route: '/dashboard', icon: 'grid_view' },
-      ...(environment.lendingEnabled
-        ? [{ label: 'Liquidity', route: '/lending', icon: 'water_drop' }]
-        : []),
+      { label: 'Securities-backed Lending', route: '/lending', icon: 'water_drop', feature: 'lending' },
+      { label: 'Repo Desk', route: '/repo-desk', icon: 'swap_horiz', roles: ['TRADER', 'REGISTRY_ADMIN'], feature: 'repoDesk' },
       { label: 'Trading Desk', route: '/trading', icon: 'candlestick_chart', roles: ['TRADER', 'REGISTRY_ADMIN'] },
       { label: 'My Positions', route: '/positions', icon: 'account_balance_wallet' },
       { label: 'Marketplace', route: '/marketplace', icon: 'storefront' },
@@ -81,6 +81,7 @@ const ELIGIBILITY: Record<WorkspaceKey, string[]> = {
 @Injectable({ providedIn: 'root' })
 export class WorkspaceService {
   private readonly auth = inject(AuthService);
+  private readonly capabilities = inject(PlatformCapabilitiesService);
 
   private readonly _current = signal<WorkspaceKey | null>(null);
   readonly current = this._current.asReadonly();
@@ -133,9 +134,16 @@ export class WorkspaceService {
     return {
       ...workspace,
       links: workspace.links.filter(link =>
-        !link.roles || link.roles.some(role => this.auth.hasRole(role))
+        this.featureEnabled(link)
+          && (!link.roles || link.roles.some(role => this.auth.hasRole(role)))
       ),
     };
+  }
+
+  private featureEnabled(link: WorkspaceNavLink): boolean {
+    if (link.feature === 'lending') return this.capabilities.lendingEnabled();
+    if (link.feature === 'repoDesk') return this.capabilities.repoDeskEnabled();
+    return true;
   }
 
   private readStored(): WorkspaceKey | null {

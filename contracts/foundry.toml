@@ -22,8 +22,12 @@ remappings = [
     "@onchain-id/solidity/=lib/onchain-id/",
     "@fhevm/=lib/fhevm/"
 ]
+fs_permissions = [
+    { access = "read-write", path = "./" },
+    { access = "write", path = "/output" }
+]
 
-[profile.default.rpc_endpoints]
+[rpc_endpoints]
 fhenix_helium = "${FHENIX_HELIUM_RPC}"
 inco_rivest   = "${INCO_RIVEST_RPC}"
 

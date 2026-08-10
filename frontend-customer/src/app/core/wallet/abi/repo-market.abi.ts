@@ -37,6 +37,20 @@ export const repoMarketAbi = [
   },
   {
     type: 'function',
+    name: 'addCollateral',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'withdrawCollateral',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
     name: 'liquidate',
     stateMutability: 'nonpayable',
     inputs: [
@@ -60,7 +74,10 @@ export const repoMarketAbi = [
     name: 'healthFactor',
     stateMutability: 'view',
     inputs: [{ name: 'borrower', type: 'address' }],
-    outputs: [{ type: 'uint256' }],
+    outputs: [
+      { name: 'factor', type: 'uint256' },
+      { name: 'priceReliable', type: 'bool' },
+    ],
   },
   {
     type: 'function',

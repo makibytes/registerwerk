@@ -49,7 +49,8 @@ public class LendingMarketController {
         LendingQuote quote = marketService.quote(marketId, collateralAmount);
         return ResponseEntity.ok(new LendingQuoteResponse(
                 quote.marketId(), quote.collateralAmount(), quote.pricePerUnit(), quote.priceUpdatedAt(),
-                quote.maxBorrowAmount(), quote.lltvBps(), quote.utilizationWad(), quote.borrowRateWad()));
+                quote.maxBorrowAmount(), quote.maxLtvBps(), quote.lltvBps(), quote.utilizationWad(),
+                quote.borrowRateWad(), quote.availableLiquidity(), quote.oracleReliable()));
     }
 
     @PostMapping
@@ -58,9 +59,7 @@ public class LendingMarketController {
             @RequestBody @Valid RegisterLendingMarketRequest request, Authentication authentication) {
         MarketView view = marketService.registerMarket(
                 request.chainConfigId(), request.marketAddress(), request.vaultAddress(),
-                request.collateralAssetId(), request.collateralTokenAddress(), request.loanTokenAddress(),
-                request.loanRailCode(), request.lltvBps(), request.liquidationBonusBps(),
-                request.baseRateWad(), request.slopeWad(), request.priceOracleAddress(),
+                request.collateralAssetId(), request.loanRailCode(),
                 extractActorId(authentication), "REGISTRY_ADMIN");
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(view));
     }
@@ -80,7 +79,9 @@ public class LendingMarketController {
                 market.getId(), market.getChainConfigId(), market.getMarketAddress(), market.getVaultAddress(),
                 market.getCollateralAssetId(), view.collateralAssetName(), view.collateralIsin(),
                 market.getCollateralTokenAddress(), market.getLoanTokenAddress(), market.getLoanRailCode(),
-                market.getLltvBps(), market.getLiquidationBonusBps(), market.getBaseRateWad(), market.getSlopeWad(),
+                market.getLoanTokenDecimals(), market.getMaxLtvBps(), market.getLltvBps(),
+                market.getLiquidationBonusBps(), market.getBaseRateWad(), market.getSlopeWad(),
+                market.getMaxPriceAgeSeconds(), market.getLiquidationGracePeriodSeconds(),
                 market.getPriceOracleAddress(), view.effectiveStatus(), view.jurisdiction(), view.micarApplicable(),
                 view.defiInteropModel(), market.getCreatedAt());
     }

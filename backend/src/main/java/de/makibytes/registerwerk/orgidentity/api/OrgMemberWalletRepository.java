@@ -17,6 +17,19 @@ public interface OrgMemberWalletRepository extends JpaRepository<OrgMemberWallet
     /** Every wallet a given app user has bound, regardless of status — callers filter as needed. */
     List<OrgMemberWallet> findByAppUserId(UUID appUserId);
 
+    /**
+     * Active wallets belonging to the effective legal entity. Entity scope is essential for
+     * company-wide views and for operator impersonation, whose JWT subject remains the operator.
+     */
+    @Query("""
+            SELECT w FROM OrgMemberWallet w
+            WHERE w.status = de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus.ACTIVE
+              AND w.orgRegistrationId IN (
+                  SELECT r.id FROM OrgRegistration r WHERE r.legalEntityId = :legalEntityId
+              )
+            """)
+    List<OrgMemberWallet> findActiveByLegalEntityId(@Param("legalEntityId") UUID legalEntityId);
+
     Optional<OrgMemberWallet> findByIdAndOrgRegistrationId(UUID id, UUID orgRegistrationId);
 
     long countByOrgRegistrationIdAndStatus(UUID orgRegistrationId, MemberWalletStatus status);

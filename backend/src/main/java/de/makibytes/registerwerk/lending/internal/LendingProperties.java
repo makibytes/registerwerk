@@ -33,7 +33,7 @@ public class LendingProperties {
         this.releaseApproved = releaseApproved;
     }
 
-    boolean isReleased() {
+    public boolean isReleased() {
         return enabled && releaseApproved;
     }
 }

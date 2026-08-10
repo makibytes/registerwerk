@@ -267,6 +267,54 @@ contract EwpgRepoMarketTest is Test {
         market.pledgeAndBorrow(100, 5_000e6);
     }
 
+    function test_addCollateral_improvesAnExistingPositionWithoutBorrowPermission() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        vm.prank(operator);
+        permissions.revokeFromOrg(address(orgId), borrowPermission);
+
+        vm.prank(alice);
+        market.addCollateral(25);
+
+        (uint256 collateralAmount,) = market.positions(alice);
+        assertEq(collateralAmount, 125);
+        assertEq(collateralToken.balanceOf(address(market)), 125);
+    }
+
+    function test_addCollateral_rejectsWalletWithoutAnOutstandingLoan() public {
+        vm.prank(mallory);
+        vm.expectRevert(EwpgRepoMarket.NoOutstandingDebt.selector);
+        market.addCollateral(1);
+    }
+
+    function test_withdrawCollateral_releasesOnlyExcessAboveOriginationBuffer() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(125, 7_000e6);
+
+        vm.prank(alice);
+        market.withdrawCollateral(25);
+
+        (uint256 collateralAmount,) = market.positions(alice);
+        assertEq(collateralAmount, 100);
+        assertEq(collateralToken.balanceOf(alice), 900);
+    }
+
+    function test_withdrawCollateral_revertsWhenItWouldExceedOriginationLtv() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoMarket.ExceedsLltv.selector);
+        market.withdrawCollateral(1);
+    }
+
     // ── reserve factor ───────────────────────────────────────────────────────
 
     function test_reserveFactor_splitsInterestBetweenReservesAndDepositors() public {

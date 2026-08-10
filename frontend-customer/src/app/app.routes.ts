@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { authGuard } from './core/auth/auth.guard';
 import { roleGuard } from './core/auth/role.guard';
 import { lendingFeatureGuard } from './core/feature/lending-feature.guard';
+import { repoDeskFeatureGuard } from './core/feature/repo-desk-feature.guard';
 import { ShellComponent } from './layout/shell/shell.component';
 
 export const routes: Routes = [
@@ -42,6 +43,12 @@ export const routes: Routes = [
         path: 'lending',
         canMatch: [lendingFeatureGuard],
         loadChildren: () => import('./features/lending/lending.routes').then(m => m.LENDING_ROUTES)
+      },
+      {
+        path: 'repo-desk',
+        canMatch: [repoDeskFeatureGuard],
+        canActivate: [roleGuard(['TRADER', 'REGISTRY_ADMIN'])],
+        loadComponent: () => import('./features/repo-desk/repo-desk.component').then(m => m.RepoDeskComponent)
       },
       {
         path: 'issuances',

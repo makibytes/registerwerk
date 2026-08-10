@@ -154,6 +154,8 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     event Supplied(address indexed lender, uint256 amount, uint256 scaledAmount);
     event Withdrawn(address indexed lender, uint256 amount, uint256 scaledAmount);
     event Borrowed(address indexed borrower, uint256 collateralAmount, uint256 borrowAmount);
+    event CollateralAdded(address indexed borrower, uint256 amount, uint256 totalCollateral);
+    event CollateralWithdrawn(address indexed borrower, uint256 amount, uint256 remainingCollateral);
     event Repaid(address indexed borrower, uint256 repayAmount, uint256 collateralReturned);
     event Liquidated(
         address indexed borrower, address indexed liquidator, uint256 debtRepaid, uint256 collateralSeized
@@ -182,6 +184,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     error StalePrice(uint256 updatedAt, uint256 currentTimestamp);
     error PriceNotSet();
     error InsufficientPoolLiquidity();
+    error InsufficientCollateral();
     error ExceedsLltv();
     error PositionHealthy(address borrower);
     error NoOutstandingDebt();
@@ -374,6 +377,46 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         emit Borrowed(msg.sender, collateralAmount, borrowAmount);
     }
 
+    /// @notice Adds collateral to an existing loan without drawing more cash. This risk-reducing
+    ///         path deliberately remains available if an ecosystem permission is later revoked;
+    ///         the restricted collateral token still enforces its own transfer eligibility.
+    function addCollateral(uint256 amount) external nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+        _accrue();
+        Position storage pos = positions[msg.sender];
+        if (pos.scaledDebt == 0) revert NoOutstandingDebt();
+
+        collateralToken.safeTransferFrom(msg.sender, address(this), amount);
+        pos.collateralAmount += amount;
+        emit CollateralAdded(msg.sender, amount, pos.collateralAmount);
+    }
+
+    /// @notice Withdraws excess collateral while keeping the remaining position at or below the
+    ///         market's origination LTV. Unlike repayment/add-collateral this increases pool risk,
+    ///         so it requires the normal borrower permission, KYC claim, and a current price.
+    function withdrawCollateral(uint256 amount)
+        external
+        nonReentrant
+        requiresPermission(BORROW)
+        requiresClaim(TOPIC_KYC)
+    {
+        if (amount == 0) revert ZeroAmount();
+        _accrue();
+        Position storage pos = positions[msg.sender];
+        if (pos.scaledDebt == 0) revert NoOutstandingDebt();
+        if (amount > pos.collateralAmount) revert InsufficientCollateral();
+
+        uint256 remainingCollateral = pos.collateralAmount - amount;
+        uint256 currentDebt = Math.mulDiv(pos.scaledDebt, borrowIndex, WAD);
+        uint256 collateralValue = Math.mulDiv(remainingCollateral, _currentPrice(), 1);
+        uint256 maxDebt = Math.mulDiv(collateralValue, maxLtvBps, BPS_DENOMINATOR);
+        if (currentDebt > maxDebt) revert ExceedsLltv();
+
+        pos.collateralAmount = remainingCollateral;
+        collateralToken.safeTransfer(msg.sender, amount);
+        emit CollateralWithdrawn(msg.sender, amount, remainingCollateral);
+    }
+
     /// @notice Repays up to `repayAmount` (capped to the current outstanding debt) and
     ///         releases a proportional share of the pledged collateral. Not gated by
     ///         {RegisterwerkGated} — see the contract-level NatSpec for why.
@@ -462,8 +505,8 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         Position storage pos = positions[borrower];
         uint256 debt = Math.mulDiv(pos.scaledDebt, projectedBorrowIndex, WAD);
         (uint256 pricePerUnit, uint256 updatedAt) = priceOracle.price(address(collateralToken));
-        priceReliable =
-            pricePerUnit != 0 && (maxPriceAgeSeconds == 0 || block.timestamp - updatedAt <= maxPriceAgeSeconds);
+        priceReliable = pricePerUnit != 0 && updatedAt <= block.timestamp
+            && (maxPriceAgeSeconds == 0 || block.timestamp - updatedAt <= maxPriceAgeSeconds);
         factor = _healthFactorFor(pos.collateralAmount, pricePerUnit, debt);
     }
 
@@ -572,7 +615,10 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         uint256 updatedAt;
         (pricePerUnit, updatedAt) = priceOracle.price(address(collateralToken));
         if (pricePerUnit == 0) revert PriceNotSet();
-        if (maxPriceAgeSeconds != 0 && block.timestamp - updatedAt > maxPriceAgeSeconds) {
+        if (
+            maxPriceAgeSeconds != 0
+                && (updatedAt > block.timestamp || block.timestamp - updatedAt > maxPriceAgeSeconds)
+        ) {
             revert StalePrice(updatedAt, block.timestamp);
         }
     }
@@ -600,6 +646,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         if (maxPriceAgeSeconds == 0) {
             return (pricePerUnit, false);
         }
+        if (updatedAt > block.timestamp) revert StalePrice(updatedAt, block.timestamp);
         uint256 age = block.timestamp - updatedAt;
         if (age <= maxPriceAgeSeconds) {
             return (pricePerUnit, false);

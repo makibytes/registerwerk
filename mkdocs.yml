@@ -680,7 +680,8 @@ nav:
       - 2. Primary issuance: customer/lifecycle/primary-issuance.md
       - 3. Holding and custody: customer/lifecycle/holding.md
       - 4. Secondary trading: customer/lifecycle/secondary-market.md
-      - 5. Repo and lending: customer/lifecycle/repo-lending.md
+      - 5a. Repo trading: customer/lifecycle/repo-trading.md
+      - 5b. Securities-backed lending: customer/lifecycle/repo-lending.md
       - 6. Corporate actions and redemption: customer/lifecycle/redemption.md
     - Your workspace:
       - customer/workspaces/index.md

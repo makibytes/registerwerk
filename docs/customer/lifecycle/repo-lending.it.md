@@ -1,9 +1,9 @@
 ---
-title: 5. Pronti contro termine e finanziamento
+title: 5b. Prestito garantito da titoli
 description: Prendere denaro a prestito contro uno strumento che tieni — garanzia, rapporto prestito/valore, interessi, escussione e che cosa può andare storto.
 ---
 
-# Fase 5 — Pronti contro termine e finanziamento
+# Fase 5b — Prestito garantito da titoli
 
 *L'investitore ha bisogno di liquidità. Ma l'obbligazione gli piace e non vuole venderla.*
 
@@ -11,6 +11,9 @@ Allora la usa come **garanzia**: la costituisce in pegno, ci prende a prestito s
 
 !!! info "Disponibilità"
     Il finanziamento è una funzione che l'operatore abilita per singola installazione. Se non vedi **Liquidity** nell'area Trader, nel tuo registro è disattivata. È anche la parte più recente e meno collaudata della piattaforma — vedi la [revisione di conformità](../../compliance/lending-facility-review.md) per i rilievi aperti.
+
+!!! note "Questo non è un repo"
+    Questa funzione è un prestito collateralizzato on-chain in un pool, non una vendita bilaterale con riacquisto concordato. Per RFQ repo, quotazioni private e regolamento bilaterale usa il [Repo Desk](repo-trading.md) separato.
 
 ---
 

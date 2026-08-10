@@ -164,4 +164,4 @@ The bond has changed hands. The register records a new holder, the old holder ha
 
 But selling is not the only way to raise cash from a bond you own.
 
-[Stage 5: Repo and lending :octicons-arrow-right-24:](repo-lending.md){ .md-button .md-button--primary }
+[Stage 5a: Repo trading :octicons-arrow-right-24:](repo-trading.md){ .md-button .md-button--primary }

@@ -1,9 +1,9 @@
 ---
-title: 5. Pensionsgeschäfte und Beleihung
+title: 5b. Wertpapierbesicherte Kreditvergabe
 description: Geld leihen gegen ein Wertpapier, das Sie behalten — Sicherheiten, Beleihungsquote, Zinsen, Verwertung und was schiefgehen kann.
 ---
 
-# Station 5 — Pensionsgeschäfte und Beleihung
+# Station 5b — Wertpapierbesicherte Kreditvergabe
 
 *Der Anleger braucht Geld. Aber die Anleihe gefällt ihm, und er will sie nicht verkaufen.*
 
@@ -11,6 +11,9 @@ Also nutzt er sie als **Sicherheit**: Er verpfändet sie, leiht sich dagegen und
 
 !!! info "Verfügbarkeit"
     Die Beleihung ist eine Funktion, die der Betreiber je Installation freischaltet. Sehen Sie im Arbeitsbereich Trader kein **Liquidity**, ist sie in Ihrem Register abgeschaltet. Sie ist außerdem der neueste und am wenigsten erprobte Teil der Plattform — siehe die [Compliance-Prüfung](../../compliance/lending-facility-review.md) für offene Feststellungen.
+
+!!! note "Kein Pensionsgeschäft"
+    Diese Funktion ist ein besicherter On-Chain-Kredit in einem Pool, kein bilateraler Verkauf mit vereinbartem Rückkauf. Für echte Repo-RFQs, private Quotes und bilaterale Abwicklung verwenden Sie den separaten [Repo Desk](repo-trading.md).
 
 ---
 

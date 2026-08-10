@@ -18,7 +18,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
 import { erc20Abi, repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
 import { InvestmentRecord, LendingMarket, LendingQuote } from '../../../core/models';
 import { LendingComplianceBannerComponent } from '../compliance-banner.component';
-import type { Address } from 'viem';
+import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
 
 /**
  * Guided pledge-and-borrow flow — replaces the dead end in `investment-detail` that used to
@@ -94,7 +94,8 @@ import type { Address } from 'viem';
                   <h3>{{ investment?.assetName ?? investment?.assetNumber }}</h3>
                   <div class="detail-grid">
                     <div><span class="label">Nominal held</span><span class="value">{{ investment?.nominalAmount }}</span></div>
-                    <div><span class="label">Max LTV</span><span class="value">{{ (market.lltvBps / 100).toFixed(1) }}%</span></div>
+                    <div><span class="label">Maximum origination LTV</span><span class="value">{{ ((market.maxLtvBps ?? 0) / 100).toFixed(1) }}%</span></div>
+                    <div><span class="label">Liquidation threshold</span><span class="value">{{ (market.lltvBps / 100).toFixed(1) }}%</span></div>
                     <div><span class="label">Liquidation bonus</span><span class="value">{{ (market.liquidationBonusBps / 100).toFixed(1) }}%</span></div>
                     <div><span class="label">Market</span><span class="value mono">{{ market.marketAddress | slice:0:10 }}…</span></div>
                   </div>
@@ -151,9 +152,17 @@ import type { Address } from 'viem';
                   } @else if (quoteError) {
                     <p class="error-text" role="alert">{{ quoteError }}</p>
                   } @else if (quote) {
+                    @if (!quote.oracleReliable) {
+                      <p class="error-text" role="alert">
+                        The collateral price is missing or stale. This quote is informational only;
+                        borrowing is disabled until the oracle is current.
+                      </p>
+                    }
                     <div class="quote-card">
-                      <div><span class="label">Price / unit</span><span class="value">{{ formatUnits(quote.pricePerUnit, 6) }}</span></div>
-                      <div><span class="label">Max borrow</span><span class="value">{{ formatUnits(quote.maxBorrowAmount, 6) }}</span></div>
+                      <div><span class="label">Price / unit</span><span class="value">{{ formatLoanUnits(quote.pricePerUnit) }}</span></div>
+                      <div><span class="label">Max borrow</span><span class="value">{{ formatLoanUnits(quote.maxBorrowAmount) }}</span></div>
+                      <div><span class="label">Available liquidity</span><span class="value">{{ formatLoanUnits(quote.availableLiquidity) }}</span></div>
+                      <div><span class="label">Origination LTV</span><span class="value">{{ (quote.maxLtvBps / 100).toFixed(1) }}%</span></div>
                       <div><span class="label">Utilization</span><span class="value">{{ formatPct(quote.utilizationWad) }}</span></div>
                       <div><span class="label">Borrow rate (APR)</span><span class="value">{{ formatPct(quote.borrowRateWad) }}</span></div>
                     </div>
@@ -161,14 +170,14 @@ import type { Address } from 'viem';
                     <mat-form-field appearance="outline" class="full-width">
                       <mat-label>Amount to borrow (stablecoin)</mat-label>
                       <input matInput type="number" min="0.000001" step="0.000001" formControlName="borrowAmount" />
-                      <mat-hint>Max {{ formatUnits(quote.maxBorrowAmount, 6) }} at this collateral amount</mat-hint>
+                      <mat-hint>Max {{ formatLoanUnits(quote.maxBorrowAmount) }} at this collateral amount</mat-hint>
                       @if (amountsForm.get('borrowAmount')?.hasError('max')) {
                         <mat-error>Exceeds the max borrow for this collateral amount</mat-error>
                       }
                     </mat-form-field>
                   }
 
-                  <button mat-flat-button color="primary" type="button" [disabled]="!quote || amountsForm.invalid" (click)="stepper.next()">
+                  <button mat-flat-button color="primary" type="button" [disabled]="!quote?.oracleReliable || amountsForm.invalid" (click)="stepper.next()">
                     Continue
                   </button>
                 </form>
@@ -183,7 +192,7 @@ import type { Address } from 'viem';
                       <div><span class="label">Borrowing</span><span class="value">{{ amountsForm.value.borrowAmount }} (stablecoin)</span></div>
                     </div>
 
-                    <button mat-flat-button color="primary" type="button" [disabled]="executing" (click)="execute()">
+                    <button mat-flat-button color="primary" type="button" [disabled]="executing || !quote?.oracleReliable" (click)="execute()">
                       @if (executing) {
                         <mat-spinner diameter="18"></mat-spinner>
                         {{ executionStage }}
@@ -376,7 +385,7 @@ export class BorrowStepperComponent implements OnInit {
   private onQuoteLoaded(quote: LendingQuote): void {
     this.quote = quote;
     this.quoting = false;
-    const maxBorrowHuman = Number(quote.maxBorrowAmount) / 1e6;
+    const maxBorrowHuman = Number(formatTokenUnits(BigInt(quote.maxBorrowAmount), this.loanTokenDecimals));
     this.amountsForm.get('borrowAmount')?.setValidators([
       Validators.required,
       Validators.min(1),
@@ -386,8 +395,13 @@ export class BorrowStepperComponent implements OnInit {
     this.cdr.markForCheck();
   }
 
-  formatUnits(raw: string, decimals: number): string {
-    return (Number(raw) / 10 ** decimals).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  get loanTokenDecimals(): number {
+    return this.market?.loanTokenDecimals ?? 6;
+  }
+
+  formatLoanUnits(raw: string): string {
+    const value = formatTokenUnits(BigInt(raw), this.loanTokenDecimals);
+    return Number(value).toLocaleString(undefined, { maximumFractionDigits: this.loanTokenDecimals });
   }
 
   formatPct(wad: string): string {
@@ -397,16 +411,16 @@ export class BorrowStepperComponent implements OnInit {
   async execute(): Promise<void> {
     const collateralHuman = this.amountsForm.value.collateralAmount ?? 0;
     const borrowAmountHuman = this.amountsForm.value.borrowAmount ?? 0;
-    if (!this.market || this.executing || this.amountsForm.invalid || !this.quote
+    if (!this.market || this.executing || this.amountsForm.invalid || !this.quote?.oracleReliable
         || !this.walletMatchesHolding || !Number.isSafeInteger(collateralHuman)
-        || !Number.isSafeInteger(borrowAmountHuman * 1_000_000)) return;
+        || !Number.isFinite(borrowAmountHuman)) return;
     this.executing = true;
     this.executionError = null;
     this.cdr.markForCheck();
 
     try {
       const collateralAmount = BigInt(collateralHuman);
-      const borrowAmount = BigInt(borrowAmountHuman * 1_000_000);
+      const borrowAmount = parseUnits(String(borrowAmountHuman), this.loanTokenDecimals);
       const marketAddress = this.market.marketAddress as Address;
       const collateralToken = this.market.collateralTokenAddress as Address;
 

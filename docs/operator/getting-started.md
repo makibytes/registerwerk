@@ -104,6 +104,38 @@ Then:
 
 Sign in with `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` from your `.env`.
 
+### Exercise lending and repo locally
+
+Set `SEED_DEMO_DATA=true` before starting Compose. The stack deploys two real lending markets to its disposable Anvil chain, registers their verified immutable parameters, and seeds a separate bilateral Repo Desk book.
+
+When the browser is on another host (for example `nibbler.local`), also set the address the **browser** can reach:
+
+```dotenv
+SEED_DEMO_DATA=true
+ANVIL_PUBLIC_RPC_URL=http://nibbler.local:8545
+```
+
+Add that RPC to a disposable browser wallet as chain ID `11155111`. The Anvil mnemonic is the standard public development mnemonic:
+
+```text
+test test test test test test test test test test test junk
+```
+
+!!! danger "Demo keys only"
+    This mnemonic and every account derived from it are public. Use a separate browser profile and never send real assets to these addresses. Importing the mnemonic into an existing wallet can replace or mingle with real accounts.
+
+The demo maps company users to these derived accounts:
+
+| Customer login (password `demo1234!`) | Company | Anvil account |
+|---|---|---|
+| `maria.braun@nordbank-invest.de` | Nordbank Invest | account 1 |
+| `sabine.mueller@rheinische-kapital.de` | Rheinische Kapital | account 2 |
+| `lisa.hoffmann@aurora-finance.de` | Aurora Finance | account 3 |
+| `sandra.richter@fd-fonds.de` | Frankfurt Digital Fonds | account 4 |
+| `ute.koenig@wi-invest.de` | Württemberg Invest | account 5 |
+
+All five can use the Repo Desk. The first three hold Green Bond collateral; Rheinische, Frankfurt and Württemberg hold Infrastructure Note collateral. The on-chain lending demo is reset/redeployed by the one-shot `demo-onchain-deploy` service, while the Repo Desk starts with three RFQs and two private quotes.
+
 Kong runs DB-less from `gateway/kong.yml`, so there are no gateway database credentials, and there is no `kong` or `konga` database. Its admin API is bound to loopback — reach it with `docker compose exec kong kong health`, never expose it.
 
 For anything beyond a local trial, go to [Prerequisites](installation/prerequisites.md) and read [Environment](configuration/environment.md) properly.

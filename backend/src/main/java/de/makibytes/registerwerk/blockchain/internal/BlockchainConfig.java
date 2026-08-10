@@ -74,7 +74,7 @@ public class BlockchainConfig {
 
                 if (networkMap != null) {
                     networkMap.forEach((networkName, props) -> {
-                        if (props == null || props.getRpcUrl() == null) return;
+                        if (props == null || !StringUtils.hasText(props.getRpcUrl())) return;
                         Network network;
                         try {
                             network = Network.valueOf(networkName.toUpperCase());

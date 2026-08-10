@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.lending.web;
 import de.makibytes.registerwerk.lending.internal.LendingPositionService;
 import de.makibytes.registerwerk.lending.web.dto.LendingPositionResponse;
 import de.makibytes.registerwerk.lending.web.dto.LendingSupplyPositionResponse;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -30,8 +31,8 @@ public class LendingPositionController {
 
     @GetMapping("/my-positions")
     public ResponseEntity<List<LendingPositionResponse>> myPositions(Authentication authentication) {
-        UUID appUserId = extractAppUserId(authentication);
-        List<LendingPositionResponse> positions = positionService.refreshAndListMyPositions(appUserId).stream()
+        UUID legalEntityId = SecurityUtils.extractEntityId(authentication);
+        List<LendingPositionResponse> positions = positionService.refreshAndListMyPositions(legalEntityId).stream()
                 .map(p -> new LendingPositionResponse(
                         p.getMarketId(), p.getWalletAddress(), p.getCollateralAmount(), p.getCurrentDebt(),
                         p.getHealthFactorWad(), p.getHealthFactorReliable(), p.getStatus(), p.getLastSyncedAt()))
@@ -41,8 +42,8 @@ public class LendingPositionController {
 
     @GetMapping("/supply-positions")
     public ResponseEntity<List<LendingSupplyPositionResponse>> supplyPositions(Authentication authentication) {
-        UUID appUserId = extractAppUserId(authentication);
-        List<LendingSupplyPositionResponse> positions = positionService.refreshAndListMySupplyPositions(appUserId)
+        UUID legalEntityId = SecurityUtils.extractEntityId(authentication);
+        List<LendingSupplyPositionResponse> positions = positionService.refreshAndListMySupplyPositions(legalEntityId)
                 .stream()
                 .map(p -> new LendingSupplyPositionResponse(
                         p.getMarketId(), p.getWalletAddress(), p.getCurrentClaim(), p.getLastSyncedAt()))
@@ -50,12 +51,4 @@ public class LendingPositionController {
         return ResponseEntity.ok(positions);
     }
 
-    private UUID extractAppUserId(Authentication authentication) {
-        if (authentication == null) return null;
-        try {
-            return UUID.fromString(authentication.getName());
-        } catch (IllegalArgumentException ignored) {
-            return null;
-        }
-    }
 }

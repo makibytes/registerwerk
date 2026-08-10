@@ -6,7 +6,8 @@
     "node": "24.x"
   },
   "scripts": {
-    "test:browser": "node ./scripts/verify-browser.mjs"
+    "test:browser": "node ./scripts/verify-browser.mjs",
+    "test:frontends": "node ./scripts/verify-frontends.mjs"
   },
   "dependencies": {
     "mermaid": "11.16.1"

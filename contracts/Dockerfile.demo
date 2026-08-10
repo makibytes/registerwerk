@@ -1,0 +1,14 @@
+FROM ghcr.io/foundry-rs/foundry:v1.5.1
+
+ADD --chmod=755 https://github.com/ethereum/solidity/releases/download/v0.8.30/solc-static-linux /home/foundry/.local/share/svm/0.8.30/solc-0.8.30
+ADD --chmod=755 https://github.com/ethereum/solidity/releases/download/v0.8.36/solc-static-linux /home/foundry/.local/share/svm/0.8.36/solc-0.8.36
+
+WORKDIR /contracts
+COPY . .
+
+# The runtime Foundry image intentionally does not bundle every solc release. Resolve and cache
+# the repository's pinned compiler while the image is built, so demo startup itself is offline
+# and deterministic.
+RUN forge build script/DeployLocalLendingDemo.s.sol
+
+ENTRYPOINT ["sh", "-c"]

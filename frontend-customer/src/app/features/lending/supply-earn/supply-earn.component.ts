@@ -17,10 +17,10 @@ import { LendingService } from '../../../core/api/lending.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { erc20Abi, repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
 import { LendingMarket, LendingSupplyPosition } from '../../../core/models';
-import type { Address } from 'viem';
+import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
 
 /**
- * Lender side of the repo/lending facility — deliberately ungated (any stablecoin holder, no
+ * Lender side of the securities-backed lending facility — deliberately ungated (any stablecoin holder, no
  * KYC) per `EwpgRepoMarket`'s own asymmetric design: the fewer barriers to *supplying* capital,
  * the deeper the pool. See `contracts/src/lending/EwpgRepoMarket.sol` NatSpec.
  */
@@ -111,7 +111,7 @@ import type { Address } from 'viem';
               <mat-card class="position-card">
                 <mat-card-content>
                   <div class="position-market">{{ marketLabel(p.marketId) }}</div>
-                  <div class="position-claim">{{ formatUnits(p.currentClaim) }}</div>
+                  <div class="position-claim">{{ formatUnits(p.currentClaim, p.marketId) }}</div>
                   <div class="position-label">Current claim</div>
                 </mat-card-content>
               </mat-card>
@@ -188,8 +188,10 @@ export class SupplyEarnComponent implements OnInit {
     return market?.collateralAssetName ?? market?.marketAddress ?? marketId;
   }
 
-  formatUnits(raw: string): string {
-    return (Number(raw) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  formatUnits(raw: string, marketId = this.selectedMarketId): string {
+    const decimals = this.marketDecimals(marketId);
+    return Number(formatTokenUnits(BigInt(raw), decimals))
+      .toLocaleString(undefined, { maximumFractionDigits: decimals });
   }
 
   private shortHash(hash: string): string {
@@ -209,7 +211,7 @@ export class SupplyEarnComponent implements OnInit {
       }
       const marketAddress = market.marketAddress as Address;
       const loanToken = market.loanTokenAddress as Address;
-      const amountUnits = BigInt(Math.round(this.amount * 1e6));
+      const amountUnits = this.amountUnits(market);
 
       const allowance = await this.wallet.readContract<bigint>({
         address: loanToken,
@@ -246,13 +248,7 @@ export class SupplyEarnComponent implements OnInit {
 
   async withdraw(): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    const amountUnitsNumber = Math.round(this.amount * 1e6);
-    const position = this.positions.find((candidate) => candidate.marketId === market?.id);
     if (!market || this.acting || !this.isValidAmount()) return;
-    if (!position || BigInt(amountUnitsNumber) > BigInt(position.currentClaim)) {
-      this.actionError = 'The withdrawal exceeds your current claim in this market.';
-      return;
-    }
     this.acting = 'withdraw';
     this.actionError = null;
     this.cdr.markForCheck();
@@ -261,7 +257,13 @@ export class SupplyEarnComponent implements OnInit {
       if (!this.wallet.isConnected()) {
         await this.wallet.connect();
       }
-      const amountUnits = BigInt(amountUnitsNumber);
+      const connectedWallet = this.wallet.address()?.toLowerCase();
+      const position = this.positions.find((candidate) =>
+        candidate.marketId === market.id && candidate.walletAddress.toLowerCase() === connectedWallet);
+      const amountUnits = this.amountUnits(market);
+      if (!position || amountUnits > BigInt(position.currentClaim)) {
+        throw new Error('The withdrawal exceeds the connected wallet\'s current claim in this market.');
+      }
       const hash = await this.wallet.writeContract({
         address: market.marketAddress as Address,
         abi: repoMarketAbi,
@@ -280,9 +282,20 @@ export class SupplyEarnComponent implements OnInit {
   }
 
   isValidAmount(): boolean {
-    const amountUnits = this.amount * 1e6;
-    return Number.isFinite(this.amount)
-      && this.amount > 0
-      && Number.isSafeInteger(amountUnits);
+    const market = this.markets.find((candidate) => candidate.id === this.selectedMarketId);
+    if (!market || !Number.isFinite(this.amount) || this.amount <= 0) return false;
+    try {
+      return this.amountUnits(market) > 0n;
+    } catch {
+      return false;
+    }
+  }
+
+  private marketDecimals(marketId: string | null): number {
+    return this.markets.find((market) => market.id === marketId)?.loanTokenDecimals ?? 6;
+  }
+
+  private amountUnits(market: LendingMarket): bigint {
+    return parseUnits(String(this.amount), market.loanTokenDecimals ?? 6);
   }
 }

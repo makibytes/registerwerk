@@ -802,7 +802,7 @@ export interface PermissionGrantView {
   revokedAt: string | null;
 }
 
-// ── Lending (repo/collateralized-lending isolated markets) ──────────────────
+// ── Securities-backed lending (isolated on-chain lending markets) ───────────
 //
 // WAD-scaled / raw on-chain integer fields (healthFactorWad, currentDebt, collateralAmount,
 // currentClaim, pricePerUnit, maxBorrowAmount, utilizationWad, borrowRateWad, baseRateWad,
@@ -825,10 +825,14 @@ export interface LendingMarket {
   collateralTokenAddress: string;
   loanTokenAddress: string;
   loanRailCode: string | null;
+  loanTokenDecimals: number | null;
+  maxLtvBps: number | null;
   lltvBps: number;
   liquidationBonusBps: number;
   baseRateWad: string;
   slopeWad: string;
+  maxPriceAgeSeconds: string | null;
+  liquidationGracePeriodSeconds: string | null;
   priceOracleAddress: string;
   status: LendingMarketStatus;
   jurisdiction: Jurisdiction | null;
@@ -843,9 +847,12 @@ export interface LendingQuote {
   pricePerUnit: string;
   priceUpdatedAt: string;
   maxBorrowAmount: string;
+  maxLtvBps: number;
   lltvBps: number;
   utilizationWad: string;
   borrowRateWad: string;
+  availableLiquidity: string;
+  oracleReliable: boolean;
 }
 
 export interface LendingPosition {
@@ -854,6 +861,7 @@ export interface LendingPosition {
   collateralAmount: string;
   currentDebt: string;
   healthFactorWad: string | null;
+  healthFactorReliable: boolean | null;
   status: LendingPositionStatus;
   lastSyncedAt: string;
 }
@@ -863,6 +871,50 @@ export interface LendingSupplyPosition {
   walletAddress: string;
   currentClaim: string;
   lastSyncedAt: string;
+}
+
+// ── Repo Desk (bilateral sale-and-repurchase workflow) ──────────────────────
+
+export type RepoRfqSide = 'BORROW_CASH' | 'LEND_CASH';
+export type RepoRfqVisibility = 'TARGETED' | 'BROADCAST';
+export type RepoRfqStatus = 'OPEN' | 'MATCHED' | 'CANCELLED' | 'EXPIRED';
+export type RepoQuoteStatus = 'ACTIVE' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED';
+export type RepoTradeStatus = 'PENDING_OPEN_SETTLEMENT' | 'OPEN' | 'MARGIN_CALL' | 'PENDING_CLOSE' | 'CLOSED' | 'DEFAULTED' | 'CANCELLED';
+export type RepoSettlementMethod = 'DVP' | 'FOP';
+
+export interface RepoCounterparty { id: string; name: string; lei: string | null; }
+export interface RepoCollateral { id: string; name: string; isin: string | null; assetNumber: string; }
+export interface RepoQuote {
+  id: string; quotingEntityId: string; quotingEntityName: string; cashAmount: number;
+  repoRate: number; haircutBps: number; validUntil: string; status: RepoQuoteStatus;
+  message: string | null; createdAt: string;
+}
+export interface RepoRfq {
+  id: string; side: RepoRfqSide; visibility: RepoRfqVisibility; status: RepoRfqStatus;
+  requesterEntityId: string; requesterName: string; collateralAssetId: string;
+  collateralAssetName: string; collateralIsin: string | null; collateralQuantity: number;
+  cashAmount: number; cashCurrency: string; startDate: string; endDate: string;
+  proposedRepoRate: number | null; proposedHaircutBps: number | null;
+  settlementMethod: RepoSettlementMethod; expiresAt: string; targetEntityIds: string[];
+  notes: string | null; mine: boolean; canQuote: boolean; tradeId: string | null;
+  quotes: RepoQuote[]; createdAt: string; updatedAt: string;
+}
+export interface RepoLifecycleEvent {
+  id: string; type: string; actorEntityId: string; actorName: string; amount: number | null;
+  assetId: string | null; quantity: number | null; reference: string | null;
+  note: string | null; createdAt: string;
+}
+export interface RepoTrade {
+  id: string; rfqId: string; acceptedQuoteId: string; status: RepoTradeStatus;
+  cashBorrowerEntityId: string; cashBorrowerName: string; cashLenderEntityId: string;
+  cashLenderName: string; collateralAssetId: string; collateralAssetName: string;
+  collateralIsin: string | null; collateralQuantity: number; cashAmount: number;
+  cashCurrency: string; repoRate: number; haircutBps: number; startDate: string;
+  endDate: string; repurchaseAmount: number; settlementMethod: RepoSettlementMethod;
+  openCashConfirmed: boolean; openCollateralConfirmed: boolean; closeCashConfirmed: boolean;
+  closeCollateralConfirmed: boolean; marginCallAmount: number | null; marginCallDueAt: string | null;
+  pendingSubstitutionAssetId: string | null; pendingSubstitutionQuantity: number | null;
+  borrower: boolean; events: RepoLifecycleEvent[]; createdAt: string; updatedAt: string;
 }
 
 // ─── Webhooks ───────────────────────────────────────────────────────────────

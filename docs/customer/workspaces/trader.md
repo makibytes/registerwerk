@@ -7,7 +7,7 @@ description: For people who buy, sell and finance positions — the trading desk
 
 **You do not just hold securities, you work them.** You buy when something is cheap, sell when you need the cash, and borrow against positions rather than unwinding them.
 
-The Trader workspace is the Investor workspace plus the two things that make a position active: a **trading desk** and **liquidity markets**.
+The Trader workspace is the Investor workspace plus three tools that make a position active: a **trading desk**, a bilateral **Repo Desk**, and **securities-backed lending markets**.
 
 ---
 
@@ -17,7 +17,8 @@ The Trader workspace is the Investor workspace plus the two things that make a p
 |---|---|
 | **Dashboard** | Positions, recent executions, anything needing attention. |
 | **Trading Desk** | Create listings, browse offers, execute, settle. |
-| **Liquidity** | Borrow against holdings, or supply cash and earn. Only if the operator enabled it. |
+| **Repo Desk** | Send targeted or broadcast repo RFQs, negotiate private quotes, and manage bilateral settlement. |
+| **Securities-backed Lending** | Borrow against holdings, or supply cash and earn. Only if the operator enabled it. |
 | **My Positions** | Everything you hold, including what is pledged. |
 | **Marketplace** | Ecosystem dApps. |
 
@@ -93,11 +94,17 @@ Stale `PENDING` trades time out automatically. A settled trade can be reversed b
 
 ---
 
-## Liquidity: borrowing against what you hold
+## Repo Desk: bilateral term funding
+
+*Repo Desk → New RFQ.* Choose whether you want to borrow or lend cash, the collateral, principal, dates, indicative rate and haircut. A **targeted** RFQ is visible only to selected companies; a **broadcast** RFQ is visible to all eligible traders. Dealer quotes remain private: an RFQ owner sees every response, while a dealer sees only its own.
+
+Accepting a quote fixes the ACT/360 repurchase amount and creates a trade. Each recipient then confirms the opening leg it actually received. The same two-sided process applies at close. Margin calls and collateral substitutions are recorded in the shared lifecycle rather than hidden in email. See [Repo trading](../lifecycle/repo-trading.md).
+
+## Securities-backed lending: borrowing against what you hold
 
 *Liquidity → Borrow.* Pledge a holding, take a loan, keep the security.
 
-The full mechanics — collateral, LLTV, health factor, liquidation, and the isolated-market design — are in [Repo and lending](../lifecycle/repo-lending.md). Three things belong here because they will bite a trader specifically:
+The full mechanics — collateral, LLTV, health factor, liquidation, and the isolated-market design — are in [Securities-backed lending](../lifecycle/repo-lending.md). Three things belong here because they will bite a trader specifically:
 
 !!! danger "Borrowing the maximum leaves you no room"
     If the screen says you can borrow €67,200, borrowing €67,200 puts you exactly at the liquidation threshold. Any price fall liquidates you. The gap between what you borrow and what you could borrow *is* your safety margin.
@@ -128,5 +135,6 @@ All of these fail closed. If a screening service is unavailable, transfers are r
 ## Where next
 
 - [Secondary trading](../lifecycle/secondary-market.md) — the full picture
-- [Repo and lending](../lifecycle/repo-lending.md) — collateral and leverage in depth
+- [Repo trading](../lifecycle/repo-trading.md) — bilateral RFQs, settlement, margin and close
+- [Securities-backed lending](../lifecycle/repo-lending.md) — pooled collateral and leverage in depth
 - [Connecting a wallet](../investors/wallet-setup.md)

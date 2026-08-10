@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigInteger;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,7 +33,7 @@ import java.util.UUID;
  */
 @Service
 @Transactional
-public class LendingMarketService {
+public class LendingMarketService implements de.makibytes.registerwerk.lending.api.LendingMarketRegistrar {
 
     private static final Logger log = LoggerFactory.getLogger(LendingMarketService.class);
 
@@ -79,11 +80,17 @@ public class LendingMarketService {
             LendingMarket market, Jurisdiction jurisdiction, String collateralAssetName, String collateralIsin,
             Boolean micarApplicable, DefiInteropModel defiInteropModel, LendingMarketStatus effectiveStatus) {}
 
+    @Override
+    public void registerVerifiedMarket(UUID chainConfigId, String marketAddress, String vaultAddress,
+                                       UUID collateralAssetId, String loanRailCode,
+                                       UUID registeredBy, String registeredByRole) {
+        registerMarket(chainConfigId, marketAddress, vaultAddress, collateralAssetId, loanRailCode,
+                registeredBy, registeredByRole);
+    }
+
     public MarketView registerMarket(
             UUID chainConfigId, String marketAddress, String vaultAddress, UUID collateralAssetId,
-            String collateralTokenAddress, String loanTokenAddress, String loanRailCode,
-            int lltvBps, int liquidationBonusBps, BigInteger baseRateWad, BigInteger slopeWad,
-            String priceOracleAddress, UUID actorId, String actorRole) {
+            String loanRailCode, UUID actorId, String actorRole) {
 
         releaseGate.requireReleased();
 
@@ -91,27 +98,44 @@ public class LendingMarketService {
             throw new IllegalArgumentException(
                     "Market " + marketAddress + " is already registered on this chain");
         }
-        chainConfigRepository.findById(chainConfigId)
+        ChainConfig chainConfig = chainConfigRepository.findById(chainConfigId)
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
+        if (!chainConfig.isEnabled() || chainConfig.getChainType() != ChainConfig.ChainType.EVM) {
+            throw new IllegalArgumentException("Lending markets require an enabled EVM chain");
+        }
+        assetRepository.findById(collateralAssetId)
+                .orElseThrow(() -> new EntityNotFoundException("Asset", collateralAssetId));
+
+        RepoMarketOnchainReader.MarketParameters parameters =
+                onchainReader.marketParameters(chainConfig.getIdentifier(), marketAddress);
+        if (parameters.maxLtvBps() <= 0 || parameters.maxLtvBps() >= parameters.lltvBps()) {
+            throw new IllegalArgumentException("Deployed market has invalid max-LTV/liquidation-LTV parameters");
+        }
 
         LendingMarket market = new LendingMarket();
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
         market.setVaultAddress(vaultAddress);
         market.setCollateralAssetId(collateralAssetId);
-        market.setCollateralTokenAddress(collateralTokenAddress);
-        market.setLoanTokenAddress(loanTokenAddress);
+        market.setCollateralTokenAddress(parameters.collateralTokenAddress());
+        market.setLoanTokenAddress(parameters.loanTokenAddress());
         market.setLoanRailCode(loanRailCode);
-        market.setLltvBps(lltvBps);
-        market.setLiquidationBonusBps(liquidationBonusBps);
-        market.setBaseRateWad(baseRateWad);
-        market.setSlopeWad(slopeWad);
-        market.setPriceOracleAddress(priceOracleAddress);
+        market.setLoanTokenDecimals(parameters.loanTokenDecimals());
+        market.setMaxLtvBps(parameters.maxLtvBps());
+        market.setLltvBps(parameters.lltvBps());
+        market.setLiquidationBonusBps(parameters.liquidationBonusBps());
+        market.setBaseRateWad(parameters.baseRateWad());
+        market.setSlopeWad(parameters.slopeWad());
+        market.setMaxPriceAgeSeconds(parameters.maxPriceAgeSeconds());
+        market.setLiquidationGracePeriodSeconds(parameters.liquidationGracePeriodSeconds());
+        market.setPriceOracleAddress(parameters.priceOracleAddress());
         market.setRegisteredBy(actorId);
         market = marketRepository.save(market);
 
         eventPublisher.publishEvent(new LendingMarketRegisteredEvent(market.getId(), actorId, actorRole,
-                Map.of("marketAddress", marketAddress, "lltvBps", lltvBps)));
+                Map.of("marketAddress", marketAddress,
+                        "maxLtvBps", parameters.maxLtvBps(),
+                        "lltvBps", parameters.lltvBps())));
 
         return toView(market);
     }
@@ -149,6 +173,10 @@ public class LendingMarketService {
         }
         LendingMarket market = requireMarket(marketId);
         requireOperational(market);
+        if (market.getMaxLtvBps() == null || market.getMaxPriceAgeSeconds() == null) {
+            throw new IllegalStateException(
+                    "Lending market metadata predates on-chain verification; re-register it before quoting");
+        }
         String chainIdentifier = resolveChainIdentifier(market.getChainConfigId());
 
         RepoMarketOnchainReader.PriceMark mark = onchainReader.price(
@@ -157,17 +185,28 @@ public class LendingMarketService {
         BigInteger borrowRateWad = onchainReader.borrowRate(chainIdentifier, market.getMarketAddress());
 
         BigInteger collateralValue = collateralAmount.multiply(mark.pricePerUnit());
-        BigInteger maxBorrow = collateralValue.multiply(BigInteger.valueOf(market.getLltvBps()))
+        BigInteger collateralLimitedBorrow = collateralValue.multiply(BigInteger.valueOf(market.getMaxLtvBps()))
                 .divide(BigInteger.valueOf(10_000));
+        BigInteger availableLiquidity = onchainReader.availableLiquidity(
+                chainIdentifier, market.getMarketAddress(), market.getLoanTokenAddress());
+        BigInteger maxBorrow = collateralLimitedBorrow.min(availableLiquidity);
+        BigInteger age = BigInteger.valueOf(Instant.now().getEpochSecond()).subtract(mark.updatedAt());
+        boolean oracleReliable = mark.pricePerUnit().signum() > 0
+                && mark.updatedAt().signum() > 0
+                && age.signum() >= 0
+                && (market.getMaxPriceAgeSeconds().signum() == 0
+                    || age.compareTo(market.getMaxPriceAgeSeconds()) <= 0);
 
         return new LendingQuote(
                 marketId, collateralAmount, mark.pricePerUnit(), mark.updatedAt(),
-                maxBorrow, market.getLltvBps(), utilizationWad, borrowRateWad);
+                maxBorrow, market.getMaxLtvBps(), market.getLltvBps(), utilizationWad, borrowRateWad,
+                availableLiquidity, oracleReliable);
     }
 
     public record LendingQuote(
             UUID marketId, BigInteger collateralAmount, BigInteger pricePerUnit, BigInteger priceUpdatedAt,
-            BigInteger maxBorrowAmount, int lltvBps, BigInteger utilizationWad, BigInteger borrowRateWad) {}
+            BigInteger maxBorrowAmount, int maxLtvBps, int lltvBps, BigInteger utilizationWad,
+            BigInteger borrowRateWad, BigInteger availableLiquidity, boolean oracleReliable) {}
 
     String resolveChainIdentifier(UUID chainConfigId) {
         return resolveChainConfig(chainConfigId).getIdentifier();

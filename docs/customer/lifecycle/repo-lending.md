@@ -1,13 +1,13 @@
 ---
-title: 5. Repo and lending
+title: 5a. Securities-backed lending
 description: Borrowing cash against a security you keep — collateral, loan-to-value, interest, liquidation, and what can go wrong.
 ---
 
-# Stage 5 — Repo and lending
+# Stage 5a — Securities-backed lending
 
 *The investor needs cash. But they like the bond and they do not want to sell it.*
 
-So they use it as **collateral**: they pledge it, borrow against it, and get it back when they repay. This is the oldest idea in financial markets, and it is what most of the money in the world actually runs on.
+So they use it as **collateral**: they pledge it, borrow against it, and get it back when they repay.
 
 !!! info "Availability"
     Lending is a feature the operator enables per deployment. If you do not see **Liquidity** in the Trader workspace, it is switched off in your registry. It is also the newest and least battle-tested part of the platform — see the [compliance review](../../compliance/lending-facility-review.md) for open findings.
@@ -22,7 +22,9 @@ So you hand the valuable thing to a lender as security, take a loan smaller than
 
 A pawnbroker. Or a mortgage: the bank lends you money, the house is collateral, and if you stop paying they take the house.
 
-**Repo** — short for *repurchase agreement* — is the version institutions use. Formally it is a sale with an agreed buy-back at a slightly higher price. Economically it is a secured loan, and the price difference is the interest.
+This screen is **not a repurchase agreement**. It is an on-chain, over-collateralised loan: title to the security is not sold to a named cash lender under a bilateral sale-and-buy-back contract. Registerwerk now calls it *securities-backed lending* everywhere in the product.
+
+For a conventional institutional repo—targeted or broadcast RFQs, private dealer quotes, transfer of collateral, fixed repurchase price and bilateral lifecycle management—use the separate [Repo Desk](repo-trading.md).
 
 ??? note "For the specialist: why repo is structured as a sale"
 
@@ -30,7 +32,7 @@ A pawnbroker. Or a mortgage: the bank lends you money, the house is collateral, 
 
     That legal robustness is exactly why repo carries the volume it does: repo markets are the plumbing of short-term funding, and their scale rests on that insolvency treatment.
 
-    It is also why a tokenised repo needs careful legal review rather than a code review. The mechanism here is a collateralised loan in the DeFi style, and whether it obtains repo-equivalent treatment in a given jurisdiction is a question of law, not of Solidity. Finding 3 of the [facility review](../../compliance/lending-facility-review.md) is exactly this, and it remains open.
+    It is also why this lending market must not be described as repo. The mechanism here is a collateralised loan in the DeFi style. It does not become title-transfer repo merely because the collateral is tokenised.
 
 ---
 
