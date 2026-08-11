@@ -66,7 +66,7 @@ Modules: `asset`, `audit`, `auth`, `blockchain`, `chain`, `customer`, `deploymen
 - DTOs are Java `record` types with Bean Validation annotations
 - `@Transactional` at service method level, not on repositories
 - `@PreAuthorize("hasRole('REGISTRY_ADMIN')")` on controllers/methods
-- New Flyway migrations: `V{n}__description.sql` — never edit existing. Schema was squashed to a single `V1__initial_schema.sql` on 2026-07-31 (V1–V19 folded in; header documents the `flyway_schema_history` reconciliation for already-migrated environments)
+- New Flyway migrations: `V{n}__description.sql` — never edit existing. Schema was squashed to a single `V1__initial_schema.sql` on 2026-08-11 (V1–V19 folded in; header documents the `flyway_schema_history` reconciliation for already-migrated environments)
 - Emit audit events in every state-changing service method
 
 ---

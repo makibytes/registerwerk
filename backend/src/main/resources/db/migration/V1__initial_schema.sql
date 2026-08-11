@@ -2593,3 +2593,531 @@ CREATE INDEX idx_portfolio_migration_investor ON portfolio_migration_request (in
 CREATE INDEX idx_portfolio_migration_holder ON portfolio_migration_request (holder_id);
 CREATE INDEX idx_portfolio_migration_status ON portfolio_migration_request (status)
     WHERE status NOT IN ('COMPLETED', 'CANCELLED');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V2__disable_unreachable_seed_rpc_nodes.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V2 — stop the demo stack probing RPC endpoints that can never answer.
+--
+-- V1 seeds chain_config with public defaults and then derives one rpc_node row per chain
+-- (V1__initial_schema.sql:2302-2305). Several of those endpoints are placeholders or dead
+-- networks, so a stock `docker compose up` had RpcNodeHealthService issuing two blocking
+-- JSON-RPC calls per node every 30 seconds against hosts that always time out — burning the
+-- timeout budget and emitting a WARN per node per round, forever.
+--
+-- These rows are disabled, not deleted: the chain definitions stay visible in the operator
+-- portal, and re-enabling one is a single UPDATE once a real endpoint is configured. Anyone
+-- who has already replaced the URLs keeps their node enabled — the WHERE clauses match only
+-- the literal seeded values.
+
+-- 1. Infura placeholders — the seed literally ships `/v3/changeme`.
+UPDATE rpc_node
+SET    enabled = false
+WHERE  url LIKE '%/v3/changeme';
+
+-- 2. Fhenix and Inco. Both are experimental/withdrawn confidential-EVM testnets with no
+--    reachable public endpoint; the token standards that target them are still exercised
+--    against the Zama fhEVM path instead.
+UPDATE rpc_node
+SET    enabled = false
+WHERE  url IN (
+    'https://api.fhenix.zone:7747',
+    'https://api.helium.fhenix.zone:7747',
+    'https://mainnet.inco.org',
+    'https://validator.rivest.inco.org'
+);
+
+-- 3. graph_node_url pointed 12 chains at http://graph-node:8000, a host that only exists if
+--    indexer/evm/docker-compose.yml is started separately — and whose published ports 8000/8001
+--    collide head-on with Kong's in the main stack, so the two cannot run side by side as
+--    written. GraphNodeSyncService selects exactly the rows with a non-blank graph_node_url,
+--    so this had it failing 12x every 30s until each chain hit its 10-consecutive-error ceiling.
+--    Blanking the seed makes the subgraph indexer explicitly opt-in: set graph_node_url on the
+--    chains you actually deploy a subgraph for.
+UPDATE chain_config
+SET    graph_node_url      = NULL,
+       graph_subgraph_name = NULL
+WHERE  graph_node_url = 'http://graph-node:8000/subgraphs/name';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V3__wallet_keystore_blob.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V3 — Postgres-backed wallet keystore storage.
+--
+-- WalletStorage previously wrote encrypted keystore/DEK-sidecar files only to a local
+-- filesystem path (registerwerk.wallet.storage-dir, default /data/wallets). That makes the
+-- backend node-affine: every replica needs the same files, so the Helm chart mounted one
+-- ReadWriteOnce PVC into every pod — which cannot co-schedule with the chart's own required
+-- pod anti-affinity (one replica per node). Replicas beyond the first hang on
+-- FailedAttachVolume forever.
+--
+-- This table lets KeystoreBlobStore persist the same encrypted bytes (KEK-wrapped DEK +
+-- ciphertext — nothing here is plaintext key material) in Postgres instead, which already
+-- has its own HA/replication/backup story. Selected via
+-- registerwerk.wallet.storage-backend=POSTGRES; the filesystem backend remains the default
+-- for local/single-instance dev.
+
+CREATE TABLE wallet_keystore_blob (
+    relative_path VARCHAR(255) PRIMARY KEY,
+    content       BYTEA NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V4__asset_economic_terms.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Baseline economic terms on every asset, regardless of token standard — distinct from
+-- asset_bond_terms, which only exists for bond-standard assets and is entered separately.
+-- Without these, statements, valuations, tax reporting, and corporate actions have no
+-- amount or currency to work from for any non-bond asset (ledger finding: F-BLOCKER-1).
+ALTER TABLE asset
+    ADD COLUMN currency VARCHAR(3),
+    ADD COLUMN issue_size NUMERIC(38, 8),
+    ADD COLUMN denomination NUMERIC(38, 8),
+    ADD COLUMN issue_date DATE,
+    ADD COLUMN maturity_date DATE;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V5__blockchain_transaction_ops_note.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Lets an operator annotate a FAILED/TIMEOUT blockchain_transaction row once they've handled it
+-- (usually out-of-band, via the chain's own tooling) — TIMEOUT is currently terminal with no
+-- automated resubmit path (see the global transaction console: no nonce/calldata is captured at
+-- submission time, so a safe gas-bump resubmit isn't implementable without also touching the
+-- shared signing path in EvmContractService, which this migration deliberately does not do).
+ALTER TABLE blockchain_transaction
+    ADD COLUMN ops_note TEXT,
+    ADD COLUMN ops_reviewed_at TIMESTAMPTZ,
+    ADD COLUMN ops_reviewed_by UUID;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V6__subscription_order.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Primary-market subscription/allocation flow (F-BLOCKER-3): previously the only way to create
+-- a position was an issuer manually typing a wallet address into a dialog — no order, no
+-- allocation, no investor confirmation.
+CREATE TABLE subscription_order (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id            UUID NOT NULL REFERENCES asset(id),
+    investor_entity_id  UUID NOT NULL,
+    wallet_address      TEXT NOT NULL,
+    requested_amount    NUMERIC(38,18) NOT NULL,
+    allocated_amount    NUMERIC(38,18),
+    status              VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
+    submitted_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    allocated_at        TIMESTAMPTZ,
+    allocated_by        UUID,
+    confirmed_at        TIMESTAMPTZ,
+    resulting_holder_id UUID,
+    rejection_reason    TEXT
+);
+
+CREATE INDEX idx_subscription_order_asset ON subscription_order (asset_id);
+CREATE INDEX idx_subscription_order_investor ON subscription_order (investor_entity_id);
+CREATE INDEX idx_subscription_order_status ON subscription_order (asset_id, status);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V7__trade_execution_payment_declared_at.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Adds the AWAITING_SELLER_CONFIRMATION settlement status: a buyer declaring payment no longer
+-- credits the register directly — the selling company must independently confirm receipt first.
+ALTER TABLE trade_execution ADD COLUMN payment_declared_at TIMESTAMPTZ;
+
+ALTER TABLE trade_execution ALTER COLUMN settlement_status TYPE VARCHAR(30);
+
+ALTER TABLE trade_execution DROP CONSTRAINT chk_trade_execution_settlement_status;
+ALTER TABLE trade_execution ADD CONSTRAINT chk_trade_execution_settlement_status CHECK (
+    settlement_status IN ('PENDING','AWAITING_SELLER_CONFIRMATION','SETTLED','FAILED','CANCELLED','REFUNDED')
+);
+
+CREATE INDEX idx_trade_execution_awaiting_confirmation ON trade_execution (payment_declared_at)
+    WHERE settlement_status = 'AWAITING_SELLER_CONFIRMATION';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V8__mifid_classification.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- MiFID II client classification, suitability assessment, and per-asset target market
+-- (F-BLOCKER-11): previously no retail/professional/ECP flag existed anywhere, no suitability
+-- questionnaire, and no target-market restriction on an asset — an EU bank could not onboard a
+-- client to this at all.
+
+ALTER TABLE legal_entity ADD COLUMN client_category VARCHAR(30);
+ALTER TABLE legal_entity ADD COLUMN client_category_classified_at TIMESTAMPTZ;
+ALTER TABLE legal_entity ADD COLUMN client_category_classified_by UUID;
+ALTER TABLE legal_entity ADD CONSTRAINT chk_legal_entity_client_category CHECK (
+    client_category IS NULL OR client_category IN ('RETAIL', 'PROFESSIONAL', 'ELIGIBLE_COUNTERPARTY')
+);
+
+CREATE TABLE suitability_assessment (
+    id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id                     UUID NOT NULL REFERENCES legal_entity(id),
+    knowledge_experience          VARCHAR(20) NOT NULL,
+    risk_tolerance                VARCHAR(20) NOT NULL,
+    investment_horizon_years      INTEGER,
+    financial_situation_adequate  BOOLEAN NOT NULL,
+    notes                         TEXT,
+    assessed_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    assessed_by                   UUID,
+    CONSTRAINT chk_suitability_knowledge CHECK (knowledge_experience IN ('NONE', 'BASIC', 'ADVANCED')),
+    CONSTRAINT chk_suitability_risk CHECK (risk_tolerance IN ('LOW', 'MEDIUM', 'HIGH'))
+);
+CREATE INDEX idx_suitability_assessment_entity ON suitability_assessment (entity_id, assessed_at DESC);
+
+ALTER TABLE asset ADD COLUMN target_market_min_experience VARCHAR(20);
+ALTER TABLE asset ADD CONSTRAINT chk_asset_target_market_min_experience CHECK (
+    target_market_min_experience IS NULL OR target_market_min_experience IN ('NONE', 'BASIC', 'ADVANCED')
+);
+
+CREATE TABLE asset_target_market_category (
+    asset_id         UUID NOT NULL REFERENCES asset(id),
+    client_category  VARCHAR(30) NOT NULL,
+    PRIMARY KEY (asset_id, client_category),
+    CONSTRAINT chk_asset_target_market_category CHECK (
+        client_category IN ('RETAIL', 'PROFESSIONAL', 'ELIGIBLE_COUNTERPARTY')
+    )
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V9__investor_limits.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Per-investor eligibility limits (F-BLOCKER-12): previously the only limits were ERC-3643
+-- on-chain compliance modules, surfaced read-only and token-wide — no per-investor minimum
+-- subscription, maximum holding, or lockup existed anywhere.
+
+ALTER TABLE asset ADD COLUMN min_investment_amount NUMERIC(38, 8);
+ALTER TABLE asset ADD COLUMN max_holding_amount NUMERIC(38, 8);
+
+CREATE TABLE investor_limit (
+    id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id                  UUID NOT NULL REFERENCES asset(id),
+    investor_entity_id        UUID NOT NULL,
+    min_investment_override   NUMERIC(38, 8),
+    max_holding_override      NUMERIC(38, 8),
+    lockup_until              DATE,
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by                UUID,
+    CONSTRAINT uq_investor_limit_asset_investor UNIQUE (asset_id, investor_entity_id)
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V10__relationship_manager.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Relationship-manager role and client assignment (F-BLOCKER-15): previously operator staff
+-- had no way to be scoped to a "my clients" subset — everyone with any staff role saw every
+-- entity unfiltered, and impersonation (full customer-side mutation rights) was the only
+-- "act on behalf of a client" mechanism.
+
+ALTER TABLE app_user DROP CONSTRAINT chk_app_user_role;
+ALTER TABLE app_user ADD CONSTRAINT chk_app_user_role CHECK (
+    role IN (
+        'REGISTRY_ADMIN','AUDIT','COMPLIANCE_OFFICER','RELATIONSHIP_MANAGER',
+        'ISSUER','INVESTOR','COMPANY_ADMIN','TRADER','DAPP_PUBLISHER'
+    )
+);
+
+ALTER TABLE app_user_role DROP CONSTRAINT chk_app_user_role_entry;
+ALTER TABLE app_user_role ADD CONSTRAINT chk_app_user_role_entry CHECK (
+    role IN (
+        'REGISTRY_ADMIN','AUDIT','COMPLIANCE_OFFICER','RELATIONSHIP_MANAGER',
+        'ISSUER','INVESTOR','COMPANY_ADMIN','TRADER','DAPP_PUBLISHER'
+    )
+);
+
+ALTER TABLE legal_entity ADD COLUMN assigned_relationship_manager_id UUID;
+CREATE INDEX idx_legal_entity_assigned_rm ON legal_entity (assigned_relationship_manager_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V11__webhooks.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Outbound event webhooks (F-BLOCKER-2, integration surface): previously there was no way for
+-- a bank's core banking, treasury, or data-warehouse systems to be told anything happened —
+-- every consumer had to poll REST.
+
+CREATE TABLE webhook_subscription (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id    UUID NOT NULL,
+    url          TEXT NOT NULL,
+    secret       TEXT NOT NULL,
+    event_types  TEXT NOT NULL, -- comma-separated WebhookEventType names; empty = all curated types
+    enabled      BOOLEAN NOT NULL DEFAULT true,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by   UUID
+);
+CREATE INDEX idx_webhook_subscription_entity ON webhook_subscription (entity_id);
+CREATE INDEX idx_webhook_subscription_enabled ON webhook_subscription (entity_id, enabled);
+
+CREATE TABLE webhook_delivery (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subscription_id UUID NOT NULL REFERENCES webhook_subscription(id),
+    event_type      VARCHAR(50) NOT NULL,
+    payload         TEXT NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    response_code   INTEGER,
+    attempt_count   INTEGER NOT NULL DEFAULT 0,
+    last_attempted_at TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_webhook_delivery_status CHECK (status IN ('PENDING', 'SUCCESS', 'FAILED'))
+);
+CREATE INDEX idx_webhook_delivery_subscription ON webhook_delivery (subscription_id, created_at DESC);
+CREATE INDEX idx_webhook_delivery_pending ON webhook_delivery (status) WHERE status IN ('PENDING', 'FAILED');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V12__idempotency_keys.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Idempotency-Key support (F-BLOCKER-2, integration surface): previously there was no
+-- Idempotency-Key header contract on the mutating REST surface — a middleware team integrating
+-- over an unreliable link had no safe retry story (a retried POST could double-execute).
+
+CREATE TABLE idempotency_record (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id        UUID NOT NULL,
+    idempotency_key  VARCHAR(255) NOT NULL,
+    request_hash     VARCHAR(64) NOT NULL,
+    status           VARCHAR(20) NOT NULL DEFAULT 'IN_PROGRESS',
+    response_status  INTEGER,
+    response_body    TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at     TIMESTAMPTZ,
+    CONSTRAINT uq_idempotency_record_entity_key UNIQUE (entity_id, idempotency_key),
+    CONSTRAINT chk_idempotency_record_status CHECK (status IN ('IN_PROGRESS', 'COMPLETED'))
+);
+
+-- Input for the cleanup job — old records (of either status; a crashed IN_PROGRESS row must not
+-- block that key forever) are purged after the retention window.
+CREATE INDEX idx_idempotency_record_created_at ON idempotency_record (created_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V13__generic_oidc_principal.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Generic (non-Entra) OIDC principal resolution (Track 6-4).
+--
+-- The JWKS decoder (JwtDecoderFactory.issuerBacked) already validates a token from ANY OIDC
+-- issuer configured via JWT_ISSUER_URI, not just Entra. But DefaultPrincipalResolver used to
+-- unconditionally treat every non-locally-minted token as an Entra token, resolving/provisioning
+-- on Entra-specific claims (`oid`, `tid`) and mislabeling every such account UserAuthProvider.ENTRA
+-- regardless of which issuer actually signed the token. A bank on Okta/Keycloak/ForgeRock/Auth0
+-- whose tokens don't carry an `oid` claim would either be silently mislabeled or, if no
+-- email/upn/preferred_username claim was present either, rejected outright with a 403 despite the
+-- token cryptographically validating fine.
+--
+-- external_subject stores the OIDC `sub` claim for a principal resolved this way — the one
+-- identifier every OIDC provider guarantees is stable, unlike Entra's `oid`.
+ALTER TABLE app_user ADD COLUMN external_subject VARCHAR(255);
+
+COMMENT ON COLUMN app_user.external_subject IS
+    'OIDC `sub` claim for a principal resolved via a non-Entra OIDC issuer (JWT_ISSUER_URI). '
+    'NULL for LOCAL and ENTRA accounts, which are keyed by id / entra_object_id respectively.';
+
+CREATE UNIQUE INDEX ux_app_user_external_subject
+    ON app_user (external_subject)
+    WHERE external_subject IS NOT NULL;
+
+ALTER TABLE app_user DROP CONSTRAINT chk_app_user_auth_provider;
+ALTER TABLE app_user ADD CONSTRAINT chk_app_user_auth_provider CHECK (auth_provider IN ('LOCAL','ENTRA','OIDC'));
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V14__access_review.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Access recertification / entitlement review campaigns (Track 7-3).
+--
+-- BAIT (and every bank's IAM policy) requires periodic review and sign-off of user entitlements.
+-- Previously there was no campaign tooling, no attestation record, and no "last reviewed"
+-- timestamp on any account's roles — a REGISTRY_ADMIN's own role assignment was as unreviewed as
+-- the day it was granted, no matter how long ago that was.
+
+CREATE TABLE access_review_campaign (
+    id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(200) NOT NULL,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
+    due_date    DATE,
+    started_by  UUID         NOT NULL,
+    started_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    closed_by   UUID,
+    closed_at   TIMESTAMPTZ,
+    CONSTRAINT chk_access_review_campaign_status CHECK (status IN ('OPEN','CLOSED'))
+);
+
+-- One row per app_user, snapshotted at campaign start — the roles snapshot is what's actually
+-- being attested to, independent of any role change the account undergoes mid-campaign.
+CREATE TABLE access_review_item (
+    id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id         UUID         NOT NULL REFERENCES access_review_campaign(id) ON DELETE CASCADE,
+    app_user_id         UUID         NOT NULL REFERENCES app_user(id),
+    email_snapshot      VARCHAR(320) NOT NULL,
+    full_name_snapshot  VARCHAR(200),
+    roles_snapshot      VARCHAR(500) NOT NULL,
+    decision            VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+    reviewed_by         UUID,
+    reviewed_at         TIMESTAMPTZ,
+    notes               TEXT,
+    CONSTRAINT chk_access_review_item_decision CHECK (decision IN ('PENDING','CONFIRMED','REVOKED')),
+    CONSTRAINT ux_access_review_item UNIQUE (campaign_id, app_user_id)
+);
+
+CREATE INDEX idx_access_review_item_campaign ON access_review_item (campaign_id);
+CREATE INDEX idx_access_review_item_app_user ON access_review_item (app_user_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V15__travel_rule_inbox_idempotency.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Bind inbound replay protection to the originating VASP and its transfer reference.
+-- Multiple counterparties may use the same reference, but one VASP must not create duplicate
+-- compliance records by retrying the same delivery.
+CREATE UNIQUE INDEX uq_trm_inbound_vasp_transfer_ref
+    ON travel_rule_message (originator_vasp_did, protocol_message_id)
+    WHERE direction = 'INBOUND' AND protocol_message_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V16__lending_market_verified_parameters.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Immutable EwpgRepoMarket parameters verified from chain at registration time. Existing rows
+-- remain nullable and therefore fail closed for new borrowing until an operator re-registers or
+-- reconciles them against the deployed contract; inventing a max-LTV during migration would be
+-- materially unsafe.
+ALTER TABLE lending_market
+    ADD COLUMN max_ltv_bps INTEGER,
+    ADD COLUMN max_price_age_seconds NUMERIC(78,0),
+    ADD COLUMN liquidation_grace_period_seconds NUMERIC(78,0),
+    ADD COLUMN loan_token_decimals INTEGER;
+
+ALTER TABLE lending_market
+    ADD CONSTRAINT chk_lending_market_max_ltv
+        CHECK (max_ltv_bps IS NULL OR (max_ltv_bps > 0 AND max_ltv_bps < lltv_bps)),
+    ADD CONSTRAINT chk_lending_market_loan_decimals
+        CHECK (loan_token_decimals IS NULL OR (loan_token_decimals >= 0 AND loan_token_decimals <= 36));
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V17__repo_desk_rfq.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE repo_rfq (
+    id UUID PRIMARY KEY,
+    version BIGINT NOT NULL DEFAULT 0,
+    requester_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    requester_user_id UUID,
+    side VARCHAR(20) NOT NULL,
+    visibility VARCHAR(20) NOT NULL,
+    collateral_asset_id UUID NOT NULL REFERENCES asset(id),
+    collateral_quantity NUMERIC(38,18) NOT NULL,
+    cash_amount NUMERIC(38,18) NOT NULL,
+    cash_currency CHAR(3) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    proposed_repo_rate NUMERIC(12,8),
+    proposed_haircut_bps INTEGER,
+    settlement_method VARCHAR(20) NOT NULL DEFAULT 'DVP',
+    status VARCHAR(20) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    notes VARCHAR(1000),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_repo_rfq_side CHECK (side IN ('BORROW_CASH', 'LEND_CASH')),
+    CONSTRAINT ck_repo_rfq_visibility CHECK (visibility IN ('TARGETED', 'BROADCAST')),
+    CONSTRAINT ck_repo_rfq_status CHECK (status IN ('OPEN', 'MATCHED', 'CANCELLED', 'EXPIRED')),
+    CONSTRAINT ck_repo_rfq_settlement CHECK (settlement_method IN ('DVP', 'FOP')),
+    CONSTRAINT ck_repo_rfq_quantity CHECK (collateral_quantity > 0),
+    CONSTRAINT ck_repo_rfq_cash CHECK (cash_amount > 0),
+    CONSTRAINT ck_repo_rfq_dates CHECK (end_date > start_date),
+    CONSTRAINT ck_repo_rfq_haircut CHECK (proposed_haircut_bps IS NULL OR proposed_haircut_bps BETWEEN 0 AND 10000)
+);
+
+CREATE TABLE repo_rfq_target (
+    repo_rfq_id UUID NOT NULL REFERENCES repo_rfq(id) ON DELETE CASCADE,
+    target_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    PRIMARY KEY (repo_rfq_id, target_entity_id)
+);
+
+CREATE TABLE repo_quote (
+    id UUID PRIMARY KEY,
+    version BIGINT NOT NULL DEFAULT 0,
+    rfq_id UUID NOT NULL REFERENCES repo_rfq(id) ON DELETE CASCADE,
+    quoting_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    quoting_user_id UUID,
+    cash_amount NUMERIC(38,18) NOT NULL,
+    repo_rate NUMERIC(12,8) NOT NULL,
+    haircut_bps INTEGER NOT NULL,
+    valid_until TIMESTAMPTZ NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    message VARCHAR(500),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_repo_quote_counterparty UNIQUE (rfq_id, quoting_entity_id),
+    CONSTRAINT ck_repo_quote_cash CHECK (cash_amount > 0),
+    CONSTRAINT ck_repo_quote_rate CHECK (repo_rate >= 0),
+    CONSTRAINT ck_repo_quote_haircut CHECK (haircut_bps BETWEEN 0 AND 10000),
+    CONSTRAINT ck_repo_quote_status CHECK (status IN ('ACTIVE', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED'))
+);
+
+CREATE INDEX idx_repo_rfq_requester ON repo_rfq(requester_entity_id, created_at DESC);
+CREATE INDEX idx_repo_rfq_open ON repo_rfq(status, expires_at);
+CREATE INDEX idx_repo_rfq_target_entity ON repo_rfq_target(target_entity_id, repo_rfq_id);
+CREATE INDEX idx_repo_quote_rfq ON repo_quote(rfq_id, created_at DESC);
+CREATE INDEX idx_repo_quote_entity ON repo_quote(quoting_entity_id, created_at DESC);
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V18__repo_trade_lifecycle.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE repo_trade (
+    id UUID PRIMARY KEY,
+    version BIGINT NOT NULL DEFAULT 0,
+    rfq_id UUID NOT NULL UNIQUE REFERENCES repo_rfq(id),
+    accepted_quote_id UUID NOT NULL UNIQUE REFERENCES repo_quote(id),
+    cash_borrower_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    cash_lender_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    collateral_asset_id UUID NOT NULL REFERENCES asset(id),
+    collateral_quantity NUMERIC(38,18) NOT NULL,
+    cash_amount NUMERIC(38,18) NOT NULL,
+    cash_currency CHAR(3) NOT NULL,
+    repo_rate NUMERIC(12,8) NOT NULL,
+    haircut_bps INTEGER NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    repurchase_amount NUMERIC(38,18) NOT NULL,
+    settlement_method VARCHAR(20) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    open_cash_confirmed BOOLEAN NOT NULL DEFAULT false,
+    open_collateral_confirmed BOOLEAN NOT NULL DEFAULT false,
+    close_cash_confirmed BOOLEAN NOT NULL DEFAULT false,
+    close_collateral_confirmed BOOLEAN NOT NULL DEFAULT false,
+    margin_call_amount NUMERIC(38,18),
+    margin_call_due_at TIMESTAMPTZ,
+    pending_substitution_asset_id UUID REFERENCES asset(id),
+    pending_substitution_quantity NUMERIC(38,18),
+    substitution_requested_by UUID REFERENCES legal_entity(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_repo_trade_status CHECK (status IN ('PENDING_OPEN_SETTLEMENT', 'OPEN', 'MARGIN_CALL', 'PENDING_CLOSE', 'CLOSED', 'DEFAULTED', 'CANCELLED')),
+    CONSTRAINT ck_repo_trade_quantity CHECK (collateral_quantity > 0),
+    CONSTRAINT ck_repo_trade_cash CHECK (cash_amount > 0 AND repurchase_amount >= cash_amount),
+    CONSTRAINT ck_repo_trade_parties CHECK (cash_borrower_entity_id <> cash_lender_entity_id),
+    CONSTRAINT ck_repo_trade_haircut CHECK (haircut_bps BETWEEN 0 AND 10000)
+);
+
+CREATE TABLE repo_lifecycle_event (
+    id UUID PRIMARY KEY,
+    repo_trade_id UUID NOT NULL REFERENCES repo_trade(id) ON DELETE CASCADE,
+    event_type VARCHAR(40) NOT NULL,
+    actor_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    actor_user_id UUID,
+    amount NUMERIC(38,18),
+    asset_id UUID REFERENCES asset(id),
+    quantity NUMERIC(38,18),
+    reference VARCHAR(200),
+    note VARCHAR(1000),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_repo_trade_party_borrower ON repo_trade(cash_borrower_entity_id, created_at DESC);
+CREATE INDEX idx_repo_trade_party_lender ON repo_trade(cash_lender_entity_id, created_at DESC);
+CREATE INDEX idx_repo_trade_status ON repo_trade(status, end_date);
+CREATE INDEX idx_repo_event_trade ON repo_lifecycle_event(repo_trade_id, created_at);
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Schema changes originally introduced in V19__repo_currency_varchar.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Hibernate maps @Column(length=3) String as VARCHAR. PostgreSQL CHAR(3) pads values and is a
+-- different JDBC type, so keep ISO currency validation while matching the entity mapping.
+ALTER TABLE repo_rfq ALTER COLUMN cash_currency TYPE VARCHAR(3);
+ALTER TABLE repo_trade ALTER COLUMN cash_currency TYPE VARCHAR(3);

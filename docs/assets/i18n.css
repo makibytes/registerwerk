@@ -95,8 +95,10 @@ html[lang|="es"] .md-header__option .md-select > button::before { background-ima
 }
 
 .md-header__option .md-select__list {
+  max-height: none;
   padding: 0.3rem;
   border-radius: 0.7rem;
+  overflow: visible;
 }
 
 .md-header__option .md-select__item {
