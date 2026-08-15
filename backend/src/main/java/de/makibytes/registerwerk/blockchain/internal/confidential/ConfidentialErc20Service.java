@@ -18,7 +18,7 @@ import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
@@ -72,7 +72,7 @@ public class ConfidentialErc20Service {
             String factoryAddress = contractAddressConfig.requireConfidentialFactory(chainId);
 
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
-            Credentials creds = evmContractService.credentials(chain);
+            EvmSigner signer = evmContractService.signer(chain);
 
             byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
 
@@ -98,7 +98,7 @@ public class ConfidentialErc20Service {
                     Collections.singletonList(new TypeReference<Address>() {})
             );
 
-            TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, deploy);
+            TransactionReceipt receipt = evmContractService.send(web3j, signer, factoryAddress, deploy);
 
             String tokenAddress = ConfidentialTokenEvents.extractTokenAddress(receipt);
             log.info("Confidential ERC-20 deployed: assetId={} → tokenAddress={} tx={}",

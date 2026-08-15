@@ -561,6 +561,8 @@ export interface OperatorWallet {
   name: string;
   type: 'EVM' | 'SOLANA' | 'CANTON';
   address: string;
+  custodyType: 'SOFTWARE' | 'PKCS11';
+  keyReference: string | null;
   defaultForChains: string[]; // chain config UUIDs
   createdAt: string;
   updatedAt: string;

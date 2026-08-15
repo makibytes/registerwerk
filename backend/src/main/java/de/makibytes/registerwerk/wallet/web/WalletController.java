@@ -79,6 +79,17 @@ public class WalletController {
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(w, defaultService.listAll()));
     }
 
+    @PostMapping("/attach-hsm")
+    @RequiresStepUp(reason = "WALLET_ATTACH_HSM")
+    public ResponseEntity<WalletResponse> attachHsm(
+            @RequestBody @Valid WalletAttachHsmRequest req, Authentication auth) {
+        OperatorWallet wallet = walletService.attachHsm(
+                req.name(), req.keyAlias(), req.address(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(toResponse(wallet, defaultService.listAll()));
+    }
+
     @PostMapping(value = "/import-keystore", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RequiresStepUp(reason = "WALLET_IMPORT_KEYSTORE")
     public ResponseEntity<WalletResponse> importKeystore(
@@ -185,6 +196,7 @@ public class WalletController {
                 .collect(Collectors.toList());
         return new WalletResponse(
                 w.getId(), w.getName(), w.getType().name(), w.getAddress(),
+                w.getCustodyType().name(), w.getKeyReference(),
                 defaultForChains, w.getCreatedAt(), w.getUpdatedAt());
     }
 }

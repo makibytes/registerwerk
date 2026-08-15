@@ -117,6 +117,7 @@ public class SecurityConfig {
                     "/api/v1/public/**",
                     "/api/v1/onboarding/token-info/**",
                     "/api/v1/onboarding/complete",
+                    "/api/v1/demo/onchain",
                     "/swagger-ui.html",
                     "/swagger-ui/**",
                     "/api-docs/**",

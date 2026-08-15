@@ -21,7 +21,7 @@ import org.springframework.stereotype.Service;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.generated.Uint16;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.time.Instant;
@@ -80,12 +80,12 @@ public class IdentityRegistryService {
         return blockchainClientRegistry.getEvmClient(descriptor);
     }
 
-    private Credentials credentialsForSuite(Erc3643Suite suite) {
+    private EvmSigner signerForSuite(Erc3643Suite suite) {
         AssetDeployment dep = deploymentRepo.findById(suite.getAssetDeploymentId())
                 .orElseThrow(() -> new IllegalStateException(
                         "AssetDeployment not found for suite " + suite.getId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        return evmContractService.credentials(descriptor);
+        return evmContractService.signer(descriptor);
     }
 
     /**
@@ -128,7 +128,7 @@ public class IdentityRegistryService {
                         .orElseThrow(() -> new IllegalStateException(
                                 "AssetDeployment not found for suite " + suite.getId()));
                 Web3j web3j = clientForSuite(suite);
-                Credentials creds = credentialsForSuite(suite);
+                EvmSigner signer = signerForSuite(suite);
                 String identityAddr = identity.getIdentityAddress() != null
                         ? identity.getIdentityAddress() : "0x0000000000000000000000000000000000000000";
                 short country = countryCode != null ? countryCode : 0;
@@ -142,7 +142,7 @@ public class IdentityRegistryService {
                         ),
                         java.util.Collections.emptyList()
                 );
-                String txHash = evmContractService.submit(web3j, creds,
+                String txHash = evmContractService.submit(web3j, signer,
                         suite.getIdentityRegistryAddress(), fn);
                 blockchainTransactionService.record(
                         txHash,
@@ -208,13 +208,13 @@ public class IdentityRegistryService {
                 && !suite.getIdentityRegistryAddress().startsWith("0x-PENDING")) {
             try {
                 Web3j web3j = clientForSuite(suite);
-                Credentials creds = credentialsForSuite(suite);
+                EvmSigner signer = signerForSuite(suite);
                 Function fn = new Function(
                         "deleteIdentity",
                         java.util.List.of(new Address(entry.getWalletAddress())),
                         java.util.Collections.emptyList()
                 );
-                evmContractService.send(web3j, creds, suite.getIdentityRegistryAddress(), fn);
+                evmContractService.send(web3j, signer, suite.getIdentityRegistryAddress(), fn);
             } catch (Exception e) {
                 throw new RuntimeException("deleteIdentity on-chain call failed: " + e.getMessage(), e);
             }

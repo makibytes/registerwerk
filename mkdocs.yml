@@ -727,10 +727,14 @@ nav:
       - Indexers: operator/configuration/indexers.md
       - Regulatory options: operator/configuration/regulatory-compliance.md
     - Blockchain operations:
+      - Anvil demo and address manifest: operator/blockchain/anvil-demo.md
       - Adding a chain: operator/blockchain/adding-chains.md
       - Deploying contracts: operator/blockchain/deploying-contracts.md
       - ERC-3643 setup: operator/blockchain/erc3643-setup.md
       - Confidential tokens: operator/blockchain/confidential-tokens.md
+    - Security operations:
+      - HSM-backed wallets: operator/security/hsm-wallets.md
+      - On-chain security review: operator/security/onchain-review.md
     - Indexers:
       - The Graph: operator/indexers/the-graph.md
       - Solana: operator/indexers/solana.md

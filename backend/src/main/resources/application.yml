@@ -234,6 +234,14 @@ registerwerk:
     kek-provider: ${REGISTERWERK_WALLET_KEK_PROVIDER:}
     kms:
       key-id: ${REGISTERWERK_WALLET_KMS_KEY_ID:}
+    hsm:
+      # One PKCS#11 token/session per Registerwerk instance. The SunPKCS11 file selects the
+      # actual vendor library and slot. Profiles keep vendor quirks behind an adapter.
+      enabled: ${REGISTERWERK_HSM_ENABLED:false}
+      profile: ${REGISTERWERK_HSM_PROFILE:SOFTHSM}
+      provider-config: ${REGISTERWERK_HSM_PROVIDER_CONFIG:}
+      pin: ${REGISTERWERK_HSM_PIN:}
+      signature-algorithm: ${REGISTERWERK_HSM_SIGNATURE_ALGORITHM:}
   contracts:
     # AssetTokenFactory address per chain identifier (populated after `forge script Deploy`)
     asset-token-factory:

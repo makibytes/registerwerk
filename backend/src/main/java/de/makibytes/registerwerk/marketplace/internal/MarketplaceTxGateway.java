@@ -9,7 +9,7 @@ import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.springframework.stereotype.Component;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.util.Map;
@@ -48,9 +48,9 @@ class MarketplaceTxGateway {
         ChainConfig chain = requireChain(chainConfigId);
         String contractAddress = contractAddressConfig.requireDappRegistry(chain.getIdentifier());
         Web3j web3j = clientRegistry.getEvmClientByIdentifier(chain.getIdentifier());
-        Credentials creds = evmContractService.credentials(chain.getId());
+        EvmSigner signer = evmContractService.signer(chain.getId());
 
-        String txHash = evmContractService.submit(web3j, creds, contractAddress, fn);
+        String txHash = evmContractService.submit(web3j, signer, contractAddress, fn);
         txService.record(txHash, fn.getName(), null, null,
                 parseChain(chain.getIdentifier()), chain.getNetworkType().name(),
                 contractAddress, params);

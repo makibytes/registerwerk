@@ -4,6 +4,7 @@ pragma solidity ^0.8.36;
 import "forge-std/Test.sol";
 import "../src/tokens/EwpgERC4626.sol";
 import "../src/factory/AssetTokenFactory.sol";
+import "../src/factory/AssetTokenFactoryBootstrap.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /// @dev Simple ERC-20 stablecoin for testing.
@@ -11,7 +12,10 @@ contract MockUSDC is ERC20 {
     constructor() ERC20("USD Coin", "USDC") {
         _mint(msg.sender, 1_000_000e6);
     }
-    function decimals() public pure override returns (uint8) { return 6; }
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
 }
 
 contract EwpgERC4626Test is Test {
@@ -119,6 +123,9 @@ contract EwpgERC4626Test is Test {
 
     function test_factory_deploysErc4626ViaDeployVault() public {
         factory = new AssetTokenFactory(registry);
+        vm.startPrank(registry);
+        AssetTokenFactoryBootstrap.configure(factory, registry);
+        vm.stopPrank();
         address vaultAddr = factory.deployVault(4, "Fund A", "FA", ASSET_ID, address(usdc));
         assertFalse(vaultAddr == address(0));
         EwpgERC4626 deployed = EwpgERC4626(vaultAddr);
@@ -128,6 +135,9 @@ contract EwpgERC4626Test is Test {
 
     function test_factory_revertsWhenDeployingVaultTypeViaDeployToken() public {
         factory = new AssetTokenFactory(registry);
+        vm.startPrank(registry);
+        AssetTokenFactoryBootstrap.configure(factory, registry);
+        vm.stopPrank();
         vm.expectRevert();
         factory.deployToken(4, "Fund", "F", ASSET_ID);
     }

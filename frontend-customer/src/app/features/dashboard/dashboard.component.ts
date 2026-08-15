@@ -12,6 +12,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { AuthService } from '../../core/auth/auth.service';
 import { IssuanceService } from '../../core/api/issuance.service';
 import { InvestmentService } from '../../core/api/investment.service';
+import { DemoOnchainManifest, DemoOnchainService } from '../../core/api/demo-onchain.service';
 import { Asset, InvestmentRecord } from '../../core/models';
 import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponent, BarItem } from '@registerwerk/ui';
 
@@ -43,6 +44,25 @@ import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponen
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
       } @else {
+
+        @if (demoManifest) {
+          <mat-card class="anvil-banner">
+            <mat-card-content>
+              <div class="anvil-copy">
+                <span class="live-dot"></span>
+                <div>
+                  <strong>{{ demoManifest.network }}</strong>
+                  <span>All seven EVM standards are live on-chain. Demo wallets include native gas.</span>
+                </div>
+              </div>
+              <div class="standard-row">
+                @for (standard of demoStandards; track standard.key) {
+                  <span class="standard-chip" [title]="standard.address">{{ standard.label }}</span>
+                }
+              </div>
+            </mat-card-content>
+          </mat-card>
+        }
 
         <!-- Load failures must be visible: silently rendering zeros would
              misrepresent the register state to the user. -->
@@ -318,6 +338,14 @@ import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponen
       text-align: center;
     }
     .empty-icon { font-size: 48px; width: 48px; height: 48px; color: var(--rw-text-muted); margin-bottom: 16px; }
+    .anvil-banner { margin-bottom: 24px; border-left: 4px solid #10b981; }
+    .anvil-banner mat-card-content { padding: 18px 20px; }
+    .anvil-copy { display: flex; align-items: center; gap: 12px; }
+    .anvil-copy div { display: flex; flex-direction: column; gap: 2px; }
+    .anvil-copy span { color: var(--rw-text-muted); font-size: 13px; }
+    .live-dot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: #10b981; box-shadow: 0 0 0 5px rgba(16,185,129,.13); }
+    .standard-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .standard-chip { padding: 4px 9px; border-radius: 999px; background: rgba(13,148,136,.1); color: #0f766e !important; font-weight: 600; font-size: 12px !important; }
     @media (max-width: 640px) {
       .activity-row { align-items: flex-start; flex-wrap: wrap; }
       .activity-info { min-width: 180px; }
@@ -330,9 +358,23 @@ export class DashboardComponent implements OnInit {
   private readonly auth = inject(AuthService);
   private readonly issuanceService = inject(IssuanceService);
   private readonly investmentService = inject(InvestmentService);
+  private readonly demoOnchainService = inject(DemoOnchainService);
 
   loading = true;
   userName: string | null = null;
+  demoManifest: DemoOnchainManifest | null = null;
+
+  get demoStandards(): { key: string; label: string; address: string }[] {
+    const products = [
+      ['DEMO_ERC20_TOKEN', 'ERC-20'], ['DEMO_ERC721_TOKEN', 'ERC-721'],
+      ['DEMO_ERC1155_TOKEN', 'ERC-1155'], ['DEMO_ERC3525_TOKEN', 'ERC-3525'],
+      ['DEMO_ERC3643_TOKEN', 'ERC-3643'], ['DEMO_ERC4626_VAULT', 'ERC-4626'],
+      ['DEMO_ERC7540_VAULT', 'ERC-7540'],
+    ];
+    return products
+      .filter(([key]) => !!this.demoManifest?.contracts[key])
+      .map(([key, label]) => ({ key, label, address: this.demoManifest!.contracts[key] }));
+  }
 
   isIssuer = false;
   isInvestor = false;
@@ -374,6 +416,8 @@ export class DashboardComponent implements OnInit {
     this.isTrader = this.auth.hasRole('TRADER') || this.auth.hasRole('REGISTRY_ADMIN');
     this.isCompanyAdmin = this.auth.hasRole('COMPANY_ADMIN') || this.auth.hasRole('REGISTRY_ADMIN');
     this.isPublisher = this.auth.hasRole('DAPP_PUBLISHER') || this.auth.hasRole('REGISTRY_ADMIN');
+    this.demoOnchainService.getManifest().pipe(catchError(() => of(null)))
+      .subscribe(manifest => { this.demoManifest = manifest; this.cdr.markForCheck(); });
     this.loadData();
   }
 

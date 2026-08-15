@@ -35,6 +35,22 @@ jobs:
         run: forge test -vvv
         working-directory: contracts
 
+      - name: Enforce formatting
+        run: >-
+          forge fmt --check
+          src/factory/AssetTokenFactory.sol
+          src/factory/AssetTokenDeployers.sol
+          src/factory/AssetTokenFactoryBootstrap.sol
+          src/ecosystem/RegisterwerkDeploymentRegistry.sol
+          src/ecosystem/EwpgPasskeyAccount.sol
+          script/DeployLocalLendingDemo.s.sol
+          script/DeployLocalTrexDemo.s.sol
+        working-directory: contracts
+
+      - name: Enforce deployable contract sizes
+        run: forge build --sizes
+        working-directory: contracts
+
       - name: Coverage report
         run: forge coverage --report lcov --report-file lcov.info
         working-directory: contracts
@@ -58,8 +74,8 @@ jobs:
         uses: crytic/slither-action@v0.4.0
         with:
           target: contracts/
-          # Gate the build on high-severity findings (previously findings were only
-          # uploaded, never enforced). Tighten to `medium` once the medium backlog is triaged.
+          # Keep the existing repository-wide baseline enforceable. Medium findings are
+          # retained in SARIF for triage; high-severity findings fail the build.
           fail-on: high
           slither-args: "--exclude-informational --sarif slither.sarif"
 

@@ -9,6 +9,8 @@ public record WalletResponse(
         String name,
         String type,
         String address,
+        String custodyType,
+        String keyReference,
         List<UUID> defaultForChains,
         Instant createdAt,
         Instant updatedAt

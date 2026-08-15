@@ -4,6 +4,7 @@ pragma solidity ^0.8.36;
 import "forge-std/Test.sol";
 import "../src/tokens/EwpgERC7540.sol";
 import "../src/factory/AssetTokenFactory.sol";
+import "../src/factory/AssetTokenFactoryBootstrap.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /// @dev Minimal USDC mock.
@@ -11,7 +12,10 @@ contract MockUSDC7540 is ERC20 {
     constructor() ERC20("USD Coin", "USDC") {
         _mint(msg.sender, 10_000_000e6);
     }
-    function decimals() public pure override returns (uint8) { return 6; }
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
 }
 
 contract EwpgERC7540Test is Test {
@@ -66,7 +70,7 @@ contract EwpgERC7540Test is Test {
         vault.fulfillDepositRequest(requestId);
 
         assertGt(vault.balanceOf(alice), 0);
-        (, , , bool pending) = vault.depositRequest(requestId);
+        (,,, bool pending) = vault.depositRequest(requestId);
         assertFalse(pending);
     }
 
@@ -160,6 +164,9 @@ contract EwpgERC7540Test is Test {
 
     function test_factory_deploysErc7540ViaDeployVault() public {
         factory = new AssetTokenFactory(registry);
+        vm.startPrank(registry);
+        AssetTokenFactoryBootstrap.configure(factory, registry);
+        vm.stopPrank();
         address vaultAddr = factory.deployVault(5, "Async Fund", "AF", ASSET_ID, address(usdc));
         EwpgERC7540 deployed = EwpgERC7540(vaultAddr);
         assertEq(deployed.assetId(), ASSET_ID);
@@ -190,7 +197,7 @@ contract EwpgERC7540Test is Test {
         // Shares moved into vault self-custody (exempt from whitelist)
         assertEq(vault.balanceOf(alice), 0);
         assertEq(vault.balanceOf(address(vault)), aliceShares);
-        (, , address owner, bool pending) = vault.redeemRequest(requestId);
+        (,, address owner, bool pending) = vault.redeemRequest(requestId);
         assertEq(owner, alice);
         assertTrue(pending);
     }

@@ -35,5 +35,6 @@ COPY --from=dependencies /tmp/dependencies ./lib
 # the repository's pinned compiler while the image is built, so demo startup itself is offline
 # and deterministic.
 RUN forge build script/DeployLocalLendingDemo.s.sol
+RUN forge build script/DeployLocalTrexDemo.s.sol
 
 ENTRYPOINT ["sh", "-c"]

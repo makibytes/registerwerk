@@ -16,6 +16,7 @@ import java.util.UUID;
 public class OperatorWallet {
 
     public enum WalletType { EVM, SOLANA, STARKNET, STELLAR, CANTON }
+    public enum CustodyType { SOFTWARE, PKCS11 }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -34,8 +35,17 @@ public class OperatorWallet {
     private String address;
 
     /** Path to the encrypted keystore file, relative to the configured storage root. */
-    @Column(name = "keystore_path", nullable = false, length = 255)
+    @Column(name = "keystore_path", length = 255)
     private String keystorePath;
+
+    /** Selects the opaque signer adapter; existing wallets default to encrypted software storage. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "custody_type", nullable = false, length = 20)
+    private CustodyType custodyType = CustodyType.SOFTWARE;
+
+    /** Vendor-neutral PKCS#11 object alias. Null for software wallets. */
+    @Column(name = "key_reference", length = 255)
+    private String keyReference;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -64,6 +74,12 @@ public class OperatorWallet {
 
     public String getKeystorePath() { return keystorePath; }
     public void setKeystorePath(String keystorePath) { this.keystorePath = keystorePath; }
+
+    public CustodyType getCustodyType() { return custodyType; }
+    public void setCustodyType(CustodyType custodyType) { this.custodyType = custodyType; }
+
+    public String getKeyReference() { return keyReference; }
+    public void setKeyReference(String keyReference) { this.keyReference = keyReference; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

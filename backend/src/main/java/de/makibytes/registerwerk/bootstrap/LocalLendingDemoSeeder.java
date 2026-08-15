@@ -15,6 +15,7 @@ import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.lending.api.LendingMarketRepository;
 import de.makibytes.registerwerk.lending.api.LendingMarketStatus;
 import de.makibytes.registerwerk.lending.api.LendingMarketRegistrar;
+import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationRepository;
 import org.slf4j.Logger;
@@ -73,6 +74,7 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
     private final OrgMemberWalletRepository memberWallets;
     private final LendingMarketRepository markets;
     private final LendingMarketRegistrar marketRegistrar;
+    private final ContractAddressConfig contractAddresses;
 
     public LocalLendingDemoSeeder(
             AssetRepository assets,
@@ -85,7 +87,8 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
             OrgRegistrationRepository orgRegistrations,
             OrgMemberWalletRepository memberWallets,
             LendingMarketRepository markets,
-            LendingMarketRegistrar marketRegistrar) {
+            LendingMarketRegistrar marketRegistrar,
+            ContractAddressConfig contractAddresses) {
         this.assets = assets;
         this.deployments = deployments;
         this.holders = holders;
@@ -97,6 +100,7 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         this.memberWallets = memberWallets;
         this.markets = markets;
         this.marketRegistrar = marketRegistrar;
+        this.contractAddresses = contractAddresses;
     }
 
     @Override
@@ -123,12 +127,19 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         ChainConfig chain = chains.findByIdentifier(DEMO_CHAIN)
                 .orElseThrow(() -> new IllegalStateException("Demo chain is missing: " + DEMO_CHAIN));
         configureLocalRpc(chain);
+        reconcileInfrastructure(addresses);
         Asset greenBond = requireAsset("DEMO-BOND-MC-001");
         Asset infraNote = requireAsset("DEMO-NOTE-AF-001");
         String greenToken = requireAddress(addresses, "GREEN_BOND_TOKEN");
         String infraToken = requireAddress(addresses, "INFRA_NOTE_TOKEN");
         updateDeployment(greenBond, greenToken);
         updateDeployment(infraNote, infraToken);
+        updateDeployment(requireAsset("DEMO-EQ-MC-001"), requireAddress(addresses, "DEMO_ERC3643_TOKEN"));
+        updateDeployment(requireAsset("DEMO-NFT-MC-001"), requireAddress(addresses, "DEMO_ERC721_TOKEN"));
+        updateDeployment(requireAsset("DEMO-COMM-AF-001"), requireAddress(addresses, "DEMO_ERC1155_TOKEN"));
+        updateDeployment(requireAsset("DEMO-SFT-MC-001"), requireAddress(addresses, "DEMO_ERC3525_TOKEN"));
+        updateDeployment(requireAsset("DEMO-VAULT-AF-001"), requireAddress(addresses, "DEMO_ERC4626_VAULT"));
+        updateDeployment(requireAsset("DEMO-VAULT-AF-002"), requireAddress(addresses, "DEMO_ERC7540_VAULT"));
 
         updateCompanyWallets(chain);
         updateHoldingWallet(greenBond, "DEMO-NI-001");
@@ -140,7 +151,19 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
 
         registerFreshMarket(chain, greenBond, requireAddress(addresses, "GREEN_BOND_MARKET"));
         registerFreshMarket(chain, infraNote, requireAddress(addresses, "INFRA_NOTE_MARKET"));
-        log.info("Local on-chain lending demo linked: 2 markets, 5 trader companies");
+        log.info("Local on-chain demo linked: all 7 EVM standards, 2 lending markets, 5 funded companies");
+    }
+
+    private void reconcileInfrastructure(Properties addresses) {
+        String key = DEMO_CHAIN.toLowerCase().replace('_', '-');
+        contractAddresses.getAssetTokenFactory().put(key, requireAddress(addresses, "ASSET_TOKEN_FACTORY"));
+        contractAddresses.getTrexFactory().put(key, requireAddress(addresses, "TREX_FACTORY"));
+        contractAddresses.getIdFactory().put(key, requireAddress(addresses, "ID_FACTORY"));
+        contractAddresses.getOrgRegistry().put(key, requireAddress(addresses, "ORG_REGISTRY"));
+        contractAddresses.getPermissionRegistry().put(key, requireAddress(addresses, "PERMISSION_REGISTRY"));
+        contractAddresses.getPermissionOracle().put(key, requireAddress(addresses, "PERMISSION_ORACLE"));
+        contractAddresses.getDappRegistry().put(key, requireAddress(addresses, "DAPP_REGISTRY"));
+        contractAddresses.getEcosystemTir().put(key, requireAddress(addresses, "ECOSYSTEM_TIR"));
     }
 
     private void configureLocalRpc(ChainConfig chain) {

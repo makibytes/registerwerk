@@ -23,7 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.math.BigInteger;
@@ -58,7 +58,7 @@ class Erc3525AdminServiceTest {
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private StarknetErc3525AdminService starknetErc3525AdminService;
     @Mock private Web3j web3j;
-    @Mock private Credentials credentials;
+    @Mock private EvmSigner credentials;
 
     private Erc3525AdminService service;
 
@@ -92,7 +92,7 @@ class Erc3525AdminServiceTest {
         AssetSlot slot = new AssetSlot();
         when(slotRepository.findByAssetIdAndSlotId(ASSET_ID, SLOT_ID)).thenReturn(Optional.of(slot));
         when(clientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(credentials);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(credentials);
         when(evmContractService.submit(eq(web3j), eq(credentials), eq("0xdeployed"), any(Function.class)))
                 .thenReturn("0xtxhash");
         UUID expectedTxId = UUID.randomUUID();

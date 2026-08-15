@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.util.Collections;
@@ -130,7 +130,7 @@ public class WhitelistService {
         try {
             ChainDescriptor descriptor = new ChainDescriptor(deployment.getChain(), deployment.getNetwork());
             Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-            Credentials creds = evmContractService.credentials(descriptor);
+            EvmSigner signer = evmContractService.signer(descriptor);
 
             Function fn = new Function(
                     functionName,
@@ -141,7 +141,7 @@ public class WhitelistService {
             // Fire-and-track: submit() returns the tx hash immediately;
             // BlockchainTransactionService polls for the receipt asynchronously, instead of this
             // call blocking the HTTP thread for up to two minutes like send() did.
-            String txHash = evmContractService.submit(web3j, creds, deployment.getContractAddress(), fn);
+            String txHash = evmContractService.submit(web3j, signer, deployment.getContractAddress(), fn);
             txService.record(txHash, functionName, deployment.getId(), deployment.getAssetId(),
                     deployment.getChain().name(), deployment.getNetwork().name(),
                     deployment.getContractAddress(), Map.of("walletAddress", walletAddress));

@@ -20,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.math.BigDecimal;
@@ -169,8 +169,8 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
                             UUID actorId, String actorRole) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials(descriptor);
-        String txHash = evmContractService.submit(web3j, creds, dep.getContractAddress(), fn);
+        EvmSigner signer = evmContractService.signer(descriptor);
+        String txHash = evmContractService.submit(web3j, signer, dep.getContractAddress(), fn);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 

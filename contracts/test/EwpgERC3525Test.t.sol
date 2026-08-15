@@ -4,6 +4,7 @@ pragma solidity ^0.8.36;
 import "forge-std/Test.sol";
 import "../src/tokens/EwpgERC3525.sol";
 import "../src/factory/AssetTokenFactory.sol";
+import "../src/factory/AssetTokenFactoryBootstrap.sol";
 
 contract EwpgERC3525Test is Test {
     EwpgERC3525 token;
@@ -381,6 +382,9 @@ contract EwpgERC3525Test is Test {
 
     function test_factory_deploysErc3525ViaTokenType3() public {
         factory = new AssetTokenFactory(registry);
+        vm.startPrank(registry);
+        AssetTokenFactoryBootstrap.configure(factory, registry);
+        vm.stopPrank();
         address tokenAddr = factory.deployToken(3, "Bond", "BND", ASSET_ID);
         assertFalse(tokenAddr == address(0));
         EwpgERC3525 deployed = EwpgERC3525(tokenAddr);

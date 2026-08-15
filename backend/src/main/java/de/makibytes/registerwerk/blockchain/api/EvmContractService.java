@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.blockchain.api;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
@@ -12,9 +13,7 @@ import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
-import org.web3j.crypto.Credentials;
 import org.web3j.crypto.RawTransaction;
-import org.web3j.crypto.TransactionEncoder;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.request.Transaction;
@@ -79,21 +78,21 @@ public class EvmContractService {
     // ── Credential helpers ────────────────────────────────────────────────────
 
     /** Returns credentials for the default wallet of the given chain config. */
-    public Credentials credentials(UUID chainConfigId) {
-        return walletSigner.credentialsForChain(chainConfigId);
+    public EvmSigner signer(UUID chainConfigId) {
+        return walletSigner.evmSignerForChain(chainConfigId);
     }
 
     /** Returns credentials for the default wallet of the given chain descriptor. */
-    public Credentials credentials(ChainDescriptor descriptor) {
-        return walletSigner.credentialsForDescriptor(descriptor);
+    public EvmSigner signer(ChainDescriptor descriptor) {
+        return walletSigner.evmSignerForDescriptor(descriptor);
     }
 
     /**
      * Returns credentials from any configured EVM default wallet.
      * Used for chain-agnostic operations and as a fallback.
      */
-    public Credentials credentials() {
-        return walletSigner.credentialsForAnyEvm();
+    public EvmSigner signer() {
+        return walletSigner.evmSignerForAnyEvm();
     }
 
     // ── Client helpers ────────────────────────────────────────────────────────
@@ -129,26 +128,26 @@ public class EvmContractService {
      *
      * @return EVM transaction hash (0x-prefixed, 66 characters)
      */
-    public String submit(Web3j web3j, Credentials creds, String contractAddress, Function function) {
-        return submit(web3j, creds, contractAddress, FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+    public String submit(Web3j web3j, EvmSigner signer, String contractAddress, Function function) {
+        return submit(web3j, signer, contractAddress, FunctionEncoder.encode(function), CALL_GAS_LIMIT);
     }
 
     /**
      * Submits a raw ABI-encoded call to {@code contractAddress} and returns the transaction hash.
      */
-    public String submit(Web3j web3j, Credentials creds, String contractAddress,
+    public String submit(Web3j web3j, EvmSigner signer, String contractAddress,
                          String encodedData, BigInteger gasLimit) {
         // Per-sender lock: two concurrent submissions would otherwise read the same
         // pending nonce and one transaction would silently replace the other.
-        synchronized (senderLock(creds.getAddress())) {
+        synchronized (senderLock(signer.address())) {
             try {
                 BigInteger gasPrice = gasPrice(web3j);
-                BigInteger nonce = nonce(web3j, creds.getAddress());
+                BigInteger nonce = nonce(web3j, signer.address());
 
                 RawTransaction tx = RawTransaction.createTransaction(
                         nonce, gasPrice, gasLimit, contractAddress, encodedData);
 
-                byte[] signed = TransactionEncoder.signMessage(tx, resolveChainId(web3j), creds);
+                byte[] signed = signer.signTransaction(tx, resolveChainId(web3j));
                 EthSendTransaction sent = web3j
                         .ethSendRawTransaction(Numeric.toHexString(signed))
                         .send();
@@ -172,26 +171,26 @@ public class EvmContractService {
      * @return mined {@link TransactionReceipt}
      * @throws RuntimeException wrapping any IO or timeout error
      */
-    public TransactionReceipt send(Web3j web3j, Credentials creds, String contractAddress,
+    public TransactionReceipt send(Web3j web3j, EvmSigner signer, String contractAddress,
                                    Function function) {
-        return send(web3j, creds, contractAddress, FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+        return send(web3j, signer, contractAddress, FunctionEncoder.encode(function), CALL_GAS_LIMIT);
     }
 
     /**
      * Sends a raw ABI-encoded call to {@code contractAddress} with a custom gas limit.
      */
-    public TransactionReceipt send(Web3j web3j, Credentials creds, String contractAddress,
+    public TransactionReceipt send(Web3j web3j, EvmSigner signer, String contractAddress,
                                    String encodedData, BigInteger gasLimit) {
         try {
             EthSendTransaction sent;
-            synchronized (senderLock(creds.getAddress())) {
+            synchronized (senderLock(signer.address())) {
                 BigInteger gasPrice = gasPrice(web3j);
-                BigInteger nonce = nonce(web3j, creds.getAddress());
+                BigInteger nonce = nonce(web3j, signer.address());
 
                 RawTransaction tx = RawTransaction.createTransaction(
                         nonce, gasPrice, gasLimit, contractAddress, encodedData);
 
-                byte[] signed = TransactionEncoder.signMessage(tx, resolveChainId(web3j), creds);
+                byte[] signed = signer.signTransaction(tx, resolveChainId(web3j));
                 sent = web3j
                         .ethSendRawTransaction(Numeric.toHexString(signed))
                         .send();
@@ -222,20 +221,20 @@ public class EvmContractService {
      * @param encodedConstructor ABI-encoded constructor arguments (may be null for no-arg)
      * @return address of the newly deployed contract
      */
-    public String deploy(Web3j web3j, Credentials creds, String binary,
+    public String deploy(Web3j web3j, EvmSigner signer, String binary,
                          String encodedConstructor) {
         String data = Numeric.cleanHexPrefix(binary)
                 + (encodedConstructor != null ? Numeric.cleanHexPrefix(encodedConstructor) : "");
         try {
             EthSendTransaction sent;
-            synchronized (senderLock(creds.getAddress())) {
+            synchronized (senderLock(signer.address())) {
                 BigInteger gasPrice = gasPrice(web3j);
-                BigInteger nonce = nonce(web3j, creds.getAddress());
+                BigInteger nonce = nonce(web3j, signer.address());
 
                 RawTransaction tx = RawTransaction.createContractTransaction(
                         nonce, gasPrice, DEPLOY_GAS_LIMIT, BigInteger.ZERO, data);
 
-                byte[] signed = TransactionEncoder.signMessage(tx, resolveChainId(web3j), creds);
+                byte[] signed = signer.signTransaction(tx, resolveChainId(web3j));
                 sent = web3j
                         .ethSendRawTransaction(Numeric.toHexString(signed))
                         .send();

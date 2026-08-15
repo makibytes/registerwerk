@@ -38,10 +38,10 @@ registration, and whitelist entries all stay valid. The only new requirement is
 implements `isValidSignature` like any other smart-contract wallet — including
 `EwpgPasskeyAccount` below, which is exactly such a delegate implementation.
 
-**Frontend implication (not yet built):** `frontend-customer` has zero wallet abstraction today
-— a single `window.ethereum.request(...)` call site
+**Frontend implication:** `frontend-customer` still uses the injected-wallet path for its existing
+org-identity operation — a single `window.ethereum.request(...)` call site
 (`frontend-customer/src/app/features/company-admin/org-identity/org-identity.component.ts`).
-Introducing 7702/smart-account support means building a thin wallet layer from scratch;
+Introducing 7702/passkey creation into that flow still needs a thin wallet layer;
 `viem` (with its `viem/account-abstraction` and EIP-7702 helpers) is the recommended SDK, since
 there is no existing ethers/wagmi dependency to preserve compatibility with. This remains the
 one piece of this track that is UI work rather than a contract/backend change.
@@ -97,6 +97,11 @@ already vendored via `contracts/lib/openzeppelin-contracts` (no new dependency):
 (ERC-4337 `validateUserOp`), `SignerWebAuthn` (passkey signature verification), and `ERC7821`
 (minimal batch execution). It also implements ERC-1271 so it binds as a Registerwerk member
 wallet exactly like any other smart-contract wallet.
+
+Its deployer is the immutable guardian. Calls can be classified as routine, admin or recovery by
+target and selector. EntryPoint/ERC-7821 batches reject admin and recovery operations; those must
+use `guardianExecute`. This prevents a compromised session passkey or sponsored user operation
+from changing high-risk registry controls.
 
 Paired with `EwpgPaymaster`, a retail investor's onboarding-to-first-subscription flow needs no
 seed phrase and no gas token — biometric passkey authentication plus sponsored execution. Note:

@@ -19,7 +19,7 @@ import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -300,8 +300,8 @@ public class TokenAdminService implements TokenAdminPort {
                     + "(registerwerk.zama.relayer-url) to encrypt the burn amount.");
         }
         requireNotBlocked(from);
-        String operatorAddress = evmContractService.credentials(
-                new ChainDescriptor(dep.getChain(), dep.getNetwork())).getAddress();
+        String operatorAddress = evmContractService.signer(
+                new ChainDescriptor(dep.getChain(), dep.getNetwork())).address();
         ZamaRelayerClient.EncryptedInput encrypted =
                 zamaRelayerClient.encryptInput(dep.getContractAddress(), operatorAddress, amount);
 
@@ -343,8 +343,8 @@ public class TokenAdminService implements TokenAdminPort {
                     + "(registerwerk.zama.relayer-url) to encrypt the mint amount.");
         }
         requireNotBlocked(toAddress);
-        String operatorAddress = evmContractService.credentials(
-                new ChainDescriptor(dep.getChain(), dep.getNetwork())).getAddress();
+        String operatorAddress = evmContractService.signer(
+                new ChainDescriptor(dep.getChain(), dep.getNetwork())).address();
         ZamaRelayerClient.EncryptedInput encrypted =
                 zamaRelayerClient.encryptInput(dep.getContractAddress(), operatorAddress, amount);
 
@@ -514,8 +514,8 @@ public class TokenAdminService implements TokenAdminPort {
                               Map<String, Object> params, UUID actorId, String actorRole) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials(descriptor);
-        String txHash = evmContractService.submit(web3j, creds, dep.getContractAddress(), fn);
+        EvmSigner signer = evmContractService.signer(descriptor);
+        String txHash = evmContractService.submit(web3j, signer, dep.getContractAddress(), fn);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 

@@ -12,8 +12,10 @@ FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 # The Temurin tag can lag patched Alpine packages even when the JVM itself is current. Upgrade the
 # small runtime layer during the build so fixable base-image CVEs do not survive into production.
-RUN apk upgrade --no-cache \
+RUN apk upgrade --no-cache && apk add --no-cache softhsm \
+    && addgroup -S -g 2000 registerwerk-hsm \
     && addgroup -S ewpg && adduser -S ewpg -G ewpg \
+    && addgroup ewpg registerwerk-hsm \
     && mkdir -p /data/wallets /app/cds \
     && chown -R ewpg:ewpg /data /app/cds
 COPY --from=builder /app/target/*.jar app.jar

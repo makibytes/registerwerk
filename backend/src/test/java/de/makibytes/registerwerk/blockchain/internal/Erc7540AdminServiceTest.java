@@ -19,7 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.math.BigDecimal;
@@ -45,7 +45,7 @@ class Erc7540AdminServiceTest {
     @Mock BlockchainTransactionService txService;
     @Mock ApplicationEventPublisher events;
     @Mock Web3j web3j;
-    @Mock Credentials credentials;
+    @Mock EvmSigner credentials;
 
     private Erc7540AdminService service;
     private AssetDeployment deployment;
@@ -72,7 +72,7 @@ class Erc7540AdminServiceTest {
         when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
                 .thenReturn(Optional.of(request));
         when(clientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
                 .thenReturn(credentials);
         when(evmContractService.submit(eq(web3j), eq(credentials), eq(deployment.getContractAddress()), any(Function.class)))
                 .thenReturn("0xtx");

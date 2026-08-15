@@ -3,6 +3,7 @@ pragma solidity ^0.8.36;
 
 import "forge-std/Script.sol";
 import "../src/factory/AssetTokenFactory.sol";
+import "../src/factory/AssetTokenFactoryBootstrap.sol";
 import "../src/compliance/WhitelistRegistry.sol";
 
 /// @notice Deploy the core eWpG Registry infrastructure contracts to a testnet.
@@ -25,6 +26,7 @@ contract DeployTestnet is Script {
 
         WhitelistRegistry whitelistRegistry = new WhitelistRegistry();
         AssetTokenFactory factory = new AssetTokenFactory(deployer);
+        AssetTokenFactoryBootstrap.configure(factory, deployer);
 
         vm.stopBroadcast();
 

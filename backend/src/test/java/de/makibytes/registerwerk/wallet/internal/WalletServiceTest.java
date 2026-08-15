@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -47,6 +48,7 @@ class WalletServiceTest {
     @Mock private WalletStorage walletStorage;
     @Mock private WalletDefaultService defaultService;
     @Mock private WalletSigner walletSigner;
+    @Mock private Pkcs11HsmService pkcs11HsmService;
     @Mock private ApplicationEventPublisher eventPublisher;
 
     private WalletService service;
@@ -55,7 +57,8 @@ class WalletServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new WalletService(walletRepository, walletStorage, defaultService, walletSigner, eventPublisher);
+        service = new WalletService(walletRepository, walletStorage, defaultService, walletSigner,
+                pkcs11HsmService, eventPublisher);
         lenient().when(walletRepository.save(any(OperatorWallet.class))).thenAnswer(inv -> {
             OperatorWallet w = inv.getArgument(0);
             if (w.getId() == null) {
@@ -160,6 +163,24 @@ class WalletServiceTest {
         assertThat(captor.getValue().actorId()).isEqualTo(actorId);
     }
 
+    @Test
+    @DisplayName("HSM wallets cannot export private key material")
+    void export_hsmWallet_rejectsRawAndKeystore() {
+        UUID id = UUID.randomUUID();
+        OperatorWallet hsmWallet = wallet(id, WalletType.EVM, null);
+        hsmWallet.setCustodyType(OperatorWallet.CustodyType.PKCS11);
+        hsmWallet.setKeyReference("registerwerk-operator");
+        when(walletRepository.findById(id)).thenReturn(Optional.of(hsmWallet));
+
+        assertThatThrownBy(() -> service.exportRaw(id, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("non-exportable");
+        assertThatThrownBy(() -> service.exportKeystore(id, "pw", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("non-exportable");
+        verifyNoInteractions(walletStorage);
+    }
+
     // ── rename ────────────────────────────────────────────────────────────────
 
     @Test
@@ -193,6 +214,23 @@ class WalletServiceTest {
         ArgumentCaptor<WalletDeletedEvent> captor = ArgumentCaptor.forClass(WalletDeletedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().actorId()).isEqualTo(actorId);
+    }
+
+    @Test
+    @DisplayName("deleting HSM wallet metadata does not delete the PKCS#11 key")
+    void delete_hsmWallet_preservesTokenKey() {
+        UUID id = UUID.randomUUID();
+        OperatorWallet hsmWallet = wallet(id, WalletType.EVM, null);
+        hsmWallet.setCustodyType(OperatorWallet.CustodyType.PKCS11);
+        hsmWallet.setKeyReference("registerwerk-operator");
+        when(walletRepository.findById(id)).thenReturn(Optional.of(hsmWallet));
+
+        service.delete(id, actorId, "REGISTRY_ADMIN");
+
+        verify(defaultService).removeDefaultsForWallet(id);
+        verify(walletSigner).evict(id);
+        verify(walletRepository).delete(hsmWallet);
+        verifyNoInteractions(walletStorage);
     }
 
     // ── KEK rotation (finding #9, Phase 8) ─────────────────────────────────────

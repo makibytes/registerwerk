@@ -3,6 +3,8 @@ package de.makibytes.registerwerk.unit;
 import de.makibytes.registerwerk.blockchain.api.ClaimSigningService;
 import de.makibytes.registerwerk.blockchain.api.ClaimSigningService.SignedClaim;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
+import de.makibytes.registerwerk.wallet.internal.SoftwareEvmSigner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,17 +46,19 @@ class ClaimSigningServiceTest {
 
     private ClaimSigningService service;
     private Credentials credentials;
+    private EvmSigner signer;
 
     @BeforeEach
     void setUp() {
         service = new ClaimSigningService(walletSigner);
         // Fixed, non-secret test key (32 bytes, well below curve order) — deterministic fixture only.
         credentials = Credentials.create("0x" + "11".repeat(32));
+        signer = new SoftwareEvmSigner(credentials);
     }
 
     @Test
     void signClaim_withoutChain_usesAnyEvmWallet() {
-        when(walletSigner.credentialsForAnyEvm()).thenReturn(credentials);
+        when(walletSigner.evmSignerForAnyEvm()).thenReturn(signer);
 
         SignedClaim signed = service.signClaim("0x" + "11".repeat(20), 1L, null);
 
@@ -64,7 +68,7 @@ class ClaimSigningServiceTest {
     @Test
     void signClaim_withChain_usesThatChainsWallet() {
         UUID chainConfigId = UUID.randomUUID();
-        when(walletSigner.credentialsForChain(chainConfigId)).thenReturn(credentials);
+        when(walletSigner.evmSignerForChain(chainConfigId)).thenReturn(signer);
 
         SignedClaim signed = service.signClaim(chainConfigId, "0x" + "22".repeat(20), 1L, null);
 
@@ -74,7 +78,7 @@ class ClaimSigningServiceTest {
 
     @Test
     void signClaim_signatureRecoversToTheSigningWalletsAddress() throws SignatureException {
-        when(walletSigner.credentialsForAnyEvm()).thenReturn(credentials);
+        when(walletSigner.evmSignerForAnyEvm()).thenReturn(signer);
         String identity = "0x" + "33".repeat(20);
         long topic = 1L;
 
@@ -115,7 +119,7 @@ class ClaimSigningServiceTest {
         // to 32 bytes and the dynamic `data` parameter's offset/length words entirely — so
         // reconstructing the OLD (wrong) way must NOT recover the same signer, proving the fix
         // actually changed what gets signed rather than merely refactoring the call site.
-        when(walletSigner.credentialsForAnyEvm()).thenReturn(credentials);
+        when(walletSigner.evmSignerForAnyEvm()).thenReturn(signer);
         String identity = "0x" + "66".repeat(20);
         long topic = 1L;
 
@@ -143,7 +147,7 @@ class ClaimSigningServiceTest {
 
     @Test
     void signClaim_differentTopics_produceDifferentClaimDataAndSignature() {
-        when(walletSigner.credentialsForAnyEvm()).thenReturn(credentials);
+        when(walletSigner.evmSignerForAnyEvm()).thenReturn(signer);
         String identity = "0x" + "44".repeat(20);
 
         SignedClaim topic1 = service.signClaim(identity, 1L, null);
@@ -155,7 +159,7 @@ class ClaimSigningServiceTest {
 
     @Test
     void signClaim_withExpiry_encodesDifferentClaimDataThanNoExpiry() {
-        when(walletSigner.credentialsForAnyEvm()).thenReturn(credentials);
+        when(walletSigner.evmSignerForAnyEvm()).thenReturn(signer);
         String identity = "0x" + "55".repeat(20);
         Instant expiry = Instant.ofEpochSecond(1_800_000_000L);
 

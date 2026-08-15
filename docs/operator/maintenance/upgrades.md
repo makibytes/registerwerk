@@ -87,10 +87,17 @@ Frontends are stateless — upgrades are zero-downtime.
 | Contract | Upgradeable | Upgrade path |
 |----------|------------|-------------|
 | `AssetTokenFactory` | No (CREATE2 factory) | Deploy new factory, update backend config |
+| `RegisterwerkDeploymentRegistry` | Yes (UUPS proxy) | Multisig-authorized implementation upgrade |
 | `EwpgTREXFactory` | No | Deploy new factory |
 | `IdentityRegistryStorage` | Yes (UUPS proxy) | Upgrade proxy implementation |
 | `ModularCompliance` | Yes (UUPS proxy) | Upgrade proxy implementation |
 | Token contracts (per issuance) | No | Cannot be upgraded after deployment |
+
+Registerwerk applies proxies selectively. The address catalogue is upgradeable because it is a
+coordination service; ordinary issued products remain immutable. ERC-3643 keeps the audited T-REX
+proxy model. Before any UUPS upgrade, archive `forge inspect <Contract> storage-layout` output,
+compare it with the candidate implementation, run the upgrade/storage-preservation tests, and
+record the implementation bytecode hash in the change ticket.
 
 ### Upgrading a UUPS proxy contract
 

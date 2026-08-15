@@ -17,7 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.util.Optional;
@@ -46,7 +46,7 @@ class WhitelistServiceTest {
     @Mock private EvmContractService evmContractService;
     @Mock private BlockchainTransactionService txService;
     @Mock private Web3j web3j;
-    @Mock private Credentials credentials;
+    @Mock private EvmSigner credentials;
 
     private WhitelistService service;
 
@@ -77,7 +77,7 @@ class WhitelistServiceTest {
         AssetDeployment dep = deployment();
         when(assetDeploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
         when(blockchainClientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
                 .thenReturn(credentials);
         when(evmContractService.submit(eq(web3j), eq(credentials), eq("0xdeployed"), any(Function.class)))
                 .thenReturn("0xtxhash");
@@ -98,7 +98,7 @@ class WhitelistServiceTest {
         AssetDeployment dep = deployment();
         when(assetDeploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
         when(blockchainClientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
                 .thenReturn(credentials);
         when(evmContractService.submit(any(), any(), anyString(), any(Function.class))).thenReturn("0xtxhash");
 

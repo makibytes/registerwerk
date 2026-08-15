@@ -16,7 +16,7 @@ import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import de.makibytes.registerwerk.erc3643.events.ComplianceModuleAddedEvent;
@@ -125,8 +125,8 @@ public class Erc3643LifecycleService {
                         suite.getAssetDeploymentId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         org.web3j.protocol.Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-        org.web3j.crypto.Credentials creds = evmContractService.credentials(descriptor);
-        evmContractService.send(web3j, creds, contractAddress, fn);
+        de.makibytes.registerwerk.wallet.api.EvmSigner signer = evmContractService.signer(descriptor);
+        evmContractService.send(web3j, signer, contractAddress, fn);
     }
 
     /**
@@ -152,8 +152,8 @@ public class Erc3643LifecycleService {
                         suite.getAssetDeploymentId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials(descriptor);
-        String txHash = evmContractService.submit(web3j, creds, contractAddress, fn);
+        EvmSigner signer = evmContractService.signer(descriptor);
+        String txHash = evmContractService.submit(web3j, signer, contractAddress, fn);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), fn.getName(), actorId, actorRole, params));
 

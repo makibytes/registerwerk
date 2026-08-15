@@ -26,6 +26,8 @@ class ProductionReadinessCheck {
 
     private final String kekProviderName;
 
+    private final boolean hsmEnabled;
+
     private final boolean stepUpAllowUnenrolled;
 
     private final AppUserRepository appUserRepository;
@@ -43,6 +45,7 @@ class ProductionReadinessCheck {
             RegisterwerkAuthProperties authProps,
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri,
             @Value("${registerwerk.wallet.kek-provider:}") String kekProviderName,
+            @Value("${registerwerk.wallet.hsm.enabled:false}") boolean hsmEnabled,
             @Value("${registerwerk.auth.step-up.allow-unenrolled:false}") boolean stepUpAllowUnenrolled,
             @Value("${registerwerk.entra.tenant-id:}") String entraTenantId,
             @Value("${registerwerk.entra.client-id:}") String entraClientId,
@@ -53,6 +56,7 @@ class ProductionReadinessCheck {
         this.authProps = authProps;
         this.issuerUri = issuerUri;
         this.kekProviderName = kekProviderName;
+        this.hsmEnabled = hsmEnabled;
         this.stepUpAllowUnenrolled = stepUpAllowUnenrolled;
         this.entraTenantId = entraTenantId == null ? "" : entraTenantId.trim();
         this.entraClientId = entraClientId == null ? "" : entraClientId.trim();
@@ -96,6 +100,11 @@ class ProductionReadinessCheck {
                 throw new IllegalStateException(
                         "REGISTERWERK_WALLET_KEK_PROVIDER must be set to AWS_KMS, AZURE_KEY_VAULT, " +
                         "or GCP_KMS in production mode. The EnvVarKekProvider is not safe for production.");
+            }
+            if (!hsmEnabled) {
+                throw new IllegalStateException(
+                        "REGISTERWERK_HSM_ENABLED must be true in production mode so EVM signing keys " +
+                        "remain non-exportable in PKCS#11 hardware.");
             }
             if (stepUpAllowUnenrolled) {
                 throw new IllegalStateException(

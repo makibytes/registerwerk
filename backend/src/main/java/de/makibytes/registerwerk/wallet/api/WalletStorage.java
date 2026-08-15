@@ -169,8 +169,8 @@ public class WalletStorage {
      */
     public String exportEvmKeystore(String relativePath, String exportPassword) {
         try {
-            Credentials creds = loadEvm(relativePath);
-            WalletFile exported = Wallet.createStandard(exportPassword, creds.getEcKeyPair());
+            Credentials credentials = loadEvm(relativePath);
+            WalletFile exported = Wallet.createStandard(exportPassword, credentials.getEcKeyPair());
             return MAPPER.writeValueAsString(exported);
         } catch (Exception e) {
             throw new WalletStorageException("Failed to export EVM keystore from " + relativePath, e);
@@ -182,8 +182,8 @@ public class WalletStorage {
      * Caller is responsible for audit logging and access control.
      */
     public String exportEvmRaw(String relativePath) {
-        Credentials creds = loadEvm(relativePath);
-        return "0x" + creds.getEcKeyPair().getPrivateKey().toString(16);
+        Credentials credentials = loadEvm(relativePath);
+        return "0x" + credentials.getEcKeyPair().getPrivateKey().toString(16);
     }
 
     // ── Solana (AES-256-GCM envelope) ────────────────────────────────────────

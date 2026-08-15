@@ -118,6 +118,13 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
               <span class="meta-label">Default for</span>
               <span class="meta-value">{{ wallet()!.defaultForChains.length }} chain(s)</span>
             </div>
+            <div class="meta-item">
+              <span class="meta-label">Custody</span>
+              <span class="meta-value">{{ wallet()!.custodyType === 'PKCS11' ? 'PKCS#11 HSM (non-exportable)' : 'Encrypted software keystore' }}</span>
+            </div>
+            @if (wallet()!.keyReference) {
+              <div class="meta-item"><span class="meta-label">Key reference</span><span class="meta-value">{{ wallet()!.keyReference }}</span></div>
+            }
           </div>
 
           <div class="address-box">

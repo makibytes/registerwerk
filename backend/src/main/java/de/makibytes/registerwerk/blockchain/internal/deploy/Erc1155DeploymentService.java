@@ -17,7 +17,7 @@ import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint8;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
@@ -77,7 +77,7 @@ public class Erc1155DeploymentService {
             String factoryAddress = contractAddressConfig.requireAssetTokenFactory(chainId);
 
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
-            Credentials creds = evmContractService.credentials(chain);
+            EvmSigner signer = evmContractService.signer(chain);
 
             Function deployToken = new Function(
                     "deployToken",
@@ -90,7 +90,7 @@ public class Erc1155DeploymentService {
                     Collections.singletonList(new TypeReference<Address>() {})
             );
 
-            TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, deployToken);
+            TransactionReceipt receipt = evmContractService.send(web3j, signer, factoryAddress, deployToken);
             String tokenAddress = EvmUtils.extractIndexedAddress(receipt, TOKEN_DEPLOYED_TOPIC, 3)
                     .orElseThrow(() -> new RuntimeException(
                             "TokenDeployed event not found in receipt: " + receipt.getTransactionHash()));

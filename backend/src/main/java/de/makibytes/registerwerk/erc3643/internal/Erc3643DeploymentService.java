@@ -40,7 +40,7 @@ import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.abi.TypeReference;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
@@ -169,7 +169,7 @@ public class Erc3643DeploymentService {
 
             String factoryAddress = contractAddressConfig.requireTrexFactory(chainConfig.getIdentifier());
             Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
-            Credentials creds = evmContractService.credentials(chainConfigId);
+            EvmSigner signer = evmContractService.signer(chainConfigId);
 
             // CREATE2 salt: deterministic per asset
             String salt = "registerwerk-" + assetId.toString();
@@ -182,8 +182,8 @@ public class Erc3643DeploymentService {
             String assetName = assetInfo.name();
             String assetSymbol = deriveSymbol(assetName);
 
-            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, creds.getAddress(), assetName, assetSymbol);
-            evmContractService.send(web3j, creds, factoryAddress, fn);
+            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, signer.address(), assetName, assetSymbol);
+            evmContractService.send(web3j, signer, factoryAddress, fn);
 
             Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deployment.getId());
             Erc3643Suite saved = suiteRepository.save(suite);
@@ -227,14 +227,14 @@ public class Erc3643DeploymentService {
 
             String factoryAddress = contractAddressConfig.requireTrexFactory(chainConfig.getIdentifier());
             Web3j web3j = clientRegistry.getEvmClient(chain);
-            Credentials creds = evmContractService.credentials(chain);
+            EvmSigner signer = evmContractService.signer(chain);
             String salt = "registerwerk-" + assetId;
             byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
             AssetLookupPort.AssetInfo assetInfo = assetLookupPort.findById(assetId)
                     .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
-            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, creds.getAddress(),
+            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, signer.address(),
                     assetInfo.name(), deriveSymbol(assetInfo.name()));
-            TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, fn);
+            TransactionReceipt receipt = evmContractService.send(web3j, signer, factoryAddress, fn);
 
             // send() already waits for a mined, non-reverted receipt (throws otherwise), so the
             // suite genuinely exists on-chain now — resolve its real addresses via the factory's
@@ -300,7 +300,7 @@ public class Erc3643DeploymentService {
                         suite.getAssetDeploymentId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials(descriptor);
+        EvmSigner signer = evmContractService.signer(descriptor);
 
         // IIdentityRegistry.registerIdentity(address _userAddress, address _identity, uint16 _country)
         Function fn = new Function(
@@ -312,7 +312,7 @@ public class Erc3643DeploymentService {
                 ),
                 Collections.emptyList()
         );
-        evmContractService.send(web3j, creds, suite.getIdentityRegistryAddress(), fn);
+        evmContractService.send(web3j, signer, suite.getIdentityRegistryAddress(), fn);
         log.info("registerInvestorIdentity: registered wallet={} in suite={}", walletAddress, suiteId);
     }
 
@@ -347,7 +347,7 @@ public class Erc3643DeploymentService {
         ClaimSigningService.SignedClaim signed = claimSigningService.signClaim(
                 identity.getChainConfigId(), identityAddress, claimTopic, expiresAt);
 
-        Credentials creds = evmContractService.credentials(identity.getChainConfigId());
+        EvmSigner signer = evmContractService.signer(identity.getChainConfigId());
 
         // ONCHAINID.addClaim(uint256 topic, uint256 scheme, address issuer,
         //                    bytes signature, bytes data, string uri)
@@ -368,7 +368,7 @@ public class Erc3643DeploymentService {
                 ),
                 Collections.emptyList()
         );
-        evmContractService.send(web3j, creds, identityAddress, fn);
+        evmContractService.send(web3j, signer, identityAddress, fn);
         log.info("issueKycClaim: topic={} issued on identity={}", claimTopic, identityAddress);
     }
 
@@ -395,9 +395,9 @@ public class Erc3643DeploymentService {
         }
 
         // ERC-735 claimId = keccak256(abi.encode(issuer, topic))
-        Credentials creds = evmContractService.credentials(identity.getChainConfigId());
+        EvmSigner signer = evmContractService.signer(identity.getChainConfigId());
         byte[] claimId = org.web3j.crypto.Hash.sha3(
-                encodeClaimId(creds.getAddress(), claim.getTopic()));
+                encodeClaimId(signer.address(), claim.getTopic()));
 
         ChainConfig chainConfig = chainConfigRepository.findById(identity.getChainConfigId())
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig",
@@ -410,7 +410,7 @@ public class Erc3643DeploymentService {
                 List.of(new Bytes32(claimId)),
                 Collections.emptyList()
         );
-        evmContractService.send(web3j, creds, identityAddress, fn);
+        evmContractService.send(web3j, signer, identityAddress, fn);
         log.info("revokeKycClaim: claim={} removed from identity={}", onchainClaimId, identityAddress);
     }
 

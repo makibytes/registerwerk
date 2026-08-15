@@ -6,7 +6,18 @@ import "../src/ecosystem/EcosystemTrustedIssuersRegistry.sol";
 import "../src/ecosystem/OrgRegistry.sol";
 import "../src/ecosystem/PermissionOracle.sol";
 import "../src/ecosystem/PermissionRegistry.sol";
+import "../src/ecosystem/DappRegistry.sol";
+import "../src/ecosystem/RegisterwerkDeploymentRegistry.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../src/examples/MockStablecoin.sol";
+import "../src/factory/AssetTokenFactory.sol";
+import "../src/factory/AssetTokenFactoryBootstrap.sol";
+import "../src/tokens/EwpgERC20.sol";
+import "../src/tokens/EwpgERC721.sol";
+import "../src/tokens/EwpgERC1155.sol";
+import "../src/tokens/EwpgERC3525.sol";
+import "../src/tokens/EwpgERC4626.sol";
+import "../src/tokens/EwpgERC7540.sol";
 import "../src/lending/EwpgRepoMarket.sol";
 import "../src/lending/EwpgRepoMarketFactory.sol";
 import "../src/lending/oracle/RegisterwerkNavOracle.sol";
@@ -34,11 +45,20 @@ contract DeployLocalLendingDemo is Script {
     MockStablecoin private infraNote;
     RegisterwerkNavOracle private navOracle;
     EwpgRepoMarketFactory private factory;
+    PermissionOracle private permissionOracle;
+    DappRegistry private dappRegistry;
+    AssetTokenFactory private assetFactory;
+    RegisterwerkDeploymentRegistry private deploymentRegistry;
+    address private erc20Token;
+    address private erc721Token;
+    address private erc1155Token;
+    address private erc3525Token;
+    address private erc4626Vault;
+    address private erc7540Vault;
 
     function run() external {
         uint256 deployerKey = vm.envOr(
-            "LOCAL_DEMO_DEPLOYER_KEY",
-            uint256(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80)
+            "LOCAL_DEMO_DEPLOYER_KEY", uint256(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80)
         );
         address deployer = vm.addr(deployerKey);
 
@@ -46,8 +66,9 @@ contract DeployLocalLendingDemo is Script {
         orgRegistry = new OrgRegistry(deployer);
         permissions = new PermissionRegistry(deployer, orgRegistry);
         trustedIssuers = new EcosystemTrustedIssuersRegistry(deployer);
-        PermissionOracle permissionOracle =
-            new PermissionOracle(deployer, orgRegistry, permissions, trustedIssuers);
+        permissionOracle = new PermissionOracle(deployer, orgRegistry, permissions, trustedIssuers);
+        dappRegistry = new DappRegistry(deployer, orgRegistry);
+        permissionOracle.setDappRegistry(IDappRegistryView(address(dappRegistry)));
         claimIssuer = new MockClaimIssuer();
         uint256[] memory topics = new uint256[](1);
         topics[0] = KYC_TOPIC;
@@ -56,6 +77,19 @@ contract DeployLocalLendingDemo is Script {
         loanToken = new MockStablecoin("Demo Euro", "DEMOEUR", 6);
         greenBond = new MockStablecoin("Meridian Green Bond", "MGB24", 0);
         infraNote = new MockStablecoin("Aurora Infrastructure Note", "AIN25", 0);
+        assetFactory = new AssetTokenFactory(deployer);
+        AssetTokenFactoryBootstrap.configure(assetFactory, deployer);
+        _deployStandardProducts(deployer);
+        RegisterwerkDeploymentRegistry registryImplementation = new RegisterwerkDeploymentRegistry();
+        deploymentRegistry = RegisterwerkDeploymentRegistry(
+            address(
+                new ERC1967Proxy(
+                    address(registryImplementation),
+                    abi.encodeCall(RegisterwerkDeploymentRegistry.initialize, (deployer))
+                )
+            )
+        );
+        _registerStandardProducts();
         navOracle = new RegisterwerkNavOracle(permissionOracle);
         factory = new EwpgRepoMarketFactory(permissionOracle);
 
@@ -70,7 +104,11 @@ contract DeployLocalLendingDemo is Script {
             address org = _registerMember(traders[i]);
             permissions.grantToOrg(org, keccak256("repo-facility.borrow"));
             loanToken.mint(traders[i], 250_000e6);
+            (bool funded,) = payable(traders[i]).call{value: 100 ether}("");
+            require(funded, "native gas funding failed");
         }
+
+        _seedStandardProducts(deployer, traders);
 
         greenBond.mint(NORDBANK, 5_000);
         greenBond.mint(RHEINISCHE, 3_000);
@@ -85,7 +123,7 @@ contract DeployLocalLendingDemo is Script {
             loanToken, greenBond, navOracle, 7000, 8000, 500, 0.02e18, 0.18e18, 365 days, 730 days
         );
         address infraMarket = factory.createMarket(
-            loanToken, infraNote, navOracle, 6500, 7800, 500, 0.025e18, 0.20e18, 365 days, 730 days
+            loanToken, infraNote, navOracle, 6500, 7800, 500, 0.025e18, 0.2e18, 365 days, 730 days
         );
 
         loanToken.mint(deployer, 10_000_000e6);
@@ -95,15 +133,114 @@ contract DeployLocalLendingDemo is Script {
         EwpgRepoMarket(infraMarket).supply(5_000_000e6);
         vm.stopBroadcast();
 
-        string memory output = string.concat(
-            "LOAN_TOKEN=", vm.toString(address(loanToken)), "\n",
-            "NAV_ORACLE=", vm.toString(address(navOracle)), "\n",
-            "GREEN_BOND_TOKEN=", vm.toString(address(greenBond)), "\n",
-            "GREEN_BOND_MARKET=", vm.toString(greenMarket), "\n",
-            "INFRA_NOTE_TOKEN=", vm.toString(address(infraNote)), "\n",
-            "INFRA_NOTE_MARKET=", vm.toString(infraMarket), "\n"
+        _writeManifest(deployer, greenMarket, infraMarket);
+    }
+
+    function _deployStandardProducts(address deployer) private {
+        erc20Token = assetFactory.deployToken(0, "Registerwerk Demo Euro Bond", "RWDEB", keccak256("demo-erc20"));
+        erc721Token = assetFactory.deployToken(1, "Registerwerk Unique Asset Notes", "RWUAN", keccak256("demo-erc721"));
+        erc1155Token = assetFactory.deployToken(2, "", "RWMCT", keccak256("demo-erc1155"));
+        erc3525Token = assetFactory.deployToken(3, "Registerwerk Maturity Notes", "RWMN", keccak256("demo-erc3525"));
+        erc4626Vault = assetFactory.deployVault(
+            4, "Registerwerk Liquidity Fund", "RWLF", keccak256("demo-erc4626"), address(loanToken)
         );
+        erc7540Vault = assetFactory.deployVault(
+            5, "Registerwerk Private Credit Fund", "RWPC", keccak256("demo-erc7540"), address(loanToken)
+        );
+
+        EwpgERC4626(erc4626Vault).setNavPerShare(1e18, block.timestamp, keccak256("demo-nav-4626"));
+        EwpgERC7540(erc7540Vault).setNavPerShare(1.025e18, block.timestamp, keccak256("demo-nav-7540"));
+        EwpgERC7540(erc7540Vault).setMinSettlementDelay(0);
+        _whitelistAll(deployer);
+    }
+
+    function _whitelistAll(address deployer) private {
+        address[6] memory accounts = [deployer, NORDBANK, RHEINISCHE, AURORA, FRANKFURT, WUERTTEMBERG];
+        for (uint256 i = 0; i < accounts.length; i++) {
+            EwpgERC20(erc20Token).whitelist(accounts[i]);
+            EwpgERC721(erc721Token).whitelist(accounts[i]);
+            EwpgERC1155(erc1155Token).whitelist(accounts[i]);
+            EwpgERC3525(erc3525Token).whitelist(accounts[i]);
+            EwpgERC4626(erc4626Vault).whitelist(accounts[i]);
+            EwpgERC7540(erc7540Vault).whitelist(accounts[i]);
+        }
+    }
+
+    function _seedStandardProducts(address deployer, address[5] memory traders) private {
+        for (uint256 i = 0; i < traders.length; i++) {
+            EwpgERC20(erc20Token).mint(traders[i], (i + 1) * 10_000 ether);
+            EwpgERC721(erc721Token).mint(traders[i], 1001 + i);
+            EwpgERC1155(erc1155Token).mint(traders[i], (i % 2) + 1, (i + 1) * 100, "");
+            EwpgERC3525(erc3525Token).mint(traders[i], 2030 + (i % 2), (i + 1) * 50_000);
+        }
+
+        loanToken.mint(deployer, 2_000_000e6);
+        loanToken.approve(erc4626Vault, 1_000_000e6);
+        EwpgERC4626(erc4626Vault).deposit(1_000_000e6, deployer);
+        loanToken.approve(erc7540Vault, 500_000e6);
+        uint256 requestId = EwpgERC7540(erc7540Vault).requestDeposit(500_000e6, deployer, deployer);
+        EwpgERC7540(erc7540Vault).fulfillDepositRequest(requestId);
+    }
+
+    function _registerStandardProducts() private {
+        deploymentRegistry.setDeployment(keccak256("ERC-20"), erc20Token, keccak256("demo-erc20"));
+        deploymentRegistry.setDeployment(keccak256("ERC-721"), erc721Token, keccak256("demo-erc721"));
+        deploymentRegistry.setDeployment(keccak256("ERC-1155"), erc1155Token, keccak256("demo-erc1155"));
+        deploymentRegistry.setDeployment(keccak256("ERC-3525"), erc3525Token, keccak256("demo-erc3525"));
+        deploymentRegistry.setDeployment(keccak256("ERC-4626"), erc4626Vault, keccak256("demo-erc4626"));
+        deploymentRegistry.setDeployment(keccak256("ERC-7540"), erc7540Vault, keccak256("demo-erc7540"));
+    }
+
+    function _writeManifest(address deployer, address greenMarket, address infraMarket) private {
+        string memory output = "CHAIN_ID=11155111\n";
+        output = string.concat(output, "OPERATOR_WALLET=", vm.toString(deployer), "\n");
+        output = string.concat(output, "CUSTOMER_NORDBANK_WALLET=", vm.toString(NORDBANK), "\n");
+        output = string.concat(output, "CUSTOMER_RHEINISCHE_WALLET=", vm.toString(RHEINISCHE), "\n");
+        output = string.concat(output, "CUSTOMER_AURORA_WALLET=", vm.toString(AURORA), "\n");
+        output = string.concat(output, "CUSTOMER_FRANKFURT_WALLET=", vm.toString(FRANKFURT), "\n");
+        output = string.concat(output, "CUSTOMER_WUERTTEMBERG_WALLET=", vm.toString(WUERTTEMBERG), "\n");
+        output = string.concat(output, "ASSET_TOKEN_FACTORY=", vm.toString(address(assetFactory)), "\n");
+        output = string.concat(output, "DEPLOYMENT_REGISTRY=", vm.toString(address(deploymentRegistry)), "\n");
+        output = string.concat(output, "ORG_REGISTRY=", vm.toString(address(orgRegistry)), "\n");
+        output = string.concat(output, "PERMISSION_REGISTRY=", vm.toString(address(permissions)), "\n");
+        output = string.concat(output, "PERMISSION_ORACLE=", vm.toString(address(permissionOracle)), "\n");
+        output = string.concat(output, "DAPP_REGISTRY=", vm.toString(address(dappRegistry)), "\n");
+        output = string.concat(output, "ECOSYSTEM_TIR=", vm.toString(address(trustedIssuers)), "\n");
+        output = string.concat(output, "DEMO_ERC20_TOKEN=", vm.toString(erc20Token), "\n");
+        output = string.concat(output, "DEMO_ERC721_TOKEN=", vm.toString(erc721Token), "\n");
+        output = string.concat(output, "DEMO_ERC1155_TOKEN=", vm.toString(erc1155Token), "\n");
+        output = string.concat(output, "DEMO_ERC3525_TOKEN=", vm.toString(erc3525Token), "\n");
+        output = string.concat(output, "DEMO_ERC4626_VAULT=", vm.toString(erc4626Vault), "\n");
+        output = string.concat(output, "DEMO_ERC7540_VAULT=", vm.toString(erc7540Vault), "\n");
+        output = string.concat(output, "LOAN_TOKEN=", vm.toString(address(loanToken)), "\n");
+        output = string.concat(output, "NAV_ORACLE=", vm.toString(address(navOracle)), "\n");
+        output = string.concat(output, "GREEN_BOND_TOKEN=", vm.toString(address(greenBond)), "\n");
+        output = string.concat(output, "GREEN_BOND_MARKET=", vm.toString(greenMarket), "\n");
+        output = string.concat(output, "INFRA_NOTE_TOKEN=", vm.toString(address(infraNote)), "\n");
+        output = string.concat(output, "INFRA_NOTE_MARKET=", vm.toString(infraMarket), "\n");
         vm.writeFile(vm.envOr("LOCAL_DEMO_OUTPUT", string("/output/demo.env")), output);
+
+        string memory object = "registerwerk-demo";
+        vm.serializeUint(object, "schemaVersion", 1);
+        vm.serializeUint(object, "chainId", 11155111);
+        vm.serializeAddress(object, "operatorWallet", deployer);
+        vm.serializeAddress(object, "assetTokenFactory", address(assetFactory));
+        vm.serializeAddress(object, "deploymentRegistry", address(deploymentRegistry));
+        vm.serializeAddress(object, "orgRegistry", address(orgRegistry));
+        vm.serializeAddress(object, "permissionRegistry", address(permissions));
+        vm.serializeAddress(object, "permissionOracle", address(permissionOracle));
+        vm.serializeAddress(object, "dappRegistry", address(dappRegistry));
+        vm.serializeAddress(object, "ecosystemTrustedIssuersRegistry", address(trustedIssuers));
+        vm.serializeAddress(object, "erc20", erc20Token);
+        vm.serializeAddress(object, "erc721", erc721Token);
+        vm.serializeAddress(object, "erc1155", erc1155Token);
+        vm.serializeAddress(object, "erc3525", erc3525Token);
+        vm.serializeAddress(object, "erc4626", erc4626Vault);
+        vm.serializeAddress(object, "erc7540", erc7540Vault);
+        vm.serializeAddress(object, "loanToken", address(loanToken));
+        vm.serializeAddress(object, "greenBondMarket", greenMarket);
+        string memory json = vm.serializeAddress(object, "infraNoteMarket", infraMarket);
+        vm.writeJson(json, vm.envOr("LOCAL_DEMO_MANIFEST", string("/output/manifest.json")));
     }
 
     function _registerMember(address wallet) private returns (address org) {

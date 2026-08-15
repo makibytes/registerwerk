@@ -24,7 +24,7 @@ import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
@@ -122,16 +122,16 @@ public class OnChainIdService {
         try {
             String idFactoryAddress = contractAddressConfig.requireIdFactory(chainConfig.getIdentifier());
             Web3j web3j = blockchainClientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
-            Credentials creds = evmContractService.credentials(chainConfigId);
+            EvmSigner signer = evmContractService.signer(chainConfigId);
 
             // IdFactory.deployIdentityProxy(address _managementKey) returns address
             // The management key is the registry wallet (it manages the identity on behalf of the entity)
             Function fn = new Function(
                     "deployIdentityProxy",
-                    List.of(new Address(creds.getAddress())),
+                    List.of(new Address(signer.address())),
                     List.of(new TypeReference<Address>() {})
             );
-            deployTxHash = evmContractService.submit(web3j, creds, idFactoryAddress, fn);
+            deployTxHash = evmContractService.submit(web3j, signer, idFactoryAddress, fn);
             blockchainTransactionService.record(
                     deployTxHash,
                     fn.getName(),

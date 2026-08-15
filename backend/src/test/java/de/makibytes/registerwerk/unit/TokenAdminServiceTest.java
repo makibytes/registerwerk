@@ -12,6 +12,8 @@ import de.makibytes.registerwerk.blockchain.internal.TokenAdminService;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
+import de.makibytes.registerwerk.wallet.internal.SoftwareEvmSigner;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -151,7 +153,7 @@ class TokenAdminServiceTest {
         when(assetLookupPort.findById(assetId)).thenReturn(
                 Optional.of(new AssetLookupPort.AssetInfo(assetId, "ERC-20 Asset", null, TokenStandard.ERC20, null, null, null, "AST-002", null)));
         when(clientRegistry.getEvmClient(org.mockito.ArgumentMatchers.any())).thenReturn(null);
-        when(evmContractService.credentials(org.mockito.ArgumentMatchers.<de.makibytes.registerwerk.chain.api.ChainDescriptor>any())).thenReturn(null);
+        when(evmContractService.signer(org.mockito.ArgumentMatchers.<de.makibytes.registerwerk.chain.api.ChainDescriptor>any())).thenReturn(null);
         when(evmContractService.submit(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenReturn("0x" + "c".repeat(64));
@@ -223,10 +225,10 @@ class TokenAdminServiceTest {
     void confidentialForceBurn_encryptsAndSubmits() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
-        Credentials creds = Credentials.create(ECKeyPair.create(BigInteger.TWO));
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
 
         when(zamaRelayerClient.isConfigured()).thenReturn(true);
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
         when(zamaRelayerClient.encryptInput(any(), any(), any())).thenReturn(
                 new ZamaRelayerClient.EncryptedInput("0x" + "aa".repeat(32), "0x" + "bb".repeat(10)));
         when(clientRegistry.getEvmClient(any())).thenReturn(null);
@@ -270,10 +272,10 @@ class TokenAdminServiceTest {
     void confidentialMint_encryptsAndSubmits() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
-        Credentials creds = Credentials.create(ECKeyPair.create(BigInteger.TWO));
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
 
         when(zamaRelayerClient.isConfigured()).thenReturn(true);
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
         when(zamaRelayerClient.encryptInput(any(), any(), any())).thenReturn(
                 new ZamaRelayerClient.EncryptedInput("0x" + "aa".repeat(32), "0x" + "bb".repeat(10)));
         when(clientRegistry.getEvmClient(any())).thenReturn(null);
@@ -304,9 +306,9 @@ class TokenAdminServiceTest {
     void confidentialAddViewer_submits() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC20);
-        Credentials creds = Credentials.create(ECKeyPair.create(BigInteger.TWO));
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
 
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
         when(clientRegistry.getEvmClient(any())).thenReturn(null);
         when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "e".repeat(64));
         when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
@@ -333,9 +335,9 @@ class TokenAdminServiceTest {
     void confidentialRemoveViewer_submits() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
-        Credentials creds = Credentials.create(ECKeyPair.create(BigInteger.TWO));
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
 
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
         when(clientRegistry.getEvmClient(any())).thenReturn(null);
         when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "f".repeat(64));
         when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());

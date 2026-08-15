@@ -152,7 +152,12 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         syncPublicNodes();
 
         if (entities.findByEntityNumber("DEMO-MC-001").isPresent()) {
-            log.info("Demo business data already present — synced nodes only");
+            if (hasCompleteDemoEntityBaseline()) {
+                reconcileEvmProductCatalog();
+                log.info("Demo business data already present — synced nodes and reconciled EVM product catalog");
+            } else {
+                log.warn("Demo business data is incomplete — synced nodes but skipped additive product reconciliation");
+            }
             return;
         }
 
@@ -309,7 +314,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 ));
 
         AssetDeployment equityDeploy = deployment(equityToken.getId(),
-                Chain.POLYGON, Network.TESTNET,
+                Chain.ETHEREUM, Network.TESTNET,
                 "0x9C3dF55A7cE1b86B5dFe3b3E1c2A4B6D8F0E2A4C",
                 "0x3b9c7d1f5e2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4",
                 daysAgo(120));
@@ -361,6 +366,46 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 "0xB7cF22A4C8D9E1F3A5B7C9D0E2F4A6B8C0D2E4F6",
                 "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
                 daysAgo(30));
+
+        Asset uniqueNote = asset("DEMO-NFT-MC-001",
+                "Meridian Unique Asset Notes",
+                "DE000A3H2XR8",
+                meridian.getId(), TokenStandard.ERC721, AssetStatus.ISSUED,
+                Jurisdiction.DE_EWPG, OnchainLevel.SIMPLE,
+                Map.of("assetType", "NOTE", "currency", "EUR", "totalSupply", 5,
+                        "description", "Five individually identifiable asset-backed notes demonstrating ERC-721"));
+        deployment(uniqueNote.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x1111111111111111111111111111111111111111", "0x" + "11".repeat(32), daysAgo(20));
+
+        Asset maturityNote = asset("DEMO-SFT-MC-001",
+                "Meridian Maturity Notes 2030/31",
+                "DE000A3H2XS6",
+                meridian.getId(), TokenStandard.ERC3525, AssetStatus.ISSUED,
+                Jurisdiction.DE_EWPG, OnchainLevel.CONTROL,
+                Map.of("assetType", "BOND", "currency", "EUR", "totalSupply", 750000,
+                        "description", "Semi-fungible positions grouped into maturity slots using ERC-3525"));
+        deployment(maturityNote.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x2222222222222222222222222222222222222222", "0x" + "22".repeat(32), daysAgo(18));
+
+        Asset liquidityFund = asset("DEMO-VAULT-AF-001",
+                "Aurora Registerwerk Liquidity Fund",
+                "DE000A3H9PP1",
+                aurora.getId(), TokenStandard.ERC4626, AssetStatus.ISSUED,
+                Jurisdiction.LU_CSSF, OnchainLevel.SIMPLE,
+                Map.of("assetType", "FUND", "currency", "EUR", "navPerToken", 1.0,
+                        "description", "Synchronous tokenized liquidity fund demonstrating ERC-4626 deposits and redemptions"));
+        deployment(liquidityFund.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x3333333333333333333333333333333333333333", "0x" + "33".repeat(32), daysAgo(15));
+
+        Asset privateCreditFund = asset("DEMO-VAULT-AF-002",
+                "Aurora Private Credit Fund",
+                "DE000A3H9PQ9",
+                aurora.getId(), TokenStandard.ERC7540, AssetStatus.ISSUED,
+                Jurisdiction.LU_CSSF, OnchainLevel.CONTROL,
+                Map.of("assetType", "FUND", "currency", "EUR", "navPerToken", 1.025,
+                        "description", "Asynchronous fund with operator-reviewed request settlement using ERC-7540"));
+        deployment(privateCreditFund.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x4444444444444444444444444444444444444444", "0x" + "44".repeat(32), daysAgo(12));
 
         // Issued semi-fungible bond on Starknet (Cairo ERC-3525 — slot+value)
         Asset starknetBond = asset("DEMO-BOND-MC-003",
@@ -457,19 +502,22 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 ));
 
         // Draft asset (early stage, not yet submitted)
-        asset("DEMO-COMM-AF-001",
+        Asset commodityToken = asset("DEMO-COMM-AF-001",
                 "Aurora Commodity Access Token",
                 null,
                 aurora.getId(),
                 TokenStandard.ERC1155,
-                AssetStatus.DRAFT,
+                AssetStatus.ISSUED,
                 Jurisdiction.LI_TVTG,
-                OnchainLevel.NONE,
+                OnchainLevel.SIMPLE,
                 Map.of(
                         "assetType", "COMMODITY",
                         "currency", "EUR",
-                        "description", "Multi-class commodity exposure token — TVTG structuring in progress"
+                        "totalSupply", 1500,
+                        "description", "Multi-class commodity exposure token demonstrating ERC-1155 tranches"
                 ));
+        deployment(commodityToken.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x5555555555555555555555555555555555555555", "0x" + "55".repeat(32), daysAgo(10));
 
         // Confidential ERC-20 (showcase of Zama fhEVM)
         Asset confEquity = asset("DEMO-CONF-MC-001",
@@ -494,6 +542,17 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 daysAgo(45));
 
         // ── Holders ──────────────────────────────────────────────────────────
+
+        holder(uniqueNote.getId(), nordbank.getId(),
+                "0x1111111111111111111111111111111111111111", "0x" + "61".repeat(32), bd("1"), daysAgo(19));
+        holder(commodityToken.getId(), rheinische.getId(),
+                "0x2222222222222222222222222222222222222222", "0x" + "62".repeat(32), bd("200"), daysAgo(9));
+        holder(maturityNote.getId(), nordbank.getId(),
+                "0x3333333333333333333333333333333333333333", "0x" + "63".repeat(32), bd("50000"), daysAgo(17));
+        holder(liquidityFund.getId(), aurora.getId(),
+                "0x4444444444444444444444444444444444444444", "0x" + "64".repeat(32), bd("100000"), daysAgo(14));
+        holder(privateCreditFund.getId(), frankfurtDigital.getId(),
+                "0x5555555555555555555555555555555555555555", "0x" + "65".repeat(32), bd("75000"), daysAgo(11));
 
         // Meridian Green Bond holders
         AssetHolder gbNordbank = holder(greenBond.getId(), nordbank.getId(),
@@ -763,9 +822,102 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 "Redteam Cyber GmbH");
 
         log.info("Demo data seeded: 3 operator users (TOTP-enrolled), 7 companies, 14 company users, "
-                + "14 KYC documents + 7 jurisdiction approvals, 10 assets, 1 holder block, "
+                + "14 KYC documents + 7 jurisdiction approvals, 15 assets, 1 holder block, "
                 + "4 active listings, 4 trade executions, 4 indexed transfers, "
                 + "3 gas sponsorship policies, 2 ICT incidents, 2 third-party providers, 2 resilience tests");
+    }
+
+    /** Evolves old demo volumes without requiring operators to discard their database. */
+    private boolean hasCompleteDemoEntityBaseline() {
+        return List.of("DEMO-AF-001", "DEMO-NI-001", "DEMO-RK-001", "DEMO-FD-001").stream()
+                .allMatch(number -> entities.findByEntityNumber(number).isPresent());
+    }
+
+    private void reconcileEvmProductCatalog() {
+        LegalEntity meridian = requireDemoEntity("DEMO-MC-001");
+        LegalEntity aurora = requireDemoEntity("DEMO-AF-001");
+        LegalEntity nordbank = requireDemoEntity("DEMO-NI-001");
+        LegalEntity rheinische = requireDemoEntity("DEMO-RK-001");
+        LegalEntity frankfurt = requireDemoEntity("DEMO-FD-001");
+
+        // Older fixtures placed this row on Polygon. Keep the historical deployment and add
+        // the Ethereum row which the Anvil linker replaces with the live ERC-3643 proxy.
+        Asset equity = assets.findByAssetNumber("DEMO-EQ-MC-001")
+                .orElseThrow(() -> new IllegalStateException("Demo equity asset is missing"));
+        ensureEthereumDeployment(equity, "0x9C3dF55A7cE1b86B5dFe3b3E1c2A4B6D8F0E2A4C", "66");
+
+        Asset uniqueNote = ensureDemoAsset("DEMO-NFT-MC-001", "Meridian Unique Asset Notes",
+                "DE000A3H2XR8", meridian.getId(), TokenStandard.ERC721, Jurisdiction.DE_EWPG,
+                OnchainLevel.SIMPLE, Map.of("assetType", "NOTE", "currency", "EUR", "totalSupply", 5,
+                        "description", "Five individually identifiable asset-backed notes demonstrating ERC-721"));
+        ensureEthereumDeployment(uniqueNote, "0x1111111111111111111111111111111111111111", "11");
+        ensureDemoHolder(uniqueNote, nordbank, "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", "61", "1");
+
+        Asset maturityNote = ensureDemoAsset("DEMO-SFT-MC-001", "Meridian Maturity Notes 2030/31",
+                "DE000A3H2XS6", meridian.getId(), TokenStandard.ERC3525, Jurisdiction.DE_EWPG,
+                OnchainLevel.CONTROL, Map.of("assetType", "BOND", "currency", "EUR", "totalSupply", 750000,
+                        "description", "Semi-fungible positions grouped into maturity slots using ERC-3525"));
+        ensureEthereumDeployment(maturityNote, "0x2222222222222222222222222222222222222222", "22");
+        ensureDemoHolder(maturityNote, nordbank, "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", "63", "50000");
+
+        Asset liquidityFund = ensureDemoAsset("DEMO-VAULT-AF-001", "Aurora Registerwerk Liquidity Fund",
+                "DE000A3H9PP1", aurora.getId(), TokenStandard.ERC4626, Jurisdiction.LU_CSSF,
+                OnchainLevel.SIMPLE, Map.of("assetType", "FUND", "currency", "EUR", "navPerToken", 1.0,
+                        "description", "Synchronous tokenized liquidity fund demonstrating ERC-4626 deposits and redemptions"));
+        ensureEthereumDeployment(liquidityFund, "0x3333333333333333333333333333333333333333", "33");
+        ensureDemoHolder(liquidityFund, aurora, "0x90f79bf6eb2c4f870365e785982e1f101e93b906", "64", "100000");
+
+        Asset privateCredit = ensureDemoAsset("DEMO-VAULT-AF-002", "Aurora Private Credit Fund",
+                "DE000A3H9PQ9", aurora.getId(), TokenStandard.ERC7540, Jurisdiction.LU_CSSF,
+                OnchainLevel.CONTROL, Map.of("assetType", "FUND", "currency", "EUR", "navPerToken", 1.025,
+                        "description", "Asynchronous fund with operator-reviewed request settlement using ERC-7540"));
+        ensureEthereumDeployment(privateCredit, "0x4444444444444444444444444444444444444444", "44");
+        ensureDemoHolder(privateCredit, frankfurt, "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65", "65", "75000");
+
+        Asset commodity = ensureDemoAsset("DEMO-COMM-AF-001", "Aurora Commodity Access Token",
+                null, aurora.getId(), TokenStandard.ERC1155, Jurisdiction.LI_TVTG,
+                OnchainLevel.SIMPLE, Map.of("assetType", "COMMODITY", "currency", "EUR", "totalSupply", 1500,
+                        "description", "Multi-class commodity exposure token demonstrating ERC-1155 tranches"));
+        ensureEthereumDeployment(commodity, "0x5555555555555555555555555555555555555555", "55");
+        ensureDemoHolder(commodity, rheinische, "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc", "62", "200");
+    }
+
+    private LegalEntity requireDemoEntity(String entityNumber) {
+        return entities.findByEntityNumber(entityNumber)
+                .orElseThrow(() -> new IllegalStateException("Demo entity is missing: " + entityNumber));
+    }
+
+    private Asset ensureDemoAsset(String number, String name, String isin, java.util.UUID issuerId,
+                                  TokenStandard standard, Jurisdiction jurisdiction, OnchainLevel level,
+                                  Map<String, Object> publicData) {
+        Asset existing = assets.findByAssetNumber(number).orElse(null);
+        if (existing != null) {
+            if (existing.getStatus() != AssetStatus.ISSUED) {
+                existing.setStatus(AssetStatus.ISSUED);
+                existing.setLastHolderSyncTime(daysAgo(1));
+                assets.save(existing);
+            }
+            return existing;
+        }
+        return asset(number, name, isin, issuerId, standard, AssetStatus.ISSUED,
+                jurisdiction, level, publicData);
+    }
+
+    private void ensureEthereumDeployment(Asset asset, String address, String hashByte) {
+        boolean present = deployments.findByAssetId(asset.getId()).stream()
+                .anyMatch(d -> d.getChain() == Chain.ETHEREUM && d.getNetwork() == Network.TESTNET);
+        if (!present) {
+            deployment(asset.getId(), Chain.ETHEREUM, Network.TESTNET, address,
+                    "0x" + hashByte.repeat(32), daysAgo(1));
+        }
+    }
+
+    private void ensureDemoHolder(Asset asset, LegalEntity investor, String wallet,
+                                  String hashByte, String nominalAmount) {
+        if (!holders.existsActiveByAssetIdAndInvestorId(asset.getId(), investor.getId())) {
+            holder(asset.getId(), investor.getId(), wallet, "0x" + hashByte.repeat(32),
+                    bd(nominalAmount), daysAgo(1));
+        }
     }
 
     private void tokenTransfer(java.util.UUID assetId, java.util.UUID deploymentId,
