@@ -232,6 +232,12 @@ public class CantonTransferSyncService {
         tt.setEventType(eventType);
         tt.setOccurredAt(occurredAt);
         tt.setTxHash(tx.getUpdateId());
+        // Phase 2: a Canton synchronizer commits transactions atomically — once a participant
+        // observes a transaction on the Ledger API stream, that commit is final; there is no
+        // probabilistic-finality/reorg model for a permissioned synchronizer's confirmed offsets
+        // the way there is for EVM/Starknet. FINAL matches the entity default; set explicitly
+        // here for clarity/documentation, mirroring the same reasoning applied to Stellar.
+        tt.setFinalityStatus(TokenTransfer.FinalityStatus.FINAL);
         tokenTransferRepository.save(tt);
         log.debug("Canton transfer recorded: chain={} type={} instrument={} from={} to={} amount={}",
                 chain.getIdentifier(), eventType, instrument, from, to, amount);

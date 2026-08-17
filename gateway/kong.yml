@@ -16,9 +16,42 @@ _format_version: "3.0"
 # into this file only when running Kong Enterprise/Konnect. Never forward
 # identity headers from clients: the backend derives identity from the JWT.
 
+# Phase 5: routes through a Kong upstream (active + passive health checks) instead of a bare
+# `url:` pointing straight at the backend hostname. This is on top of, not instead of, whatever
+# L4 load balancing the deployment platform's own service discovery already does (a Docker
+# Compose service name round-robins DNS across replicas; a Kubernetes Service load-balances
+# across pod endpoints via kube-proxy) — Kong's own health checks add faster, L7-aware detection
+# of a struggling replica (a specific target actively probed and passively marked down on real
+# response codes) than waiting for a Kubernetes readiness probe to catch up, and this same
+# config works identically whether "backend" resolves to one container or many.
+upstreams:
+  - name: registerwerk-backend-upstream
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health/readiness
+        healthy:
+          interval: 10
+          successes: 2
+        unhealthy:
+          interval: 10
+          http_failures: 3
+          timeouts: 3
+      passive:
+        healthy:
+          successes: 2
+        unhealthy:
+          http_failures: 5
+          timeouts: 5
+    targets:
+      - target: backend:8080
+        weight: 100
+
 services:
   - name: registerwerk-backend
-    url: http://backend:8080
+    protocol: http
+    host: registerwerk-backend-upstream
+    port: 8080
     connect_timeout: 10000
     read_timeout: 60000
     write_timeout: 60000
@@ -71,6 +104,14 @@ plugins:
   # Response caching — PUBLIC routes only. Caching authenticated registry data
   # at the gateway would serve stale compliance state (and, mis-keyed, another
   # user's responses); an eWpG register must always read current state.
+  #
+  # strategy: memory is inherently per-Kong-node — Kong OSS's proxy-cache plugin has no
+  # Redis-backed strategy at all (that needs the Enterprise-only proxy-cache-advanced plugin), so
+  # this is deliberately NOT switched to Redis alongside rate-limiting below. Accepted as a low-
+  # risk limitation, not a bug: worst case with multiple Kong replicas is a client hitting a
+  # different node and getting a cache miss (an extra backend request within the 30-60s TTL), not
+  # stale or incorrect data — unlike rate-limiting, where per-node counting would silently
+  # multiply the effective throttle by the replica count.
   - name: proxy-cache
     route: api-public
     config:
@@ -123,14 +164,22 @@ plugins:
           - X-Entity-Id
           - X-Entity-Roles
 
-  # Rate limiting. `local` works on a single node out of the box; for multiple
-  # Kong replicas switch to policy: redis (see plugins/rate-limiting.yml).
+  # Rate limiting — Redis-backed (Phase 5) so the per-minute/hour throttle is a real fleet-wide
+  # limit shared across every Kong replica, not a per-node counter. policy: local (the previous
+  # default) counts independently on each node, so N Kong replicas silently multiplied the
+  # effective limit by N — the throttle got weaker exactly when horizontal scale-out made it more
+  # important. redis.host below is Compose's service name; the Helm copy
+  # (deploy/helm/registerwerk/files/kong.yml) points at the Bitnami redis subchart's Service
+  # instead — see that file's own comment.
   - name: rate-limiting
     service: registerwerk-backend
     config:
       minute: 300
       hour: 10000
-      policy: local
+      policy: redis
+      redis:
+        host: redis
+        port: 6379
       fault_tolerant: true
       hide_client_headers: false
 

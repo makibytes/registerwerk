@@ -1,10 +1,9 @@
 package de.makibytes.registerwerk.blockchain.api;
 
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxReviewedEvent;
-import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
+import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionCompletionWriter;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import org.springframework.context.ApplicationEventPublisher;
@@ -20,11 +19,11 @@ import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Map;
 
 /**
  * Manages the lifecycle of on-chain transactions submitted by the registry.
@@ -47,18 +46,21 @@ public class BlockchainTransactionService {
     private final EvmContractService evmContractService;
     private final ApplicationEventPublisher eventPublisher;
     private final BlockchainTxProperties txProperties;
+    private final BlockchainTransactionCompletionWriter completionWriter;
 
     public BlockchainTransactionService(
             BlockchainTransactionRepository repository,
             BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
             ApplicationEventPublisher eventPublisher,
-            BlockchainTxProperties txProperties) {
+            BlockchainTxProperties txProperties,
+            BlockchainTransactionCompletionWriter completionWriter) {
         this.repository = repository;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
         this.eventPublisher = eventPublisher;
         this.txProperties = txProperties;
+        this.completionWriter = completionWriter;
     }
 
     // ── Record creation ───────────────────────────────────────────────────────
@@ -148,20 +150,38 @@ public class BlockchainTransactionService {
             try {
                 if (tx.getTxHash() == null || tx.getChain() == null) {
                     // Cannot look up a receipt without a hash/chain — apply the un-mined timeout.
-                    if (isTimedOut(tx)) markTimeout(tx);
+                    if (isTimedOut(tx)) completionWriter.markTimeout(tx, txProperties.getTimeoutSeconds());
                     continue;
                 }
 
-                ChainDescriptor descriptor = new ChainDescriptor(
-                de.makibytes.registerwerk.chain.api.Chain.valueOf(tx.getChain()),
-                de.makibytes.registerwerk.chain.api.Network.valueOf(tx.getNetwork()));
-                Web3j web3j = clientRegistry.getEvmClient(descriptor);
+                // Phase 3 fix: getEvmClient(ChainDescriptor) is the legacy static-client tier —
+                // it bypasses BlockchainClientRegistry's node pool entirely, so this poller
+                // never benefited from multi-node failover/health-aware selection and would
+                // throw outright for any chain configured only via the node pool (no static
+                // property entry). getEvmClientByIdentifier picks the best currently-healthy
+                // rpc_node every tick (RpcNodeHealthService refreshes health ~every 30s), so a
+                // node that starts failing is avoided on the very next poll instead of never.
+                String identifier = tx.getChain() + "_" + tx.getNetwork();
+                Web3j web3j = clientRegistry.getEvmClientByIdentifier(identifier);
                 Optional<TransactionReceipt> receipt =
                         web3j.ethGetTransactionReceipt(tx.getTxHash()).send().getTransactionReceipt();
 
                 if (receipt.isEmpty()) {
                     // Still un-mined. Only an un-mined transaction is eligible for TIMEOUT.
-                    if (isTimedOut(tx)) markTimeout(tx);
+                    if (isTimedOut(tx)) completionWriter.markTimeout(tx, txProperties.getTimeoutSeconds());
+                    continue;
+                }
+
+                TransactionReceipt r = receipt.get();
+
+                // Reorg guard: if we already recorded a block hash for this tx on an earlier poll
+                // (below), and the chain now reports a different hash at that height, this tx's
+                // block was reorged out — reset to PENDING rather than trusting a confirmation
+                // count built on a block that no longer exists. Not a resubmit (see writer
+                // javadoc); the tx may simply need to be re-mined.
+                if (tx.getBlockHash() != null && r.getBlockHash() != null
+                        && !Objects.equals(tx.getBlockHash(), r.getBlockHash())) {
+                    completionWriter.resetToPendingAfterReorg(tx, r.getBlockHash());
                     continue;
                 }
 
@@ -169,78 +189,32 @@ public class BlockchainTransactionService {
                 // depth before we treat it as final. A mined-but-shallow tx stays PENDING and
                 // is never timed out, so a reorg cannot leave the register asserting a dropped
                 // state.
-                TransactionReceipt r = receipt.get();
                 int required = txProperties.confirmationsFor(tx.getChain());
-                long confirmations = confirmations(web3j, r);
+                long confirmations = EvmUtils.confirmations(web3j, r);
                 if (confirmations < required) {
                     log.debug("tx={} mined at block {} but only {}/{} confirmations — waiting",
                             tx.getTxHash(), r.getBlockNumber(), confirmations, required);
+                    // Persist the block hash/number the first time we see them (or if they moved)
+                    // so the mismatch check above has a baseline to compare against next poll,
+                    // even before the confirmation depth is reached.
+                    Long receiptBlockNumber = r.getBlockNumber() != null ? r.getBlockNumber().longValueExact() : null;
+                    if (!Objects.equals(tx.getBlockHash(), r.getBlockHash())
+                            || !Objects.equals(tx.getBlockNumber(), receiptBlockNumber)) {
+                        completionWriter.recordProvisionalReceipt(tx, r);
+                    }
                     continue;
                 }
-                complete(tx, r);
+                completionWriter.complete(tx, r);
             } catch (Exception e) {
                 log.warn("Error polling tx={}: {}", tx.getTxHash(), e.getMessage());
             }
         }
     }
 
-    /** Number of blocks mined on top of (and including) the receipt's block. */
-    private long confirmations(Web3j web3j, TransactionReceipt receipt) throws java.io.IOException {
-        if (receipt.getBlockNumber() == null) {
-            return 0;
-        }
-        java.math.BigInteger current = web3j.ethBlockNumber().send().getBlockNumber();
-        java.math.BigInteger depth = current.subtract(receipt.getBlockNumber()).add(java.math.BigInteger.ONE);
-        return depth.signum() < 0 ? 0 : depth.longValueExact();
-    }
-
     // ── Internal helpers ──────────────────────────────────────────────────────
-
-    @Transactional
-    protected void complete(BlockchainTransaction tx, TransactionReceipt receipt) {
-        boolean success = "0x1".equals(receipt.getStatus());
-        tx.setStatus(success ? BlockchainTransaction.Status.SUCCESS : BlockchainTransaction.Status.FAILED);
-        tx.setCompletedAt(Instant.now());
-        if (receipt.getGasUsed() != null) tx.setGasUsed(receipt.getGasUsed().longValue());
-        if (receipt.getBlockNumber() != null) tx.setBlockNumber(receipt.getBlockNumber().longValue());
-        if (!success) tx.setErrorMessage("Transaction reverted on-chain");
-        repository.save(tx);
-
-        publishCompletionAuditEvent(tx);
-        log.info("Blockchain tx={} completed status={}", tx.getTxHash(), tx.getStatus());
-    }
-
-    @Transactional
-    protected void markTimeout(BlockchainTransaction tx) {
-        long timeoutSeconds = txProperties.getTimeoutSeconds();
-        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
-        tx.setCompletedAt(Instant.now());
-        tx.setErrorMessage("Transaction not mined within " + timeoutSeconds + "s");
-        repository.save(tx);
-
-        publishCompletionAuditEvent(tx);
-        log.warn("Blockchain tx={} timed out", tx.getTxHash());
-    }
 
     private boolean isTimedOut(BlockchainTransaction tx) {
         return tx.getCreatedAt().plusSeconds(txProperties.getTimeoutSeconds()).isBefore(Instant.now());
-    }
-
-    private void publishCompletionAuditEvent(BlockchainTransaction tx) {
-        if (tx.getDeploymentId() == null) return;
-
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("txHash", tx.getTxHash());
-        payload.put("status", tx.getStatus().name());
-        payload.put("methodName", tx.getMethodName());
-        payload.put("actorName", tx.getActorName());
-        payload.put("actorRole", tx.getActorRole());
-        if (tx.getGasUsed() != null) payload.put("gasUsed", tx.getGasUsed());
-        if (tx.getBlockNumber() != null) payload.put("blockNumber", tx.getBlockNumber());
-        if (tx.getErrorMessage() != null) payload.put("error", tx.getErrorMessage());
-        if (tx.getParams() != null) payload.putAll(tx.getParams());
-
-        eventPublisher.publishEvent(new BlockchainTxStatusEvent(tx.getDeploymentId(), null, tx.getActorRole(), tx.getStatus().name(), payload));
     }
 
     private static String resolveActorName() {

@@ -1,22 +1,28 @@
+{{- $ctx := dict "context" . "component" "backend" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  {{/* Resource name deliberately stays registerwerk.fullname (not componentFullname) — Ingress,
+       the frontend nginx ConfigMaps' proxy_pass target, and DB_URL-adjacent cross-references all
+       assume the backend Service is named plainly, and renaming it is a much bigger, unrelated
+       change. Only the LABELS below needed fixing — see the selector-subset comment at the
+       topologySpreadConstraints block further down. */}}
   name: {{ include "registerwerk.fullname" . }}
   labels:
-    {{- include "registerwerk.labels" . | nindent 4 }}
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
     matchLabels:
-      {{- include "registerwerk.selectorLabels" . | nindent 6 }}
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
   template:
     metadata:
       annotations:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
       labels:
-        {{- include "registerwerk.selectorLabels" . | nindent 8 }}
+        {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -28,6 +34,33 @@ spec:
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{/* Phase 5 fix: the required pod anti-affinity this chart used to ship under .Values.affinity
+           forced at most one replica per node — a HARD constraint silently contradicting
+           autoscaling.maxReplicas (10 below): on any cluster with fewer than 10 nodes, HPA-driven
+           replicas beyond the node count sat Pending forever, invisibly capping real scale at the
+           node count rather than the configured max (ledger finding, Phase 5). Hardcoded here
+           (not values-driven) because the label selector needs the release-specific selector
+           labels computed by registerwerk.componentSelectorLabels, which only exist at template
+           time — values.yaml is static data, not a template, so it cannot express this itself.
+           whenUnsatisfiable: ScheduleAnyway keeps the even-spread-across-nodes benefit as a soft
+           goal while guaranteeing scheduling never blocks because of it. .Values.affinity above
+           stays available for an operator who wants to layer on additional (e.g. node-selection)
+           affinity rules — it is empty by default now.
+
+           Uses componentSelectorLabels (component: backend), not the bare selectorLabels — the
+           bare version matches any pod carrying at least app.kubernetes.io/{name,instance}, which
+           every frontend-operator/frontend-customer/zama-relayer pod also does, so this spread
+           constraint used to (silently, incorrectly) govern their scheduling too. */}}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 14 }}
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
       {{- end }}
       containers:
         - name: backend
@@ -70,6 +103,25 @@ spec:
                   name: {{ .Values.postgresql.auth.existingSecret }}
                   key: {{ .Values.postgresql.auth.secretKeys.userPasswordKey | default "password" }}
             {{- end }}
+            {{- if .Values.zamaRelayer.enabled }}
+            {{/* zamaRelayer.enabled defaults to false (Compose mirrors this with its own
+                 `profiles: [confidential]` opt-in) — HttpZamaRelayerClient.isConfigured() treats a
+                 blank registerwerk.zama.relayer-url as "not configured" and every confidential
+                 encrypt/decrypt call fails with a clear 5xx rather than a boot crash, so it's safe
+                 to simply omit these two env vars entirely when the relayer isn't deployed. */}}
+            - name: REGISTERWERK_ZAMA_RELAYER_URL
+              value: "http://{{ include "registerwerk.componentFullname" (dict "context" . "component" "zama-relayer") }}:{{ .Values.zamaRelayer.service.port }}"
+            {{/* Same Secret + key the zama-relayer Deployment itself reads RELAYER_API_KEY from
+                 (templates/zama-relayer-deployment.yaml) — every /v1/* call the relayer receives
+                 must present this value (zama-relayer/src auth.ts), so reading both sides from one
+                 Secret key guarantees they can never drift out of sync the way two independently
+                 typed values could. */}}
+            - name: REGISTERWERK_ZAMA_RELAYER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.zamaRelayer.existingSecret }}
+                  key: RELAYER_API_KEY
+            {{- end }}
           envFrom:
             - secretRef:
                 name: registerwerk-secrets
@@ -78,6 +130,14 @@ spec:
           volumeMounts:
             - name: wallets
               mountPath: /data/wallets
+          {{- end }}
+          {{- with .Values.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}

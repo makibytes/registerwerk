@@ -438,6 +438,16 @@ code {
   &.status-transitional   { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
   &.status-not-authorized { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
   &.status-not-whitelisted { background: var(--rw-border-subtle); color: var(--rw-text-muted); }
+  // Indexer state (indexer_state.status) — a stuck/erroring indexer needs to read as clearly
+  // wrong at a glance, not blend in with a neutral/pending look.
+  &.status-error        { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
+  &.status-paused        { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  // Token transfer finality (TokenTransfer.FinalityStatus) — PROVISIONAL reads as
+  // pending/unconfirmed, FINAL as a subtle success state, ORPHANED as a clear warning since it
+  // means the chain reorged past a transfer the registry previously recorded.
+  &.status-provisional   { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-final         { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-orphaned      { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
 }
 
 // ── Registry overview ──────────────────────────────────────────────────────────

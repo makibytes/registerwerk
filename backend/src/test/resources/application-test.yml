@@ -2,12 +2,6 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
-  quartz:
-    # Integration tests do not exercise scheduled Quartz work. Starting ten non-daemon worker
-    # threads per cached application context slowed JVM shutdown and let work outlive its
-    # Testcontainers database.
-    auto-startup: false
-
   datasource:
     # overridden at runtime by @DynamicPropertySource in integration tests
     url: jdbc:postgresql://localhost:5432/registerwerk_test

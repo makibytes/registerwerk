@@ -19,5 +19,6 @@ public record TokenTransferResponse(
         Long blockNumber,
         Instant occurredAt,
         String explorerTxUrl,
-        String chainIdentifier
+        String chainIdentifier,
+        String finalityStatus
 ) {}

@@ -8,6 +8,9 @@
  * (Sepolia today, Ethereum/Base mainnet, T-REX Chain once it publishes its own addresses) purely
  * by changing env vars, not by editing code.
  */
+import { EnvVarKekProvider } from './kekProvider.js';
+import { fromHex } from './hex.js';
+
 export interface RelayerConfig {
   port: number;
   chainId: number;
@@ -48,6 +51,17 @@ export interface RelayerConfig {
    * then decrypt confidential balances it is a viewer on, but cannot move funds or submit
    * transactions. Its public address must be registered as a viewer via `addViewer`/the deploy
    * factory's `initialViewers` for whichever confidential tokens the operator needs to reconcile.
+   *
+   * Resolved from ONE of two env inputs (finding #2, Phase 9):
+   *  - `OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED` + `RELAYER_KEK_MASTER_KEY` (preferred): the raw key
+   *    is envelope-encrypted at rest (AES-256-GCM via {@link EnvVarKekProvider}, the exact scheme
+   *    the backend's own `wallet.internal.EnvVarKekProvider` uses) and unwrapped only here, once,
+   *    at process boot — mirroring this codebase's wallet-module KEK/DEK discipline instead of
+   *    keeping the plaintext key sitting in the container's environment for its whole lifetime.
+   *    Run `npm run wrap-operator-key -- <rawKeyHex>` (reads `RELAYER_KEK_MASTER_KEY` from env) to
+   *    produce the wrapped value once, offline, when provisioning or rotating the operator key.
+   *  - `OPERATOR_DECRYPT_PRIVATE_KEY` (legacy, plaintext): still accepted for backward
+   *    compatibility, but logs a startup warning — this path should be migrated to the wrapped one.
    */
   operatorDecryptPrivateKey?: `0x${string}`;
   /** How long the operator-decrypt EIP-712 authorization is valid for, in days. */
@@ -101,13 +115,45 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayerConfig 
     };
   }
 
-  const operatorKey = env.OPERATOR_DECRYPT_PRIVATE_KEY;
-  if (operatorKey && operatorKey.trim() !== '') {
-    if (!/^0x[0-9a-fA-F]{64}$/.test(operatorKey)) {
-      throw new Error('OPERATOR_DECRYPT_PRIVATE_KEY must be a 0x-prefixed 32-byte hex private key');
-    }
-    config.operatorDecryptPrivateKey = operatorKey as `0x${string}`;
-  }
+  config.operatorDecryptPrivateKey = resolveOperatorDecryptPrivateKey(env);
 
   return config;
+}
+
+function resolveOperatorDecryptPrivateKey(env: NodeJS.ProcessEnv): `0x${string}` | undefined {
+  const wrapped = env.OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED;
+  const plaintext = env.OPERATOR_DECRYPT_PRIVATE_KEY;
+
+  if (wrapped && wrapped.trim() !== '') {
+    const masterKey = requireEnv(env, 'RELAYER_KEK_MASTER_KEY');
+    let unwrapped: Buffer;
+    try {
+      unwrapped = new EnvVarKekProvider(masterKey).unwrap(Buffer.from(fromHex(wrapped)));
+    } catch (e) {
+      throw new Error(
+        'Failed to unwrap OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED — check RELAYER_KEK_MASTER_KEY ' +
+        'matches the key it was wrapped with.', { cause: e }
+      );
+    }
+    const rawKey = `0x${unwrapped.toString('hex')}`;
+    if (!/^0x[0-9a-fA-F]{64}$/.test(rawKey)) {
+      throw new Error('OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED did not unwrap to a 32-byte hex private key');
+    }
+    return rawKey as `0x${string}`;
+  }
+
+  if (plaintext && plaintext.trim() !== '') {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(plaintext)) {
+      throw new Error('OPERATOR_DECRYPT_PRIVATE_KEY must be a 0x-prefixed 32-byte hex private key');
+    }
+    // eslint-disable-next-line no-console
+    console.warn(
+      'OPERATOR_DECRYPT_PRIVATE_KEY is set as plaintext — this key sits unencrypted in the ' +
+      'container environment for the process lifetime. Migrate to OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED ' +
+      '+ RELAYER_KEK_MASTER_KEY (see src/config.ts / npm run wrap-operator-key).'
+    );
+    return plaintext as `0x${string}`;
+  }
+
+  return undefined;
 }

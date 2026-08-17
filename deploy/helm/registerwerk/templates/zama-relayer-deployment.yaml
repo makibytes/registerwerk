@@ -1,0 +1,90 @@
+{{- if .Values.zamaRelayer.enabled }}
+{{- $ctx := dict "context" . "component" "zama-relayer" }}
+# Compose gates this service behind `profiles: [confidential]` — opt-in even in the local/demo
+# stack (docker-compose.yml) because it needs a real OPERATOR_DECRYPT_PRIVATE_KEY registered as a
+# viewer on whatever confidential token it reconciles, which most environments won't have set up.
+# zamaRelayer.enabled: false mirrors that same opt-in default here — nothing in this Deployment
+# renders unless a cluster operator deliberately turns it on.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "registerwerk.componentFullname" $ctx }}
+  labels:
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ .Values.zamaRelayer.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- toYaml .Values.zamaRelayer.podAnnotations | nindent 8 }}
+      labels:
+        {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.zamaRelayer.podSecurityContext | nindent 8 }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.zamaRelayer.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      containers:
+        - name: zama-relayer
+          securityContext:
+            {{- toYaml .Values.zamaRelayer.securityContext | nindent 12 }}
+          image: "{{ .Values.zamaRelayer.image.repository }}:{{ .Values.zamaRelayer.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.zamaRelayer.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.zamaRelayer.service.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.zamaRelayer.service.port | quote }}
+            {{- range $k, $v := .Values.zamaRelayer.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            # OPERATOR_DECRYPT_PRIVATE_KEY and RELAYER_API_KEY are real secrets (a viewer-only
+            # signing key and a shared bearer credential respectively) — never values.yaml
+            # plaintext. Both must exist in .Values.zamaRelayer.existingSecret; see
+            # templates/secret.yaml for the `kubectl create secret` command. RELAYER_API_KEY here
+            # must be the SAME value as the backend Deployment's REGISTERWERK_ZAMA_RELAYER_API_KEY
+            # (also read from this same Secret, see templates/deployment.yaml) — every /v1/* caller
+            # must present it (zama-relayer/src auth.ts), so a mismatch fails every backend call
+            # to this relayer with 401, not a startup crash.
+            - name: OPERATOR_DECRYPT_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.zamaRelayer.existingSecret }}
+                  key: OPERATOR_DECRYPT_PRIVATE_KEY
+            - name: RELAYER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.zamaRelayer.existingSecret }}
+                  key: RELAYER_API_KEY
+          livenessProbe:
+            {{- toYaml .Values.zamaRelayer.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.zamaRelayer.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.zamaRelayer.resources | nindent 12 }}
+          {{- if .Values.zamaRelayer.securityContext.readOnlyRootFilesystem }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
+      {{- if .Values.zamaRelayer.securityContext.readOnlyRootFilesystem }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- end }}
+{{- end }}

@@ -1,14 +1,18 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $ctx := dict "context" . "component" "backend" }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "registerwerk.fullname" . }}
   labels:
-    {{- include "registerwerk.labels" . | nindent 4 }}
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
 spec:
+  {{/* componentSelectorLabels (component: backend) — the bare selectorLabels would apply this
+       policy's ingress/egress rules to every frontend-operator/frontend-customer/zama-relayer
+       pod too, since they all carry app.kubernetes.io/{name,instance} as a subset. */}}
   podSelector:
     matchLabels:
-      {{- include "registerwerk.selectorLabels" . | nindent 6 }}
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
   policyTypes:
     - Ingress
     - Egress
@@ -49,4 +53,19 @@ spec:
           protocol: TCP
         - port: 8080
           protocol: TCP
+    {{- if .Values.zamaRelayer.enabled }}
+    # zama-relayer's Service port (zamaRelayer.service.port, default 3001) doesn't fall under
+    # either generic rule above — it's neither 443 nor 8080 — so without this the backend's
+    # operator-initiated confidential mint/force-burn and balance-reconciliation calls
+    # (HttpZamaRelayerClient, REGISTERWERK_ZAMA_RELAYER_URL below) would be silently dropped at
+    # the network layer whenever this policy is enabled, the same class of gap this file's own
+    # ingress-controller comment already describes for a different path.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "registerwerk.componentSelectorLabels" (dict "context" . "component" "zama-relayer") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.zamaRelayer.service.port }}
+    {{- end }}
 {{- end }}

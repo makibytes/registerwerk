@@ -258,6 +258,11 @@ export class SidebarComponent {
       items: [
         { label: 'Screening', icon: 'policy', route: '/compliance/screening', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Chain Drift', icon: 'sync_problem', route: '/compliance/chain-drift', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        // Not under Infrastructure (REGISTRY_ADMIN-only, see the Operations section note below)
+        // — IndexerAdminController's read access is REGISTRY_ADMIN/COMPLIANCE_OFFICER/AUDIT,
+        // matching this section's roles exactly, and indexer sync health is the mechanical
+        // counterpart to Chain Drift right above it.
+        { label: 'Indexers', icon: 'sync', route: '/indexers', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
         { label: 'Holder Blocks', icon: 'gavel', route: '/compliance/holder-blocks', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Token Admin Grants', icon: 'admin_panel_settings', route: '/compliance/token-admin-grants', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'CASP Register', icon: 'verified_user', route: '/compliance/casp-register', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },

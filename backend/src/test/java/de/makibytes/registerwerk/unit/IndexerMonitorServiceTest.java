@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
+import de.makibytes.registerwerk.chain.api.RpcNode;
+import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.internal.IndexerMonitorService;
@@ -40,6 +42,7 @@ class IndexerMonitorServiceTest {
 
     @Mock private IndexerStateRepository indexerStateRepository;
     @Mock private ChainConfigRepository chainConfigRepository;
+    @Mock private RpcNodeRepository rpcNodeRepository;
     @Mock private ApplicationEventPublisher eventPublisher;
 
     private IndexerMonitorService service;
@@ -63,7 +66,7 @@ class IndexerMonitorServiceTest {
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        service = new IndexerMonitorService(indexerStateRepository, chainConfigRepository, eventPublisher, meterRegistry);
+        service = new IndexerMonitorService(indexerStateRepository, chainConfigRepository, rpcNodeRepository, eventPublisher, meterRegistry);
     }
 
     private void invokeReconcile() {
@@ -188,5 +191,65 @@ class IndexerMonitorServiceTest {
                 .gauge()
                 .value();
         assertThat(neverSyncedGaugeValue).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("checkIndexerHealth() publishes an indexer-lag-blocks gauge from the best healthy "
+            + "RPC node's head, and omits chains with no healthy node or no synced block yet")
+    void checkIndexerHealth_publishesLagBlocksGauge() {
+        when(chainConfigRepository.findByEnabledTrue()).thenReturn(List.of());
+
+        UUID laggingChainId = UUID.randomUUID();
+        IndexerState lagging = new IndexerState();
+        lagging.setChainConfigId(laggingChainId);
+        lagging.setIndexerType(IndexerState.IndexerType.GRAPH_NODE);
+        lagging.setStatus(IndexerState.IndexerStatus.ACTIVE);
+        lagging.setLastSyncedAt(Instant.now());
+        lagging.setLastSyncedBlock(90L);
+
+        UUID noHealthyNodeChainId = UUID.randomUUID();
+        IndexerState noHealthyNode = new IndexerState();
+        noHealthyNode.setChainConfigId(noHealthyNodeChainId);
+        noHealthyNode.setIndexerType(IndexerState.IndexerType.STARKNET_POLL);
+        noHealthyNode.setStatus(IndexerState.IndexerStatus.ACTIVE);
+        noHealthyNode.setLastSyncedAt(Instant.now());
+        noHealthyNode.setLastSyncedBlock(50L);
+
+        when(indexerStateRepository.findAll()).thenReturn(List.of(lagging, noHealthyNode));
+        when(indexerStateRepository.findByStatus(IndexerState.IndexerStatus.ERROR)).thenReturn(List.of());
+        when(indexerStateRepository.findByStatusAndLastSyncedAtBefore(any(), any())).thenReturn(List.of());
+
+        ChainConfig laggingChain = new ChainConfig();
+        laggingChain.setId(laggingChainId);
+
+        // Two nodes for the lagging chain: an unhealthy one reporting a much higher (stale-check
+        // notwithstanding, still disqualified) block, and a healthy one at 100 — the healthy
+        // one must win, proving unhealthy/disabled nodes are excluded from the head calculation.
+        RpcNode unhealthyNode = new RpcNode();
+        unhealthyNode.setChainConfig(laggingChain);
+        unhealthyNode.setEnabled(true);
+        unhealthyNode.setHealthy(false);
+        unhealthyNode.setLatestBlockNumber(500L);
+
+        RpcNode healthyNode = new RpcNode();
+        healthyNode.setChainConfig(laggingChain);
+        healthyNode.setEnabled(true);
+        healthyNode.setHealthy(true);
+        healthyNode.setLatestBlockNumber(100L);
+
+        when(rpcNodeRepository.findAllWithChainConfig()).thenReturn(List.of(unhealthyNode, healthyNode));
+
+        service.checkIndexerHealth();
+
+        double lagValue = meterRegistry.get("registerwerk_indexer_lag_blocks")
+                .tag("chain_config_id", laggingChainId.toString())
+                .gauge()
+                .value();
+        assertThat(lagValue).isEqualTo(10.0); // 100 (healthy head) - 90 (last synced)
+
+        // No healthy node reported for noHealthyNodeChainId at all -> no row, not a misleading 0.
+        assertThat(meterRegistry.find("registerwerk_indexer_lag_blocks")
+                .tag("chain_config_id", noHealthyNodeChainId.toString())
+                .gauge()).isNull();
     }
 }

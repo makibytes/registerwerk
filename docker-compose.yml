@@ -167,6 +167,72 @@ services:
           cpus: "1.0"
           memory: 1g
 
+  # ─── PostgreSQL backup ─────────────────────────────────────────────────────
+  # Docker Compose deployment — pg_dump path (docs/operator/maintenance/backups.md). Until now
+  # the only backup mechanism documented for this path was a cron entry the operator had to add
+  # to the HOST outside of Compose entirely — `docker compose up` alone produced zero backups.
+  # This runs the same pg_dump this repo already documents, as a real Compose service: dump on
+  # startup, then daily, retained on a named volume (survives container recreation, not the
+  # same durability as offsite/S3 — see backups.md's own "S3 document backup" section for why
+  # KYC/report buckets need separate off-host replication; this volume is local-Docker-host
+  # only, same as the Helm path's PVC-backed approach before it reaches S3).
+  postgres-backup:
+    image: postgres:17.10-alpine
+    logging: *default-logging
+    environment:
+      PGHOST: postgres
+      PGUSER: ${DB_USER:-registerwerk}
+      PGPASSWORD: ${DB_PASSWORD:-registerwerk}
+      PGDATABASE: registerwerk
+      BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-30}
+      # monitoring/docker-compose.yml's pushgateway service, reachable here because that stack
+      # is deliberately started on this same registerwerk_default network (see its own header
+      # comment) — but that stack is optional, so a failed push below only logs a warning, never
+      # fails the backup itself. monitoring/alerts/registerwerk.yml's BackupStale alert reads
+      # exactly the metric name pushed here.
+      PUSHGATEWAY_URL: ${PUSHGATEWAY_URL:-http://pushgateway:9091}
+    volumes:
+      - pg_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    # $$ throughout: Compose performs its OWN ${...} substitution on every string in this file
+    # (not just `environment:` blocks) before the container ever sees it — a bare $(...) or
+    # ${...} here would be silently resolved (usually to blank, since none of these are real
+    # Compose/.env variables) at `docker compose config`/`up` time instead of by bash inside the
+    # container. See the demo-onchain-deploy service's identical $$-escaping for the same reason.
+    command:
+      - |
+        set -e
+        echo "postgres-backup: daily pg_dump, $${BACKUP_RETAIN_DAYS}d local retention."
+        while true; do
+          STAMP=$$(date -u +%Y%m%d-%H%M%S)
+          FILE="/backups/registerwerk-$${STAMP}.sql.gz"
+          echo "[$$(date -u +%FT%TZ)] Starting pg_dump..."
+          if pg_dump --no-owner --no-privileges | gzip > "$$FILE"; then
+            echo "[$$(date -u +%FT%TZ)] Backup complete: $$FILE ($$(wc -c < "$$FILE") bytes)"
+            find /backups -name '*.sql.gz' -mtime "+$${BACKUP_RETAIN_DAYS}" -delete
+            # Pushgateway rejects a body with no trailing newline (HTTP 400) — --post-data
+            # never adds one, so piping through --post-file=/dev/stdin from a printf that does
+            # is required, not cosmetic; confirmed by hand against a running Pushgateway.
+            printf 'backup_last_success_timestamp %s\n' "$$(date +%s)" \
+              | wget -q -O- --post-file=/dev/stdin \
+                "$${PUSHGATEWAY_URL}/metrics/job/registerwerk_pg_backup" \
+              || echo "WARNING: backup succeeded but pushing the success metric to $${PUSHGATEWAY_URL} failed"
+          else
+            echo "ERROR: pg_dump failed" >&2
+            rm -f "$$FILE"
+          fi
+          sleep 86400
+        done
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
     build:
@@ -303,6 +369,14 @@ services:
       timeout: 5s
       retries: 12
       start_period: 60s
+    # Docker's default `docker stop` timeout is 10s — less than
+    # spring.lifecycle.timeout-per-shutdown-phase's 30s (application.yml), the budget
+    # server.shutdown: graceful actually gives in-flight requests to finish. Without this,
+    # `docker compose stop`/`down`/a rolling recreate could SIGKILL the JVM mid-drain, on any
+    # request that happens to take longer than 10s, defeating graceful shutdown entirely — the
+    # same class of gap the Helm chart already avoids via terminationGracePeriodSeconds. 35s
+    # matches that 30s budget plus a small margin, same reasoning as the Helm chart's own.
+    stop_grace_period: 35s
     restart: unless-stopped
     deploy:
       resources:
@@ -343,7 +417,14 @@ services:
       # transaction-signing wallet (registry wallets configured via Operator Portal → Wallets).
       # Its public address must be registered as a viewer (addViewer / deploy-time
       # initialViewers) on any confidential token the operator needs to reconcile.
+      #
+      # Finding #2, Phase 9: prefer the envelope-encrypted pair below over the plaintext
+      # ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY — produce ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED with
+      # `cd zama-relayer && RELAYER_KEK_MASTER_KEY=<master-key> npm run wrap-operator-key -- <rawKeyHex>`.
+      # The plaintext var still works (logs a startup warning) for local/dev convenience.
       OPERATOR_DECRYPT_PRIVATE_KEY: ${ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY:-}
+      OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: ${ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED:-}
+      RELAYER_KEK_MASTER_KEY: ${ZAMA_RELAYER_KEK_MASTER_KEY:-}
       # Finding #6, Phase 9: shared secret every /v1/* caller must present — see auth.ts. Same
       # value the backend sends above (REGISTERWERK_ZAMA_RELAYER_API_KEY); keep them in sync.
       RELAYER_API_KEY: ${ZAMA_RELAYER_API_KEY:-registerwerk-dev-zama-relayer-key-change-in-production}
@@ -428,6 +509,29 @@ services:
   # declarative files, which is why this used to route nothing. JWT validation
   # still happens in the Spring backend (see gateway/kong.yml header comment);
   # Kong here only handles caching, rate limiting, CORS, and security headers.
+  # Backs Kong's rate-limiting plugin (policy: redis, gateway/kong.yml) so the per-minute/hour
+  # request throttle is a real limit shared across every Kong worker/replica rather than a
+  # per-node counter (see gateway/kong.yml's own comment on why policy: local silently multiplies
+  # the effective limit). Not exposed to the host — only reachable on the compose network, same
+  # trust boundary as Kong's own admin API. No persistence: rate-limit counters are inherently
+  # ephemeral/self-healing, so a restart just resets the window early, a harmless failure mode.
+  redis:
+    image: redis:7.4-alpine
+    logging: *default-logging
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+
   kong:
     image: kong:3.9.3
     logging: *default-logging
@@ -457,6 +561,8 @@ services:
       - ./gateway/kong.yml:/etc/kong/kong.yml:ro
     depends_on:
       backend:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "8000:8000"
@@ -539,5 +645,6 @@ volumes:
   anvil_state:
   lending_demo_addresses:
   pgdata:
+  pg_backups:
   registerwerk_wallets:
   softhsm_tokens:

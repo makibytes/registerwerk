@@ -7,12 +7,14 @@ import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxReviewedEvent;
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
+import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionCompletionWriter;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -71,8 +73,14 @@ class BlockchainTransactionServiceTest {
         txProperties = new BlockchainTxProperties();
         txProperties.setDefaultConfirmations(12);
         txProperties.setTimeoutSeconds(900);
+        // Real (non-mocked) writer, wired to the same repository/eventPublisher mocks — mirrors
+        // AssetDeploymentCompletionWriterTest's pattern. complete()/markTimeout() used to be
+        // self-invoked @Transactional methods on this service (a no-op due to Spring proxy
+        // bypass); they now live on this separate bean so the transaction boundary is real.
+        BlockchainTransactionCompletionWriter completionWriter =
+                new BlockchainTransactionCompletionWriter(repository, eventPublisher, new SimpleMeterRegistry());
         service = new BlockchainTransactionService(
-                repository, clientRegistry, evmContractService, eventPublisher, txProperties);
+                repository, clientRegistry, evmContractService, eventPublisher, txProperties, completionWriter);
     }
 
     @AfterEach
@@ -132,7 +140,7 @@ class BlockchainTransactionServiceTest {
     void pollPendingTransactions_noReceiptYet_notTimedOut_staysPending() throws java.io.IOException {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
         stubPending(tx);
-        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
         when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
                 .thenReturn(Optional.empty());
 
@@ -143,10 +151,26 @@ class BlockchainTransactionServiceTest {
     }
 
     @Test
+    @DisplayName("Phase 3: resolves the client via the node-pool-aware identifier lookup "
+            + "(not the legacy descriptor tier, which bypasses multi-node failover entirely)")
+    void pollPendingTransactions_resolvesClientViaNodePoolAwareIdentifier() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        stubPending(tx);
+        when(clientRegistry.getEvmClientByIdentifier("ETHEREUM_MAINNET")).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.empty());
+
+        service.pollPendingTransactions();
+
+        verify(clientRegistry).getEvmClientByIdentifier("ETHEREUM_MAINNET");
+        verify(clientRegistry, never()).getEvmClient(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class));
+    }
+
+    @Test
     void pollPendingTransactions_noReceiptYet_timedOut_marksTimeout() throws java.io.IOException {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(1_000));
         stubPending(tx);
-        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
         when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
                 .thenReturn(Optional.empty());
 
@@ -162,10 +186,11 @@ class BlockchainTransactionServiceTest {
         // Old enough to time out if the (buggy) code ever applied the timeout to a mined tx.
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(1_000));
         stubPending(tx);
-        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setBlockNumber("0x64"); // block 100
+        receipt.setBlockHash("0xblock100a");
         receipt.setStatus("0x1");
         when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
                 .thenReturn(Optional.of(receipt));
@@ -175,7 +200,58 @@ class BlockchainTransactionServiceTest {
         service.pollPendingTransactions();
 
         assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+        // Not yet SUCCESS/FAILED/TIMEOUT — but the block hash/number seen this poll IS persisted
+        // (reorg-guard baseline for the next poll's mismatch check), which is a real save.
+        assertThat(tx.getBlockNumber()).isEqualTo(100L);
+        assertThat(tx.getBlockHash()).isEqualTo("0xblock100a");
+        verify(repository).save(tx);
+    }
+
+    @Test
+    void pollPendingTransactions_secondPollSameBlock_doesNotResaveUnnecessarily() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        ReflectionTestUtils.setField(tx, "blockNumber", 100L);
+        ReflectionTestUtils.setField(tx, "blockHash", "0xblock100a");
+        stubPending(tx);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100a"); // unchanged from the previous poll
+        receipt.setStatus("0x1");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(105));
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
         verify(repository, never()).save(any());
+    }
+
+    @Test
+    void pollPendingTransactions_blockHashMismatch_resetsToPendingNotFailed() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        ReflectionTestUtils.setField(tx, "blockNumber", 100L);
+        ReflectionTestUtils.setField(tx, "blockHash", "0xblock100a");
+        stubPending(tx);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100b"); // reorged — different hash at the same height
+        receipt.setStatus("0x1");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+        assertThat(tx.getBlockHash()).isNull();
+        assertThat(tx.getBlockNumber()).isNull();
+        verify(repository).save(tx);
+        // Never reaches confirmations()/ethBlockNumber() — the mismatch short-circuits first.
+        verify(web3j, never()).ethBlockNumber();
     }
 
     @Test
@@ -184,7 +260,7 @@ class BlockchainTransactionServiceTest {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
         tx.setDeploymentId(deploymentId);
         stubPending(tx);
-        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setBlockNumber("0x64"); // block 100
@@ -208,7 +284,7 @@ class BlockchainTransactionServiceTest {
     void pollPendingTransactions_minedAndConfirmed_revertedOnChain_marksFailed() throws java.io.IOException {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
         stubPending(tx);
-        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setBlockNumber("0x64");
@@ -229,7 +305,7 @@ class BlockchainTransactionServiceTest {
         txProperties.setConfirmationsByChain(Map.of("POLYGON", 128));
         BlockchainTransaction tx = pendingTx("0xabc", "POLYGON", "MAINNET", Instant.now());
         stubPending(tx);
-        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setBlockNumber("0x64"); // block 100
@@ -249,7 +325,7 @@ class BlockchainTransactionServiceTest {
         BlockchainTransaction broken = pendingTx("0xbad", "ETHEREUM", "MAINNET", Instant.now());
         BlockchainTransaction fine = pendingTx(null, null, null, Instant.now().minusSeconds(1_000));
         stubPending(broken, fine);
-        when(clientRegistry.getEvmClient(any(ChainDescriptor.class))).thenThrow(new RuntimeException("RPC down"));
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenThrow(new RuntimeException("RPC down"));
 
         service.pollPendingTransactions();
 

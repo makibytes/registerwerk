@@ -65,7 +65,8 @@ class StellarTransferSyncServiceTest {
     void setUp() {
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         service = new StellarTransferSyncService(chainConfigRepository, indexerStateRepository,
-                tokenTransferRepository, assetDeploymentRepository, explorerUrlBuilder, restClientBuilder);
+                tokenTransferRepository, assetDeploymentRepository, explorerUrlBuilder, restClientBuilder,
+                io.github.resilience4j.bulkhead.BulkheadRegistry.ofDefaults());
         assetCode = StellarUtils.deriveAssetCode(assetId);
     }
 

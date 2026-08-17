@@ -1,4 +1,4 @@
-package de.makibytes.registerwerk.unit;
+package de.makibytes.registerwerk.indexer.internal;
 
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
@@ -11,7 +11,6 @@ import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
-import de.makibytes.registerwerk.indexer.internal.StarknetTransferSyncService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +36,14 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+/**
+ * Co-located with {@link StarknetTransferSyncService} (rather than the legacy
+ * {@code de.makibytes.registerwerk.unit} bucket package) so it can construct a real
+ * {@link ReorgGuard} directly — {@code ReorgGuard} is deliberately package-private (shared
+ * internal wiring between {@link GraphNodeSyncService} and this class, not part of either
+ * module's public surface), so a test in a different package could not reference the type at
+ * all, let alone instantiate it. Mirrors {@link SolanaTransferSyncServiceTest}'s placement.
+ */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("StarknetTransferSyncService unit tests")
 class StarknetTransferSyncServiceTest {
@@ -62,8 +69,15 @@ class StarknetTransferSyncServiceTest {
     @BeforeEach
     void setUp() {
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
+        // tokenTransferRepository.findDistinctProvisionalBlocks is left unstubbed on purpose in
+        // every test below: Mockito's default answer for a List-returning method is an empty
+        // list, so ReorgGuard.reverifyProvisionalWindow short-circuits to VerifyResult.NONE with
+        // no further RPC calls — exactly what every test here wants, since none of them are
+        // exercising the reorg-detection path itself.
+        ReorgGuard reorgGuard = new ReorgGuard(tokenTransferRepository);
         service = new StarknetTransferSyncService(chainConfigRepository, indexerStateRepository,
-                tokenTransferRepository, assetDeploymentRepository, explorerUrlBuilder, restClientBuilder);
+                tokenTransferRepository, assetDeploymentRepository, explorerUrlBuilder,
+                restClientBuilder, reorgGuard, io.github.resilience4j.bulkhead.BulkheadRegistry.ofDefaults());
     }
 
     /** Only needed by tests that reach past the "no watched deployments" early-return. */
@@ -89,6 +103,16 @@ class StarknetTransferSyncServiceTest {
         return d;
     }
 
+    /** starknet_getBlockWithTxHashes response used by mapToEntity's finality classification —
+     *  ACCEPTED_ON_L2 is the common case for a just-observed event (see
+     *  StarknetTransferSyncService#mapToEntity), so every test below that reaches that call
+     *  uses it unless the test cares specifically about the FINAL/L1 branch. */
+    private static String blockStatusResponse(String status) {
+        return """
+            {"jsonrpc":"2.0","id":1,"result":{"status":"%s"}}
+            """.formatted(status);
+    }
+
     @Test
     @DisplayName("syncChain decodes a mint (from=0) Transfer event and links it to the deployment")
     void syncChain_decodesMintEventAndLinksDeployment() {
@@ -108,6 +132,8 @@ class StarknetTransferSyncServiceTest {
                        "data":["0x64","0x0"],"block_number":10,"transaction_hash":"0xdeadbeef"}
                     ]}}
                     """.formatted(TRANSFER_SELECTOR), MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(RPC_URL))
+                .andRespond(withSuccess(blockStatusResponse("ACCEPTED_ON_L2"), MediaType.APPLICATION_JSON));
 
         service.syncChain(chain);
 
@@ -124,6 +150,8 @@ class StarknetTransferSyncServiceTest {
         assertThat(saved.getLogIndex()).isEqualTo(0);
         assertThat(saved.getDeploymentId()).isEqualTo(deploymentId);
         assertThat(saved.getAssetId()).isEqualTo(assetId);
+        // ACCEPTED_ON_L2 (not yet ACCEPTED_ON_L1) — stays PROVISIONAL until a later re-verify.
+        assertThat(saved.getFinalityStatus()).isEqualTo(TokenTransfer.FinalityStatus.PROVISIONAL);
 
         ArgumentCaptor<IndexerState> stateCaptor = ArgumentCaptor.forClass(IndexerState.class);
         verify(indexerStateRepository, org.mockito.Mockito.atLeastOnce()).save(stateCaptor.capture());
@@ -153,6 +181,8 @@ class StarknetTransferSyncServiceTest {
                        "data":["0x5","0x0"],"block_number":42,"transaction_hash":"0xfeed"}
                     ]}}
                     """.formatted(TRANSFER_SELECTOR), MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(RPC_URL))
+                .andRespond(withSuccess(blockStatusResponse("ACCEPTED_ON_L1"), MediaType.APPLICATION_JSON));
 
         service.syncChain(chain);
 
@@ -164,6 +194,8 @@ class StarknetTransferSyncServiceTest {
         assertThat(saved.getFromAddress()).isEqualTo("0x111");
         assertThat(saved.getToAddress()).isEqualTo("0x222");
         assertThat(saved.getAmount()).isEqualByComparingTo(new BigDecimal("5"));
+        // ACCEPTED_ON_L1 at write time — FINAL immediately, no provisional window needed.
+        assertThat(saved.getFinalityStatus()).isEqualTo(TokenTransfer.FinalityStatus.FINAL);
 
         mockServer.verify();
     }
@@ -187,6 +219,7 @@ class StarknetTransferSyncServiceTest {
                        "data":["0x64","0x0"],"block_number":10,"transaction_hash":"0xdeadbeef"}
                     ]}}
                     """.formatted(TRANSFER_SELECTOR), MediaType.APPLICATION_JSON));
+        // Duplicate detected before mapToEntity is ever called, so no block-status RPC happens.
 
         service.syncChain(chain);
 

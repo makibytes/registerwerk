@@ -1,0 +1,16 @@
+{{- if .Values.frontendOperator.enabled }}
+# Overrides the nginx.conf frontend-operator/Dockerfile bakes into the image at build time (image
+# nginx.conf hardcodes `proxy_pass http://backend:8080` for /api/, a name that only resolves on the
+# Compose network — see files/frontend-operator-nginx.conf.tpl's own header comment for the full
+# rationale). Mounted over /etc/nginx/conf.d/default.conf in
+# templates/frontend-operator-deployment.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "registerwerk.componentFullname" (dict "context" . "component" "frontend-operator") }}-nginx
+  labels:
+    {{- include "registerwerk.componentLabels" (dict "context" . "component" "frontend-operator") | nindent 4 }}
+data:
+  default.conf: |-
+{{ tpl (.Files.Get "files/frontend-operator-nginx.conf.tpl") . | indent 4 }}
+{{- end }}

@@ -49,7 +49,8 @@ public class TokenTransferMapper {
                 transfer.getBlockNumber(),
                 transfer.getOccurredAt(),
                 transfer.getExplorerTxUrl(),
-                identifier
+                identifier,
+                transfer.getFinalityStatus().name()
         );
     }
 

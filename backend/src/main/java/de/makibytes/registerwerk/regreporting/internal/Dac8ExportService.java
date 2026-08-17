@@ -86,6 +86,7 @@ public class Dac8ExportService {
             JOIN legal_entity le ON le.id = ah.investor_id
             LEFT JOIN token_transfer tt ON tt.to_address = ah.wallet_address
                 AND DATE(tt.created_at) BETWEEN ? AND ?
+                AND tt.finality_status <> 'ORPHANED'
             WHERE a.status = 'ISSUED'
             GROUP BY ah.investor_id, le.entity_number, le.registration_country,
                      a.isin, a.name, a.token_standard

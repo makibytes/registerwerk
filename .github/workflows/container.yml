@@ -46,8 +46,15 @@ jobs:
           push: false
           load: true
           tags: ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Phase 5: scoped explicitly (scope=backend) now that this workflow builds four images
+          # in one run — the GHA cache backend defaults every unscoped type=gha reference to the
+          # same implicit scope, so without this the backend build and the three new
+          # frontend/zama-relayer jobs below would all read/write the identical cache namespace
+          # despite having entirely different Dockerfiles and contexts (mostly wasted cache-key
+          # misses rather than a correctness bug, since layers are still content-addressed, but
+          # real cross-job contention on the same GHA cache entries all the same).
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
       - name: Trivy image scan (gate — must pass before push)
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
@@ -71,8 +78,15 @@ jobs:
           context: backend
           push: true
           tags: ghcr.io/${{ github.repository }}/backend:${{ github.sha }},ghcr.io/${{ github.repository }}/backend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Phase 5: scoped explicitly (scope=backend) now that this workflow builds four images
+          # in one run — the GHA cache backend defaults every unscoped type=gha reference to the
+          # same implicit scope, so without this the backend build and the three new
+          # frontend/zama-relayer jobs below would all read/write the identical cache namespace
+          # despite having entirely different Dockerfiles and contexts (mostly wasted cache-key
+          # misses rather than a correctness bug, since layers are still content-addressed, but
+          # real cross-job contention on the same GHA cache entries all the same).
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
           provenance: true
           sbom: true
 
@@ -94,12 +108,268 @@ jobs:
             --tag ghcr.io/${{ github.repository }}/backend:${{ github.event.release.tag_name }} \
             ghcr.io/${{ github.repository }}/backend@${{ steps.push.outputs.digest }}
 
+  # Phase 5: gives the two Angular frontends and the zama-relayer sidecar the same publish
+  # pipeline the backend already had — deploy/helm/registerwerk's values.yaml previously had
+  # nowhere real to pull ghcr.io/.../frontend-operator etc. from, so a Helm install of any of the
+  # three new Deployments (templates/frontend-operator-deployment.yaml,
+  # frontend-customer-deployment.yaml, zama-relayer-deployment.yaml) would ImagePullBackOff
+  # forever against an image that had never been pushed. Structure is deliberately identical to
+  # build-backend above (same Trivy version pin, same build-push-action version, same
+  # scan-before-push ordering, same Cosign signing) rather than inventing a second pattern for a
+  # second image type — see that job's own comments for the rationale behind each step.
+  build-frontend-operator:
+    name: Frontend (Operator) Container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (local, pre-scan)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          # Repo root, not ./frontend-operator: the Dockerfile COPYs frontend-shared/ (the
+          # "@registerwerk/ui" path-alias library both frontends consume) from alongside
+          # frontend-operator/ in the repo tree — see frontend-operator/Dockerfile's own comment
+          # and docker-compose.yml's identical `context: .` for this same build.
+          context: .
+          file: frontend-operator/Dockerfile
+          push: false
+          load: true
+          # BUILD_CONFIG picks the Angular build configuration (frontend-operator/Dockerfile's
+          # `ARG BUILD_CONFIG=production`, consumed by `ng build --configuration=${BUILD_CONFIG}`).
+          # docker-compose.yml defaults this to `${FRONTEND_BUILD_ENV:-production}` too — CI always
+          # builds "production" specifically (not made configurable via a workflow input) because
+          # this job publishes the one image ghcr.io/.../frontend-operator:<sha> that Helm/Compose
+          # deployments actually pull; a "development" Angular build (unminified, source maps,
+          # dev-mode error overlays) is never something that should be reachable at a real
+          # `:latest`/`:<sha>` tag. Anyone who wants a development-configuration image builds it
+          # locally with `--build-arg BUILD_CONFIG=development`, same as this repo's own frontend
+          # READMEs already describe for local iteration.
+          build-args: |
+            BUILD_CONFIG=production
+          tags: ghcr.io/${{ github.repository }}/frontend-operator:${{ github.sha }}
+          # scope=frontend-operator: see build-backend's own cache-from/cache-to comment — every
+          # type=gha reference in this workflow needs a distinct scope now that four images build
+          # in one run, or they'd all share one implicit cache namespace.
+          cache-from: type=gha,scope=frontend-operator
+          cache-to: type=gha,mode=max,scope=frontend-operator
+
+      - name: Trivy image scan (gate — must pass before push)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          version: v0.73.0
+          image-ref: ghcr.io/${{ github.repository }}/frontend-operator:${{ github.sha }}
+          format: sarif
+          output: trivy-frontend-operator.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-frontend-operator.sarif
+
+      - name: Push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend-operator/Dockerfile
+          push: true
+          build-args: |
+            BUILD_CONFIG=production
+          tags: ghcr.io/${{ github.repository }}/frontend-operator:${{ github.sha }},ghcr.io/${{ github.repository }}/frontend-operator:latest
+          cache-from: type=gha,scope=frontend-operator
+          cache-to: type=gha,mode=max,scope=frontend-operator
+          provenance: true
+          sbom: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless OIDC)
+        run: |
+          cosign sign --yes ghcr.io/${{ github.repository }}/frontend-operator@${{ steps.push.outputs.digest }}
+
+      - name: Tag release version
+        if: github.event_name == 'release'
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository }}/frontend-operator:${{ github.event.release.tag_name }} \
+            ghcr.io/${{ github.repository }}/frontend-operator@${{ steps.push.outputs.digest }}
+
+  build-frontend-customer:
+    name: Frontend (Customer) Container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (local, pre-scan)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          # See build-frontend-operator's identical comment: repo root context for the same
+          # frontend-shared/ COPY reason, this time from frontend-customer/Dockerfile.
+          context: .
+          file: frontend-customer/Dockerfile
+          push: false
+          load: true
+          # See build-frontend-operator's identical comment on why this is fixed at "production".
+          build-args: |
+            BUILD_CONFIG=production
+          tags: ghcr.io/${{ github.repository }}/frontend-customer:${{ github.sha }}
+          # scope=frontend-customer: see build-backend's own cache-from/cache-to comment.
+          cache-from: type=gha,scope=frontend-customer
+          cache-to: type=gha,mode=max,scope=frontend-customer
+
+      - name: Trivy image scan (gate — must pass before push)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          version: v0.73.0
+          image-ref: ghcr.io/${{ github.repository }}/frontend-customer:${{ github.sha }}
+          format: sarif
+          output: trivy-frontend-customer.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-frontend-customer.sarif
+
+      - name: Push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend-customer/Dockerfile
+          push: true
+          build-args: |
+            BUILD_CONFIG=production
+          tags: ghcr.io/${{ github.repository }}/frontend-customer:${{ github.sha }},ghcr.io/${{ github.repository }}/frontend-customer:latest
+          cache-from: type=gha,scope=frontend-customer
+          cache-to: type=gha,mode=max,scope=frontend-customer
+          provenance: true
+          sbom: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless OIDC)
+        run: |
+          cosign sign --yes ghcr.io/${{ github.repository }}/frontend-customer@${{ steps.push.outputs.digest }}
+
+      - name: Tag release version
+        if: github.event_name == 'release'
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository }}/frontend-customer:${{ github.event.release.tag_name }} \
+            ghcr.io/${{ github.repository }}/frontend-customer@${{ steps.push.outputs.digest }}
+
+  build-zama-relayer:
+    name: Zama Relayer Container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (local, pre-scan)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          # Unlike the two frontends, this one's context is its own subdirectory (matching
+          # docker-compose.yml's `context: ./zama-relayer`) — the Dockerfile has no
+          # frontend-shared-style cross-directory COPY to reach.
+          context: zama-relayer
+          push: false
+          load: true
+          tags: ghcr.io/${{ github.repository }}/zama-relayer:${{ github.sha }}
+          # scope=zama-relayer: see build-backend's own cache-from/cache-to comment.
+          cache-from: type=gha,scope=zama-relayer
+          cache-to: type=gha,mode=max,scope=zama-relayer
+
+      - name: Trivy image scan (gate — must pass before push)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          version: v0.73.0
+          image-ref: ghcr.io/${{ github.repository }}/zama-relayer:${{ github.sha }}
+          format: sarif
+          output: trivy-zama-relayer.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-zama-relayer.sarif
+
+      - name: Push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: zama-relayer
+          push: true
+          tags: ghcr.io/${{ github.repository }}/zama-relayer:${{ github.sha }},ghcr.io/${{ github.repository }}/zama-relayer:latest
+          cache-from: type=gha,scope=zama-relayer
+          cache-to: type=gha,mode=max,scope=zama-relayer
+          provenance: true
+          sbom: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless OIDC)
+        run: |
+          cosign sign --yes ghcr.io/${{ github.repository }}/zama-relayer@${{ steps.push.outputs.digest }}
+
+      - name: Tag release version
+        if: github.event_name == 'release'
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository }}/zama-relayer:${{ github.event.release.tag_name }} \
+            ghcr.io/${{ github.repository }}/zama-relayer@${{ steps.push.outputs.digest }}
+
   release-sbom:
     name: Attach SBOM + Provenance
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: github.event_name == 'release'
-    needs: build-backend
+    # Waits on all four image builds (not just build-backend, as before Phase 5) so a release
+    # never gets an SBOM/provenance attachment implying "everything shipped cleanly" if any one
+    # image's Trivy gate actually failed.
+    needs: [build-backend, build-frontend-operator, build-frontend-customer, build-zama-relayer]
     steps:
       - uses: actions/checkout@v4
 

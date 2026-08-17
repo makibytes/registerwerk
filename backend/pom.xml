@@ -32,6 +32,7 @@
     <greenmail.version>2.1.12</greenmail.version>
     <awssdk.version>2.51.3</awssdk.version>
     <shedlock.version>7.7.0</shedlock.version>
+    <resilience4j.version>2.2.0</resilience4j.version>
     <!-- Narrow security patch overrides until the next Spring Boot BOM release carries them. -->
     <netty.version>4.2.16.Final</netty.version>
     <postgresql.version>42.7.13</postgresql.version>
@@ -53,6 +54,13 @@
         <groupId>org.springframework.modulith</groupId>
         <artifactId>spring-modulith-bom</artifactId>
         <version>${spring-modulith.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-bom</artifactId>
+        <version>${resilience4j.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
@@ -253,15 +261,10 @@
       <scope>test</scope>
     </dependency>
 
-    <!-- ── Quartz Scheduler (coupon/corporate-action cron — Track C2) ───── -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-quartz</artifactId>
-    </dependency>
-
     <!-- ── ShedLock (multi-instance safety for @Scheduled jobs) ─────────── -->
     <!-- Serializes every @Scheduled job across concurrent threads AND multiple backend
-         instances via a Postgres row lock (V3__shedlock.sql), so on-chain tx pollers,
+         instances via a Postgres row lock (shedlock table, V1__initial_schema.sql), so
+         on-chain tx pollers,
          indexers, and reporting crons never double-fire under horizontal scale-out. -->
     <dependency>
       <groupId>net.javacrumbs.shedlock</groupId>
@@ -301,6 +304,30 @@
     <dependency>
       <groupId>org.aspectj</groupId>
       <artifactId>aspectjweaver</artifactId>
+    </dependency>
+
+    <!-- ── Resilience (Phase 3) ─────────────────────────────────────────────
+         Programmatic API only (Retry.of/CircuitBreaker.of/Bulkhead.of), not the
+         resilience4j-spring-boot3 annotation starter — that starter's auto-config targets Spring
+         Boot 3.x actuator/metrics APIs whose Spring Boot 4 compatibility hasn't been verified in
+         this codebase, and the programmatic API gives explicit, testable policy objects that
+         match this codebase's existing style (NonceCoordinator, ReorgGuard) rather than
+         annotation magic. -->
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-retry</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-circuitbreaker</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-bulkhead</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-micrometer</artifactId>
     </dependency>
 
     <!-- ── Observability ─────────────────────────────────────────────────── -->
@@ -591,6 +618,69 @@
                   <limits>
                     <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.35</minimum></limit>
                     <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.20</minimum></limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <!-- Phase 7: floors for the production-readiness program's own packages, set just
+               below measured coverage (blockchain/internal 38.8%/27.8%, indexer/internal
+               66.1%/42.1%, infrastructure 95.8%/67.9% at the time these were added) so the
+               retention/partitioning, reorg-safety, nonce-coordination and observability work
+               this program added can't silently regress, the same ratchet pattern as the
+               floors above. -->
+          <execution>
+            <id>check-infrastructure</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <includes>
+                <include>**/infrastructure/*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.90</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.60</minimum></limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <execution>
+            <id>check-indexer-internal</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <includes>
+                <include>**/indexer/internal/*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.60</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.38</minimum></limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <execution>
+            <id>check-blockchain-internal</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <includes>
+                <include>**/blockchain/internal/*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.35</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.25</minimum></limit>
                   </limits>
                 </rule>
               </rules>

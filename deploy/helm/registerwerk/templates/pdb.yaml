@@ -1,13 +1,16 @@
 {{- if .Values.podDisruptionBudget.enabled }}
+{{- $ctx := dict "context" . "component" "backend" }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "registerwerk.fullname" . }}
   labels:
-    {{- include "registerwerk.labels" . | nindent 4 }}
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
 spec:
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{/* componentSelectorLabels (component: backend) — the bare selectorLabels would count every
+       frontend-operator/frontend-customer/zama-relayer pod toward minAvailable too. */}}
   selector:
     matchLabels:
-      {{- include "registerwerk.selectorLabels" . | nindent 6 }}
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
 {{- end }}

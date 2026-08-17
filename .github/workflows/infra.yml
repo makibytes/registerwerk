@@ -70,20 +70,47 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: "v3.16.3"
-      # No `helm dependency build` needed: charts/*.tgz (kong, postgresql) are already vendored
-      # and committed, so lint/template resolve against them directly without touching a
+
+      # Static binary, matching this repo's existing pattern of pinning exact tool versions
+      # (dpm in daml.yml, wal-g/restic images in the backup chart) rather than tracking `latest`.
+      - name: Install kubeconform
+        run: |
+          curl -fsSL -o kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz"
+          tar -xzf kubeconform.tar.gz kubeconform
+          chmod +x kubeconform
+          sudo mv kubeconform /usr/local/bin/kubeconform
+          rm kubeconform.tar.gz
+
+      # No `helm dependency build` needed: charts/*.tgz (kong, postgresql, redis) are already
+      # vendored and committed, so lint/template resolve against them directly without touching a
       # chart repository.
-      - name: Lint & template the main chart
+      #
+      # Three render passes for the main chart, each piped straight into kubeconform against the
+      # real Kubernetes OpenAPI schemas (not just "is this valid YAML" — catches a typo'd field
+      # name, a wrong apiVersion, or a value of the wrong type that `helm template` itself never
+      # notices since it's just string templating): the fresh-install defaults, the same defaults
+      # with the zama-relayer sidecar turned on (its own Deployment/Service/NetworkPolicy
+      # templates are otherwise never rendered by CI at all), and the production overlay layered
+      # on top with the relayer enabled too, matching the fullest real-world combination.
+      - name: Lint & template & validate the main chart
         working-directory: deploy/helm/registerwerk
         run: |
-          helm lint .
-          helm template test .
+          helm lint . -f values.yaml
+          helm lint . -f values.yaml -f values-production.yaml
+          helm template test . -f values.yaml \
+            | kubeconform -strict -summary -kubernetes-version 1.31.0
+          helm template test . -f values.yaml --set zamaRelayer.enabled=true \
+            | kubeconform -strict -summary -kubernetes-version 1.31.0
+          helm template test . -f values.yaml -f values-production.yaml --set zamaRelayer.enabled=true \
+            | kubeconform -strict -summary -kubernetes-version 1.31.0
       # postgresql.host/pvcName are marked REQUIRED in values.yaml with a `fail` guard when
       # unset (they're derived from the main chart's release name at install time, which this
       # chart deliberately can't compute on its own — see the comment in values.yaml) — set
       # placeholders here purely so the template step can render.
-      - name: Lint & template the backup chart
+      - name: Lint & template & validate the backup chart
         working-directory: deploy/helm/backup
         run: |
           helm lint . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder
-          helm template test . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder
+          helm template test . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder \
+            | kubeconform -strict -summary -kubernetes-version 1.31.0

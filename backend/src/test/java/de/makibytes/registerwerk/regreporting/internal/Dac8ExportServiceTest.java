@@ -102,6 +102,27 @@ class Dac8ExportServiceTest {
     }
 
     @Test
+    @DisplayName("the holdings query excludes reorg-orphaned transfers from the token_transfer join")
+    void generateAnnualCarf_excludesOrphanedTransfers() {
+        UUID actorId = UUID.randomUUID();
+        when(jdbc.queryForList(anyString(), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(holdingRow()));
+        when(submissions.persist(anyString(), anyString(), any(), any(), any())).thenReturn(UUID.randomUUID());
+        when(documentStore.store(any(), anyString(), anyString(), any(), any())).thenReturn("key");
+        when(submissionGateway.submit(any(), anyString(), anyString(), any()))
+                .thenReturn(SubmissionResult.transportedUnverified("REF-1"));
+
+        service.generateAnnualCarf(2021, actorId, "REGISTRY_ADMIN");
+
+        // A reorg that orphans a transfer must not leave it permanently counted toward a
+        // holder's reported transaction count — regression test for the fix that added this
+        // predicate to the LEFT JOIN.
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc, org.mockito.Mockito.atLeastOnce())
+                .queryForList(sql.capture(), any(LocalDate.class), any(LocalDate.class));
+        assertThat(sql.getAllValues()).allMatch(s -> s.contains("tt.finality_status <> 'ORPHANED'"));
+    }
+
+    @Test
     @DisplayName("on-demand generation is unavailable unless the draft prototype is explicitly enabled")
     void generateAnnualCarf_disabledByDefault() {
         when(reportingProperties.isPrototypeEnabled()).thenReturn(false);

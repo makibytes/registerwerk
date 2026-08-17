@@ -15,6 +15,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
@@ -399,6 +400,60 @@ public class TokenAdminService implements TokenAdminPort {
                 .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));
         if (asset.tokenStandard() != TokenStandard.CONF_ERC20 && asset.tokenStandard() != TokenStandard.CONF_ERC3643) {
             throw new IllegalArgumentException("This operation is only available for confidential token standards");
+        }
+        return asset;
+    }
+
+    // ── Confidential ERC-3643 pause / freeze (finding #6, Phase 9) ───────────
+    //
+    // ConfidentialERC3643.sol implements pause()/unpause()/setAddressFrozen(address,bool) — the
+    // eWpG §24/MiCAR Art. 36,84 corrective-action machinery every OTHER T-REX-family token
+    // already exposes here — but confidential deployments were previously routed to neither this
+    // class's plaintext pause()/freezeAddress() (requireEvmToken() explicitly rejects
+    // CONF_ERC3643, redirecting it to Erc3643LifecycleService) nor Erc3643LifecycleService
+    // (which requires an Erc3643Suite row that confidential deployments — deployed via
+    // EwpgConfidentialFactory, not EwpgTREXFactory — never have), leaving them operationally
+    // unreachable from either admin surface. Unlike confidentialForceBurn/confidentialMint,
+    // these three functions take no encrypted arguments, so no relayer round-trip is needed.
+
+    public UUID confidentialPause(UUID deploymentId, UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialPause on deployment={}", deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
+        Function fn = new Function("pause", Collections.emptyList(), Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialPause", Map.of(), actorId, actorRole);
+    }
+
+    public UUID confidentialUnpause(UUID deploymentId, UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialUnpause on deployment={}", deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
+        Function fn = new Function("unpause", Collections.emptyList(), Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialUnpause", Map.of(), actorId, actorRole);
+    }
+
+    /**
+     * ConfidentialERC3643.setAddressFrozen(address,bool) toggles freeze state via a single
+     * function (unlike the plaintext freezeAddress/unfreezeAddress pair), so one method covers
+     * both directions.
+     */
+    public UUID confidentialSetAddressFrozen(UUID deploymentId, String walletAddress, boolean frozen,
+                                             UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialSetAddressFrozen={} frozen={} on deployment={}",
+                walletAddress, frozen, deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
+        Function fn = new Function("setAddressFrozen",
+                Arrays.asList(new Address(walletAddress), new Bool(frozen)), Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialSetAddressFrozen",
+                Map.of("address", walletAddress, "frozen", frozen), actorId, actorRole);
+    }
+
+    private AssetLookupPort.AssetInfo requireConfidentialErc3643Token(AssetDeployment dep) {
+        AssetLookupPort.AssetInfo asset = assetLookupPort.findById(dep.getAssetId())
+                .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));
+        if (asset.tokenStandard() != TokenStandard.CONF_ERC3643) {
+            throw new IllegalArgumentException("This operation is only available for confidential ERC-3643 tokens");
         }
         return asset;
     }

@@ -245,6 +245,45 @@ public class TokenAdminController {
     }
 
     /**
+     * Confidential-ERC-3643 equivalent of {@link #pause}. Not step-up gated, matching the
+     * plaintext {@code pause} endpoint's own gating (finding #6, Phase 9).
+     */
+    @PostMapping("/confidential-pause")
+    public ResponseEntity<TxSubmissionResponse> confidentialPause(
+            @PathVariable UUID assetId, @PathVariable UUID depId, Authentication auth) {
+        log.info("ADMIN confidentialPause on deployment={} by actor={}", depId, actorName(auth));
+        return accepted(adminService.confidentialPause(depId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+    }
+
+    /** Confidential-ERC-3643 equivalent of {@link #unpause} (finding #6, Phase 9). */
+    @PostMapping("/confidential-unpause")
+    public ResponseEntity<TxSubmissionResponse> confidentialUnpause(
+            @PathVariable UUID assetId, @PathVariable UUID depId, Authentication auth) {
+        log.info("ADMIN confidentialUnpause on deployment={} by actor={}", depId, actorName(auth));
+        return accepted(adminService.confidentialUnpause(depId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+    }
+
+    /** Confidential-ERC-3643 equivalent of {@link #freeze} (finding #6, Phase 9). */
+    @PostMapping("/confidential-freeze")
+    public ResponseEntity<TxSubmissionResponse> confidentialFreeze(
+            @PathVariable UUID assetId, @PathVariable UUID depId,
+            @RequestBody @Valid UnfreezeRequest request, Authentication auth) {
+        log.info("ADMIN confidentialFreeze address={} on deployment={} by actor={}", request.address(), depId, actorName(auth));
+        return accepted(adminService.confidentialSetAddressFrozen(depId, request.address(), true,
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+    }
+
+    /** Confidential-ERC-3643 equivalent of {@link #unfreeze} (finding #6, Phase 9). */
+    @PostMapping("/confidential-unfreeze")
+    public ResponseEntity<TxSubmissionResponse> confidentialUnfreeze(
+            @PathVariable UUID assetId, @PathVariable UUID depId,
+            @RequestBody @Valid UnfreezeRequest request, Authentication auth) {
+        log.info("ADMIN confidentialUnfreeze address={} on deployment={} by actor={}", request.address(), depId, actorName(auth));
+        return accepted(adminService.confidentialSetAddressFrozen(depId, request.address(), false,
+                actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+    }
+
+    /**
      * Grants {@code viewerAddress} decrypt rights on every holder's balance on this confidential
      * token (e.g. adding an auditor, or an issuer's own wallet, after deployment) — see
      * {@code ConfidentialERC20.addViewer}'s doc comment on the additive/non-retroactive ACL model.
@@ -252,6 +291,7 @@ public class TokenAdminController {
     @PostMapping("/confidential-add-viewer")
     @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
             "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
+    @RequiresStepUp(requireSecondApprover = true, reason = "CONFIDENTIAL_VIEWER_GRANT")
     public ResponseEntity<TxSubmissionResponse> confidentialAddViewer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ConfidentialViewerRequest request, Authentication auth) {
@@ -267,6 +307,7 @@ public class TokenAdminController {
     @PostMapping("/confidential-remove-viewer")
     @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
             "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
+    @RequiresStepUp(reason = "CONFIDENTIAL_VIEWER_REVOKE")
     public ResponseEntity<TxSubmissionResponse> confidentialRemoveViewer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ConfidentialViewerRequest request, Authentication auth) {

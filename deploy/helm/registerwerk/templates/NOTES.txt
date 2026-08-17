@@ -23,6 +23,16 @@ failing the install itself.
        --from-literal=WALLETS_BACKUP_RESTIC_PASSWORD=...
 
    See templates/secret.yaml for the full ExternalSecret reference.
+{{- if .Values.zamaRelayer.enabled }}
+
+1b. zamaRelayer.enabled is "true" — also create the "{{ .Values.zamaRelayer.existingSecret }}" Secret.
+   The zama-relayer Deployment and the backend Deployment's REGISTERWERK_ZAMA_RELAYER_API_KEY both
+   read from this same Secret (see templates/secret.yaml's own comment for why they must):
+
+     kubectl create secret generic {{ .Values.zamaRelayer.existingSecret }} -n {{ .Release.Namespace }} \
+       --from-literal=OPERATOR_DECRYPT_PRIVATE_KEY=... \
+       --from-literal=RELAYER_API_KEY=...
+{{- end }}
 
 2. Configure a production KEK provider for the wallet-keystore volume.
    REGISTERWERK_PRODUCTION_MODE is "{{ .Values.env.REGISTERWERK_PRODUCTION_MODE }}" — if true,

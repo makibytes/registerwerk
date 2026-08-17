@@ -35,6 +35,17 @@ spring:
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
+      # Fail fast rather than hang indefinitely if the pool is exhausted.
+      connection-timeout: 30000
+      # Recycle connections well under any reasonable DB-side/LB idle-connection kill timeout,
+      # so the pool retires connections on its own terms instead of handing out ones the
+      # network has silently already dropped.
+      max-lifetime: 1800000
+      # Bound how long a connection-liveness check itself may take.
+      validation-timeout: 5000
+      # Log (not kill) a connection held for longer than this — surfaces leaked/forgotten
+      # connections (e.g. a missing close() on a manual JDBC path) well before pool exhaustion.
+      leak-detection-threshold: 60000
 
   jpa:
     hibernate:
@@ -92,12 +103,23 @@ spring:
     suffix: .html
     mode: HTML
 
+  lifecycle:
+    # Mirrors the 30s already used for scheduled-task/async shutdown (see spring.task.* above) —
+    # one consistent grace period for the whole graceful-shutdown story (server.shutdown: graceful
+    # below), not two different ones.
+    timeout-per-shutdown-phase: 30s
+
 server:
   port: 8080
   compression:
     enabled: true
   error:
     include-message: never
+  # Lets an in-flight request finish before the JVM stops, instead of the connector cutting it
+  # off mid-response — matters for rolling Kubernetes deployments (Phase 4), which send SIGTERM
+  # to a pod that may still be serving traffic. Bounded by spring.lifecycle's shutdown timeout
+  # below so a stuck request can't block shutdown forever.
+  shutdown: graceful
 
 management:
   endpoints:
@@ -107,9 +129,37 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      # Explicit rather than relying on Spring Boot's Kubernetes-environment auto-detection
+      # (activates automatically inside any real pod via KUBERNETES_SERVICE_HOST, but silently
+      # does NOT activate under Docker Compose or a local run) — the Helm chart's
+      # livenessProbe/readinessProbe already point at these paths, so making the setting explicit
+      # keeps every deployment path consistent instead of depending on implicit detection.
+      probes:
+        enabled: true
+      group:
+        # readinessState alone only reflects "SmartLifecycle says I'm ready" — it says nothing
+        # about whether this instance can actually serve a request right now. Including db here
+        # means a pod that lost its database connection stops receiving traffic instead of
+        # accepting requests it cannot fulfill.
+        readiness:
+          include: readinessState,db
+        liveness:
+          include: livenessState
   health:
     mail:
       enabled: false
+  metrics:
+    distribution:
+      # RED metrics (Phase 4): without a histogram, http.server.requests only exposes a count +
+      # sum, so p95/p99 latency cannot be computed in Prometheus at all — Grafana/alerting would
+      # have throughput and error-rate but no real latency signal.
+      percentiles-histogram:
+        http.server.requests: true
+        registerwerk.scheduled.job: true
+      percentiles:
+        http.server.requests: 0.5, 0.95, 0.99
+      slo:
+        http.server.requests: 100ms, 250ms, 500ms, 1s, 2s
   tracing:
     sampling:
       probability: ${OTEL_SAMPLING_PROBABILITY:0.1}

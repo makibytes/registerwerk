@@ -60,6 +60,14 @@ public class BlockchainTransaction {
     @Column(name = "block_number")
     private Long blockNumber;
 
+    /**
+     * Receipt block hash, recorded the first poll a receipt is seen and re-verified on every
+     * subsequent poll before the confirmation count is trusted (reorg guard). Null until a
+     * receipt has been observed at least once.
+     */
+    @Column(name = "block_hash", length = 66)
+    private String blockHash;
+
     @Column(name = "error_message", columnDefinition = "text")
     private String errorMessage;
 
@@ -125,6 +133,9 @@ public class BlockchainTransaction {
 
     public Long getBlockNumber() { return blockNumber; }
     public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
 
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }

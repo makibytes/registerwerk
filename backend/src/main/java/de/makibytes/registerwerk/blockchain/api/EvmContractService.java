@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.api;
 
+import de.makibytes.registerwerk.blockchain.internal.NonceCoordinator;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
@@ -18,8 +19,11 @@ import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.request.Transaction;
 import org.web3j.protocol.core.methods.response.EthCall;
+import org.web3j.protocol.core.methods.response.EthEstimateGas;
+import org.web3j.protocol.core.methods.response.EthFeeHistory;
 import org.web3j.protocol.core.methods.response.EthGetTransactionCount;
 import org.web3j.protocol.core.methods.response.EthGasPrice;
+import org.web3j.protocol.core.methods.response.EthMaxPriorityFeePerGas;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
@@ -39,6 +43,12 @@ import java.util.UUID;
  *
  * <p>All signing uses the registry operator wallet resolved from the {@link WalletSigner}
  * for the relevant chain. Configure wallets via the Operator Portal → Wallets.
+ *
+ * <p><strong>Multi-replica safety.</strong> {@code submit}/{@code send}/{@code deploy} decide the
+ * nonce, sign, and broadcast inside a single {@link NonceCoordinator#withNonce} call, which holds
+ * a Postgres advisory lock per {@code (chainId, senderAddress)} for that whole critical section —
+ * safe across every backend replica, not just within one JVM. See {@link NonceCoordinator}'s
+ * class Javadoc for why a durable lease table exists alongside the lock.
  */
 @Service
 public class EvmContractService {
@@ -52,27 +62,19 @@ public class EvmContractService {
     private final BlockchainClientRegistry clientRegistry;
     private final ChainConfigRepository    chainConfigRepository;
     private final WalletSigner             walletSigner;
+    private final NonceCoordinator         nonceCoordinator;
 
     /** eth_chainId per Web3j client — chain clients are long-lived singletons. */
     private final ConcurrentHashMap<Web3j, Long> chainIdCache = new ConcurrentHashMap<>();
 
-    /**
-     * Per-sender submission locks: nonce fetch + sign + send must be atomic per wallet.
-     *
-     * <p><strong>Single-instance only.</strong> These locks live in this JVM. With more than
-     * one backend replica submitting from the same operator wallet, two instances can read the
-     * same pending nonce and one transaction silently replaces the other. Before scaling out,
-     * serialise submissions per wallet across instances (a single submitter, an advisory DB
-     * lock, or a shared nonce allocator). The login throttle has the same per-instance caveat.
-     */
-    private final ConcurrentHashMap<String, Object> senderLocks = new ConcurrentHashMap<>();
-
     public EvmContractService(BlockchainClientRegistry clientRegistry,
                                ChainConfigRepository chainConfigRepository,
-                               WalletSigner walletSigner) {
+                               WalletSigner walletSigner,
+                               NonceCoordinator nonceCoordinator) {
         this.clientRegistry       = clientRegistry;
         this.chainConfigRepository = chainConfigRepository;
         this.walletSigner          = walletSigner;
+        this.nonceCoordinator      = nonceCoordinator;
     }
 
     // ── Credential helpers ────────────────────────────────────────────────────
@@ -137,30 +139,36 @@ public class EvmContractService {
      */
     public String submit(Web3j web3j, EvmSigner signer, String contractAddress,
                          String encodedData, BigInteger gasLimit) {
-        // Per-sender lock: two concurrent submissions would otherwise read the same
-        // pending nonce and one transaction would silently replace the other.
-        synchronized (senderLock(signer.address())) {
-            try {
-                BigInteger gasPrice = gasPrice(web3j);
-                BigInteger nonce = nonce(web3j, signer.address());
-
-                RawTransaction tx = RawTransaction.createTransaction(
-                        nonce, gasPrice, gasLimit, contractAddress, encodedData);
-
-                byte[] signed = signer.signTransaction(tx, resolveChainId(web3j));
-                EthSendTransaction sent = web3j
-                        .ethSendRawTransaction(Numeric.toHexString(signed))
-                        .send();
-
-                if (sent.hasError()) {
-                    throw new RuntimeException("Transaction submission error: " + sent.getError().getMessage());
-                }
-                return sent.getTransactionHash();
-            } catch (RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new RuntimeException("EVM transaction submit error: " + e.getMessage(), e);
-            }
+        try {
+            long chainId = resolveChainId(web3j);
+            BigInteger effectiveGasLimit = estimateGasLimit(web3j, signer.address(), contractAddress,
+                    encodedData, gasLimit);
+            Fees fees = resolveFees(web3j);
+            // Fleet-wide nonce coordination (NonceCoordinator): two concurrent submissions —
+            // whether on this instance or another replica — would otherwise read the same
+            // pending nonce and one transaction would silently replace the other.
+            EthSendTransaction sent = nonceCoordinator.withNonce(chainId, signer.address(),
+                    () -> nonce(web3j, signer.address()),
+                    nonce -> {
+                        RawTransaction tx = buildTransaction(
+                                chainId, nonce, effectiveGasLimit, contractAddress, encodedData, fees);
+                        byte[] signed = signer.signTransaction(tx, chainId);
+                        EthSendTransaction result = web3j
+                                .ethSendRawTransaction(Numeric.toHexString(signed))
+                                .send();
+                        if (result.hasError()) {
+                            // Thrown inside the coordinator's callback: a failed submission must
+                            // not advance the nonce lease, so the same nonce is retried next time.
+                            throw new RuntimeException(
+                                    "Transaction submission error: " + result.getError().getMessage());
+                        }
+                        return result;
+                    });
+            return sent.getTransactionHash();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("EVM transaction submit error: " + e.getMessage(), e);
         }
     }
 
@@ -182,23 +190,25 @@ public class EvmContractService {
     public TransactionReceipt send(Web3j web3j, EvmSigner signer, String contractAddress,
                                    String encodedData, BigInteger gasLimit) {
         try {
-            EthSendTransaction sent;
-            synchronized (senderLock(signer.address())) {
-                BigInteger gasPrice = gasPrice(web3j);
-                BigInteger nonce = nonce(web3j, signer.address());
+            long chainId = resolveChainId(web3j);
+            BigInteger effectiveGasLimit = estimateGasLimit(web3j, signer.address(), contractAddress,
+                    encodedData, gasLimit);
+            Fees fees = resolveFees(web3j);
+            EthSendTransaction sent = nonceCoordinator.withNonce(chainId, signer.address(),
+                    () -> nonce(web3j, signer.address()),
+                    nonce -> {
+                        RawTransaction tx = buildTransaction(
+                                chainId, nonce, effectiveGasLimit, contractAddress, encodedData, fees);
+                        byte[] signed = signer.signTransaction(tx, chainId);
+                        EthSendTransaction result = web3j
+                                .ethSendRawTransaction(Numeric.toHexString(signed))
+                                .send();
+                        if (result.hasError()) {
+                            throw new RuntimeException("Transaction failed: " + result.getError().getMessage());
+                        }
+                        return result;
+                    });
 
-                RawTransaction tx = RawTransaction.createTransaction(
-                        nonce, gasPrice, gasLimit, contractAddress, encodedData);
-
-                byte[] signed = signer.signTransaction(tx, resolveChainId(web3j));
-                sent = web3j
-                        .ethSendRawTransaction(Numeric.toHexString(signed))
-                        .send();
-            }
-
-            if (sent.hasError()) {
-                throw new RuntimeException("Transaction failed: " + sent.getError().getMessage());
-            }
             TransactionReceipt receipt = waitForReceipt(web3j, sent.getTransactionHash());
             if (!receipt.isStatusOK()) {
                 // A mined-but-reverted transaction also yields a receipt — callers of
@@ -226,23 +236,25 @@ public class EvmContractService {
         String data = Numeric.cleanHexPrefix(binary)
                 + (encodedConstructor != null ? Numeric.cleanHexPrefix(encodedConstructor) : "");
         try {
-            EthSendTransaction sent;
-            synchronized (senderLock(signer.address())) {
-                BigInteger gasPrice = gasPrice(web3j);
-                BigInteger nonce = nonce(web3j, signer.address());
-
-                RawTransaction tx = RawTransaction.createContractTransaction(
-                        nonce, gasPrice, DEPLOY_GAS_LIMIT, BigInteger.ZERO, data);
-
-                byte[] signed = signer.signTransaction(tx, resolveChainId(web3j));
-                sent = web3j
-                        .ethSendRawTransaction(Numeric.toHexString(signed))
-                        .send();
-            }
-
-            if (sent.hasError()) {
-                throw new RuntimeException("Deploy failed: " + sent.getError().getMessage());
-            }
+            long chainId = resolveChainId(web3j);
+            BigInteger effectiveGasLimit = estimateDeployGasLimit(web3j, signer.address(), data, DEPLOY_GAS_LIMIT);
+            Fees fees = resolveFees(web3j);
+            EthSendTransaction sent = nonceCoordinator.withNonce(chainId, signer.address(),
+                    () -> nonce(web3j, signer.address()),
+                    nonce -> {
+                        // "" (empty, not null) signals contract creation to RawTransaction's RLP
+                        // encoding — the same convention RawTransaction.createContractTransaction
+                        // uses internally for the legacy path.
+                        RawTransaction tx = buildTransaction(chainId, nonce, effectiveGasLimit, "", data, fees);
+                        byte[] signed = signer.signTransaction(tx, chainId);
+                        EthSendTransaction result = web3j
+                                .ethSendRawTransaction(Numeric.toHexString(signed))
+                                .send();
+                        if (result.hasError()) {
+                            throw new RuntimeException("Deploy failed: " + result.getError().getMessage());
+                        }
+                        return result;
+                    });
 
             TransactionReceipt receipt = waitForReceipt(web3j, sent.getTransactionHash());
             String contractAddress = receipt.getContractAddress();
@@ -286,6 +298,126 @@ public class EvmContractService {
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
+    /** Either a legacy (type-0) gasPrice or an EIP-1559 (type-2) fee pair — never both. */
+    private record Fees(boolean eip1559, BigInteger gasPrice,
+            BigInteger maxPriorityFeePerGas, BigInteger maxFeePerGas) {
+        static Fees legacy(BigInteger gasPrice) {
+            return new Fees(false, gasPrice, null, null);
+        }
+        static Fees eip1559(BigInteger maxPriorityFeePerGas, BigInteger maxFeePerGas) {
+            return new Fees(true, null, maxPriorityFeePerGas, maxFeePerGas);
+        }
+    }
+
+    /**
+     * Resolves EIP-1559 (type-2) fees when the chain supports {@code eth_feeHistory}, falling
+     * back to the legacy {@link #gasPrice} heuristic otherwise. Some configured chains (older
+     * testnets, certain L2s, confidential-EVM sidecars) do not implement the London fee-market
+     * RPC methods, so this must degrade gracefully rather than assume every chain supports it.
+     */
+    private Fees resolveFees(Web3j web3j) {
+        try {
+            EthFeeHistory feeHistoryResponse =
+                    web3j.ethFeeHistory(1, DefaultBlockParameterName.LATEST, List.of()).send();
+            if (feeHistoryResponse.hasError()) {
+                throw new RuntimeException(feeHistoryResponse.getError().getMessage());
+            }
+            List<BigInteger> baseFees = feeHistoryResponse.getFeeHistory().getBaseFeePerGas();
+            if (baseFees == null || baseFees.isEmpty()) {
+                throw new RuntimeException("eth_feeHistory returned no baseFeePerGas");
+            }
+            // The last entry is the projected base fee for the NEXT block — the one this
+            // transaction will actually land in.
+            BigInteger nextBaseFee = baseFees.get(baseFees.size() - 1);
+
+            BigInteger tip;
+            try {
+                EthMaxPriorityFeePerGas tipResponse = web3j.ethMaxPriorityFeePerGas().send();
+                tip = (!tipResponse.hasError() && tipResponse.getMaxPriorityFeePerGas() != null)
+                        ? tipResponse.getMaxPriorityFeePerGas()
+                        : BigInteger.valueOf(1_500_000_000L); // 1.5 gwei — conservative default tip
+            } catch (Exception e) {
+                tip = BigInteger.valueOf(1_500_000_000L);
+            }
+
+            // 2x base fee + tip: base fee can rise at most 12.5% per block, so this comfortably
+            // covers several consecutive full blocks before the transaction would need re-pricing
+            // — the same headroom heuristic widely used by wallet/client libraries.
+            BigInteger maxFeePerGas = nextBaseFee.multiply(BigInteger.TWO).add(tip);
+            return Fees.eip1559(tip, maxFeePerGas);
+        } catch (Exception e) {
+            log.debug("EIP-1559 fee data unavailable ({}); falling back to legacy gasPrice.", e.getMessage());
+            try {
+                return Fees.legacy(gasPrice(web3j));
+            } catch (Exception ex) {
+                return Fees.legacy(BigInteger.valueOf(20_000_000_000L));
+            }
+        }
+    }
+
+    /** {@code to} = {@code ""} (not null) signals contract creation, matching
+     *  {@link RawTransaction}'s own convention for the legacy path. */
+    private RawTransaction buildTransaction(long chainId, BigInteger nonce, BigInteger gasLimit,
+            String to, String data, Fees fees) {
+        if (fees.eip1559()) {
+            return RawTransaction.createTransaction(chainId, nonce, gasLimit, to, BigInteger.ZERO, data,
+                    fees.maxPriorityFeePerGas(), fees.maxFeePerGas());
+        }
+        return RawTransaction.createTransaction(nonce, fees.gasPrice(), gasLimit, to, data);
+    }
+
+    /**
+     * Estimates the gas limit for a contract call via {@code eth_estimateGas}, replacing the
+     * previous fixed {@code CALL_GAS_LIMIT}. {@code fallback} (the caller-supplied or default
+     * limit) is used whenever estimation fails or errors — e.g. the node doesn't support the
+     * call, or execution depends on state that makes a dry-run estimate unreliable — so a
+     * transaction is never blocked on {@code eth_estimateGas} being available.
+     */
+    private BigInteger estimateGasLimit(Web3j web3j, String from, String to, String data, BigInteger fallback) {
+        try {
+            EthEstimateGas result = web3j.ethEstimateGas(
+                    Transaction.createFunctionCallTransaction(from, null, null, null, to, data)).send();
+            if (result.hasError()) {
+                log.debug("eth_estimateGas error ({}); using fallback gas limit {}.",
+                        result.getError().getMessage(), fallback);
+                return fallback;
+            }
+            return withSafetyMargin(result.getAmountUsed());
+        } catch (Exception e) {
+            log.debug("eth_estimateGas failed ({}); using fallback gas limit {}.", e.getMessage(), fallback);
+            return fallback;
+        }
+    }
+
+    /** Same as {@link #estimateGasLimit} but for contract creation (no {@code to} address). */
+    private BigInteger estimateDeployGasLimit(Web3j web3j, String from, String initCode, BigInteger fallback) {
+        try {
+            EthEstimateGas result = web3j.ethEstimateGas(
+                    Transaction.createContractTransaction(from, null, null, null, BigInteger.ZERO, initCode))
+                    .send();
+            if (result.hasError()) {
+                log.debug("eth_estimateGas (deploy) error ({}); using fallback gas limit {}.",
+                        result.getError().getMessage(), fallback);
+                return fallback;
+            }
+            return withSafetyMargin(result.getAmountUsed());
+        } catch (Exception e) {
+            log.debug("eth_estimateGas (deploy) failed ({}); using fallback gas limit {}.", e.getMessage(), fallback);
+            return fallback;
+        }
+    }
+
+    /**
+     * 20% headroom over a raw {@code eth_estimateGas} result: the estimate reflects state at
+     * call time, which can shift by the time the transaction actually executes (e.g. a
+     * compliance check takes a costlier branch, or a storage slot that was cold becomes warm
+     * from an intervening transaction) — landing exactly on the estimate risks an out-of-gas
+     * revert.
+     */
+    private BigInteger withSafetyMargin(BigInteger estimated) {
+        return estimated.multiply(BigInteger.valueOf(12)).divide(BigInteger.TEN);
+    }
+
     private BigInteger gasPrice(Web3j web3j) throws Exception {
         EthGasPrice gp = web3j.ethGasPrice().send();
         if (gp.hasError()) {
@@ -310,10 +442,6 @@ public class EvmContractService {
                         + e.getMessage(), e);
             }
         });
-    }
-
-    private Object senderLock(String address) {
-        return senderLocks.computeIfAbsent(address.toLowerCase(java.util.Locale.ROOT), k -> new Object());
     }
 
     private BigInteger nonce(Web3j web3j, String address) throws Exception {

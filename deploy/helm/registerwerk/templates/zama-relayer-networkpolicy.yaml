@@ -1,0 +1,44 @@
+{{- if and .Values.networkPolicy.enabled .Values.zamaRelayer.enabled }}
+{{- $ctx := dict "context" . "component" "zama-relayer" }}
+# No ingress-controller admission rule here (unlike the two frontend NetworkPolicies) — this
+# component has no Ingress (templates/zama-relayer-service.yaml explains why: nothing outside the
+# cluster, and no frontend, ever calls it). Ingress is restricted to the backend's own pods only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "registerwerk.componentFullname" $ctx }}
+  labels:
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # componentSelectorLabels (component: backend), not the bare selectorLabels — the bare version
+    # would admit every component's pods in the release, not just the backend.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "registerwerk.componentSelectorLabels" (dict "context" . "component" "backend") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.zamaRelayer.service.port }}
+  egress:
+    # Allow DNS
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # The relayer sidecar itself talks outbound to Zama's coprocessor/gateway/relayer stack and to
+    # the configured chain's RPC endpoint (SEPOLIA_NETWORK_RPC_URL / NETWORK_RPC_URL,
+    # zamaRelayer.env below) — both are plain HTTPS to hosts outside the cluster, so this is a
+    # 443-to-anywhere egress rule rather than a specific podSelector/ipBlock, the same trade the
+    # backend's own NetworkPolicy already makes for its "Kong upstream health checks and KMS" rule.
+    - ports:
+        - port: 443
+          protocol: TCP
+{{- end }}

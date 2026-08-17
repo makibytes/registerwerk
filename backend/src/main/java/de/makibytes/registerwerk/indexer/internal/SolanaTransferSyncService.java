@@ -39,8 +39,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ol>
  *
  * <p>SPL token instructions are parsed from the {@code getTransaction} RPC response using
- * {@code jsonParsed} encoding. Raw transaction data is stored in {@code token_transfer.raw_data}
- * for auditing and re-processing.
+ * {@code jsonParsed} encoding. A trimmed slice of the raw transaction data (slot, version, and
+ * the {@code meta} fields with forensic value — see {@link #trimRawResult}) is stored in
+ * {@code token_transfer.raw_data} for auditing; the full RPC response is not persisted.
  */
 @Service
 public class SolanaTransferSyncService {
@@ -203,6 +204,17 @@ public class SolanaTransferSyncService {
 
         Map<String, Object> rawTxData = fetchRawTransaction(chain.getRpcUrl(), txSignature);
 
+        // Belt-and-suspenders: pollMintAddress already skips signatures whose getSignaturesForAddress
+        // "err" field is non-null, but processSolanaTransaction is also reachable independently
+        // (e.g. from a future Geyser/WebSocket push), so re-check the getTransaction-level err too.
+        if (rawTxData.get("raw") instanceof Map<?, ?> raw
+                && raw.get("meta") instanceof Map<?, ?> meta
+                && meta.get("err") != null) {
+            log.debug("Skipping failed Solana tx {} on chain {} (meta.err={})", txSignature,
+                    chain.getIdentifier(), meta.get("err"));
+            return;
+        }
+
         String fromAddress = extractField(rawTxData, "from");
         String toAddress   = extractField(rawTxData, "to");
         String contractAddress = extractField(rawTxData, "mint");
@@ -228,6 +240,12 @@ public class SolanaTransferSyncService {
         transfer.setOccurredAt(resolveOccurredAt(rawTxData));
         transfer.setExplorerTxUrl(explorerUrlBuilder.buildTxUrl(chain, txSignature));
         transfer.setRawData(rawTxData);
+        // Phase 2: both getSignaturesForAddress and getTransaction above are called with
+        // commitment=finalized, so by the time a row reaches this point Solana's own consensus
+        // (supermajority-rooted, no probabilistic finality/reorg window) already treats it as
+        // irreversible — there is no separate provisional tier for Solana the way there is for
+        // EVM/Starknet. FINAL matches the entity default; set explicitly here for clarity.
+        transfer.setFinalityStatus(TokenTransfer.FinalityStatus.FINAL);
 
         tokenTransferRepository.save(transfer);
         log.debug("Saved Solana {} tx={} chain={} amount={}", eventType, txSignature,
@@ -273,6 +291,16 @@ public class SolanaTransferSyncService {
                 newestSignatureThisPoll = sig;
             }
 
+            // A non-null "err" means the transaction was included in a block but reverted
+            // on-chain (e.g. a failed transfer instruction) — it never moved any tokens, so
+            // indexing it as a transfer would fabricate a transfer that didn't happen. This
+            // field was previously read into sigInfo but never inspected.
+            if (sigInfo.get("err") != null) {
+                log.debug("Skipping failed Solana tx {} on chain {}: err={}", sig,
+                        chain.getIdentifier(), sigInfo.get("err"));
+                continue;
+            }
+
             boolean dup = tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(
                     chain.getId(), sig, null);
             if (!dup) {
@@ -316,6 +344,7 @@ public class SolanaTransferSyncService {
             String rpcUrl, String address, int limit, String until) {
         var options = new HashMap<String, Object>();
         options.put("limit", limit);
+        options.put("commitment", "finalized");
         if (until != null) {
             options.put("until", until);
         }
@@ -374,7 +403,8 @@ public class SolanaTransferSyncService {
             "method", "getTransaction",
             "params", List.of(txSignature, Map.of(
                 "encoding", "jsonParsed",
-                "maxSupportedTransactionVersion", 0
+                "maxSupportedTransactionVersion", 0,
+                "commitment", "finalized"
             ))
         );
 
@@ -436,14 +466,52 @@ public class SolanaTransferSyncService {
                 }
             }
 
-            // Preserve raw result for re-processing or debugging.
-            parsed.put("raw", result);
+            // Preserve a trimmed slice of the raw result for forensic/debugging value — see
+            // trimRawResult() for exactly what is kept and why the full response is not stored.
+            parsed.put("raw", trimRawResult(result));
             return parsed;
         } catch (Exception e) {
             log.warn("Failed to fetch transaction {} at {}: {}", txSignature, rpcUrl,
                     e.getMessage());
             return Map.of("signature", txSignature);
         }
+    }
+
+    /**
+     * {@code token_transfer.raw_data} used to store the entire {@code getTransaction}
+     * {@code jsonParsed} RPC response verbatim under the "raw" key — including
+     * {@code meta.logMessages} (program log output, can run to hundreds of lines for a complex
+     * versioned transaction), {@code meta.innerInstructions} (the full CPI call trace across
+     * every program touched, not just the SPL Token instruction already extracted above into
+     * {@code instructionType}/{@code mint}/{@code amount}/{@code from}/{@code to}),
+     * {@code meta.loadedAddresses}, and the full {@code transaction.message.instructions} list —
+     * none of which is ever read back by any code path (the only reader of {@code raw_data} is
+     * {@code TokenTransfer.getRawData()}, and nothing calls it) and all of which scales with
+     * transaction complexity rather than with anything about the transfer itself.
+     *
+     * <p>This registry is regulated ({@code eWpG}/{@code TVTG}), so the fix is deliberately not
+     * "drop everything" but "keep what has forensic/audit value and drop the noise": on-chain
+     * slot and version, whether the transaction actually succeeded ({@code meta.err} — non-null
+     * means it failed on-chain despite being included in a block), the fee paid, and — most
+     * importantly — {@code meta.preTokenBalances}/{@code postTokenBalances}, which is the
+     * ground-truth evidence for the SPL token balance deltas this transfer claims, independent
+     * of (and a cross-check against) the amount already parsed from the instruction above.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> trimRawResult(Map<String, Object> result) {
+        Map<String, Object> trimmed = new HashMap<>();
+        trimmed.put("slot", result.get("slot"));
+        trimmed.put("version", result.get("version"));
+        if (result.get("meta") instanceof Map<?, ?> metaRaw) {
+            Map<String, Object> meta = (Map<String, Object>) metaRaw;
+            Map<String, Object> trimmedMeta = new HashMap<>();
+            trimmedMeta.put("err", meta.get("err"));
+            trimmedMeta.put("fee", meta.get("fee"));
+            trimmedMeta.put("preTokenBalances", meta.get("preTokenBalances"));
+            trimmedMeta.put("postTokenBalances", meta.get("postTokenBalances"));
+            trimmed.put("meta", trimmedMeta);
+        }
+        return trimmed;
     }
 
     private IndexerState loadOrCreatePollState(ChainConfig chain) {

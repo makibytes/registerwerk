@@ -1,0 +1,107 @@
+# Production overlay — layer on top of values.yaml, never replace it:
+#
+#   helm install registerwerk deploy/helm/registerwerk \
+#     -f deploy/helm/registerwerk/values.yaml \
+#     -f deploy/helm/registerwerk/values-production.yaml
+#
+# This file changes DEFAULTS that are reasonable for a first `helm install` (values.yaml) but
+# not for a real deployment: a floating image tag, and a single Postgres instance with no
+# standby. It contains no secret VALUES — every secret this chart needs (registerwerk-secrets,
+# registerwerk-postgres-secret) is created out-of-band per templates/secret.yaml's own
+# instructions; this file only tells each chart which key names to read and, where a genuinely
+# new key is introduced below (replication-password), says so in a comment next to the setting
+# that needs it. Redis auth is deliberately NOT enabled here — see that section's own comment for
+# why turning it on without also wiring Kong's rate-limiting plugin would be a regression, not a
+# hardening step.
+#
+# What this file deliberately does NOT do: it does not turn `changeme`/`<placeholder>` values in
+# .env.example into real ones — those only apply to the Docker Compose path (CLAUDE.md: "Helm/
+# Kubernetes is the production reference"), and no real secret value belongs in a values file
+# committed to git regardless of path. Grafana/mail/DB/admin secrets for whichever path you
+# actually run must come from your own secret manager, never from this repository.
+
+image:
+  # values.yaml defaults to :latest so a first `helm install` doesn't ImagePullBackOff — that is
+  # exactly the floating tag a real deployment must NOT run (a `docker compose pull`-equivalent
+  # rollout you didn't ask for). Pin to the immutable :<git-sha> .github/workflows/container.yml
+  # actually publishes, or a cut :<release-tag> once one exists (see that workflow's "Tag release
+  # version" step) — never leave this as "latest" here.
+  tag: "REPLACE_ME_WITH_A_PINNED_SHA_OR_RELEASE_TAG"
+
+# Same floating-tag problem as the backend's image.tag above, now for the two frontends and the
+# (opt-in) zama-relayer sidecar — .github/workflows/container.yml publishes all four images from
+# the same workflow, so pin each to the SAME immutable :<git-sha> (all four are built from the same
+# commit in CI) or the SAME cut :<release-tag>, never left at values.yaml's :latest default.
+frontendOperator:
+  image:
+    tag: "REPLACE_ME_WITH_A_PINNED_SHA_OR_RELEASE_TAG"
+
+frontendCustomer:
+  image:
+    tag: "REPLACE_ME_WITH_A_PINNED_SHA_OR_RELEASE_TAG"
+
+# Only takes effect if zamaRelayer.enabled is also set to true (values.yaml default: false) —
+# this overlay does not itself turn the relayer on, the same way it doesn't turn on anything else
+# that requires operator-provided secrets/config first (see values.yaml's zamaRelayer.env block,
+# all blank by default).
+zamaRelayer:
+  image:
+    tag: "REPLACE_ME_WITH_A_PINNED_SHA_OR_RELEASE_TAG"
+
+# Bitnami's postgresql subchart defaults to architecture: standalone (values.yaml) — a single
+# primary with no standby, so a lost pod/PVC/node means a full WAL-G restore (docs/operator/dr/
+# runbook.md §2a, RPO target ≤15 min but RTO is "however long that restore takes") before the
+# registry is writable again. architecture: replication here adds one streaming read replica —
+# in real time, not periodic — cutting recovery from "run the restore runbook" to "promote the
+# replica" for a lost-primary scenario. It does NOT give automatic failover (nothing here
+# repoints DB_URL at the replica if the primary dies — that's still a manual promotion, see
+# docs/operator/dr/runbook.md) and it does NOT give read scaling (the backend's DB_URL always
+# points at the primary Service; JPA has no read/write splitting configured, and adding one is a
+# separate, much larger change than this overlay). Documented, not silently pretended away — see
+# the runbook's "Promoting the read replica" section.
+postgresql:
+  architecture: replication
+  auth:
+    secretKeys:
+      # A NEW key beyond what values.yaml's postgres-secret comment documents: add
+      # `replication-password` (any high-entropy value; the replication user itself is managed
+      # by the subchart, not one you choose) to the same registerwerk-postgres-secret Secret
+      # before installing with this overlay, or the replica pod will CrashLoopBackOff on auth.
+      replicationPasswordKey: replication-password
+  readReplicas:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 50Gi
+    resources:
+      requests:
+        memory: 1Gi
+        cpu: 500m
+
+# values.yaml's redis (rate-limiting counters only, see that file's own comment) runs
+# auth.enabled: false, and this overlay deliberately leaves it that way rather than flipping it on
+# half-wired. Turning on redis.auth.enabled here alone is actively worse than leaving it off:
+# neither kong.yml copy's rate-limiting plugin has a config.redis.password field to authenticate
+# with (a static .Files.Get file can't reference a Secret at all — see gateway/kong.yml's own
+# header comment), and that plugin's fault_tolerant: true makes it fail OPEN — allow every request
+# through unthrottled — whenever it can't reach/authenticate to Redis. So enabling auth here, as a
+# previous version of this file did, would silently disable rate limiting fleet-wide on install
+# while looking like a hardening step. The trust boundary in the meantime is the cluster
+# NetworkPolicy (templates/networkpolicy.yaml), which already restricts this Redis to Kong pods
+# only — and this instance holds nothing but rate-limit counters (no registry data, no session
+# state), so that boundary is a reasonable one to rely on until the real fix ships: switching
+# templates/kong-configmap.yaml from raw .Files.Get to tpl (matching how the frontend nginx
+# ConfigMaps already render their config) so a Secret-sourced password can actually be templated
+# into both kong.yml copies. Tracked as a follow-up, not attempted here without a live cluster to
+# verify the rendered ConfigMap against.
+
+# TLS: ingress.enabled defaults to true with ssl-redirect already on (values.yaml) — set
+# ingress.certManagerClusterIssuer (values.yaml) to a real ClusterIssuer name if cert-manager is
+# installed cluster-wide, or provision the registerwerk-tls Secret yourself out-of-band. Either
+# way, TLS TERMINATES AT THE INGRESS: traffic from the ingress controller to this chart's backend
+# Service, and from Kong to its own upstream, is plain HTTP inside the cluster network — the same
+# trust boundary Kubernetes NetworkPolicy (templates/networkpolicy.yaml) already restricts to
+# ingress-controller/Kong/Prometheus pods only. Kong's own :8443 listener (proxy.tls.enabled,
+# values.yaml) is self-signed and not meant to be internet-facing in this topology — the ingress
+# above is. If your compliance posture requires in-cluster mTLS too (not just edge TLS), that is
+# a service-mesh decision (Linkerd/Istio) outside what this chart provisions.

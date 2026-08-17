@@ -13,7 +13,8 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "test": "vitest run",
-    "lint": "tsc --noEmit -p tsconfig.typecheck.json"
+    "lint": "tsc --noEmit -p tsconfig.typecheck.json",
+    "wrap-operator-key": "node --loader ts-node/esm scripts/wrap-operator-key.ts"
   },
   "dependencies": {
     "@zama-fhe/relayer-sdk": "^0.4.4",

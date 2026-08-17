@@ -83,8 +83,15 @@ public class ConfidentialErc20Service {
                     .map(Address::new)
                     .collect(Collectors.toList());
             if (initialViewers.isEmpty()) {
-                log.warn("No confidential viewers configured for chain={} — deploying assetId={} with no "
-                        + "operator/auditor decrypt access until addViewer is called explicitly.", chainId, assetId);
+                // Fail closed (finding #7, Phase 9): deploying anyway would create a live register
+                // entry nobody at the operator can ever decrypt — reconciliation, Travel Rule
+                // screening, and regulator disclosure would all be permanently blind to it until
+                // someone notices and calls addViewer, which nothing prompts them to do.
+                throw new IllegalStateException(
+                        "No confidential viewers configured for chain=" + chainId + " (registerwerk.contracts."
+                        + "confidential-operator-viewer." + chainId + " / confidential-auditor-viewer." + chainId
+                        + "). Refusing to deploy assetId=" + assetId
+                        + " with no operator/auditor decrypt access — configure at least one viewer first.");
             }
 
             Function deploy = new Function(

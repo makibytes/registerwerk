@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
+import { EnvVarKekProvider } from '../src/kekProvider.js';
+import { toHex } from '../src/hex.js';
 
 const OPERATOR_KEY = `0x${'1'.repeat(64)}`;
 const API_KEY = 'test-relayer-api-key';
@@ -67,6 +69,61 @@ describe('loadConfig', () => {
   it('treats a blank operator decrypt private key as unset', () => {
     const config = loadConfig(withApiKey({ OPERATOR_DECRYPT_PRIVATE_KEY: '  ' }));
     expect(config.operatorDecryptPrivateKey).toBeUndefined();
+  });
+
+  // ── finding #2, Phase 9: envelope-encrypted operator-decrypt key ─────────────────────────
+  describe('OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED', () => {
+    const MASTER_KEY = 'test-kek-master-key';
+
+    it('unwraps and resolves the operator decrypt private key', () => {
+      const wrapped = toHex(new EnvVarKekProvider(MASTER_KEY).wrap(Buffer.from(OPERATOR_KEY.slice(2), 'hex')));
+
+      const config = loadConfig(withApiKey({
+        OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: wrapped,
+        RELAYER_KEK_MASTER_KEY: MASTER_KEY,
+      }));
+
+      expect(config.operatorDecryptPrivateKey).toBe(OPERATOR_KEY);
+    });
+
+    it('takes priority over a plaintext OPERATOR_DECRYPT_PRIVATE_KEY set at the same time', () => {
+      const wrapped = toHex(new EnvVarKekProvider(MASTER_KEY).wrap(Buffer.from(OPERATOR_KEY.slice(2), 'hex')));
+      const otherPlaintextKey = `0x${'2'.repeat(64)}`;
+
+      const config = loadConfig(withApiKey({
+        OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: wrapped,
+        RELAYER_KEK_MASTER_KEY: MASTER_KEY,
+        OPERATOR_DECRYPT_PRIVATE_KEY: otherPlaintextKey,
+      }));
+
+      expect(config.operatorDecryptPrivateKey).toBe(OPERATOR_KEY);
+    });
+
+    it('requires RELAYER_KEK_MASTER_KEY when the wrapped key is set', () => {
+      const wrapped = toHex(new EnvVarKekProvider(MASTER_KEY).wrap(Buffer.from(OPERATOR_KEY.slice(2), 'hex')));
+
+      expect(() => loadConfig(withApiKey({ OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: wrapped })))
+        .toThrow(/RELAYER_KEK_MASTER_KEY/);
+    });
+
+    it('fails loudly when unwrapped with the wrong master key', () => {
+      const wrapped = toHex(new EnvVarKekProvider(MASTER_KEY).wrap(Buffer.from(OPERATOR_KEY.slice(2), 'hex')));
+
+      expect(() => loadConfig(withApiKey({
+        OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: wrapped,
+        RELAYER_KEK_MASTER_KEY: 'wrong-master-key',
+      }))).toThrow(/Failed to unwrap/);
+    });
+
+    it('warns when falling back to the legacy plaintext key', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = loadConfig(withApiKey({ OPERATOR_DECRYPT_PRIVATE_KEY: OPERATOR_KEY }));
+
+      expect(config.operatorDecryptPrivateKey).toBe(OPERATOR_KEY);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/plaintext/));
+      warnSpy.mockRestore();
+    });
   });
 
   // ── finding #6, Phase 9: RELAYER_API_KEY is required ─────────────────────────────────────

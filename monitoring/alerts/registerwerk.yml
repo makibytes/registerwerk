@@ -259,3 +259,87 @@ groups:
         annotations:
           summary: "One or more RPC nodes unhealthy"
           description: "{{ $value }} RpcNode(s) currently marked unhealthy. May have automatic failover — escalate if a whole chain's nodes are affected."
+
+  # Phase 4 (production-readiness observability pass): every rule below backs a metric that
+  # exists as of this pass — registerwerk_indexer_lag_blocks, registerwerk_event_publication_backlog,
+  # registerwerk_shedlock_oldest_held_lock_age_seconds, and registerwerk_scheduled_job_seconds
+  # (from ScheduledJobMetricsAspect, instrumenting all 41 @Scheduled jobs) — none of these existed
+  # before this pass; see IndexerMonitorService/OperationalMetricsJob/ScheduledJobMetricsAspect.
+  - name: registerwerk.observability
+    interval: 1m
+    rules:
+
+      # ── Indexer lag (blocks) ─────────────────────────────────────────────────
+      # Complements IndexerStaleCritical/Warning (time-since-last-sync) with a depth signal: a
+      # chain that syncs a small batch every tick can look "not stale" by timestamp alone while
+      # still falling further behind the chain head every run.
+      - alert: IndexerLagBlocksHigh
+        expr: |
+          registerwerk_indexer_lag_blocks{job="registerwerk-backend"} > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Indexer more than 1000 blocks behind chain head"
+          description: "Indexer type {{ $labels.indexer_type }} (chain_config_id={{ $labels.chain_config_id }}) is {{ $value }} blocks behind the best known healthy RPC node's head, sustained for 10+ minutes."
+
+      # ── Spring Modulith event-publication backlog ────────────────────────────
+      - alert: EventPublicationBacklogGrowing
+        expr: |
+          registerwerk_event_publication_backlog{job="registerwerk-backend"} > 100
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spring Modulith event-publication backlog is elevated"
+          description: "{{ $value }} event_publication row(s) not yet completed, sustained for 15+ minutes — a listener may be stuck failing (republish-outstanding-events-on-restart only retries on restart, not automatically)."
+
+      # ── ShedLock stuck lock ───────────────────────────────────────────────────
+      - alert: ShedLockStuckLock
+        expr: |
+          registerwerk_shedlock_oldest_held_lock_age_seconds{job="registerwerk-backend"} > 1800
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A ShedLock row has been held for over 30 minutes"
+          description: "The oldest currently-held shedlock row is {{ $value | humanizeDuration }} old. Every scheduled job in this app is ShedLock-serialized fleet-wide, so a stuck lock silently stops that job running on ANY replica until it expires (lockAtMostFor) or is manually cleared."
+
+      # ── Scheduled-job failures (any of the 41 @Scheduled jobs) ───────────────
+      - alert: ScheduledJobFailuresElevated
+        expr: |
+          increase(registerwerk_scheduled_job_seconds_count{job="registerwerk-backend", outcome="failure"}[1h]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A scheduled job has failed more than 3 times in the last hour"
+          description: "job={{ $labels.job }} outcome=failure — see application logs for the exception; ShedLock ensures this reflects only actual executions on the leader replica, not skipped ticks."
+
+      # ── Blockchain tx submission -> confirmation latency (SLO-style) ─────────
+      - alert: BlockchainTxConfirmationLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(registerwerk_blockchain_tx_confirmation_latency_seconds_bucket{job="registerwerk-backend"}[15m]))
+            by (le, chain)
+          ) > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 blockchain tx submission-to-confirmation latency exceeds 5 minutes"
+          description: "chain={{ $labels.chain }} p95 is {{ $value | humanizeDuration }}, sustained for 10+ minutes — check RPC node health and the configured confirmation depth for this chain."
+
+      # ── API latency SLO (RED metrics, enabled this pass) ─────────────────────
+      - alert: ApiLatencyP95High
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_requests_seconds_bucket{job="registerwerk-backend"}[5m]))
+            by (le)
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency exceeds 1s"
+          description: "p95 request latency is {{ $value | humanizeDuration }}, sustained for 10+ minutes across all endpoints."

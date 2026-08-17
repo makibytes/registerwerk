@@ -28,6 +28,17 @@ public class TokenTransfer {
 
     public enum EventType { MINT, TRANSFER, BURN }
 
+    /**
+     * Two-tier finality state — see V4__reorg_safety.sql for the full rationale.
+     * PROVISIONAL: within the configured confirmation depth, not yet re-verified.
+     * FINAL: cleared the confirmation depth, or chain-natively final on write
+     * (Solana at commitment=finalized, Stellar ledger close, Canton synchronizer commit,
+     * Starknet ACCEPTED_ON_L1).
+     * ORPHANED: re-verification found this row's block/tx is no longer canonical. Rows are
+     * never deleted, only marked — this is a regulated register with an audit-trail requirement.
+     */
+    public enum FinalityStatus { PROVISIONAL, FINAL, ORPHANED }
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -93,6 +104,23 @@ public class TokenTransfer {
     @Column(name = "raw_data", columnDefinition = "jsonb")
     private Map<String, Object> rawData;
 
+    /**
+     * Defaults to FINAL, matching the DB column default — correct for chains that are final on
+     * write (Solana/Stellar/Canton, see class javadoc). EVM (via GraphNodeSyncService) and
+     * Starknet explicitly set PROVISIONAL at write time when the row is within the confirmation
+     * depth / not yet L1-accepted.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "finality_status", nullable = false, length = 12)
+    private FinalityStatus finalityStatus = FinalityStatus.FINAL;
+
+    /**
+     * Canonical block/identity hash recorded at write time (EVM block hash, Starknet block
+     * hash). Null for chains/rows where no reorg primitive applies — see V4 migration comment.
+     */
+    @Column(name = "block_hash", length = 128)
+    private String blockHash;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -145,4 +173,10 @@ public class TokenTransfer {
 
     public Map<String, Object> getRawData() { return rawData; }
     public void setRawData(Map<String, Object> rawData) { this.rawData = rawData; }
+
+    public FinalityStatus getFinalityStatus() { return finalityStatus; }
+    public void setFinalityStatus(FinalityStatus finalityStatus) { this.finalityStatus = finalityStatus; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
 }

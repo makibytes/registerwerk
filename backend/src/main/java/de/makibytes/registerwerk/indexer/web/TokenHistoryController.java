@@ -41,9 +41,8 @@ public class TokenHistoryController {
      * across all its deployments.
      */
     @GetMapping("/assets/{assetId}/history")
-    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#deploymentId, #assetId) and "
-            + "(hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
-            + "or @assetAccessChecker.canRead(#assetId, authentication))")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
+            + "or @assetAccessChecker.canRead(#assetId, authentication)")
     public ResponseEntity<PageResponse<TokenTransferResponse>> getAssetHistory(
             @PathVariable UUID assetId,
             Pageable pageable,

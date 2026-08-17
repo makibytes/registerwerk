@@ -348,6 +348,109 @@ class TokenAdminServiceTest {
         assertThat(txId).isNotNull();
     }
 
+    // ── confidentialPause / confidentialUnpause / confidentialSetAddressFrozen (finding #6) ──
+
+    @Test
+    @DisplayName("confidentialPause rejects non-CONF_ERC3643 standards (CONF_ERC20 has no pause concept)")
+    void confidentialPause_rejectsNonConfidentialErc3643Standard() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC20);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialPause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("confidentialPause submits a pause call for CONF_ERC3643")
+    void confidentialPause_submits() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
+
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(clientRegistry.getEvmClient(any())).thenReturn(null);
+        when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "1".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialPause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
+    @Test
+    @DisplayName("confidentialUnpause rejects non-CONF_ERC3643 standards")
+    void confidentialUnpause_rejectsNonConfidentialErc3643Standard() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.ERC20);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialUnpause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("confidentialUnpause submits an unpause call for CONF_ERC3643")
+    void confidentialUnpause_submits() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
+
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(clientRegistry.getEvmClient(any())).thenReturn(null);
+        when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "2".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialUnpause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
+    @Test
+    @DisplayName("confidentialSetAddressFrozen rejects non-CONF_ERC3643 standards")
+    void confidentialSetAddressFrozen_rejectsNonConfidentialErc3643Standard() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC20);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialSetAddressFrozen(
+                dep.getId(), "0x" + "5".repeat(40), true, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("confidentialSetAddressFrozen(true) submits a freeze call for CONF_ERC3643")
+    void confidentialSetAddressFrozen_freezes() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
+
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(clientRegistry.getEvmClient(any())).thenReturn(null);
+        when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "3".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialSetAddressFrozen(
+                dep.getId(), "0x" + "5".repeat(40), true, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
+    @Test
+    @DisplayName("confidentialSetAddressFrozen(false) submits an unfreeze call for CONF_ERC3643")
+    void confidentialSetAddressFrozen_unfreezes() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
+
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(clientRegistry.getEvmClient(any())).thenReturn(null);
+        when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "6".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialSetAddressFrozen(
+                dep.getId(), "0x" + "5".repeat(40), false, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
     // ── §16 eWpG Sperrvermerk enforcement ────────────────────────────────────
 
     @Test

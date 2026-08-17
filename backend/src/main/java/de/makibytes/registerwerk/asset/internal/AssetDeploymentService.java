@@ -5,10 +5,13 @@ import de.makibytes.registerwerk.asset.events.DeploymentConfirmedEvent;
 import de.makibytes.registerwerk.asset.events.DeploymentFailedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.erc3643.api.Erc3643DeploymentPort;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -19,16 +22,22 @@ import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -43,8 +52,10 @@ public class AssetDeploymentService {
 
     private static final Logger log = LoggerFactory.getLogger(AssetDeploymentService.class);
     private static final EnumSet<Chain> TRACKING_ONLY_CHAINS = EnumSet.noneOf(Chain.class);
+    /** Non-EVM chains with no automated confirmation path (see syncFromChain). STARKNET is
+     *  handled separately via {@link #syncStarknetDeployment} — not a member of this set. */
     private static final EnumSet<Chain> NON_EVM_CHAINS =
-            EnumSet.of(Chain.SOLANA, Chain.CANTON, Chain.STARKNET, Chain.STELLAR);
+            EnumSet.of(Chain.SOLANA, Chain.CANTON, Chain.STELLAR);
     /**
      * Chains where Zama's fhEVM coprocessor is (or will be) actually deployed — Ethereum and
      * Base today, per Zama's own "fhEVM Coprocessor: Run FHE smart contracts on Ethereum, Base,
@@ -68,6 +79,9 @@ public class AssetDeploymentService {
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
     private final AssetDeploymentCompletionWriter completionWriter;
+    private final BlockchainTxProperties txProperties;
+    private final ChainConfigRepository chainConfigRepository;
+    private final RestClient restClient;
 
     public AssetDeploymentService(
             AssetDeploymentRepository assetDeploymentRepository,
@@ -77,7 +91,10 @@ public class AssetDeploymentService {
             Erc3643DeploymentPort erc3643DeploymentPort,
             BlockchainClientRegistry blockchainClientRegistry,
             EvmContractService evmContractService,
-            AssetDeploymentCompletionWriter completionWriter) {
+            AssetDeploymentCompletionWriter completionWriter,
+            BlockchainTxProperties txProperties,
+            ChainConfigRepository chainConfigRepository,
+            RestClient.Builder restClientBuilder) {
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
@@ -86,6 +103,9 @@ public class AssetDeploymentService {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.completionWriter = completionWriter;
+        this.txProperties = txProperties;
+        this.chainConfigRepository = chainConfigRepository;
+        this.restClient = restClientBuilder.build();
     }
 
     /**
@@ -182,8 +202,9 @@ public class AssetDeploymentService {
     }
 
     /**
-     * Queries the chain for the deployment transaction receipt and, if confirmed,
-     * marks the deployment as CONFIRMED with the mined contract address.
+     * Queries the chain for the deployment transaction receipt and, if confirmed past the
+     * configured confirmation depth ({@link BlockchainTxProperties}), marks the deployment as
+     * CONFIRMED with the mined contract address.
      *
      * <p>No-ops if the deployment has no tx hash or is already CONFIRMED / FAILED.
      *
@@ -197,6 +218,28 @@ public class AssetDeploymentService {
     /** Same operation with an explicit parent/child ownership invariant for REST resources. */
     public void syncFromChain(UUID assetId, UUID deploymentId) {
         syncFromChain(getDeployment(assetId, deploymentId));
+    }
+
+    /**
+     * Re-verifies every non-terminal deployment with an on-chain tx recorded, so a deployment
+     * reaches CONFIRMED (once its confirmation-depth/finality policy is satisfied) without an
+     * operator having to trigger a manual re-sync. Previously this was the missing half of
+     * {@code AssetDeploymentCompletionWriter.markSubmitted}: EVM/Starknet deployments were left
+     * PENDING with a candidate address and nothing ever polled them again.
+     */
+    @SchedulerLock(name = "assetDeploymentConfirmationPoll", lockAtMostFor = "PT1M", lockAtLeastFor = "PT10S")
+    @Scheduled(fixedDelay = 30_000, initialDelay = 40_000)
+    public void pollPendingDeploymentConfirmations() {
+        List<AssetDeployment> pending = assetDeploymentRepository
+                .findByDeploymentStatusAndDeployedByTxIsNotNull(AssetDeployment.DeploymentStatus.PENDING);
+        for (AssetDeployment deployment : pending) {
+            try {
+                syncFromChain(deployment);
+            } catch (Exception e) {
+                log.error("pollPendingDeploymentConfirmations: error syncing deploymentId={}: {}",
+                        deployment.getId(), e.getMessage(), e);
+            }
+        }
     }
 
     private void syncFromChain(AssetDeployment deployment) {
@@ -220,10 +263,18 @@ public class AssetDeploymentService {
             return;
         }
 
-        // Non-EVM chains have their own confirmation paths (not via ethGetTransactionReceipt)
         Chain deployChain = deployment.getChain();
+
+        if (deployChain == Chain.STARKNET) {
+            syncStarknetDeployment(deployment);
+            return;
+        }
         if (NON_EVM_CHAINS.contains(deployChain)) {
-            log.debug("syncFromChain: chain {} uses a non-EVM confirmation path", deployChain);
+            // Solana/Canton/Stellar have no chain-read confirmation path here at all — a
+            // pre-existing gap (see AssetDeploymentCompletionWriter's IMMEDIATE_CONFIRM_CHAINS
+            // javadoc) that Phase 2 documents but does not close; it needs its own per-chain
+            // finality design, not merely this EVM/Starknet confirmation-depth policy.
+            log.debug("syncFromChain: chain {} has no automated confirmation path yet", deployChain);
             return;
         }
 
@@ -260,6 +311,39 @@ public class AssetDeploymentService {
                 return;
             }
 
+            // Reorg guard: if an earlier poll already recorded a block hash for this deployment
+            // tx and the chain now reports a different hash at that height, the block was
+            // reorged out before this deployment ever reached CONFIRMED. Clear the recorded
+            // block and wait for the tx to be (re-)mined; mirrors
+            // BlockchainTransactionCompletionWriter.resetToPendingAfterReorg.
+            String newBlockHash = receipt.getBlockHash();
+            if (deployment.getBlockHash() != null && newBlockHash != null
+                    && !Objects.equals(deployment.getBlockHash(), newBlockHash)) {
+                log.warn("syncFromChain: deploymentId={} block hash mismatch (was {}, chain now reports {} "
+                                + "at that height) — deployment tx was reorged out; awaiting re-mining.",
+                        deploymentId, deployment.getBlockHash(), newBlockHash);
+                deployment.setBlockHash(null);
+                deployment.setBlockNumber(null);
+                assetDeploymentRepository.save(deployment);
+                return;
+            }
+
+            int required = txProperties.confirmationsFor(deployChain.name());
+            long confirmations = EvmUtils.confirmations(web3j, receipt);
+            Long newBlockNumber = receipt.getBlockNumber() != null
+                    ? receipt.getBlockNumber().longValueExact() : null;
+            if (confirmations < required) {
+                log.debug("syncFromChain: deploymentId={} mined at block {} but only {}/{} "
+                                + "confirmations — waiting", deploymentId, newBlockNumber, confirmations, required);
+                if (!Objects.equals(deployment.getBlockHash(), newBlockHash)
+                        || !Objects.equals(deployment.getBlockNumber(), newBlockNumber)) {
+                    deployment.setBlockHash(newBlockHash);
+                    deployment.setBlockNumber(newBlockNumber);
+                    assetDeploymentRepository.save(deployment);
+                }
+                return;
+            }
+
             String contractAddress = deployment.getContractAddress();
             if (contractAddress == null || contractAddress.isBlank()) {
                 contractAddress = extractDeployedAddress(receipt, asset(deployment).getTokenStandard()).orElse(null);
@@ -267,6 +351,8 @@ public class AssetDeploymentService {
 
             deployment.setDeployedAt(Instant.now());
             deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+            deployment.setBlockHash(newBlockHash);
+            deployment.setBlockNumber(newBlockNumber);
             if (contractAddress != null) {
                 deployment.setContractAddress(contractAddress);
             } else {
@@ -282,6 +368,90 @@ public class AssetDeploymentService {
             log.error("syncFromChain: error fetching receipt for deploymentId={}: {}",
                     deploymentId, e.getMessage(), e);
         }
+    }
+
+    /**
+     * Starknet confirmation path: the deployment's contractAddress is UDC-precomputed and known
+     * before the tx is even broadcast (see {@code StarknetTokenService}), so its presence proves
+     * nothing about finality — unlike EVM, there is no block-hash reorg primitive to re-verify;
+     * instead the deployment tx's own {@code finality_status} (via
+     * {@code starknet_getTransactionStatus}) is the source of truth, exactly as
+     * {@link de.makibytes.registerwerk.indexer.internal.StarknetTransferSyncService} already
+     * does for token transfers. Only ACCEPTED_ON_L1 is treated as final; REJECTED marks the
+     * deployment FAILED; every other status (RECEIVED, ACCEPTED_ON_L2, or the RPC call itself
+     * failing) leaves the deployment PENDING for the next poll.
+     */
+    private void syncStarknetDeployment(AssetDeployment deployment) {
+        UUID deploymentId = deployment.getId();
+        String txHash = deployment.getDeployedByTx();
+        try {
+            ChainConfig.NetworkType netType = deployment.getNetwork() == Network.MAINNET
+                    ? ChainConfig.NetworkType.MAINNET : ChainConfig.NetworkType.TESTNET;
+            ChainConfig chain = chainConfigRepository
+                    .findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STARKNET).stream()
+                    .filter(c -> c.getNetworkType() == netType)
+                    .findFirst()
+                    .orElse(null);
+            if (chain == null) {
+                log.warn("syncFromChain: no enabled Starknet chain config for network={}; deploymentId={}",
+                        deployment.getNetwork(), deploymentId);
+                return;
+            }
+
+            String finalityStatus = fetchStarknetTxFinalityStatus(chain.getRpcUrl(), txHash);
+            if (finalityStatus == null) {
+                log.debug("syncFromChain: could not determine Starknet finality_status for tx={} "
+                        + "deploymentId={} — will retry next poll", txHash, deploymentId);
+                return;
+            }
+
+            switch (finalityStatus) {
+                case "ACCEPTED_ON_L1" -> {
+                    deployment.setDeployedAt(Instant.now());
+                    deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+                    assetDeploymentRepository.save(deployment);
+                    log.info("syncFromChain: Starknet deploymentId={} confirmed (ACCEPTED_ON_L1) contractAddress={}",
+                            deploymentId, deployment.getContractAddress());
+                    eventPublisher.publishEvent(new DeploymentConfirmedEvent(
+                            deploymentId, null, null, deployment.getContractAddress(), txHash));
+                }
+                case "REJECTED" -> {
+                    deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.FAILED);
+                    assetDeploymentRepository.save(deployment);
+                    log.warn("syncFromChain: Starknet deploymentId={} tx={} REJECTED; marking FAILED",
+                            deploymentId, txHash);
+                    eventPublisher.publishEvent(new DeploymentFailedEvent(
+                            deploymentId, null, null, "Starknet transaction rejected: " + txHash));
+                }
+                default -> log.debug("syncFromChain: Starknet deploymentId={} tx={} finality_status={} "
+                                + "— not yet final", deploymentId, txHash, finalityStatus);
+            }
+        } catch (Exception e) {
+            log.error("syncFromChain: error checking Starknet tx status for deploymentId={}: {}",
+                    deploymentId, e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String fetchStarknetTxFinalityStatus(String rpcUrl, String txHash) {
+        Map<String, Object> requestBody = Map.of(
+                "jsonrpc", "2.0", "id", 1, "method", "starknet_getTransactionStatus",
+                "params", List.of(txHash));
+        Map<String, Object> response = restClient.post()
+                .uri(rpcUrl)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(requestBody)
+                .retrieve()
+                .body(Map.class);
+        if (response == null || response.containsKey("error")) {
+            return null;
+        }
+        Object result = response.get("result");
+        if (result instanceof Map<?, ?> map) {
+            Object status = ((Map<String, Object>) map).get("finality_status");
+            return status instanceof String s ? s : null;
+        }
+        return null;
     }
 
     // ── Address-extraction fallback for syncFromChain ──────────────────────────

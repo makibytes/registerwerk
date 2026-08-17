@@ -9,23 +9,33 @@ import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
-import org.quartz.Job;
-import org.quartz.JobExecutionContext;
-import org.quartz.JobExecutionException;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Quartz job that reads asset_coupon_payment rows with status=SCHEDULED and
- * scheduled_date <= today, creates CorporateAction(type=COUPON) rows and triggers settlement.
+ * Reads asset_coupon_payment rows with status=SCHEDULED and scheduled_date &lt;= today,
+ * creates CorporateAction(type=COUPON) rows and triggers settlement.
+ *
+ * <p>Originally written as an {@code org.quartz.Job}, but was never actually wired up: no
+ * {@code JobDetail}/{@code Trigger} bean, no {@code SchedulerFactoryBean}, and no
+ * {@code spring.quartz.*} configuration existed anywhere in the app, so this logic never ran in
+ * any deployment despite {@link CorporateActionAnnouncedEvent} and
+ * {@code RegisterTransferService}'s doc comments describing it as if it were an active scheduled
+ * job. Converted to a ShedLock'd {@code @Scheduled} bean — the same pattern as its sibling
+ * {@link BondMaturityJob} — as part of Phase 1 production-readiness work, which also removed the
+ * now-fully-unused Quartz persistent job store (spring-boot-starter-quartz dependency and the
+ * qrtz_* tables; see {@code V3__retention_and_partitioning.sql}).
  */
 @Component
-public class CouponPaymentJob implements Job {
+public class CouponPaymentJob {
 
     private static final Logger log = LoggerFactory.getLogger(CouponPaymentJob.class);
 
@@ -50,8 +60,12 @@ public class CouponPaymentJob implements Job {
         this.assetRepository = assetRepository;
     }
 
-    @Override
-    public void execute(JobExecutionContext context) throws JobExecutionException {
+    /** Daily at 06:00 UTC — an hour and a half before BondMaturityJob's 06:30 run, so a bond
+     *  reaching maturity the same day as its last coupon has its coupon raised first. */
+    @SchedulerLock(name = "couponPaymentJob", lockAtMostFor = "PT30M")
+    @Scheduled(cron = "0 0 6 * * *")
+    @Transactional
+    public void processDuePayments() {
         LocalDate today = LocalDate.now();
         log.info("CouponPaymentJob: scanning due coupon payments for date={}", today);
 

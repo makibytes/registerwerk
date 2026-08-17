@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.indexer.internal;
 
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
+import de.makibytes.registerwerk.chain.api.RpcNode;
+import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
 import de.makibytes.registerwerk.indexer.events.IndexerStaleEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.MultiGauge;
@@ -20,10 +22,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Scheduled monitor that periodically checks the health of all registered indexers and
@@ -52,16 +56,20 @@ public class IndexerMonitorService {
 
     private final IndexerStateRepository indexerStateRepository;
     private final ChainConfigRepository chainConfigRepository;
+    private final RpcNodeRepository rpcNodeRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final MultiGauge lastSyncGauge;
+    private final MultiGauge lagBlocksGauge;
 
     public IndexerMonitorService(
             IndexerStateRepository indexerStateRepository,
             ChainConfigRepository chainConfigRepository,
+            RpcNodeRepository rpcNodeRepository,
             ApplicationEventPublisher eventPublisher,
             MeterRegistry meterRegistry) {
         this.indexerStateRepository = indexerStateRepository;
         this.chainConfigRepository = chainConfigRepository;
+        this.rpcNodeRepository = rpcNodeRepository;
         this.eventPublisher = eventPublisher;
         // Exposes a timestamp (Unix epoch seconds), not a precomputed age — the idiomatic
         // Prometheus pattern is `time() - registerwerk_indexer_last_sync_timestamp_seconds`,
@@ -69,6 +77,16 @@ public class IndexerMonitorService {
         // once per run.
         this.lastSyncGauge = MultiGauge.builder("registerwerk_indexer_last_sync_timestamp_seconds")
                 .description("Unix epoch seconds of each indexer's last successful sync; 0 if never synced")
+                .register(meterRegistry);
+        // Phase 4: docs/operator/indexers/resilience.md previously documented an
+        // "indexer_lag_blocks" metric that did not exist anywhere in the code — this closes that
+        // gap for real. Reuses RpcNodeHealthService's already-cached rpc_node.latest_block_number
+        // (refreshed ~every 30s) as the chain-head reference rather than making a fresh RPC call
+        // here, so this job stays a pure DB read.
+        this.lagBlocksGauge = MultiGauge.builder("registerwerk_indexer_lag_blocks")
+                .description("Blocks between the best known healthy RPC node's head and each "
+                        + "indexer's last-synced block; absent when no healthy node or no synced "
+                        + "block is known yet for that chain")
                 .register(meterRegistry);
     }
 
@@ -147,6 +165,39 @@ public class IndexerMonitorService {
     }
 
     /**
+     * Blocks between each indexer's {@code last_synced_block} and the highest
+     * {@code latest_block_number} reported by any enabled+healthy {@link RpcNode} on that chain.
+     * Chains with no block-number-based cursor (Canton/Stellar use a signature/offset cursor
+     * instead — see {@code IndexerState.lastSyncedBlock} usages) or with no healthy node yet
+     * simply get no row, rather than a misleading 0.
+     */
+    private void refreshIndexerLagGauge(List<IndexerState> states) {
+        Map<UUID, Long> bestHeadByChain = rpcNodeRepository.findAllWithChainConfig().stream()
+                .filter(n -> n.isEnabled() && n.isHealthy() && n.getLatestBlockNumber() != null)
+                .collect(Collectors.groupingBy(
+                        n -> n.getChainConfig().getId(),
+                        Collectors.mapping(RpcNode::getLatestBlockNumber, Collectors.maxBy(Comparator.naturalOrder()))))
+                .entrySet().stream()
+                .filter(e -> e.getValue().isPresent())
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().get()));
+
+        List<MultiGauge.Row<?>> rows = new ArrayList<>();
+        for (IndexerState state : states) {
+            Long head = bestHeadByChain.get(state.getChainConfigId());
+            if (head == null || state.getLastSyncedBlock() == null) {
+                continue;
+            }
+            long lag = Math.max(0L, head - state.getLastSyncedBlock());
+            rows.add(MultiGauge.Row.of(
+                    Tags.of(
+                            "chain_config_id", state.getChainConfigId().toString(),
+                            "indexer_type", state.getIndexerType().name()),
+                    (double) lag));
+        }
+        lagBlocksGauge.register(rows, true);
+    }
+
+    /**
      * Runs every 5 minutes. Identifies indexers that are either:
      * <ul>
      *   <li>In {@code ERROR} status, or</li>
@@ -163,7 +214,9 @@ public class IndexerMonitorService {
     @Transactional
     public void checkIndexerHealth() {
         try {
-            refreshLastSyncGauge(reconcileIndexerStates());
+            List<IndexerState> states = reconcileIndexerStates();
+            refreshLastSyncGauge(states);
+            refreshIndexerLagGauge(states);
 
             Instant staleThreshold = Instant.now().minus(STALE_THRESHOLD);
 

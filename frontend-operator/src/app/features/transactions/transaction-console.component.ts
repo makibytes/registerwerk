@@ -19,6 +19,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
+import { PageEvent } from '@angular/material/paginator';
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
 import { TransactionService, TxRecord } from '../../core/api/transaction.service';
 import { AsyncSectionStatus } from '../../core/async/async-section';
@@ -69,9 +70,14 @@ import { Subscription } from 'rxjs';
       [rows]="transactions"
       [state]="state"
       (retry)="load()"
-      filterPlaceholder="Filter by method, actor, chain…"
+      [showFilter]="false"
       emptyMessage="No transactions with this status."
-      [actionsTemplate]="rowActions">
+      [actionsTemplate]="rowActions"
+      paginationMode="server"
+      [totalItems]="totalElements"
+      [pageIndex]="pageIndex"
+      [pageSize]="pageSize"
+      (page)="onPage($event)">
     </rw-data-table>
 
     <ng-template #rowActions let-tx>
@@ -162,6 +168,9 @@ export class TransactionConsoleComponent implements OnInit, OnDestroy {
   selected: TxRecord | null = null;
   reviewNote = '';
   reviewing = false;
+  pageIndex = 0;
+  pageSize = 20;
+  totalElements = 0;
   private loadSubscription?: Subscription;
 
   readonly columns: TableColumn[] = [
@@ -184,6 +193,16 @@ export class TransactionConsoleComponent implements OnInit, OnDestroy {
 
   onStatusChange(status: TxRecord['status']): void {
     this.statusFilter = status;
+    // A status change makes the previous page index meaningless against the new filtered set
+    // (e.g. page 3 of FAILED almost certainly isn't a valid page of TIMEOUT) — reset to page 0
+    // rather than silently requesting a page that may not exist.
+    this.pageIndex = 0;
+    this.load();
+  }
+
+  onPage(event: PageEvent): void {
+    this.pageIndex = event.pageIndex;
+    this.pageSize = event.pageSize;
     this.load();
   }
 
@@ -192,17 +211,20 @@ export class TransactionConsoleComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
 
     this.loadSubscription?.unsubscribe();
-    this.loadSubscription = this.transactionService.listByStatus(this.statusFilter).subscribe({
-      next: (page) => {
-        this.transactions = page.content;
-        this.state = 'ready';
-        this.cdr.markForCheck();
-      },
-      error: () => {
-        this.state = 'error';
-        this.cdr.markForCheck();
-      },
-    });
+    this.loadSubscription = this.transactionService
+      .listByStatus(this.statusFilter, this.pageIndex, this.pageSize)
+      .subscribe({
+        next: (page) => {
+          this.transactions = page.content;
+          this.totalElements = page.totalElements;
+          this.state = 'ready';
+          this.cdr.markForCheck();
+        },
+        error: () => {
+          this.state = 'error';
+          this.cdr.markForCheck();
+        },
+      });
   }
 
   openReviewDialog(tx: TxRecord): void {

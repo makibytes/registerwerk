@@ -42,8 +42,14 @@ spec:
                   wal-g delete retain FULL {{ .Values.backup.retainFullBackups }} --confirm
                   echo "Done."
                   {{- if .Values.monitoring.pushgatewayUrl }}
-                  curl -s -X POST --data-binary "backup_last_success_timestamp $(date +%s)" \
-                    "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_pg_backup" \
+                  # Pushgateway rejects a body with no trailing newline (HTTP 400) —
+                  # --data-binary "literal string" never adds one; piping a printf that does
+                  # through --data-binary @- is required, not cosmetic (confirmed by hand
+                  # against a running Pushgateway — this previously pushed nothing, ever,
+                  # silently swallowed by the `|| echo WARNING` fallback below).
+                  printf 'backup_last_success_timestamp %s\n' "$(date +%s)" \
+                    | curl -s -X POST --data-binary @- \
+                      "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_pg_backup" \
                     || echo "WARNING: backup succeeded but pushing the success metric failed"
                   {{- end }}
               env:

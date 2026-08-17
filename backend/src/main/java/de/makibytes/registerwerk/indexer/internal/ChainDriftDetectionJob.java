@@ -125,7 +125,8 @@ class ChainDriftDetectionJob {
                      -- holder rows may store EIP-55 checksummed ones, so a case-sensitive join
                      -- there would silently report zero drift for every holder. Solana (base58)
                      -- and Stellar (StrKey) addresses are compared exactly.
-                     WHERE (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+                     WHERE tt.finality_status <> 'ORPHANED'
+                       AND (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
 ) THEN LOWER(tt.contract_address) ELSE tt.contract_address END)
                          = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
 ) THEN LOWER(ad.contract_address) ELSE ad.contract_address END)

@@ -2,10 +2,12 @@ package de.makibytes.registerwerk.blockchain.api;
 
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
@@ -16,6 +18,22 @@ import org.web3j.utils.Numeric;
 public final class EvmUtils {
 
     private EvmUtils() {}
+
+    /**
+     * Number of blocks mined on top of (and including) the receipt's own block — the standard
+     * "confirmation depth" a reorg-safety policy gates on. Shared by every EVM confirmation path
+     * ({@code BlockchainTransactionService.pollPendingTransactions},
+     * {@code AssetDeploymentService.syncFromChain}) so the depth calculation itself never drifts
+     * between the tx-submission and deployment-confirmation call sites.
+     */
+    public static long confirmations(Web3j web3j, TransactionReceipt receipt) throws IOException {
+        if (receipt.getBlockNumber() == null) {
+            return 0;
+        }
+        BigInteger current = web3j.ethBlockNumber().send().getBlockNumber();
+        BigInteger depth = current.subtract(receipt.getBlockNumber()).add(BigInteger.ONE);
+        return depth.signum() < 0 ? 0 : depth.longValueExact();
+    }
 
     /**
      * Derives the on-chain token symbol for an asset deployment, so every EVM deploy service

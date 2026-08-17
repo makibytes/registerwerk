@@ -176,6 +176,18 @@ export const routes: Routes = [
             (m) => m.EndpointsListComponent
           ),
       },
+      {
+        path: 'indexers',
+        canActivate: [roleGuard],
+        // Matches IndexerAdminController's class-level @PreAuthorize exactly; the reset action
+        // itself is additionally REGISTRY_ADMIN-only, gated in the component and enforced again
+        // server-side.
+        data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        loadComponent: () =>
+          import('./features/indexers/indexers-list.component').then(
+            (m) => m.IndexersListComponent
+          ),
+      },
     ],
   },
   {

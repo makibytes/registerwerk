@@ -4,31 +4,39 @@ import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
 import de.makibytes.registerwerk.asset.internal.AssetDeploymentCompletionWriter;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.asset.events.DeploymentConfirmedEvent;
 import de.makibytes.registerwerk.asset.events.DeploymentFailedEvent;
+import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.erc3643.api.Erc3643DeploymentPort;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
-import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
+import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -42,10 +50,14 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AssetDeploymentService unit tests")
 class AssetDeploymentServiceTest {
+
+    private static final String STARKNET_RPC_URL = "http://localhost/starknet-rpc";
 
     @Mock
     private AssetDeploymentRepository assetDeploymentRepository;
@@ -71,8 +83,33 @@ class AssetDeploymentServiceTest {
     @Mock
     private AssetDeploymentCompletionWriter completionWriter;
 
-    @InjectMocks
+    @Mock
+    private ChainConfigRepository chainConfigRepository;
+
+    /** Real instance (not a mock), same pattern as BlockchainTransactionServiceTest — a plain
+     *  POJO with getters/setters is more reliable to configure directly than to stub. */
+    private BlockchainTxProperties txProperties;
+
+    private final RestClient.Builder restClientBuilder = RestClient.builder();
+    private MockRestServiceServer mockServer;
+
+    /** Constructed manually in {@link #setUp} (not {@code @InjectMocks}) since two constructor
+     *  params ({@code txProperties}, {@code restClientBuilder}) are deliberately real instances,
+     *  not mocks — {@code @InjectMocks}' reflective auto-construction would otherwise still run
+     *  during Mockito's annotation processing (before this class's own {@code @BeforeEach}) and
+     *  NPE on {@code restClientBuilder.build()} exactly as it did before this fix, since no
+     *  {@code @Mock RestClient.Builder} exists for it to find. */
     private AssetDeploymentService assetDeploymentService;
+
+    @BeforeEach
+    void setUp() {
+        txProperties = new BlockchainTxProperties();
+        mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
+        assetDeploymentService = new AssetDeploymentService(
+                assetDeploymentRepository, assetRepository, eventPublisher, tokenDeploymentPort,
+                erc3643DeploymentPort, blockchainClientRegistry, evmContractService, completionWriter,
+                txProperties, chainConfigRepository, restClientBuilder);
+    }
 
     @Test
     @DisplayName("deploy should reject confidential tokens on non-fhEVM L2 chains before persisting")
@@ -490,6 +527,8 @@ class AssetDeploymentServiceTest {
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setStatus("0x1"); // success — but no top-level contractAddress, since `to` was the factory
+        receipt.setBlockNumber("0x64"); // block 100
+        receipt.setBlockHash("0xblock100");
         String topicSig = "0x" + org.web3j.crypto.Hash.sha3String("TokenDeployed(bytes32,uint8,address)");
         String tokenAddress = "0x" + "ab".repeat(20); // 20-byte address, 40 hex chars
         String tokenAddressTopic = "0x" + "0".repeat(24) + tokenAddress.substring(2); // left-padded to 32 bytes
@@ -503,11 +542,191 @@ class AssetDeploymentServiceTest {
         receipt.setLogs(List.of(log));
         when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
                 .thenReturn(Optional.of(receipt));
+        // ETHEREUM's configured depth (see application.yml) is 12; block 100 seen at head 111
+        // gives exactly 12 confirmations (111 - 100 + 1).
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(111));
+        txProperties.setDefaultConfirmations(12);
 
         assetDeploymentService.syncFromChain(deploymentId);
 
         assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
         assertThat(deployment.getContractAddress()).isEqualTo(tokenAddress);
+        assertThat(deployment.getBlockHash()).isEqualTo("0xblock100");
+        assertThat(deployment.getBlockNumber()).isEqualTo(100L);
         verify(eventPublisher).publishEvent(any(DeploymentConfirmedEvent.class));
+    }
+
+    @Test
+    @DisplayName("syncFromChain should stay PENDING (recording the baseline block) when mined but "
+            + "below the configured confirmation depth")
+    void syncFromChain_staysPending_belowConfirmationDepth() throws java.io.IOException {
+        UUID deploymentId = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, Answers.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64"); // block 100
+        receipt.setBlockHash("0xblock100");
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        // Only 3 confirmations (102 - 100 + 1) — below the default 12.
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(102));
+        txProperties.setDefaultConfirmations(12);
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
+        assertThat(deployment.getBlockHash()).isEqualTo("0xblock100");
+        assertThat(deployment.getBlockNumber()).isEqualTo(100L);
+        verify(eventPublisher, never()).publishEvent(any(DeploymentConfirmedEvent.class));
+    }
+
+    @Test
+    @DisplayName("syncFromChain should clear the recorded block and stay PENDING when a previously-seen "
+            + "block hash no longer matches — the deployment tx was reorged out")
+    void syncFromChain_clearsBlockAndStaysPending_onReorgMismatch() throws java.io.IOException {
+        UUID deploymentId = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        deployment.setBlockHash("0xblock100a"); // recorded on an earlier poll
+        deployment.setBlockNumber(100L);
+
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, Answers.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64"); // still block 100
+        receipt.setBlockHash("0xblock100b"); // different hash — reorged
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
+        assertThat(deployment.getBlockHash()).isNull();
+        assertThat(deployment.getBlockNumber()).isNull();
+        // Never reaches confirmations()/ethBlockNumber() — the mismatch short-circuits first.
+        verify(web3j, never()).ethBlockNumber();
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("syncFromChain (Starknet) confirms the deployment once the tx reaches ACCEPTED_ON_L1")
+    void syncFromChain_confirmsStarknetDeployment_onAcceptedOnL1() {
+        UUID deploymentId = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setChain(Chain.STARKNET);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xstarknettx");
+        deployment.setContractAddress("0xudcaddress");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        ChainConfig starknetChain = new ChainConfig();
+        starknetChain.setRpcUrl(STARKNET_RPC_URL);
+        starknetChain.setNetworkType(ChainConfig.NetworkType.TESTNET);
+        when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STARKNET))
+                .thenReturn(List.of(starknetChain));
+
+        mockServer.expect(requestTo(STARKNET_RPC_URL))
+                .andRespond(withSuccess(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"finality_status\":\"ACCEPTED_ON_L1\"}}",
+                        MediaType.APPLICATION_JSON));
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        verify(eventPublisher).publishEvent(any(DeploymentConfirmedEvent.class));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("syncFromChain (Starknet) marks FAILED when the tx is REJECTED")
+    void syncFromChain_marksStarknetDeploymentFailed_onRejected() {
+        UUID deploymentId = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setChain(Chain.STARKNET);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xstarknettx");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        ChainConfig starknetChain = new ChainConfig();
+        starknetChain.setRpcUrl(STARKNET_RPC_URL);
+        starknetChain.setNetworkType(ChainConfig.NetworkType.TESTNET);
+        when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STARKNET))
+                .thenReturn(List.of(starknetChain));
+
+        mockServer.expect(requestTo(STARKNET_RPC_URL))
+                .andRespond(withSuccess(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"finality_status\":\"REJECTED\"}}",
+                        MediaType.APPLICATION_JSON));
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.FAILED);
+        verify(eventPublisher).publishEvent(any(DeploymentFailedEvent.class));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("pollPendingDeploymentConfirmations syncs every PENDING deployment with an on-chain tx, "
+            + "isolating one failure from the rest")
+    void pollPendingDeploymentConfirmations_syncsAllPendingDeployments() {
+        UUID okDeploymentId = UUID.randomUUID();
+        AssetDeployment ok = new AssetDeployment();
+        ok.setId(okDeploymentId);
+        ok.setChain(Chain.STARKNET);
+        ok.setNetwork(Network.TESTNET);
+        ok.setDeployedByTx("0xok");
+        ok.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+
+        UUID brokenDeploymentId = UUID.randomUUID();
+        AssetDeployment broken = new AssetDeployment();
+        broken.setId(brokenDeploymentId);
+        broken.setChain(Chain.ETHEREUM);
+        broken.setNetwork(Network.TESTNET);
+        broken.setDeployedByTx("0xbroken");
+        broken.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+
+        when(assetDeploymentRepository.findByDeploymentStatusAndDeployedByTxIsNotNull(
+                AssetDeployment.DeploymentStatus.PENDING)).thenReturn(List.of(broken, ok));
+        // "broken": simulate an unexpected RPC failure for the EVM path so we can prove one
+        // deployment failing doesn't stop the rest of the batch from being polled.
+        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class)))
+                .thenThrow(new RuntimeException("RPC down"));
+
+        ChainConfig starknetChain = new ChainConfig();
+        starknetChain.setRpcUrl(STARKNET_RPC_URL);
+        starknetChain.setNetworkType(ChainConfig.NetworkType.TESTNET);
+        when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STARKNET))
+                .thenReturn(List.of(starknetChain));
+        mockServer.expect(requestTo(STARKNET_RPC_URL))
+                .andRespond(withSuccess(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"finality_status\":\"ACCEPTED_ON_L1\"}}",
+                        MediaType.APPLICATION_JSON));
+
+        assetDeploymentService.pollPendingDeploymentConfirmations();
+
+        assertThat(ok.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        assertThat(broken.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
+        mockServer.verify();
     }
 }

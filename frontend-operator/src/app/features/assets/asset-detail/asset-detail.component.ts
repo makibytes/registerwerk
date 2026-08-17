@@ -38,10 +38,11 @@ import { BulkErc3643OpsComponent } from '../wizards/bulk-erc3643-ops/bulk-erc364
 import { ForceGrantsComponent } from '../wizards/force-grants/force-grants.component';
 import {
   Asset, AssetDeployment, AssetDocument, AssetHolder,
-  KycComplianceResponse, VAULT_STANDARDS,
+  KycComplianceResponse, VAULT_STANDARDS, TokenTransferResponse,
 } from '../../../core/models';
 
-import { StatusBadgeComponent, ChainNamePipe } from '@registerwerk/ui';
+import { StatusBadgeComponent, ChainNamePipe, DataTableComponent, TableColumn } from '@registerwerk/ui';
+import { PageEvent } from '@angular/material/paginator';
 import { RegisterInvestorDialogComponent, RegisterInvestorData } from './register-investor-dialog.component';
 import { AddIssuerDialogComponent, AddIssuerData } from './add-issuer-dialog.component';
 import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-topic-dialog.component';
@@ -49,6 +50,7 @@ import { TransactionService, TxRecord } from '../../../core/api/transaction.serv
 import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../shared/components/address-picker-dialog.component';
 import { ConfidentialViewerPanelComponent } from '../../../shared/components/confidential-viewer-panel/confidential-viewer-panel.component';
 import { AuthService } from '../../../core/auth/auth.service';
+import { AsyncSectionStatus } from '../../../core/async/async-section';
 
 @Component({
   selector: 'app-asset-detail',
@@ -71,6 +73,7 @@ import { AuthService } from '../../../core/auth/auth.service';
     AddressComponent,
     StatusBadgeComponent,
     ChainNamePipe,
+    DataTableComponent,
     DatePipe,
     DecimalPipe,
     VaultRequestsComponent,
@@ -440,6 +443,27 @@ import { AuthService } from '../../../core/auth/auth.service';
                 <p class="text-muted" style="text-align:center;padding:24px">No holder data available.</p>
               }
             }
+          </div>
+        </mat-tab>
+
+        <!-- Transfer History — indexed on-chain transfers (token_transfer), across all
+             deployments; distinct from the ERC-3643-only "Transactions" tab below, which shows
+             the registry's own submitted transactions (blockchain_transaction). -->
+        <mat-tab label="Transfer History">
+          <div class="tab-content">
+            <rw-data-table
+              [columns]="transferColumns"
+              [rows]="transfers"
+              [state]="transfersState"
+              (retry)="loadTransferHistory()"
+              [showFilter]="false"
+              emptyMessage="No indexed on-chain transfers for this asset yet."
+              paginationMode="server"
+              [totalItems]="transfersTotalElements"
+              [pageIndex]="transfersPageIndex"
+              [pageSize]="transfersPageSize"
+              (page)="onTransfersPage($event)">
+            </rw-data-table>
           </div>
         </mat-tab>
 
@@ -1234,6 +1258,7 @@ export class AssetDetailComponent implements OnInit {
         this.loadDeployments();
         this.loadHolders();
         this.loadTermSheetDocs();
+        this.loadTransferHistory();
         if (asset.status === 'PENDING_APPROVAL' && asset.jurisdiction) {
           this.loadKycCompliance(asset.id);
         }
@@ -1509,6 +1534,49 @@ export class AssetDetailComponent implements OnInit {
       next: (page) => { this.txHistory = page.content; this.txHistoryLoading = false; this.cdr.markForCheck(); },
       error: () => { this.txHistoryLoading = false; this.cdr.markForCheck(); },
     });
+  }
+
+  // ── Indexed transfer history (token_transfer, via TokenHistoryController) ──
+
+  transfers: TokenTransferResponse[] = [];
+  transfersState: AsyncSectionStatus = 'pending';
+  transfersPageIndex = 0;
+  transfersPageSize = 20;
+  transfersTotalElements = 0;
+
+  readonly transferColumns: TableColumn[] = [
+    { key: 'eventType', header: 'Event', cell: (t: TokenTransferResponse) => t.eventType },
+    { key: 'fromAddress', header: 'From', cell: (t: TokenTransferResponse) => t.fromAddress ?? '—', type: 'mono' },
+    { key: 'toAddress', header: 'To', cell: (t: TokenTransferResponse) => t.toAddress ?? '—', type: 'mono' },
+    { key: 'amount', header: 'Amount', cell: (t: TokenTransferResponse) => t.amount, type: 'number' },
+    { key: 'finalityStatus', header: 'Finality', cell: (t: TokenTransferResponse) => t.finalityStatus, type: 'badge' },
+    { key: 'txHash', header: 'Tx Hash', cell: (t: TokenTransferResponse) => t.txHash, type: 'mono' },
+    { key: 'blockNumber', header: 'Block', cell: (t: TokenTransferResponse) => `${t.blockNumber}`, type: 'number' },
+    { key: 'occurredAt', header: 'Occurred', cell: (t: TokenTransferResponse) => t.occurredAt, type: 'date' },
+  ];
+
+  loadTransferHistory(): void {
+    this.transfersState = 'pending';
+    this.cdr.markForCheck();
+
+    this.assetService.getTransferHistory(this.id, this.transfersPageIndex, this.transfersPageSize).subscribe({
+      next: (page) => {
+        this.transfers = page.content;
+        this.transfersTotalElements = page.totalElements;
+        this.transfersState = 'ready';
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.transfersState = 'error';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  onTransfersPage(event: PageEvent): void {
+    this.transfersPageIndex = event.pageIndex;
+    this.transfersPageSize = event.pageSize;
+    this.loadTransferHistory();
   }
 
   // ── Regulatory admin actions ──────────────────────────────────────────────

@@ -411,6 +411,52 @@ export interface AssetHolder {
   percentage: number;
 }
 
+/**
+ * A single on-chain token transfer as recorded by the off-chain indexer (`token_transfer`
+ * table) — distinct from `TxRecord`/`blockchain_transaction`, which is the registry's own
+ * record of transactions *it* submitted. This is the indexer's view of everything that moved
+ * on-chain, including transfers the registry didn't initiate itself. Mirrors the backend's
+ * `TokenTransferResponse` record exactly (`indexer/web/dto/TokenTransferResponse.java`).
+ */
+export interface TokenTransferResponse {
+  id: string;
+  contractAddress: string;
+  fromAddress: string | null;
+  toAddress: string | null;
+  tokenId: string | null;
+  amount: string;
+  eventType: string;
+  txHash: string;
+  blockNumber: number;
+  occurredAt: string;
+  explorerTxUrl: string | null;
+  chainIdentifier: string;
+  /**
+   * PROVISIONAL = seen but not yet past the chain's finality depth (can still be reorged out);
+   * FINAL = past finality, safe to treat as settled; ORPHANED = the block that contained this
+   * transfer was reorged out — the transfer no longer exists on the canonical chain.
+   */
+  finalityStatus: 'PROVISIONAL' | 'FINAL' | 'ORPHANED';
+}
+
+/**
+ * Operator visibility/recovery surface for `indexer_state` — one row per chain x indexer type.
+ * Mirrors the backend's `IndexerStateResponse` record exactly
+ * (`indexer/web/dto/IndexerStateResponse.java`).
+ */
+export interface IndexerStateResponse {
+  id: string;
+  chainConfigId: string;
+  indexerType: 'GRAPH_NODE' | 'SOLANA_GEYSER' | 'SOLANA_POLL' | 'CANTON_STREAM' | 'STARKNET_POLL' | 'STELLAR_HORIZON';
+  status: 'ACTIVE' | 'PAUSED' | 'ERROR';
+  lastSyncedBlock: number | null;
+  lastFinalBlock: number | null;
+  lastSyncedSignature: string | null;
+  lastSyncedAt: string | null;
+  consecutiveErrors: number;
+  lastError: string | null;
+}
+
 export interface KycDocument {
   id: string;
   entityId: string;

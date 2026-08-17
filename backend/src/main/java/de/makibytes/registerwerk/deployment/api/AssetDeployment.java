@@ -40,6 +40,13 @@ public class AssetDeployment {
     @Column(name = "deployment_status", nullable = false, length = 10)
     private DeploymentStatus deploymentStatus = DeploymentStatus.PENDING;
 
+    /** EVM deployment-tx receipt block hash — see V4__reorg_safety.sql column comment. */
+    @Column(name = "block_hash", length = 66)
+    private String blockHash;
+
+    @Column(name = "block_number")
+    private Long blockNumber;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -65,4 +72,10 @@ public class AssetDeployment {
 
     public DeploymentStatus getDeploymentStatus() { return deploymentStatus; }
     public void setDeploymentStatus(DeploymentStatus deploymentStatus) { this.deploymentStatus = deploymentStatus; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
+
+    public Long getBlockNumber() { return blockNumber; }
+    public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
 }

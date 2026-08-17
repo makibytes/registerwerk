@@ -39,8 +39,11 @@ spec:
                   restic forget --keep-daily {{ .Values.wallets.retainDaily }} --prune
                   echo "Done."
                   {{- if .Values.monitoring.pushgatewayUrl }}
-                  curl -s -X POST --data-binary "wallets_backup_last_success_timestamp $(date +%s)" \
-                    "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_wallets_backup" \
+                  # Pushgateway rejects a body with no trailing newline (HTTP 400) — see
+                  # backup-cronjob.yaml's identical comment; same fix, same reason.
+                  printf 'wallets_backup_last_success_timestamp %s\n' "$(date +%s)" \
+                    | curl -s -X POST --data-binary @- \
+                      "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_wallets_backup" \
                     || echo "WARNING: backup succeeded but pushing the success metric failed"
                   {{- end }}
               env:

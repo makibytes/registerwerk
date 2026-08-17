@@ -12,6 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,7 +30,12 @@ class RepoTradeServiceTest {
         service=new RepoTradeService(p,trades,events,entities,assets);trade=new RepoTrade();trade.setId(UUID.randomUUID());
         trade.setCashBorrowerEntityId(borrower);trade.setCashLenderEntityId(lender);trade.setCollateralAssetId(UUID.randomUUID());
         trade.setCollateralQuantity(new BigDecimal("100"));trade.setCashAmount(new BigDecimal("90000"));
-        trade.setRepurchaseAmount(new BigDecimal("90500"));trade.setStartDate(LocalDate.now());trade.setEndDate(LocalDate.now().plusDays(30));
+        trade.setRepurchaseAmount(new BigDecimal("90500"));
+        // RepoTradeService.confirmOpenLeg checks LocalDate.now(ZoneOffset.UTC) against
+        // startDate — using the system-default-zone LocalDate.now() here instead makes this
+        // test fail deterministically for any zone ahead of UTC (e.g. CEST) during the ~2h
+        // window where the local date has already rolled over but the UTC date hasn't yet.
+        trade.setStartDate(LocalDate.now(ZoneOffset.UTC));trade.setEndDate(LocalDate.now(ZoneOffset.UTC).plusDays(30));
         when(trades.findByIdForUpdate(trade.getId())).thenReturn(Optional.of(trade));when(entities.existsById(any())).thenReturn(true);
         lenient().when(entities.findById(any())).thenAnswer(i->Optional.of(entity(i.getArgument(0))));
         lenient().when(assets.findById(trade.getCollateralAssetId())).thenReturn(Optional.of(asset()));
