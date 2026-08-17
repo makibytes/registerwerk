@@ -330,7 +330,7 @@ class RegisterStatementServiceTest {
     }
 
     @Test
-    @DisplayName("issueForHolder publishes RegisterStatementIssuedEvent (finding #9)")
+    @DisplayName("issueForHolder publishes RegisterStatementIssuedEvent")
     void issueForHolderPublishesAuditEvent() {
         AssetHolder h = holder(EntryType.INDIVIDUAL, true);
         when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
@@ -348,7 +348,7 @@ class RegisterStatementServiceTest {
     }
 
     @Test
-    @DisplayName("renderForDownload publishes RegisterStatementIssuedEvent for a newly logged issuance (finding #9)")
+    @DisplayName("renderForDownload publishes RegisterStatementIssuedEvent for a newly logged issuance")
     void renderForDownloadPublishesAuditEvent() {
         AssetHolder h = holder(EntryType.INDIVIDUAL, false);
         when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
@@ -363,7 +363,7 @@ class RegisterStatementServiceTest {
     }
 
     @Test
-    @DisplayName("statement PDF is PAdES-signed when a signing keystore is configured (finding #9)")
+    @DisplayName("statement PDF is PAdES-signed when a signing keystore is configured")
     void issueForHolderSignsWhenConfigured() {
         AssetHolder h = holder(EntryType.INDIVIDUAL, true);
         when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));

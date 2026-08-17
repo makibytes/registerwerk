@@ -13,19 +13,16 @@ navigateur (`frontend-customer`/`frontend-operator`).
 
 ---
 
-## Chaînes qui exécutent réellement le fhEVM de Zama { #chains-that-actually-run-zamas-fhevm }
+## Périmètre de chaînes configuré { #configured-chain-scope }
 
-| Chaîne | Statut | Source |
-|---|---|---|
-| Ethereum Sepolia | Adresses réelles et documentées (ACL, TFHEExecutor, FHEPayment, KMSVerifier, Gateway) — voir `contracts/lib/fhevm/config/ZamaFHEVMConfig.sol`, et `SepoliaConfig` embarquée dans `@zama-fhe/relayer-sdk` lui-même | Bibliothèque vendorisée / package npm |
-| Ethereum mainnet | Ciblé, adresses non finalisées au moment de la rédaction (objectif T3 2026) et évolutives par gouvernance une fois en ligne | Feuille de route publique de Zama / forum communautaire |
-| Base | L'annonce du « fhEVM Coprocessor » de Zama cite Base aux côtés d'Ethereum | Annonce produit de Zama |
-| T-REX Chain | Zama a annoncé (mars 2026) qu'elle deviendrait la couche de confidentialité de T-REX Ledger — directement pertinent pour `CONF_ERC3643` — mais T-REX Chain n'a pas encore d'entrée dans l'énumération `Chain` ici et n'a pas publié ses propres adresses FHEVM | Communiqué de presse public T-REX/Zama |
+| Chaîne | Comportement de Registerwerk |
+|---|---|
+| Ethereum | Le déploiement confidentiel est accepté si la factory propre au réseau est configurée. |
+| Base | Le déploiement confidentiel est accepté si la factory propre au réseau est configurée. |
+| Autres valeurs de `Chain` | Le déploiement confidentiel est refusé. |
 
-`AssetDeploymentService.FHEVM_CHAINS` limite le déploiement confidentiel à `Chain.ETHEREUM` et
-`Chain.BASE` précisément pour cette raison. **Fhenix et Inco sont délibérément exclues** — elles restent
-répertoriées comme chaînes EVM ordinaires dans l'énumération `Chain` (avec leurs propres nœuds RPC à des fins
-d'information/de suivi) mais ne sont pas des cibles valides de déploiement confidentiel.
+`AssetDeploymentService.FHEVM_CHAINS` est la liste d'autorisation de référence. Fhenix et Inco
+restent des entrées EVM ordinaires de l'énumération `Chain`, mais ne sont pas des cibles valides.
 
 ---
 

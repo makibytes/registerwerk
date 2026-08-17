@@ -6,7 +6,7 @@ import { toHex } from '../src/hex.js';
 const OPERATOR_KEY = `0x${'1'.repeat(64)}`;
 const API_KEY = 'test-relayer-api-key';
 /** Every scenario below needs a valid RELAYER_API_KEY present so it can exercise what it's
- *  actually testing rather than failing on the (also required, finding #6) API key check first. */
+ *  actually testing rather than failing on the (also required, ) API key check first. */
 const withApiKey = (env: Record<string, string | undefined> = {}) => ({ RELAYER_API_KEY: API_KEY, ...env });
 
 describe('loadConfig', () => {
@@ -71,7 +71,7 @@ describe('loadConfig', () => {
     expect(config.operatorDecryptPrivateKey).toBeUndefined();
   });
 
-  // ── finding #2, Phase 9: envelope-encrypted operator-decrypt key ─────────────────────────
+  // ── Envelope-encrypted operator-decrypt key ───────────────────────────
   describe('OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED', () => {
     const MASTER_KEY = 'test-kek-master-key';
 
@@ -126,7 +126,7 @@ describe('loadConfig', () => {
     });
   });
 
-  // ── finding #6, Phase 9: RELAYER_API_KEY is required ─────────────────────────────────────
+  // ── RELAYER_API_KEY is required ───────────────────────────────────────
   it('requires RELAYER_API_KEY to be set', () => {
     expect(() => loadConfig({})).toThrow(/RELAYER_API_KEY/);
   });

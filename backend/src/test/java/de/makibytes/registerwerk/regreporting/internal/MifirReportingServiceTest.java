@@ -27,7 +27,7 @@ import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Verifies Phase 5 findings #6 (audit trail / actor threading) and #9 (on-demand generation
+ * Verifies audit trail / actor threading and on-demand generation
  * previously silently ignored the requested reporting date and always used "yesterday").
  */
 @ExtendWith(MockitoExtension.class)

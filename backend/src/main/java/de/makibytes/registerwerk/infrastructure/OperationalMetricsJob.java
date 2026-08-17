@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Refreshes two operational gauges that were previously visible only via log lines, not metrics
- * (Phase 4):
+ *:
  *
  * <ul>
  *   <li>{@code registerwerk_event_publication_backlog} — count of Spring Modulith

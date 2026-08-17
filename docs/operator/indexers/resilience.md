@@ -121,10 +121,11 @@ UPDATE indexer_state SET status = 'ACTIVE', consecutive_errors = 0, last_error =
 
 ## Deduplication
 
-`token_transfer` has `UNIQUE NULLS NOT DISTINCT` constraints on `(chain_config_id, tx_hash,
-log_index)` (EVM/Starknet) and `(chain_config_id, tx_hash, slot)` (Solana). Re-syncing from an
-earlier block is safe: each sync service checks `existsByChainConfigIdAndTxHashAndLogIndex`
-before inserting, so a re-processed range is silently skipped rather than duplicated or erroring.
+`token_transfer` has partition-compatible `UNIQUE NULLS NOT DISTINCT` constraints on
+`(chain_config_id, tx_hash, log_index, occurred_at)` for EVM/Starknet and
+`(chain_config_id, tx_hash, slot, occurred_at)` for Solana. Re-syncing from an earlier block is
+safe because each sync service also checks the transaction identity before inserting, so a
+reprocessed range is skipped rather than duplicated.
 
 ## Failure modes and recovery
 

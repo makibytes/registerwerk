@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Phase 7: catches an unguarded destructive DDL statement (DROP TABLE/COLUMN, TRUNCATE) in a
+  # catches an unguarded destructive DDL statement (DROP TABLE/COLUMN, TRUNCATE) in a
   # NEW migration before it merges — see scripts/check-destructive-migrations.sh's own header for
   # the acknowledgment mechanism. Independent of build-test so it still runs (and still blocks
   # the PR) even if a migration change happens to also break compilation elsewhere.
@@ -132,7 +132,7 @@ jobs:
         with:
           sarif_file: trivy-backend.sarif
 
-  # Phase 7: github/codeql-action was previously used ONLY as a SARIF uploader for Trivy's
+  # github/codeql-action was previously used ONLY as a SARIF uploader for Trivy's
   # container-image scan results above — actual CodeQL static analysis (source-level dataflow,
   # SQL-injection/deserialization/auth-bypass-class findings Trivy's dependency/image scanning
   # can't see) never ran anywhere in this repo. This job is the real thing.

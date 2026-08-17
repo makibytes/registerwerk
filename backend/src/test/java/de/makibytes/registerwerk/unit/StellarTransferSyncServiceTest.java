@@ -137,7 +137,7 @@ class StellarTransferSyncServiceTest {
     }
 
     @Test
-    @DisplayName("finding #14: occurred_at uses Horizon's real created_at, not processing time")
+    @DisplayName("occurred_at uses Horizon's real created_at, not processing time")
     void syncChain_usesHorizonCreatedAt_notProcessingTime() {
         stubEmptyIndexerState();
         ChainConfig chain = stellarChain();

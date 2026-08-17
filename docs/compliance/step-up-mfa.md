@@ -47,9 +47,8 @@ The `@RequiresStepUp` annotation is placed on the following endpoints and servic
 | Entra: revoke sign-in sessions | ✅ | ❌ | Availability impact only, no privilege gain |
 | Entra: issue Temporary Access Pass | ✅ | ✅ | A bearer credential that authenticates *as* the customer |
 
-¹ `AdminImpersonationController` carries no `@RequiresStepUp` today, and impersonation is refused
-outright when `ENTRA_ENABLED=true`. This row previously claimed step-up protection that the code
-does not implement.
+¹ `AdminImpersonationController` carries no `@RequiresStepUp`, and impersonation is refused
+outright when `ENTRA_ENABLED=true`.
 
 ---
 

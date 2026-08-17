@@ -48,8 +48,6 @@ Un usuario tiene uno o más. En el portal del cliente, los roles determinan qué
     - **Para revocar el acceso, cámbielo aquí** — o deshabilite la cuenta en Entra para que no pueda iniciar sesión en absoluto.
     - Hay exactamente un lugar donde mirar al auditar quién puede hacer qué.
 
-Alguna documentación anterior describía que los roles llegaban en un claim JWT completado por el proveedor de identidad y leído por una clase llamada `JwtEntityClaimsConverter`. Esa clase ha sido eliminada, y ese modelo nunca fue cómo se comportó el sistema. Si está trabajando a partir de un modelo mental construido sobre eso, reemplácelo con el párrafo anterior.
-
 ---
 
 ## Alcance de la entidad { #entity-scoping }

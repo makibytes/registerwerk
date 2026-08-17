@@ -90,7 +90,7 @@ public class ConfidentialErc3643Service {
                     .map(Address::new)
                     .collect(Collectors.toList());
             if (initialViewers.isEmpty()) {
-                // Fail closed (finding #7, Phase 9): deploying anyway would create a live register
+                // Fail closed : deploying anyway would create a live register
                 // entry nobody at the operator can ever decrypt — reconciliation, Travel Rule
                 // screening, and regulator disclosure would all be permanently blind to it until
                 // someone notices and calls addViewer, which nothing prompts them to do.

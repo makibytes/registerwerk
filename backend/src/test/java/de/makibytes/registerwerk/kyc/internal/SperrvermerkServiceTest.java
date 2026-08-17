@@ -94,7 +94,7 @@ class SperrvermerkServiceTest {
     }
 
     @Test
-    @DisplayName("lift carries walletAddress/assetId in the payload so an on-chain sync listener can act on it (finding #1, Phase 7)")
+    @DisplayName("lift carries walletAddress/assetId in the payload so an on-chain sync listener can act on it ")
     void lift_publishesWalletAddressAndAssetIdForOnchainSync() {
         UUID blockId = UUID.randomUUID();
         UUID assetId = UUID.randomUUID();

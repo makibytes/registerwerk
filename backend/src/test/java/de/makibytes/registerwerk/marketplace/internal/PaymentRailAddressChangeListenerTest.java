@@ -28,7 +28,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("PaymentRailAddressChangeListener — flags PUBLISHED listings on rail address drift (finding #1)")
+@DisplayName("PaymentRailAddressChangeListener — flags PUBLISHED listings on rail address drift")
 class PaymentRailAddressChangeListenerTest {
 
     @Mock private DappPaymentMethodRepository paymentMethodRepository;

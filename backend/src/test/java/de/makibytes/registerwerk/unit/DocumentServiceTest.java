@@ -247,7 +247,7 @@ class DocumentServiceTest {
         verify(kycDocumentRepository).save(doc);
     }
 
-    // ── audit events (finding #11a) ───────────────────────────────────────────
+    // ── audit events (a) ───────────────────────────────────────────
 
     @Test
     @DisplayName("storeDocument publishes a DocumentUploadedEvent")

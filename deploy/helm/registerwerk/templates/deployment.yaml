@@ -35,11 +35,11 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{/* Phase 5 fix: the required pod anti-affinity this chart used to ship under .Values.affinity
+      {{/* the required pod anti-affinity this chart used to ship under .Values.affinity
            forced at most one replica per node — a HARD constraint silently contradicting
            autoscaling.maxReplicas (10 below): on any cluster with fewer than 10 nodes, HPA-driven
            replicas beyond the node count sat Pending forever, invisibly capping real scale at the
-           node count rather than the configured max (ledger finding, Phase 5). Hardcoded here
+           node count rather than the configured max (ledger finding, ). Hardcoded here
            (not values-driven) because the label selector needs the release-specific selector
            labels computed by registerwerk.componentSelectorLabels, which only exist at template
            time — values.yaml is static data, not a template, so it cannot express this itself.

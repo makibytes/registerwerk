@@ -80,9 +80,9 @@ It is deliberately honest about what that does and does not mean:
 
 !!! warning "What this software does not give you"
 
-    Running this code does not make you compliant with the eWpG or any other law, does not grant you regulatory authorisation, and does not give a token legal effect as a security. Those depend on your licence, your organisation, your instruments, your customers and your deployment — none of which a repository can supply.
+    Running this code does not establish adherence to the eWpG or any other law, does not grant you regulatory authorisation, and does not give a token legal effect as a security. Those depend on your licence, your organisation, your instruments, your customers and your deployment — none of which a repository can supply.
 
-    Where the documentation describes a control as implementing a legal requirement, it means *the code implements a mechanism intended to support that requirement*. Whether it satisfies the requirement in your case is a question for your counsel and your supervisor.
+    Where the documentation describes a control as implementing a legal requirement, it means *the code implements a mechanism intended to support that requirement*. Its legal adequacy in your case is a question for your counsel and your supervisor.
 
 Everything in this documentation tries to hold that line. If a page tells you a check is advisory rather than enforcing, or that a status means "we transmitted it" rather than "the authority accepted it", that distinction is deliberate and load-bearing.
 

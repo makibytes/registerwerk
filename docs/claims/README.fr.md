@@ -40,11 +40,8 @@ The repository-wide scanner examines maintained documentation, examples, source,
 configuration, migrations, scripts, and manifests while excluding vendored/generated/build
 directories. A high-risk phrase is allowed only when its containing sentence directly negates or
 qualifies it, or when an eligible exact controlled statement covers it. There is no inline
-suppression syntax. Schema version 1 recognizes only the explicitly allowlisted `RW-SUP-0001`
-historical V1 Flyway comment and its later V12 correction; arbitrary migrations cannot be added as
-exceptions. Its exact text plus source and corrective file hashes are pinned, and its owner, independent reviewer,
-review date, and expiry are checked. Current documentation and code cannot use that exception—add
-a narrow controlled statement or correct the wording.
+suppression syntax, and the current suppression register is empty. Add a narrow controlled statement
+or correct wording that triggers the scanner.
 
 ## Add, renew, correct, or retire
 

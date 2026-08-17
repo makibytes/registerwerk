@@ -72,7 +72,7 @@ public class BlockchainTransactionCompletionWriter {
     }
 
     /**
-     * Phase 4: time from {@code createdAt} (submission — see
+     * time from {@code createdAt} (submission — see
      * {@code BlockchainTransactionService.record}) to whichever terminal status this tx reached,
      * tagged by chain and outcome. Previously invisible except by manually diffing
      * {@code created_at}/{@code completed_at} in the database.

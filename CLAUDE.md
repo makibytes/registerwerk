@@ -66,7 +66,7 @@ Modules: `asset`, `audit`, `auth`, `blockchain`, `chain`, `customer`, `deploymen
 - DTOs are Java `record` types with Bean Validation annotations
 - `@Transactional` at service method level, not on repositories
 - `@PreAuthorize("hasRole('REGISTRY_ADMIN')")` on controllers/methods
-- New Flyway migrations: `V{n}__description.sql` — never edit existing. Schema was squashed to a single `V1__initial_schema.sql` on 2026-08-11 (V1–V19 folded in; header documents the `flyway_schema_history` reconciliation for already-migrated environments). CI (`scripts/check-destructive-migrations.sh`, wired into `backend.yml`) fails a PR that adds an unguarded `DROP TABLE`/`DROP COLUMN`/`TRUNCATE` — acknowledge an intentional one with a `-- migration-safety: ack (<why>)` comment directly above it.
+- Flyway uses a single clean-install baseline, `V1__initial_schema.sql`. Add later changes as `V{n}__description.sql`; do not edit migrations after release. CI (`scripts/check-destructive-migrations.sh`, wired into `backend.yml`) rejects unguarded `DROP TABLE`, `DROP COLUMN`, and `TRUNCATE` statements; acknowledge an intentional destructive change with `-- migration-safety: ack (<why>)` directly above it.
 - Emit audit events in every state-changing service method
 
 ---
@@ -158,7 +158,7 @@ docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs
   registerwerk-docs:authoring serve -a 0.0.0.0:8000
 ```
 
-Two things to know about `docs_dir`: MkDocs builds a page for **every** `.md` under it — the explicit `nav:` only controls the sidebar, not what gets rendered or indexed — and `mkdocs serve`'s livereload polls the **entire** tree twice a second regardless of `exclude_docs`. A dormant Docusaurus install used to sit here and cost 1,722 rendered pages plus a permanent 30k-file polling loop; it has been removed, and `exclude_docs` now also lists `node_modules/`, `build/`, `.docusaurus/` so a stray `npm install` under `docs/` cannot bring it back. Use MkDocs syntax (`!!! note`), not Docusaurus (`:::note`).
+MkDocs builds a page for every Markdown file under `docs_dir`; the explicit `nav:` only controls the sidebar. Its live-reload watcher also scans the complete tree regardless of `exclude_docs`, so keep generated and dependency directories out of `docs/`. Use MkDocs admonition syntax (`!!! note`).
 
 ---
 

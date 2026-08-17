@@ -66,10 +66,4 @@ Opzionalmente, termina OIDC anche a Kong utilizzando `gateway/plugins/oidc-self-
 
 ## Attestazioni JWT previste { #jwt-claims-expected }
 
-`JwtEntityClaimsConverter` del backend legge le attestazioni direttamente dallo JWT convalidato — non si basa su alcuna intestazione inserita dal gateway:
-- `sub` — soggetto utente
-- `roles` — elenco di stringhe di ruoli (ad esempio `["ISSUER", "COMPANY_ADMIN"]`), trasformato in autorità `ROLE_*`
-- `entity_id` — l'UUID del soggetto giuridico, per l'ambito multi-tenant
-
-Configura la mappatura dei token/attestazioni del tuo IdP in modo che siano presenti nello JWT emesso. Non è presente alcun passaggio di mappatura delle entità sul lato
-Kong nella configurazione OSS Kong di questo repository.
+Il backend associa ogni JWT convalidato a una riga `app_user` e non considera attendibili le intestazioni di identità inserite dal gateway. I token OIDC generici richiedono un'attestazione `sub` stabile e un indirizzo e-mail per il primo provisioning. I token Entra usano `oid` come identità stabile. `roles` e `entity_id` inizializzano soltanto un nuovo account; in seguito fanno fede i ruoli e l'ambito dell'entità memorizzati. La configurazione Kong OSS di questo repository non esegue alcuna mappatura delle entità.

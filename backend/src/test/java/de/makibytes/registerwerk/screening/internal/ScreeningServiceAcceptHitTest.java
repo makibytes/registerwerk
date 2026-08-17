@@ -137,7 +137,7 @@ class ScreeningServiceAcceptHitTest {
     }
 
     @Test
-    @DisplayName("errors-recent gauge reflects a live count of ERROR-status runs (repo-wide alerting follow-up)")
+    @DisplayName("errors-recent gauge reflects a live count of ERROR-status runs (alerting metrics)")
     void errorsRecentGauge_reflectsLiveCount() {
         when(runRepository.countByStatusAndStartedAtAfter(org.mockito.ArgumentMatchers.eq(ScreeningStatus.ERROR), any()))
                 .thenReturn(3L);

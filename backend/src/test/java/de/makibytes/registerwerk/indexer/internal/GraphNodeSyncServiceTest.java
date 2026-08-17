@@ -32,7 +32,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link GraphNodeSyncService}'s Phase 2 reorg-safety logic — the crux of the
+ * Unit tests for {@link GraphNodeSyncService}'s reorg-safety logic — the crux of the
  * whole finality model, so it gets direct coverage even though a real anvil {@code anvil_reorg}
  * end-to-end run would be the more realistic exercise. That path needs a live anvil node plus a
  * live graph-node subgraph reachable from the test JVM, neither of which Testcontainers can
@@ -45,7 +45,7 @@ import static org.mockito.Mockito.when;
  * just with the HTTP layer swapped for a scripted collaborator.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("GraphNodeSyncService — Phase 2 reorg safety")
+@DisplayName("GraphNodeSyncService — reorg safety")
 class GraphNodeSyncServiceTest {
 
     @Mock private ChainConfigRepository chainConfigRepository;

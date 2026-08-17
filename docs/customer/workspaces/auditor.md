@@ -117,4 +117,3 @@ Neither the code nor this documentation can answer these. They are the ones that
 
 - [Audit log](../../platform/audit-log.md) — the technical reference
 - [Legal frameworks](../../legal/index.md) · [Compliance components](../../compliance/index.md)
-- [Assurance review ledger](../../assurance-review-ledger.md) — findings raised against this codebase

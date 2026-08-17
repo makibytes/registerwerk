@@ -13,19 +13,16 @@ contra el fhEVM de **Zama**, específicamente la API `TFHE.sol`/Gateway incluida
 
 ---
 
-## Cadenas que realmente ejecutan el fhEVM de Zama { #chains-that-actually-run-zamas-fhevm }
+## Alcance de cadenas configurado { #configured-chain-scope }
 
-| Cadena | Estado | Fuente |
-|---|---|---|
-| Ethereum Sepolia | Direcciones reales documentadas (ACL, TFHEExecutor, FHEPayment, KMSVerifier, Gateway): consulte `contracts/lib/fhevm/config/ZamaFHEVMConfig.sol` y `SepoliaConfig` incluidos en el propio `@zama-fhe/relayer-sdk` | Biblioteca vendored/paquete npm |
-| Red principal de Ethereum | Dirigidas, direcciones no finalizadas al momento de escribir este artículo (objetivo para el tercer trimestre de 2026) y la gobernanza se puede actualizar una vez activa | Hoja de ruta pública de Zama / foro comunitario |
-| Base | El anuncio del "coprocesador fhEVM" de Zama nombra a Base junto con Ethereum | Anuncio de producto Zama |
-| Cadena T-REX | Zama anunció (marzo de 2026) que se convertirá en la capa de confidencialidad de T-REX Ledger, directamente relevante para `CONF_ERC3643`, pero la cadena T-REX no tiene ninguna entrada de enumeración `Chain` aquí todavía y no ha publicado sus propias direcciones FHEVM | Comunicado de prensa público T-REX/Zama |
+| Cadena | Comportamiento de Registerwerk |
+|---|---|
+| Ethereum | Se acepta el despliegue confidencial cuando está configurada la factoría específica de la red. |
+| Base | Se acepta el despliegue confidencial cuando está configurada la factoría específica de la red. |
+| Otros valores de `Chain` | Se rechaza el despliegue confidencial. |
 
-`AssetDeploymentService.FHEVM_CHAINS` activa la implementación confidencial en `Chain.ETHEREUM` y
-`Chain.BASE` exactamente por este motivo. **Fhenix e Inco están excluidos deliberadamente**: permanecen en la lista
-como cadenas EVM ordinarias en la enumeración `Chain` (con sus propios nodos RPC con fines informativos/de seguimiento),
-pero no son objetivos válidos de implementación confidencial.
+`AssetDeploymentService.FHEVM_CHAINS` es la lista permitida autoritativa. Fhenix e Inco siguen
+siendo entradas EVM ordinarias del enum `Chain`, pero no son destinos válidos para despliegues confidenciales.
 
 ---
 

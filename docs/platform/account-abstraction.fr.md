@@ -5,7 +5,9 @@ description: Comptes intelligents ERC-4337 / EIP-7702, gas sponsorisé, clés d'
 
 # Abstraction de compte et transactions sponsorisées { #account-abstraction-sponsored-transactions }
 
-Une opportunité distincte de l'[interopérabilité DeFi](./defi-interoperability.md) : les avancées de l'écosystème Ethereum depuis l'ERC-4337 (abstraction de compte) permettent de sponsoriser le gas pour les clients particuliers/institutionnels et de simplifier leur onboarding, indépendamment de tout pont DeFi. C'était un terrain vierge au démarrage de ce chantier — aucun code AA/paymaster/passkey n'existait nulle part dans le dépôt.
+Registerwerk prend en charge les transactions sponsorisées ERC-4337, les comptes délégués
+EIP-7702, la vérification de wallets ERC-1271 et un compte passkey on-chain. Ces fonctions sont
+indépendantes de l'[interopérabilité DeFi](./defi-interoperability.md).
 
 ## Fondation : `WalletSignatureVerifier` { #foundation-walletsignatureverifier }
 
@@ -21,7 +23,10 @@ L'EIP-7702 (actif depuis la mise à niveau Pectra) permet à un EOA existant de 
 
 Un client qui fait migrer son EOA existant vers un compte intelligent délégué 7702 n'a besoin d'**aucune migration** de ce qui précède — l'adresse ne change pas, donc l'appartenance à l'org, l'enregistrement d'identité et les entrées de liste blanche restent tous valides. La seule nouvelle exigence est le chemin ERC-1271 de `WalletSignatureVerifier` (déjà en place), puisque le code d'un EOA délégué par 7702 implémente `isValidSignature` comme n'importe quel autre wallet à contrat intelligent — y compris `EwpgPasskeyAccount` ci-dessous, qui est précisément une implémentation de ce type de délégué.
 
-**Implication côté frontend (pas encore construite) :** `frontend-customer` n'a aujourd'hui aucune abstraction de wallet — un seul point d'appel `window.ethereum.request(...)` (`frontend-customer/src/app/features/company-admin/org-identity/org-identity.component.ts`). Introduire la prise en charge 7702/compte intelligent implique de construire une couche wallet légère à partir de zéro ; `viem` (avec ses assistants `viem/account-abstraction` et EIP-7702) est le SDK recommandé, puisqu'il n'existe aucune dépendance ethers/wagmi existante avec laquelle préserver la compatibilité. C'est le seul élément de ce chantier qui relève du travail d'interface plutôt que d'un changement de contrat/backend.
+`frontend-customer` centralise l'accès au wallet dans `WalletService` et implémente l'exécution
+EIP-7702/ERC-4337 facultative dans `SponsoredTxService`. Le sponsoring exige
+`environment.bundlerUrl`, une adresse de paymaster et un identifiant de politique résolu.
+L'interface ne crée ni n'exploite d'instances `EwpgPasskeyAccount`.
 
 ## `EwpgPaymaster` — transactions sponsorisées { #ewpgpaymaster-sponsored-transactions }
 
@@ -48,6 +53,8 @@ Les tests (`contracts/test/ecosystem/EwpgPasskeyAccount.t.sol`) construisent de 
 
 `EwpgBondDesk.subscribeWithPermit` consomme un `permit` EIP-2612 signé au lieu d'exiger une transaction `approve` préalable distincte — cela divise par deux le nombre de transactions et s'associe naturellement au sponsoring `EwpgPaymaster` (permit + exécution sponsorisée = UX sans jeton de gas). `MockStablecoin` implémente désormais `ERC20Permit` afin que l'exemple/les tests puissent exercer ce parcours de bout en bout (`test_subscribeWithPermit_succeedsWithoutPriorApproval` dans `contracts/test/examples/EwpgBondDesk.t.sol`). Tous les rails de paiement réels ne prennent pas en charge cela : USDC implémente EIP-2612 nativement ; vérifiez la prise en charge d'AllUnity Euro avant de câbler `subscribeWithPermit` en production — le chemin `subscribe` classique reste disponible dans tous les cas.
 
-## Données typées EIP-712 — encore différées { #eip-712-typed-data-still-deferred }
+## Formats de signature { #signature-formats }
 
-Les wallets affichent les données structurées EIP-712 de façon bien plus lisible que du hex/texte brut opaque. Cela vaudrait la peine de l'appliquer à tout message signé dès qu'une interface de signature correspondante existe pour l'afficher — le défi de liaison de wallet `personal_sign` existant et les flux de signature de manifeste ont délibérément été laissés tels quels dans ce chantier, car migrer leur format sur le fil nécessite un changement de méthode de signature côté frontend (`eth_signTypedData_v4`) qui sort du périmètre ici ; introduire le format sans cet appelant ne créerait qu'une surface inutilisée.
+La liaison du wallet et la signature des manifestes utilisent `personal_sign`.
+`WalletSignatureVerifier` accepte ce format pour les EOA et les wallets ERC-1271, mais pas les
+signatures de données typées EIP-712.

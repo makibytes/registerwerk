@@ -125,7 +125,7 @@ class LendingPositionServiceTest {
     }
 
     @Test
-    @DisplayName("caches a position with healthFactorReliable=false when the contract flags its own price as stale/unpriced (finding #8)")
+    @DisplayName("caches a position with healthFactorReliable=false when the contract flags its own price as stale/unpriced")
     void cachesUnreliableHealthFactor() {
         when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();

@@ -94,4 +94,3 @@ Worth stating, because customers will assume otherwise.
 | Something is down | [Monitoring](maintenance/monitoring.md) · [DR runbook](dr/runbook.md) |
 | Customer locked out | [Two-factor support](customers/two-factor-support.md) |
 | Customer confused | [Impersonation](customers/impersonation.md) — see exactly what they see |
-| Known defects | [Assurance review ledger](../assurance-review-ledger.md) |

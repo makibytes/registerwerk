@@ -62,7 +62,7 @@ class AuditChainIntegrityIT {
         // Published (not inserted via raw SQL) so every row goes through the real
         // AuditChainAppender write path and gets a real, non-null entry_hash — a raw-SQL
         // insert with the hash columns left NULL would (correctly, since the fix for
-        // finding #2) now be reported as a broken chain rather than a tolerated legacy gap.
+        // ) now be reported as a broken chain rather than a tolerated legacy gap.
         UUID subjectId = UUID.randomUUID();
         var event = new KycApprovedEvent(subjectId, UUID.randomUUID(), "REGISTRY_ADMIN", Map.of("seq", "0"));
 
@@ -108,7 +108,7 @@ class AuditChainIntegrityIT {
 
     @Test
     @Order(3)
-    @DisplayName("on-demand chain verification via AuditApi runs a fresh scan and updates the cached status (finding #6, Phase 11)")
+    @DisplayName("on-demand chain verification via AuditApi runs a fresh scan and updates the cached status ")
     void verifyChainNowUpdatesStatus() {
         // The prior test intentionally raw-inserts a row with no entry_hash, breaking the chain
         // on purpose (WORM/persistence check, not continuity) — so this asserts verifyChainNow()

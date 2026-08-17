@@ -41,7 +41,7 @@ class OrgChainReconciliationService {
 
     // Only a fire-and-forget OrgChainDriftEvent per detection, re-published every cycle for the
     // same unresolved drift — reset-then-recount each full sweep gives an accurate "currently
-    // open drift" snapshot without needing new persisted state (repo-wide alerting-gap follow-up).
+    // open drift" snapshot without needing new persisted state.
     private final SweepDriftCounter driftCount;
 
     OrgChainReconciliationService(

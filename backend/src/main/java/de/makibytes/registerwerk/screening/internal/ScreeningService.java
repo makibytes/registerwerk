@@ -65,7 +65,7 @@ public class ScreeningService {
                 .register(meterRegistry);
         // Distinct from the gauge above: this tracks provider-call FAILURES (ScreeningStatus.ERROR,
         // never rethrown — ScreeningGateImpl fails closed on it, silently blocking new-entity
-        // approvals), not unresolved hits. Repo-wide alerting-gap follow-up.
+        // approvals), not unresolved hits.
         Gauge.builder("registerwerk_screening_errors_recent_total", runRepository,
                         repo -> (double) repo.countByStatusAndStartedAtAfter(
                                 ScreeningStatus.ERROR, Instant.now().minus(RECENT_ERROR_WINDOW)))

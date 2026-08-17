@@ -57,7 +57,7 @@ public class StellarTransferSyncService {
     static final int PAGE_LIMIT = 200;
 
     /**
-     * Phase 3: bounds the per-issuer-account fan-out below — same reasoning as
+     * bounds the per-issuer-account fan-out below — same reasoning as
      * {@code StarknetTransferSyncService.FAN_OUT_BULKHEAD_CONFIG}: a waiting (not fail-fast)
      * bulkhead, because Stellar's cursor is shared across every watched account on the chain
      * (see {@code sharedCursor} below) and advances once regardless of which individual accounts'
@@ -289,7 +289,7 @@ public class StellarTransferSyncService {
                 "pagingToken", String.valueOf(payment.get("paging_token")),
                 "type", String.valueOf(payment.get("type"))
         ));
-        // Phase 2: Stellar Consensus Protocol has no probabilistic finality — a ledger either
+        // Stellar Consensus Protocol has no probabilistic finality — a ledger either
         // closes with 2/3+ validator quorum agreement or it does not close at all, and Horizon's
         // /payments endpoint only ever returns operations from ledgers that have already closed.
         // There is no equivalent of an EVM/Starknet "provisional, might still be reorged" state

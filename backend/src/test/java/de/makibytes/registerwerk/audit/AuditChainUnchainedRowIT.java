@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
-@DisplayName("Audit chain verification — fails closed on an unchained row (finding #2)")
+@DisplayName("Audit chain verification — fails closed on an unchained row")
 class AuditChainUnchainedRowIT {
 
     @Container

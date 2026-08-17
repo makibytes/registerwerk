@@ -36,7 +36,7 @@ public class AssetDeploymentCompletionWriter {
      *   <li>EVM (ERC20/721/1155/3525/4626/7540, ERC-3643): {@code contractAddress} is resolved
      *       from the factory's deployed-address event log, but that only requires the receipt to
      *       exist at all — one confirmation, not the configured confirmation depth. Immediate
-     *       CONFIRMED here is the exact "zero confirmation depth" bug this phase fixes.</li>
+     *       presence alone cannot mark the deployment confirmed.</li>
      *   <li>Starknet: {@code contractAddress} is the UDC-precomputed address, known
      *       deterministically before the transaction is even broadcast — its presence proves
      *       nothing about whether the transaction ever landed, let alone reached L1 acceptance.</li>
@@ -46,9 +46,8 @@ public class AssetDeploymentCompletionWriter {
      * token-transfer finality. Solana and Canton currently return {@code TokenDeploymentResult
      * .txOnly(...)} (no address at submission time at all — see {@code TokenDeploymentPortImpl}),
      * so they never reach the contractAddress-present branch below regardless of this set; those
-     * two chains' deployments are not yet auto-confirmed by any path — a pre-existing gap noted
-     * but not fixed in this phase (out of scope: needs its own chain-read confirmation design,
-     * not merely a confirmation-depth policy).
+     * two chains' deployments are not auto-confirmed because they require chain-specific
+     * confirmation readers rather than a confirmation-depth policy.
      */
     private static final Set<Chain> IMMEDIATE_CONFIRM_CHAINS = EnumSet.of(Chain.STELLAR);
 

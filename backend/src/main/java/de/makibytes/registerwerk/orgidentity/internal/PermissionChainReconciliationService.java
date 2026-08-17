@@ -47,7 +47,7 @@ class PermissionChainReconciliationService {
     private final ApplicationEventPublisher eventPublisher;
 
     // Same rationale as OrgChainReconciliationService's driftCount: no dedicated table, so a
-    // reset-then-recount-per-sweep gauge is what backs the alerting (repo-wide follow-up).
+    // Reset and recount per sweep so the gauge represents current drift.
     private final SweepDriftCounter driftCount;
 
     PermissionChainReconciliationService(

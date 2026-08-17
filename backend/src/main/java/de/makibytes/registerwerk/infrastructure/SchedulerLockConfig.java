@@ -11,7 +11,7 @@ import java.time.Duration;
 
 /**
  * Enables ShedLock so every {@code @Scheduled} job in the application is serialized
- * across threads AND backend instances via a Postgres row lock (V3__shedlock.sql).
+ * across threads and backend instances via a Postgres row lock.
  *
  * <p>Without this, scaling the backend out to more than one instance for hot-failover
  * would make every on-chain tx poller, indexer sync job, and reporting cron run

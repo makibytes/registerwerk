@@ -30,7 +30,7 @@ import java.util.function.Supplier;
  * HTTP client for querying a The Graph node's GraphQL endpoint.
  * Returns raw transfer records that the calling service maps to {@link de.makibytes.registerwerk.domain.history.TokenTransfer}.
  *
- * <p><strong>Phase 3 fix.</strong> {@link #fetchTransfers} previously swallowed every HTTP/parse/
+ * <p><strong>.</strong> {@link #fetchTransfers} previously swallowed every HTTP/parse/
  * GraphQL-level error into an empty list — indistinguishable from "queried successfully, no new
  * transfers", which meant {@code GraphNodeSyncService}'s {@code consecutive_errors} escalation
  * never fired for the single most common failure mode (RPC/graph-node outage): an outage just

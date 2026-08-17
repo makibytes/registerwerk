@@ -117,4 +117,3 @@ Ni le code ni cette documentation ne peuvent y répondre. Ce sont elles qui dét
 
 - [Piste d'audit](../../platform/audit-log.md) — la référence technique
 - [Cadres juridiques](../../legal/index.md) · [Composants de conformité](../../compliance/index.md)
-- [Registre des constats d'assurance](../../assurance-review-ledger.md) — constats formulés contre cette base de code

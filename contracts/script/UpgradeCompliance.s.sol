@@ -4,13 +4,8 @@ pragma solidity ^0.8.36;
 import "forge-std/Script.sol";
 import "../src/compliance/WhitelistRegistry.sol";
 
-/// @notice Upgrade / re-deploy the WhitelistRegistry and optionally transfer
+/// @notice Deploy a standalone WhitelistRegistry and optionally transfer
 ///         ownership to a new registry wallet.
-///
-/// TODO: When the token contracts are upgraded to delegate whitelist checks to
-///       an external WhitelistRegistry (rather than their internal mapping), this
-///       script should also call a setter on each token contract to point it to the
-///       newly deployed registry address.
 ///
 ///       Required env vars:
 ///         REGISTRY_WALLET_PRIVATE_KEY  — deployer / current owner private key
@@ -43,7 +38,5 @@ contract UpgradeCompliance is Script {
         console.log(unicode"=== eWpG Registry — Compliance Upgrade ===");
         console.log("New WhitelistRegistry :", address(newRegistry));
         console.log("Owner                 :", newOwner);
-        console.log("");
-        console.log("TODO: Update token contracts to reference the new registry address.");
     }
 }

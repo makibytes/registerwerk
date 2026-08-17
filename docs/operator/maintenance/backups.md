@@ -19,8 +19,7 @@ Smart contract state lives on the blockchain and is inherently replicated — it
 
 The two deployment paths documented in the repo's `CLAUDE.md` use two different, **non-
 interchangeable** backup mechanisms. Follow whichever section matches how you're actually
-running Registerwerk — previously this page only ever described the Docker Compose path, which
-would mislead an operator running the Helm/Kubernetes deployment (Phase 12, finding #6).
+running Registerwerk.
 
 ### Docker Compose deployment — pg_dump
 

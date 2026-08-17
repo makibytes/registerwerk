@@ -87,7 +87,7 @@ class DoraServiceTest {
     }
 
     @Test
-    @DisplayName("updateStatus publishes an audit event with the actor and status transition (finding #5)")
+    @DisplayName("updateStatus publishes an audit event with the actor and status transition")
     void updateStatus_publishesAuditEvent() {
         UUID incidentId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
@@ -109,7 +109,7 @@ class DoraServiceTest {
     }
 
     @Test
-    @DisplayName("reportIncident computes the 4h classification deadline for MAJOR severity (finding #4)")
+    @DisplayName("reportIncident computes the 4h classification deadline for MAJOR severity")
     void reportIncident_computesClassificationDeadlineForMajor() {
         when(incidentRepository.save(any(IctIncident.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -156,7 +156,7 @@ class DoraServiceTest {
     }
 
     @Test
-    @DisplayName("deadline-breach gauges reflect live overdue counts, tagged by breach_type (repo-wide alerting follow-up)")
+    @DisplayName("deadline-breach gauges reflect live overdue counts, tagged by breach_type (alerting metrics)")
     void breachGauges_reflectLiveOverdueCounts() {
         when(incidentRepository.findOverdueClassificationReports(any())).thenReturn(List.of(new IctIncident()));
         when(incidentRepository.findOverdueInitialReports(any())).thenReturn(List.of());
@@ -170,7 +170,7 @@ class DoraServiceTest {
     }
 
     @Test
-    @DisplayName("markReportedToAuthority persists reportedBy and publishes an audit event (finding #5)")
+    @DisplayName("markReportedToAuthority persists reportedBy and publishes an audit event")
     void markReportedToAuthority_persistsActorAndPublishesEvent() {
         UUID incidentId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();

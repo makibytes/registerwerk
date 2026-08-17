@@ -118,16 +118,6 @@ groups:
           severity: critical
 ```
 
-## Comparación planificada del rango de eventos (no implementada)
-
-Registerwerk actualmente no expone un punto final de administración `verify-consistency`. Un control de recuperación planificado:
-
-1. Consulta el subgrafo para todos los eventos de transferencia en el rango de bloques
-2. Recupera directamente los mismos eventos de la cadena a través de `eth_getLogs`
-3. Compara los dos conjuntos e informa cualquier discrepancia
-
-Hasta que se implemente y pruebe ese control, los operadores deben realizar una comparación de rango de eventos controlada independientemente antes de reanudar la confianza. Incluso entonces, los conjuntos de eventos coincidentes establecerían un acuerdo solo para el rango verificado, no la finalidad de la cadena, el estado del registro legal, el efecto legal, la liquidación o la identidad del código implementado.
-
 # Resiliencia y recuperación
 
 ## Modos de fallo y recuperación

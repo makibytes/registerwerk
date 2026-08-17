@@ -32,7 +32,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Entity accessor coverage for the Phase-1 domain additions:
+ * Entity accessor coverage for the domain additions:
  * AssetBondTerms, AssetVaultState, VaultNavStrike, VaultRequest,
  * AssetSlot, AssetTokenUnit, AssetCouponPayment.
  */

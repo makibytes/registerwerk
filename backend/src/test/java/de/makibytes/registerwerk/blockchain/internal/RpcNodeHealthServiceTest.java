@@ -19,7 +19,7 @@ import static org.mockito.Mockito.when;
  * Unit test for the {@code registerwerk_rpc_nodes_unhealthy_total} gauge only — the full
  * health-check service opens real Web3j/Solana/Canton clients, which is impractical to unit
  * test meaningfully; the gauge itself is a live query over already-persisted RpcNode.healthy
- * state (repo-wide alerting-gap follow-up), so it can be verified independently of
+ * state (alerting metrics), so it can be verified independently of
  * checkAllNodes() ever running.
  */
 @ExtendWith(MockitoExtension.class)

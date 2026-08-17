@@ -248,7 +248,7 @@ class TradingServiceTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("createListing surfaces the most recent settled trade price as a reference (finding #15)")
+    @org.junit.jupiter.api.DisplayName("createListing surfaces the most recent settled trade price as a reference")
     void createListing_populatesLastTradePrice_whenASettledExecutionExistsForTheAsset() {
         AssetHolder holder = sellerHolder(BigDecimal.TEN);
         when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(holder));
@@ -271,7 +271,7 @@ class TradingServiceTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("createListing leaves lastTradePrice null when the asset has never settled a trade (finding #15)")
+    @org.junit.jupiter.api.DisplayName("createListing leaves lastTradePrice null when the asset has never settled a trade")
     void createListing_leavesLastTradePriceNull_whenNoSettledExecutionExists() {
         AssetHolder holder = sellerHolder(BigDecimal.TEN);
         when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(holder));
@@ -599,7 +599,7 @@ class TradingServiceTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("buy fails clearly (not a bare 404) when the listingId belongs to a live external-venue offer (finding #10)")
+    @org.junit.jupiter.api.DisplayName("buy fails clearly (not a bare 404) when the listingId belongs to a live external-venue offer")
     void buy_unknownListingId_thatMatchesALiveExternalOffer_failsWithClearError() {
         UUID externalListingId = UUID.randomUUID();
         when(tradeListingRepository.findByIdForUpdate(externalListingId)).thenReturn(Optional.empty());
@@ -620,7 +620,7 @@ class TradingServiceTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("buy still throws a plain not-found for a listingId that matches nothing anywhere (finding #10)")
+    @org.junit.jupiter.api.DisplayName("buy still throws a plain not-found for a listingId that matches nothing anywhere")
     void buy_trulyUnknownListingId_throwsEntityNotFound() {
         UUID unknownId = UUID.randomUUID();
         when(tradeListingRepository.findByIdForUpdate(unknownId)).thenReturn(Optional.empty());
@@ -637,7 +637,7 @@ class TradingServiceTest {
     // ── listMarketplaceOffers ─────────────────────────────────────────────────
 
     @Test
-    @org.junit.jupiter.api.DisplayName("listMarketplaceOffers surfaces the most recent settled trade price per asset (finding #15)")
+    @org.junit.jupiter.api.DisplayName("listMarketplaceOffers surfaces the most recent settled trade price per asset")
     void listMarketplaceOffers_populatesLastTradePrice_whenASettledExecutionExistsForTheAsset() {
         UUID listingId = UUID.randomUUID();
         TradingVenueOffer offer = new TradingVenueOffer(
@@ -661,7 +661,7 @@ class TradingServiceTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("listMarketplaceOffers leaves lastTradePrice null when the asset has never settled a trade (finding #15)")
+    @org.junit.jupiter.api.DisplayName("listMarketplaceOffers leaves lastTradePrice null when the asset has never settled a trade")
     void listMarketplaceOffers_leavesLastTradePriceNull_whenNoSettledExecutionExists() {
         UUID listingId = UUID.randomUUID();
         TradingVenueOffer offer = new TradingVenueOffer(
@@ -839,7 +839,7 @@ class TradingServiceTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("settlePendingTrade requires a payment reference (finding #2, Phase 7)")
+    @org.junit.jupiter.api.DisplayName("settlePendingTrade requires a payment reference ")
     void settlePendingTrade_rejectsBlankPaymentReference() {
         UUID executionId = UUID.randomUUID();
         TradeExecution execution = new TradeExecution();
@@ -1099,7 +1099,7 @@ class TradingServiceTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("cancelPendingTrade publishes an audit event (finding #6, Phase 7)")
+    @org.junit.jupiter.api.DisplayName("cancelPendingTrade publishes an audit event ")
     void cancelPendingTrade_publishesAuditEvent() {
         UUID executionId = UUID.randomUUID();
         TradeExecution execution = new TradeExecution();
@@ -1195,7 +1195,7 @@ class TradingServiceTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("timeoutStuckPendingTrades publishes an audit event per timed-out trade (finding #6, Phase 7)")
+    @org.junit.jupiter.api.DisplayName("timeoutStuckPendingTrades publishes an audit event per timed-out trade ")
     void timeoutStuckPendingTrades_publishesEventPerTimedOutTrade() {
         tradingProperties.setPendingTimeoutHours(72);
         TradeExecution stuck = new TradeExecution();

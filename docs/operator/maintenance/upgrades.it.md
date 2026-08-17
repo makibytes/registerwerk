@@ -18,7 +18,7 @@ git submodule update --recursive
 
 ### 2. Esaminare il registro delle modifiche { #2-review-the-changelog }
 
-Controllare `CHANGELOG.md` per eventuali modifiche importanti, note sulla migrazione del database e modifiche alla configurazione prima di procedere.
+Esaminare i commit e le modifiche alla configurazione tra il tag attualmente distribuito e il tag di destinazione prima di procedere.
 
 ### 3. Creare la nuova immagine backend { #3-build-the-new-backend-image }
 
@@ -132,7 +132,7 @@ docker tag ghcr.io/ewpg/registerwerk-backend:previous \
 docker compose up -d backend
 ```
 
-Non è possibile eseguire il rollback automatico delle migrazioni del database. Se è necessario annullare una migrazione, utilizzare gli script di migrazione `DOWN` in `backend/src/main/resources/db/migration/` (presenti per tutte le migrazioni da V10 in poi).
+Le migrazioni Flyway di questo repository non dispongono di script di rollback automatici. Se una release modifica lo schema, ripristinare il backup precedente all'aggiornamento insieme all'immagine applicativa precedente oppure distribuire una migrazione correttiva revisionata.
 
 ## Aggiornamento Kong { #kong-upgrade }
 

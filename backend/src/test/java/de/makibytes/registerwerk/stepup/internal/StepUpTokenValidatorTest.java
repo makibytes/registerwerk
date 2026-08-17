@@ -151,7 +151,7 @@ class StepUpTokenValidatorTest {
                 .hasMessageContaining("different user");
     }
 
-    // ── Scope binding (finding #10, Phase 8) ───────────────────────────────────
+    // ── Scope binding  ───────────────────────────────────
 
     @Test
     @DisplayName("rejects an approver token scoped to a different action than the one being approved")

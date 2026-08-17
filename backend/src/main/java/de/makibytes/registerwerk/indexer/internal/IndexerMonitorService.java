@@ -78,7 +78,7 @@ public class IndexerMonitorService {
         this.lastSyncGauge = MultiGauge.builder("registerwerk_indexer_last_sync_timestamp_seconds")
                 .description("Unix epoch seconds of each indexer's last successful sync; 0 if never synced")
                 .register(meterRegistry);
-        // Phase 4: docs/operator/indexers/resilience.md previously documented an
+        // docs/operator/indexers/resilience.md previously documented an
         // "indexer_lag_blocks" metric that did not exist anywhere in the code — this closes that
         // gap for real. Reuses RpcNodeHealthService's already-cached rpc_node.latest_block_number
         // (refreshed ~every 30s) as the chain-head reference rather than making a fresh RPC call

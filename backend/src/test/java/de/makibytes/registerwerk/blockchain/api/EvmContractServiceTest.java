@@ -36,7 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Phase 3: EIP-1559 fee resolution and {@code eth_estimateGas}-based gas limits, replacing the
+ * EIP-1559 fee resolution and {@code eth_estimateGas}-based gas limits, replacing the
  * previous fixed {@code CALL_GAS_LIMIT}/legacy-{@code gasPrice} behavior. Exercises
  * {@code EvmContractService.submit} end-to-end with a mocked {@link Web3j} and a
  * {@link NonceCoordinator} stub that invokes its callback immediately (mirroring what the real

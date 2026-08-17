@@ -31,13 +31,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for the centralized reconciliation fix (finding #22, Phase 10): previously a chain
+ * Unit tests for the centralized reconciliation fix : previously a chain
  * missing required config (graphNodeUrl/wsUrl/etc.) never got an {@code IndexerState} row created
  * at all, since every sync service filtered it out before ever reaching that creation step —
  * making it invisible to this monitor entirely rather than flagged stale.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("IndexerMonitorService — reconciles missing IndexerState rows (finding #22)")
+@DisplayName("IndexerMonitorService — reconciles missing IndexerState rows")
 class IndexerMonitorServiceTest {
 
     @Mock private IndexerStateRepository indexerStateRepository;
@@ -158,7 +158,7 @@ class IndexerMonitorServiceTest {
     }
 
     @Test
-    @DisplayName("checkIndexerHealth() publishes a last-sync-timestamp gauge per indexer (finding #5, Phase 12)")
+    @DisplayName("checkIndexerHealth() publishes a last-sync-timestamp gauge per indexer ")
     void checkIndexerHealth_publishesLastSyncGauge() {
         when(chainConfigRepository.findByEnabledTrue()).thenReturn(List.of());
 

@@ -198,7 +198,7 @@ contract DvpSettlementTest is Test {
         vm.stopPrank();
     }
 
-    // ── pause (finding #2) ────────────────────────────────────────────────────
+    // ── pause ────────────────────────────────────────────────────
 
     function test_pause_blocksNewLocksAndSettlement() public {
         vm.prank(operator);

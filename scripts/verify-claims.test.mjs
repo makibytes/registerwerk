@@ -51,7 +51,7 @@ function fixtureRepository() {
     entries: [{ id: "RW-CLAIM-9999", firstRegisteredAt: "2026-07-01" }]
   }));
   write(root, "docs/claims/suppressions.json", fs.readFileSync(path.join(sourceRepo, "docs/claims/suppressions.json")));
-  for (const migration of ["V1__initial_schema.sql", "V12__payment_rail_micar_verification.sql"]) {
+  for (const migration of ["V1__initial_schema.sql"]) {
     write(root, `backend/src/main/resources/db/migration/${migration}`,
       fs.readFileSync(path.join(sourceRepo, `backend/src/main/resources/db/migration/${migration}`)));
   }
@@ -163,7 +163,7 @@ assert.ok(withMutation(({ root }) => { fs.symlinkSync("docs/claims/README.md", p
   .some(error => error.includes("must not be a symlink")));
 assert.ok(withMutation(({ root }) => {
   const document = JSON.parse(fs.readFileSync(path.join(root, "docs/claims/suppressions.json"), "utf8"));
-  document.entries.push({ ...document.entries[0], id: "RW-SUP-0002" });
+  document.entries.push({ id: "RW-SUP-0002" });
   write(root, "docs/claims/suppressions.json", JSON.stringify(document));
 }).some(error => error.includes("not in the closed schema-version-1 allowlist")));
 

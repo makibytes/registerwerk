@@ -22,6 +22,6 @@ public interface AssetDeploymentRepository extends JpaRepository<AssetDeployment
 
     Optional<AssetDeployment> findFirstByContractAddressIgnoreCase(String contractAddress);
 
-    /** Deployments awaiting confirmation-depth / L1-acceptance re-verification (Phase 2). */
+    /** Deployments awaiting confirmation-depth / L1-acceptance re-verification. */
     List<AssetDeployment> findByDeploymentStatusAndDeployedByTxIsNotNull(AssetDeployment.DeploymentStatus status);
 }

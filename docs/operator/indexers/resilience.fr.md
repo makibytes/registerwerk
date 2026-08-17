@@ -117,16 +117,6 @@ groups:
           severity: critical
 ```
 
-## Comparaison de plages d'événements planifiée (non implémentée)
-
-Registerwerk n'expose actuellement pas de point de terminaison d'administration `verify-consistency`. Un contrôle de récupération planifié va :
-
-1. Interroger le sous-graphe pour tous les événements de transfert dans la plage de blocs
-2. Récupérer directement les mêmes événements depuis la chaîne via `eth_getLogs`
-3. Comparer les deux ensembles et signaler toute divergence
-
-Tant que ce contrôle n'est pas implémenté et testé, les opérateurs doivent effectuer une comparaison de plage d'événements contrôlée de manière indépendante avant de reprendre toute dépendance à ces données. Même alors, des ensembles d'événements concordants n'établiraient un accord que pour la plage vérifiée — pas la finalité de la chaîne, l'état juridique du registre, l'effet juridique, le règlement, ou l'identité du code déployé.
-
 # Résilience et récupération
 
 ## Modes de défaillance et récupération

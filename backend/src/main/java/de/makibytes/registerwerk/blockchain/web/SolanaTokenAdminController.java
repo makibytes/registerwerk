@@ -28,7 +28,7 @@ import java.util.UUID;
 
 /**
  * Registry-operator administrative controls for SPL Token-2022 mints (SPL, SPL_2022,
- * SPL_2022_BOND, SPL_2022_CONFIDENTIAL) — the "Phase-4" work {@link SolanaTokenAdminService}
+ * SPL_2022_BOND, SPL_2022_CONFIDENTIAL) — the "" work {@link SolanaTokenAdminService}
  * was built for but never got a controller. Previously the only way to invoke a §24/§26
  * correction on a Solana deployment was direct service-layer code; this closes that gap the
  * same way {@code TokenAdminController} does for EVM.

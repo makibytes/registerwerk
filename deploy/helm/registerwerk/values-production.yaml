@@ -92,7 +92,7 @@ postgresql:
 # state), so that boundary is a reasonable one to rely on until the real fix ships: switching
 # templates/kong-configmap.yaml from raw .Files.Get to tpl (matching how the frontend nginx
 # ConfigMaps already render their config) so a Secret-sourced password can actually be templated
-# into both kong.yml copies. Tracked as a follow-up, not attempted here without a live cluster to
+# into both kong.yml copies. Configure this only after validating it against a live cluster to
 # verify the rendered ConfigMap against.
 
 # TLS: ingress.enabled defaults to true with ssl-redirect already on (values.yaml) — set

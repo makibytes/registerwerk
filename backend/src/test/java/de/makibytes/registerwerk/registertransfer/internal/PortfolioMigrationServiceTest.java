@@ -97,7 +97,7 @@ class PortfolioMigrationServiceTest {
     }
 
     @Test
-    @DisplayName("initiate refuses a legally blocked holding (finding #6) — the earliest point to stop it")
+    @DisplayName("initiate refuses a legally blocked holding — the earliest point to stop it")
     void initiate_refusesBlockedHolder() {
         init();
         UUID holderId = UUID.randomUUID();
@@ -298,7 +298,7 @@ class PortfolioMigrationServiceTest {
     }
 
     @Test
-    @DisplayName("recordOnchainTransfer refuses a holding blocked mid-flight, after initiate already passed (finding #6 defense-in-depth)")
+    @DisplayName("recordOnchainTransfer refuses a holding blocked mid-flight, after initiate already passed (defense-in-depth)")
     void recordOnchainTransfer_refusesBlockedHolder() {
         init();
         UUID migrationId = UUID.randomUUID();
@@ -336,7 +336,7 @@ class PortfolioMigrationServiceTest {
     }
 
     @Test
-    @DisplayName("complete closes the source register entry — the previously-missing step (finding #3)")
+    @DisplayName("complete closes the source register entry — the previously-missing step")
     void complete_closesSourceRegisterEntry() {
         init();
         UUID migrationId = UUID.randomUUID();

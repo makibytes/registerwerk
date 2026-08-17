@@ -6,7 +6,7 @@ image:
   # .github/workflows/container.yml only ever publishes :<git-sha> and :latest — it never
   # publishes a tag matching Chart.yaml's appVersion (no release has been cut yet), so
   # defaulting here to .Chart.AppVersion made a fresh `helm install` ImagePullBackOff
-  # (Phase 12, finding #3). `latest` is the one tag CI guarantees exists after every push
+  # . `latest` is the one tag CI guarantees exists after every push
   # to main. Pin to a specific `:<sha>` (or a real release tag, once one is cut) for any
   # deployment that needs reproducibility — `latest` is a safe-to-try-it default, not a
   # production recommendation.
@@ -85,11 +85,8 @@ podDisruptionBudget:
 
 # Even-spread-across-nodes for HA (backing the story implied by replicaCount/autoscaling and
 # podDisruptionBudget above) is now a topologySpreadConstraints block hardcoded directly in
-# templates/deployment.yaml, not driven from here — see that file's comment for why (the label
-# selector needs release-specific values only computable at template time) and for the Phase 5
-# fix this replaced: a REQUIRED pod anti-affinity used to live in this key, silently capping real
-# HPA scale-out at the cluster's node count (a hard one-replica-per-node constraint directly
-# contradicting autoscaling.maxReplicas: 10 below on any cluster with fewer than 10 nodes).
+# templates/deployment.yaml because the label selector needs release-specific values computed at
+# template time.
 # Empty by default; set this if you want to layer on additional affinity rules (e.g. node
 # selection) alongside the chart's own topology spread.
 affinity: {}
@@ -120,7 +117,7 @@ wallets:
     size: 5Gi
     accessMode: ReadWriteOnce
 
-# Phase 4: JVM/JPA/Modulith startup (see application.yml's own boot log — cold start is a few
+# JVM/JPA/Modulith startup (see application.yml's own boot log — cold start is a few
 # seconds locally, longer on constrained CPU requests) previously had to fit inside
 # livenessProbe's initialDelaySeconds (60s) with no separate allowance, so bumping periodSeconds
 # on a slower node risked the liveness probe killing a pod that was simply still starting, not
@@ -149,7 +146,7 @@ readinessProbe:
   periodSeconds: 5
   failureThreshold: 3
 
-# Phase 4: SIGTERM today would land on a pod potentially still receiving newly-routed traffic —
+# SIGTERM today would land on a pod potentially still receiving newly-routed traffic —
 # kube-proxy/endpoint removal and SIGTERM delivery are not ordered relative to each other, so a
 # short sleep here lets the Service stop sending new requests before the container actually
 # starts shutting down. Paired with server.shutdown: graceful + spring.lifecycle.
@@ -194,7 +191,7 @@ kong:
   # block, gated on `not .Values.ingressController.enabled`). Registerwerk uses Kong purely
   # as a declarative API gateway (matching the Docker Compose usage), not as a k8s Ingress
   # controller — without this explicit override, dblessConfig.configMap below would render
-  # with no error but never actually take effect (Phase 12, finding #8).
+  # with no error but never actually take effect .
   ingressController:
     enabled: false
   proxy:
@@ -205,7 +202,7 @@ kong:
   # Wires the same hardened declarative config (files/kong.yml, a copy of gateway/kong.yml)
   # into the k8s Kong subchart — previously nothing set this, so Kong ran its own stock
   # defaults in the Helm/k8s path with none of the admin-API scoping, header-stripping, or
-  # rate-limiting verified in the Docker Compose path (Phase 12, finding #8). Name must match
+  # rate-limiting verified in the Docker Compose path . Name must match
   # templates/kong-configmap.yaml's fixed "registerwerk-kong-config" — subchart values.yaml
   # entries aren't Go-templated, so this can't be computed per-release; update both together
   # if you ever need more than one registerwerk release in the same namespace.
@@ -250,7 +247,7 @@ networkPolicy:
         - protocol: TCP
           port: 8080
 
-# Phase 5: backs Kong's rate-limiting plugin (policy: redis, files/kong.yml) so the
+# backs Kong's rate-limiting plugin (policy: redis, files/kong.yml) so the
 # per-minute/hour request throttle is a real fleet-wide limit shared across every Kong replica —
 # see the Chart.yaml dependency comment. Deliberately minimal: no persistence (rate-limit
 # counters are inherently ephemeral/self-healing — a restart just resets the window early, which
@@ -278,7 +275,7 @@ redis:
         memory: 256Mi
 
 # ─── Operator Frontend ──────────────────────────────────────────────────────
-# Phase 5: gives the Helm chart the same deployment coverage docker-compose.yml already has for
+# gives the Helm chart the same deployment coverage docker-compose.yml already has for
 # frontend-operator (docker-compose.yml lines ~367-394) — previously this chart deployed only the
 # backend, so a Helm-based install had no way to actually serve either UI. Angular is baked at
 # image-build time (frontend-operator/Dockerfile's `ARG BUILD_CONFIG` + `ng build --configuration`

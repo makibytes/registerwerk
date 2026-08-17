@@ -13,4 +13,4 @@ Questa sezione riguarda la progettazione interna della piattaforma Registerwerk 
 - [REST API Panoramica](api.md) — struttura URL, risposte agli errori, impaginazione
 - [Sviluppo dApp](dapp-development.md): framework di autorizzazioni dell'ecosistema, flusso di lavoro di pubblicazione del marketplace
 - [Interoperabilità DeFi](defi-interoperability.md): domande sulla giurisdizione, ponte intestatario/omnibus e una struttura di pronti contro termine/prestito di riferimento non approvata per l'uso in produzione
-- [Astrazione account e transazioni sponsorizzate](account-abstraction.md) — roadmap ERC-4337/EIP-7702, sponsorizzazione del gas, passkey
+- [Astrazione account e transazioni sponsorizzate](account-abstraction.md) — supporto ERC-4337/EIP-7702, sponsorizzazione del gas, passkey

@@ -94,4 +94,3 @@ Erwähnenswert, weil Kunden das Gegenteil annehmen werden.
 | Etwas ist ausgefallen | [Überwachung](maintenance/monitoring.md) · [Notfallhandbuch](dr/runbook.md) |
 | Kunde ausgesperrt | [Zwei-Faktor-Support](customers/two-factor-support.md) |
 | Kunde ratlos | [Identitätsübernahme](customers/impersonation.md) — genau sehen, was er sieht |
-| Bekannte Mängel | [Prüfungsbefunde](../assurance-review-ledger.md) |

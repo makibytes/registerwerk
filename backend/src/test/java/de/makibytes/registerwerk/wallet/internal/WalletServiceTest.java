@@ -37,9 +37,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for the operator-wallet lifecycle (finding #11, Phase 8) — the highest-blast-
- * radius module in the repo had zero test coverage before this. Also covers findings #3
- * (actor identity threaded into every lifecycle event) and #9 (KEK rotation).
+ * Unit tests for the operator-wallet lifecycle, including actor attribution and KEK rotation.
  */
 @ExtendWith(MockitoExtension.class)
 class WalletServiceTest {
@@ -80,7 +78,7 @@ class WalletServiceTest {
     // ── generate ──────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("generate(EVM) persists the wallet, auto-promotes it, and publishes an event carrying the real actor (finding #3)")
+    @DisplayName("generate(EVM) persists the wallet, auto-promotes it, and publishes an event carrying the real actor")
     void generate_evm_publishesEventWithActor() {
         when(walletRepository.findByName("my-wallet")).thenReturn(Optional.empty());
         when(walletStorage.storeEvm(any(), any())).thenReturn("some-id.json");
@@ -109,7 +107,7 @@ class WalletServiceTest {
     // ── importRaw / importKeystore ────────────────────────────────────────────
 
     @Test
-    @DisplayName("importRaw publishes an event carrying the real actor (finding #3)")
+    @DisplayName("importRaw publishes an event carrying the real actor")
     void importRaw_publishesEventWithActor() throws Exception {
         when(walletRepository.findByName("imported")).thenReturn(Optional.empty());
         when(walletStorage.importEvmRaw(any(), any())).thenReturn("some-id.json");
@@ -123,7 +121,7 @@ class WalletServiceTest {
     }
 
     @Test
-    @DisplayName("importKeystore publishes an event carrying the real actor (finding #3)")
+    @DisplayName("importKeystore publishes an event carrying the real actor")
     void importKeystore_publishesEventWithActor() throws Exception {
         when(walletRepository.findByName("imported")).thenReturn(Optional.empty());
         when(walletStorage.importEvmKeystore(any(), any(), any())).thenReturn("some-id.json");
@@ -150,7 +148,7 @@ class WalletServiceTest {
     }
 
     @Test
-    @DisplayName("exportKeystore publishes an event carrying the real actor (finding #3)")
+    @DisplayName("exportKeystore publishes an event carrying the real actor")
     void exportKeystore_publishesEventWithActor() {
         UUID id = UUID.randomUUID();
         when(walletRepository.findById(id)).thenReturn(Optional.of(wallet(id, WalletType.EVM, id + ".json")));
@@ -184,7 +182,7 @@ class WalletServiceTest {
     // ── rename ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("rename rejects a duplicate name and publishes an event carrying the real actor otherwise (finding #3)")
+    @DisplayName("rename rejects a duplicate name and publishes an event carrying the real actor otherwise")
     void rename_publishesEventWithActor() {
         UUID id = UUID.randomUUID();
         when(walletRepository.findById(id)).thenReturn(Optional.of(wallet(id, WalletType.EVM, id + ".json")));
@@ -200,7 +198,7 @@ class WalletServiceTest {
     // ── delete ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("delete removes chain defaults, evicts the signer cache, and publishes an event carrying the real actor (finding #3)")
+    @DisplayName("delete removes chain defaults, evicts the signer cache, and publishes an event carrying the real actor")
     void delete_removesDefaultsEvictsSignerAndPublishesEvent() {
         UUID id = UUID.randomUUID();
         OperatorWallet w = wallet(id, WalletType.EVM, id + ".json");
@@ -233,7 +231,7 @@ class WalletServiceTest {
         verifyNoInteractions(walletStorage);
     }
 
-    // ── KEK rotation (finding #9, Phase 8) ─────────────────────────────────────
+    // ── KEK rotation  ─────────────────────────────────────
 
     @Test
     @DisplayName("rotateKek(EVM) delegates to WalletStorage and publishes rotated=true")

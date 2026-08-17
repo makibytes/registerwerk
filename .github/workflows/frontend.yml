@@ -119,7 +119,7 @@ jobs:
         with:
           sarif_file: trivy-cust.sarif
 
-  # Phase 7: github/codeql-action was previously used ONLY as a SARIF uploader for each app's
+  # github/codeql-action was previously used ONLY as a SARIF uploader for each app's
   # Trivy container-image scan above — actual CodeQL static analysis of the TypeScript/Angular
   # source itself (XSS sinks, unsafe DOM APIs, prototype pollution) never ran. JS/TS analysis is
   # source-based (no build/npm-install step needed), so one job covers all three source trees.

@@ -4,7 +4,7 @@
 # kong:8001, and the main stack must already be up first (registerwerk_default must exist).
 # Previously this file declared no network at all, so Compose gave it its own separate
 # "monitoring_default" network and every scrape target in prometheus.yml was unreachable
-# by construction (Phase 12, finding #4).
+# by construction .
 networks:
   default:
     name: registerwerk_default
@@ -56,7 +56,7 @@ services:
     # NOTE: Promtail is end-of-life. Loki has moved on to 3.7.x while promtail stopped at 3.6.x;
     # Grafana's replacement is Alloy (grafana/alloy), which subsumes promtail's scrape config.
     # 3.6.11 is the last release — pinned here so the stack keeps working, but migrating this
-    # service to Alloy is a tracked follow-up, not something to defer indefinitely.
+    # service to Alloy requires an explicit deployment change.
     image: grafana/promtail:3.6.11
     volumes:
       - /var/log:/var/log:ro
@@ -105,7 +105,7 @@ services:
 
   # ─── Postgres exporter ─────────────────────────────────────────────────────
   # prometheus.yml's "postgres" scrape job referenced this target already; the service
-  # itself was never defined anywhere (Phase 12, finding #4).
+  # itself was never defined anywhere .
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.20.1
     environment:

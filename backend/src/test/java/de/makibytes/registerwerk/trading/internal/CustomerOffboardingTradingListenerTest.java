@@ -59,7 +59,7 @@ class CustomerOffboardingTradingListenerTest {
     }
 
     @Test
-    @DisplayName("publishes TradeListingCancelledEvent per cancelled listing (finding #6, Phase 7)")
+    @DisplayName("publishes TradeListingCancelledEvent per cancelled listing ")
     void publishesEventPerCancelledListing() {
         UUID entityId = UUID.randomUUID();
         TradeListing open = new TradeListing();

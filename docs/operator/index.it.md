@@ -94,4 +94,3 @@ Vale la pena dirlo, perché i clienti presumeranno il contrario.
 | Qualcosa è giù | [Monitoraggio](maintenance/monitoring.md) · [Manuale di ripristino](dr/runbook.md) |
 | Cliente bloccato fuori | [Assistenza due fattori](customers/two-factor-support.md) |
 | Cliente confuso | [Modalità supporto](customers/impersonation.md) — vedere esattamente ciò che vede lui |
-| Difetti noti | [Registro dei rilievi](../assurance-review-ledger.md) |

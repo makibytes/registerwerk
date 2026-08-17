@@ -117,4 +117,3 @@ Weder der Code noch diese Dokumentation kann sie beantworten. Sie entscheiden da
 
 - [Audit-Log](../../platform/audit-log.md) — die technische Referenz
 - [Rechtsrahmen](../../legal/index.md) · [Compliance-Bausteine](../../compliance/index.md)
-- [Prüfungsbefunde](../../assurance-review-ledger.md) — gegen diese Codebasis erhobene Feststellungen

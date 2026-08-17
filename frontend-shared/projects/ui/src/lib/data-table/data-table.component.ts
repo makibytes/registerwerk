@@ -202,7 +202,7 @@ export class DataTableComponent implements OnInit, OnChanges, AfterViewInit, OnD
    * is just the current page, `totalItems`/`pageIndex` drive the paginator's `[length]`, and
    * `(page)`/`(sortChange)`/`(filterChange)` tell the parent what to fetch next — needed for any
    * dataset too large to ship to the browser in one response (see `rw-data-table`'s own findings
-   * in the Phase 6 review: 23 consumers were all client-side-only, several papering over it with
+   * in the 23 consumers were all client-side-only, several papering over it with
    * a hardcoded `size: 100`/`size: 200` request ceiling instead of real pagination).
    */
   @Input() paginationMode: 'client' | 'server' = 'client';

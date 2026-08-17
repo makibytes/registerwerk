@@ -67,7 +67,7 @@ app — both are always reached directly at their own port.
 
 - Docker & Docker Compose
 - Java 25+ (for local backend development)
-- Node 20+ / npm (for frontend development)
+- Node 24 / npm (for frontend development)
 - Foundry (`curl -L https://foundry.paradigm.xyz | bash`)
 
 ### 1. Copy environment file
@@ -216,8 +216,8 @@ Each backend module follows the pattern `<module>/api/` (public surface), `<modu
 | ERC-4626 / ERC-7540 (tokenized vaults) | Repository implementation present; economic terms and production readiness unverified |
 | Confidential ERC-20 / ERC-3643 (Zama fhEVM) | Repository implementation present; production readiness unverified |
 | SPL / SPL-2022 (Solana) | Repository integration present; production readiness unverified |
-| Starknet ERC-20 / ERC-3525 (Cairo) | Placeholder / incomplete; do not use in production |
-| Stellar classic asset | Placeholder / incomplete; do not use in production |
+| Starknet ERC-20 / ERC-3525 (Cairo) | Repository integration present; production readiness unverified |
+| Stellar classic asset | Repository integration present; production readiness unverified |
 | Daml Finance bonds (Canton) | Optional repository implementation (`-Pcanton`); production readiness unverified |
 
 ### Supported Chains
@@ -242,6 +242,7 @@ Each backend module follows the pattern `<module>/api/` (public surface), `<modu
 | `REGISTRY_ADMIN` | Full access |
 | `AUDIT` | Read all |
 | `COMPLIANCE_OFFICER` | KYC approvals, screening reviews, holder blocks |
+| `RELATIONSHIP_MANAGER` | Read and support assigned customer entities |
 | `ISSUER` | Own issuances (read + write) |
 | `INVESTOR` | Own investments |
 | `TRADER` | Secondary-market listings and executions |
@@ -285,8 +286,9 @@ The `AssetTokenFactory` uses `CREATE2` with a deterministic salt so contract add
 ## Security Notes
 
 - The backend acts as an OAuth2 Resource Server in both modes; it validates the JWT itself and
-  derives entity/role authorities directly from its claims (`JwtEntityClaimsConverter`) — it does
-  not trust any inbound `X-Entity-Id`/`X-Entity-Roles` headers. In OIDC mode, customer traffic
+  resolves the principal to an `app_user` row (`DefaultPrincipalResolver`). Persisted roles and
+  entity scope are authoritative after provisioning, and inbound `X-Entity-Id`/`X-Entity-Roles`
+  headers are not trusted. In OIDC mode, customer traffic
   typically flows through Kong first, but Kong here only adds rate limiting, response caching, and
   security headers; it does not itself validate the JWT (Kong's `openid-connect` plugin is
   Enterprise-only — see `gateway/plugins/oidc-entra.yml` for the config to merge in if you're

@@ -38,7 +38,7 @@ import java.util.Optional;
  * counted and the indexer is paused with status {@code ERROR} once
  * {@link #MAX_CONSECUTIVE_ERRORS} is reached.
  *
- * <p><strong>Reorg safety (Phase 2):</strong> every tick first reads the Graph Node's current
+ * <p><strong>Reorg safety:</strong> every tick first reads the Graph Node's current
  * {@code _meta} head. Newly-fetched transfers are written PROVISIONAL or FINAL depending on
  * whether they already clear {@link BlockchainTxProperties#confirmationsFor}; PROVISIONAL rows
  * get a {@code block_hash} recorded via a time-travel {@code _meta(block:{number})} query. After
@@ -332,7 +332,7 @@ public class GraphNodeSyncService {
         t.setEventType(resolveEventType(gt.eventType(), gt.from(), gt.to()));
         t.setExplorerTxUrl(explorerUrlBuilder.buildTxUrl(chain, gt.transactionHash()));
 
-        // Finality classification (Phase 2). No head available this tick -> conservatively
+        // Finality classification. No head available this tick -> conservatively
         // PROVISIONAL with no hash (the next tick's reorg pass, once the head is available again,
         // will fetch a hash and either flip it FINAL or leave it PROVISIONAL as appropriate).
         if (headBlock == null) {

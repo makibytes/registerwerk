@@ -18,7 +18,7 @@ git submodule update --recursive
 
 ### 2. Consultez le journal des modifications
 
-Vérifiez `CHANGELOG.md` pour les modifications importantes, les notes de migration de base de données et les modifications de configuration avant de continuer.
+Examinez les commits et les changements de configuration entre la version actuellement déployée et la version cible avant de continuer.
 
 ### 3. Créez la nouvelle image backend
 
@@ -131,7 +131,7 @@ docker tag ghcr.io/ewpg/registerwerk-backend:previous \
   registerwerk-backend:latest
 docker compose up -d backend
 ```
-Les migrations de bases de données ne peuvent pas être automatiquement annulées. Si une migration doit être annulée, utilisez les scripts de migration `DOWN` dans `backend/src/main/resources/db/migration/` (présents pour toutes les migrations à partir de V10).
+Les migrations Flyway de ce dépôt ne disposent pas de scripts de retour arrière automatiques. Si une version modifie le schéma, restaurez la sauvegarde antérieure à la mise à niveau avec l'image applicative précédente, ou déployez une migration corrective révisée.
 
 ## Mise à niveau de Kong
 

@@ -25,12 +25,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Proves, against a real Postgres 17 container (not mocks), the two load-bearing pieces of
- * Phase 1 production-readiness work:
- *
+ * Proves, against a real Postgres 17 container, the partition and retention behavior.
  * <ol>
  *   <li>{@code token_transfer} is genuinely RANGE-partitioned by {@code occurred_at} after
- *       V3__retention_and_partitioning.sql: thousands of rows spread across several months all
+ *       the baseline schema: thousands of rows spread across several months all
  *       land in the correct monthly partition (none in the DEFAULT partition), and
  *       {@code rw_retire_partitions} can DETACH old partitions — proven here on token_transfer
  *       as the "non-regulated table" the task background calls for, since audit_event is

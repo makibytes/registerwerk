@@ -5,11 +5,9 @@ description: ERC-4337 / EIP-7702 cuentas inteligentes, gas patrocinado, claves d
 
 # Abstracción de cuenta y transacciones patrocinadas { #account-abstraction-sponsored-transactions }
 
-Una oportunidad distinta de la [interoperabilidad DeFi](./defi-interoperability.md): los avances en
-el ecosistema Ethereum desde ERC-4337 (abstracción de cuenta) permiten patrocinar el gas para
-clientes minoristas/institucionales y simplificar su incorporación, con independencia de cualquier
-puente DeFi. Esto era terreno totalmente nuevo cuando comenzó este trabajo: no existía ningún
-código de AA/paymaster/clave de acceso en ningún lugar del repositorio.
+Registerwerk admite transacciones patrocinadas ERC-4337, cuentas delegadas EIP-7702, verificación
+de monederos ERC-1271 y una cuenta de clave de acceso en cadena. Estas funciones son independientes
+de la [interoperabilidad DeFi](./defi-interoperability.md).
 
 ## Fundamento: `WalletSignatureVerifier` { #foundation-walletsignatureverifier }
 
@@ -39,14 +37,10 @@ que el código de un EOA delegado por 7702 implementa `isValidSignature` como cu
 monedero de contrato inteligente, incluido `EwpgPasskeyAccount` (más abajo), que es exactamente ese
 tipo de implementación delegada.
 
-**Implicación para el frontend (aún sin construir):** `frontend-customer` no tiene hoy ninguna
-capa de abstracción de monedero — un único punto de llamada a `window.ethereum.request(...)`
-(`frontend-customer/src/app/features/company-admin/org-identity/org-identity.component.ts`).
-Introducir soporte de 7702/cuenta inteligente implica construir desde cero una capa de monedero
-ligera; `viem` (con sus ayudantes `viem/account-abstraction` y de EIP-7702) es el SDK recomendado,
-ya que no existe ninguna dependencia previa de ethers/wagmi cuya compatibilidad haya que preservar.
-Esta sigue siendo la única pieza de este bloque de trabajo que es trabajo de interfaz de usuario y
-no un cambio de contrato/backend.
+`frontend-customer` centraliza el acceso al monedero en `WalletService` e implementa la ejecución
+opcional EIP-7702/ERC-4337 en `SponsoredTxService`. El patrocinio exige
+`environment.bundlerUrl`, una dirección de paymaster y un ID de política resuelto. La interfaz no
+crea ni opera instancias de `EwpgPasskeyAccount`.
 
 ## `EwpgPaymaster` — transacciones patrocinadas { #ewpgpaymaster-sponsored-transactions }
 
@@ -138,12 +132,8 @@ implementa EIP-2612 de forma nativa; verifique el soporte de AllUnity Euro antes
 `subscribeWithPermit` contra él en producción — la ruta simple `subscribe` sigue disponible en
 cualquier caso.
 
-## Datos tipados de EIP-712 — todavía diferido { #eip-712-typed-data-still-deferred }
+## Formatos de firma { #signature-formats }
 
-Los monederos muestran los datos estructurados de EIP-712 de forma mucho más legible que las
-cadenas hexadecimales u opacas. Merece la pena aplicarlo a cualquier mensaje firmado en cuanto
-exista una interfaz de firma correspondiente para representarlo — el desafío de vinculación de
-monedero mediante `personal_sign` y los flujos de firma de manifiesto existentes se dejaron
-deliberadamente tal cual en este paso, ya que migrar su formato de transmisión requiere un cambio
-de método de firma en el frontend (`eth_signTypedData_v4`) que queda fuera de alcance aquí;
-introducir el formato sin ese llamador sería simplemente superficie sin usar.
+La vinculación del monedero y la firma de manifiestos usan `personal_sign`.
+`WalletSignatureVerifier` acepta ese formato para EOA y monederos ERC-1271, pero no firmas de
+datos tipados EIP-712.

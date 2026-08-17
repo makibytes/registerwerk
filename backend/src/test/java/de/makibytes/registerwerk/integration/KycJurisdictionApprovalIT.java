@@ -162,7 +162,7 @@ class KycJurisdictionApprovalIT {
         headers.setBearerAuth(signedJwt("00000000-0000-0000-0000-000000000001", true, roles));
         // Every call site in this file hits the same jurisdiction-approve endpoint
         // (@RequiresStepUp(reason = "KYC_JURISDICTION_APPROVE")) — the dual-control token
-        // must carry a matching stepup_scope claim (finding #10, Phase 8).
+        // must carry a matching stepup_scope claim .
         headers.set("X-Dual-Control-Token", dualControlToken("KYC_JURISDICTION_APPROVE"));
         return headers;
     }
@@ -178,7 +178,7 @@ class KycJurisdictionApprovalIT {
         return signedJwt(sub, stepUp, null, roles);
     }
 
-    /** @param scope embedded as the {@code stepup_scope} claim when non-null (finding #10, Phase 8). */
+    /** @param scope embedded as the {@code stepup_scope} claim when non-null . */
     private String signedJwtWithScope(String sub, String scope, String... roles) {
         return signedJwt(sub, true, scope, roles);
     }

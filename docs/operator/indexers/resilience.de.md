@@ -117,16 +117,6 @@ groups:
           severity: critical
 ```
 
-## Geplanter Ereignisbereichsvergleich (nicht implementiert)
-
-Registerwerk stellt derzeit keinen Admin-Endpunkt `verify-consistency` bereit. Eine geplante Wiederherstellungskontrolle wird:
-
-1. Den Subgraph nach allen Transfer-Ereignissen im Blockbereich abfragen
-2. Dieselben Ereignisse direkt über `eth_getLogs` von der Chain abrufen
-3. Beide Mengen vergleichen und etwaige Abweichungen melden
-
-Bis diese Kontrolle implementiert und getestet ist, müssen Betreiber vor einer erneuten Verlassung darauf einen unabhängig kontrollierten Ereignisbereichsvergleich durchführen. Selbst dann würden übereinstimmende Ereignismengen nur Übereinstimmung für den geprüften Bereich belegen — nicht Chain-Finalität, maßgeblichen Registerstatus, rechtliche Wirkung, Abwicklung oder die Identität des bereitgestellten Codes.
-
 # Resilienz und Wiederherstellung
 
 ## Fehlermodi und Wiederherstellung

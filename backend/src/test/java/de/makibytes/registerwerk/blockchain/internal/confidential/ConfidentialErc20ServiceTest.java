@@ -26,7 +26,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit test for the finding #7 (Phase 9) fail-closed fix: deploying a confidential ERC-20 with
+ * Unit test for the fail-closed fix: deploying a confidential ERC-20 with
  * no configured viewer must abort rather than silently proceed with a permanently undecryptable
  * register entry.
  */

@@ -238,9 +238,7 @@ public class Erc3643DeploymentService {
 
             // send() already waits for a mined, non-reverted receipt (throws otherwise), so the
             // suite genuinely exists on-chain now — resolve its real addresses via the factory's
-            // own getSuiteAddresses(salt) view call rather than parsing event-log topics (the
-            // previous approach only ever captured 3 of 6 addresses and, for the sibling overload,
-            // was never even attempted here — see the ERC-3643 review's findings #2/#6).
+            // own getSuiteAddresses(salt) view call rather than parsing event-log topics.
             Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deployment.getId());
             Erc3643Suite saved = suiteRepository.save(suite);
             saved.setFactoryTxHash(receipt.getTransactionHash());

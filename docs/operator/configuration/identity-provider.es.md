@@ -67,11 +67,4 @@ Opcionalmente, finalice OIDC en Kong también usando `gateway/plugins/oidc-self-
 
 ## Claims JWT esperados { #jwt-claims-expected }
 
-El `JwtEntityClaimsConverter` del backend lee los claims directamente del JWT validado. No
-depende de ningún encabezado inyectado por la puerta de enlace:
-- `sub` - asunto del usuario
-- `roles` - lista de cadenas de roles (por ejemplo, `["ISSUER", "COMPANY_ADMIN"]`), convertidas en autoridades `ROLE_*`
-- `entity_id` - el UUID de la entidad jurídica, para el alcance multi-tenant
-
-Configure la asignación de tokens/claims de su IdP para que estén presentes en el JWT emitido. No hay ningún paso de mapeo de entidades del lado de
-Kong en la configuración de OSS Kong de este repositorio.
+El backend resuelve cada JWT validado a una fila `app_user` y no confía en cabeceras de identidad inyectadas por la puerta de enlace. Los tokens OIDC genéricos necesitan un claim `sub` estable y un claim de correo electrónico para el primer aprovisionamiento. Los tokens de Entra usan `oid` como identidad estable. `roles` y `entity_id` solo inicializan una cuenta nueva; después prevalecen los roles y el ámbito de entidad persistidos. No existe un paso de mapeo de entidades en Kong en la configuración OSS de este repositorio.

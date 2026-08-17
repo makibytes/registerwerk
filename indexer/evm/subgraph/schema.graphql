@@ -259,7 +259,7 @@ type AsyncVaultRequestEvent @entity(immutable: true) {
 }
 
 # ── EwpgRepoMarket (isolated repo/lending market) ────────────────────────────
-# finding #7, Phase 7 — previously no event-log ingestion existed for this contract pair at
+#  — previously no event-log ingestion existed for this contract pair at
 # all. RepoMarketEvent now exposes a provisional event hint; it cannot establish durable
 # liquidation status without separate canonical-inclusion and finality evidence.
 
@@ -369,7 +369,7 @@ type RepoVaultEvent @entity(immutable: true) {
   logIndex: BigInt!
 }
 
-# ── Payment-leg contracts (finding #6, Phase 8) ──────────────────────────────
+# ── Payment-leg contracts  ──────────────────────────────
 # DvpSettlement, EwpgBondDesk and StablecoinAmm previously had no event-log ingestion at
 # all — the on-chain cash legs these contracts move (DvP escrow/settlement, primary-market
 # bond subscriptions/coupons/redemptions, stablecoin AMM swaps) were invisible to the
@@ -448,7 +448,7 @@ type StablecoinAmmEvent @entity(immutable: true) {
   logIndex: BigInt!
 }
 
-# ── Confidential (Zama fhEVM) tokens (finding #8, Phase 9) ───────────────────
+# ── Confidential (Zama fhEVM) tokens  ───────────────────
 # Previously no event-log ingestion existed for confidential tokens at all — a holder-initiated
 # ConfidentialTransfer was invisible to the backend, so it could never be evaluated for FATF/TFR
 # Travel Rule obligations the way a backend-initiated forceTransfer already is. Amounts stay

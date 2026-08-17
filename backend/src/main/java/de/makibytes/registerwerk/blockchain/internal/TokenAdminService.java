@@ -404,7 +404,7 @@ public class TokenAdminService implements TokenAdminPort {
         return asset;
     }
 
-    // ── Confidential ERC-3643 pause / freeze (finding #6, Phase 9) ───────────
+    // ── Confidential ERC-3643 pause / freeze  ───────────
     //
     // ConfidentialERC3643.sol implements pause()/unpause()/setAddressFrozen(address,bool) — the
     // eWpG §24/MiCAR Art. 36,84 corrective-action machinery every OTHER T-REX-family token
@@ -531,11 +531,11 @@ public class TokenAdminService implements TokenAdminPort {
         }
         if (standard == TokenStandard.SPL || standard == TokenStandard.SPL_2022) {
             throw new UnsupportedOperationException(
-                    "SPL token admin controls go through SolanaTokenAdminService (Phase-4 implementation).");
+                    "SPL token admin controls go through SolanaTokenAdminService (implementation).");
         }
         if (standard == TokenStandard.SPL_2022_BOND || standard == TokenStandard.SPL_2022_CONFIDENTIAL) {
             throw new UnsupportedOperationException(
-                    "Token-2022 extension-preset admin operations go through SolanaTokenAdminService (Phase-4 implementation).");
+                    "Token-2022 extension-preset admin operations go through SolanaTokenAdminService (implementation).");
         }
         if (standard == TokenStandard.ERC3525 || standard == TokenStandard.STARKNET_ERC3525) {
             throw new IllegalArgumentException(

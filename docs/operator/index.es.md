@@ -94,4 +94,3 @@ Conviene decirlo, porque los clientes supondrán lo contrario.
 | Algo está caído | [Supervisión](maintenance/monitoring.md) · [Manual de recuperación](dr/runbook.md) |
 | Cliente bloqueado fuera | [Soporte de doble factor](customers/two-factor-support.md) |
 | Cliente desorientado | [Modo soporte](customers/impersonation.md) — ver exactamente lo que él ve |
-| Defectos conocidos | [Registro de hallazgos](../assurance-review-ledger.md) |

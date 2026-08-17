@@ -42,8 +42,7 @@ public class IndexerState {
     /**
      * Highest block number whose token_transfer rows have all been re-verified and flipped to
      * FINAL. Always {@code <= lastSyncedBlock}. Null before the first successful finality pass,
-     * or for indexer types with no two-tier model. See V4__reorg_safety.sql for the full
-     * rationale.
+     * or for indexer types with no two-tier model.
      */
     @Column(name = "last_final_block")
     private Long lastFinalBlock;

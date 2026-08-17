@@ -117,4 +117,3 @@ Ni el código ni esta documentación pueden responderlas. Son las que determinan
 
 - [Pista de auditoría](../../platform/audit-log.md) — la referencia técnica
 - [Marcos jurídicos](../../legal/index.md) · [Componentes de cumplimiento](../../compliance/index.md)
-- [Registro de hallazgos](../../assurance-review-ledger.md) — hallazgos planteados contra esta base de código

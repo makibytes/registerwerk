@@ -13,10 +13,10 @@ import "../ecosystem/mocks/MockClaimIssuer.sol";
 import "../ecosystem/mocks/MockOnchainId.sol";
 import "./handlers/EwpgRepoMarketHandler.sol";
 
-/// @notice Fuzzed invariant suite for {EwpgRepoMarket} (finding #12, Phase 7) — a bounded-random
+/// @notice Fuzzed invariant suite for {EwpgRepoMarket}  — a bounded-random
 ///         handler drives supply/withdraw/pledgeAndBorrow/repay/liquidate/price-move sequences
 ///         and every run checks the pool's core accounting identities still hold, including
-///         through the bad-debt write-off path added by finding #5. Complements (does not
+///         through the bad-debt write-off path added by . Complements (does not
 ///         replace) `EwpgRepoMarket.t.sol`'s scenario-specific unit tests.
 contract EwpgRepoMarketInvariantTest is Test {
     OrgRegistry orgRegistry;
@@ -108,7 +108,7 @@ contract EwpgRepoMarketInvariantTest is Test {
 
     /// @notice The pool's core accounting identity: idle cash plus outstanding debt must always
     ///         equal what depositors (plus the protocol's own reserves) are owed. This must
-    ///         continue to hold through the bad-debt write-off path (finding #5) — a write-off
+    ///         continue to hold through the bad-debt write-off path — a write-off
     ///         removes debt and depositor claims by the same amount, by construction, so this
     ///         identity is exactly what proves that fix keeps the books balanced rather than
     ///         quietly creating or destroying value.

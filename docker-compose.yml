@@ -1,6 +1,6 @@
 # Named explicitly (rather than left to Compose's directory-name default) so the network
 # monitoring/docker-compose.yml joins as "registerwerk_default" is deterministic regardless
-# of what directory this repo is checked out into (Phase 12, finding #4).
+# of what directory this repo is checked out into .
 name: registerwerk
 
 # Container logs previously had no rotation configured anywhere, so Docker's default json-file
@@ -418,14 +418,14 @@ services:
       # Its public address must be registered as a viewer (addViewer / deploy-time
       # initialViewers) on any confidential token the operator needs to reconcile.
       #
-      # Finding #2, Phase 9: prefer the envelope-encrypted pair below over the plaintext
+      # : prefer the envelope-encrypted pair below over the plaintext
       # ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY — produce ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED with
       # `cd zama-relayer && RELAYER_KEK_MASTER_KEY=<master-key> npm run wrap-operator-key -- <rawKeyHex>`.
       # The plaintext var still works (logs a startup warning) for local/dev convenience.
       OPERATOR_DECRYPT_PRIVATE_KEY: ${ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY:-}
       OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: ${ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED:-}
       RELAYER_KEK_MASTER_KEY: ${ZAMA_RELAYER_KEK_MASTER_KEY:-}
-      # Finding #6, Phase 9: shared secret every /v1/* caller must present — see auth.ts. Same
+      # : shared secret every /v1/* caller must present — see auth.ts. Same
       # value the backend sends above (REGISTERWERK_ZAMA_RELAYER_API_KEY); keep them in sync.
       RELAYER_API_KEY: ${ZAMA_RELAYER_API_KEY:-registerwerk-dev-zama-relayer-key-change-in-production}
       PORT: 3001

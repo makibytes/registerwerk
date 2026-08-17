@@ -6,7 +6,7 @@ import { TxSubmissionResponse } from './transaction.service';
 
 /**
  * Wraps `blockchain.web.SolanaTokenAdminController` (`/solana-admin`), the controller that
- * finally wires up `SolanaTokenAdminService` — previously "Phase-4" and unreachable from any
+ * finally wires up `SolanaTokenAdminService` — previously "" and unreachable from any
  * API despite being a fully implemented Token-2022 Permanent Delegate integration.
  */
 @Injectable({ providedIn: 'root' })

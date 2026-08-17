@@ -12,7 +12,7 @@ import java.util.UUID;
 /**
  * Immutable, append-only audit log (eWpRV §6 integrity). No FK constraints for throughput.
  * Hash chain enforced by AuditEventRecorder: entry_hash = SHA-256(prev_hash || payload || sequence_no).
- * DB-level WORM trigger in V10__audit_chain.sql prevents UPDATE/DELETE.
+ * A database WORM trigger prevents UPDATE and DELETE operations.
  */
 @Entity
 @Table(name = "audit_event")
@@ -46,7 +46,7 @@ public class AuditEvent {
     private Instant occurredAt = Instant.now();
 
     /**
-     * audit_event.id of the entry this one reverses/corrects (V2 migration). Null for
+     * audit_event.id of the entry this one reverses or corrects. Null for
      * ordinary events. No FK by design, matching the rest of this table.
      */
     @Column(name = "reverses_event_id", updatable = false)
@@ -56,7 +56,7 @@ public class AuditEvent {
     @Column(name = "correlation_id", updatable = false)
     private UUID correlationId;
 
-    // ── Hash chain fields (V2__audit_chain_and_correction_linkage.sql) ────────
+    // ── Hash chain fields ────────────────────────────────────────────────────
     /**
      * Monotonically increasing sequence number. Reserved explicitly by
      * {@code AuditEventRecorder} (via {@code nextval('audit_event_seq')}) before insert

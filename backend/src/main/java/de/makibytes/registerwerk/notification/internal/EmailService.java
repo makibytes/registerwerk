@@ -81,7 +81,7 @@ public class EmailService implements de.makibytes.registerwerk.notification.api.
 
     /** No persisted state backs email delivery at all (not even a fire-and-forget audit event),
      *  so a Counter — not a gauge — is the only thing to expose (repo-wide alerting-gap
-     *  follow-up). Tagged by context to keep the fire-and-forget path (sendHtml) distinguishable
+     *  metric). Tagged by context to keep the fire-and-forget path (sendHtml) distinguishable
      *  from the §19-statement-delivery path (sendHtmlWithPdf), whose caller actually needs the
      *  boolean outcome. */
     private void incrementFailureCounter(String context) {

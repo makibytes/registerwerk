@@ -240,7 +240,7 @@ public class SolanaTransferSyncService {
         transfer.setOccurredAt(resolveOccurredAt(rawTxData));
         transfer.setExplorerTxUrl(explorerUrlBuilder.buildTxUrl(chain, txSignature));
         transfer.setRawData(rawTxData);
-        // Phase 2: both getSignaturesForAddress and getTransaction above are called with
+        // both getSignaturesForAddress and getTransaction above are called with
         // commitment=finalized, so by the time a row reaches this point Solana's own consensus
         // (supermajority-rooted, no probabilistic finality/reorg window) already treats it as
         // irreversible — there is no separate provisional tier for Solana the way there is for

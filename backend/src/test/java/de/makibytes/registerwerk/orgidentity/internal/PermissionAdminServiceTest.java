@@ -34,7 +34,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("PermissionAdminService — cross-tier revoke isolation (finding #3) + dual-control persistence (#4)")
+@DisplayName("PermissionAdminService — cross-tier revoke isolation + dual-control persistence")
 class PermissionAdminServiceTest {
 
     @Mock private PermissionDefinitionRepository definitionRepository;
@@ -165,7 +165,7 @@ class PermissionAdminServiceTest {
     }
 
     @Test
-    @DisplayName("setRoleRestricted publishes an audit event (finding #5)")
+    @DisplayName("setRoleRestricted publishes an audit event")
     void setRoleRestricted_publishesEvent() {
         UUID orgRegistrationId = UUID.randomUUID();
         UUID entityId = UUID.randomUUID();

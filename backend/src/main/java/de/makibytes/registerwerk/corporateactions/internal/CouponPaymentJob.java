@@ -24,15 +24,8 @@ import java.util.UUID;
  * Reads asset_coupon_payment rows with status=SCHEDULED and scheduled_date &lt;= today,
  * creates CorporateAction(type=COUPON) rows and triggers settlement.
  *
- * <p>Originally written as an {@code org.quartz.Job}, but was never actually wired up: no
- * {@code JobDetail}/{@code Trigger} bean, no {@code SchedulerFactoryBean}, and no
- * {@code spring.quartz.*} configuration existed anywhere in the app, so this logic never ran in
- * any deployment despite {@link CorporateActionAnnouncedEvent} and
- * {@code RegisterTransferService}'s doc comments describing it as if it were an active scheduled
- * job. Converted to a ShedLock'd {@code @Scheduled} bean — the same pattern as its sibling
- * {@link BondMaturityJob} — as part of Phase 1 production-readiness work, which also removed the
- * now-fully-unused Quartz persistent job store (spring-boot-starter-quartz dependency and the
- * qrtz_* tables; see {@code V3__retention_and_partitioning.sql}).
+ * <p>Runs as a ShedLock-protected scheduled job so only one backend instance processes a due
+ * coupon cycle.
  */
 @Component
 public class CouponPaymentJob {

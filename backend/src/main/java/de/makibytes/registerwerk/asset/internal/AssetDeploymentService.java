@@ -63,10 +63,6 @@ public class AssetDeploymentService {
      * both real chains but running their OWN, separate, non-Zama FHE stacks with incompatible
      * libraries; Registerwerk's confidential contracts (ConfidentialERC20/ERC3643) are built
      * specifically against Zama's TFHE.sol/Gateway API and will not function against either.
-     * Add {@code Chain.CANTON} here once T-REX Chain is represented as its own {@code Chain}
-     * value and has published its FHEVM infrastructure addresses (T-REX Network announced in
-     * March 2026 that Zama is becoming its confidentiality layer, but T-REX Chain is not yet a
-     * distinct entry in this enum).
      */
     private static final EnumSet<Chain> FHEVM_CHAINS =
             EnumSet.of(Chain.ETHEREUM, Chain.BASE);
@@ -272,7 +268,7 @@ public class AssetDeploymentService {
         if (NON_EVM_CHAINS.contains(deployChain)) {
             // Solana/Canton/Stellar have no chain-read confirmation path here at all — a
             // pre-existing gap (see AssetDeploymentCompletionWriter's IMMEDIATE_CONFIRM_CHAINS
-            // javadoc) that Phase 2 documents but does not close; it needs its own per-chain
+            // javadoc) that documents but does not close; it needs its own per-chain
             // finality design, not merely this EVM/Starknet confirmation-depth policy.
             log.debug("syncFromChain: chain {} has no automated confirmation path yet", deployChain);
             return;

@@ -51,7 +51,7 @@ import java.time.Instant;
  *       {@code CantonTransferSyncService} already deletes a row the moment its underlying ledger
  *       contract is archived/consumed (see {@code holdingSnapshotRepository.deleteById}). There
  *       is no stale-row accumulation here to sweep — this table is already self-pruning by
- *       design. (Correction to the Phase 1 plan's premise: it listed this table as a retention
+ *       design. (Correction to the plan's premise: it listed this table as a retention
  *       candidate to evaluate; on inspection it turned out not to need one at all.)</li>
  * </ul>
  */
@@ -173,7 +173,7 @@ class RetentionSweepJob {
      * spring-configuration-metadata.json declares {@code defaultValue: "update"} for
      * {@code spring.modulith.events.completion-mode}, and this app does not override it in
      * application.yml) — completed publications are marked via {@code completion_date}, not
-     * deleted, so {@code event_publication} does grow without bound exactly as the Phase 1 plan
+     * deleted, so {@code event_publication} does grow without bound exactly as the plan
      * assumed. Only rows with a non-null completion_date (i.e. already successfully processed)
      * older than the window are eligible; incomplete rows are left alone for
      * republish-outstanding-events-on-restart / retry to handle.

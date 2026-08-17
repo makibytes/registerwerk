@@ -306,7 +306,7 @@
       <artifactId>aspectjweaver</artifactId>
     </dependency>
 
-    <!-- ── Resilience (Phase 3) ─────────────────────────────────────────────
+    <!-- ── Resilience ─────────────────────────────────────────────
          Programmatic API only (Retry.of/CircuitBreaker.of/Bulkhead.of), not the
          resilience4j-spring-boot3 annotation starter — that starter's auto-config targets Spring
          Boot 3.x actuator/metrics APIs whose Spring Boot 4 compatibility hasn't been verified in
@@ -487,11 +487,8 @@
             <phase>verify</phase>
             <goals><goal>check</goal></goals>
             <configuration>
-              <!-- Exclude pure data carriers and infrastructure wiring that cannot
-                   be meaningfully unit-tested without live external services.
-                   Roadmap: line 0.36 (current floor) → 0.45 (after screening/KYC/audit ITs) → 0.60 (full).
-                   The whole-bundle floor is a regression guard; the compliance-critical packages
-                   below carry their own, higher floors so the code that matters most cannot erode. -->
+              <!-- The whole-bundle floor is a regression guard; compliance-critical packages
+                   below carry their own, higher floors. -->
               <excludes>
                 <!-- Domain event records — pure data carriers with generated equals/hashCode -->
                 <exclude>**/events/*Event.class</exclude>
@@ -623,7 +620,7 @@
               </rules>
             </configuration>
           </execution>
-          <!-- Phase 7: floors for the production-readiness program's own packages, set just
+          <!-- floors for the production-readiness program's own packages, set just
                below measured coverage (blockchain/internal 38.8%/27.8%, indexer/internal
                66.1%/42.1%, infrastructure 95.8%/67.9% at the time these were added) so the
                retention/partitioning, reorg-safety, nonce-coordination and observability work

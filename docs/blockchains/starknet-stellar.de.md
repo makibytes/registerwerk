@@ -5,9 +5,8 @@ description: Status und Konfiguration der Blockchain-Unterstützung für StarkNe
 
 # StarkNet & Stellar { #starknet-stellar }
 
-StarkNet und Stellar werden in Registerwerk teilweise unterstützt. Die Infrastruktur-Verdrahtung
-(Client-Anbindung, Deployment-Service-Gerüste, Token-Standard-Enums) ist vorhanden, aber beide Chains
-haben **Platzhalterwerte**, die vor dem Produktionseinsatz ersetzt werden müssen.
+Registerwerk enthält funktionsfähige Starknet- und Stellar-Integrationen mit klaren betrieblichen
+Grenzen. Ohne netzwerkspezifische Tests gelten sie nicht als produktionsvalidiert.
 
 ---
 
@@ -25,16 +24,20 @@ Ethereum-äquivalente Sicherheit bei deutlich geringeren Transaktionskosten.
 
 ### Status { #status }
 
-⚠️ **Der StarkNet-Class-Hash ist ein Nullplatzhalter.** Vor der Bereitstellung von StarkNet-Token in
-der Produktion:
+`StarknetTokenService` sendet signierte Invoke-v3-Transaktionen über den Universal Deployer
+Contract. Die Deployment-Bestätigung wartet auf `ACCEPTED_ON_L1`; der
+`StarknetTransferSyncService` indexiert ERC-20-/ERC-3525-Transfers.
+
+Die Standard-Class-Hashes für ERC-20 und ERC-3525 sind null und führen zu einem sofortigen Fehler.
+Vor einem Deployment:
 
 1. Die Cairo-Verträge unter `contracts/cairo/` kompilieren
 2. Die Vertragsklasse deklarieren: `starkli declare target/dev/EwpgERC3525.json`
-3. Den Class-Hash in der Konfiguration von `StarknetTokenService` durch den deklarierten Class-Hash
-   ersetzen
+3. `registerwerk.chains.starknet.erc20-class-hash` und/oder
+   `registerwerk.chains.starknet.erc3525-class-hash` setzen
 
-Der `StarknetTokenService` verwendet einen eigenen Java-Client (Starknet4j), konfiguriert über
-`Chain.STARKNET` + `Network.MAINNET/TESTNET`.
+Die Integration verwendet Starknet JSON-RPC und das für `Chain.STARKNET` sowie
+`Network.MAINNET/TESTNET` konfigurierte Operator-Wallet.
 
 ### Netzwerke { #networks }
 
@@ -61,7 +64,7 @@ On-Chain-Darstellungen beliebiger Währungen oder Instrumente.
 Anders als bei EVM oder Solana verfügt Stellar auf Protokollebene über einen eingebauten Asset-Typ.
 Es ist keine Vertragsbereitstellung nötig:
 
-1. Das **ausgebende Konto** richtet vom Inhaberkonto aus eine Trustline ein
+1. Ein Inhaber richtet eine Trustline für Emittent und Asset-Code ein
 2. Das ausgebende Konto sendet das Asset per `Payment`-Operation an das Inhaberkonto
 3. Salden werden nativ in den Ledger-Einträgen des Stellar-Kontos gespeichert
 
@@ -69,26 +72,13 @@ In Registerwerk:
 
 - `AssetDeployment.contractAddress` speichert die Stellar-**Adresse des ausgebenden Kontos**
   (Stellar-Public-Key)
-- `StellarAssetService` nutzt die **Horizon-API** (Java-SDK), um Transaktionen einzureichen
+- `StellarAssetService` erzeugt und signiert das XDR und reicht es über die **Horizon-API** ein
 
 ### Status { #status }
 
-⚠️ **Die Stellar-Unterstützung ist ein Platzhalter.** Die Gerüste von `StellarAssetService` sind
-vorhanden, aber die vollständige Implementierung (Trustline-Management, Compliance, Indexer) ist noch
-nicht abgeschlossen.
-
----
-
-## Roadmap-Hinweis { #roadmap-note }
-
-Sowohl StarkNet als auch Stellar sind aktive Entwicklungsbereiche. Die Infrastruktur ist vorhanden, um
-Beiträge zu ermöglichen. Prioritätsüberlegungen:
-
-- **StarkNet ERC-3525**: Hoher Nutzen für [Liechtenstein-TVTG](../legal/tvtg-li.md)-Emittenten, die
-  ZK-nachgewiesene Abwicklung gegenüber optimistischen Rollups bevorzugen
-- **Stellar**: Nützlich für grenzüberschreitende Zahlungswertpapiere und Stablecoins in
-  Schwellenländern
-
-Um eine Implementierung beizutragen, folgen Sie dem Muster der EVM-Deployment-Services
-(`Erc20DeploymentService`, `Erc3525DeploymentService`) und implementieren Sie dieselbe
-`TokenDeploymentPort`-Schnittstelle.
+`StellarAssetService` speichert die Registerwerk-Asset-ID mit einer signierten
+`ManageData`-Transaktion und unterstützt Clawback sowie Trustline-Autorisierung. Der Service
+erstellt keine Inhaber-Trustlines und verteilt keinen Anfangsbestand. Der
+`StellarTransferSyncService` indexiert nur Zahlungen mit Beteiligung des Emittentenkontos;
+direkte Inhaber-zu-Inhaber-Transfers sind nicht abgedeckt. Für Stellar-Deployments gibt es in
+`AssetDeploymentService` außerdem keinen automatischen Bestätigungspfad.

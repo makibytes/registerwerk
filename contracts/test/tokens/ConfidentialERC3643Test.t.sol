@@ -122,7 +122,7 @@ contract ConfidentialERC3643Test is Test {
         token.confidentialTransfer(address(0x3), einput.wrap(bytes32(0)), hex"");
     }
 
-    /// @notice Regression test for findings #3/#4 (Phase 9): confidentialTransferFrom must
+    /// @notice confidentialTransferFrom must
     ///         (a) decrement the spender's allowance by what actually moved, not the requested
     ///         amount, so a transfer that moves zero tokens because the balance check
     ///         independently fails cannot still burn the allowance, and (b) re-grant the
@@ -149,7 +149,7 @@ contract ConfidentialERC3643Test is Test {
         token.confidentialTransferFrom(owner, address(0x61), einput.wrap(bytes32(0)), hex"");
     }
 
-    /// @notice Regression test for finding #1 (Phase 9): before the fix, the base
+    /// @notice Regression test for: before the fix, the base
     ///         ConfidentialERC20.confidentialTransferFrom wasn't `virtual` and ConfidentialERC3643
     ///         never overrode it — so an approved spender could move encrypted tokens through the
     ///         allowance path with zero compliance enforcement, even while the token was paused.
@@ -168,7 +168,7 @@ contract ConfidentialERC3643Test is Test {
         token.confidentialTransferFrom(owner, address(0x61), einput.wrap(bytes32(0)), hex"");
     }
 
-    /// @notice Regression test for finding #1 (Phase 9): a frozen sender must also block the
+    /// @notice Regression test for: a frozen sender must also block the
     ///         allowance-based path, not just direct confidentialTransfer.
     function test_confidentialTransferFrom_revertsWhenSenderFrozen() public onFhevm {
         address spender = address(0x60);
@@ -185,7 +185,7 @@ contract ConfidentialERC3643Test is Test {
 
     // ── Forced transfer ─────────────────────────────────────────────────────
 
-    /// @notice Regression test for finding #10 (Phase 9): forcedTransfer bypasses pause/freeze
+    /// @notice Regression test for: forcedTransfer bypasses pause/freeze
     ///         intentionally (regulatory override) but must still notify the compliance module's
     ///         bookkeeping hook (transferred()), matching real T-REX's Token.forcedTransfer.
     ///         Compliance is left as the stub address here on purpose: transferred() has no

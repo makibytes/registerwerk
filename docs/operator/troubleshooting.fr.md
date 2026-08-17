@@ -88,7 +88,7 @@ Cette page couvre les problèmes les plus courants rencontrés lors du fonctionn
      | jq '.[].latestIndexedBlock'
    ```
 
-2. Si l'indexeur a rattrapé son retard et que l'événement est toujours manquant, effectuez une comparaison indépendante et contrôlée des événements du sous-graphe avec `eth_getLogs` pour la plage concernée. Le point de terminaison d'administration `verify-consistency` prévu n'est pas implémenté.
+2. Si l'indexeur a rattrapé son retard et que l'événement est toujours manquant, effectuez une comparaison indépendante et contrôlée des événements du sous-graphe avec `eth_getLogs` pour la plage concernée.
 
 3. Si un écart est confirmé, redéployez le sous-graphe à partir d'un bloc antérieur à l'événement manquant
 

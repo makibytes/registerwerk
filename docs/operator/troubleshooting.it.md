@@ -89,8 +89,7 @@ Questa pagina copre i problemi più comuni riscontrati durante il funzionamento 
    ```
 
 2. Se l'indicizzatore ha recuperato il ritardo e l'evento è ancora mancante, eseguire un confronto controllato in modo indipendente
-degli eventi del sottografo rispetto a `eth_getLogs` per l'intervallo interessato. L'endpoint di amministrazione
-pianificato `verify-consistency` non è implementato.
+degli eventi del sottografo rispetto a `eth_getLogs` per l'intervallo interessato.
 
 3. Se viene confermata una lacuna, ridistribuire il sottografo da un blocco prima dell'evento mancante
 

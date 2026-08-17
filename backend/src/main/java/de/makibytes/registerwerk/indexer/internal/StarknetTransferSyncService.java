@@ -71,7 +71,7 @@ public class StarknetTransferSyncService {
     private static final String STATUS_REJECTED = "REJECTED";
 
     /**
-     * Phase 3: bounds the per-address fan-out below (previously an unbounded
+     * bounds the per-address fan-out below (previously an unbounded
      * {@code CompletableFuture.supplyAsync} per watched address on the shared common
      * ForkJoinPool — a chain with many tracked addresses could exhaust that pool, starving every
      * other unrelated {@code CompletableFuture} user in the same JVM).
@@ -324,7 +324,7 @@ public class StarknetTransferSyncService {
                 "logIndex", logIndex
         ));
 
-        // Finality classification (Phase 2): FINAL only once ACCEPTED_ON_L1; ACCEPTED_ON_L2 (the
+        // Finality classification: FINAL only once ACCEPTED_ON_L1; ACCEPTED_ON_L2 (the
         // common case for a just-observed event) and PENDING both stay PROVISIONAL. A block whose
         // status can't be determined this tick (RPC error) is conservatively PROVISIONAL too —
         // the reorg pass will keep re-checking it on later ticks.

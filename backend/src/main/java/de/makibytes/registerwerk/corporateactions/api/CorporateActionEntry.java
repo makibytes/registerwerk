@@ -6,11 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Per-holder line item of a {@link CorporateAction} — the entitlement snapshot the
- * {@code corporate_action_entry} table was always designed to hold (see
- * {@code V1__initial_schema.sql}), but which had no JPA entity or write path until now: every
- * coupon/dividend action only ever carried an asset-level {@code totalAmount}, with no
- * per-holder breakdown to compute Steuerbescheinigung income or a payment confirmation from.
+ * Per-holder entitlement snapshot for a {@link CorporateAction}.
  *
  * <p>Lifecycle: a row is created for every current holder of the asset when the corporate
  * action reaches {@code RECORD_DATE_SET} ({@code nominalAtRecord} snapshotted then — the

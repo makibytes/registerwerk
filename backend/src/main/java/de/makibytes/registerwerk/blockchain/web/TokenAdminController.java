@@ -246,7 +246,7 @@ public class TokenAdminController {
 
     /**
      * Confidential-ERC-3643 equivalent of {@link #pause}. Not step-up gated, matching the
-     * plaintext {@code pause} endpoint's own gating (finding #6, Phase 9).
+     * plaintext {@code pause} endpoint's own gating .
      */
     @PostMapping("/confidential-pause")
     public ResponseEntity<TxSubmissionResponse> confidentialPause(
@@ -255,7 +255,7 @@ public class TokenAdminController {
         return accepted(adminService.confidentialPause(depId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
-    /** Confidential-ERC-3643 equivalent of {@link #unpause} (finding #6, Phase 9). */
+    /** Confidential-ERC-3643 equivalent of {@link #unpause} . */
     @PostMapping("/confidential-unpause")
     public ResponseEntity<TxSubmissionResponse> confidentialUnpause(
             @PathVariable UUID assetId, @PathVariable UUID depId, Authentication auth) {
@@ -263,7 +263,7 @@ public class TokenAdminController {
         return accepted(adminService.confidentialUnpause(depId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
-    /** Confidential-ERC-3643 equivalent of {@link #freeze} (finding #6, Phase 9). */
+    /** Confidential-ERC-3643 equivalent of {@link #freeze} . */
     @PostMapping("/confidential-freeze")
     public ResponseEntity<TxSubmissionResponse> confidentialFreeze(
             @PathVariable UUID assetId, @PathVariable UUID depId,
@@ -273,7 +273,7 @@ public class TokenAdminController {
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
-    /** Confidential-ERC-3643 equivalent of {@link #unfreeze} (finding #6, Phase 9). */
+    /** Confidential-ERC-3643 equivalent of {@link #unfreeze} . */
     @PostMapping("/confidential-unfreeze")
     public ResponseEntity<TxSubmissionResponse> confidentialUnfreeze(
             @PathVariable UUID assetId, @PathVariable UUID depId,

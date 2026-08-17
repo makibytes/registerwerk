@@ -51,7 +51,7 @@ class AssetDeploymentCompletionWriterTest {
 
     @Test
     void evmSubmission_receiptSeenButOnlyOneConfirmation_staysPendingAwaitingDepthPoll() {
-        // Phase 2 fix: EVM's contractAddress is resolved from the deployed-address event log,
+        // EVM's contractAddress is resolved from the deployed-address event log,
         // which only proves a receipt exists — one confirmation, not the configured depth.
         // markSubmitted must not treat that as final; AssetDeploymentService's scheduled poll
         // owns flipping this to CONFIRMED once the confirmation depth is actually met.

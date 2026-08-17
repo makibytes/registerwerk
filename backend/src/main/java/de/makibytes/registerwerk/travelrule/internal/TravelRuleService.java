@@ -84,7 +84,7 @@ public class TravelRuleService {
         this.completionWriter = completionWriter;
 
         // Live-queried at scrape time — send() sets STATUS_FAILED on the async completion
-        // callback's failure path, but nothing ever counted it (repo-wide alerting-gap follow-up).
+        // callback's failure path.
         Gauge.builder("registerwerk_travelrule_failed_messages_recent_total", jdbc, TravelRuleService::countRecentFailures)
                 .description("Count of travel_rule_message rows with status=FAILED in the last 24h")
                 .register(meterRegistry);

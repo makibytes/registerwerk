@@ -116,7 +116,7 @@ server:
   error:
     include-message: never
   # Lets an in-flight request finish before the JVM stops, instead of the connector cutting it
-  # off mid-response — matters for rolling Kubernetes deployments (Phase 4), which send SIGTERM
+  # off mid-response — matters for rolling Kubernetes deployments, which send SIGTERM
   # to a pod that may still be serving traffic. Bounded by spring.lifecycle's shutdown timeout
   # below so a stuck request can't block shutdown forever.
   shutdown: graceful
@@ -150,7 +150,7 @@ management:
       enabled: false
   metrics:
     distribution:
-      # RED metrics (Phase 4): without a histogram, http.server.requests only exposes a count +
+      # RED metrics: without a histogram, http.server.requests only exposes a count +
       # sum, so p95/p99 latency cannot be computed in Prometheus at all — Grafana/alerting would
       # have throughput and error-rate but no real latency signal.
       percentiles-histogram:
@@ -241,8 +241,7 @@ registerwerk:
         rpc-url: ${SOLANA_MAINNET_RPC:https://api.mainnet-beta.solana.com}
       testnet:
         rpc-url: ${SOLANA_DEVNET_RPC:https://api.devnet.solana.com}
-      # SPL Token-2022 BOND/CONFIDENTIAL presets refuse to deploy until both are set (finding #12,
-      # Phase 10) — see SolanaTokenService.createSplToken2022's fail-fast gate.
+      # SPL Token-2022 BOND/CONFIDENTIAL presets refuse to deploy until both are set.
       transfer-hook-program-id: ${SOLANA_TRANSFER_HOOK_PROGRAM_ID:}
       confidential-transfer-auditor-elgamal-pubkey: ${SOLANA_CONFIDENTIAL_AUDITOR_ELGAMAL_PUBKEY:}
     canton:
@@ -338,8 +337,7 @@ registerwerk:
     # EwpgConfidentialFactory (Zama fhEVM) — gated to Chain.ETHEREUM/Chain.BASE
     # (AssetDeploymentService.FHEVM_CHAINS); Fhenix/Inco are separate, non-Zama FHE stacks and are
     # NOT valid confidential-deployment targets (see docs/blockchains/confidential-evm.md). These
-    # keys previously (wrongly) targeted fhenix-*/inco-* — dead config since the deployment gate
-    # only ever asks for ethereum-*/base-* identifiers.
+    # available only for ethereum-*/base-* identifiers.
     confidential-factory:
       ethereum-mainnet: ${CONFIDENTIAL_FACTORY_ETH_MAINNET:}
       ethereum-testnet: ${CONFIDENTIAL_FACTORY_ETH_TESTNET:}

@@ -13,19 +13,16 @@ lato browser (`frontend-customer`/`frontend-operator`).
 
 ---
 
-## Blockchain che eseguono davvero l'fhEVM di Zama
+## Ambito delle blockchain configurato
 
-| Blockchain | Stato | Fonte |
-|---|---|---|
-| Ethereum Sepolia | Indirizzi reali e documentati (ACL, TFHEExecutor, FHEPayment, KMSVerifier, Gateway) — vedi `contracts/lib/fhevm/config/ZamaFHEVMConfig.sol` e `SepoliaConfig`, incluso nello stesso `@zama-fhe/relayer-sdk` | Libreria inclusa nel repository / pacchetto npm |
-| Ethereum mainnet | Obiettivo dichiarato, indirizzi non definitivi al momento della stesura (obiettivo terzo trimestre 2026) e aggiornabili tramite governance una volta attivi | Roadmap pubblica di Zama / forum della community |
-| Base | L'annuncio del "fhEVM Coprocessor" di Zama cita Base accanto a Ethereum | Annuncio di prodotto di Zama |
-| T-REX Chain | Zama ha annunciato (marzo 2026) che sta diventando il livello di confidenzialità di T-REX Ledger — aspetto direttamente rilevante per `CONF_ERC3643` — ma T-REX Chain non ha ancora una voce nell'enum `Chain` qui e non ha pubblicato i propri indirizzi FHEVM | Comunicato stampa pubblico T-REX/Zama |
+| Blockchain | Comportamento di Registerwerk |
+|---|---|
+| Ethereum | Il deployment confidenziale è accettato se la factory specifica della rete è configurata. |
+| Base | Il deployment confidenziale è accettato se la factory specifica della rete è configurata. |
+| Altri valori di `Chain` | Il deployment confidenziale viene rifiutato. |
 
-`AssetDeploymentService.FHEVM_CHAINS` limita il deployment confidenziale a `Chain.ETHEREUM` e
-`Chain.BASE` esattamente per questo motivo. **Fhenix e Inco sono esclusi deliberatamente**: restano
-elencati come normali blockchain EVM nell'enum `Chain` (con i propri nodi RPC a fini informativi/di
-tracciamento), ma non sono destinazioni valide per il deployment confidenziale.
+`AssetDeploymentService.FHEVM_CHAINS` è la lista consentita autorevole. Fhenix e Inco restano
+normali voci EVM nell'enum `Chain`, ma non sono destinazioni valide per deployment confidenziali.
 
 ---
 

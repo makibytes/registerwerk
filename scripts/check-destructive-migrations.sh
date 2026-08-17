@@ -5,7 +5,7 @@ set -euo pipefail
 # and an ALTER TABLE ... DROP ... — so a migration that would silently destroy data can't merge
 # without a human explicitly saying it's intentional. This repo's own convention for anything that
 # looks like "remove data" is DETACH-then-archive, never an unconditional DROP (see
-# rw_retire_partitions in V3__retention_and_partitioning.sql) — a real DROP should be the rare,
+# rw_retire_partitions in the baseline schema) — a real DROP should be the rare,
 # reviewed exception, not something that slips through unnoticed in a large diff.
 #
 # Only NEW migration files (added since the base ref) are scanned. This repo never edits an

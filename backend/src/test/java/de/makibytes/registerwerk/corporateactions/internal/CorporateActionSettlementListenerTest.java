@@ -29,7 +29,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Verifies Phase 6 finding #1: previously EVERY DAML bond corporate action (coupon or
+ * Verifies : previously EVERY DAML bond corporate action (coupon or
  * redemption alike) was routed to {@code payCoupon}, so a REDEMPTION action paid face value
  * but never exercised {@code Redeem} on the DAML ledger. Also verifies the pre-existing
  * (separately discovered while fixing #1) bug where the wrong ID — the corporate action's, not

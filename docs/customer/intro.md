@@ -85,9 +85,9 @@ Being clear about this is more useful than a list of features.
 !!! warning "Registerwerk is a reference implementation"
     Working software that models how an electronic securities registry can be built — so the design can be examined, criticised and reused.
 
-    **Using it does not make anybody compliant with the eWpG or any other law.** It does not confer regulatory authorisation, and it does not give a token legal effect as a security. Those depend on the operator's licence, the instrument, the offer, the parties and the deployment.
+    **Using it does not establish adherence to the eWpG or any other law.** It does not confer regulatory authorisation, and it does not give a token legal effect as a security. Those depend on the operator's licence, the instrument, the offer, the parties and the deployment.
 
-    You may encounter older material claiming tokens issued here are "legally equivalent to traditional bearer bonds and shares". **That claim is wrong** and has been removed. Whether an instrument has legal effect is determined by law and by how it was actually issued — never by the software that recorded it.
+    Whether an instrument has legal effect is determined by law and by how it was actually issued — never by the software that recorded it.
 
 More specifically, it is not:
 

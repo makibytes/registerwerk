@@ -94,4 +94,3 @@ Cela mérite d'être dit, car les clients supposeront le contraire.
 | Quelque chose est tombé | [Supervision](maintenance/monitoring.md) · [Plan de reprise](dr/runbook.md) |
 | Client verrouillé dehors | [Assistance deux facteurs](customers/two-factor-support.md) |
 | Client perdu | [Mode support](customers/impersonation.md) — voir exactement ce qu'il voit |
-| Défauts connus | [Registre des constats d'assurance](../assurance-review-ledger.md) |

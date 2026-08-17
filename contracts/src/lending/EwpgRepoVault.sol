@@ -37,7 +37,7 @@ import "./EwpgRepoMarket.sol";
 ///      depositor who chose this vault specifically for diversified,
 ///      loss-isolated exposure across markets does not currently get that isolation once
 ///      capital is allocated — a per-market loss-containment/tranching model is a natural v2
-///      refinement, tracked alongside the withdrawal-queue gap above, not yet implemented here.
+///      refinement and is not implemented here.
 contract EwpgRepoVault is ERC4626, RegisterwerkGated, ReentrancyGuard {
     using SafeERC20 for IERC20;
 

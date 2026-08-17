@@ -25,7 +25,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** Verifies Phase 6 finding #7: settlement confirmation previously published no audit event
+/** Verifies : settlement confirmation previously published no audit event
  *  at all — only the settlement *request* was audited, never its confirmation. */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("CorporateActionSettlementWriter audit-event unit tests")

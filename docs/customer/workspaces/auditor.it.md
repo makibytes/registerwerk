@@ -117,4 +117,3 @@ Né il codice né questa documentazione possono rispondervi. Sono quelle che det
 
 - [Pista di controllo](../../platform/audit-log.md) — il riferimento tecnico
 - [Quadri giuridici](../../legal/index.md) · [Componenti di conformità](../../compliance/index.md)
-- [Registro dei rilievi](../../assurance-review-ledger.md) — rilievi sollevati su questa base di codice

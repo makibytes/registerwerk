@@ -13,4 +13,4 @@ Esta sección cubre el diseño interno de la plataforma Registerwerk para ingeni
 - [Descripción general de la API REST](api.md) — estructura de URL, respuestas de error, paginación
 - [Desarrollo de dApp](dapp-development.md) — marco de permisos del ecosistema, flujo de trabajo de publicación en el mercado
 - [Interoperabilidad DeFi](defi-interoperability.md) — preguntas de jurisdicción, puente nominado/ómnibus, y una facilidad de referencia de repo/préstamo que no está aprobada para uso en producción
-- [Abstracción de cuenta y transacciones patrocinadas](account-abstraction.md) — hoja de ruta ERC-4337/EIP-7702, patrocinio de gas, claves de acceso
+- [Abstracción de cuenta y transacciones patrocinadas](account-abstraction.md) — soporte ERC-4337/EIP-7702, patrocinio de gas, claves de acceso

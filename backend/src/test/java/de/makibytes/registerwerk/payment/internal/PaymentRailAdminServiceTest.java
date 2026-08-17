@@ -133,7 +133,7 @@ class PaymentRailAdminServiceTest {
     }
 
     @Test
-    @DisplayName("update that changes the chain-address mapping records the old/new diff and the dual-control approver (finding #1)")
+    @DisplayName("update that changes the chain-address mapping records the old/new diff and the dual-control approver")
     void updateWithAddressChange_recordsDiffAndApprover() {
         PaymentRail rail = new PaymentRail();
         rail.setId(UUID.randomUUID());
@@ -162,7 +162,7 @@ class PaymentRailAdminServiceTest {
     }
 
     @Test
-    @DisplayName("setMicarVerified(true) records the attestation and its actor (finding #8)")
+    @DisplayName("setMicarVerified(true) records the attestation and its actor")
     void setMicarVerified_recordsAttestation() {
         PaymentRail rail = new PaymentRail();
         rail.setId(UUID.randomUUID());
@@ -180,7 +180,7 @@ class PaymentRailAdminServiceTest {
     }
 
     @Test
-    @DisplayName("setMicarVerified(false) clears the attestation (finding #8)")
+    @DisplayName("setMicarVerified(false) clears the attestation")
     void setMicarVerified_clearsAttestation() {
         PaymentRail rail = new PaymentRail();
         rail.setId(UUID.randomUUID());
@@ -201,7 +201,7 @@ class PaymentRailAdminServiceTest {
     }
 
     @Test
-    @DisplayName("update resets a prior MiCAR attestation once the disclosed fields actually change (finding #8)")
+    @DisplayName("update resets a prior MiCAR attestation once the disclosed fields actually change")
     void update_resetsMicarVerification_whenDisclosureFieldsChange() {
         PaymentRail rail = new PaymentRail();
         rail.setId(UUID.randomUUID());
@@ -223,7 +223,7 @@ class PaymentRailAdminServiceTest {
     }
 
     @Test
-    @DisplayName("update leaves a prior MiCAR attestation intact when the disclosed fields are unchanged (finding #8)")
+    @DisplayName("update leaves a prior MiCAR attestation intact when the disclosed fields are unchanged")
     void update_leavesMicarVerificationIntact_whenDisclosureFieldsUnchanged() {
         PaymentRail rail = new PaymentRail();
         rail.setId(UUID.randomUUID());

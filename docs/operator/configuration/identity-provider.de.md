@@ -67,10 +67,4 @@ Optional können Sie OIDC auch bei Kong terminieren, mit `gateway/plugins/oidc-s
 
 ## Erwartete JWT-Claims
 
-Der `JwtEntityClaimsConverter` des Backends liest Claims direkt vom validierten JWT — er verlässt sich
-nicht auf einen vom Gateway eingefügten Header:
-- `sub` – Benutzer-Subjekt
-- `roles` – Liste von Rollen-Strings (z. B. `["ISSUER", "COMPANY_ADMIN"]`), umgewandelt in `ROLE_*`-Berechtigungen
-- `entity_id` – die UUID der juristischen Person, für Multi-Tenant-Scoping
-
-Konfigurieren Sie das Token-/Claims-Mapping Ihres IdP so, dass diese im ausgestellten JWT vorhanden sind. Im OSS-Kong-Setup dieses Repos gibt es keinen Kong-seitigen Schritt zur Entitätszuordnung.
+Das Backend löst jedes validierte JWT zu einem `app_user`-Datensatz auf und vertraut keinen vom Gateway eingefügten Identitäts-Headern. Generische OIDC-Token benötigen für die erstmalige Bereitstellung einen stabilen `sub`-Claim und einen E-Mail-Claim. Entra-Token verwenden `oid` als stabile Identität. `roles` und `entity_id` befüllen nur ein neues Konto; danach sind die gespeicherten Rollen und die Entitätszuordnung maßgeblich. Im OSS-Kong-Setup dieses Repositories gibt es keine Kong-seitige Entitätszuordnung.

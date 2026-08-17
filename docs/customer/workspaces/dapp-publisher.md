@@ -123,7 +123,7 @@ Both are real, tested code you can read rather than descriptions:
 Both ship as manifests and are seeded as `PUBLISHED` demo listings when demo data is enabled. The minimal integration is `SampleGatedDapp` in the contract tests.
 
 !!! note "These are technical examples"
-    They demonstrate mechanisms. They are not legally classified instruments, verified payment arrangements, or production-ready products.
+    They demonstrate mechanisms. They are not legally classified instruments, verified payment arrangements, or products approved for production use.
 
 ---
 

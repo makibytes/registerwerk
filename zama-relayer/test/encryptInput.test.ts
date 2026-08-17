@@ -73,7 +73,7 @@ describe('POST /v1/encrypt-input', () => {
     expect(res.body.error).toMatch(/relayer unreachable/);
   });
 
-  // ── finding #6, Phase 9: shared-secret auth ──────────────────────────────────────────────
+  // ── Shared-secret auth ────────────────────────────────────────────────
   it('rejects a request with no Authorization header', async () => {
     const app = createServer(config);
     const res = await request(app)

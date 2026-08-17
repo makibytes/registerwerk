@@ -19,7 +19,7 @@ import static org.mockito.Mockito.when;
 /**
  * Unit tests for the email-send-failure counter — no persisted state backs email delivery at
  * all (not even a fire-and-forget audit event, unlike every other job in this repo-wide
- * alerting-gap follow-up), so a Micrometer Counter is the only thing to expose.
+ * alerting metrics), so a Micrometer Counter is the only thing to expose.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("EmailService — send-failure counter")

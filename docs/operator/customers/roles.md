@@ -48,8 +48,6 @@ A user holds one or more. In the customer portal, roles determine which [workspa
     - **To revoke access, change it here** — or disable the account in Entra so they cannot sign in at all.
     - There is exactly one place to look when auditing who can do what.
 
-Some older documentation described roles as arriving in a JWT claim populated by the identity provider and read by a class called `JwtEntityClaimsConverter`. That class has been removed and that model was never how the system behaved. If you are working from a mental model built on it, replace it with the paragraph above.
-
 ---
 
 ## Entity scoping

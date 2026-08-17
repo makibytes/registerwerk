@@ -6,7 +6,7 @@ const EVENT_DERIVED = 'EVENT_DERIVED'
 
 /**
  * Handles EwpgConfidentialFactory.ConfidentialTokenDeployed(assetId, tokenType, tokenAddress) —
- * observes provisional factory-reported metadata for confidential tokens (finding #8, Phase 9).
+ * observes provisional factory-reported metadata for confidential tokens .
  * It does not verify deployment, runtime code, or database linkage. ConfidentialERC3643 inherits
  * ConfidentialERC20 and emits the identical Transfer/Mint/Burn events, so both token types share
  * the one ConfidentialERC20 template — no separate template needed per type.

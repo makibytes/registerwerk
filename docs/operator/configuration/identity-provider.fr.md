@@ -65,11 +65,4 @@ En option, terminez OIDC chez Kong également en utilisant `gateway/plugins/oidc
 
 ## Revendications JWT attendues
 
-Le `JwtEntityClaimsConverter` du backend lit les revendications directement à partir du JWT validé — il ne
-repose sur aucun en-tête injecté par la passerelle :
-- `sub` — sujet utilisateur
-- `roles` — liste de chaînes de rôles (par exemple `["ISSUER", "COMPANY_ADMIN"]`), transformées en autorités `ROLE_*`
-- `entity_id` — l'UUID de l'entité juridique, pour la portée multi-locataires
-
-Configurez le mappage des jetons/revendications de votre IdP afin qu'ils soient présents dans le JWT émis. Il n'y a pas d'étape de mappage d'entité côté
-Kong dans la configuration OSS Kong de ce dépôt.
+Le backend associe chaque JWT validé à une ligne `app_user` et ne fait confiance à aucun en-tête d'identité injecté par la passerelle. Les jetons OIDC génériques nécessitent une revendication `sub` stable et une adresse électronique pour le premier provisionnement. Les jetons Entra utilisent `oid` comme identité stable. `roles` et `entity_id` initialisent uniquement un nouveau compte ; ensuite, les rôles et le périmètre d'entité enregistrés font autorité. La configuration Kong OSS de ce dépôt n'effectue aucun mappage d'entité.

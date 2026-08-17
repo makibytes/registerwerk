@@ -1,7 +1,7 @@
 # SYNC NOTE: this is a copy of ../../../../gateway/kong.yml — Helm can only read files inside
 # its own chart directory (.Files.Get), so this copy is what templates/kong-configmap.yaml
 # actually deploys. Previously the k8s/Helm path had NO wiring to this hardened config at all
-# (Phase 12, finding #8) — the Kong subchart ran its own stock defaults instead, silently
+#  — the Kong subchart ran its own stock defaults instead, silently
 # losing the admin-API scoping/header-stripping/rate-limiting verified in the Compose path.
 # Keep this file identical to the original whenever that one changes — the only deployment-
 # specific delta is called out inline below (rate-limiting's redis.host). The upstream target's
@@ -23,7 +23,7 @@ _format_version: "3.0"
 # into this file only when running Kong Enterprise/Konnect. Never forward
 # identity headers from clients: the backend derives identity from the JWT.
 
-# Phase 5: routes through a Kong upstream (active + passive health checks) instead of a bare
+# routes through a Kong upstream (active + passive health checks) instead of a bare
 # `url:` pointing straight at the backend hostname. This is on top of, not instead of, whatever
 # L4 load balancing the deployment platform's own service discovery already does (a Docker
 # Compose service name round-robins DNS across replicas; a Kubernetes Service load-balances
@@ -180,7 +180,7 @@ plugins:
           - X-Entity-Id
           - X-Entity-Roles
 
-  # Rate limiting — Redis-backed (Phase 5) so the per-minute/hour throttle is a real fleet-wide
+  # Rate limiting — Redis-backed so the per-minute/hour throttle is a real fleet-wide
   # limit shared across every Kong replica, not a per-node counter. policy: local (the previous
   # default) counts independently on each node, so N Kong replicas silently multiplied the
   # effective limit by N — the throttle got weaker exactly when horizontal scale-out made it more

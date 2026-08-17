@@ -88,7 +88,7 @@ Diese Seite behandelt die häufigsten Probleme beim Betrieb des eWpG-Registers, 
      | jq '.[].latestIndexedBlock'
    ```
 
-2. Hat der Indexer aufgeholt und das Ereignis fehlt weiterhin, führen Sie einen unabhängig kontrollierten Vergleich der Subgraph-Ereignisse gegen `eth_getLogs` für den betroffenen Bereich durch. Der geplante Admin-Endpunkt `verify-consistency` ist nicht implementiert.
+2. Hat der Indexer aufgeholt und das Ereignis fehlt weiterhin, führen Sie einen unabhängig kontrollierten Vergleich der Subgraph-Ereignisse gegen `eth_getLogs` für den betroffenen Bereich durch.
 
 3. Ist eine Lücke bestätigt, stellen Sie den Subgraph ab einem Block vor dem fehlenden Ereignis neu bereit
 

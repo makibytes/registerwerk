@@ -126,7 +126,7 @@ class HolderDataServiceTest {
     }
 
     @Test
-    @DisplayName("a newly created on-chain holder publishes HolderBalanceSyncedEvent(newlyCreated=true) (finding #10)")
+    @DisplayName("a newly created on-chain holder publishes HolderBalanceSyncedEvent(newlyCreated=true)")
     void newHolderPublishesCreatedEvent() {
         Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
         givenTransfers(transfer("0x0000000000000000000000000000000000000000", "0xAAA1", "1000", t0));
@@ -148,7 +148,7 @@ class HolderDataServiceTest {
     }
 
     @Test
-    @DisplayName("an existing holder whose balance changed publishes HolderBalanceSyncedEvent(newlyCreated=false) (finding #10)")
+    @DisplayName("an existing holder whose balance changed publishes HolderBalanceSyncedEvent(newlyCreated=false)")
     void updatedHolderPublishesUpdatedEvent() {
         Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
         givenTransfers(transfer("0x0000000000000000000000000000000000000000", "0xaaa1", "500", t0));

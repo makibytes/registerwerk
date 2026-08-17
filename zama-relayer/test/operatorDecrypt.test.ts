@@ -80,7 +80,7 @@ describe('POST /v1/operator-decrypt', () => {
     expect(res.status).toBe(502);
   });
 
-  // ── finding #6, Phase 9: shared-secret auth ──────────────────────────────────────────────
+  // ── Shared-secret auth ────────────────────────────────────────────────
   it('rejects a request with no Authorization header', async () => {
     const app = createServer(config);
     const res = await request(app)

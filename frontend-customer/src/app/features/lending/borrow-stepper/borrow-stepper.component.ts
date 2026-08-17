@@ -445,11 +445,7 @@ export class BorrowStepperComponent implements OnInit {
         await this.wallet.waitForTransaction(approveHash);
       }
 
-      // Sponsored (gasless) execution isn't offered here yet: SponsoredTxService needs a real
-      // EwpgPaymaster address and a resolved policyId, and GasSponsorshipPolicy today only
-      // scopes to an asset's own AssetDeployment — there's no equivalent resolution path for a
-      // lending market yet. Wiring that (a policy per market or per collateral asset) is a
-      // natural next step; until then every borrow pays its own gas via the direct path below.
+      // Lending-market borrowing uses the connected wallet's direct transaction path.
       const hash = await this.wallet.writeContract({
         address: marketAddress,
         abi: repoMarketAbi,

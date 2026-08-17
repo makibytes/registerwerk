@@ -49,7 +49,7 @@ export const CHAIN_LENDING_CAPABILITIES: Record<Chain, ChainLendingCapability> =
     lendingSupported: false,
     sponsoredTxSupported: false,
     maturity: 'PRODUCTION',
-    note: 'Repo/lending is EVM-only today. Solana admin corrections are also still Phase-4 (not yet implemented) — trade this holding via the Trading Desk.',
+    note: 'Repo/lending is EVM-only today. Solana admin corrections are also still (not yet implemented) — trade this holding via the Trading Desk.',
   },
   STARKNET: {
     lendingSupported: false,

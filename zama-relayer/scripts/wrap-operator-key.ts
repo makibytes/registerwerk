@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Offline utility (finding #2, Phase 9): wraps a raw operator-decrypt private key under
+ * Offline utility : wraps a raw operator-decrypt private key under
  * `RELAYER_KEK_MASTER_KEY` so it can be stored as `OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED` instead
  * of plaintext. Never run this against a production master key from a shared/logged shell —
  * treat the printed wrapped value like any other secret in transit.

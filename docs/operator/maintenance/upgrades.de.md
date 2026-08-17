@@ -18,7 +18,7 @@ git submodule update --recursive
 
 ### 2. Das Änderungsprotokoll prüfen
 
-Prüfen Sie `CHANGELOG.md` auf Breaking Changes, Hinweise zur Datenbankmigration und Konfigurationsänderungen, bevor Sie fortfahren.
+Prüfen Sie vorab die Commits und Konfigurationsänderungen zwischen dem aktuell eingesetzten und dem Ziel-Tag.
 
 ### 3. Das neue Backend-Image bauen
 
@@ -130,7 +130,7 @@ docker tag ghcr.io/ewpg/registerwerk-backend:previous \
 docker compose up -d backend
 ```
 
-Datenbankmigrationen können nicht automatisch zurückgerollt werden. Muss eine Migration rückgängig gemacht werden, verwenden Sie die `DOWN`-Migrationsskripte in `backend/src/main/resources/db/migration/` (vorhanden für alle Migrationen ab V10).
+Die Flyway-Migrationen in diesem Repository haben keine automatischen Down-Skripte. Bei einer Schemaänderung stellen Sie die Datenbanksicherung vor dem Upgrade zusammen mit dem vorherigen Anwendungsimage wieder her oder spielen eine geprüfte Vorwärtskorrektur ein.
 
 ## Kong-Upgrade
 

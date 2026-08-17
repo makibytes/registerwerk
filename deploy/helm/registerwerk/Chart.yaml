@@ -16,7 +16,7 @@ dependencies:
     repository: https://charts.konghq.com
     version: "~2.38"
     condition: kong.enabled
-  # Phase 5: backs Kong's rate-limiting plugin (policy: redis in files/kong.yml) so the
+  # backs Kong's rate-limiting plugin (policy: redis in files/kong.yml) so the
   # request-per-minute/hour throttle is a real, fleet-wide limit across every Kong replica —
   # policy: local (the previous default) counts per-node, so N Kong replicas silently multiplied
   # the effective limit by N. Kong OSS's proxy-cache plugin has no Redis-backed strategy at all

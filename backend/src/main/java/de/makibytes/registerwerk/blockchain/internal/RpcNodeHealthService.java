@@ -96,7 +96,7 @@ public class RpcNodeHealthService {
 
         // Live-queried at scrape time over the real persisted health state — checkAllNodes()
         // already saveAll()s this every ~30s, but nothing ever counted it (repo-wide
-        // alerting-gap follow-up).
+        // alerting gauge).
         Gauge.builder("registerwerk_rpc_nodes_unhealthy_total", rpcNodeRepository, RpcNodeRepository::countByHealthyFalse)
                 .description("Count of RpcNode rows currently marked unhealthy")
                 .register(meterRegistry);

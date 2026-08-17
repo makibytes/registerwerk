@@ -16,9 +16,9 @@ git pull origin main
 git submodule update --recursive
 ```
 
-### 2. Review the changelog
+### 2. Review the release
 
-Check `CHANGELOG.md` for breaking changes, database migration notes, and configuration changes before proceeding.
+Review the commits and deployment configuration changes between the currently deployed tag and the target tag before proceeding.
 
 ### 3. Build the new backend image
 
@@ -139,7 +139,7 @@ docker tag ghcr.io/ewpg/registerwerk-backend:previous \
 docker compose up -d backend
 ```
 
-Database migrations cannot be automatically rolled back. If a migration needs to be reverted, use the `DOWN` migration scripts in `backend/src/main/resources/db/migration/` (present for all migrations from V10 onwards).
+Flyway migrations in this repository have no automatic down scripts. If a release changes the schema, restore the pre-upgrade database backup together with the previous application image, or deploy a reviewed forward-fix migration.
 
 ## Kong upgrade
 

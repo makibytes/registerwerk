@@ -48,8 +48,6 @@ Un utente ne detiene uno o più. Nel portale clienti, i ruoli determinano quali 
     - **Per revocare l'accesso, modificalo qui** o disabilita l'account in Entra in modo che non possano accedere affatto.
     - C'è esattamente un posto in cui cercare quando si controlla chi può fare cosa.
 
-Parte della documentazione precedente descriveva i ruoli come se arrivassero in un'attestazione JWT popolata dal provider di identità e letta da una classe chiamata `JwtEntityClaimsConverter`. Quella classe è stata rimossa e quel modello non è mai stato il modo in cui si è comportato il sistema. Se stai lavorando partendo da un modello mentale costruito su di esso, sostituiscilo con il paragrafo precedente.
-
 ---
 
 ## Scoping delle entità { #entity-scoping }

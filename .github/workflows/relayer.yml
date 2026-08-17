@@ -53,7 +53,7 @@ jobs:
         with:
           sarif_file: trivy-relayer.sarif
 
-  # Phase 7: github/codeql-action was previously used ONLY as a SARIF uploader for the Trivy
+  # github/codeql-action was previously used ONLY as a SARIF uploader for the Trivy
   # image scan above — actual CodeQL static analysis of the TypeScript source never ran.
   codeql-typescript:
     name: CodeQL (TypeScript)

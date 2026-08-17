@@ -29,7 +29,7 @@ public class TokenTransfer {
     public enum EventType { MINT, TRANSFER, BURN }
 
     /**
-     * Two-tier finality state — see V4__reorg_safety.sql for the full rationale.
+     * Two-tier finality state.
      * PROVISIONAL: within the configured confirmation depth, not yet re-verified.
      * FINAL: cleared the confirmation depth, or chain-natively final on write
      * (Solana at commitment=finalized, Stellar ledger close, Canton synchronizer commit,

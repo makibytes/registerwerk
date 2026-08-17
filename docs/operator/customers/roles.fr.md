@@ -48,8 +48,6 @@ Un utilisateur en détient un ou plusieurs. Dans le portail client, les rôles d
     - **Pour révoquer un accès, modifiez-le ici** — ou désactivez le compte dans Entra pour que la personne ne puisse plus se connecter du tout.
     - Il n'y a qu'un seul endroit où regarder pour auditer qui peut faire quoi.
 
-    Une documentation plus ancienne décrivait les rôles comme provenant d'une revendication JWT renseignée par le fournisseur d'identité et lue par une classe appelée `JwtEntityClaimsConverter`. Cette classe a été supprimée et ce modèle n'a jamais correspondu au comportement réel du système. Si vous travaillez à partir d'un modèle mental construit sur cette base, remplacez-le par le paragraphe ci-dessus.
-
 ---
 
 ## Portée de l'entité

@@ -8,7 +8,7 @@ import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Verifies Phase 5 finding #8: entry_sig now has a real, testable (dev/test-grade) signer. */
+/** Verifies : entry_sig now has a real, testable (dev/test-grade) signer. */
 @DisplayName("EnvVarEd25519SigningKeyProvider unit tests")
 class EnvVarEd25519SigningKeyProviderTest {
 

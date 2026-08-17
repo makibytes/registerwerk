@@ -40,7 +40,7 @@ public class AssetDeployment {
     @Column(name = "deployment_status", nullable = false, length = 10)
     private DeploymentStatus deploymentStatus = DeploymentStatus.PENDING;
 
-    /** EVM deployment-tx receipt block hash — see V4__reorg_safety.sql column comment. */
+    /** EVM deployment transaction receipt block hash. */
     @Column(name = "block_hash", length = 66)
     private String blockHash;
 

@@ -214,7 +214,7 @@ These depend on tenant configuration and on Microsoft behaviour that is not full
   The adapter deletes the default last and reports per-method failures rather than assuming.
 - Exact TAP behaviour for an internal-but-guest account; the `#EXT#` heuristic distinguishes
   external guests and should be confirmed empirically.
-- Whether cross-tenant MFA trust satisfies an authentication-context requirement for federated
+- Whether cross-tenant MFA trust is accepted for an authentication-context policy for federated
   users. Microsoft documents that FIDO2, Windows Hello and certificate-based auth satisfy strength
   only in the user's *home* tenant.
 - Graph throttling under sustained `/two-factor/refresh` polling. The backend throttles per user,

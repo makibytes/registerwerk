@@ -8,10 +8,8 @@ import {
 import { DvpSettlementEvent } from '../generated/schema'
 
 /**
- * Lifecycle-event ingestion for the operator-provided DvpSettlement rail (finding #6,
- * Phase 8) — previously this contract's cash-leg transfers (escrow lock, same-transaction settlement,
- * expiry/counterparty cancellation) were invisible to the backend, unlike backend-initiated
- * forceTransfer paths which go through Travel Rule evaluation and the audit trail.
+ * Lifecycle-event ingestion for the operator-provided DvpSettlement rail, including escrow,
+ * settlement, expiry, and counterparty cancellation.
  */
 function newEvent(txHash: string, logIndex: string, eventType: string): DvpSettlementEvent {
   let id = txHash + '-' + logIndex

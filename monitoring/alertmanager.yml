@@ -2,7 +2,7 @@
 # previously used below for webhook/PagerDuty/Slack URLs is never substituted at all (the
 # monitoring/docker-compose.yml alertmanager service runs the stock image with no envsubst
 # wrapper), so the literal string "${ALERTMANAGER_PAGERDUTY_KEY:changeme}" would have been sent
-# to PagerDuty verbatim as the service_key (Phase 12, finding #13). Same convention as
+# to PagerDuty verbatim as the service_key . Same convention as
 # gateway/kong.yml: edit the placeholder values below directly, or render this file with your
 # own deployment tooling before mounting it.
 global:

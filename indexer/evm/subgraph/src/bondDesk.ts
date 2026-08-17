@@ -9,7 +9,7 @@ import { BondDeskEvent } from '../generated/schema'
 import { Address } from '@graphprotocol/graph-ts'
 
 /**
- * Lifecycle-event ingestion for EwpgBondDesk (finding #6, Phase 8) — previously this
+ * Lifecycle-event ingestion for EwpgBondDesk  — previously this
  * contract's primary-market subscription and coupon/redemption cash legs were invisible to
  * the backend, unlike backend-initiated forceTransfer paths which go through Travel Rule
  * evaluation and the audit trail. One EwpgBondDesk instance is deployed per bond issuance

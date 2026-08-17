@@ -24,7 +24,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end verification of Phase 5 finding #8: with audit signing enabled, newly appended
+ * End-to-end verification of : with audit signing enabled, newly appended
  * rows get a real Ed25519 {@code entry_sig}, and chain verification checks it — proving the
  * wiring works, not just the standalone signer (see EnvVarEd25519SigningKeyProviderTest).
  */
@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
-@DisplayName("Audit chain signing integration test (finding #8)")
+@DisplayName("Audit chain signing integration test")
 class AuditChainSigningIT {
 
     @Container

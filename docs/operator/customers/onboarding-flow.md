@@ -111,8 +111,6 @@ The complete set — there are only four:
 | `DISSOLVED` | Ended. |
 
 !!! note "There is no `PENDING_KYC` status"
-    Older documentation listed one, alongside a `PATCH /api/v1/admin/entities/{id}/status` endpoint. Neither exists.
-
     Status changes are explicit, named operations — `suspend`, `dissolve`, `reactivate`, `terminate` — under `/api/v1/entities/{id}/`, not a generic status write. That is deliberate: each transition has its own preconditions and its own audit event, which a free-form status field could not enforce.
 
 ---

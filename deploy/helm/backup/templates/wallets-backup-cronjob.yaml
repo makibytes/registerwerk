@@ -12,7 +12,7 @@ metadata:
 spec:
   # Same daily cadence as the Postgres backup — the wallet keystore volume is exactly as
   # critical (losing it means permanently losing on-chain asset-admin capability) and had no
-  # backup mechanism at all before this (Phase 12, finding #7).
+  # backup mechanism at all before this .
   schedule: "45 1 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 7

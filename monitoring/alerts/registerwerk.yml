@@ -4,9 +4,7 @@ groups:
     rules:
 
       # ── Audit chain integrity (eWpRV §6) ─────────────────────────────────
-      # registerwerk_audit_chain_valid is a real gauge (AuditChainVerificationService, Phase 12
-      # finding #5) — the previous query referenced spring_boot_actuator_health_status, a metric
-      # Spring Boot Actuator has never emitted; this alert could never have fired.
+      # Emitted by AuditChainVerificationService.
       - alert: AuditChainBroken
         expr: |
           registerwerk_audit_chain_valid{job="registerwerk-backend"} == 0
@@ -84,7 +82,7 @@ groups:
       # config value with no real "created at" concept to track. registerwerk_audit_signing_key
       # _age_seconds (AuditChainVerificationService) tracks the audit hash-chain's Ed25519
       # signing key instead — a real rotatable key where "hasn't been rotated in 90+ days" is
-      # meaningful (Phase 12, finding #5 + #9).
+      # meaningful .
       - alert: AuditSigningKeyAgeWarning
         expr: |
           registerwerk_audit_signing_key_age_seconds{job="registerwerk-backend"} > 7776000
@@ -124,11 +122,7 @@ groups:
           summary: "Registerwerk backend is down"
           description: "The backend has been unreachable for 1 minute. eWpRV §6 availability ≥99.5% SLO at risk."
 
-  # Every rule below closes a "detected but never alerted" gap: each of these jobs already
-  # existed and already found real problems, but only ever log.warn'd/log.error'd them — no
-  # metric, no alert. Follow-up to the repo-wide alerting-infrastructure gap (confidential
-  # reconciliation + orgidentity reconciliation named explicitly, screening failures + 5 more
-  # instances of the identical pattern found on a full repo sweep).
+  # Reconciliation and background-job alerts backed by application metrics.
   - name: registerwerk.reconciliation
     interval: 1m
     rules:
@@ -260,7 +254,7 @@ groups:
           summary: "One or more RPC nodes unhealthy"
           description: "{{ $value }} RpcNode(s) currently marked unhealthy. May have automatic failover — escalate if a whole chain's nodes are affected."
 
-  # Phase 4 (production-readiness observability pass): every rule below backs a metric that
+  # (production-readiness observability pass): every rule below backs a metric that
   # exists as of this pass — registerwerk_indexer_lag_blocks, registerwerk_event_publication_backlog,
   # registerwerk_shedlock_oldest_held_lock_age_seconds, and registerwerk_scheduled_job_seconds
   # (from ScheduledJobMetricsAspect, instrumenting all 41 @Scheduled jobs) — none of these existed

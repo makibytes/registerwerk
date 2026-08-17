@@ -41,11 +41,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for the Starknet-routing fix (finding #6) and audit-event fix (finding #7), Phase 10
+ * Unit tests for the Starknet-routing fix and audit-event fix,
  * — this service had no test coverage before either fix.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("Erc3525AdminService — Starknet routing (finding #6) + audit events (finding #7)")
+@DisplayName("Erc3525AdminService — Starknet routing + audit events")
 class Erc3525AdminServiceTest {
 
     @Mock private AssetDeploymentRepository deploymentRepository;

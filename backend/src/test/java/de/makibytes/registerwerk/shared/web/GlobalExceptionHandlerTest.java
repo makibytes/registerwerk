@@ -30,7 +30,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Verifies Phase 5 finding #11: compliance-gate rejections ({@link ComplianceGateException})
+ * Verifies : compliance-gate rejections ({@link ComplianceGateException})
  * are recorded as rejected actions, while the many unrelated {@link IllegalStateException}
  * call sites elsewhere in the codebase (config/infra errors) deliberately are not.
  */

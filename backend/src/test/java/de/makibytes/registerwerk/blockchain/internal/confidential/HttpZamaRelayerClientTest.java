@@ -17,7 +17,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Unit tests for {@link HttpZamaRelayerClient} (finding #12, Phase 9) — the real HTTP wire
+ * Unit tests for {@link HttpZamaRelayerClient}  — the real HTTP wire
  * client to the zama-relayer sidecar previously had zero test coverage, unlike the well-tested
  * reconciliation logic that consumes it via the mocked {@link ZamaRelayerClient} interface.
  */

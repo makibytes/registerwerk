@@ -33,7 +33,7 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end test of the previously-missing TOTP enrolment flow (Phase 5 finding #3):
+ * End-to-end test of the previously-missing TOTP enrolment flow :
  * without it, a real production deployment had no way to ever obtain a step-up token, making
  * every {@code @RequiresStepUp} endpoint permanently unreachable. Deliberately does NOT rely
  * on {@code registerwerk.auth.step-up.allow-unenrolled} (used by other step-up ITs to skip

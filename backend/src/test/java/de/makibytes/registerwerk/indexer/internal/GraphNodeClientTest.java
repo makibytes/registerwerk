@@ -23,12 +23,12 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Phase 3 fix: {@code fetchTransfers} must throw on any HTTP/GraphQL/parse failure rather than
+ * {@code fetchTransfers} must throw on any HTTP/GraphQL/parse failure rather than
  * returning an empty list — an empty list is reserved for "queried successfully, genuinely no new
  * transfers" so {@code GraphNodeSyncService}'s consecutive-error escalation can actually see a
  * real outage (see class Javadoc on {@link GraphNodeClient}).
  */
-@DisplayName("GraphNodeClient — fetchTransfers error signaling (Phase 3)")
+@DisplayName("GraphNodeClient — fetchTransfers error signaling")
 class GraphNodeClientTest {
 
     private static final String GRAPH_URL = "http://graph-node/subgraphs/name/ewpg/ethereum-mainnet";
@@ -54,7 +54,7 @@ class GraphNodeClientTest {
     }
 
     @Test
-    @DisplayName("retries an HTTP error 3 times (Phase 3 resilience), then throws — distinct from an empty result")
+    @DisplayName("retries an HTTP error 3 times (resilience), then throws — distinct from an empty result")
     void fetchTransfers_retriesThenThrowsOnHttpError() {
         // HTTP_RETRY_CONFIG: maxAttempts=3 — the mock server must see all 3 attempts.
         mockServer.expect(ExpectedCount.times(3), requestTo(GRAPH_URL)).andRespond(withServerError());

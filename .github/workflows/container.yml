@@ -37,7 +37,7 @@ jobs:
       # Build locally (no push yet) so the Trivy gate below runs BEFORE anything reaches the
       # registry or gets a valid Cosign signature — previously the scan ran after push+sign,
       # so a HIGH/CRITICAL image could already be pullable and validly signed before the job
-      # failed (Phase 12, finding #13).
+      # failed .
       - name: Build (local, pre-scan)
         id: build
         uses: docker/build-push-action@v6
@@ -46,7 +46,7 @@ jobs:
           push: false
           load: true
           tags: ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
-          # Phase 5: scoped explicitly (scope=backend) now that this workflow builds four images
+          # scoped explicitly (scope=backend) now that this workflow builds four images
           # in one run — the GHA cache backend defaults every unscoped type=gha reference to the
           # same implicit scope, so without this the backend build and the three new
           # frontend/zama-relayer jobs below would all read/write the identical cache namespace
@@ -78,7 +78,7 @@ jobs:
           context: backend
           push: true
           tags: ghcr.io/${{ github.repository }}/backend:${{ github.sha }},ghcr.io/${{ github.repository }}/backend:latest
-          # Phase 5: scoped explicitly (scope=backend) now that this workflow builds four images
+          # scoped explicitly (scope=backend) now that this workflow builds four images
           # in one run — the GHA cache backend defaults every unscoped type=gha reference to the
           # same implicit scope, so without this the backend build and the three new
           # frontend/zama-relayer jobs below would all read/write the identical cache namespace
@@ -99,7 +99,7 @@ jobs:
 
       # Gives operators a real, reproducible tag matching a cut release (rather than only
       # :latest/:<sha>) — points at the exact same manifest digest already pushed above,
-      # no rebuild (Phase 12, finding #3: Chart.yaml's appVersion had no corresponding
+      # no rebuild (: Chart.yaml's appVersion had no corresponding
       # published image at all).
       - name: Tag release version
         if: github.event_name == 'release'
@@ -108,7 +108,7 @@ jobs:
             --tag ghcr.io/${{ github.repository }}/backend:${{ github.event.release.tag_name }} \
             ghcr.io/${{ github.repository }}/backend@${{ steps.push.outputs.digest }}
 
-  # Phase 5: gives the two Angular frontends and the zama-relayer sidecar the same publish
+  # gives the two Angular frontends and the zama-relayer sidecar the same publish
   # pipeline the backend already had — deploy/helm/registerwerk's values.yaml previously had
   # nowhere real to pull ghcr.io/.../frontend-operator etc. from, so a Helm install of any of the
   # three new Deployments (templates/frontend-operator-deployment.yaml,
@@ -366,7 +366,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: github.event_name == 'release'
-    # Waits on all four image builds (not just build-backend, as before Phase 5) so a release
+    # Waits on all four image builds (not just build-backend, as before ) so a release
     # never gets an SBOM/provenance attachment implying "everything shipped cleanly" if any one
     # image's Trivy gate actually failed.
     needs: [build-backend, build-frontend-operator, build-frontend-customer, build-zama-relayer]

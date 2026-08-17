@@ -154,7 +154,7 @@ public class BlockchainTransactionService {
                     continue;
                 }
 
-                // Phase 3 fix: getEvmClient(ChainDescriptor) is the legacy static-client tier —
+                // getEvmClient(ChainDescriptor) is the legacy static-client tier —
                 // it bypasses BlockchainClientRegistry's node pool entirely, so this poller
                 // never benefited from multi-node failover/health-aware selection and would
                 // throw outright for any chain configured only via the node pool (no static

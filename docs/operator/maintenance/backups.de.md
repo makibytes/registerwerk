@@ -15,7 +15,7 @@ Der Smart-Contract-Zustand liegt auf der Blockchain und ist von Natur aus repliz
 Die beiden in der `CLAUDE.md` des Repositorys dokumentierten Bereitstellungspfade verwenden zwei unterschiedliche, **nicht
 austauschbare** Backup-Mechanismen. Folgen Sie dem Abschnitt, der zu Ihrer tatsächlichen Registerwerk-Bereitstellung passt —
 bisher beschrieb diese Seite nur den Docker-Compose-Pfad, was einen Betreiber, der die Helm-/Kubernetes-Bereitstellung
-fährt, in die Irre führen würde (Phase 12, Befund Nr. 6).
+fährt, in die Irre führen würde.
 
 ### Docker-Compose-Bereitstellung – pg_dump
 

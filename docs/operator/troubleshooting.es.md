@@ -89,8 +89,7 @@ Esta página cubre los problemas más comunes al operar el Registro eWpG, junto 
    ```
 
 2. Si el indexador se ha puesto al día y el evento sigue faltando, realice una comparación controlada de forma independiente
-   entre los eventos del subgrafo y `eth_getLogs` para el rango afectado. El
-   endpoint de administración `verify-consistency` planificado no está implementado.
+   entre los eventos del subgrafo y `eth_getLogs` para el rango afectado.
 
 3. Si se confirma una brecha, vuelva a implementar el subgrafo desde un bloque anterior al evento faltante
 

@@ -24,16 +24,10 @@ import "../documents/EwpgDocumentManagement.sol";
  * @dev FHEVM/Gateway infrastructure addresses (ACL, TFHEExecutor, FHEPayment,
  * KMSVerifier, Gateway) are supplied by the deploying factory at construction
  * time via {FhevmInfra}, NOT hardcoded per network. This is deliberate: the
- * vendored `ZamaFHEVMConfig`/`ZamaGatewayConfig` libraries only have real
- * addresses for Sepolia — `getEthereumConfig()` is an upstream `/// TODO`
- * stub — and Zama's own mainnet host-contract addresses are still being
- * finalised (target Q3 2026) and are governance-upgradeable even once live
- * (see SETUP-42 on the Zama community forum). Hardcoding them here would
- * either compile against a non-existent mainnet address or need a contract
- * redeploy on every governance upgrade. T-REX Network announced in March
- * 2026 that Zama is becoming the confidentiality layer for the T-REX Ledger
- * — the same injectable-address pattern applies there once T-REX publishes
- * its own FHEVM infrastructure addresses; this contract does not assume
+ * vendored `ZamaFHEVMConfig`/`ZamaGatewayConfig` libraries provide only a
+ * Sepolia configuration. Injecting addresses keeps deployments independent
+ * of library defaults and avoids contract redeployment when infrastructure
+ * addresses change. This contract does not assume
  * T-REX's addresses match Ethereum's.
  *
  * Two decryption paths exist, both real here:

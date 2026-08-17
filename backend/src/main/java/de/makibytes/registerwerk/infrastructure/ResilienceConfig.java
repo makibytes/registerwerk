@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Shared Resilience4j registries (Phase 3) for outbound RPC/HTTP calls, each bound to
+ * Shared Resilience4j registries for outbound RPC/HTTP calls, each bound to
  * {@link MeterRegistry} so retry/circuit-breaker/bulkhead state is Prometheus-visible without any
  * extra wiring at the call site.
  *
@@ -23,7 +23,7 @@ import org.springframework.context.annotation.Configuration;
  * per integration — a GraphQL query and a per-address fan-out don't want the same policy), this
  * class only owns the registries and their metrics binding.
  *
- * <p><strong>Scope (Phase 3):</strong> applied to {@code GraphNodeClient} (retry + circuit
+ * <p><strong>Scope:</strong> applied to {@code GraphNodeClient} (retry + circuit
  * breaker around the HTTP call) and the Starknet/Stellar per-address fan-out (bulkhead, capping
  * concurrency against the shared ForkJoinPool). Not applied blanket across every outbound
  * RPC/HTTP call in the codebase (Web3j chain calls, screening/travel-rule providers, trading

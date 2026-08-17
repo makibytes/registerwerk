@@ -13,19 +13,16 @@ Submodul `zama-ai/fhevm-solidity`) vertragsseitig eingebunden ist, sowie das rea
 
 ---
 
-## Chains, die Zamas fhEVM tatsächlich betreiben { #chains-that-actually-run-zamas-fhevm }
+## Konfigurierter Chain-Umfang { #configured-chain-scope }
 
-| Chain | Status | Quelle |
-|---|---|---|
-| Ethereum Sepolia | Echte, dokumentierte Adressen (ACL, TFHEExecutor, FHEPayment, KMSVerifier, Gateway) – siehe `contracts/lib/fhevm/config/ZamaFHEVMConfig.sol` und die in `@zama-fhe/relayer-sdk` selbst gebündelte `SepoliaConfig` | Eingebundene Bibliothek / npm-Paket |
-| Ethereum Mainnet | Geplant, Adressen zum Zeitpunkt der Erstellung noch nicht final (Zielquartal Q3 2026) und nach dem Livegang per Governance aktualisierbar | Öffentliche Roadmap von Zama / Community-Forum |
-| Base | Zamas eigene Ankündigung des „fhEVM Coprocessor" nennt Base neben Ethereum | Zama-Produktankündigung |
-| T-REX Chain | Zama kündigte (März 2026) an, zur Vertraulichkeitsschicht der T-REX Ledger zu werden – direkt relevant für `CONF_ERC3643` – aber die T-REX Chain hat hier noch keinen `Chain`-Enum-Eintrag und hat keine eigenen FHEVM-Adressen veröffentlicht | Öffentliche Pressemitteilung von T-REX/Zama |
+| Chain | Verhalten von Registerwerk |
+|---|---|
+| Ethereum | Vertrauliche Deployments werden akzeptiert, wenn die netzwerkspezifische Factory konfiguriert ist. |
+| Base | Vertrauliche Deployments werden akzeptiert, wenn die netzwerkspezifische Factory konfiguriert ist. |
+| Andere `Chain`-Werte | Vertrauliche Deployments werden abgewiesen. |
 
-Aus genau diesem Grund beschränkt `AssetDeploymentService.FHEVM_CHAINS` die vertrauliche Bereitstellung
-auf `Chain.ETHEREUM` und `Chain.BASE`. **Fhenix und Inco sind bewusst ausgeschlossen** – sie bleiben als
-gewöhnliche EVM-Chains in der `Chain`-Enumeration gelistet (mit eigenen RPC-Nodes zu Informations-/
-Tracking-Zwecken), sind aber keine gültigen Ziele für eine vertrauliche Bereitstellung.
+`AssetDeploymentService.FHEVM_CHAINS` ist die maßgebliche Positivliste. Fhenix und Inco bleiben
+gewöhnliche EVM-Einträge im `Chain`-Enum, sind aber keine gültigen Ziele für vertrauliche Deployments.
 
 ---
 

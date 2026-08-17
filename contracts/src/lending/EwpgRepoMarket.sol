@@ -683,7 +683,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     ///      This is a detection-and-immediate-recognition mechanism only — it does not attempt
     ///      reserve-first absorption, a first-loss tranche, or any other socialization policy
     ///      beyond "every depositor eats their share equally"; a more nuanced write-down design
-    ///      is intentionally left for a follow-up phase.
+    ///      is intentionally not automated by this contract.
     function _writeOffBadDebt(address borrower, Position storage pos) private {
         uint256 writtenOff = Math.mulDiv(pos.scaledDebt, borrowIndex, WAD);
         totalScaledDebt -= pos.scaledDebt;

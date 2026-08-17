@@ -31,7 +31,7 @@ fs_permissions = [
 fhenix_helium = "${FHENIX_HELIUM_RPC}"
 inco_rivest   = "${INCO_RIVEST_RPC}"
 
-# Used by contracts/test/lending/EwpgRepoMarket.invariant.t.sol (finding #12, Phase 7) — the
+# Used by contracts/test/lending/EwpgRepoMarket.invariant.t.sol — the
 # repo markets are the first contracts in this codebase to move real pooled stablecoin/collateral
 # value with nontrivial internal accounting (scaled shares/debt, a bad-debt write-off), so a
 # fuzzed handler run is worth the extra CI time relative to the ordinary unit-test suite.

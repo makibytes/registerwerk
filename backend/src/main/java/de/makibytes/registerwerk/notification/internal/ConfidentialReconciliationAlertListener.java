@@ -7,11 +7,7 @@ import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Operator-facing alert for confidential-balance reconciliation mismatches (finding #11,
- * Phase 9) — previously {@code ConfidentialReconciliationCompletedEvent} (and its
- * mismatch-only predecessor) only landed in the {@code audit_event} table (automatic, via
- * {@code AuditableEvent}) with nothing surfacing it proactively; an operator would only ever
- * see a mismatch by manually querying the audit log.
+ * Operator-facing alert for confidential-balance reconciliation mismatches.
  *
  * <p>Logs at ERROR rather than sending email: this repo's established pattern for this class of
  * operational-monitoring concern (cf. {@code regreporting.internal.RegReportStalenessMonitor})

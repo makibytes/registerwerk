@@ -29,7 +29,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Verifies Phase 6 finding #1's other half: {@code CantonBondService.redeem} correctly
+ * Verifies 's other half: {@code CantonBondService.redeem} correctly
  * exercises {@code Redeem} on the DAML ledger and publishes {@link CantonBondRedeemedEvent},
  * but previously nothing consumed it — {@code AssetHolder.nominalAmount} stayed at its
  * pre-redemption value forever, so the register kept showing a retired bond as a live holding.

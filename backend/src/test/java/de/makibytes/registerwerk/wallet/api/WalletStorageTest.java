@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Unit tests for the DEK-wrap/unwrap envelope logic in {@link WalletStorage} — previously
- * entirely untested (finding #11, Phase 8), including the highest-blast-radius code path in
+ * entirely untested , including the highest-blast-radius code path in
  * the repo: the encrypted-at-rest storage of every operator signing key. A local
  * {@link StubKekProvider} stands in for a real KMS, matching the real interface contract
  * (fresh IV per {@code wrap()} call, so a rewrap always produces different ciphertext bytes
@@ -161,7 +161,7 @@ class WalletStorageTest {
         assertThat(blobStore.exists(relativePath)).isFalse();
     }
 
-    // ── KEK rotation (finding #9, Phase 8) ─────────────────────────────────────
+    // ── KEK rotation  ─────────────────────────────────────
 
     @Test
     @DisplayName("rewrapDek(EVM) re-wraps the sidecar DEK; the wallet still decrypts identically afterward")

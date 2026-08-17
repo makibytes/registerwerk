@@ -12,7 +12,7 @@ L'état du contrat intelligent réside sur la blockchain et est intrinsèquement
 
 ## Stratégie de sauvegarde PostgreSQL
 
-Les deux chemins de déploiement documentés dans le `CLAUDE.md` du dépôt utilisent deux mécanismes de sauvegarde différents et **non interchangeables**. Suivez la section qui correspond à la façon dont vous exécutez réellement Registerwerk — auparavant, cette page ne décrivait que le chemin Docker Compose, qui pouvait induire en erreur un opérateur exécutant le déploiement Helm/Kubernetes (phase 12, constat n° 6).
+Les deux chemins de déploiement documentés dans le `CLAUDE.md` du dépôt utilisent deux mécanismes de sauvegarde différents et **non interchangeables**. Suivez la section qui correspond à la façon dont vous exécutez réellement Registerwerk.
 
 ### Déploiement Docker Compose — pg_dump
 

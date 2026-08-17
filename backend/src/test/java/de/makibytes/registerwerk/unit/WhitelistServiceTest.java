@@ -32,12 +32,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit test for the async submit+poll fix (finding #13, Phase 10) — previously this service used
+ * Unit test for the async submit+poll fix  — previously this service used
  * the blocking {@code EvmContractService.send()} (up to 120s) inside an HTTP request handler;
  * this file did not exist before the fix.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("WhitelistService — fire-and-track submit, not blocking send (finding #13)")
+@DisplayName("WhitelistService — fire-and-track submit, not blocking send")
 class WhitelistServiceTest {
 
     @Mock private AssetDeploymentRepository assetDeploymentRepository;

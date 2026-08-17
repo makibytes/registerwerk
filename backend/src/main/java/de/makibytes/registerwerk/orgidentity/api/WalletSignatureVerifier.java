@@ -14,10 +14,8 @@ import java.util.UUID;
  * signing), which previously carried near-duplicate ECDSA-only recovery logic — consolidating
  * here means smart-account support lands once for both call sites instead of drifting apart.
  *
- * <p>Note: this verifies the existing {@code personal_sign} wire format only. Migrating the
- * signed payload itself to EIP-712 typed data (clearer wallet-UX rendering) is a natural
- * follow-up once the corresponding signing UI adopts {@code eth_signTypedData_v4} — introducing
- * it here without a caller would just be unused surface area.
+ * <p>This verifier accepts the {@code personal_sign} wire format; it does not accept EIP-712
+ * typed-data signatures.
  */
 public interface WalletSignatureVerifier {
 

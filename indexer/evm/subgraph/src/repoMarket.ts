@@ -10,7 +10,7 @@ import {
 import { RepoMarket, RepoMarketEvent } from '../generated/schema'
 
 /**
- * Lifecycle-event ingestion for {@link EwpgRepoMarket} instances (finding #7, Phase 7) —
+ * Lifecycle-event ingestion for {@link EwpgRepoMarket} instances  —
  * previously no event-log ingestion existed for this contract pair at all, so
  * {@code LendingPositionService.refreshPosition} could not distinguish a voluntarily-repaid
  * position from a liquidated one (both collapsed to the same on-chain read state once debt
@@ -106,7 +106,7 @@ export function handleLiquidated(event: LiquidatedEvent): void {
 }
 
 /** Fired when a borrower's collateral is fully exhausted and remaining debt is written off
- *  (finding #5, Phase 7's on-chain fix) — always immediately preceded, in the same
+ *  ( on-chain fix) — always immediately preceded, in the same
  *  transaction, by the LIQUIDATED or CollateralReconciled event that triggered it. */
 export function handleBadDebtRecognized(event: BadDebtRecognizedEvent): void {
   let market = RepoMarket.load(event.address.toHexString())

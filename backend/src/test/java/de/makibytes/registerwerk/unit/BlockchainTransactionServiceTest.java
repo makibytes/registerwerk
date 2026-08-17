@@ -151,7 +151,7 @@ class BlockchainTransactionServiceTest {
     }
 
     @Test
-    @DisplayName("Phase 3: resolves the client via the node-pool-aware identifier lookup "
+    @DisplayName("resolves the client via the node-pool-aware identifier lookup "
             + "(not the legacy descriptor tier, which bypasses multi-node failover entirely)")
     void pollPendingTransactions_resolvesClientViaNodePoolAwareIdentifier() throws java.io.IOException {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());

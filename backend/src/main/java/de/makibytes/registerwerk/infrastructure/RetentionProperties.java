@@ -25,7 +25,7 @@ import java.time.Duration;
  * code comments in {@link RetentionSweepJob} for the reasoning per table, and
  * {@code kyc.api.JurisdictionRequirementConfig#dataRetentionPeriod} for the legal-hold durations
  * (10 years for DE/LI) that make automated deletion of anything evidentiary too risky to
- * automate in Phase 1.
+ * automate in .
  */
 @Component
 @ConfigurationProperties(prefix = "registerwerk.retention")

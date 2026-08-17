@@ -52,7 +52,7 @@ export interface RelayerConfig {
    * transactions. Its public address must be registered as a viewer via `addViewer`/the deploy
    * factory's `initialViewers` for whichever confidential tokens the operator needs to reconcile.
    *
-   * Resolved from ONE of two env inputs (finding #2, Phase 9):
+   * Resolved from ONE of two env inputs :
    *  - `OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED` + `RELAYER_KEK_MASTER_KEY` (preferred): the raw key
    *    is envelope-encrypted at rest (AES-256-GCM via {@link EnvVarKekProvider}, the exact scheme
    *    the backend's own `wallet.internal.EnvVarKekProvider` uses) and unwrapped only here, once,
@@ -67,7 +67,7 @@ export interface RelayerConfig {
   /** How long the operator-decrypt EIP-712 authorization is valid for, in days. */
   operatorDecryptDurationDays: number;
   /**
-   * Shared-secret bearer token every `/v1/*` request must present (finding #6, Phase 9). Required
+   * Shared-secret bearer token every `/v1/*` request must present . Required
    * exactly like `JWT_DEV_SECRET` is on the backend side — this sidecar's decrypt capability is
    * at least as sensitive as the backend's own JWT-gated endpoints, so it gets the same "must
    * never be empty" treatment rather than an optional, defaults-to-disabled toggle that would

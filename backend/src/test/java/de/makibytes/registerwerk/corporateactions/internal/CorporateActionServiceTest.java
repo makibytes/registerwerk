@@ -196,7 +196,7 @@ class CorporateActionServiceTest {
     }
 
     @Test
-    @DisplayName("markSettledManually refuses when any entitled holder has an active Sperrvermerk (finding #5)")
+    @DisplayName("markSettledManually refuses when any entitled holder has an active Sperrvermerk")
     void markSettledManually_refusesBlockedEntitledHolder() {
         init();
         UUID actionId = UUID.randomUUID();
@@ -240,7 +240,7 @@ class CorporateActionServiceTest {
     }
 
     @Test
-    @DisplayName("announce publishes a system-attributed audit event (finding #7)")
+    @DisplayName("announce publishes a system-attributed audit event")
     void announce_publishesAuditEvent() {
         init();
         UUID assetId = UUID.randomUUID();
@@ -260,7 +260,7 @@ class CorporateActionServiceTest {
     }
 
     @Test
-    @DisplayName("cancel transitions an ANNOUNCED action to CANCELLED and publishes an audit event (finding #13)")
+    @DisplayName("cancel transitions an ANNOUNCED action to CANCELLED and publishes an audit event")
     void cancel_cancelsAnnouncedAction() {
         init();
         UUID actionId = UUID.randomUUID();

@@ -188,7 +188,7 @@ class TravelRuleServiceTest {
     }
 
     @Test
-    @DisplayName("failed-messages gauge reflects a live count (repo-wide alerting follow-up)")
+    @DisplayName("failed-messages gauge reflects a live count (alerting metrics)")
     void failedMessagesGauge_reflectsLiveCount() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         when(jdbc.queryForObject(anyString(), org.mockito.ArgumentMatchers.eq(Long.class), any()))

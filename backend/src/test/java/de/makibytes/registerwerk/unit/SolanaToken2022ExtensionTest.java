@@ -31,7 +31,7 @@ import static org.mockito.Mockito.lenient;
  * from the async path (not from input validation before the future is created).
  *
  * <p>BOND/CONFIDENTIAL now also require {@link SolanaProperties}' transfer-hook/ElGamal config
- * (finding #12, Phase 10) — the tests below stub real-looking values so the pre-existing
+ *  — the tests below stub real-looking values so the pre-existing
  * "async RPC failure" assertions still hold, and add dedicated cases for the new fail-fast gate
  * itself (missing config throws synchronously, before any future is even created).
  */
@@ -99,7 +99,7 @@ class SolanaToken2022ExtensionTest {
         assertThatThrownBy(future::get).isInstanceOf(ExecutionException.class);
     }
 
-    // ── Finding #12, Phase 10: fail-fast config gate ────────────────────────────────────────
+    // ── : fail-fast config gate ────────────────────────────────────────
 
     @Test
     @DisplayName("BOND preset throws synchronously (no future created) when the transfer-hook program is unconfigured")

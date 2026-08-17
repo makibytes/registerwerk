@@ -17,7 +17,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit test for finding #11 (Phase 9): a confidential reconciliation mismatch must be logged at
+ * Unit test for: a confidential reconciliation mismatch must be logged at
  * ERROR (this repo's established operational-alert pattern — see the listener's class doc), and
  * a clean run must not be.
  */

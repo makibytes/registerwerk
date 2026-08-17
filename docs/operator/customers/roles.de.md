@@ -48,8 +48,6 @@ Ein Nutzer hat eine oder mehrere davon. Im Kundenportal bestimmen die Rollen, we
     - **Um Zugriff zu widerrufen, ändern Sie ihn hier** – oder deaktivieren Sie das Konto in Entra, sodass sich der Nutzer überhaupt nicht mehr anmelden kann.
     - Es gibt genau eine Stelle, an der man nachsehen muss, wer was darf.
 
-Ältere Dokumentation beschrieb Rollen als in einem JWT-Claim ankommend, der vom Identitätsanbieter befüllt und von einer Klasse namens `JwtEntityClaimsConverter` gelesen wird. Diese Klasse wurde entfernt, und dieses Modell hat nie beschrieben, wie das System tatsächlich funktioniert. Arbeiten Sie mit einem darauf aufbauenden mentalen Modell, ersetzen Sie es durch den obigen Absatz.
-
 ---
 
 ## Entity Scoping

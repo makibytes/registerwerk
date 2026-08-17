@@ -14,7 +14,7 @@ import java.lang.reflect.Method;
 /**
  * Instruments every {@code @Scheduled} method in the application with a
  * {@code registerwerk.scheduled.job} duration timer, tagged by {@code job} and
- * {@code outcome} (success/failure) — Phase 4: none of the 38 scheduled jobs previously exposed
+ * {@code outcome} (success/failure) — none of the 38 scheduled jobs previously exposed
  * duration or success/failure as a metric at all, only via log lines.
  *
  * <p>Applying this as a single cross-cutting aspect (rather than hand-instrumenting each of the

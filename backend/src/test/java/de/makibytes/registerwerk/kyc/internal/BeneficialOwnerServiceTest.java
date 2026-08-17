@@ -37,7 +37,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("BeneficialOwnerService — UBO registration triggers real screening (finding #11)")
+@DisplayName("BeneficialOwnerService — UBO registration triggers real screening")
 class BeneficialOwnerServiceTest {
 
     @Mock private BeneficialOwnerRepository beneficialOwnerRepository;

@@ -94,8 +94,6 @@ With this model:
 
     To change what somebody can do, change it in Registerwerk — your [company administrator](workspaces/company-admin.md) does this. To stop them signing in at all, disable the account in Entra.
 
-Older documentation described roles being mapped from a `roles` or `groups` claim in your token. That is not how it works, and configuring such a claim will have no effect here.
-
 ---
 
 ## Sessions

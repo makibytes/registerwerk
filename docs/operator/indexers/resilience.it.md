@@ -122,20 +122,6 @@ groups:
           severity: critical
 ```
 
-## Confronto pianificato degli intervalli di eventi (non implementato)
-
-Registerwerk attualmente non espone un endpoint di amministrazione `verify-consistency`. Un controllo di ripristino
-pianificato:
-
-1. Interroga il subgraph per tutti gli eventi di trasferimento nell'intervallo di blocchi
-2. Recupera direttamente gli stessi eventi dalla catena tramite `eth_getLogs`
-3. Confronta i due insiemi e segnala eventuali discrepanze
-
-Finché questo controllo non viene implementato e testato, gli operatori devono eseguire un confronto degli intervalli di
-eventi controllato in modo indipendente prima di riprendere ad affidarvisi. Anche in tal caso, insiemi di eventi
-corrispondenti stabilirebbero un accordo solo per l'intervallo verificato — non la definitività della catena, lo stato
-legale del registro, l'efficacia giuridica, il regolamento o l'identità del codice distribuito.
-
 # Resilienza e ripristino
 
 ## Modalità di guasto e ripristino

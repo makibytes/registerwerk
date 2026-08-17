@@ -5,11 +5,9 @@ description: ERC-4337 / EIP-7702 smart accounts, sponsored gas, passkeys, and ga
 
 # Account Abstraction & Sponsored Transactions
 
-A separate opportunity from [DeFi Interoperability](./defi-interoperability.md): advances in
-the Ethereum ecosystem since ERC-4337 (account abstraction) make it possible to sponsor gas for
-retail/institutional customers and simplify their onboarding, independent of any DeFi bridge.
-This was greenfield when this work started — no AA/paymaster/passkey code existed anywhere in
-the repo.
+Registerwerk supports ERC-4337 sponsored transactions, EIP-7702 delegated accounts, ERC-1271
+wallet verification, and an on-chain passkey account. These capabilities are independent of
+[DeFi interoperability](./defi-interoperability.md).
 
 ## Foundation: `WalletSignatureVerifier`
 
@@ -38,13 +36,10 @@ registration, and whitelist entries all stay valid. The only new requirement is
 implements `isValidSignature` like any other smart-contract wallet — including
 `EwpgPasskeyAccount` below, which is exactly such a delegate implementation.
 
-**Frontend implication:** `frontend-customer` still uses the injected-wallet path for its existing
-org-identity operation — a single `window.ethereum.request(...)` call site
-(`frontend-customer/src/app/features/company-admin/org-identity/org-identity.component.ts`).
-Introducing 7702/passkey creation into that flow still needs a thin wallet layer;
-`viem` (with its `viem/account-abstraction` and EIP-7702 helpers) is the recommended SDK, since
-there is no existing ethers/wagmi dependency to preserve compatibility with. This remains the
-one piece of this track that is UI work rather than a contract/backend change.
+`frontend-customer` centralizes injected-wallet operations in `WalletService` and implements
+optional EIP-7702/ERC-4337 execution in `SponsoredTxService`. Sponsorship is available only when
+`environment.bundlerUrl`, a paymaster address, and a resolved policy ID are available. The UI
+does not create or operate `EwpgPasskeyAccount` instances.
 
 ## `EwpgPaymaster` — sponsored transactions
 
@@ -64,22 +59,18 @@ v0.8, for native EIP-7702 support) that sponsors gas for verified Registerwerk c
 - **A per-wallet spend cap** (`setWalletBudgetCap`) bounds how much of a *shared* policy budget
   any single wallet can consume, on top of the aggregate policy budget itself.
 - Backed by the `deployment/api/GasSponsorshipPolicy` entity (backend) — mirrors the existing
-  `MintControlRule` pattern: a per-deployment override, or an issuer-level default that future
+  `MintControlRule` pattern: a per-deployment override, or an issuer-level default that new
   deployments from that issuer inherit until they get their own override
   (`GasSponsorshipService.resolveEffectivePolicy`, `asset/web/GasSponsorshipController`). The
   on-chain `policyId` for a given row is `keccak256(id.toString())`. This backend layer is
-  configuration only — it does not yet drive an on-chain sync job pushing budgets into the
-  paymaster automatically; an operator/issuer funds `EwpgPaymaster.fundSponsorship` directly
-  today.
+  configuration only; operators or issuers fund `EwpgPaymaster.fundSponsorship` directly.
 - Operator UI: `frontend-operator`'s asset detail page has a **Gas Sponsorship** tab per
   deployment (set/remove a deployment-specific override) and the customer detail page has one
   for issuers (set the issuer-level default new deployments inherit) — both backed by
   `core/api/gas-sponsorship.service.ts`, showing the currently-effective policy and whether
   it's an override or an inherited default.
-- Deploy script: `contracts/script/DeployLiquidityDapps.s.sol` deploys `EwpgPaymaster` (default
-  EntryPoint `ERC4337Utils.ENTRYPOINT_V08`) alongside `EwpgRepoFacility` — kept separate from
-  `DeployExampleDapps.s.sol` since both are pragma `^0.8.36` and can't share a compilation unit
-  with that script's erc3643-dependent imports (exact-pinned to `0.8.30`).
+- Deploy script: `contracts/script/DeployLiquidityDapps.s.sol` deploys `EwpgPaymaster` with
+  EntryPoint `ERC4337Utils.ENTRYPOINT_V08` alongside `EwpgRepoFacility`.
 - Demo data: `EcosystemDemoDataSeeder` seeds three `GasSponsorshipPolicy` rows — Meridian
   Capital's own issuer-level default (`ISSUER` sponsor), Aurora Finance's issuer default funded
   by the operator instead (`OPERATOR` sponsor, showcasing the other sponsor type), and a
@@ -127,11 +118,7 @@ now implements `ERC20Permit` so the example/tests can exercise this end to end
 implements EIP-2612 natively; verify AllUnity Euro's support before wiring `subscribeWithPermit`
 up against it in production — the plain `subscribe` path remains available either way.
 
-## EIP-712 typed data — still deferred
+## Signature formats
 
-Wallets render EIP-712 structured data far more legibly than opaque hex/plain strings. Worth
-applying to any signed messages once a corresponding signing UI exists to render it — the
-existing `personal_sign` wallet-binding challenge and manifest-signing flows were deliberately
-left as-is in this pass, since migrating their wire format requires a frontend signing-method
-change (`eth_signTypedData_v4`) that is out of scope here; introducing the format without that
-caller would just be unused surface area.
+Wallet binding and manifest signing use `personal_sign`. `WalletSignatureVerifier` accepts that
+wire format for EOAs and ERC-1271 wallets; it does not accept EIP-712 typed-data signatures.

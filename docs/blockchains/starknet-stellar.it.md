@@ -5,7 +5,8 @@ description: Stato e configurazione del supporto blockchain di StarkNet (Cairo E
 
 # StarkNet e Stellar { #starknet-stellar }
 
-StarkNet e Stellar sono parzialmente supportati in Registerwerk. L'infrastruttura di base (cablaggio del client, scheletri del servizio di distribuzione, enumerazioni standard dei token) è a posto, ma entrambe le catene hanno **valori segnaposto** che devono essere sostituiti prima dell'uso in produzione.
+Registerwerk contiene integrazioni Starknet e Stellar funzionanti con limiti operativi espliciti.
+Nessuna delle due va considerata validata per la produzione senza test specifici della rete.
 
 ---
 
@@ -22,13 +23,20 @@ StarkNet è un ZK-rollup su Ethereum che utilizza il linguaggio del contratto in
 
 ### Stato { #status }
 
-⚠️ **L'hash della classe StarkNet è un segnaposto zero.** Prima di distribuire i token StarkNet in produzione:
+`StarknetTokenService` invia transazioni Invoke v3 firmate tramite l'Universal Deployer Contract.
+La conferma attende `ACCEPTED_ON_L1` e `StarknetTransferSyncService` indicizza gli eventi di
+trasferimento ERC-20/ERC-3525.
+
+Gli hash di classe predefiniti per ERC-20 ed ERC-3525 sono zero e causano un errore immediato.
+Prima del deployment:
 
 1. Compila i contratti Cairo sotto `contracts/cairo/`
 2. Dichiara la classe del contratto: `starkli declare target/dev/EwpgERC3525.json`
-3. Sostituisci l'hash della classe nella configurazione di `StarknetTokenService` con l'hash della classe dichiarata
+3. Configura `registerwerk.chains.starknet.erc20-class-hash` e/o
+   `registerwerk.chains.starknet.erc3525-class-hash`
 
-`StarknetTokenService` utilizza un client Java personalizzato (Starknet4j) configurato tramite `Chain.STARKNET` + `Network.MAINNET/TESTNET`.
+L'integrazione usa Starknet JSON-RPC e il wallet operatore configurato per
+`Chain.STARKNET` e `Network.MAINNET/TESTNET`.
 
 ### Reti { #networks }
 
@@ -53,25 +61,18 @@ Stellar è una blockchain incentrata sui pagamenti con supporto nativo per **Ste
 
 A differenza di EVM o Solana, Stellar ha un tipo di asset integrato a livello di protocollo. Non è necessaria alcuna distribuzione del contratto:
 
-1. Il **conto emittente** crea una linea di fiducia dal conto del titolare
+1. Il titolare crea una linea di fiducia per l'emittente e il codice dell'asset
 2. Il conto di emissione invia il bene al conto del titolare tramite un'operazione `Payment`
 3. I saldi vengono archiviati in modo nativo nelle voci del registro degli account Stellar
 
 In Registerwerk:
 - `AssetDeployment.contractAddress` memorizza l'**indirizzo dell'account di emissione** Stellar (chiave pubblica Stellar)
-- `StellarAssetService` utilizza **Horizon API** (Java SDK) per inviare transazioni
+- `StellarAssetService` costruisce e firma l'XDR e lo invia tramite l'**API Horizon**
 
 ### Stato { #status }
 
-⚠️ **Il supporto di Stellar è un segnaposto.** Gli scheletri `StellarAssetService` sono presenti ma l'implementazione completa (gestione della linea di fiducia, conformità, indicizzatore) non è ancora stata completata.
-
----
-
-## Nota sulla roadmap { #roadmap-note }
-
-Sia StarkNet che Stellar rappresentano aree di sviluppo attive. L'infrastruttura esiste per consentire i contributi. Considerazioni prioritarie:
-
-- **StarkNet ERC-3525**: valore elevato per gli emittenti [Liechtenstein TVTG](../legal/tvtg-li.md) che preferiscono il regolamento comprovato da ZK rispetto ai rollup ottimistici
-- **Stellar**: utile per i titoli di pagamento transfrontalieri e le stablecoin nei mercati emergenti
-
-Per contribuire con un'implementazione, seguire lo schema dei servizi di distribuzione EVM (`Erc20DeploymentService`, `Erc3525DeploymentService`) e implementare la stessa interfaccia `TokenDeploymentPort`.
+`StellarAssetService` registra l'ID dell'asset con una transazione `ManageData` firmata e implementa
+clawback e autorizzazione delle linee di fiducia. Non crea linee di fiducia dei titolari né
+distribuisce un saldo iniziale. `StellarTransferSyncService` indicizza i pagamenti che coinvolgono
+il conto emittente; i trasferimenti diretti tra titolari non sono coperti. I deployment Stellar
+non hanno inoltre una conferma automatica in `AssetDeploymentService`.

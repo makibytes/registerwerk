@@ -107,8 +107,8 @@ class TokenAdminServiceTest {
     }
 
     @Test
-    @DisplayName("pause on SPL_2022_BOND routes callers to SolanaTokenAdminService (Phase 4)")
-    void pause_rejectsSpl2022BondWithPhase4Message() {
+    @DisplayName("pause on SPL_2022_BOND routes callers to SolanaTokenAdminService")
+    void pause_rejectsSpl2022BondWithClearMessage() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.SPL_2022_BOND);
         assertThatThrownBy(() -> tokenAdminService.pause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN"))
@@ -117,8 +117,8 @@ class TokenAdminServiceTest {
     }
 
     @Test
-    @DisplayName("pause on SPL_2022_CONFIDENTIAL routes callers to SolanaTokenAdminService (Phase 4)")
-    void pause_rejectsSpl2022ConfidentialWithPhase4Message() {
+    @DisplayName("pause on SPL_2022_CONFIDENTIAL routes callers to SolanaTokenAdminService")
+    void pause_rejectsSpl2022ConfidentialWithClearMessage() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.SPL_2022_CONFIDENTIAL);
         assertThatThrownBy(() -> tokenAdminService.pause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN"))
@@ -348,7 +348,7 @@ class TokenAdminServiceTest {
         assertThat(txId).isNotNull();
     }
 
-    // ── confidentialPause / confidentialUnpause / confidentialSetAddressFrozen (finding #6) ──
+    // ── confidentialPause / confidentialUnpause / confidentialSetAddressFrozen ──
 
     @Test
     @DisplayName("confidentialPause rejects non-CONF_ERC3643 standards (CONF_ERC20 has no pause concept)")

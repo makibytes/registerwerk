@@ -30,12 +30,12 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Unit tests for the polling-cursor fix (finding #3, Phase 10): previously the cursor was set
+ * Unit tests for the polling-cursor fix : previously the cursor was set
  * only once ever (a one-shot latch) and shared across every mint tracked on a chain — this file
  * did not exist before this fix, per the review's own finding that no test coverage existed.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("SolanaTransferSyncService — per-mint polling cursor (finding #3)")
+@DisplayName("SolanaTransferSyncService — per-mint polling cursor")
 class SolanaTransferSyncServiceTest {
 
     private static final String RPC_URL = "http://solana-rpc:8899";
@@ -155,7 +155,7 @@ class SolanaTransferSyncServiceTest {
         assertThat(mintSyncCursorRepository.findByChainConfigIdAndMintAddress(chain.getId(), MINT_A)
                 .orElseThrow().getLastSyncedSignature()).isEqualTo("sig1");
 
-        // Finding #3's core regression: before the fix, this second poll would never update the
+        // 's core regression: before the fix, this second poll would never update the
         // cursor again because the "only set if null" latch had already fired once.
         service.pollChain(chain);
 

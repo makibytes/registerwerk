@@ -13,4 +13,4 @@ Cette section couvre la conception interne de la plateforme Registerwerk pour le
 - [Aperçu de l'API REST](api.md) — structure des URL, réponses d'erreur, pagination
 - [Développement de dApps](dapp-development.md) — cadre de permissions de l'écosystème, workflow de publication sur la marketplace
 - [Interopérabilité DeFi](defi-interoperability.md) — questions de juridiction, pont prête-nom/omnibus, et une facilité de référence de repo/prêt qui n'est pas approuvée pour un usage en production
-- [Abstraction de compte et transactions sponsorisées](account-abstraction.md) — feuille de route ERC-4337/EIP-7702, gas sponsorisé, clés d'accès (passkeys)
+- [Abstraction de compte et transactions sponsorisées](account-abstraction.md) — prise en charge ERC-4337/EIP-7702, gas sponsorisé, clés d'accès (passkeys)
