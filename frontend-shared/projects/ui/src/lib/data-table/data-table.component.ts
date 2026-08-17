@@ -69,7 +69,15 @@ export interface TableColumn {
     tr.mat-mdc-row:hover td { background: var(--rw-table-row-hover, rgba(255,255,255,0.03)); cursor: default; }
     .cell-mono { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
     .cell-number { text-align: right; font-variant-numeric: tabular-nums; }
-    td.actions-cell { white-space: nowrap; width: 1px; }
+    th.mat-column-_actions,
+    td.rw-actions-cell {
+      width: 1%;
+      min-width: max-content;
+      white-space: nowrap;
+    }
+    th.mat-column-_actions { padding: 10px 16px 10px 8px; }
+    td.rw-actions-cell { padding: 10px 16px 10px 8px; overflow: visible; }
+    .actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; width: max-content; }
     .state-row { display: flex; align-items: center; justify-content: center; padding: 48px 16px; gap: 12px; color: var(--rw-text-muted); font-size: 13px; text-align: center; }
     .state-row.error { flex-wrap: wrap; }
     .empty-icon { font-size: 32px; width: 32px; height: 32px; color: var(--rw-text-muted); opacity: 0.4; }
@@ -133,11 +141,13 @@ export interface TableColumn {
           @if (actionsTemplate) {
             <ng-container matColumnDef="_actions">
               <th mat-header-cell *matHeaderCellDef></th>
-              <td mat-cell *matCellDef="let row" class="actions-cell">
-                <ng-container
-                  [ngTemplateOutlet]="actionsTemplate"
-                  [ngTemplateOutletContext]="{ $implicit: row }">
-                </ng-container>
+              <td mat-cell *matCellDef="let row" class="rw-actions-cell">
+                <div class="actions">
+                  <ng-container
+                    [ngTemplateOutlet]="actionsTemplate"
+                    [ngTemplateOutletContext]="{ $implicit: row }">
+                  </ng-container>
+                </div>
               </td>
             </ng-container>
           }
