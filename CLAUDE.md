@@ -31,7 +31,7 @@ docker-compose.yml    / .env.example
 
 ## Backend
 
-**Stack:** Java 25, Spring Boot 4.1, Spring Security 7, Spring Modulith 2.1, JPA/Hibernate, Flyway, Caffeine (30s TTL), Jackson 3 (tools.jackson), Web3j (EVM), Solanaj (Solana), Daml Java bindings (Canton), plus native Starknet (Cairo/STARK ECDSA) and Stellar (Horizon/Ed25519) client code — see `blockchain/internal/deploy/`.
+**Stack:** Java 25, Spring Boot 4.1, Spring Security 7, Spring Modulith 2.1, JPA/Hibernate, Flyway, Caffeine (30s TTL; only the `assets` cache is wired to a read path — see `CacheConfig`'s javadoc for why `deployments`/`entities` deliberately aren't yet), Jackson 3 (tools.jackson), Web3j (EVM), Solanaj (Solana), Daml Java bindings (Canton), plus native Starknet (Cairo/STARK ECDSA) and Stellar (Horizon/Ed25519) client code — see `blockchain/internal/deploy/`.
 Build: `./mvnw verify` — runs unit + integration tests + JaCoCo. Coverage gate: bundle LINE ≥ 0.36 / BRANCH ≥ 0.23, plus stricter per-package floors (e.g. `customer/internal` 0.60/0.40, `registertransfer/internal` 0.85/0.70) — check `pom.xml` before adding code to those packages.
 **Lazy datasource:** `spring.datasource.connection-fetch=lazy` — defers physical DB connection until first SQL statement.
 

@@ -12,6 +12,8 @@ import de.makibytes.registerwerk.asset.api.AssetRepository;
 import org.hibernate.Hibernate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -51,6 +53,11 @@ public class AssetService {
         return saved;
     }
 
+    // Evicted by every writer of this asset's row: updateAsset/updateTargetMarket below, and all
+    // seven status-transition methods in AssetLifecycleService (submit/approve/reject/issue/
+    // suspend/reactivate/redeem) - a miss there would let stale status/name/terms serve for up to
+    // this cache's 30s TTL (see CacheConfig).
+    @Cacheable(value = "assets", key = "#id")
     @Transactional(readOnly = true)
     public Asset getAsset(UUID id) {
         return assetRepository.findById(id)
@@ -81,6 +88,7 @@ public class AssetService {
         return asset;
     }
 
+    @CacheEvict(value = "assets", key = "#id")
     public Asset updateAsset(UUID id, Asset patch, UUID actorId) {
         Asset existing = getAsset(id);
         if (patch.getName() != null) existing.setName(patch.getName());
@@ -111,6 +119,7 @@ public class AssetService {
      * other patchable fields on {@link #updateAsset}. An empty {@code categories} set means
      * unrestricted (see {@link Asset#isEligibleForTargetMarket}).
      */
+    @CacheEvict(value = "assets", key = "#id")
     public Asset updateTargetMarket(UUID id, java.util.Set<de.makibytes.registerwerk.customer.api.ClientCategory> categories,
                                      de.makibytes.registerwerk.customer.api.KnowledgeExperienceLevel minExperience, UUID actorId) {
         Asset existing = getAsset(id);
