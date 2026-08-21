@@ -144,6 +144,82 @@ class DemoDataSeederTest {
         verify(legalEntityRepository, never()).save(any(LegalEntity.class));
     }
 
+    @Test
+    @DisplayName("run seeds a CHAINCACHE-kind node on ETHEREUM_SEPOLIA and sets finalitySource=CHAINCACHE")
+    void run_seedsChaincacheDemoNode() throws Exception {
+        ChainConfig sepolia = chain("ETHEREUM_SEPOLIA", "http://anvil:8545");
+
+        when(legalEntityRepository.findByEntityNumber("DEMO-MC-001")).thenReturn(Optional.of(new LegalEntity()));
+        when(chainConfigRepository.findByIdentifier(anyString()))
+                .thenAnswer(invocation -> "ETHEREUM_SEPOLIA".equals(invocation.getArgument(0))
+                        ? Optional.of(sepolia) : Optional.empty());
+        when(rpcNodeRepository.findByChainConfig_Identifier(anyString())).thenReturn(List.of());
+        when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(chainConfigRepository.save(any(ChainConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        seeder.run(new DefaultApplicationArguments());
+
+        ArgumentCaptor<RpcNode> savedNodes = ArgumentCaptor.forClass(RpcNode.class);
+        verify(rpcNodeRepository, atLeast(1)).save(savedNodes.capture());
+        assertThat(savedNodes.getAllValues())
+                .filteredOn(n -> n.getKind() == RpcNode.NodeKind.CHAINCACHE)
+                .hasSize(1)
+                .first()
+                .satisfies(node -> {
+                    assertThat(node.getUrl()).isEqualTo("http://chaincache:8080/local-devnet/rpc");
+                    assertThat(node.getManagementUrl()).isEqualTo("http://chaincache:8080");
+                    assertThat(node.getRemoteChainKey()).isEqualTo("local-devnet");
+                    assertThat(node.isEnabled()).isTrue();
+                });
+
+        ArgumentCaptor<ChainConfig> savedChains = ArgumentCaptor.forClass(ChainConfig.class);
+        verify(chainConfigRepository, atLeast(1)).save(savedChains.capture());
+        assertThat(savedChains.getAllValues())
+                .filteredOn(c -> "ETHEREUM_SEPOLIA".equals(c.getIdentifier()))
+                .extracting(ChainConfig::getFinalitySource)
+                .contains(ChainConfig.FinalitySource.CHAINCACHE);
+    }
+
+    @Test
+    @DisplayName("run does not duplicate the chaincache node or re-set finalitySource when already seeded")
+    void run_isIdempotentForChaincacheDemoNode() throws Exception {
+        ChainConfig sepolia = chain("ETHEREUM_SEPOLIA", "http://anvil:8545");
+        sepolia.setFinalitySource(ChainConfig.FinalitySource.CHAINCACHE);
+        RpcNode existingChaincacheNode = new RpcNode();
+        // A real "already seeded" row has a generated id and every field this method reconciles
+        // already at its desired value — set them all so the test actually exercises "nothing to
+        // change", not just an unrelated null-id/null-field mismatch against a bare new RpcNode().
+        org.springframework.test.util.ReflectionTestUtils.setField(existingChaincacheNode, "id", UUID.randomUUID());
+        existingChaincacheNode.setChainConfig(sepolia);
+        existingChaincacheNode.setUrl("http://chaincache:8080/local-devnet/rpc");
+        existingChaincacheNode.setLabel("chaincache (anvil)");
+        existingChaincacheNode.setManagementUrl("http://chaincache:8080");
+        existingChaincacheNode.setRemoteChainKey("local-devnet");
+        existingChaincacheNode.setEnabled(true);
+        existingChaincacheNode.setKind(RpcNode.NodeKind.CHAINCACHE);
+
+        when(legalEntityRepository.findByEntityNumber("DEMO-MC-001")).thenReturn(Optional.of(new LegalEntity()));
+        when(chainConfigRepository.findByIdentifier(anyString()))
+                .thenAnswer(invocation -> "ETHEREUM_SEPOLIA".equals(invocation.getArgument(0))
+                        ? Optional.of(sepolia) : Optional.empty());
+        // Only the chaincache node exists yet — syncPublicNodes' own unrelated logic still adds
+        // ETHEREUM_SEPOLIA's public demo nodes and syncs its rpcUrl on top, which is not what
+        // this test is about; it isolates the chaincache-specific idempotency this method owns.
+        when(rpcNodeRepository.findByChainConfig_Identifier("ETHEREUM_SEPOLIA"))
+                .thenReturn(List.of(existingChaincacheNode));
+        when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(chainConfigRepository.save(any(ChainConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        seeder.run(new DefaultApplicationArguments());
+
+        ArgumentCaptor<RpcNode> savedNodes = ArgumentCaptor.forClass(RpcNode.class);
+        verify(rpcNodeRepository, atLeast(0)).save(savedNodes.capture());
+        assertThat(savedNodes.getAllValues())
+                .filteredOn(n -> n.getKind() == RpcNode.NodeKind.CHAINCACHE)
+                .isEmpty();
+        assertThat(sepolia.getFinalitySource()).isEqualTo(ChainConfig.FinalitySource.CHAINCACHE);
+    }
+
     private ChainConfig chain(String identifier, String rpcUrl) {
         ChainConfig chain = new ChainConfig();
         chain.setId(UUID.randomUUID());

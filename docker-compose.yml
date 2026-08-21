@@ -62,23 +62,19 @@ services:
       start_period: 3s
     restart: unless-stopped
 
-  # ─── chaincache experiment (portfolio review P3) ──────────────────────────
-  # Not part of the default stack: `docker compose up` never starts these. Bring them up
-  # explicitly with `docker compose --profile chaincache-experiment up chaincache-postgres
-  # chaincache` to try chaincache (../chaincache — a sibling repo) as this repo's anvil
-  # devnet's node backend. chaincache gets its own dedicated Postgres, per the single-instance
-  # architecture note in CLAUDE.md ("hosts only the registerwerk database") — it is not a
-  # second schema/database bolted onto the shared `postgres` service above.
-  #
-  # To actually route traffic through it: point the ETHEREUM_SEPOLIA chain_config/rpc_node
-  # row(s) that currently resolve to this stack's anvil at http://chaincache:8080/rpc (from
-  # inside the Compose network) instead — a URL change via the existing
-  # POST/PATCH /api/v1/admin/chains and rpc_node endpoints, zero backend code change. Measure
-  # via chaincache's `GET /api/metrics` before/after a deployment + transfer flow.
+  # ─── chaincache (the showcase) ─────────────────────────────────────────────
+  # Part of the default stack (`docker compose up` starts these) — per the portfolio plan's
+  # product decision: chaincache default-on, side-by-side with direct-node chains, so the
+  # operator node list shows a real A/B capability comparison out of the box rather than
+  # something only reachable via an opt-in profile. It fronts this stack's own anvil devnet
+  # (chaincache's own default chain key "local-devnet") as a genuine CHAINCACHE-kind RpcNode on
+  # ETHEREUM_SEPOLIA (DemoDataSeeder seeds it, see the node's managementUrl/remoteChainKey
+  # there) — every other chain stays direct-to-node, untouched. chaincache gets its own dedicated Postgres, per the
+  # single-instance architecture note in CLAUDE.md ("hosts only the registerwerk database") —
+  # it is not a second schema/database bolted onto the shared `postgres` service above.
   chaincache-postgres:
     image: postgres:15-alpine
     logging: *default-logging
-    profiles: [chaincache-experiment]
     environment:
       POSTGRES_DB: chaincache
       POSTGRES_USER: chaincache
@@ -95,9 +91,8 @@ services:
   chaincache:
     build:
       context: ../chaincache
-    image: registerwerk-chaincache-experiment:local
+    image: registerwerk-chaincache-demo:local
     logging: *default-logging
-    profiles: [chaincache-experiment]
     depends_on:
       chaincache-postgres:
         condition: service_healthy
@@ -108,16 +103,24 @@ services:
       SPRING_DATASOURCE_USERNAME: chaincache
       SPRING_DATASOURCE_PASSWORD: chaincache
       # This stack's own anvil devnet (chain-id 11155111, impersonating Ethereum Sepolia for
-      # the local demo — see ETH_SEPOLIA_RPC below) as chaincache's sole upstream node.
-      CHAINCACHE_RPC_NODES_0_PROVIDER: anvil
-      CHAINCACHE_RPC_NODES_0_HTTP: http://anvil:8545
-      CHAINCACHE_RPC_NODES_0_WS: ws://anvil:8545
-      CHAINCACHE_RPC_EXPECTED_CHAIN_ID: "11155111"
+      # the local demo — see ETH_SEPOLIA_RPC below, still pointed straight at anvil as the
+      # untouched direct-RPC fallback) as chaincache's sole upstream node, under chaincache's
+      # own baked-in default chain key "local-devnet" (application.yml) — deliberately reusing
+      # that key rather than introducing a new one (e.g. "anvil"): chaincache's Map-based
+      # @ConfigurationProperties binding *merges* env-var-provided chain keys with the YAML
+      # default rather than replacing the whole map, so an unrelated new key would leave
+      # "local-devnet" (pointing at localhost:8545/8546, unreachable from inside this
+      # container) still configured and spamming connection-refused errors alongside it.
+      # registerwerk's RpcNode.remoteChainKey for this connection must match: "local-devnet".
+      CHAINCACHE_CHAINS_LOCAL_DEVNET_RPC_NODES_0_PROVIDER: anvil
+      CHAINCACHE_CHAINS_LOCAL_DEVNET_RPC_NODES_0_HTTP: http://anvil:8545
+      CHAINCACHE_CHAINS_LOCAL_DEVNET_RPC_NODES_0_WS: ws://anvil:8545
+      CHAINCACHE_CHAINS_LOCAL_DEVNET_RPC_EXPECTED_CHAIN_ID: "11155111"
       # anvil has no reorgs and no safe/finalized tags; DEPTH_BASED (chaincache's own default)
       # is the wrong model for it — INSTANT matches anvil's actual (lack of) finality semantics.
-      CHAINCACHE_CHAIN_FINALITY_MODEL: INSTANT
-      # Off for a local experiment; see chaincache's docs/ADMIN.md before exposing this beyond
-      # your own machine.
+      CHAINCACHE_CHAINS_LOCAL_DEVNET_CHAIN_FINALITY_MODEL: INSTANT
+      # Off for the local demo stack; see chaincache's docs/ADMIN.md before exposing this
+      # beyond your own machine.
       CHAINCACHE_AUTH_ENABLED: "false"
       CHAINCACHE_KAFKA_ENABLED: "false"
     ports:

@@ -185,6 +185,7 @@ class ChaincacheDurableStreamManager {
         @Override
         public void onOpen(WebSocket webSocket) {
             this.webSocket = webSocket;
+            log.info("chaincache durable stream connected for chain={}, consumerId={}", chainId, consumerId);
             subscribe(webSocket, FinalityLevel.SAFE);
             subscribe(webSocket, FinalityLevel.FINALIZED);
             webSocket.request(1);

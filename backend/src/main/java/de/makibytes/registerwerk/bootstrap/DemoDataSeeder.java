@@ -150,6 +150,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
     @Transactional
     public void run(ApplicationArguments args) {
         syncPublicNodes();
+        syncChaincacheDemoNode();
 
         if (entities.findByEntityNumber("DEMO-MC-001").isPresent()) {
             if (hasCompleteDemoEntityBaseline()) {
@@ -1147,6 +1148,63 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         if (changed) {
             chainConfigs.save(chain);
         }
+    }
+
+    /**
+     * Seeds the demo stack's chaincache connection: an additional {@code CHAINCACHE}-kind
+     * {@link RpcNode} on ETHEREUM_SEPOLIA (this stack's anvil devnet, reached via chaincache's
+     * own baked-in default chain key "local-devnet" — see docker-compose.yml's {@code chaincache}
+     * service; deliberately reusing that key rather than a new one, since chaincache's
+     * Map-based config binding merges env-var-provided keys with its YAML default instead of
+     * replacing it), alongside the direct-RPC nodes {@link #syncPublicNodes} already seeds for
+     * that chain — per the portfolio plan's product decision that the demo stack runs
+     * chaincache default-on, side-by-side, so the operator node list shows a real capability
+     * comparison out of the box. Every other chain stays direct-to-node, untouched. Idempotent
+     * and self-healing: a second run finds the existing row by kind and reconciles its fields
+     * (matching {@link #syncChainNodes}'s own check-and-update idiom for the same reason —
+     * {@code RpcNodeHealthService}'s health-check cycle saves the full entity back after every
+     * probe, so a value changed only in a running database, never in this seeder, will not
+     * survive on its own) rather than assuming a once-seeded row stays correct forever.
+     */
+    private void syncChaincacheDemoNode() {
+        chainConfigs.findByIdentifier("ETHEREUM_SEPOLIA").ifPresent(chain -> {
+            RpcNode node = rpcNodes.findByChainConfig_Identifier("ETHEREUM_SEPOLIA").stream()
+                    .filter(n -> n.getKind() == RpcNode.NodeKind.CHAINCACHE)
+                    .findFirst()
+                    .orElseGet(() -> {
+                        RpcNode fresh = new RpcNode();
+                        fresh.setChainConfig(chain);
+                        fresh.setKind(RpcNode.NodeKind.CHAINCACHE);
+                        return fresh;
+                    });
+
+            boolean changed = node.getId() == null;
+            changed |= setIfChanged(node::getUrl, node::setUrl, "http://chaincache:8080/local-devnet/rpc");
+            changed |= setIfChanged(node::getLabel, node::setLabel, "chaincache (anvil)");
+            changed |= setIfChanged(node::getManagementUrl, node::setManagementUrl, "http://chaincache:8080");
+            changed |= setIfChanged(node::getRemoteChainKey, node::setRemoteChainKey, "local-devnet");
+            if (!node.isEnabled()) {
+                node.setEnabled(true);
+                changed = true;
+            }
+            if (changed) {
+                rpcNodes.save(node);
+            }
+
+            if (chain.getFinalitySource() != ChainConfig.FinalitySource.CHAINCACHE) {
+                chain.setFinalitySource(ChainConfig.FinalitySource.CHAINCACHE);
+                chainConfigs.save(chain);
+            }
+        });
+    }
+
+    private static boolean setIfChanged(java.util.function.Supplier<String> getter,
+                                        java.util.function.Consumer<String> setter, String desired) {
+        if (Objects.equals(getter.get(), desired)) {
+            return false;
+        }
+        setter.accept(desired);
+        return true;
     }
 
     private void rpcNode(ChainConfig chain, String url, String label, boolean enabled) {
