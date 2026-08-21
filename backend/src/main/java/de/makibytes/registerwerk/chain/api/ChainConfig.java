@@ -19,6 +19,28 @@ public class ChainConfig {
 
     public enum NetworkType { MAINNET, TESTNET }
 
+    /**
+     * How a transaction/block on this chain becomes irreversible — the policy an EVM
+     * confirmation gate (e.g. {@code EvmUtils.isFinal}) evaluates against. Only meaningful for
+     * {@link ChainType#EVM} today; non-EVM chains use their own protocol-native finality signal
+     * (e.g. Starknet's {@code finality_status}, Solana/Stellar/Canton's final-on-write model)
+     * regardless of this field.
+     */
+    public enum FinalityModel {
+        /** Real {@code safe}/{@code finalized} block tags via {@code eth_getBlockByNumber}
+         *  (Ethereum L1, OP-Stack L2s). Reflects the chain's actual finality guarantee (e.g.
+         *  Casper FFG), not a depth heuristic. */
+        TAG_BASED,
+        /** No meaningful {@code finalized} tag; finality is derived from confirmation depth via
+         *  {@code BlockchainTxProperties#confirmationsFor}. Default — preserves the depth-only
+         *  behavior this registry always had. */
+        DEPTH_BASED,
+        /** Permissioned BFT consensus (Besu/Quorum QBFT, IBFT) where a block cannot be produced
+         *  until it is already final — there is no fork/reorg path, so the first-seen receipt is
+         *  final immediately. */
+        INSTANT
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -74,6 +96,18 @@ public class ChainConfig {
     /** Canton: synchronizer/domain alias (e.g. "global-synchronizer" for public CN). */
     @Column(name = "synchronizer_id", length = 255)
     private String synchronizerId;
+
+    /** @see FinalityModel */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "finality_model", nullable = false, length = 20)
+    private FinalityModel finalityModel = FinalityModel.DEPTH_BASED;
+
+    /** Average seconds between blocks on this chain, used only to estimate "time until this
+     *  level is reached" for a caller blocked by the finality gate. Null (the default) means
+     *  unknown — callers must show no estimate at all rather than guess one. Operator-supplied;
+     *  nothing in this codebase derives or updates it automatically. */
+    @Column(name = "avg_block_seconds")
+    private Integer avgBlockSeconds;
 
     @Column(nullable = false)
     private boolean enabled = true;
@@ -157,6 +191,12 @@ public class ChainConfig {
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+    public FinalityModel getFinalityModel() { return finalityModel; }
+    public void setFinalityModel(FinalityModel finalityModel) { this.finalityModel = finalityModel; }
+
+    public Integer getAvgBlockSeconds() { return avgBlockSeconds; }
+    public void setAvgBlockSeconds(Integer avgBlockSeconds) { this.avgBlockSeconds = avgBlockSeconds; }
 
     public Instant getCreatedAt() { return createdAt; }
 

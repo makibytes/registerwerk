@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.indexer.internal;
 
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
@@ -245,7 +246,7 @@ public class SolanaTransferSyncService {
         // (supermajority-rooted, no probabilistic finality/reorg window) already treats it as
         // irreversible — there is no separate provisional tier for Solana the way there is for
         // EVM/Starknet. FINAL matches the entity default; set explicitly here for clarity.
-        transfer.setFinalityStatus(TokenTransfer.FinalityStatus.FINAL);
+        transfer.setFinalityStatus(FinalityLevel.FINALIZED);
 
         tokenTransferRepository.save(transfer);
         log.debug("Saved Solana {} tx={} chain={} amount={}", eventType, txSignature,

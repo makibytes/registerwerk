@@ -451,7 +451,24 @@ public class EvmContractService {
     }
 
     /**
-     * Polls until the transaction is mined or times out.
+     * Polls until the transaction is mined or times out — deliberately not confirmation-depth or
+     * {@code FinalityModel}-aware, unlike {@code BlockchainTransactionService.pollPendingTransactions}.
+     *
+     * <p>This is safe only because every caller that needs the mined result to be authoritative
+     * re-verifies it asynchronously through an already model-aware path before treating it as
+     * final: the deployment factory flow ({@code send}/{@code deploy} here) only extracts a
+     * tx hash/address and hands off to {@code AssetDeploymentService.syncFromChain}; tracked
+     * corrections ({@code Erc3643LifecycleService.submitToSuite} and similar) use the
+     * non-blocking {@link #submit} and {@code BlockchainTransactionService.record} instead of
+     * this method entirely. A caller that instead treats this method's return as final truth
+     * with no downstream re-verification (e.g. writing removal/compliance state immediately
+     * after it returns) reintroduces exactly the reorg gap those two paths were fixed to close —
+     * see {@code IdentityRegistryService.removeInvestor} for a known instance of that.
+     *
+     * <p>Blocking here for full confirmation depth was deliberately rejected: on a
+     * {@code DEPTH_BASED} chain like Polygon (128 confirmations) that would turn a
+     * synchronous admin HTTP call into a multi-minute one, for no benefit where the downstream
+     * re-verification above already exists.
      */
     public TransactionReceipt waitForReceipt(Web3j web3j, String txHash) throws Exception {
         log.debug("Waiting for receipt of tx={}", txHash);

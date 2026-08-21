@@ -62,6 +62,74 @@ services:
       start_period: 3s
     restart: unless-stopped
 
+  # ─── chaincache experiment (portfolio review P3) ──────────────────────────
+  # Not part of the default stack: `docker compose up` never starts these. Bring them up
+  # explicitly with `docker compose --profile chaincache-experiment up chaincache-postgres
+  # chaincache` to try chaincache (../chaincache — a sibling repo) as this repo's anvil
+  # devnet's node backend. chaincache gets its own dedicated Postgres, per the single-instance
+  # architecture note in CLAUDE.md ("hosts only the registerwerk database") — it is not a
+  # second schema/database bolted onto the shared `postgres` service above.
+  #
+  # To actually route traffic through it: point the ETHEREUM_SEPOLIA chain_config/rpc_node
+  # row(s) that currently resolve to this stack's anvil at http://chaincache:8080/rpc (from
+  # inside the Compose network) instead — a URL change via the existing
+  # POST/PATCH /api/v1/admin/chains and rpc_node endpoints, zero backend code change. Measure
+  # via chaincache's `GET /api/metrics` before/after a deployment + transfer flow.
+  chaincache-postgres:
+    image: postgres:15-alpine
+    logging: *default-logging
+    profiles: [chaincache-experiment]
+    environment:
+      POSTGRES_DB: chaincache
+      POSTGRES_USER: chaincache
+      POSTGRES_PASSWORD: chaincache
+    volumes:
+      - chaincache_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chaincache -d chaincache"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  chaincache:
+    build:
+      context: ../chaincache
+    image: registerwerk-chaincache-experiment:local
+    logging: *default-logging
+    profiles: [chaincache-experiment]
+    depends_on:
+      chaincache-postgres:
+        condition: service_healthy
+      anvil:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
+      SPRING_DATASOURCE_USERNAME: chaincache
+      SPRING_DATASOURCE_PASSWORD: chaincache
+      # This stack's own anvil devnet (chain-id 11155111, impersonating Ethereum Sepolia for
+      # the local demo — see ETH_SEPOLIA_RPC below) as chaincache's sole upstream node.
+      CHAINCACHE_RPC_NODES_0_PROVIDER: anvil
+      CHAINCACHE_RPC_NODES_0_HTTP: http://anvil:8545
+      CHAINCACHE_RPC_NODES_0_WS: ws://anvil:8545
+      CHAINCACHE_RPC_EXPECTED_CHAIN_ID: "11155111"
+      # anvil has no reorgs and no safe/finalized tags; DEPTH_BASED (chaincache's own default)
+      # is the wrong model for it — INSTANT matches anvil's actual (lack of) finality semantics.
+      CHAINCACHE_CHAIN_FINALITY_MODEL: INSTANT
+      # Off for a local experiment; see chaincache's docs/ADMIN.md before exposing this beyond
+      # your own machine.
+      CHAINCACHE_AUTH_ENABLED: "false"
+      CHAINCACHE_KAFKA_ENABLED: "false"
+    ports:
+      - "127.0.0.1:18090:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
   demo-onchain-deploy:
     build:
       context: ./contracts
@@ -643,6 +711,7 @@ services:
 
 volumes:
   anvil_state:
+  chaincache_pgdata:
   lending_demo_addresses:
   pgdata:
   pg_backups:

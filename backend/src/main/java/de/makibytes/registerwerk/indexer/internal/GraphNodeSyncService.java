@@ -1,7 +1,10 @@
 package de.makibytes.registerwerk.indexer.internal;
 
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.indexer.internal.GraphNodeClient;
@@ -21,6 +24,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.web3j.protocol.Web3j;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -64,6 +68,7 @@ public class GraphNodeSyncService {
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final BlockchainTxProperties txProperties;
     private final ReorgGuard reorgGuard;
+    private final BlockchainClientRegistry clientRegistry;
 
     public GraphNodeSyncService(
             ChainConfigRepository chainConfigRepository,
@@ -73,7 +78,8 @@ public class GraphNodeSyncService {
             ExplorerUrlBuilder explorerUrlBuilder,
             AssetDeploymentRepository assetDeploymentRepository,
             BlockchainTxProperties txProperties,
-            ReorgGuard reorgGuard) {
+            ReorgGuard reorgGuard,
+            BlockchainClientRegistry clientRegistry) {
         this.chainConfigRepository = chainConfigRepository;
         this.indexerStateRepository = indexerStateRepository;
         this.tokenTransferRepository = tokenTransferRepository;
@@ -82,6 +88,7 @@ public class GraphNodeSyncService {
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.txProperties = txProperties;
         this.reorgGuard = reorgGuard;
+        this.clientRegistry = clientRegistry;
     }
 
     // ── Scheduling ────────────────────────────────────────────────────────────
@@ -134,12 +141,14 @@ public class GraphNodeSyncService {
         }
 
         long fromBlock = state.getLastSyncedBlock() != null ? state.getLastSyncedBlock() + 1 : 0L;
-        int required = txProperties.confirmationsFor(ReorgGuard.chainNameFrom(chain.getIdentifier()));
+        String chainName = ReorgGuard.chainNameFrom(chain.getIdentifier());
+        int required = txProperties.confirmationsFor(chainName);
+        int safeRequired = txProperties.safeConfirmationsFor(chainName);
 
         // Head + hasIndexingErrors up front. hasIndexingErrors is graph-node's own signal that
         // its view of the subgraph may be stale/wrong (e.g. mid-revert after a reorg it detected
-        // itself) — we deliberately do not trust PROVISIONAL/FINAL classification without a
-        // reliable head, so a missing/erroring _meta degrades this tick to "write everything
+        // itself) — we deliberately do not trust PROVISIONAL/SAFE/FINALIZED classification without
+        // a reliable head, so a missing/erroring _meta degrades this tick to "write everything
         // PROVISIONAL, skip the reorg re-verification pass" rather than failing the whole sync.
         Optional<BlockMeta> headMeta = graphNodeClient.fetchMeta(chain, null);
         Long headBlock = null;
@@ -150,6 +159,12 @@ public class GraphNodeSyncService {
                     + "classification this tick.", chain.getIdentifier());
         }
         final Long effectiveHead = headBlock;
+        // TAG_BASED chains: fetch the node's safe/finalized tags once per chain per tick (not once
+        // per transfer/probe — every call below this point shares the same finality snapshot).
+        // Other models don't need them: DEPTH_BASED derives finality from effectiveHead +
+        // required/safeRequired, INSTANT is always final.
+        final Long finalizedBlockNumber = resolveFinalizedBlockNumber(chain, effectiveHead);
+        final Long safeBlockNumber = resolveSafeBlockNumber(chain, effectiveHead);
 
         // Load all deployments once per sync call (not once per transfer, which would be an
         // O(page_size × total_deployments) full-table scan per PAGE_SIZE=1000 batch), keyed by
@@ -183,7 +198,7 @@ public class GraphNodeSyncService {
                     }
 
                     TokenTransfer transfer = mapToEntity(chain, gt, deploymentsByAddress,
-                            effectiveHead, required, hashCache);
+                            effectiveHead, required, safeRequired, safeBlockNumber, finalizedBlockNumber, hashCache);
                     tokenTransferRepository.save(transfer);
                     totalSaved++;
 
@@ -205,14 +220,19 @@ public class GraphNodeSyncService {
             // can still redirect where the cursor lands this tick.
             Long forkBlock = null;
             if (effectiveHead != null) {
-                VerifyResult result = reorgGuard.reverifyProvisionalWindow(chain.getId(),
-                        blockNumber -> probeEvmBlock(chain, blockNumber, effectiveHead, required, hashCache));
+                VerifyResult result = reorgGuard.reverifyUnsettledWindow(chain.getId(),
+                        blockNumber -> probeEvmBlock(chain, blockNumber, effectiveHead, required, safeRequired,
+                                safeBlockNumber, finalizedBlockNumber, hashCache));
                 if (result.reorgDetected()) {
                     forkBlock = result.forkBlock();
                 }
-                if (result.flippedFinal() > 0) {
-                    log.debug("Chain {}: {} transfer row(s) flipped PROVISIONAL -> FINAL.",
-                            chain.getIdentifier(), result.flippedFinal());
+                if (result.promotedSafe() > 0) {
+                    log.debug("Chain {}: {} transfer row(s) promoted PROVISIONAL -> SAFE.",
+                            chain.getIdentifier(), result.promotedSafe());
+                }
+                if (result.promotedFinalized() > 0) {
+                    log.debug("Chain {}: {} transfer row(s) promoted PROVISIONAL -> FINALIZED.",
+                            chain.getIdentifier(), result.promotedFinalized());
                 }
             }
 
@@ -229,11 +249,14 @@ public class GraphNodeSyncService {
                         chain.getIdentifier(), rewoundTo, forkBlock);
             } else if (highestBlock >= 0) {
                 state.setLastSyncedBlock(highestBlock);
-                if (effectiveHead != null) {
-                    long finalThrough = effectiveHead - required;
-                    if (finalThrough >= 0 && (state.getLastFinalBlock() == null || finalThrough > state.getLastFinalBlock())) {
-                        state.setLastFinalBlock(Math.min(finalThrough, highestBlock));
-                    }
+                Long finalThrough = switch (chain.getFinalityModel()) {
+                    case INSTANT -> effectiveHead;
+                    case TAG_BASED -> finalizedBlockNumber;
+                    case DEPTH_BASED -> effectiveHead != null ? effectiveHead - required : null;
+                };
+                if (finalThrough != null && finalThrough >= 0
+                        && (state.getLastFinalBlock() == null || finalThrough > state.getLastFinalBlock())) {
+                    state.setLastFinalBlock(Math.min(finalThrough, highestBlock));
                 }
             }
             state.setLastSyncedAt(Instant.now());
@@ -270,7 +293,7 @@ public class GraphNodeSyncService {
     /** EVM {@link ReorgGuard.FinalityProbe}: compares a freshly re-fetched canonical hash for
      *  {@code blockNumber} against whatever hash was previously recorded for it. */
     private ProbeOutcome probeEvmBlock(ChainConfig chain, long blockNumber, long headBlock, int required,
-            Map<Long, String> hashCache) {
+            int safeRequired, Long safeBlockNumber, Long finalizedBlockNumber, Map<Long, String> hashCache) {
         String freshHash = fetchAndCacheHash(chain, blockNumber, hashCache);
         if (freshHash == null) {
             return ProbeOutcome.unknown();
@@ -287,8 +310,49 @@ public class GraphNodeSyncService {
             tokenTransferRepository.backfillBlockHashAtBlock(chain.getId(), blockNumber, freshHash);
         }
 
-        long depth = headBlock - blockNumber + 1;
-        return new ProbeOutcome(depth >= required ? ProbeResult.FINAL : ProbeResult.PROVISIONAL, freshHash);
+        FinalityLevel level = EvmUtils.finalityOf(chain.getFinalityModel(), blockNumber, headBlock,
+                safeBlockNumber, finalizedBlockNumber, required, safeRequired);
+        ProbeResult result = switch (level) {
+            case FINALIZED -> ProbeResult.FINALIZED;
+            case SAFE -> ProbeResult.SAFE;
+            case PROVISIONAL, ORPHANED -> ProbeResult.PROVISIONAL;
+        };
+        return new ProbeOutcome(result, freshHash);
+    }
+
+    /** For {@link ChainConfig.FinalityModel#TAG_BASED} chains only, the node's current
+     *  {@code finalized} block tag — fetched once per chain per tick. Null for any other model,
+     *  when there's no reliable {@code effectiveHead} this tick, or if the RPC client / tag
+     *  lookup fails — rows conservatively stay PROVISIONAL rather than risk misreading an
+     *  unsupported/erroring tag as final. */
+    private Long resolveFinalizedBlockNumber(ChainConfig chain, Long effectiveHead) {
+        if (chain.getFinalityModel() != ChainConfig.FinalityModel.TAG_BASED || effectiveHead == null) {
+            return null;
+        }
+        try {
+            Web3j web3j = clientRegistry.getEvmClientByIdentifier(chain.getIdentifier());
+            return EvmUtils.finalizedBlockNumber(web3j).orElse(null);
+        } catch (Exception e) {
+            log.warn("Chain {}: could not resolve finalized block tag this tick ({}); TAG_BASED "
+                    + "rows stay PROVISIONAL until it succeeds.", chain.getIdentifier(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** For {@link ChainConfig.FinalityModel#TAG_BASED} chains only, the node's current
+     *  {@code safe} block tag — mirrors {@link #resolveFinalizedBlockNumber} exactly. */
+    private Long resolveSafeBlockNumber(ChainConfig chain, Long effectiveHead) {
+        if (chain.getFinalityModel() != ChainConfig.FinalityModel.TAG_BASED || effectiveHead == null) {
+            return null;
+        }
+        try {
+            Web3j web3j = clientRegistry.getEvmClientByIdentifier(chain.getIdentifier());
+            return EvmUtils.safeBlockNumber(web3j).orElse(null);
+        } catch (Exception e) {
+            log.warn("Chain {}: could not resolve safe block tag this tick ({}); TAG_BASED "
+                    + "rows stay PROVISIONAL until it succeeds.", chain.getIdentifier(), e.getMessage());
+            return null;
+        }
     }
 
     private String fetchAndCacheHash(ChainConfig chain, long blockNumber, Map<Long, String> hashCache) {
@@ -319,7 +383,8 @@ public class GraphNodeSyncService {
 
     private TokenTransfer mapToEntity(ChainConfig chain, GraphTransfer gt,
             Map<String, de.makibytes.registerwerk.deployment.api.AssetDeployment> deploymentsByAddress,
-            Long headBlock, int required, Map<Long, String> hashCache) {
+            Long headBlock, int required, int safeRequired, Long safeBlockNumber, Long finalizedBlockNumber,
+            Map<Long, String> hashCache) {
         TokenTransfer t = new TokenTransfer();
         t.setChainConfigId(chain.getId());
         t.setContractAddress(gt.tokenAddress() != null ? gt.tokenAddress() : "");
@@ -334,16 +399,14 @@ public class GraphNodeSyncService {
 
         // Finality classification. No head available this tick -> conservatively
         // PROVISIONAL with no hash (the next tick's reorg pass, once the head is available again,
-        // will fetch a hash and either flip it FINAL or leave it PROVISIONAL as appropriate).
+        // will fetch a hash and either promote it or leave it PROVISIONAL as appropriate).
         if (headBlock == null) {
-            t.setFinalityStatus(TokenTransfer.FinalityStatus.PROVISIONAL);
+            t.setFinalityStatus(FinalityLevel.PROVISIONAL);
         } else {
-            long depth = headBlock - gt.blockNumber() + 1;
-            if (depth >= required) {
-                t.setFinalityStatus(TokenTransfer.FinalityStatus.FINAL);
-                // Already past the depth we'll ever re-check — no need to fetch/store a hash.
-            } else {
-                t.setFinalityStatus(TokenTransfer.FinalityStatus.PROVISIONAL);
+            FinalityLevel level = EvmUtils.finalityOf(chain.getFinalityModel(), gt.blockNumber(), headBlock,
+                    safeBlockNumber, finalizedBlockNumber, required, safeRequired);
+            t.setFinalityStatus(level);
+            if (level == FinalityLevel.PROVISIONAL) {
                 t.setBlockHash(fetchAndCacheHash(chain, gt.blockNumber(), hashCache));
             }
         }

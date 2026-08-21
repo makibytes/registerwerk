@@ -77,8 +77,14 @@ public class ChainConfigController {
     public ResponseEntity<ChainConfigResponse> updateChain(
             @PathVariable UUID id,
             @RequestBody @Valid ChainConfigUpdateRequest request) {
-        // Map the incoming request fields onto a patch entity; null-valued fields will be ignored.
+        // Map the incoming request fields onto a patch entity; null-valued fields will be
+        // ignored. finalityModel is explicitly nulled out first because ChainConfig's own field
+        // initializer defaults it to DEPTH_BASED — left as-is, "not supplied in this request"
+        // would be indistinguishable from "explicitly set to DEPTH_BASED" and every unrelated
+        // PATCH (e.g. just displayName) would silently reset an existing TAG_BASED/INSTANT chain
+        // back to DEPTH_BASED.
         ChainConfig patch = new ChainConfig();
+        patch.setFinalityModel(null);
         patch.setDisplayName(request.displayName());
         patch.setRpcUrl(request.rpcUrl());
         patch.setWsUrl(request.wsUrl());
@@ -86,6 +92,9 @@ public class ChainConfigController {
         patch.setGraphNodeUrl(request.graphNodeUrl());
         patch.setGraphSubgraphName(request.graphSubgraphName());
         patch.setChainId(request.chainId());
+        if (request.finalityModel() != null) {
+            patch.setFinalityModel(ChainConfig.FinalityModel.valueOf(request.finalityModel().toUpperCase()));
+        }
 
         ChainConfig updated = chainConfigService.update(id, patch);
         return ResponseEntity.ok(chainConfigMapper.toResponse(updated));

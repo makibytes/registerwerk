@@ -1,10 +1,13 @@
 package de.makibytes.registerwerk.indexer.internal;
 
+import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.finality.api.BlockFinalityFeed;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
@@ -27,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -53,6 +57,10 @@ class GraphNodeSyncServiceTest {
     @Mock private TokenTransferRepository tokenTransferRepository;
     @Mock private GraphNodeClient graphNodeClient;
     @Mock private AssetDeploymentRepository assetDeploymentRepository;
+    @Mock private BlockchainClientRegistry clientRegistry;
+    @Mock private BlockFinalityFeed blockFinalityFeed;
+    @Mock private de.makibytes.registerwerk.finality.api.BlockFinalityPort blockFinalityPort;
+    @Mock private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
 
     private final ExplorerUrlBuilder explorerUrlBuilder = new ExplorerUrlBuilder();
     private BlockchainTxProperties txProperties;
@@ -64,10 +72,14 @@ class GraphNodeSyncServiceTest {
     void setUp() {
         txProperties = new BlockchainTxProperties();
         txProperties.setDefaultConfirmations(2);
-        ReorgGuard reorgGuard = new ReorgGuard(tokenTransferRepository);
+        ReorgGuard reorgGuard = new ReorgGuard(tokenTransferRepository, blockFinalityFeed, blockFinalityPort,
+                chainEffectRecorder, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        // clientRegistry is unused unless a chain is configured TAG_BASED — every ethereumChain()
+        // fixture below defaults to DEPTH_BASED (ChainConfig's own field default), so the
+        // existing depth-only tests never touch it.
         service = new GraphNodeSyncService(chainConfigRepository, indexerStateRepository,
                 tokenTransferRepository, graphNodeClient, explorerUrlBuilder,
-                assetDeploymentRepository, txProperties, reorgGuard);
+                assetDeploymentRepository, txProperties, reorgGuard, clientRegistry);
 
         when(assetDeploymentRepository.findAll()).thenReturn(List.of());
     }
@@ -111,14 +123,14 @@ class GraphNodeSyncServiceTest {
         when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(chainConfigId, "0xtx1", 0))
                 .thenReturn(false);
         // No provisional backlog to re-verify this tick.
-        when(tokenTransferRepository.findDistinctProvisionalBlocks(chainConfigId)).thenReturn(List.of());
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
 
         service.syncChain(chain);
 
         ArgumentCaptor<TokenTransfer> captor = ArgumentCaptor.forClass(TokenTransfer.class);
         verify(tokenTransferRepository).save(captor.capture());
         TokenTransfer saved = captor.getValue();
-        assertThat(saved.getFinalityStatus()).isEqualTo(TokenTransfer.FinalityStatus.PROVISIONAL);
+        assertThat(saved.getFinalityStatus()).isEqualTo(FinalityLevel.PROVISIONAL);
         assertThat(saved.getBlockHash()).isEqualTo("0xblockhash100");
         assertThat(saved.getBlockNumber()).isEqualTo(100L);
 
@@ -149,17 +161,26 @@ class GraphNodeSyncServiceTest {
                 .thenReturn(List.of());
 
         // One still-PROVISIONAL block from an earlier tick, now deep enough to finalize.
-        when(tokenTransferRepository.findDistinctProvisionalBlocks(chainConfigId)).thenReturn(List.of(50L));
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of(50L));
         when(graphNodeClient.fetchMeta(chain, 50L))
                 .thenReturn(Optional.of(new BlockMeta(50, "0xhash50", false)));
         when(tokenTransferRepository.findDistinctBlockHashesAt(chainConfigId, 50L))
                 .thenReturn(List.of("0xhash50")); // matches -> not orphaned
-        when(tokenTransferRepository.markFinalAtBlock(chainConfigId, 50L)).thenReturn(3);
+        when(tokenTransferRepository.markLevelAtBlock(
+                chainConfigId, 50L, FinalityLevel.PROVISIONAL, FinalityLevel.FINALIZED)).thenReturn(3);
 
         service.syncChain(chain);
 
-        verify(tokenTransferRepository).markFinalAtBlock(chainConfigId, 50L);
+        // This depth threshold has safeConfirmations clamped equal to requiredConfirmations (see
+        // BlockchainTxProperties#safeConfirmationsFor), so a PROVISIONAL row goes straight to
+        // FINALIZED in one probe — the SAFE-sourced promotion call finds no matching row (0, the
+        // Mockito default for an unstubbed int-returning call) and is never separately verified.
+        verify(tokenTransferRepository).markLevelAtBlock(
+                chainConfigId, 50L, FinalityLevel.PROVISIONAL, FinalityLevel.FINALIZED);
         verify(tokenTransferRepository, never()).markOrphanedFromBlock(any(), any());
+        // The finality module's own ledger must be told about this promotion too - this is what
+        // makes "nothing reacts to a block's finality changing" no longer true.
+        verify(blockFinalityFeed).recordObservation(chainConfigId, 50L, "0xhash50", FinalityLevel.FINALIZED);
 
         ArgumentCaptor<IndexerState> stateCaptor = ArgumentCaptor.forClass(IndexerState.class);
         verify(indexerStateRepository).save(stateCaptor.capture());
@@ -182,19 +203,32 @@ class GraphNodeSyncServiceTest {
         when(graphNodeClient.fetchTransfers(eq(chain), eq(101L), anyInt(), eq(0)))
                 .thenReturn(List.of());
 
-        when(tokenTransferRepository.findDistinctProvisionalBlocks(chainConfigId)).thenReturn(List.of(50L));
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of(50L));
         when(graphNodeClient.fetchMeta(chain, 50L))
                 .thenReturn(Optional.of(new BlockMeta(50, "0xNEWHASH", false)));
         when(tokenTransferRepository.findDistinctBlockHashesAt(chainConfigId, 50L))
                 .thenReturn(List.of("0xOLDHASH")); // mismatch -> orphaned
-        when(tokenTransferRepository.existsFinalAtOrAfter(chainConfigId, 50L)).thenReturn(false);
+        when(tokenTransferRepository.existsFinalizedAtOrAfter(chainConfigId, 50L)).thenReturn(false);
         when(tokenTransferRepository.markOrphanedFromBlock(chainConfigId, 50L)).thenReturn(4);
+        UUID affectedAssetId = UUID.randomUUID();
+        when(tokenTransferRepository.findDistinctAssetIdsAtOrAfter(chainConfigId, 50L))
+                .thenReturn(List.of(affectedAssetId));
 
         service.syncChain(chain);
 
         verify(tokenTransferRepository, never()).save(any());
         verify(tokenTransferRepository).markOrphanedFromBlock(chainConfigId, 50L);
-        verify(tokenTransferRepository, never()).markFinalAtBlock(any(), any());
+        verify(tokenTransferRepository, never()).markLevelAtBlock(any(), any(), any(), any());
+        // The retraction must reach the finality module's ledger too, carrying the fresh
+        // (replacement) hash and the count of token_transfer rows this reorg orphaned.
+        verify(blockFinalityFeed).recordRetraction(chainConfigId, 50L, "0xNEWHASH", 4);
+        // And it must actually correct balances: every asset with a transfer at/after the fork
+        // block gets a HOLDER_BALANCE_SYNCED effect journalled and immediately compensated.
+        ArgumentCaptor<de.makibytes.registerwerk.finality.api.ChainEffectDescriptor> effectCaptor =
+                ArgumentCaptor.forClass(de.makibytes.registerwerk.finality.api.ChainEffectDescriptor.class);
+        verify(chainEffectRecorder).recordAndCompensate(effectCaptor.capture());
+        assertThat(effectCaptor.getValue().entityId()).isEqualTo(affectedAssetId);
+        assertThat(effectCaptor.getValue().effectType()).isEqualTo("HOLDER_BALANCE_SYNCED");
 
         ArgumentCaptor<IndexerState> stateCaptor = ArgumentCaptor.forClass(IndexerState.class);
         verify(indexerStateRepository).save(stateCaptor.capture());
@@ -203,5 +237,88 @@ class GraphNodeSyncServiceTest {
         // clamped down too — a reorg deeper than the confirmation-depth policy guaranteed against.
         assertThat(savedState.getLastSyncedBlock()).isEqualTo(49L);
         assertThat(savedState.getLastFinalBlock()).isEqualTo(49L);
+    }
+
+    // ── TAG_BASED finality model ─────────────────────────────────────────────
+
+    private org.web3j.protocol.Web3j stubFinalizedTag(ChainConfig chain, long finalizedBlockNumber) {
+        org.web3j.protocol.Web3j web3j =
+                mock(org.web3j.protocol.Web3j.class, org.mockito.Answers.RETURNS_DEEP_STUBS);
+        when(clientRegistry.getEvmClientByIdentifier(chain.getIdentifier())).thenReturn(web3j);
+        org.web3j.protocol.core.methods.response.EthBlock finalizedResponse = mock(
+                org.web3j.protocol.core.methods.response.EthBlock.class, org.mockito.Answers.RETURNS_DEEP_STUBS);
+        when(finalizedResponse.hasError()).thenReturn(false);
+        when(finalizedResponse.getBlock().getNumber()).thenReturn(java.math.BigInteger.valueOf(finalizedBlockNumber));
+        try {
+            when(web3j.ethGetBlockByNumber(org.web3j.protocol.core.DefaultBlockParameterName.FINALIZED, false).send())
+                    .thenReturn(finalizedResponse);
+        } catch (java.io.IOException impossible) {
+            throw new AssertionError(impossible);
+        }
+        return web3j;
+    }
+
+    @Test
+    @DisplayName("TAG_BASED chain: a transfer past the depth threshold but below the node's "
+            + "finalized tag stays PROVISIONAL — the tag overrides depth, not the other way round")
+    void syncChain_tagBased_belowFinalizedTag_staysProvisionalDespiteDepth() {
+        ChainConfig chain = ethereumChain();
+        chain.setFinalityModel(ChainConfig.FinalityModel.TAG_BASED);
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE)).thenReturn(Optional.empty());
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Head at 100, transfer at block 90 -> depth = 11 >= required(2), so DEPTH_BASED would
+        // finalize it; but the node's finalized tag is only at 80, so TAG_BASED must not.
+        when(graphNodeClient.fetchMeta(chain, null))
+                .thenReturn(Optional.of(new BlockMeta(100, "0xheadhash", false)));
+        stubFinalizedTag(chain, 80L);
+
+        GraphTransfer transfer = new GraphTransfer("0xtx1-0", "0xtoken", "0xfrom", "0xto",
+                null, "5", "TRANSFER", 90L, 1_700_000_000L, "0xtx1", 0L);
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
+                .thenReturn(List.of(transfer));
+        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(chainConfigId, "0xtx1", 0))
+                .thenReturn(false);
+        when(graphNodeClient.fetchMeta(chain, 90L))
+                .thenReturn(Optional.of(new BlockMeta(90, "0xblockhash90", false)));
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
+
+        service.syncChain(chain);
+
+        ArgumentCaptor<TokenTransfer> captor = ArgumentCaptor.forClass(TokenTransfer.class);
+        verify(tokenTransferRepository).save(captor.capture());
+        assertThat(captor.getValue().getFinalityStatus()).isEqualTo(FinalityLevel.PROVISIONAL);
+    }
+
+    @Test
+    @DisplayName("TAG_BASED chain: a transfer at or below the node's finalized tag is written "
+            + "FINAL immediately, without ever fetching a block hash for it")
+    void syncChain_tagBased_atOrBelowFinalizedTag_writesFinalImmediately() {
+        ChainConfig chain = ethereumChain();
+        chain.setFinalityModel(ChainConfig.FinalityModel.TAG_BASED);
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE)).thenReturn(Optional.empty());
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        when(graphNodeClient.fetchMeta(chain, null))
+                .thenReturn(Optional.of(new BlockMeta(100, "0xheadhash", false)));
+        stubFinalizedTag(chain, 80L);
+
+        GraphTransfer transfer = new GraphTransfer("0xtx2-0", "0xtoken", "0xfrom", "0xto",
+                null, "5", "TRANSFER", 70L, 1_700_000_000L, "0xtx2", 0L);
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
+                .thenReturn(List.of(transfer));
+        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(chainConfigId, "0xtx2", 0))
+                .thenReturn(false);
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
+
+        service.syncChain(chain);
+
+        ArgumentCaptor<TokenTransfer> captor = ArgumentCaptor.forClass(TokenTransfer.class);
+        verify(tokenTransferRepository).save(captor.capture());
+        assertThat(captor.getValue().getFinalityStatus()).isEqualTo(FinalityLevel.FINALIZED);
+        assertThat(captor.getValue().getBlockHash()).isNull();
+        verify(graphNodeClient, never()).fetchMeta(chain, 70L);
     }
 }

@@ -11,6 +11,7 @@ import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
@@ -65,8 +66,11 @@ public class StarknetTransferSyncService {
 
     /** Starknet JSON-RPC block finality tiers (starknet_getBlockWithTxHashes' {@code status}
      *  field). ACCEPTED_ON_L2 is the sequencer's own finality — not reversible in the ordinary
-     *  course, but not yet posted/proven on L1 either; REJECTED is the (rare) case a block that
-     *  was momentarily visible is thrown out before L1 acceptance. */
+     *  course, but not yet posted/proven on L1 either, so it maps to {@link FinalityLevel#SAFE}
+     *  rather than {@code PROVISIONAL} (where it used to be lumped in with RECEIVED/PENDING) or
+     *  {@code FINALIZED}: it is a real intermediate guarantee, distinct from both. REJECTED is
+     *  the (rare) case a block that was momentarily visible is thrown out before L1 acceptance. */
+    private static final String STATUS_ACCEPTED_ON_L2 = "ACCEPTED_ON_L2";
     private static final String STATUS_ACCEPTED_ON_L1 = "ACCEPTED_ON_L1";
     private static final String STATUS_REJECTED = "REJECTED";
 
@@ -225,13 +229,18 @@ public class StarknetTransferSyncService {
                 }
             }
 
-            // Re-verify every still-PROVISIONAL (L2-accepted-only) block for this chain: flip to
-            // FINAL once ACCEPTED_ON_L1, or ORPHAN (never delete) + rewind on the rare REJECTED.
-            VerifyResult result = reorgGuard.reverifyProvisionalWindow(chain.getId(),
+            // Re-verify every still-unsettled (PROVISIONAL or SAFE/ACCEPTED_ON_L2) block for this
+            // chain: promote to SAFE once ACCEPTED_ON_L2, to FINALIZED once ACCEPTED_ON_L1, or
+            // ORPHAN (never delete) + rewind on the rare REJECTED.
+            VerifyResult result = reorgGuard.reverifyUnsettledWindow(chain.getId(),
                     blockNumber -> probeStarknetBlock(chain, blockNumber, statusCache));
-            if (result.flippedFinal() > 0) {
-                log.debug("Starknet chain {}: {} transfer row(s) flipped ACCEPTED_ON_L2 -> ACCEPTED_ON_L1/FINAL.",
-                        chain.getIdentifier(), result.flippedFinal());
+            if (result.promotedSafe() > 0) {
+                log.debug("Starknet chain {}: {} transfer row(s) promoted PROVISIONAL -> ACCEPTED_ON_L2/SAFE.",
+                        chain.getIdentifier(), result.promotedSafe());
+            }
+            if (result.promotedFinalized() > 0) {
+                log.debug("Starknet chain {}: {} transfer row(s) promoted -> ACCEPTED_ON_L1/FINALIZED.",
+                        chain.getIdentifier(), result.promotedFinalized());
             }
 
             if (result.reorgDetected()) {
@@ -324,16 +333,20 @@ public class StarknetTransferSyncService {
                 "logIndex", logIndex
         ));
 
-        // Finality classification: FINAL only once ACCEPTED_ON_L1; ACCEPTED_ON_L2 (the
-        // common case for a just-observed event) and PENDING both stay PROVISIONAL. A block whose
-        // status can't be determined this tick (RPC error) is conservatively PROVISIONAL too —
-        // the reorg pass will keep re-checking it on later ticks.
+        // Finality classification: FINALIZED only once ACCEPTED_ON_L1; SAFE once ACCEPTED_ON_L2
+        // (a real intermediate guarantee — see the STATUS_ACCEPTED_ON_L2 constant's javadoc);
+        // RECEIVED/PENDING stay PROVISIONAL. A block whose status can't be determined this tick
+        // (RPC error) is conservatively PROVISIONAL too — the reorg pass will keep re-checking it
+        // on later ticks.
         if (blockNumber != null) {
             String status = fetchAndCacheBlockStatus(chain.getRpcUrl(), blockNumber, statusCache);
-            transfer.setFinalityStatus(STATUS_ACCEPTED_ON_L1.equals(status)
-                    ? TokenTransfer.FinalityStatus.FINAL : TokenTransfer.FinalityStatus.PROVISIONAL);
+            transfer.setFinalityStatus(switch (String.valueOf(status)) {
+                case STATUS_ACCEPTED_ON_L1 -> FinalityLevel.FINALIZED;
+                case STATUS_ACCEPTED_ON_L2 -> FinalityLevel.SAFE;
+                default -> FinalityLevel.PROVISIONAL;
+            });
         } else {
-            transfer.setFinalityStatus(TokenTransfer.FinalityStatus.PROVISIONAL);
+            transfer.setFinalityStatus(FinalityLevel.PROVISIONAL);
         }
         return transfer;
     }
@@ -348,9 +361,10 @@ public class StarknetTransferSyncService {
             return ProbeOutcome.unknown();
         }
         return switch (status) {
-            case STATUS_ACCEPTED_ON_L1 -> new ProbeOutcome(ProbeResult.FINAL, status);
+            case STATUS_ACCEPTED_ON_L1 -> new ProbeOutcome(ProbeResult.FINALIZED, status);
+            case STATUS_ACCEPTED_ON_L2 -> new ProbeOutcome(ProbeResult.SAFE, status);
             case STATUS_REJECTED -> new ProbeOutcome(ProbeResult.ORPHANED, status);
-            default -> new ProbeOutcome(ProbeResult.PROVISIONAL, status); // ACCEPTED_ON_L2, PENDING
+            default -> new ProbeOutcome(ProbeResult.PROVISIONAL, status); // RECEIVED, PENDING
         };
     }
 

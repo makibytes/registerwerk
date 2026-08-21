@@ -7,6 +7,8 @@ import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.finality.api.BlockFinalityFeed;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
@@ -56,6 +58,9 @@ class StarknetTransferSyncServiceTest {
     @Mock private IndexerStateRepository indexerStateRepository;
     @Mock private TokenTransferRepository tokenTransferRepository;
     @Mock private AssetDeploymentRepository assetDeploymentRepository;
+    @Mock private BlockFinalityFeed blockFinalityFeed;
+    @Mock private de.makibytes.registerwerk.finality.api.BlockFinalityPort blockFinalityPort;
+    @Mock private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
 
     private final ExplorerUrlBuilder explorerUrlBuilder = new ExplorerUrlBuilder();
     private final RestClient.Builder restClientBuilder = RestClient.builder();
@@ -69,12 +74,13 @@ class StarknetTransferSyncServiceTest {
     @BeforeEach
     void setUp() {
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
-        // tokenTransferRepository.findDistinctProvisionalBlocks is left unstubbed on purpose in
+        // tokenTransferRepository.findDistinctUnsettledBlocks is left unstubbed on purpose in
         // every test below: Mockito's default answer for a List-returning method is an empty
-        // list, so ReorgGuard.reverifyProvisionalWindow short-circuits to VerifyResult.NONE with
+        // list, so ReorgGuard.reverifyUnsettledWindow short-circuits to VerifyResult.NONE with
         // no further RPC calls — exactly what every test here wants, since none of them are
         // exercising the reorg-detection path itself.
-        ReorgGuard reorgGuard = new ReorgGuard(tokenTransferRepository);
+        ReorgGuard reorgGuard = new ReorgGuard(tokenTransferRepository, blockFinalityFeed, blockFinalityPort,
+                chainEffectRecorder, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
         service = new StarknetTransferSyncService(chainConfigRepository, indexerStateRepository,
                 tokenTransferRepository, assetDeploymentRepository, explorerUrlBuilder,
                 restClientBuilder, reorgGuard, io.github.resilience4j.bulkhead.BulkheadRegistry.ofDefaults());
@@ -150,8 +156,9 @@ class StarknetTransferSyncServiceTest {
         assertThat(saved.getLogIndex()).isEqualTo(0);
         assertThat(saved.getDeploymentId()).isEqualTo(deploymentId);
         assertThat(saved.getAssetId()).isEqualTo(assetId);
-        // ACCEPTED_ON_L2 (not yet ACCEPTED_ON_L1) — stays PROVISIONAL until a later re-verify.
-        assertThat(saved.getFinalityStatus()).isEqualTo(TokenTransfer.FinalityStatus.PROVISIONAL);
+        // ACCEPTED_ON_L2 (not yet ACCEPTED_ON_L1) — a real intermediate guarantee, so SAFE rather
+        // than PROVISIONAL; still re-verified on later ticks until it reaches FINALIZED.
+        assertThat(saved.getFinalityStatus()).isEqualTo(FinalityLevel.SAFE);
 
         ArgumentCaptor<IndexerState> stateCaptor = ArgumentCaptor.forClass(IndexerState.class);
         verify(indexerStateRepository, org.mockito.Mockito.atLeastOnce()).save(stateCaptor.capture());
@@ -194,8 +201,8 @@ class StarknetTransferSyncServiceTest {
         assertThat(saved.getFromAddress()).isEqualTo("0x111");
         assertThat(saved.getToAddress()).isEqualTo("0x222");
         assertThat(saved.getAmount()).isEqualByComparingTo(new BigDecimal("5"));
-        // ACCEPTED_ON_L1 at write time — FINAL immediately, no provisional window needed.
-        assertThat(saved.getFinalityStatus()).isEqualTo(TokenTransfer.FinalityStatus.FINAL);
+        // ACCEPTED_ON_L1 at write time — FINALIZED immediately, no provisional window needed.
+        assertThat(saved.getFinalityStatus()).isEqualTo(FinalityLevel.FINALIZED);
 
         mockServer.verify();
     }

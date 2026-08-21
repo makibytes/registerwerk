@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.indexer.api;
 
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
@@ -27,17 +28,6 @@ import java.util.UUID;
 public class TokenTransfer {
 
     public enum EventType { MINT, TRANSFER, BURN }
-
-    /**
-     * Two-tier finality state.
-     * PROVISIONAL: within the configured confirmation depth, not yet re-verified.
-     * FINAL: cleared the confirmation depth, or chain-natively final on write
-     * (Solana at commitment=finalized, Stellar ledger close, Canton synchronizer commit,
-     * Starknet ACCEPTED_ON_L1).
-     * ORPHANED: re-verification found this row's block/tx is no longer canonical. Rows are
-     * never deleted, only marked — this is a regulated register with an audit-trail requirement.
-     */
-    public enum FinalityStatus { PROVISIONAL, FINAL, ORPHANED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -105,14 +95,18 @@ public class TokenTransfer {
     private Map<String, Object> rawData;
 
     /**
-     * Defaults to FINAL, matching the DB column default — correct for chains that are final on
-     * write (Solana/Stellar/Canton, see class javadoc). EVM (via GraphNodeSyncService) and
-     * Starknet explicitly set PROVISIONAL at write time when the row is within the confirmation
-     * depth / not yet L1-accepted.
+     * Defaults to FINALIZED, matching the DB column default — correct for chains that are final
+     * on write (Solana/Stellar/Canton — final at commitment=finalized / ledger close /
+     * synchronizer commit respectively). EVM (via GraphNodeSyncService) and Starknet explicitly
+     * set PROVISIONAL or SAFE at write time when the row hasn't yet reached the chain's configured
+     * finality model's strongest level — Starknet's ACCEPTED_ON_L2 maps to SAFE, ACCEPTED_ON_L1 to
+     * FINALIZED, REJECTED/REVERTED to ORPHANED. ORPHANED rows are never deleted, only marked — this
+     * is a regulated register with an audit-trail requirement. See {@link FinalityLevel}'s javadoc
+     * for the full three-tier model and how it aligns with the sibling products' vocabulary.
      */
     @Enumerated(EnumType.STRING)
-    @Column(name = "finality_status", nullable = false, length = 12)
-    private FinalityStatus finalityStatus = FinalityStatus.FINAL;
+    @Column(name = "finality_status", nullable = false, length = 16)
+    private FinalityLevel finalityStatus = FinalityLevel.FINALIZED;
 
     /**
      * Canonical block/identity hash recorded at write time (EVM block hash, Starknet block
@@ -174,8 +168,8 @@ public class TokenTransfer {
     public Map<String, Object> getRawData() { return rawData; }
     public void setRawData(Map<String, Object> rawData) { this.rawData = rawData; }
 
-    public FinalityStatus getFinalityStatus() { return finalityStatus; }
-    public void setFinalityStatus(FinalityStatus finalityStatus) { this.finalityStatus = finalityStatus; }
+    public FinalityLevel getFinalityStatus() { return finalityStatus; }
+    public void setFinalityStatus(FinalityLevel finalityStatus) { this.finalityStatus = finalityStatus; }
 
     public String getBlockHash() { return blockHash; }
     public void setBlockHash(String blockHash) { this.blockHash = blockHash; }

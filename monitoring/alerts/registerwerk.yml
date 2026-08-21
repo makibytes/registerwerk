@@ -310,6 +310,27 @@ groups:
           summary: "A scheduled job has failed more than 3 times in the last hour"
           description: "job={{ $labels.job }} outcome=failure — see application logs for the exception; ShedLock ensures this reflects only actual executions on the leader replica, not skipped ticks."
 
+      # ── Reorg depth (ReorgGuard) ──────────────────────────────────────────────
+      - alert: DeepReorgDetected
+        expr: |
+          increase(registerwerk_reorg_detected_total{job="registerwerk-backend", severity="crosses_finalized"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Reorg reached an already-FINALIZED block"
+          description: "A chain reorg orphaned a row this registry had already treated as FINALIZED — deeper than the configured confirmation policy guarantees. This is a consensus failure, not routine reorg noise; manual review required (see ReorgGuard's CRITICAL log line for the affected chain/block)."
+
+      - alert: ReorgCrossedSafeThreshold
+        expr: |
+          increase(registerwerk_reorg_detected_total{job="registerwerk-backend", severity="crosses_safe"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Reorg reached an already-SAFE block"
+          description: "A chain reorg orphaned a row already promoted to SAFE — still within the confirmation policy's guarantee, but deeper than a purely-PROVISIONAL reorg. Worth a look, not yet a consensus failure."
+
       # ── Blockchain tx submission -> confirmation latency (SLO-style) ─────────
       - alert: BlockchainTxConfirmationLatencyHigh
         expr: |

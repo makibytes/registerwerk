@@ -12,5 +12,6 @@ public record ChainConfigUpdateRequest(
         @Size(max = 512) @Pattern(regexp = "wss?://\\S+") String wsUrl,
         @Size(max = 512) @Pattern(regexp = "https?://\\S+") String blockExplorerUrl,
         @Size(max = 512) @Pattern(regexp = "https?://\\S+") String graphNodeUrl,
-        @Size(max = 200) String graphSubgraphName
+        @Size(max = 200) String graphSubgraphName,
+        @Pattern(regexp = "(?i)TAG_BASED|DEPTH_BASED|INSTANT") String finalityModel
 ) {}

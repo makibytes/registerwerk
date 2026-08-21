@@ -27,6 +27,17 @@ public class BlockchainTxProperties {
     /** Per-chain confirmation depth, keyed by Chain enum name (case-insensitive). */
     private Map<String, Integer> confirmationsByChain = new HashMap<>();
 
+    /** SAFE-level confirmation depth for {@code DEPTH_BASED} chains, applied to any chain without
+     *  an explicit override. Ethereum's real {@code safe} tag lands at ~1 epoch vs {@code
+     *  finalized}'s ~2, so a quarter of the FINALIZED depth is the default here — deliberately
+     *  conservative rather than tuned per chain, since a DEPTH_BASED chain has no real safe/
+     *  finalized distinction to begin with (see {@code ChainConfig.FinalityModel}'s javadoc);
+     *  {@code TAG_BASED} chains ignore this and read the node's actual {@code safe} tag instead. */
+    private int defaultSafeConfirmations = 3;
+
+    /** Per-chain SAFE-level confirmation depth, keyed by Chain enum name (case-insensitive). */
+    private Map<String, Integer> safeConfirmationsByChain = new HashMap<>();
+
     /**
      * A transaction that is still un-mined (no receipt) after this many seconds is marked
      * TIMEOUT. A mined-but-not-yet-confirmed transaction is never timed out — it stays
@@ -41,6 +52,17 @@ public class BlockchainTxProperties {
         return confirmationsByChain.getOrDefault(chain.toUpperCase(Locale.ROOT), defaultConfirmations);
     }
 
+    /** @return the chain's SAFE-level confirmation depth, clamped to never exceed its FINALIZED
+     *  depth — a misconfigured override (safe &gt; finalized) would otherwise let a block report
+     *  SAFE without ever having been able to report FINALIZED first, which is not a real ordering
+     *  under {@link de.makibytes.registerwerk.blockchain.api.EvmUtils#finalityOf}. */
+    public int safeConfirmationsFor(String chain) {
+        int safe = chain == null
+                ? defaultSafeConfirmations
+                : safeConfirmationsByChain.getOrDefault(chain.toUpperCase(Locale.ROOT), defaultSafeConfirmations);
+        return Math.min(safe, confirmationsFor(chain));
+    }
+
     public int getDefaultConfirmations() { return defaultConfirmations; }
     public void setDefaultConfirmations(int defaultConfirmations) { this.defaultConfirmations = defaultConfirmations; }
 
@@ -50,6 +72,16 @@ public class BlockchainTxProperties {
         Map<String, Integer> normalised = new HashMap<>();
         confirmationsByChain.forEach((k, v) -> normalised.put(k.toUpperCase(Locale.ROOT), v));
         this.confirmationsByChain = normalised;
+    }
+
+    public int getDefaultSafeConfirmations() { return defaultSafeConfirmations; }
+    public void setDefaultSafeConfirmations(int defaultSafeConfirmations) { this.defaultSafeConfirmations = defaultSafeConfirmations; }
+
+    public Map<String, Integer> getSafeConfirmationsByChain() { return safeConfirmationsByChain; }
+    public void setSafeConfirmationsByChain(Map<String, Integer> safeConfirmationsByChain) {
+        Map<String, Integer> normalised = new HashMap<>();
+        safeConfirmationsByChain.forEach((k, v) -> normalised.put(k.toUpperCase(Locale.ROOT), v));
+        this.safeConfirmationsByChain = normalised;
     }
 
     public long getTimeoutSeconds() { return timeoutSeconds; }

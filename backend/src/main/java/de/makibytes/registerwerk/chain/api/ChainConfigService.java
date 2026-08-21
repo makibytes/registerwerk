@@ -95,6 +95,7 @@ public class ChainConfigService {
         if (patch.getGraphNodeUrl() != null)       existing.setGraphNodeUrl(patch.getGraphNodeUrl());
         if (patch.getGraphSubgraphName() != null)  existing.setGraphSubgraphName(patch.getGraphSubgraphName());
         if (patch.getChainId() != null)            existing.setChainId(patch.getChainId());
+        if (patch.getFinalityModel() != null)      existing.setFinalityModel(patch.getFinalityModel());
 
         ChainConfig saved = chainConfigRepository.save(existing);
         eventPublisher.publishEvent(new ChainUpdatedEvent(saved.getId(), null, null));

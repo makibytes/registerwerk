@@ -1,6 +1,6 @@
 package de.makibytes.registerwerk.indexer.api;
 
-import de.makibytes.registerwerk.indexer.api.TokenTransfer;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -26,6 +26,13 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
     /** Returns all transfers linked to a specific deployment, newest first. */
     Page<TokenTransfer> findByDeploymentIdOrderByOccurredAtDesc(UUID deploymentId, Pageable pageable);
 
+    /** Same as {@link #findByDeploymentIdOrderByOccurredAtDesc} but restricted to a single
+     *  {@link FinalityLevel} — used by balance-authoritative reads (holder sync) where a
+     *  reorged-out (ORPHANED) or not-yet-confirmed (PROVISIONAL/SAFE) transfer must never be
+     *  allowed to move the register's balance. Pass {@code FINALIZED}. */
+    Page<TokenTransfer> findByDeploymentIdAndFinalityStatusOrderByOccurredAtDesc(
+            UUID deploymentId, FinalityLevel finalityStatus, Pageable pageable);
+
     /**
      * Returns transfers on a given chain that occurred after (strictly greater than) the
      * given block number. Used by the indexer to resume from a checkpoint.
@@ -48,13 +55,19 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
 
     // ── Reorg / finality (ReorgGuard) ───────────────────────────────────────
 
-    /** Distinct block numbers among currently PROVISIONAL rows for a chain — the "provisional
+    /** Distinct block numbers among currently PROVISIONAL-or-SAFE rows for a chain — the "unsettled
      *  window" ReorgGuard re-verifies each tick. Ascending so the first mismatch found is the
-     *  earliest (true) fork point. */
+     *  earliest (true) fork point. SAFE rows stay in this walk (not just PROVISIONAL ones) so a
+     *  block that reaches SAFE keeps being re-probed on later ticks until it either reaches
+     *  FINALIZED or is orphaned — otherwise a SAFE row would never advance further once it left
+     *  PROVISIONAL, since nothing else re-visits it. Already-FINALIZED rows are excluded: the
+     *  model's promise is trusted once reached, and any reorg deep enough to reach one anyway is
+     *  still caught by {@link #markOrphanedFromBlock}'s bulk "everything at/after the fork point"
+     *  sweep, triggered by some other still-unsettled block on this same walk. */
     @Query("SELECT DISTINCT t.blockNumber FROM TokenTransfer t "
-            + "WHERE t.chainConfigId = :chainConfigId AND t.finalityStatus = 'PROVISIONAL' "
+            + "WHERE t.chainConfigId = :chainConfigId AND t.finalityStatus IN ('PROVISIONAL', 'SAFE') "
             + "AND t.blockNumber IS NOT NULL ORDER BY t.blockNumber ASC")
-    List<Long> findDistinctProvisionalBlocks(@Param("chainConfigId") UUID chainConfigId);
+    List<Long> findDistinctUnsettledBlocks(@Param("chainConfigId") UUID chainConfigId);
 
     /** The block hash(es) previously recorded for a given chain+height — normally a single
      *  distinct value; more than one indicates the rows themselves already disagree. */
@@ -63,30 +76,58 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
             + "AND t.blockHash IS NOT NULL")
     List<String> findDistinctBlockHashesAt(@Param("chainConfigId") UUID chainConfigId, @Param("blockNumber") Long blockNumber);
 
-    /** Flips every PROVISIONAL row at exactly this height to FINAL. Bulk/set-based — bypasses
-     *  the persistence context, so callers must not rely on in-memory entities reflecting this
-     *  afterwards within the same transaction. */
+    /** Flips every row at exactly this height currently at {@code fromStatus} to {@code toStatus}.
+     *  Bulk/set-based — bypasses the persistence context, so callers must not rely on in-memory
+     *  entities reflecting this afterwards within the same transaction.
+     *
+     *  <p>Promotion is deliberately one specific {@code fromStatus} at a time, not "anything below
+     *  toStatus" — the caller (ReorgGuard) calls this once per plausible source status (a
+     *  FINALIZED verdict promotes both PROVISIONAL and SAFE rows via two calls; a SAFE verdict
+     *  promotes only PROVISIONAL rows via one), so a single well-known source status per call
+     *  keeps this monotonic without needing a CASE expression: a row already at FINALIZED is never
+     *  touched by a later call targeting a weaker source status, so a transient probe regression
+     *  can never demote it back down. */
     @Modifying(clearAutomatically = true)
-    @Query("UPDATE TokenTransfer t SET t.finalityStatus = 'FINAL' "
+    @Query("UPDATE TokenTransfer t SET t.finalityStatus = :toStatus "
             + "WHERE t.chainConfigId = :chainConfigId AND t.blockNumber = :blockNumber "
-            + "AND t.finalityStatus = 'PROVISIONAL'")
-    int markFinalAtBlock(@Param("chainConfigId") UUID chainConfigId, @Param("blockNumber") Long blockNumber);
+            + "AND t.finalityStatus = :fromStatus")
+    int markLevelAtBlock(@Param("chainConfigId") UUID chainConfigId, @Param("blockNumber") Long blockNumber,
+            @Param("fromStatus") FinalityLevel fromStatus, @Param("toStatus") FinalityLevel toStatus);
 
     /** Marks every non-ORPHANED row at or after the fork block ORPHANED — never deletes. Applies
-     *  to both PROVISIONAL and (in the rare case of a reorg deeper than the confirmation policy)
-     *  already-FINAL rows, matching the "everything at and after the fork point" algorithm. */
+     *  to PROVISIONAL, SAFE, and (in the rare case of a reorg deeper than the confirmation policy)
+     *  already-FINALIZED rows, matching the "everything at and after the fork point" algorithm. */
     @Modifying(clearAutomatically = true)
     @Query("UPDATE TokenTransfer t SET t.finalityStatus = 'ORPHANED' "
             + "WHERE t.chainConfigId = :chainConfigId AND t.blockNumber >= :forkBlock "
             + "AND t.finalityStatus <> 'ORPHANED'")
     int markOrphanedFromBlock(@Param("chainConfigId") UUID chainConfigId, @Param("forkBlock") Long forkBlock);
 
-    /** True if any already-FINAL row is at or after the fork block — signals a reorg deeper than
-     *  the configured confirmation depth (a CRITICAL condition, logged separately by the caller). */
+    /** True if any already-FINALIZED row is at or after the fork block — signals a reorg deeper
+     *  than the configured confirmation depth (a CRITICAL condition, logged separately by the
+     *  caller). */
     @Query("SELECT COUNT(t) > 0 FROM TokenTransfer t "
             + "WHERE t.chainConfigId = :chainConfigId AND t.blockNumber >= :forkBlock "
-            + "AND t.finalityStatus = 'FINAL'")
-    boolean existsFinalAtOrAfter(@Param("chainConfigId") UUID chainConfigId, @Param("forkBlock") Long forkBlock);
+            + "AND t.finalityStatus = 'FINALIZED'")
+    boolean existsFinalizedAtOrAfter(@Param("chainConfigId") UUID chainConfigId, @Param("forkBlock") Long forkBlock);
+
+    /** True if any already-SAFE-or-stronger row is at or after the fork block — a reorg reaching
+     *  this deep is still within the confirmation policy's promise (SAFE is not final) but is a
+     *  materially more serious event than one confined to the PROVISIONAL window, and the caller
+     *  logs/alerts at a different severity than a shallow, purely-PROVISIONAL reorg. */
+    @Query("SELECT COUNT(t) > 0 FROM TokenTransfer t "
+            + "WHERE t.chainConfigId = :chainConfigId AND t.blockNumber >= :forkBlock "
+            + "AND t.finalityStatus IN ('SAFE', 'FINALIZED')")
+    boolean existsSafeAtOrAfter(@Param("chainConfigId") UUID chainConfigId, @Param("forkBlock") Long forkBlock);
+
+    /** Distinct asset ids among rows at or after the fork block — used to find which assets a
+     *  reorg affected, so their holder balances can be recompensated. Rows a reorg's bulk
+     *  {@link #markOrphanedFromBlock} update has already flipped to ORPHANED are still matched
+     *  here (the filter is purely by block range, not current status), so this stays correct
+     *  whether it runs before or after that update. */
+    @Query("SELECT DISTINCT t.assetId FROM TokenTransfer t "
+            + "WHERE t.chainConfigId = :chainConfigId AND t.blockNumber >= :forkBlock AND t.assetId IS NOT NULL")
+    List<UUID> findDistinctAssetIdsAtOrAfter(@Param("chainConfigId") UUID chainConfigId, @Param("forkBlock") Long forkBlock);
 
     /** Backfills a block hash onto rows at a height that were written without one (e.g. a
      *  transient _meta lookup failure at insert time) — lets a later successful probe establish

@@ -4,6 +4,7 @@ import com.daml.ledger.javaapi.data.*;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.CantonTokenService;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
@@ -237,7 +238,7 @@ public class CantonTransferSyncService {
         // probabilistic-finality/reorg model for a permissioned synchronizer's confirmed offsets
         // the way there is for EVM/Starknet. FINAL matches the entity default; set explicitly
         // here for clarity/documentation, mirroring the same reasoning applied to Stellar.
-        tt.setFinalityStatus(TokenTransfer.FinalityStatus.FINAL);
+        tt.setFinalityStatus(FinalityLevel.FINALIZED);
         tokenTransferRepository.save(tt);
         log.debug("Canton transfer recorded: chain={} type={} instrument={} from={} to={} amount={}",
                 chain.getIdentifier(), eventType, instrument, from, to, amount);

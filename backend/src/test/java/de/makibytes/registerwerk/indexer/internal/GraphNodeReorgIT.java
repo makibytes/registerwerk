@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.indexer.internal;
 
 import de.makibytes.registerwerk.config.TestSecurityConfig;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -127,7 +128,7 @@ class GraphNodeReorgIT {
         }
         long depth = headBlock - blockNumber + 1;
         return new ReorgGuard.ProbeOutcome(
-                depth >= requiredConfirmations ? ReorgGuard.ProbeResult.FINAL : ReorgGuard.ProbeResult.PROVISIONAL,
+                depth >= requiredConfirmations ? ReorgGuard.ProbeResult.FINALIZED : ReorgGuard.ProbeResult.PROVISIONAL,
                 freshHash);
     }
 
@@ -154,12 +155,12 @@ class GraphNodeReorgIT {
         transfer.setBlockNumber(blockNumber);
         transfer.setBlockHash(blockHash);
         transfer.setOccurredAt(Instant.now());
-        transfer.setFinalityStatus(TokenTransfer.FinalityStatus.PROVISIONAL);
+        transfer.setFinalityStatus(FinalityLevel.PROVISIONAL);
         tokenTransferRepository.saveAndFlush(transfer);
     }
 
     @Test
-    @DisplayName("a real anvil_reorg orphans the affected row and reverifyProvisionalWindow reports the fork block")
+    @DisplayName("a real anvil_reorg orphans the affected row and reverifyUnsettledWindow reports the fork block")
     void realReorgIsDetectedAndOrphansTheRow() throws Exception {
         UUID chainConfigId = seedChainConfig();
 
@@ -175,7 +176,7 @@ class GraphNodeReorgIT {
         // First pass, before any reorg: hash matches, depth (3) is well under the deliberately
         // high confirmation requirement (100) — row stays PROVISIONAL, no fork reported.
         long requiredConfirmations = 100;
-        ReorgGuard.VerifyResult before = reorgGuard.reverifyProvisionalWindow(
+        ReorgGuard.VerifyResult before = reorgGuard.reverifyUnsettledWindow(
                 chainConfigId, bn -> {
                     try {
                         return probe(chainConfigId, requiredConfirmations, head, bn);
@@ -184,7 +185,8 @@ class GraphNodeReorgIT {
                     }
                 });
         assertThat(before.reorgDetected()).isFalse();
-        assertThat(before.flippedFinal()).isZero();
+        assertThat(before.promotedSafe()).isZero();
+        assertThat(before.promotedFinalized()).isZero();
         assertThat(jdbc.queryForObject(
                 "SELECT finality_status FROM token_transfer WHERE chain_config_id = ? AND block_number = ?",
                 String.class, chainConfigId, targetBlock))
@@ -200,7 +202,7 @@ class GraphNodeReorgIT {
 
         // Second pass: the probe now sees a real hash mismatch at block 3 against the stored
         // baseline — ReorgGuard must report a fork at exactly that block.
-        ReorgGuard.VerifyResult after = reorgGuard.reverifyProvisionalWindow(
+        ReorgGuard.VerifyResult after = reorgGuard.reverifyUnsettledWindow(
                 chainConfigId, bn -> {
                     try {
                         return probe(chainConfigId, requiredConfirmations, headAfter, bn);
