@@ -42,6 +42,7 @@ class RegisterInspectionServiceTest {
     @Mock private AssetHolderRepository holderRepository;
     @Mock private RegisterExtractRenderer extractRenderer;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private de.makibytes.registerwerk.finality.api.FinalityGate finalityGate;
 
     private RegisterInspectionService service;
 
@@ -49,7 +50,7 @@ class RegisterInspectionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RegisterInspectionService(requestRepository, assetRepository, holderRepository, extractRenderer, eventPublisher);
+        service = new RegisterInspectionService(requestRepository, assetRepository, holderRepository, extractRenderer, eventPublisher, finalityGate);
         lenient().when(requestRepository.save(any(RegisterInspectionRequest.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -185,6 +186,35 @@ class RegisterInspectionServiceTest {
         assertThat(request.getStatus()).isEqualTo(InspectionStatus.FULFILLED);
         assertThat(request.getContentHash()).startsWith("0x");
         assertThat(request.getFulfilledAt()).isNotNull();
+        verify(finalityGate).require(de.makibytes.registerwerk.finality.api.GatedOperation.REGISTER_INSPECTION_FULFIL,
+                ASSET_ID, null, de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED);
+    }
+
+    @Test
+    void fulfil_blockedByFinalityGate_propagatesAndNeverTransitionsToFulfilled() {
+        UUID requestId = UUID.randomUUID();
+        RegisterInspectionRequest request = new RegisterInspectionRequest();
+        request.setAssetId(ASSET_ID);
+        request.setStatus(InspectionStatus.APPROVED);
+        request.setLegalBasis(InspectionLegalBasis.HOLDER);
+        request.setRequesterName("Jane Doe");
+        when(requestRepository.findById(requestId)).thenReturn(Optional.of(request));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(new Asset()));
+        org.mockito.Mockito.doThrow(new de.makibytes.registerwerk.finality.api.FinalityNotReachedException(
+                        new de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked(
+                                de.makibytes.registerwerk.finality.api.GatedOperation.REGISTER_INSPECTION_FULFIL,
+                                ASSET_ID, de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED,
+                                de.makibytes.registerwerk.finality.api.FinalityLevel.SAFE,
+                                de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked.Reason.BELOW_REQUIRED,
+                                "not yet final")))
+                .when(finalityGate).require(any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.fulfil(requestId))
+                .isInstanceOf(de.makibytes.registerwerk.finality.api.FinalityNotReachedException.class);
+
+        assertThat(request.getStatus()).isEqualTo(InspectionStatus.APPROVED);
+        verifyNoInteractions(extractRenderer);
+        verify(requestRepository, never()).save(any());
     }
 
     @Test

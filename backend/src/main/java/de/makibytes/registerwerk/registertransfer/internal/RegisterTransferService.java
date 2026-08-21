@@ -9,6 +9,9 @@ import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
+import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.registertransfer.api.RegisterTransfer;
 import de.makibytes.registerwerk.registertransfer.api.RegisterTransferRepository;
 import de.makibytes.registerwerk.registertransfer.api.TransferStatus;
@@ -61,6 +64,7 @@ public class RegisterTransferService {
     private final AuditApi auditApi;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final FinalityGate finalityGate;
 
     public RegisterTransferService(
             RegisterTransferRepository transferRepository,
@@ -69,7 +73,8 @@ public class RegisterTransferService {
             AssetDeploymentRepository deploymentRepository,
             AuditApi auditApi,
             ObjectMapper objectMapper,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            FinalityGate finalityGate) {
         this.transferRepository = transferRepository;
         this.assetRepository = assetRepository;
         this.holderRepository = holderRepository;
@@ -77,6 +82,7 @@ public class RegisterTransferService {
         this.auditApi = auditApi;
         this.objectMapper = objectMapper;
         this.eventPublisher = eventPublisher;
+        this.finalityGate = finalityGate;
     }
 
     /** Initiates a transfer. Rejects a second concurrent transfer for the same asset. */
@@ -121,6 +127,15 @@ public class RegisterTransferService {
 
         Asset asset = assetRepository.findById(transfer.getAssetId())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown asset " + transfer.getAssetId()));
+
+        // Hard floor: the exported holder snapshot must reflect only FINALIZED register state — a
+        // successor operator ingesting this package has no way to later distinguish "confirmed at
+        // export time" from "provisional and later reorged." currentLevel is FINALIZED
+        // unconditionally (not looked up) because holderSnapshots() reads AssetHolder.nominalAmount,
+        // which HolderDataService only ever populates from FINALIZED transfers for chain-derived
+        // holders — see RegisterStatementService's identical reasoning for the first gate call site.
+        finalityGate.require(GatedOperation.REGISTER_EXTRACT_EXPORT, transfer.getAssetId(), asset.getTokenStandard(),
+                FinalityLevel.FINALIZED);
 
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("formatVersion", "1.0");
@@ -181,16 +196,28 @@ public class RegisterTransferService {
         RegisterTransfer transfer = load(transferId);
         require(transfer.getStatus() == TransferStatus.HANDED_OVER,
                 "Only a HANDED_OVER transfer can be completed");
+
+        Asset asset = assetRepository.findById(transfer.getAssetId()).orElse(null);
+        if (asset != null) {
+            // Hard floor, same reasoning as export()'s gate call — completing the transfer is the
+            // point of no return (the asset flips to TRANSFERRED_OUT and this registrar's own jobs
+            // stop touching it), so the register state it hands off must be FINALIZED, not provisional.
+            finalityGate.require(GatedOperation.REGISTER_TRANSFER_COMPLETE, transfer.getAssetId(),
+                    asset.getTokenStandard(), FinalityLevel.FINALIZED);
+        }
+
         transfer.setStatus(TransferStatus.COMPLETED);
         transfer.setCompletedAt(Instant.now());
         transfer.setUpdatedAt(Instant.now());
         RegisterTransfer saved = transferRepository.save(transfer);
 
-        assetRepository.findById(transfer.getAssetId()).ifPresentOrElse(asset -> {
+        if (asset != null) {
             asset.setStatus(AssetStatus.TRANSFERRED_OUT);
             assetRepository.save(asset);
-        }, () -> log.warn("Asset {} disappeared before it could be marked TRANSFERRED_OUT (transfer={})",
-                transfer.getAssetId(), transferId));
+        } else {
+            log.warn("Asset {} disappeared before it could be marked TRANSFERRED_OUT (transfer={})",
+                    transfer.getAssetId(), transferId);
+        }
 
         eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "COMPLETED", actorId, "REGISTRY_ADMIN",
                 nullSafeMap("assetId", transfer.getAssetId(), "successorName", transfer.getSuccessorName())));

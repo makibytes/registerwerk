@@ -16,6 +16,7 @@ import de.makibytes.registerwerk.registertransfer.internal.RegisterTransferServi
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
@@ -50,6 +51,7 @@ class RegisterTransferServiceTest {
     @Mock private AssetDeploymentRepository deploymentRepository;
     @Mock private AuditApi auditApi;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private de.makibytes.registerwerk.finality.api.FinalityGate finalityGate;
 
     private RegisterTransferService service;
 
@@ -59,7 +61,7 @@ class RegisterTransferServiceTest {
     void setUp() {
         service = new RegisterTransferService(
                 transferRepository, assetRepository, holderRepository, deploymentRepository,
-                auditApi, new ObjectMapper(), eventPublisher);
+                auditApi, new ObjectMapper(), eventPublisher, finalityGate);
         lenient().when(transferRepository.save(any(RegisterTransfer.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -133,6 +135,33 @@ class RegisterTransferServiceTest {
         assertThat(transfer.getExportHash()).startsWith("0x");
         assertThat(transfer.getExportManifest()).isNotNull();
         assertThat(transfer.getExportedAt()).isNotNull();
+        verify(finalityGate).require(de.makibytes.registerwerk.finality.api.GatedOperation.REGISTER_EXTRACT_EXPORT,
+                ASSET_ID, asset().getTokenStandard(), de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED);
+    }
+
+    @Test
+    void export_blockedByFinalityGate_propagatesAndNeverTransitionsToExported() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = new RegisterTransfer();
+        transfer.setAssetId(ASSET_ID);
+        transfer.setStatus(TransferStatus.INITIATED);
+        when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        doThrow(new de.makibytes.registerwerk.finality.api.FinalityNotReachedException(
+                        new de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked(
+                                de.makibytes.registerwerk.finality.api.GatedOperation.REGISTER_EXTRACT_EXPORT,
+                                ASSET_ID, de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED,
+                                de.makibytes.registerwerk.finality.api.FinalityLevel.SAFE,
+                                de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked.Reason.BELOW_REQUIRED,
+                                "not yet final")))
+                .when(finalityGate).require(any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.export(transferId, UUID.randomUUID()))
+                .isInstanceOf(de.makibytes.registerwerk.finality.api.FinalityNotReachedException.class);
+
+        assertThat(transfer.getStatus()).isEqualTo(TransferStatus.INITIATED);
+        verify(transferRepository, never()).save(any());
+        verifyNoInteractions(holderRepository, deploymentRepository, auditApi);
     }
 
     @Test
@@ -240,6 +269,53 @@ class RegisterTransferServiceTest {
 
         assertThat(result.getStatus()).isEqualTo(TransferStatus.COMPLETED);
         assertThat(result.getCompletedAt()).isNotNull();
+        // transfer.assetId is null in this fixture -> asset lookup resolves empty -> gate skipped
+        // entirely (mirrors the pre-existing "asset disappeared" tolerance, see the warn-log branch).
+        verifyNoInteractions(finalityGate);
+    }
+
+    @Test
+    void complete_withKnownAsset_consultsFinalityGateAndFlipsAssetStatus() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = new RegisterTransfer();
+        transfer.setAssetId(ASSET_ID);
+        transfer.setStatus(TransferStatus.HANDED_OVER);
+        when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+
+        RegisterTransfer result = service.complete(transferId, UUID.randomUUID());
+
+        assertThat(result.getStatus()).isEqualTo(TransferStatus.COMPLETED);
+        verify(finalityGate).require(de.makibytes.registerwerk.finality.api.GatedOperation.REGISTER_TRANSFER_COMPLETE,
+                ASSET_ID, asset().getTokenStandard(), de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED);
+        ArgumentCaptor<Asset> assetCaptor = ArgumentCaptor.forClass(Asset.class);
+        verify(assetRepository).save(assetCaptor.capture());
+        assertThat(assetCaptor.getValue().getStatus()).isEqualTo(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT);
+    }
+
+    @Test
+    void complete_blockedByFinalityGate_propagatesAndNeverTransitionsToCompleted() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = new RegisterTransfer();
+        transfer.setAssetId(ASSET_ID);
+        transfer.setStatus(TransferStatus.HANDED_OVER);
+        when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        doThrow(new de.makibytes.registerwerk.finality.api.FinalityNotReachedException(
+                        new de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked(
+                                de.makibytes.registerwerk.finality.api.GatedOperation.REGISTER_TRANSFER_COMPLETE,
+                                ASSET_ID, de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED,
+                                de.makibytes.registerwerk.finality.api.FinalityLevel.PROVISIONAL,
+                                de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked.Reason.BELOW_REQUIRED,
+                                "not yet final")))
+                .when(finalityGate).require(any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.complete(transferId, UUID.randomUUID()))
+                .isInstanceOf(de.makibytes.registerwerk.finality.api.FinalityNotReachedException.class);
+
+        assertThat(transfer.getStatus()).isEqualTo(TransferStatus.HANDED_OVER);
+        verify(transferRepository, never()).save(any());
+        verify(assetRepository, never()).save(any());
     }
 
     @Test
