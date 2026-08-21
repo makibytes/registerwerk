@@ -70,8 +70,13 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
     // ── NAV strike ────────────────────────────────────────────────────────────
 
     /**
-     * Operator strikes a new NAV per share. Both on-chain (via {@code setNavPerShare}) and
-     * the off-chain mirror ({@code vault_nav_strike}, {@code asset_vault_state}) are updated.
+     * Operator strikes a new NAV per share. Submits {@code setNavPerShare} on-chain and appends a
+     * {@code vault_nav_strike} history row with the tx hash — but deliberately does <b>not</b>
+     * update {@code asset_vault_state.latest_nav_per_share} here: {@link EvmContractService#submit}
+     * returns immediately without waiting for a receipt, so at this point the strike is only
+     * submitted, not confirmed. {@code VaultConfirmationListener} applies it to
+     * {@code asset_vault_state} once the tx reaches FINALIZED, and only if it's still the latest
+     * strike (guards against an out-of-order confirmation clobbering a newer one).
      *
      * @param deploymentId  ID of the ERC-4626 or ERC-7540 deployment.
      * @param navPerShare   New NAV in fixed-point (1e18 = 1.0).
@@ -104,19 +109,12 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
                 ),
                 Collections.emptyList());
 
-        UUID txId = submitEvm(dep, fn, "setNavPerShare",
+        SubmittedTx tx = submitEvm(dep, fn, "setNavPerShare",
                 Map.of("navPerShare", navPerShare.toPlainString(),
                         "effectiveAt", effectiveAt.toString()), actorId, actorRole);
 
-        // Update off-chain mirrors
-        AssetVaultState state = vaultStateRepository.findById(assetId)
-                .orElseGet(() -> { AssetVaultState s = new AssetVaultState(); s.setAssetId(assetId); return s; });
-        state.setLatestNavPerShare(navPerShare);
-        state.setLatestNavStrikeAt(effectiveAt);
-        state.setLatestNavReportHash(reportHashBytes);
-        vaultStateRepository.save(state);
-
-        // Append to history
+        // Append to history, unconfirmed — asset_vault_state is updated only once
+        // VaultConfirmationListener confirms this row's tx.
         long strikeId = navStrikeRepository.findByAssetIdOrderByEffectiveAtDesc(assetId).size() + 1L;
         VaultNavStrike strike = new VaultNavStrike();
         strike.setAssetId(assetId);
@@ -127,13 +125,21 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
         strike.setReportDocId(reportDocId);
         strike.setStruckBy(actorId);
         strike.setStruckAt(Instant.now());
+        strike.setTxHash(tx.txHash());
         navStrikeRepository.save(strike);
 
-        return txId;
+        return tx.txId();
     }
 
     // ── Deposit cap ───────────────────────────────────────────────────────────
 
+    /**
+     * Submits {@code setDepositCap} on-chain and records the in-flight value on {@code
+     * asset_vault_state} — deliberately does <b>not</b> update {@code deposit_cap} itself yet
+     * (same "submit returns immediately, not confirmed" reasoning as {@link #strikeNav}).
+     * {@code VaultConfirmationListener} applies {@code pendingDepositCap} to {@code depositCap}
+     * once confirmed. Upserts the state row (previously a silent no-op when none existed yet).
+     */
     public UUID setDepositCap(UUID deploymentId, java.math.BigInteger newCap, UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
         log.info("ERC-4626 setDepositCap={} on deployment={}", newCap, deploymentId);
@@ -142,14 +148,15 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
                 Collections.singletonList(new Uint256(newCap)),
                 Collections.emptyList());
 
-        UUID txId = submitEvm(dep, fn, "setDepositCap", Map.of("newCap", newCap.toString()), actorId, actorRole);
+        SubmittedTx tx = submitEvm(dep, fn, "setDepositCap", Map.of("newCap", newCap.toString()), actorId, actorRole);
 
-        vaultStateRepository.findById(dep.getAssetId()).ifPresent(state -> {
-            state.setDepositCap(newCap);
-            vaultStateRepository.save(state);
-        });
+        AssetVaultState state = vaultStateRepository.findById(dep.getAssetId())
+                .orElseGet(() -> { AssetVaultState s = new AssetVaultState(); s.setAssetId(dep.getAssetId()); return s; });
+        state.setPendingDepositCap(newCap);
+        state.setDepositCapTxHash(tx.txHash());
+        vaultStateRepository.save(state);
 
-        return txId;
+        return tx.txId();
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -163,9 +170,15 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
         return dep;
     }
 
+    /** @param txId the {@code blockchain_transaction} tracking row's id (what callers of this
+     *              service return to their own callers); {@code txHash} the actual on-chain
+     *              transaction hash (what gets stored on the vault mirror rows so {@code
+     *              VaultConfirmationListener} can poll it via {@code BlockchainTransactionService}). */
+    private record SubmittedTx(UUID txId, String txHash) {}
+
     /** Submits the on-chain transaction and publishes a {@link TokenAdminActionEvent} to the
      *  audit log, so both strikeNav and setDepositCap reach the audit trail. */
-    private UUID submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
+    private SubmittedTx submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
                             UUID actorId, String actorRole) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
@@ -174,7 +187,8 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 
-        return txService.record(txHash, methodName, dep.getId(), dep.getAssetId(),
+        UUID txId = txService.record(txHash, methodName, dep.getId(), dep.getAssetId(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
+        return new SubmittedTx(txId, txHash);
     }
 }

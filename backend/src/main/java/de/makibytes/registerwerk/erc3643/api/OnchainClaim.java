@@ -51,6 +51,28 @@ public class OnchainClaim {
     @Column(name = "tx_hash", length = 66)
     private String txHash;
 
+    /** FK to {@code chain_config} — set only once {@link #confirmed} is true. */
+    @Column(name = "chain_config_id")
+    private UUID chainConfigId;
+
+    @Column(name = "block_number")
+    private Long blockNumber;
+
+    /** True once {@link de.makibytes.registerwerk.erc3643.internal.Erc3643ClaimConfirmationListener}
+     *  has confirmed {@link #txHash} SUCCESS. {@code getActiveClaims} only counts claims where this
+     *  is {@code true} — a freshly-submitted claim does not unblock compliance checks until its
+     *  {@code addClaim} tx reaches FINALIZED. Claims issued before this column existed were
+     *  grandfathered in as {@code true} by the migration that added it (see V11). */
+    @Column(name = "confirmed", nullable = false)
+    private boolean confirmed = false;
+
+    /** Transaction hash of an in-flight {@code removeClaim} call. Non-null while a revocation is
+     *  submitted but not yet confirmed; {@link #revokedAt} is only set once
+     *  {@code Erc3643ClaimConfirmationListener} confirms this tx — mirrors the same
+     *  submit-then-confirm shape as {@link #txHash}/{@link #confirmed} for issuance. */
+    @Column(name = "revocation_tx_hash", length = 80)
+    private String revocationTxHash;
+
     /**
      * Hex-encoded ABI-encoded claim data bytes (topic + issuer + data payload).
      * Stored so the registry can reconstruct or verify the claim off-chain.
@@ -96,6 +118,18 @@ public class OnchainClaim {
 
     public String getTxHash() { return txHash; }
     public void setTxHash(String txHash) { this.txHash = txHash; }
+
+    public UUID getChainConfigId() { return chainConfigId; }
+    public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
+
+    public Long getBlockNumber() { return blockNumber; }
+    public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
+
+    public boolean isConfirmed() { return confirmed; }
+    public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }
+
+    public String getRevocationTxHash() { return revocationTxHash; }
+    public void setRevocationTxHash(String revocationTxHash) { this.revocationTxHash = revocationTxHash; }
 
     public String getClaimData() { return claimData; }
     public void setClaimData(String claimData) { this.claimData = claimData; }

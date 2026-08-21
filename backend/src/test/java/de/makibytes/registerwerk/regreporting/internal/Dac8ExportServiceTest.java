@@ -102,8 +102,8 @@ class Dac8ExportServiceTest {
     }
 
     @Test
-    @DisplayName("the holdings query excludes reorg-orphaned transfers from the token_transfer join")
-    void generateAnnualCarf_excludesOrphanedTransfers() {
+    @DisplayName("the holdings query only counts FINALIZED transfers, not merely non-ORPHANED ones")
+    void generateAnnualCarf_onlyCountsFinalizedTransfers() {
         UUID actorId = UUID.randomUUID();
         when(jdbc.queryForList(anyString(), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(holdingRow()));
         when(submissions.persist(anyString(), anyString(), any(), any(), any())).thenReturn(UUID.randomUUID());
@@ -113,13 +113,17 @@ class Dac8ExportServiceTest {
 
         service.generateAnnualCarf(2021, actorId, "REGISTRY_ADMIN");
 
-        // A reorg that orphans a transfer must not leave it permanently counted toward a
-        // holder's reported transaction count — regression test for the fix that added this
-        // predicate to the LEFT JOIN.
+        // A reorg that orphans a transfer must not leave it permanently counted toward a holder's
+        // reported transaction count — but the predicate must also exclude PROVISIONAL/SAFE rows,
+        // not just ORPHANED ones (a not-yet-final transfer isn't reportable settled data). This is
+        // the exact gap HolderDataService's javadoc names Dac8ExportService for; tightened from
+        // `<> 'ORPHANED'` to `= 'FINALIZED'` so the (currently unused, but not a trap for whoever
+        // next consumes it) tx_count column can never include a not-yet-final transfer.
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc, org.mockito.Mockito.atLeastOnce())
                 .queryForList(sql.capture(), any(LocalDate.class), any(LocalDate.class));
-        assertThat(sql.getAllValues()).allMatch(s -> s.contains("tt.finality_status <> 'ORPHANED'"));
+        assertThat(sql.getAllValues()).allMatch(s -> s.contains("tt.finality_status = 'FINALIZED'"));
+        assertThat(sql.getAllValues()).noneMatch(s -> s.contains("<> 'ORPHANED'"));
     }
 
     @Test

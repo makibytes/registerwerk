@@ -24,4 +24,13 @@ public interface OnchainClaimRepository extends JpaRepository<OnchainClaim, UUID
     List<OnchainClaim> findByOnchainIdentityIdAndTopic(UUID onchainIdentityId, long topic);
 
     Optional<OnchainClaim> findByIdAndOnchainIdentityId(UUID id, UUID onchainIdentityId);
+
+    /** Claims with a submitted {@code addClaim} tx not yet resolved — scoped so this shrinks over
+     *  time instead of re-scanning every claim ever issued (see
+     *  {@code Erc3643ClaimConfirmationListener}). */
+    List<OnchainClaim> findByTxHashIsNotNullAndConfirmedFalse();
+
+    /** Claims with a submitted {@code removeClaim} tx not yet resolved — {@code revokedAt} being
+     *  null is itself the "not yet confirmed" signal (see {@code Erc3643ClaimConfirmationListener}). */
+    List<OnchainClaim> findByRevocationTxHashIsNotNullAndRevokedAtIsNull();
 }

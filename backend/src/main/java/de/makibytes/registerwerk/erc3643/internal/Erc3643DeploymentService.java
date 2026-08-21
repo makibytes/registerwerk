@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.erc3643.events.Erc3643SuiteDeployedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.ClaimSigningService;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
@@ -103,6 +104,7 @@ public class Erc3643DeploymentService {
     private final EvmContractService evmContractService;
     private final ContractAddressConfig contractAddressConfig;
     private final ClaimSigningService claimSigningService;
+    private final BlockchainTransactionService blockchainTransactionService;
 
     public Erc3643DeploymentService(
             BlockchainClientRegistry clientRegistry,
@@ -117,7 +119,8 @@ public class Erc3643DeploymentService {
             ChainConfigRepository chainConfigRepository,
             EvmContractService evmContractService,
             ContractAddressConfig contractAddressConfig,
-            ClaimSigningService claimSigningService) {
+            ClaimSigningService claimSigningService,
+            BlockchainTransactionService blockchainTransactionService) {
         this.clientRegistry = clientRegistry;
         this.identityRepository = identityRepository;
         this.claimRepository = claimRepository;
@@ -131,6 +134,7 @@ public class Erc3643DeploymentService {
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
         this.claimSigningService = claimSigningService;
+        this.blockchainTransactionService = blockchainTransactionService;
     }
 
     /**
@@ -321,11 +325,20 @@ public class Erc3643DeploymentService {
      * {@code ONCHAINID.addClaim(topic, scheme, issuer, signature, data, uri)}.
      * The registry backend wallet must be registered as a TrustedIssuer in the TIR.
      *
+     * <p>Submits via {@link EvmContractService#submit} and returns immediately with the tx hash —
+     * it does <b>not</b> wait for a receipt. {@code Erc3643ClaimConfirmationListener} confirms it
+     * once mined and FINALIZED; until then the caller's {@link OnchainClaim} row must stay
+     * {@code confirmed=false} and must not count toward compliance checks.
+     *
      * @param onchainIdentityId ID of the ONCHAINID record to receive the claim
      * @param claimTopic        claim topic number (e.g. {@link #CLAIM_TOPIC_KYC})
      * @param expiresAt         optional expiry baked into the signed claim data; {@code null} means none
+     * @return the submitted transaction's hash
+     * @throws IllegalStateException if the target identity has no deployed contract yet (still
+     *         {@code 0x-PENDING-...}) — previously this silently returned, letting callers persist
+     *         a claim with nothing on-chain behind it at all
      */
-    public void issueKycClaim(UUID onchainIdentityId, long claimTopic, java.time.Instant expiresAt) {
+    public String issueKycClaim(UUID onchainIdentityId, long claimTopic, java.time.Instant expiresAt) {
         log.info("Issuing claim topic={} to identity={}", claimTopic, onchainIdentityId);
 
         OnchainIdentity identity = identityRepository.findById(onchainIdentityId)
@@ -333,9 +346,8 @@ public class Erc3643DeploymentService {
 
         String identityAddress = identity.getIdentityAddress();
         if (identityAddress == null || identityAddress.startsWith("0x-PENDING")) {
-            log.warn("issueKycClaim: identity not yet deployed for id={}; skipping on-chain call",
-                    onchainIdentityId);
-            return;
+            throw new IllegalStateException(
+                    "issueKycClaim: identity not yet deployed for id=" + onchainIdentityId);
         }
 
         // Sign via ClaimSigningService — real ABI encoding (abi.encode(address,uint256,bytes) for
@@ -366,18 +378,27 @@ public class Erc3643DeploymentService {
                 ),
                 Collections.emptyList()
         );
-        evmContractService.send(web3j, signer, identityAddress, fn);
-        log.info("issueKycClaim: topic={} issued on identity={}", claimTopic, identityAddress);
+        String txHash = evmContractService.submit(web3j, signer, identityAddress, fn);
+        blockchainTransactionService.record(txHash, fn.getName(), null, null,
+                parseChain(chainConfig.getIdentifier()), chainConfig.getNetworkType().name(),
+                identityAddress, Map.of("onchainIdentityId", onchainIdentityId.toString(),
+                        "claimTopic", String.valueOf(claimTopic)));
+        log.info("issueKycClaim: topic={} submitted on identity={} tx={}", claimTopic, identityAddress, txHash);
+        return txHash;
     }
 
     /**
      * Revoke a claim (e.g. when KYC expires or an investor fails re-verification).
      *
-     * <p>Calls {@code ONCHAINID.removeClaim(claimId)} via Web3j.
+     * <p>Calls {@code ONCHAINID.removeClaim(claimId)} via Web3j — same "submit, don't wait for a
+     * receipt" shape as {@link #issueKycClaim}. The caller must not set {@code revokedAt} until
+     * {@code Erc3643ClaimConfirmationListener} confirms the returned tx.
      *
      * @param onchainClaimId ID of the {@code OnchainClaim} record to revoke
+     * @return the submitted transaction's hash
+     * @throws IllegalStateException if the target identity has no deployed contract yet
      */
-    public void revokeKycClaim(UUID onchainClaimId) {
+    public String revokeKycClaim(UUID onchainClaimId) {
         log.info("Revoking claim={}", onchainClaimId);
 
         OnchainClaim claim = claimRepository.findById(onchainClaimId)
@@ -388,8 +409,8 @@ public class Erc3643DeploymentService {
 
         String identityAddress = identity.getIdentityAddress();
         if (identityAddress == null || identityAddress.startsWith("0x-PENDING")) {
-            log.warn("revokeKycClaim: identity not yet deployed; skipping on-chain call");
-            return;
+            throw new IllegalStateException(
+                    "revokeKycClaim: identity not yet deployed for claim=" + onchainClaimId);
         }
 
         // ERC-735 claimId = keccak256(abi.encode(issuer, topic))
@@ -408,8 +429,23 @@ public class Erc3643DeploymentService {
                 List.of(new Bytes32(claimId)),
                 Collections.emptyList()
         );
-        evmContractService.send(web3j, signer, identityAddress, fn);
-        log.info("revokeKycClaim: claim={} removed from identity={}", onchainClaimId, identityAddress);
+        String txHash = evmContractService.submit(web3j, signer, identityAddress, fn);
+        blockchainTransactionService.record(txHash, fn.getName(), null, null,
+                parseChain(chainConfig.getIdentifier()), chainConfig.getNetworkType().name(),
+                identityAddress, Map.of("onchainClaimId", onchainClaimId.toString()));
+        log.info("revokeKycClaim: claim={} removal submitted on identity={} tx={}",
+                onchainClaimId, identityAddress, txHash);
+        return txHash;
+    }
+
+    /** Splits a {@code ChainConfig.identifier} like {@code "ETHEREUM_MAINNET"} into its chain
+     *  segment ({@code "ETHEREUM"}), matching {@link BlockchainTransactionService#record}'s
+     *  {@code chain + "_" + network} identifier-reconstruction — same helper as
+     *  {@code OnChainIdService#parseChain}, duplicated rather than shared since both are private
+     *  to their own package-private service. */
+    private String parseChain(String identifier) {
+        int splitIndex = identifier.lastIndexOf('_');
+        return splitIndex > 0 ? identifier.substring(0, splitIndex) : identifier;
     }
 
     // ── Suite deployment helpers ──────────────────────────────────────────────

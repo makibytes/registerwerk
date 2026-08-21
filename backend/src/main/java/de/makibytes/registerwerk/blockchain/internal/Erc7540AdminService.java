@@ -93,6 +93,13 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
         return fulfill(dep, request, navAtFulfill, actorId, actorRole);
     }
 
+    /**
+     * Submits the fulfil tx and records it on the request row, but deliberately does <b>not</b>
+     * flip {@code requestStatus} to {@code FULFILLED} yet — {@link EvmContractService#submit}
+     * returns before any receipt exists, so at this point fulfilment is only submitted, not
+     * confirmed. {@code VaultConfirmationListener} applies the status transition once the tx
+     * reaches FINALIZED.
+     */
     private UUID fulfill(AssetDeployment dep, VaultRequest request, BigDecimal navAtFulfill,
                          UUID actorId, String actorRole) {
         String functionName = request.getRequestType() == VaultRequestType.DEPOSIT
@@ -102,14 +109,13 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
         Function fn = new Function(functionName,
                 Collections.singletonList(new Uint256(request.getRequestId())),
                 Collections.emptyList());
-        UUID txId = submitEvm(dep, fn, functionName,
+        SubmittedTx tx = submitEvm(dep, fn, functionName,
                 Map.of("requestId", request.getRequestId().toString(),
                         "navAtFulfill", navAtFulfill.toPlainString()), actorId, actorRole);
-        request.setRequestStatus(VaultRequestStatus.FULFILLED);
-        request.setFulfilledAt(Instant.now());
+        request.setFulfilledTx(tx.txHash());
         request.setNavAtFulfill(navAtFulfill);
         vaultRequestRepository.save(request);
-        return txId;
+        return tx.txId();
     }
 
     // ── Cancel request ────────────────────────────────────────────────────────
@@ -132,6 +138,8 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
         return cancelExpectedRequest(deploymentId, onChainRequestId, null, actorId, actorRole);
     }
 
+    /** Same "submitted, not yet confirmed" reasoning as {@link #fulfill} — {@code requestStatus}
+     *  stays {@code PENDING} until {@code VaultConfirmationListener} confirms {@code cancelledTx}. */
     private UUID cancelExpectedRequest(UUID deploymentId, BigInteger onChainRequestId,
                                        VaultRequestType expectedType, UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
@@ -141,10 +149,10 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
         Function fn = new Function(fnName,
                 Collections.singletonList(new Uint256(onChainRequestId)),
                 Collections.emptyList());
-        UUID txId = submitEvm(dep, fn, fnName, Map.of("requestId", onChainRequestId.toString()), actorId, actorRole);
-        request.setRequestStatus(VaultRequestStatus.CANCELLED);
+        SubmittedTx tx = submitEvm(dep, fn, fnName, Map.of("requestId", onChainRequestId.toString()), actorId, actorRole);
+        request.setCancelledTx(tx.txHash());
         vaultRequestRepository.save(request);
-        return txId;
+        return tx.txId();
     }
 
     // ── Query ─────────────────────────────────────────────────────────────────
@@ -179,15 +187,28 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
             throw new IllegalStateException("Vault request " + requestId + " is already "
                     + request.getRequestStatus());
         }
+        // requestStatus alone no longer proves this request is free to act on: fulfil/cancel now
+        // leave it PENDING while a submitted tx awaits confirmation (see #fulfill,
+        // #cancelExpectedRequest) — an in-flight request must not be re-submitted.
+        if (request.getFulfilledTx() != null || request.getCancelledTx() != null) {
+            throw new IllegalStateException("Vault request " + requestId
+                    + " already has a submitted tx awaiting confirmation");
+        }
         return request;
     }
+
+    /** @param txId the {@code blockchain_transaction} tracking row's id (what callers of this
+     *              service return to their own callers); {@code txHash} the actual on-chain
+     *              transaction hash (what gets stored on {@code VaultRequest} so {@code
+     *              VaultConfirmationListener} can poll it via {@code BlockchainTransactionService}). */
+    private record SubmittedTx(UUID txId, String txHash) {}
 
     /**
      * Submits the on-chain transaction and publishes a {@link TokenAdminActionEvent} to the
      * audit log — the chokepoint all four public methods in this class funnel through, so
      * vault-request fulfillment AND cancellation (both previously unaudited) are covered.
      */
-    private UUID submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
+    private SubmittedTx submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
                            UUID actorId, String actorRole) {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         Web3j web3j = clientRegistry.getEvmClient(descriptor);
@@ -196,7 +217,8 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 
-        return txService.record(txHash, methodName, dep.getId(), dep.getAssetId(),
+        UUID txId = txService.record(txHash, methodName, dep.getId(), dep.getAssetId(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
+        return new SubmittedTx(txId, txHash);
     }
 }

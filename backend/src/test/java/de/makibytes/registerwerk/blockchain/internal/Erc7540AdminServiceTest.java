@@ -65,7 +65,7 @@ class Erc7540AdminServiceTest {
     }
 
     @Test
-    void genericFulfillDispatchesRedeemRequestToRedeemFunction() {
+    void genericFulfillSubmitsTxButDoesNotFlipStatusUntilConfirmed() {
         BigInteger requestId = BigInteger.TEN;
         VaultRequest request = request(requestId, VaultRequestType.REDEEM, VaultRequestStatus.PENDING);
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
@@ -86,8 +86,12 @@ class Erc7540AdminServiceTest {
         verify(evmContractService).submit(eq(web3j), eq(credentials),
                 eq(deployment.getContractAddress()), function.capture());
         assertThat(function.getValue().getName()).isEqualTo("fulfillRedeemRequest");
-        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.FULFILLED);
-        assertThat(request.getFulfilledAt()).isNotNull();
+        // submit() returns before any receipt exists — status must stay PENDING until
+        // VaultConfirmationListener confirms fulfilledTx (see VaultConfirmationListenerTest).
+        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
+        assertThat(request.getFulfilledTx()).isEqualTo("0xtx");
+        assertThat(request.getFulfilledAt()).isNull();
+        assertThat(request.isConfirmed()).isFalse();
         verify(requestRepository).save(request);
     }
 
@@ -104,6 +108,48 @@ class Erc7540AdminServiceTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("already FULFILLED");
         verify(evmContractService, never()).submit(any(), any(), any(), any(Function.class));
+    }
+
+    @Test
+    void requestWithUnconfirmedFulfilledTxCannotBeResubmitted() {
+        // requestStatus stays PENDING while a submitted tx awaits confirmation (see
+        // genericFulfillSubmitsTxButDoesNotFlipStatusUntilConfirmed) — requirePendingRequest must
+        // still reject a second submission attempt on the same request.
+        BigInteger requestId = BigInteger.valueOf(7);
+        VaultRequest request = request(requestId, VaultRequestType.DEPOSIT, VaultRequestStatus.PENDING);
+        request.setFulfilledTx("0xalready-submitted");
+        when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
+                .thenReturn(Optional.of(request));
+
+        assertThatThrownBy(() -> service.fulfillRequest(
+                deploymentId, requestId, new BigDecimal("1.0"), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("awaiting confirmation");
+        verify(evmContractService, never()).submit(any(), any(), any(), any(Function.class));
+    }
+
+    @Test
+    void cancelSubmitsTxButDoesNotFlipStatusUntilConfirmed() {
+        BigInteger requestId = BigInteger.valueOf(3);
+        VaultRequest request = request(requestId, VaultRequestType.DEPOSIT, VaultRequestStatus.PENDING);
+        when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
+                .thenReturn(Optional.of(request));
+        when(clientRegistry.getEvmClient(any())).thenReturn(web3j);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
+                .thenReturn(credentials);
+        when(evmContractService.submit(eq(web3j), eq(credentials), eq(deployment.getContractAddress()), any(Function.class)))
+                .thenReturn("0xcanceltx");
+        when(txService.record(eq("0xcanceltx"), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(UUID.randomUUID());
+
+        service.cancelRequest(deploymentId, requestId, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
+        assertThat(request.getCancelledTx()).isEqualTo("0xcanceltx");
+        assertThat(request.isConfirmed()).isFalse();
+        verify(requestRepository).save(request);
     }
 
     private VaultRequest request(BigInteger requestId, VaultRequestType type, VaultRequestStatus status) {

@@ -32,6 +32,23 @@ public class AssetVaultState {
     @Column(name = "latest_nav_report_hash")
     private byte[] latestNavReportHash;
 
+    /** In-flight {@code setDepositCap} value, not yet confirmed on-chain — {@link
+     *  #depositCapTxHash} being non-null is itself the "pending" signal (there is no separate
+     *  boolean, unlike {@code vault_nav_strike}/{@code vault_request}: this table has nothing
+     *  else to poll concurrently, so nulling these four fields on confirmation is unambiguous).
+     *  {@link #depositCap} itself is only ever updated once confirmed. */
+    @Column(name = "pending_deposit_cap", precision = 78, scale = 0)
+    private java.math.BigInteger pendingDepositCap;
+
+    @Column(name = "deposit_cap_tx_hash", length = 80)
+    private String depositCapTxHash;
+
+    @Column(name = "deposit_cap_chain_config_id")
+    private UUID depositCapChainConfigId;
+
+    @Column(name = "deposit_cap_block_number")
+    private Long depositCapBlockNumber;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -63,6 +80,18 @@ public class AssetVaultState {
 
     public byte[] getLatestNavReportHash() { return latestNavReportHash; }
     public void setLatestNavReportHash(byte[] latestNavReportHash) { this.latestNavReportHash = latestNavReportHash; }
+
+    public java.math.BigInteger getPendingDepositCap() { return pendingDepositCap; }
+    public void setPendingDepositCap(java.math.BigInteger pendingDepositCap) { this.pendingDepositCap = pendingDepositCap; }
+
+    public String getDepositCapTxHash() { return depositCapTxHash; }
+    public void setDepositCapTxHash(String depositCapTxHash) { this.depositCapTxHash = depositCapTxHash; }
+
+    public UUID getDepositCapChainConfigId() { return depositCapChainConfigId; }
+    public void setDepositCapChainConfigId(UUID depositCapChainConfigId) { this.depositCapChainConfigId = depositCapChainConfigId; }
+
+    public Long getDepositCapBlockNumber() { return depositCapBlockNumber; }
+    public void setDepositCapBlockNumber(Long depositCapBlockNumber) { this.depositCapBlockNumber = depositCapBlockNumber; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

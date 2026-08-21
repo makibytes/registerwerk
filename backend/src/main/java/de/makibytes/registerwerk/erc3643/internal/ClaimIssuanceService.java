@@ -131,9 +131,13 @@ public class ClaimIssuanceService {
             .orElseThrow(() -> new EntityNotFoundException(
                 "OnchainIdentity for entity " + legalEntityId + " on chain", chainConfigId));
 
-        deploymentService.issueKycClaim(identity.getId(), topic, expiresAt);
+        // Throws if the identity isn't deployed yet — nothing is persisted below unless the tx was
+        // actually submitted. The claim starts confirmed=false: Erc3643ClaimConfirmationListener
+        // flips it once addClaim reaches FINALIZED, and getActiveClaims won't count it until then.
+        String txHash = deploymentService.issueKycClaim(identity.getId(), topic, expiresAt);
 
         OnchainClaim claim = buildClaimRecord(identity, chainConfigId, topic, topicLabel, expiresAt);
+        claim.setTxHash(txHash);
         OnchainClaim saved = claimRepository.save(claim);
 
         eventPublisher.publishEvent(new ClaimIssuedEvent(saved.getId(), actorId, actorRole, java.util.Map.of()));
@@ -161,10 +165,18 @@ public class ClaimIssuanceService {
             log.warn("Claim={} is already revoked at {}. Skipping.", claimId, claim.getRevokedAt());
             return;
         }
+        if (claim.getRevocationTxHash() != null) {
+            log.warn("Claim={} already has a revocation tx={} awaiting confirmation. Skipping.",
+                    claimId, claim.getRevocationTxHash());
+            return;
+        }
 
-        deploymentService.revokeKycClaim(claimId);
+        // Same "submitted, not yet confirmed" reasoning as issueClaim — revokedAt stays null until
+        // Erc3643ClaimConfirmationListener confirms removeClaim, so the claim keeps counting for
+        // compliance until the revocation is actually final.
+        String txHash = deploymentService.revokeKycClaim(claimId);
 
-        claim.setRevokedAt(Instant.now());
+        claim.setRevocationTxHash(txHash);
         claimRepository.save(claim);
 
         eventPublisher.publishEvent(new ClaimRevokedEvent(claimId, actorId, actorRole, java.util.Map.of()));
@@ -186,6 +198,7 @@ public class ClaimIssuanceService {
 
         Instant now = Instant.now();
         return claimRepository.findByOnchainIdentityId(identity.getId()).stream()
+            .filter(OnchainClaim::isConfirmed)
             .filter(c -> c.getRevokedAt() == null)
             .filter(c -> c.getExpiresAt() == null || c.getExpiresAt().isAfter(now))
             .toList();
