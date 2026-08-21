@@ -47,6 +47,26 @@ public class Erc3643IdentityRegistry {
     @Column(name = "removed_at")
     private Instant removedAt;
 
+    /** Transaction hash of the on-chain {@code deleteIdentity()} call, if any. */
+    @Column(name = "removed_by_tx", length = 66)
+    private String removedByTx;
+
+    /** Which chain this suite (and therefore this entry) lives on — lets the reorg-retraction
+     *  sweep find affected rows by (chainConfigId, blockNumber). Set at registration time; reused
+     *  for the removal path too (a wallet's registry entry does not move chains). */
+    @Column(name = "chain_config_id")
+    private UUID chainConfigId;
+
+    /** True once {@link Erc3643IdentityRegistryConfirmationListener} has journalled (or given up
+     *  on) the {@code registered_by_tx} outcome — scopes that listener's polling query so it
+     *  shrinks over time instead of re-scanning every registration ever made. */
+    @Column(name = "registration_confirmed", nullable = false)
+    private boolean registrationConfirmed = false;
+
+    /** Same as {@link #registrationConfirmed}, for {@code removed_by_tx}. */
+    @Column(name = "removal_confirmed", nullable = false)
+    private boolean removalConfirmed = false;
+
     public UUID getId() { return id; }
     public UUID getSuiteId() { return suiteId; }
     public void setSuiteId(UUID suiteId) { this.suiteId = suiteId; }
@@ -62,4 +82,16 @@ public class Erc3643IdentityRegistry {
     public Instant getRemovedAt() { return removedAt; }
     public void setRemovedAt(Instant removedAt) { this.removedAt = removedAt; }
     public boolean isActive() { return removedAt == null; }
+
+    public String getRemovedByTx() { return removedByTx; }
+    public void setRemovedByTx(String removedByTx) { this.removedByTx = removedByTx; }
+
+    public UUID getChainConfigId() { return chainConfigId; }
+    public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
+
+    public boolean isRegistrationConfirmed() { return registrationConfirmed; }
+    public void setRegistrationConfirmed(boolean registrationConfirmed) { this.registrationConfirmed = registrationConfirmed; }
+
+    public boolean isRemovalConfirmed() { return removalConfirmed; }
+    public void setRemovalConfirmed(boolean removalConfirmed) { this.removalConfirmed = removalConfirmed; }
 }

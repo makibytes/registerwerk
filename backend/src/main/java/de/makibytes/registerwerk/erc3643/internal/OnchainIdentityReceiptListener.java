@@ -1,10 +1,15 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
+import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
+import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
+import de.makibytes.registerwerk.finality.api.CompensationCategory;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.jpa.repository.Query;
@@ -35,14 +40,20 @@ class OnchainIdentityReceiptListener {
     private final OnchainIdentityRepository identityRepository;
     private final ChainConfigRepository chainConfigRepository;
     private final BlockchainClientRegistry clientRegistry;
+    private final EvmFinalityResolver finalityResolver;
+    private final ChainEffectRecorder chainEffectRecorder;
 
     OnchainIdentityReceiptListener(
             OnchainIdentityRepository identityRepository,
             ChainConfigRepository chainConfigRepository,
-            BlockchainClientRegistry clientRegistry) {
+            BlockchainClientRegistry clientRegistry,
+            EvmFinalityResolver finalityResolver,
+            ChainEffectRecorder chainEffectRecorder) {
         this.identityRepository = identityRepository;
         this.chainConfigRepository = chainConfigRepository;
         this.clientRegistry = clientRegistry;
+        this.finalityResolver = finalityResolver;
+        this.chainEffectRecorder = chainEffectRecorder;
     }
 
     @SchedulerLock(name = "onchainIdentityReceiptListener", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
@@ -95,6 +106,17 @@ class OnchainIdentityReceiptListener {
             return;
         }
 
+        // Consult the chain's configured FinalityModel rather than accepting the first mined
+        // receipt: a reorg that un-mines this deployment must not leave the register asserting
+        // an identity address the chain has since abandoned. Stay pending (recheck next tick)
+        // rather than resolve on a shallow/unconfirmed receipt.
+        long blockNumber = receipt.getBlockNumber().longValueExact();
+        boolean isFinal = finalityResolver.levelOf(chainConfig.getIdentifier(), web3j, blockNumber)
+                .atLeast(FinalityLevel.FINALIZED);
+        if (!isFinal) {
+            return;
+        }
+
         String realAddress = extractIdentityAddress(receipt);
         if (realAddress == null) return;
 
@@ -102,6 +124,11 @@ class OnchainIdentityReceiptListener {
         identityRepository.save(identity);
         log.info("Resolved ONCHAINID identity={} address={} tx={}",
                 identity.getId(), realAddress, identity.getDeployedByTx());
+
+        chainEffectRecorder.record(new ChainEffectDescriptor(
+                identity.getChainConfigId(), blockNumber, receipt.getBlockHash(), identity.getDeployedByTx(), null,
+                "erc3643", OnchainIdentityRevertCompensator.EFFECT_TYPE, "OnchainIdentity", identity.getId(),
+                CompensationCategory.INVERSE_FLIP, null, null, null, null));
     }
 
     private static String extractIdentityAddress(TransactionReceipt receipt) {

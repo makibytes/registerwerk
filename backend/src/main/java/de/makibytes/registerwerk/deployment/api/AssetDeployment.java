@@ -47,6 +47,14 @@ public class AssetDeployment {
     @Column(name = "block_number")
     private Long blockNumber;
 
+    /** FK to {@code chain_config} — lets the reorg-retraction sweep
+     *  ({@code finality.internal.BlockFinalityServiceImpl#recordRetraction}) find affected rows by
+     *  (chainConfigId, blockNumber). Set only on the EVM confirmation path (the only path that also
+     *  records {@link #blockNumber}); null for Starknet/Stellar/Solana/Canton deployments and rows
+     *  written before this column existed. */
+    @Column(name = "chain_config_id")
+    private UUID chainConfigId;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -78,4 +86,7 @@ public class AssetDeployment {
 
     public Long getBlockNumber() { return blockNumber; }
     public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
+
+    public UUID getChainConfigId() { return chainConfigId; }
+    public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
 }

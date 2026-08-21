@@ -43,6 +43,15 @@ public class AssetHolder {
     @Column(name = "nominal_amount", nullable = false, precision = 38, scale = 18)
     private BigDecimal nominalAmount = BigDecimal.ZERO;
 
+    /** True once {@code HolderDataService.syncHoldersFromBlockchain} has created or updated this
+     *  row from indexed on-chain transfers — distinguishes an on-chain-derived balance (which must
+     *  be zeroed, not left untouched, if the wallet later vanishes from the counted transfer set)
+     *  from an off-chain register entry the chain is never authoritative for. Defaults to false
+     *  so every pre-existing row reads as "not chain-derived" (leave alone) until the sync service
+     *  marks it true going forward. */
+    @Column(name = "chain_derived", nullable = false)
+    private boolean chainDerived = false;
+
     @Column(name = "acquisition_date")
     private LocalDate acquisitionDate;
 
@@ -114,6 +123,9 @@ public class AssetHolder {
 
     public BigDecimal getNominalAmount() { return nominalAmount; }
     public void setNominalAmount(BigDecimal nominalAmount) { this.nominalAmount = nominalAmount; }
+
+    public boolean isChainDerived() { return chainDerived; }
+    public void setChainDerived(boolean chainDerived) { this.chainDerived = chainDerived; }
 
     public LocalDate getAcquisitionDate() { return acquisitionDate; }
     public void setAcquisitionDate(LocalDate acquisitionDate) { this.acquisitionDate = acquisitionDate; }

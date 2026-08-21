@@ -164,6 +164,7 @@ public class IdentityRegistryService {
                 entry.setOnchainIdentityId(identity.getId());
                 entry.setCountryCode(countryCode);
                 entry.setRegisteredByTx(txHash);
+                entry.setChainConfigId(chainConfigId);
                 Erc3643IdentityRegistry saved = registryRepo.save(entry);
                 eventPublisher.publishEvent(new InvestorRegisteredEvent(suiteId, actorId, actorRole,
                         java.util.Map.of("walletAddress", walletAddress, "legalEntityId", legalEntityId.toString())));
@@ -179,6 +180,7 @@ public class IdentityRegistryService {
         entry.setWalletAddress(walletAddress.toLowerCase());
         entry.setOnchainIdentityId(identity.getId());
         entry.setCountryCode(countryCode);
+        entry.setChainConfigId(chainConfigId);
         Erc3643IdentityRegistry saved = registryRepo.save(entry);
         eventPublisher.publishEvent(new InvestorRegisteredEvent(suiteId, actorId, actorRole,
                 java.util.Map.of("walletAddress", walletAddress, "legalEntityId", legalEntityId.toString())));
@@ -187,6 +189,20 @@ public class IdentityRegistryService {
 
     /**
      * Removes an investor from the on-chain IdentityRegistry and soft-deletes the DB entry.
+     *
+     * <p>Submits {@code deleteIdentity} non-blocking and tracks it via
+     * {@link BlockchainTransactionService#record} — mirroring {@link #registerInvestor}'s
+     * pattern exactly, rather than the {@code send()}/{@code waitForReceipt()} blocking call
+     * this used before. That older version accepted the transaction as final the moment it was
+     * first mined, with no reorg guard and no async re-verification of any kind: a reorg
+     * un-mining {@code deleteIdentity} would leave the register asserting {@code removedAt} set
+     * while the on-chain IdentityRegistry might still list the investor — a genuine compliance
+     * gap, since {@code removedAt IS NULL} is how {@link Erc3643IdentityRegistryRepository}
+     * decides whether a wallet is still whitelisted. The soft-delete write here remains
+     * optimistic (matching {@link #registerInvestor}'s already-accepted risk profile for the
+     * mirror-image operation) but is now tracked through the same model-aware
+     * {@code BlockchainTransactionService.pollPendingTransactions} every other correction in
+     * this registry uses, instead of being invisible to it entirely.
      *
      * @param actorId   ID of the user removing the investor (for audit)
      * @param actorRole role of the user removing the investor (for audit)
@@ -207,6 +223,9 @@ public class IdentityRegistryService {
         if (suite.getIdentityRegistryAddress() != null
                 && !suite.getIdentityRegistryAddress().startsWith("0x-PENDING")) {
             try {
+                AssetDeployment deployment = deploymentRepo.findById(suite.getAssetDeploymentId())
+                        .orElseThrow(() -> new IllegalStateException(
+                                "AssetDeployment not found for suite " + suite.getId()));
                 Web3j web3j = clientForSuite(suite);
                 EvmSigner signer = signerForSuite(suite);
                 Function fn = new Function(
@@ -214,9 +233,20 @@ public class IdentityRegistryService {
                         java.util.List.of(new Address(entry.getWalletAddress())),
                         java.util.Collections.emptyList()
                 );
-                evmContractService.send(web3j, signer, suite.getIdentityRegistryAddress(), fn);
+                String txHash = evmContractService.submit(web3j, signer, suite.getIdentityRegistryAddress(), fn);
+                blockchainTransactionService.record(
+                        txHash,
+                        fn.getName(),
+                        deployment.getId(),
+                        deployment.getAssetId(),
+                        deployment.getChain().name(),
+                        deployment.getNetwork().name(),
+                        suite.getIdentityRegistryAddress(),
+                        java.util.Map.of("walletAddress", entry.getWalletAddress())
+                );
+                entry.setRemovedByTx(txHash);
             } catch (Exception e) {
-                throw new RuntimeException("deleteIdentity on-chain call failed: " + e.getMessage(), e);
+                throw new RuntimeException("deleteIdentity submission failed: " + e.getMessage(), e);
             }
         }
 

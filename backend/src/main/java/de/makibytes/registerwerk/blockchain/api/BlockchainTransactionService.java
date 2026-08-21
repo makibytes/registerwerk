@@ -4,6 +4,8 @@ import de.makibytes.registerwerk.blockchain.events.BlockchainTxReviewedEvent;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionCompletionWriter;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import org.springframework.context.ApplicationEventPublisher;
@@ -47,6 +49,8 @@ public class BlockchainTransactionService {
     private final ApplicationEventPublisher eventPublisher;
     private final BlockchainTxProperties txProperties;
     private final BlockchainTransactionCompletionWriter completionWriter;
+    private final EvmFinalityResolver finalityResolver;
+    private final ChainConfigRepository chainConfigRepository;
 
     public BlockchainTransactionService(
             BlockchainTransactionRepository repository,
@@ -54,13 +58,17 @@ public class BlockchainTransactionService {
             EvmContractService evmContractService,
             ApplicationEventPublisher eventPublisher,
             BlockchainTxProperties txProperties,
-            BlockchainTransactionCompletionWriter completionWriter) {
+            BlockchainTransactionCompletionWriter completionWriter,
+            EvmFinalityResolver finalityResolver,
+            ChainConfigRepository chainConfigRepository) {
         this.repository = repository;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
         this.eventPublisher = eventPublisher;
         this.txProperties = txProperties;
         this.completionWriter = completionWriter;
+        this.finalityResolver = finalityResolver;
+        this.chainConfigRepository = chainConfigRepository;
     }
 
     // ── Record creation ───────────────────────────────────────────────────────
@@ -100,6 +108,10 @@ public class BlockchainTransactionService {
         tx.setParams(params);
         tx.setActorName(actorName);
         tx.setActorRole(actorRole);
+        if (chain != null && network != null) {
+            chainConfigRepository.findByIdentifier(chain + "_" + network)
+                    .ifPresent(cc -> tx.setChainConfigId(cc.getId()));
+        }
 
         BlockchainTransaction saved = repository.save(tx);
         log.info("Recorded blockchain tx={} method={} actor={}", txHash, methodName, actorName);
@@ -134,6 +146,54 @@ public class BlockchainTransactionService {
                 "note", note
         )));
         return saved;
+    }
+
+    // ── Finality lookup for other modules' pollers ───────────────────────────
+
+    /**
+     * True once {@link #pollPendingTransactions} has confirmed {@code txHash} SUCCESS — i.e. it
+     * has cleared the chain's configured {@code FinalityModel} (a real {@code finalized} tag,
+     * confirmation depth, or immediate for permissioned BFT), not merely been mined once. False
+     * while still tracked-PENDING or if {@code txHash} isn't a tracked transaction at all.
+     *
+     * <p>For any module that submits via {@link #record} and needs to know "is this specific
+     * action done and successful yet" — reusing this tracked, already-model-aware verdict is
+     * preferred over each caller re-implementing its own receipt/confirmation check, which is
+     * exactly the inconsistency this method exists to close (see {@code MarketplaceTxPoller},
+     * which used to accept the first mined receipt as final regardless of chain or depth).
+     */
+    @Transactional(readOnly = true)
+    public boolean isConfirmedSuccess(String txHash) {
+        return repository.findByTxHash(txHash)
+                .map(tx -> tx.getStatus() == BlockchainTransaction.Status.SUCCESS)
+                .orElse(false);
+    }
+
+    /** True once the tracked poller has given up on {@code txHash} — reverted on-chain, or
+     *  never mined within {@link BlockchainTxProperties#getTimeoutSeconds}. @see #isConfirmedSuccess */
+    @Transactional(readOnly = true)
+    public boolean isConfirmedFailure(String txHash) {
+        return repository.findByTxHash(txHash)
+                .map(tx -> tx.getStatus() == BlockchainTransaction.Status.FAILED
+                        || tx.getStatus() == BlockchainTransaction.Status.TIMEOUT)
+                .orElse(false);
+    }
+
+    /** Where a tracked, SUCCESS transaction was confirmed — {@code chainConfigId} and
+     *  {@code blockNumber} (as resolved/recorded by {@link #record} and
+     *  {@link de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionCompletionWriter#complete}),
+     *  handed to callers that need it to journal a {@code ChainEffectDescriptor} for a confirmed
+     *  action that isn't itself a tracked entity with its own block-number column (e.g.
+     *  {@code Erc3643IdentityRegistryConfirmationListener}). Empty if not tracked, not SUCCESS
+     *  yet, or the chain/network pair never resolved to a {@code chainConfigId}. */
+    public record ConfirmedTxLocation(java.util.UUID chainConfigId, long blockNumber, String blockHash) {}
+
+    @Transactional(readOnly = true)
+    public Optional<ConfirmedTxLocation> confirmedLocation(String txHash) {
+        return repository.findByTxHash(txHash)
+                .filter(tx -> tx.getStatus() == BlockchainTransaction.Status.SUCCESS
+                        && tx.getChainConfigId() != null && tx.getBlockNumber() != null)
+                .map(tx -> new ConfirmedTxLocation(tx.getChainConfigId(), tx.getBlockNumber(), tx.getBlockHash()));
     }
 
     // ── Scheduled polling ─────────────────────────────────────────────────────
@@ -185,15 +245,16 @@ public class BlockchainTransactionService {
                     continue;
                 }
 
-                // Mined: require the receipt to be buried under the configured confirmation
-                // depth before we treat it as final. A mined-but-shallow tx stays PENDING and
-                // is never timed out, so a reorg cannot leave the register asserting a dropped
-                // state.
-                int required = txProperties.confirmationsFor(tx.getChain());
-                long confirmations = EvmUtils.confirmations(web3j, r);
-                if (confirmations < required) {
-                    log.debug("tx={} mined at block {} but only {}/{} confirmations — waiting",
-                            tx.getTxHash(), r.getBlockNumber(), confirmations, required);
+                // Mined: require the receipt to be final under the chain's configured
+                // FinalityModel before we treat it as final. A mined-but-not-yet-final tx stays
+                // PENDING and is never timed out, so a reorg cannot leave the register asserting
+                // a dropped state.
+                long blockNumber = r.getBlockNumber().longValueExact();
+                boolean isFinal = finalityResolver.levelOf(identifier, web3j, blockNumber)
+                        .atLeast(FinalityLevel.FINALIZED);
+                if (!isFinal) {
+                    log.debug("tx={} mined at block {} but not yet final — waiting",
+                            tx.getTxHash(), r.getBlockNumber());
                     // Persist the block hash/number the first time we see them (or if they moved)
                     // so the mismatch check above has a baseline to compare against next poll,
                     // even before the confirmation depth is reached.
@@ -216,6 +277,7 @@ public class BlockchainTransactionService {
     private boolean isTimedOut(BlockchainTransaction tx) {
         return tx.getCreatedAt().plusSeconds(txProperties.getTimeoutSeconds()).isBefore(Instant.now());
     }
+
 
     private static String resolveActorName() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

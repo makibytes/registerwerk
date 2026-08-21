@@ -13,7 +13,6 @@ import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 /** Signs and submits DappRegistry calls with the operator wallet, recording the pending tx. */
@@ -57,15 +56,19 @@ class MarketplaceTxGateway {
         return txHash;
     }
 
-    Optional<org.web3j.protocol.core.methods.response.TransactionReceipt> receipt(UUID chainConfigId, String txHash) {
-        ChainConfig chain = chainConfigRepository.findById(chainConfigId).orElse(null);
-        if (chain == null) return Optional.empty();
-        try {
-            Web3j web3j = clientRegistry.getEvmClientByIdentifier(chain.getIdentifier());
-            return web3j.ethGetTransactionReceipt(txHash).send().getTransactionReceipt();
-        } catch (Exception e) {
-            return Optional.empty();
-        }
+    /** @see BlockchainTransactionService#isConfirmedSuccess */
+    boolean isConfirmedSuccess(String txHash) {
+        return txService.isConfirmedSuccess(txHash);
+    }
+
+    /** @see BlockchainTransactionService#isConfirmedFailure */
+    boolean isConfirmedFailure(String txHash) {
+        return txService.isConfirmedFailure(txHash);
+    }
+
+    /** @see BlockchainTransactionService#confirmedLocation */
+    java.util.Optional<BlockchainTransactionService.ConfirmedTxLocation> confirmedLocation(String txHash) {
+        return txService.confirmedLocation(txHash);
     }
 
     private static String parseChain(String identifier) {

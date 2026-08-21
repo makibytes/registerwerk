@@ -4,11 +4,14 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver;
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxReviewedEvent;
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionCompletionWriter;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -65,6 +68,12 @@ class BlockchainTransactionServiceTest {
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private Web3j web3j;
 
+    @Mock
+    private ChainConfigRepository chainConfigRepository;
+
+    @Mock
+    private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
+
     private BlockchainTxProperties txProperties;
     private BlockchainTransactionService service;
 
@@ -78,9 +87,17 @@ class BlockchainTransactionServiceTest {
         // self-invoked @Transactional methods on this service (a no-op due to Spring proxy
         // bypass); they now live on this separate bean so the transaction boundary is real.
         BlockchainTransactionCompletionWriter completionWriter =
-                new BlockchainTransactionCompletionWriter(repository, eventPublisher, new SimpleMeterRegistry());
-        service = new BlockchainTransactionService(
-                repository, clientRegistry, evmContractService, eventPublisher, txProperties, completionWriter);
+                new BlockchainTransactionCompletionWriter(repository, eventPublisher, new SimpleMeterRegistry(), chainEffectRecorder);
+        // chainConfigRepository is left unstubbed in most tests: findByIdentifier() then returns
+        // Optional.empty() (Mockito's built-in default for Optional-returning methods), and
+        // EvmFinalityResolver.resolveModel() falls back to DEPTH_BASED — i.e. the pre-existing
+        // depth-only behavior every other test in this class exercises. The same unstubbed
+        // Optional.empty() also means BlockchainTransactionService.record() never resolves a
+        // chainConfigId in these tests, so completionWriter.complete()'s chain-effect journalling
+        // is a no-op (chainConfigId stays null) — chainEffectRecorder needs no stubbing either.
+        EvmFinalityResolver finalityResolver = new EvmFinalityResolver(chainConfigRepository, txProperties);
+        service = new BlockchainTransactionService(repository, clientRegistry, evmContractService,
+                eventPublisher, txProperties, completionWriter, finalityResolver, chainConfigRepository);
     }
 
     @AfterEach
@@ -320,6 +337,97 @@ class BlockchainTransactionServiceTest {
         assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
     }
 
+    // ── pollPendingTransactions — per-chain FinalityModel ────────────────────────
+
+    @Test
+    @DisplayName("TAG_BASED chain: mined but below the node's finalized tag stays PENDING, "
+            + "never consulting the depth heuristic")
+    void pollPendingTransactions_tagBased_belowFinalizedTag_staysPending() throws java.io.IOException {
+        ChainConfig chain = new ChainConfig();
+        chain.setFinalityModel(ChainConfig.FinalityModel.TAG_BASED);
+        when(chainConfigRepository.findByIdentifier("ETHEREUM_MAINNET")).thenReturn(Optional.of(chain));
+
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        stubPending(tx);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64"); // block 100
+        receipt.setStatus("0x1");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+
+        org.web3j.protocol.core.methods.response.EthBlock finalizedResponse =
+                mock(org.web3j.protocol.core.methods.response.EthBlock.class, Answers.RETURNS_DEEP_STUBS);
+        when(finalizedResponse.hasError()).thenReturn(false);
+        when(finalizedResponse.getBlock().getNumber()).thenReturn(BigInteger.valueOf(90)); // finalized < 100
+        when(web3j.ethGetBlockByNumber(org.web3j.protocol.core.DefaultBlockParameterName.FINALIZED, false)
+                .send()).thenReturn(finalizedResponse);
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
+        // TAG_BASED never calls ethBlockNumber() — the depth heuristic is bypassed entirely.
+        verify(web3j, never()).ethBlockNumber();
+    }
+
+    @Test
+    @DisplayName("TAG_BASED chain: mined at or below the node's finalized tag completes, "
+            + "even though depth alone would still be shallow")
+    void pollPendingTransactions_tagBased_atFinalizedTag_completes() throws java.io.IOException {
+        ChainConfig chain = new ChainConfig();
+        chain.setFinalityModel(ChainConfig.FinalityModel.TAG_BASED);
+        when(chainConfigRepository.findByIdentifier("ETHEREUM_MAINNET")).thenReturn(Optional.of(chain));
+
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        stubPending(tx);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64"); // block 100
+        receipt.setStatus("0x1");
+        receipt.setGasUsed("0x5208");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+
+        org.web3j.protocol.core.methods.response.EthBlock finalizedResponse =
+                mock(org.web3j.protocol.core.methods.response.EthBlock.class, Answers.RETURNS_DEEP_STUBS);
+        when(finalizedResponse.hasError()).thenReturn(false);
+        when(finalizedResponse.getBlock().getNumber()).thenReturn(BigInteger.valueOf(100)); // finalized == 100
+        when(web3j.ethGetBlockByNumber(org.web3j.protocol.core.DefaultBlockParameterName.FINALIZED, false)
+                .send()).thenReturn(finalizedResponse);
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.SUCCESS);
+    }
+
+    @Test
+    @DisplayName("INSTANT chain (permissioned BFT): completes on the first receipt, "
+            + "no depth or tag lookup at all")
+    void pollPendingTransactions_instant_completesImmediately() throws java.io.IOException {
+        ChainConfig chain = new ChainConfig();
+        chain.setFinalityModel(ChainConfig.FinalityModel.INSTANT);
+        when(chainConfigRepository.findByIdentifier("ETHEREUM_MAINNET")).thenReturn(Optional.of(chain));
+
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        stubPending(tx);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64");
+        receipt.setStatus("0x1");
+        receipt.setGasUsed("0x5208");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+
+        service.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.SUCCESS);
+        verify(web3j, never()).ethBlockNumber();
+        verify(web3j, never()).ethGetBlockByNumber(any(), anyBoolean());
+    }
+
     @Test
     void pollPendingTransactions_exceptionForOneTx_doesNotAbortRemaining() {
         BlockchainTransaction broken = pendingTx("0xbad", "ETHEREUM", "MAINNET", Instant.now());
@@ -333,6 +441,49 @@ class BlockchainTransactionServiceTest {
         assertThat(broken.getStatus()).isEqualTo(BlockchainTransaction.Status.PENDING);
         // ...but the loop still reached "fine" (no hash/chain -> never calls getEvmClient).
         assertThat(fine.getStatus()).isEqualTo(BlockchainTransaction.Status.TIMEOUT);
+    }
+
+    // ── isConfirmedSuccess / isConfirmedFailure ──────────────────────────────────
+
+    @Test
+    void isConfirmedSuccess_trueOnlyForTrackedSuccessRow() {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        tx.setStatus(BlockchainTransaction.Status.SUCCESS);
+        when(repository.findByTxHash("0xabc")).thenReturn(Optional.of(tx));
+
+        assertThat(service.isConfirmedSuccess("0xabc")).isTrue();
+        assertThat(service.isConfirmedFailure("0xabc")).isFalse();
+    }
+
+    @Test
+    void isConfirmedSuccess_falseForStillPendingRow() {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        when(repository.findByTxHash("0xabc")).thenReturn(Optional.of(tx));
+
+        assertThat(service.isConfirmedSuccess("0xabc")).isFalse();
+        assertThat(service.isConfirmedFailure("0xabc")).isFalse();
+    }
+
+    @Test
+    void isConfirmedSuccess_falseForUntrackedHash() {
+        when(repository.findByTxHash("0xunknown")).thenReturn(Optional.empty());
+
+        assertThat(service.isConfirmedSuccess("0xunknown")).isFalse();
+        assertThat(service.isConfirmedFailure("0xunknown")).isFalse();
+    }
+
+    @Test
+    void isConfirmedFailure_trueForFailedAndTimedOutRows() {
+        BlockchainTransaction failed = pendingTx("0xfailed", "ETHEREUM", "MAINNET", Instant.now());
+        failed.setStatus(BlockchainTransaction.Status.FAILED);
+        BlockchainTransaction timedOut = pendingTx("0xtimeout", "ETHEREUM", "MAINNET", Instant.now());
+        timedOut.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        when(repository.findByTxHash("0xfailed")).thenReturn(Optional.of(failed));
+        when(repository.findByTxHash("0xtimeout")).thenReturn(Optional.of(timedOut));
+
+        assertThat(service.isConfirmedFailure("0xfailed")).isTrue();
+        assertThat(service.isConfirmedFailure("0xtimeout")).isTrue();
+        assertThat(service.isConfirmedSuccess("0xfailed")).isFalse();
     }
 
     // ── record ────────────────────────────────────────────────────────────────
@@ -357,6 +508,33 @@ class BlockchainTransactionServiceTest {
         assertThat(tx.getActorRole()).isEqualTo("REGISTRY_ADMIN");
         assertThat(tx.getDeploymentId()).isEqualTo(deploymentId);
         assertThat(tx.getAssetId()).isEqualTo(assetId);
+    }
+
+    @Test
+    void record_resolvesChainConfigIdWhenTheChainNetworkPairIsKnown() {
+        UUID chainConfigId = UUID.randomUUID();
+        ChainConfig chain = new ChainConfig();
+        ReflectionTestUtils.setField(chain, "id", chainConfigId);
+        when(chainConfigRepository.findByIdentifier("ETHEREUM_MAINNET")).thenReturn(Optional.of(chain));
+        when(repository.save(any(BlockchainTransaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.record("0xabc", "pause", null, null, "ETHEREUM", "MAINNET", "0xcontract", Map.of());
+
+        ArgumentCaptor<BlockchainTransaction> captor = ArgumentCaptor.forClass(BlockchainTransaction.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getChainConfigId()).isEqualTo(chainConfigId);
+    }
+
+    @Test
+    void record_unresolvableChainNetworkPair_leavesChainConfigIdNull() {
+        when(chainConfigRepository.findByIdentifier("ETHEREUM_MAINNET")).thenReturn(Optional.empty());
+        when(repository.save(any(BlockchainTransaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.record("0xabc", "pause", null, null, "ETHEREUM", "MAINNET", "0xcontract", Map.of());
+
+        ArgumentCaptor<BlockchainTransaction> captor = ArgumentCaptor.forClass(BlockchainTransaction.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getChainConfigId()).isNull();
     }
 
     @Test

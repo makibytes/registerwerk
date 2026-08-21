@@ -7,6 +7,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver;
 import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
@@ -14,6 +15,10 @@ import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.erc3643.api.Erc3643DeploymentPort;
+import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
+import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
+import de.makibytes.registerwerk.finality.api.CompensationCategory;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -77,7 +82,9 @@ public class AssetDeploymentService {
     private final AssetDeploymentCompletionWriter completionWriter;
     private final BlockchainTxProperties txProperties;
     private final ChainConfigRepository chainConfigRepository;
+    private final EvmFinalityResolver finalityResolver;
     private final RestClient restClient;
+    private final ChainEffectRecorder chainEffectRecorder;
 
     public AssetDeploymentService(
             AssetDeploymentRepository assetDeploymentRepository,
@@ -90,7 +97,9 @@ public class AssetDeploymentService {
             AssetDeploymentCompletionWriter completionWriter,
             BlockchainTxProperties txProperties,
             ChainConfigRepository chainConfigRepository,
-            RestClient.Builder restClientBuilder) {
+            EvmFinalityResolver finalityResolver,
+            RestClient.Builder restClientBuilder,
+            ChainEffectRecorder chainEffectRecorder) {
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
@@ -101,7 +110,9 @@ public class AssetDeploymentService {
         this.completionWriter = completionWriter;
         this.txProperties = txProperties;
         this.chainConfigRepository = chainConfigRepository;
+        this.finalityResolver = finalityResolver;
         this.restClient = restClientBuilder.build();
+        this.chainEffectRecorder = chainEffectRecorder;
     }
 
     /**
@@ -247,6 +258,12 @@ public class AssetDeploymentService {
             return;
         }
 
+        // Still a legitimate optimization, not a reorg-blind spot: this only guards *this polling
+        // path* (re-verifying confirmation depth), which has nothing useful to do once CONFIRMED —
+        // it is not the only mechanism watching a CONFIRMED deployment for a reorg. That job now
+        // belongs to AssetDeploymentRevertCompensator, triggered independently by the finality
+        // module's retraction sweep (see recordDeploymentConfirmedEffect), which reverts CONFIRMED
+        // -> PENDING on retraction regardless of whether syncFromChain ever runs again for this row.
         AssetDeployment.DeploymentStatus status = deployment.getDeploymentStatus();
         if (status == AssetDeployment.DeploymentStatus.CONFIRMED
                 || status == AssetDeployment.DeploymentStatus.FAILED) {
@@ -324,13 +341,14 @@ public class AssetDeploymentService {
                 return;
             }
 
-            int required = txProperties.confirmationsFor(deployChain.name());
-            long confirmations = EvmUtils.confirmations(web3j, receipt);
             Long newBlockNumber = receipt.getBlockNumber() != null
                     ? receipt.getBlockNumber().longValueExact() : null;
-            if (confirmations < required) {
-                log.debug("syncFromChain: deploymentId={} mined at block {} but only {}/{} "
-                                + "confirmations — waiting", deploymentId, newBlockNumber, confirmations, required);
+            String identifier = deployChain.name() + "_" + deployment.getNetwork().name();
+            boolean isFinal = newBlockNumber != null
+                    && finalityResolver.levelOf(identifier, web3j, newBlockNumber).atLeast(FinalityLevel.FINALIZED);
+            if (!isFinal) {
+                log.debug("syncFromChain: deploymentId={} mined at block {} but not yet final "
+                                + "— waiting", deploymentId, newBlockNumber);
                 if (!Objects.equals(deployment.getBlockHash(), newBlockHash)
                         || !Objects.equals(deployment.getBlockNumber(), newBlockNumber)) {
                     deployment.setBlockHash(newBlockHash);
@@ -349,6 +367,7 @@ public class AssetDeploymentService {
             deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
             deployment.setBlockHash(newBlockHash);
             deployment.setBlockNumber(newBlockNumber);
+            chainConfigRepository.findByIdentifier(identifier).ifPresent(cc -> deployment.setChainConfigId(cc.getId()));
             if (contractAddress != null) {
                 deployment.setContractAddress(contractAddress);
             } else {
@@ -360,10 +379,31 @@ public class AssetDeploymentService {
             log.info("syncFromChain: confirmed deploymentId={} contractAddress={}", deploymentId, contractAddress);
             eventPublisher.publishEvent(new DeploymentConfirmedEvent(
                     deploymentId, null, null, contractAddress, txHash));
+            recordDeploymentConfirmedEffect(deployment, newBlockNumber, newBlockHash, txHash);
         } catch (Exception e) {
             log.error("syncFromChain: error fetching receipt for deploymentId={}: {}",
                     deploymentId, e.getMessage(), e);
         }
+    }
+
+    /**
+     * Journals a {@code DEPLOYMENT_CONFIRMED} chain effect (INVERSE_FLIP) so a reorg deep enough to
+     * retract this deployment's already-FINALIZED block reverts the register's CONFIRMED claim
+     * instead of asserting a deployment the chain no longer agrees happened — see
+     * {@code AssetDeploymentRevertCompensator}, the compensator that undoes it. Only ever called
+     * from the EVM confirmation branch above, since that is the only path that also resolves
+     * {@code chainConfigId}/{@code blockNumber}; silently skipped (not an error) when the chain
+     * identifier didn't resolve to a known {@code ChainConfig} — a disclosed gap matching
+     * {@code BlockchainTransactionCompletionWriter}'s equivalent {@code TX_COMPLETED} journalling.
+     */
+    private void recordDeploymentConfirmedEffect(AssetDeployment deployment, Long blockNumber, String blockHash, String txHash) {
+        if (deployment.getChainConfigId() == null || blockNumber == null) {
+            return;
+        }
+        chainEffectRecorder.record(new ChainEffectDescriptor(
+                deployment.getChainConfigId(), blockNumber, blockHash, txHash, null,
+                "asset", AssetDeploymentRevertCompensator.EFFECT_TYPE, "AssetDeployment", deployment.getId(),
+                CompensationCategory.INVERSE_FLIP, null, null, null, null));
     }
 
     /**

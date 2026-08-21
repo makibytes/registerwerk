@@ -1,6 +1,9 @@
 package de.makibytes.registerwerk.blockchain.internal.tx;
 
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
+import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
+import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
+import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
@@ -32,13 +35,15 @@ public class BlockchainTransactionCompletionWriter {
     private final BlockchainTransactionRepository repository;
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
+    private final ChainEffectRecorder chainEffectRecorder;
 
     public BlockchainTransactionCompletionWriter(
             BlockchainTransactionRepository repository, ApplicationEventPublisher eventPublisher,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry, ChainEffectRecorder chainEffectRecorder) {
         this.repository = repository;
         this.eventPublisher = eventPublisher;
         this.meterRegistry = meterRegistry;
+        this.chainEffectRecorder = chainEffectRecorder;
     }
 
     @Transactional
@@ -55,7 +60,31 @@ public class BlockchainTransactionCompletionWriter {
 
         recordSubmissionToConfirmationLatency(tx, completedAt);
         publishCompletionAuditEvent(tx);
+        recordChainEffectIfCompensable(tx);
         log.info("Blockchain tx={} completed status={}", tx.getTxHash(), tx.getStatus());
+    }
+
+    /**
+     * Journals a {@code TX_COMPLETED} chain effect so a reorg deep enough to retract this
+     * transaction's already-FINALIZED block (see {@code BlockchainTransactionService.pollPendingTransactions}
+     * — SUCCESS is only ever written once the receipt clears the configured finality model, so this
+     * is always a crosses-FINALIZED-tier event, not routine reorg noise) gets reverted back to
+     * PENDING instead of the register asserting a completion the chain no longer agrees happened.
+     * Only SUCCESS is journalled — FAILED/TIMEOUT already represent "nothing happened", so there is
+     * nothing to undo if that block is later retracted. Silently skipped (not an error) when
+     * {@code chainConfigId}/{@code blockNumber} couldn't be resolved (see
+     * {@link BlockchainTransaction#getChainConfigId()}'s javadoc) — this transaction simply won't be
+     * reached by the retraction sweep, a disclosed gap for unresolvable chain/network pairs.
+     */
+    private void recordChainEffectIfCompensable(BlockchainTransaction tx) {
+        if (tx.getStatus() != BlockchainTransaction.Status.SUCCESS
+                || tx.getChainConfigId() == null || tx.getBlockNumber() == null) {
+            return;
+        }
+        chainEffectRecorder.record(new ChainEffectDescriptor(
+                tx.getChainConfigId(), tx.getBlockNumber(), tx.getBlockHash(), tx.getTxHash(), null,
+                "blockchain", BlockchainTxRevertCompensator.EFFECT_TYPE, "BlockchainTransaction", tx.getId(),
+                CompensationCategory.INVERSE_FLIP, null, null, null, null));
     }
 
     @Transactional

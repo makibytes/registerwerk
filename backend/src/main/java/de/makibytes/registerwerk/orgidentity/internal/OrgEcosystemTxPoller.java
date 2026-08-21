@@ -1,9 +1,14 @@
 package de.makibytes.registerwerk.orgidentity.internal;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.erc3643.Erc3643Api;
+import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
+import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
+import de.makibytes.registerwerk.finality.api.CompensationCategory;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuer;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuerRepository;
 import de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus;
@@ -63,6 +68,8 @@ class OrgEcosystemTxPoller {
     private final BlockchainClientRegistry clientRegistry;
     private final Erc3643Api erc3643Api;
     private final EcosystemOnchainBroadcaster broadcaster;
+    private final EvmFinalityResolver finalityResolver;
+    private final ChainEffectRecorder chainEffectRecorder;
 
     OrgEcosystemTxPoller(
             OrgRegistrationRepository registrationRepository,
@@ -72,7 +79,9 @@ class OrgEcosystemTxPoller {
             ChainConfigRepository chainConfigRepository,
             BlockchainClientRegistry clientRegistry,
             Erc3643Api erc3643Api,
-            EcosystemOnchainBroadcaster broadcaster) {
+            EcosystemOnchainBroadcaster broadcaster,
+            EvmFinalityResolver finalityResolver,
+            ChainEffectRecorder chainEffectRecorder) {
         this.registrationRepository = registrationRepository;
         this.walletRepository = walletRepository;
         this.grantRepository = grantRepository;
@@ -81,6 +90,8 @@ class OrgEcosystemTxPoller {
         this.clientRegistry = clientRegistry;
         this.erc3643Api = erc3643Api;
         this.broadcaster = broadcaster;
+        this.finalityResolver = finalityResolver;
+        this.chainEffectRecorder = chainEffectRecorder;
     }
 
     @SchedulerLock(name = "orgEcosystemTxPoller", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
@@ -138,12 +149,20 @@ class OrgEcosystemTxPoller {
         }
         OrgRegistration org = registrationRepository.findById(grant.getOrgRegistrationId()).orElse(null);
         if (org == null) return;
-        receipt(org.getChainConfigId(), grant.getGrantedTx()).ifPresent(rcpt -> {
-            grant.setStatus("0x1".equals(rcpt.getStatus())
-                    ? PermissionGrantStatus.ACTIVE
-                    : PermissionGrantStatus.FAILED);
-            grantRepository.save(grant);
-        });
+        VerdictResult verdict = resolveVerdict(org.getChainConfigId(), grant.getGrantedTx());
+        switch (verdict.verdict()) {
+            case SUCCESS -> {
+                grant.setStatus(PermissionGrantStatus.ACTIVE);
+                grantRepository.save(grant);
+                recordEffect(org.getChainConfigId(), verdict, grant.getGrantedTx(),
+                        "PERMISSION_GRANTED", "PermissionGrant", grant.getId());
+            }
+            case FAILED -> {
+                grant.setStatus(PermissionGrantStatus.FAILED);
+                grantRepository.save(grant);
+            }
+            case PENDING -> { /* not yet mined, or mined but not yet final — recheck next tick */ }
+        }
     }
 
     private void resolveIssuer(EcosystemTrustedIssuer issuer) {
@@ -153,12 +172,20 @@ class OrgEcosystemTxPoller {
             }
             return;
         }
-        receipt(issuer.getChainConfigId(), issuer.getAddedTx()).ifPresent(rcpt -> {
-            issuer.setStatus("0x1".equals(rcpt.getStatus())
-                    ? MemberWalletStatus.ACTIVE
-                    : MemberWalletStatus.FAILED);
-            trustedIssuerRepository.save(issuer);
-        });
+        VerdictResult verdict = resolveVerdict(issuer.getChainConfigId(), issuer.getAddedTx());
+        switch (verdict.verdict()) {
+            case SUCCESS -> {
+                issuer.setStatus(MemberWalletStatus.ACTIVE);
+                trustedIssuerRepository.save(issuer);
+                recordEffect(issuer.getChainConfigId(), verdict, issuer.getAddedTx(),
+                        "TRUSTED_ISSUER_ADDED", "EcosystemTrustedIssuer", issuer.getId());
+            }
+            case FAILED -> {
+                issuer.setStatus(MemberWalletStatus.FAILED);
+                trustedIssuerRepository.save(issuer);
+            }
+            case PENDING -> { /* not yet mined, or mined but not yet final — recheck next tick */ }
+        }
     }
 
     private void resolveRegistration(OrgRegistration registration) {
@@ -189,18 +216,24 @@ class OrgEcosystemTxPoller {
             }
             return;
         }
-        receipt(registration.getChainConfigId(), registration.getRegisteredTx()).ifPresent(rcpt -> {
-            if ("0x1".equals(rcpt.getStatus())) {
+        VerdictResult verdict = resolveVerdict(registration.getChainConfigId(), registration.getRegisteredTx());
+        switch (verdict.verdict()) {
+            case SUCCESS -> {
                 registration.setStatus(OrgRegistrationStatus.ACTIVE);
                 log.info("Org registration={} confirmed active (tx={})",
                         registration.getId(), registration.getRegisteredTx());
-            } else {
+                registrationRepository.save(registration);
+                recordEffect(registration.getChainConfigId(), verdict, registration.getRegisteredTx(),
+                        "ORG_REGISTRATION_CONFIRMED", "OrgRegistration", registration.getId());
+            }
+            case FAILED -> {
                 registration.setStatus(OrgRegistrationStatus.FAILED);
                 log.error("registerOrg tx={} failed for registration={}",
                         registration.getRegisteredTx(), registration.getId());
+                registrationRepository.save(registration);
             }
-            registrationRepository.save(registration);
-        });
+            case PENDING -> { /* not yet mined, or mined but not yet final — recheck next tick */ }
+        }
     }
 
     private void resolveWallet(OrgMemberWallet wallet) {
@@ -210,38 +243,97 @@ class OrgEcosystemTxPoller {
             }
             return;
         }
-        receipt(wallet.getChainConfigId(), wallet.getBoundTx()).ifPresent(rcpt -> {
-            if ("0x1".equals(rcpt.getStatus())) {
+        VerdictResult verdict = resolveVerdict(wallet.getChainConfigId(), wallet.getBoundTx());
+        switch (verdict.verdict()) {
+            case SUCCESS -> {
                 wallet.setStatus(MemberWalletStatus.ACTIVE);
                 log.info("Member wallet={} binding confirmed (tx={})", wallet.getId(), wallet.getBoundTx());
-            } else {
+                walletRepository.save(wallet);
+                recordEffect(wallet.getChainConfigId(), verdict, wallet.getBoundTx(),
+                        "MEMBER_WALLET_BOUND", "OrgMemberWallet", wallet.getId());
+            }
+            case FAILED -> {
                 wallet.setStatus(MemberWalletStatus.FAILED);
                 log.error("addMember tx={} failed for wallet={}", wallet.getBoundTx(), wallet.getId());
+                walletRepository.save(wallet);
             }
-            walletRepository.save(wallet);
-        });
+            case PENDING -> { /* not yet mined, or mined but not yet final — recheck next tick */ }
+        }
     }
 
     private static boolean retryDue(Instant reference) {
         return reference != null && reference.plus(RETRY_GRACE).isBefore(Instant.now());
     }
 
-    private Optional<TransactionReceipt> receipt(UUID chainConfigId, String txHash) {
+    // ── Receipt finality (shared by all four resolveX methods above) ────────────
+
+    private enum TxVerdict { PENDING, SUCCESS, FAILED }
+
+    /** @param blockNumber/blockHash populated only on SUCCESS — the receipt's confirming block,
+     *  needed to journal a chain effect (see {@link #recordEffect}); null for PENDING/FAILED. */
+    private record VerdictResult(TxVerdict verdict, Long blockNumber, String blockHash) {
+        static VerdictResult of(TxVerdict verdict) { return new VerdictResult(verdict, null, null); }
+    }
+
+    /**
+     * Mined-but-not-yet-final is deliberately folded into PENDING (not a fourth state): every
+     * caller here re-polls every tick anyway, so "wait one more tick" and "not mined yet" need
+     * no different handling — the only distinction that matters is whether it's safe to write a
+     * terminal ACTIVE/FAILED status yet. Consults the chain's configured
+     * {@link ChainConfig.FinalityModel} rather than accepting the first mined receipt, so a
+     * reorg that un-mines this tx cannot leave an org registration, member binding, permission
+     * grant, or trusted issuer ACTIVE on a state the chain has since abandoned.
+     */
+    private VerdictResult resolveVerdict(UUID chainConfigId, String txHash) {
         ChainConfig chainConfig = chainConfigRepository.findById(chainConfigId).orElse(null);
-        if (chainConfig == null) return Optional.empty();
+        if (chainConfig == null) return VerdictResult.of(TxVerdict.PENDING);
 
         Web3j web3j;
         try {
             web3j = clientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
         } catch (Exception e) {
             log.debug("EVM client not available for chain={}", chainConfig.getIdentifier());
-            return Optional.empty();
+            return VerdictResult.of(TxVerdict.PENDING);
         }
         try {
-            return web3j.ethGetTransactionReceipt(txHash).send().getTransactionReceipt();
+            Optional<TransactionReceipt> receiptOpt =
+                    web3j.ethGetTransactionReceipt(txHash).send().getTransactionReceipt();
+            if (receiptOpt.isEmpty()) {
+                return VerdictResult.of(TxVerdict.PENDING);
+            }
+            TransactionReceipt receipt = receiptOpt.get();
+            if (!"0x1".equals(receipt.getStatus())) {
+                return VerdictResult.of(TxVerdict.FAILED);
+            }
+
+            long blockNumber = receipt.getBlockNumber().longValueExact();
+            boolean isFinal = finalityResolver.levelOf(chainConfig.getIdentifier(), web3j, blockNumber)
+                    .atLeast(FinalityLevel.FINALIZED);
+            return isFinal
+                    ? new VerdictResult(TxVerdict.SUCCESS, blockNumber, receipt.getBlockHash())
+                    : VerdictResult.of(TxVerdict.PENDING);
         } catch (Exception e) {
             log.debug("Receipt lookup failed for tx={}: {}", txHash, e.getMessage());
-            return Optional.empty();
+            return VerdictResult.of(TxVerdict.PENDING);
         }
+    }
+
+    /**
+     * Journals an INVERSE_FLIP chain effect for a just-confirmed row so a reorg deep enough to
+     * retract its already-FINALIZED block reverts it back to PENDING instead of the register
+     * asserting a confirmation the chain no longer agrees happened — see the four
+     * {@code *RevertCompensator} classes in this package that undo each effect type. Silently
+     * skipped (not an error) if the verdict somehow carries no block number — cannot happen on the
+     * SUCCESS path that calls this, but keeps the method total rather than throwing.
+     */
+    private void recordEffect(UUID chainConfigId, VerdictResult verdict, String txHash,
+            String effectType, String entityType, UUID entityId) {
+        if (verdict.blockNumber() == null) {
+            return;
+        }
+        chainEffectRecorder.record(new ChainEffectDescriptor(
+                chainConfigId, verdict.blockNumber(), verdict.blockHash(), txHash, null,
+                "orgidentity", effectType, entityType, entityId,
+                CompensationCategory.INVERSE_FLIP, null, null, null, null));
     }
 }

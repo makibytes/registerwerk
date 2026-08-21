@@ -6,6 +6,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.asset.events.DeploymentConfirmedEvent;
@@ -86,6 +87,9 @@ class AssetDeploymentServiceTest {
     @Mock
     private ChainConfigRepository chainConfigRepository;
 
+    @Mock
+    private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
+
     /** Real instance (not a mock), same pattern as BlockchainTransactionServiceTest — a plain
      *  POJO with getters/setters is more reliable to configure directly than to stub. */
     private BlockchainTxProperties txProperties;
@@ -105,10 +109,11 @@ class AssetDeploymentServiceTest {
     void setUp() {
         txProperties = new BlockchainTxProperties();
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
+        EvmFinalityResolver finalityResolver = new EvmFinalityResolver(chainConfigRepository, txProperties);
         assetDeploymentService = new AssetDeploymentService(
                 assetDeploymentRepository, assetRepository, eventPublisher, tokenDeploymentPort,
                 erc3643DeploymentPort, blockchainClientRegistry, evmContractService, completionWriter,
-                txProperties, chainConfigRepository, restClientBuilder);
+                txProperties, chainConfigRepository, finalityResolver, restClientBuilder, chainEffectRecorder);
     }
 
     @Test
@@ -554,6 +559,50 @@ class AssetDeploymentServiceTest {
         assertThat(deployment.getBlockHash()).isEqualTo("0xblock100");
         assertThat(deployment.getBlockNumber()).isEqualTo(100L);
         verify(eventPublisher).publishEvent(any(DeploymentConfirmedEvent.class));
+    }
+
+    @Test
+    @DisplayName("syncFromChain journals a DEPLOYMENT_CONFIRMED chain effect when the chain identifier resolves")
+    void syncFromChain_marksConfirmed_journalsChainEffectWhenChainConfigResolves() throws java.io.IOException {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setAssetId(assetId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setContractAddress("0xalreadyknown");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+
+        de.makibytes.registerwerk.chain.api.ChainConfig chainConfig = new de.makibytes.registerwerk.chain.api.ChainConfig();
+        UUID chainConfigId = UUID.randomUUID();
+        org.springframework.test.util.ReflectionTestUtils.setField(chainConfig, "id", chainConfigId);
+        when(chainConfigRepository.findByIdentifier("ETHEREUM_TESTNET")).thenReturn(Optional.of(chainConfig));
+
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64"); // block 100
+        receipt.setBlockHash("0xblock100");
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(111));
+        txProperties.setDefaultConfirmations(12);
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getChainConfigId()).isEqualTo(chainConfigId);
+        ArgumentCaptor<de.makibytes.registerwerk.finality.api.ChainEffectDescriptor> captor =
+                ArgumentCaptor.forClass(de.makibytes.registerwerk.finality.api.ChainEffectDescriptor.class);
+        verify(chainEffectRecorder).record(captor.capture());
+        assertThat(captor.getValue().chainConfigId()).isEqualTo(chainConfigId);
+        assertThat(captor.getValue().blockNumber()).isEqualTo(100L);
+        assertThat(captor.getValue().effectType()).isEqualTo("DEPLOYMENT_CONFIRMED");
+        assertThat(captor.getValue().entityId()).isEqualTo(deploymentId);
     }
 
     @Test

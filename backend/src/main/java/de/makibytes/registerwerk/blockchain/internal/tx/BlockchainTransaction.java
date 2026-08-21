@@ -38,6 +38,14 @@ public class BlockchainTransaction {
     @Column(name = "deployment_id")
     private UUID deploymentId;
 
+    /** FK to {@code chain_config} — lets the reorg-retraction sweep
+     *  ({@code finality.internal.BlockFinalityServiceImpl#recordRetraction}) find affected rows by
+     *  (chainConfigId, blockNumber) directly, rather than string-matching {@link #chain}/{@link #network}.
+     *  Null for rows written before this column existed, or if the chain+network couldn't be
+     *  resolved to a known {@code ChainConfig} at submission time. */
+    @Column(name = "chain_config_id")
+    private UUID chainConfigId;
+
     @Column(name = "asset_id")
     private UUID assetId;
 
@@ -112,6 +120,9 @@ public class BlockchainTransaction {
 
     public UUID getDeploymentId() { return deploymentId; }
     public void setDeploymentId(UUID deploymentId) { this.deploymentId = deploymentId; }
+
+    public UUID getChainConfigId() { return chainConfigId; }
+    public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
 
     public UUID getAssetId() { return assetId; }
     public void setAssetId(UUID assetId) { this.assetId = assetId; }
