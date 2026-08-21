@@ -623,6 +623,23 @@ export interface WalletDefault {
   walletAddress: string;
 }
 
+export type RpcNodeKind = 'DIRECT_RPC' | 'CHAINCACHE';
+
+/** Advisory snapshot of chaincache's own `GET /api/capabilities` response for one chain — see
+ *  ChaincacheClient.ChainCapabilitiesProbe on the backend. Only present on a CHAINCACHE-kind node,
+ *  and only once a probe has succeeded at least once. */
+export interface RpcNodeCapabilities {
+  finalityModel?: string;
+  safeConfirmations?: number;
+  finalizedConfirmations?: number;
+  configuredApis?: string[];
+  debugApiConfiguredOnAnyNode?: boolean;
+  addressTraceCapability?: string;
+  durableStreamAvailable?: boolean;
+  kafkaRelayEnabled?: boolean;
+  probedAt?: string;
+}
+
 export interface RpcNode {
   id: string;
   chainConfigId: string;
@@ -639,6 +656,10 @@ export interface RpcNode {
   consecutiveFailures: number;
   lagFromBest?: number;
   syncing: boolean;
+  kind: RpcNodeKind;
+  managementUrl?: string;
+  remoteChainKey?: string;
+  capabilities?: RpcNodeCapabilities;
 }
 
 export interface ChainHealth {
@@ -650,6 +671,24 @@ export interface ChainHealth {
   chainId?: number;
   enabled: boolean;
   nodes: RpcNode[];
+}
+
+export type FinalitySource = 'RPC_SELF_PROBE' | 'CHAINCACHE';
+
+/** Full chain configuration — the "chain config screen" the operator UI previously had no way
+ *  to edit finalityModel/avgBlockSeconds/finalitySource/rpcUrl/wsUrl/graphNodeUrl from. */
+export interface ChainConfig {
+  id: string;
+  identifier: string;
+  displayName: string;
+  chainType: 'EVM' | 'SOLANA' | 'STARKNET' | 'STELLAR' | 'CANTON';
+  networkType: 'MAINNET' | 'TESTNET';
+  chainId?: number;
+  blockExplorerUrl?: string;
+  finalityModel: 'TAG_BASED' | 'DEPTH_BASED' | 'INSTANT';
+  avgBlockSeconds?: number;
+  finalitySource: FinalitySource;
+  enabled: boolean;
 }
 
 export interface RegistryOverviewSummary {

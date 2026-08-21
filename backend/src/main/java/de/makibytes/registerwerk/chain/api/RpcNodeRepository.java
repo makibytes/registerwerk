@@ -32,7 +32,13 @@ public interface RpcNodeRepository extends JpaRepository<RpcNode, UUID> {
      *  status every ~30s via saveAll(), but nothing ever counted it. */
     long countByHealthyFalse();
 
-    Optional<RpcNode> findByIdAndChainConfig_Id(UUID id, UUID chainConfigId);
+    /** Eagerly joins chain_config — {@code RpcNodeService.getById} feeds every write operation
+     *  (enable/disable/pin/delete/update/refresh-capabilities), several of which (update,
+     *  refresh-capabilities) return the entity for {@code toResponse()} to serialize in the
+     *  controller, outside this method's own transaction; a lazy {@code chainConfig} proxy would
+     *  throw LazyInitializationException there. */
+    @Query("SELECT n FROM RpcNode n JOIN FETCH n.chainConfig WHERE n.id = :id AND n.chainConfig.id = :chainConfigId")
+    Optional<RpcNode> findByIdAndChainConfig_Id(@Param("id") UUID id, @Param("chainConfigId") UUID chainConfigId);
 
     /** The chaincache connection to use for a chain that opted into
      *  {@code ChainConfig.FinalitySource.CHAINCACHE} — see

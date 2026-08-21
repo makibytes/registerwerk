@@ -1189,3 +1189,56 @@ code {
     justify-content: space-between;
   }
 }
+
+// ── chaincache capability comparison ────────────────────────────────────────
+// Shared by any page showing a chaincache-kind node's advertised capabilities next to a direct
+// node's connection — currently network-nodes.component.ts. Kept global (not per-component
+// styles) both because it's meant to be reused and to stay under Angular's per-component style
+// budget for a table-heavy admin page.
+
+.finality-source-chip, .kind-badge.chaincache {
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+}
+
+.finality-source-chip, .kind-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.kind-badge { margin-top: 3px; }
+.kind-badge mat-icon, .chaincheck-link mat-icon { font-size: 12px; width: 12px; height: 12px; }
+.expand-btn { color: var(--rw-text-muted); }
+.capabilities-row td { background: var(--rw-bg); padding: 0 20px 16px; }
+
+.capabilities-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--rw-surface);
+  border: 1px solid var(--rw-border);
+  border-radius: 8px;
+}
+
+.capability-item .label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--rw-text-muted);
+  margin-bottom: 2px;
+}
+
+.capability-item .value { font-size: 13px; color: var(--rw-text-primary); font-weight: 600; }
+.capability-item .value.yes { color: #16a34a; }
+.capability-item .value.no { color: var(--rw-text-muted); }
+
+.capabilities-empty { padding: 14px 16px; font-size: 12px; color: var(--rw-text-muted); font-style: italic; }
+.capabilities-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.chaincheck-link { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }

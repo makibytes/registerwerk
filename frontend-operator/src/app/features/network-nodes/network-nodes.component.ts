@@ -9,10 +9,12 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { ChainService } from '../../core/api/chain.service';
-import { ChainHealth, RpcNode } from '../../core/models';
+import { ChainService, ChainConfigCreateRequest, ChainConfigUpdateRequest, RpcNodeWriteRequest } from '../../core/api/chain.service';
+import { ChainConfig, ChainHealth, RpcNode } from '../../core/models';
+import { environment } from '../../../environments/environment';
 import { EMPTY, Subject, Subscription, catchError, exhaustMap, finalize, merge, timer } from 'rxjs';
 import { AddNodeDialogComponent } from './add-node-dialog.component';
+import { ChainConfigDialogComponent } from './chain-config-dialog.component';
 
 @Component({
   selector: 'app-network-nodes',
@@ -359,6 +361,13 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
     .stopped-row td {
       opacity: 0.55;
     }
+
+    .add-chain-btn { font-size: 12px; height: 32px; }
+    .chain-actions { display: flex; gap: 8px; align-items: center; }
+    .settings-btn { color: var(--rw-text-muted); }
+    /* .finality-source-chip, .kind-badge, .capabilities-*, .chaincheck-link — global, see styles.scss
+       "chaincache capability comparison" section: reused wherever a node exposes chaincache
+       capability data, not just this page, and kept this component under its style budget. */
   `],
   template: `
     <div class="page-header">
@@ -366,23 +375,29 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
         <h1>Network Nodes</h1>
         <p class="page-subtitle">RPC endpoint health for all configured blockchains</p>
       </div>
-      @if (loading()) {
-        <div class="refresh-info">
-          <mat-icon>refresh</mat-icon>
-          <span>Refreshing…</span>
-        </div>
-      } @else if (loadError()) {
-        <div class="refresh-info error">
-          <mat-icon>sync_problem</mat-icon>
-          <span>Last refresh failed</span>
-          <button mat-button type="button" (click)="refresh()">Retry</button>
-        </div>
-      } @else {
-        <div class="refresh-info">
-          <mat-icon style="animation: none; opacity: 0.5">schedule</mat-icon>
-          <span>Auto-refreshes every 30s</span>
-        </div>
-      }
+      <div class="chain-actions">
+        @if (loading()) {
+          <div class="refresh-info">
+            <mat-icon>refresh</mat-icon>
+            <span>Refreshing…</span>
+          </div>
+        } @else if (loadError()) {
+          <div class="refresh-info error">
+            <mat-icon>sync_problem</mat-icon>
+            <span>Last refresh failed</span>
+            <button mat-button type="button" (click)="refresh()">Retry</button>
+          </div>
+        } @else {
+          <div class="refresh-info">
+            <mat-icon style="animation: none; opacity: 0.5">schedule</mat-icon>
+            <span>Auto-refreshes every 30s</span>
+          </div>
+        }
+        <button mat-stroked-button class="add-chain-btn" (click)="openAddChain()">
+          <mat-icon style="font-size: 16px; width: 16px; height: 16px; margin-right: 4px">add</mat-icon>
+          Add chain
+        </button>
+      </div>
     </div>
 
     @if (chains().length === 0 && loading()) {
@@ -417,6 +432,12 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
             @if (!chain.enabled) {
               <span class="badge badge-disabled">disabled</span>
             }
+            <span class="finality-source-chip" [matTooltip]="finalitySourceTooltip(chain)">
+              {{ chainConfigOf(chain)?.finalitySource === 'CHAINCACHE' ? 'via chaincache' : 'self-probed' }}
+            </span>
+            <button mat-icon-button class="settings-btn" matTooltip="Chain settings" (click)="openEditChain(chain)">
+              <mat-icon style="font-size: 18px">tune</mat-icon>
+            </button>
             <button mat-stroked-button class="add-node-btn" (click)="openAddNode(chain)">
               <mat-icon style="font-size: 14px; width: 14px; height: 14px; margin-right: 4px">add</mat-icon>
               Add node
@@ -468,6 +489,18 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
                       @if (node.label) {
                         <div class="node-label">{{ node.label }}</div>
                       }
+                      @if (node.kind === 'CHAINCACHE') {
+                        <div class="kind-badge chaincache">
+                          <mat-icon>bolt</mat-icon> chaincache
+                          <button mat-icon-button class="expand-btn" style="width: 20px; height: 20px; line-height: 20px"
+                                  [matTooltip]="isExpanded(node.id) ? 'Hide capabilities' : 'Show capabilities'"
+                                  (click)="toggleExpanded(node.id)">
+                            <mat-icon style="font-size: 16px; width: 16px; height: 16px">
+                              {{ isExpanded(node.id) ? 'expand_less' : 'expand_more' }}
+                            </mat-icon>
+                          </button>
+                        </div>
+                      }
                     </td>
                     <td>
                       @if (node.latestBlockNumber != null) {
@@ -510,6 +543,18 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
                           {{ node.exclusive ? 'Pinned' : 'Pin' }}
                         </button>
 
+                        <button mat-icon-button matTooltip="Edit node"
+                                (click)="openEditNode(chain, node)">
+                          <mat-icon style="font-size: 18px">edit</mat-icon>
+                        </button>
+
+                        @if (node.kind === 'CHAINCACHE') {
+                          <button mat-icon-button matTooltip="Re-probe capabilities"
+                                  (click)="refreshCapabilities(chain, node)">
+                            <mat-icon style="font-size: 18px">sync</mat-icon>
+                          </button>
+                        }
+
                         <button mat-icon-button class="delete-btn"
                                 matTooltip="Remove this node"
                                 (click)="deleteNode(chain, node)">
@@ -518,6 +563,55 @@ import { AddNodeDialogComponent } from './add-node-dialog.component';
                       </div>
                     </td>
                   </tr>
+                  @if (node.kind === 'CHAINCACHE' && isExpanded(node.id)) {
+                    <tr class="capabilities-row">
+                      <td colspan="6">
+                        @if (node.capabilities) {
+                          <div class="capabilities-panel">
+                            <div class="capability-item">
+                              <div class="label">Finality model</div>
+                              <div class="value">{{ node.capabilities.finalityModel || '—' }}</div>
+                            </div>
+                            <div class="capability-item">
+                              <div class="label">Safe / Finalized confirmations</div>
+                              <div class="value">{{ node.capabilities.safeConfirmations ?? '—' }} / {{ node.capabilities.finalizedConfirmations ?? '—' }}</div>
+                            </div>
+                            <div class="capability-item">
+                              <div class="label">Durable stream</div>
+                              <div class="value" [class.yes]="node.capabilities.durableStreamAvailable" [class.no]="!node.capabilities.durableStreamAvailable">
+                                {{ node.capabilities.durableStreamAvailable ? 'Available' : 'Unavailable' }}
+                              </div>
+                            </div>
+                            <div class="capability-item">
+                              <div class="label">Address trace</div>
+                              <div class="value">{{ node.capabilities.addressTraceCapability || 'Unknown' }}</div>
+                            </div>
+                            <div class="capability-item">
+                              <div class="label">debug_* configured</div>
+                              <div class="value" [class.yes]="node.capabilities.debugApiConfiguredOnAnyNode" [class.no]="!node.capabilities.debugApiConfiguredOnAnyNode">
+                                {{ node.capabilities.debugApiConfiguredOnAnyNode ? 'Yes' : 'No' }}
+                              </div>
+                            </div>
+                            <div class="capability-item">
+                              <div class="label">Probed</div>
+                              <div class="value">{{ node.capabilities.probedAt ? formatRelative(node.capabilities.probedAt) : '—' }}</div>
+                            </div>
+                          </div>
+                        } @else {
+                          <div class="capabilities-empty">
+                            No capability data yet — the last probe failed or hasn't run. Try "Re-probe capabilities".
+                          </div>
+                        }
+                        <div class="capabilities-actions">
+                          @if (chaincheckUrl) {
+                            <a class="chaincheck-link" [href]="chaincheckUrl" target="_blank" rel="noopener">
+                              <mat-icon>open_in_new</mat-icon> View in chaincheck
+                            </a>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  }
                 }
               </tbody>
             </table>
@@ -536,10 +630,23 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
   readonly loading = signal(false);
   readonly loadError = signal(false);
 
+  /** Full ChainConfig rows (finalityModel/avgBlockSeconds/finalitySource/etc.) — health() only
+   *  returns the health-dashboard shape, so this is fetched separately and joined by id. */
+  private readonly chainConfigs = signal<ChainConfig[]>([]);
+
+  private readonly expandedNodeIds = signal<Set<string>>(new Set());
+
+  readonly chaincheckUrl = environment.chaincheckUrl;
+
   private pollSub?: Subscription;
   private readonly refreshTrigger = new Subject<void>();
 
   ngOnInit(): void {
+    this.chainService.listChains().subscribe({
+      next: configs => this.chainConfigs.set(configs),
+      error: () => {}, // finality-source chip just shows nothing if this fails; not fatal
+    });
+
     this.pollSub = merge(timer(0, 30_000), this.refreshTrigger).pipe(
       exhaustMap(() => {
         this.loading.set(true);
@@ -560,6 +667,28 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.pollSub?.unsubscribe();
     this.refreshTrigger.complete();
+  }
+
+  chainConfigOf(chain: ChainHealth) {
+    return this.chainConfigs().find(c => c.id === chain.id);
+  }
+
+  finalitySourceTooltip(chain: ChainHealth): string {
+    return this.chainConfigOf(chain)?.finalitySource === 'CHAINCACHE'
+      ? 'SAFE/FINALIZED promotions and reorg retractions come from chaincache, push-based and gap-free'
+      : 'SAFE/FINALIZED promotions come from this registry own RPC polling';
+  }
+
+  isExpanded(nodeId: string): boolean {
+    return this.expandedNodeIds().has(nodeId);
+  }
+
+  toggleExpanded(nodeId: string): void {
+    this.expandedNodeIds.update(ids => {
+      const next = new Set(ids);
+      if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
+      return next;
+    });
   }
 
   toggleEnabled(chain: ChainHealth, node: RpcNode, enabled: boolean) {
@@ -613,16 +742,88 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
       data: { chain },
     });
 
-    ref.afterClosed().subscribe((result: { url: string; label: string } | undefined) => {
+    ref.afterClosed().subscribe((result: RpcNodeWriteRequest | undefined) => {
       if (!result) return;
-      this.chainService.addNode(chain.id, result.url, result.label).subscribe({
+      this.chainService.addNode(chain.id, result).subscribe({
         next: node => {
           this.chains.update((chains) => chains.map((current) => current.id === chain.id
             ? { ...current, nodes: [...current.nodes, node] }
             : current));
-          this.snackBar.open('Node added — health check will run shortly', 'OK', { duration: 3000 });
+          this.snackBar.open(
+            node.kind === 'CHAINCACHE' && !node.capabilities
+              ? 'Node added — chaincache capability probe failed, will retry on refresh'
+              : 'Node added — health check will run shortly',
+            'OK', { duration: 3500 });
         },
         error: () => this.snackBar.open('Failed to add node', 'OK', { duration: 3000 }),
+      });
+    });
+  }
+
+  openEditNode(chain: ChainHealth, node: RpcNode) {
+    const ref = this.dialog.open(AddNodeDialogComponent, {
+      width: '480px',
+      data: { chain, node },
+    });
+
+    ref.afterClosed().subscribe((result: RpcNodeWriteRequest | undefined) => {
+      if (!result) return;
+      this.chainService.updateNode(chain.id, node.id, result).subscribe({
+        next: updated => {
+          this.updateNode(chain.id, node.id, updated);
+          this.snackBar.open('Node updated', 'OK', { duration: 2500 });
+        },
+        error: () => this.snackBar.open('Failed to update node', 'OK', { duration: 3000 }),
+      });
+    });
+  }
+
+  refreshCapabilities(chain: ChainHealth, node: RpcNode) {
+    this.chainService.refreshCapabilities(chain.id, node.id).subscribe({
+      next: updated => {
+        this.updateNode(chain.id, node.id, updated);
+        this.snackBar.open(
+          updated.capabilities ? 'Capabilities refreshed' : 'Probe failed — chaincache may be unreachable',
+          'OK', { duration: 3000 });
+      },
+      error: () => this.snackBar.open('Failed to refresh capabilities', 'OK', { duration: 3000 }),
+    });
+  }
+
+  openAddChain() {
+    const ref = this.dialog.open(ChainConfigDialogComponent, {
+      width: '520px',
+      data: {},
+    });
+
+    ref.afterClosed().subscribe((result: ChainConfigCreateRequest | undefined) => {
+      if (!result) return;
+      this.chainService.createChain(result).subscribe({
+        next: created => {
+          this.chainConfigs.update(configs => [...configs, created]);
+          this.snackBar.open('Chain created — add an RPC node to start using it', 'OK', { duration: 3500 });
+          this.refresh();
+        },
+        error: () => this.snackBar.open('Failed to create chain', 'OK', { duration: 3000 }),
+      });
+    });
+  }
+
+  openEditChain(chain: ChainHealth) {
+    const config = this.chainConfigOf(chain);
+    const ref = this.dialog.open(ChainConfigDialogComponent, {
+      width: '520px',
+      data: { chain: config },
+    });
+
+    ref.afterClosed().subscribe((result: ChainConfigUpdateRequest | undefined) => {
+      if (!result) return;
+      this.chainService.updateChain(chain.id, result).subscribe({
+        next: updated => {
+          this.chainConfigs.update(configs => configs.map(c => c.id === chain.id ? updated : c));
+          this.snackBar.open('Chain settings saved', 'OK', { duration: 2500 });
+        },
+        error: () => this.snackBar.open('Failed to save chain settings', 'OK', { duration: 3000 }),
       });
     });
   }
