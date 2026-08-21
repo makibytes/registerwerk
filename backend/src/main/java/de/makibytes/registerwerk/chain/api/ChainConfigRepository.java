@@ -26,4 +26,8 @@ public interface ChainConfigRepository extends JpaRepository<ChainConfig, UUID> 
 
     /** Returns all chain configurations matching the identifier pattern (e.g. "ETHEREUM_MAINNET"). */
     List<ChainConfig> findByIdentifierStartingWith(String prefix);
+
+    /** Chains that opted into chaincache's push-based durable retraction stream instead of this
+     *  registry's own poll-based probing — see {@code blockchain.internal.ChaincacheDurableStreamManager}. */
+    List<ChainConfig> findByEnabledTrueAndFinalitySource(ChainConfig.FinalitySource finalitySource);
 }

@@ -96,6 +96,8 @@ public class ChainConfigService {
         if (patch.getGraphSubgraphName() != null)  existing.setGraphSubgraphName(patch.getGraphSubgraphName());
         if (patch.getChainId() != null)            existing.setChainId(patch.getChainId());
         if (patch.getFinalityModel() != null)      existing.setFinalityModel(patch.getFinalityModel());
+        if (patch.getAvgBlockSeconds() != null)    existing.setAvgBlockSeconds(patch.getAvgBlockSeconds());
+        if (patch.getFinalitySource() != null)     existing.setFinalitySource(patch.getFinalitySource());
 
         ChainConfig saved = chainConfigRepository.save(existing);
         eventPublisher.publishEvent(new ChainUpdatedEvent(saved.getId(), null, null));

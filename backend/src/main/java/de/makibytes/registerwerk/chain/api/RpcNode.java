@@ -1,7 +1,11 @@
 package de.makibytes.registerwerk.chain.api;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -12,6 +16,16 @@ import java.util.UUID;
 @Entity
 @Table(name = "rpc_node")
 public class RpcNode {
+
+    /** A direct connection to a node's own RPC endpoint gives poll-based, coarse finality that
+     *  can miss a short-lived reorg and has no SAFE tier without a {@code safe} block tag. A
+     *  {@link #CHAINCACHE} node additionally exposes push-based, gap-free, replayable retractions
+     *  and a real SAFE tier via its durable event stream — see
+     *  {@code blockchain.internal.ChaincacheDurableStreamManager}. This distinction is
+     *  deliberately visible in the product, not hidden behind an identical URL-in-a-table like a
+     *  direct node: the whole point of chaincache as a showcase is stating, per connection, which
+     *  guarantees it actually provides. */
+    public enum NodeKind { DIRECT_RPC, CHAINCACHE }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -26,6 +40,31 @@ public class RpcNode {
 
     @Column(length = 100)
     private String label;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private NodeKind kind = NodeKind.DIRECT_RPC;
+
+    /** Base URL of the chaincache instance (e.g. {@code http://chaincache:8080}), used for the
+     *  {@code GET /api/capabilities} probe and to derive the durable-stream WebSocket URL. Null
+     *  for {@link NodeKind#DIRECT_RPC} nodes — {@link #url} already points at the node's own
+     *  per-chain RPC endpoint for those. */
+    @Column(name = "management_url", length = 512)
+    private String managementUrl;
+
+    /** Which of chaincache's own {@code chaincache.chains.<key>} multi-chain keys this
+     *  {@link ChainConfig} maps to — the first path segment of every chaincache route
+     *  ({@code /<key>/rpc}, {@code /<key>/ws}). Null for {@link NodeKind#DIRECT_RPC} nodes. */
+    @Column(name = "remote_chain_key", length = 80)
+    private String remoteChainKey;
+
+    /** Last {@code GET /api/capabilities} response for this chain from chaincache — version,
+     *  finality model, whether {@code debug_traceBlockByHash} is actually available upstream, etc.
+     *  Advisory only: refreshed on add and by a periodic probe, not authoritative between probes.
+     *  Null for {@link NodeKind#DIRECT_RPC} nodes and until the first successful probe. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private Map<String, Object> capabilities;
 
     /** False when the operator has manually stopped this node from being used. */
     @Column(nullable = false)
@@ -92,6 +131,18 @@ public class RpcNode {
 
     public String getLabel() { return label; }
     public void setLabel(String label) { this.label = label; }
+
+    public NodeKind getKind() { return kind; }
+    public void setKind(NodeKind kind) { this.kind = kind; }
+
+    public String getManagementUrl() { return managementUrl; }
+    public void setManagementUrl(String managementUrl) { this.managementUrl = managementUrl; }
+
+    public String getRemoteChainKey() { return remoteChainKey; }
+    public void setRemoteChainKey(String remoteChainKey) { this.remoteChainKey = remoteChainKey; }
+
+    public Map<String, Object> getCapabilities() { return capabilities; }
+    public void setCapabilities(Map<String, Object> capabilities) { this.capabilities = capabilities; }
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

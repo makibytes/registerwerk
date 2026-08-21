@@ -13,5 +13,7 @@ public record ChainConfigUpdateRequest(
         @Size(max = 512) @Pattern(regexp = "https?://\\S+") String blockExplorerUrl,
         @Size(max = 512) @Pattern(regexp = "https?://\\S+") String graphNodeUrl,
         @Size(max = 200) String graphSubgraphName,
-        @Pattern(regexp = "(?i)TAG_BASED|DEPTH_BASED|INSTANT") String finalityModel
+        @Pattern(regexp = "(?i)TAG_BASED|DEPTH_BASED|INSTANT") String finalityModel,
+        @Positive Integer avgBlockSeconds,
+        @Pattern(regexp = "(?i)RPC_SELF_PROBE|CHAINCACHE") String finalitySource
 ) {}

@@ -16,9 +16,10 @@ public interface ChainConfigMapper {
      * Maps a {@link ChainConfig} entity to a {@link ChainConfigResponse} DTO.
      * Enum values are mapped to their string names.
      */
-    @Mapping(target = "chainType",     expression = "java(config.getChainType().name())")
-    @Mapping(target = "networkType",   expression = "java(config.getNetworkType().name())")
-    @Mapping(target = "finalityModel", expression = "java(config.getFinalityModel().name())")
+    @Mapping(target = "chainType",      expression = "java(config.getChainType().name())")
+    @Mapping(target = "networkType",    expression = "java(config.getNetworkType().name())")
+    @Mapping(target = "finalityModel",  expression = "java(config.getFinalityModel().name())")
+    @Mapping(target = "finalitySource", expression = "java(config.getFinalitySource().name())")
     ChainConfigResponse toResponse(ChainConfig config);
 
     /**
@@ -40,5 +41,8 @@ public interface ChainConfigMapper {
     @Mapping(target = "finalityModel",
              expression = "java(request.finalityModel() == null ? ChainConfig.FinalityModel.DEPTH_BASED "
                      + ": ChainConfig.FinalityModel.valueOf(request.finalityModel().toUpperCase()))")
+    @Mapping(target = "finalitySource",
+             expression = "java(request.finalitySource() == null ? ChainConfig.FinalitySource.RPC_SELF_PROBE "
+                     + ": ChainConfig.FinalitySource.valueOf(request.finalitySource().toUpperCase()))")
     ChainConfig toEntity(ChainConfigCreateRequest request);
 }

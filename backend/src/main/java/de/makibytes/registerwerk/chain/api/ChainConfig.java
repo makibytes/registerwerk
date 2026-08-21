@@ -19,6 +19,13 @@ public class ChainConfig {
 
     public enum NetworkType { MAINNET, TESTNET }
 
+    /** Where this chain's SAFE/FINALIZED promotions and reorg retractions come from. Defaults to
+     *  {@link #RPC_SELF_PROBE} (this registry's own poll-based tag/depth probing, unchanged
+     *  behavior) — an operator opts a chain into {@link #CHAINCACHE} only once it has an enabled
+     *  {@code RpcNode} of {@code NodeKind.CHAINCACHE} for it, giving push-based, gap-free,
+     *  replayable retractions instead. See {@code blockchain.internal.ChaincacheDurableStreamManager}. */
+    public enum FinalitySource { RPC_SELF_PROBE, CHAINCACHE }
+
     /**
      * How a transaction/block on this chain becomes irreversible — the policy an EVM
      * confirmation gate (e.g. {@code EvmUtils.isFinal}) evaluates against. Only meaningful for
@@ -109,6 +116,11 @@ public class ChainConfig {
     @Column(name = "avg_block_seconds")
     private Integer avgBlockSeconds;
 
+    /** @see FinalitySource */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "finality_source", nullable = false, length = 20)
+    private FinalitySource finalitySource = FinalitySource.RPC_SELF_PROBE;
+
     @Column(nullable = false)
     private boolean enabled = true;
 
@@ -197,6 +209,9 @@ public class ChainConfig {
 
     public Integer getAvgBlockSeconds() { return avgBlockSeconds; }
     public void setAvgBlockSeconds(Integer avgBlockSeconds) { this.avgBlockSeconds = avgBlockSeconds; }
+
+    public FinalitySource getFinalitySource() { return finalitySource; }
+    public void setFinalitySource(FinalitySource finalitySource) { this.finalitySource = finalitySource; }
 
     public Instant getCreatedAt() { return createdAt; }
 

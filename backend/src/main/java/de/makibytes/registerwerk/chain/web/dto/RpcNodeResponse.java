@@ -1,6 +1,9 @@
 package de.makibytes.registerwerk.chain.web.dto;
 
+import de.makibytes.registerwerk.chain.api.RpcNode;
+
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 public record RpcNodeResponse(
@@ -18,5 +21,9 @@ public record RpcNodeResponse(
         boolean healthy,
         int consecutiveFailures,
         Integer lagFromBest,
-        boolean syncing
+        boolean syncing,
+        RpcNode.NodeKind kind,
+        String managementUrl,
+        String remoteChainKey,
+        Map<String, Object> capabilities
 ) {}

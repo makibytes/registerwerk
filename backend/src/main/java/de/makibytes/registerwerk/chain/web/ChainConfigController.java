@@ -85,6 +85,7 @@ public class ChainConfigController {
         // back to DEPTH_BASED.
         ChainConfig patch = new ChainConfig();
         patch.setFinalityModel(null);
+        patch.setFinalitySource(null);
         patch.setDisplayName(request.displayName());
         patch.setRpcUrl(request.rpcUrl());
         patch.setWsUrl(request.wsUrl());
@@ -92,8 +93,12 @@ public class ChainConfigController {
         patch.setGraphNodeUrl(request.graphNodeUrl());
         patch.setGraphSubgraphName(request.graphSubgraphName());
         patch.setChainId(request.chainId());
+        patch.setAvgBlockSeconds(request.avgBlockSeconds());
         if (request.finalityModel() != null) {
             patch.setFinalityModel(ChainConfig.FinalityModel.valueOf(request.finalityModel().toUpperCase()));
+        }
+        if (request.finalitySource() != null) {
+            patch.setFinalitySource(ChainConfig.FinalitySource.valueOf(request.finalitySource().toUpperCase()));
         }
 
         ChainConfig updated = chainConfigService.update(id, patch);

@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.chain.internal.RpcNodeService;
 import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeCreateRequest;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeResponse;
+import de.makibytes.registerwerk.chain.web.dto.RpcNodeUpdateRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -42,8 +43,29 @@ public class RpcNodeController {
     public ResponseEntity<RpcNodeResponse> addNode(
             @PathVariable UUID chainId,
             @RequestBody @Valid RpcNodeCreateRequest request) {
-        RpcNode node = rpcNodeService.addNode(chainId, request.url(), request.label());
+        RpcNode node = rpcNodeService.addNode(chainId, request.url(), request.label(),
+                request.kind(), request.managementUrl(), request.remoteChainKey());
         return ResponseEntity.status(HttpStatus.CREATED).body(rpcNodeService.toResponse(node));
+    }
+
+    /** Updates an existing node's connection details. */
+    @PutMapping("/{nodeId}")
+    public ResponseEntity<RpcNodeResponse> updateNode(
+            @PathVariable UUID chainId,
+            @PathVariable UUID nodeId,
+            @RequestBody @Valid RpcNodeUpdateRequest request) {
+        RpcNode node = rpcNodeService.updateNode(chainId, nodeId, request.url(), request.label(),
+                request.kind(), request.managementUrl(), request.remoteChainKey());
+        return ResponseEntity.ok(rpcNodeService.toResponse(node));
+    }
+
+    /** Re-probes a {@code CHAINCACHE}-kind node's capabilities on demand. No-op for a
+     *  {@code DIRECT_RPC} node. */
+    @PostMapping("/{nodeId}/refresh-capabilities")
+    public ResponseEntity<RpcNodeResponse> refreshCapabilities(
+            @PathVariable UUID chainId, @PathVariable UUID nodeId) {
+        RpcNode node = rpcNodeService.refreshCapabilities(chainId, nodeId);
+        return ResponseEntity.ok(rpcNodeService.toResponse(node));
     }
 
     /** Manually enables (un-stops) a node. */

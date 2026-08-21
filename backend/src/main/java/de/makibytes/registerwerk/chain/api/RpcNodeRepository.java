@@ -33,4 +33,11 @@ public interface RpcNodeRepository extends JpaRepository<RpcNode, UUID> {
     long countByHealthyFalse();
 
     Optional<RpcNode> findByIdAndChainConfig_Id(UUID id, UUID chainConfigId);
+
+    /** The chaincache connection to use for a chain that opted into
+     *  {@code ChainConfig.FinalitySource.CHAINCACHE} — see
+     *  {@code blockchain.internal.ChaincacheDurableStreamManager}. If more than one is enabled,
+     *  any one is usable (chaincache's durable stream is keyed by consumerId+stream, not by which
+     *  node row asked for it). */
+    List<RpcNode> findByChainConfig_IdAndKindAndEnabledTrue(UUID chainConfigId, RpcNode.NodeKind kind);
 }
