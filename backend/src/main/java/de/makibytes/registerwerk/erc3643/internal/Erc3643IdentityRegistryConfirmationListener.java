@@ -87,11 +87,11 @@ class Erc3643IdentityRegistryConfirmationListener {
         }
         entry.setRegistrationConfirmed(true);
         repository.save(entry);
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash, null,
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "erc3643", IdentityRegistryRegistrationRevertCompensator.EFFECT_TYPE,
-                "Erc3643IdentityRegistry", entry.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+                "Erc3643IdentityRegistry", entry.getId(), null,
+                CompensationCategory.INVERSE_FLIP));
     }
 
     private void resolveRemoval(Erc3643IdentityRegistry entry) {
@@ -111,10 +111,10 @@ class Erc3643IdentityRegistryConfirmationListener {
         }
         entry.setRemovalConfirmed(true);
         repository.save(entry);
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash, null,
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "erc3643", IdentityRegistryRemovalRevertCompensator.EFFECT_TYPE,
-                "Erc3643IdentityRegistry", entry.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+                "Erc3643IdentityRegistry", entry.getId(), null,
+                CompensationCategory.INVERSE_FLIP));
     }
 }

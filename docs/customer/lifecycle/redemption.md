@@ -52,10 +52,13 @@ The answer cannot be "whoever holds it when the payment lands" — that is unkno
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> ANNOUNCED
+    [*] --> PROPOSED: issuer proposes
+    [*] --> ANNOUNCED: system-raised
+    PROPOSED --> ANNOUNCED: operator approves
+    PROPOSED --> REJECTED: operator rejects
     ANNOUNCED --> RECORD_DATE_SET
     RECORD_DATE_SET --> COMPUTED: snapshot taken
-    COMPUTED --> AWAITING_SETTLEMENT: approved (4-eyes)
+    COMPUTED --> AWAITING_SETTLEMENT: issuer attests + operator confirms
     AWAITING_SETTLEMENT --> SETTLED: paid
     SETTLED --> CLOSED
     ANNOUNCED --> CANCELLED
@@ -63,22 +66,32 @@ stateDiagram-v2
     COMPUTED --> CANCELLED
 ```
 
-`COMPUTED` → `AWAITING_SETTLEMENT` requires **[four eyes](../../compliance/step-up-mfa.md)**: a second authorised person has to approve before money moves against a holder list. The commonest catastrophic error in securities administration is paying the wrong list, and it is very hard to reverse.
+Coupons and redemptions are **system-raised** — created automatically from the payment schedule or the maturity date, rather than being remembered by a human, and start life `ANNOUNCED`. Dividends, splits, and early calls are **issuer-proposed**: the issuer submits one starting `PROPOSED`, and it only joins the register (`ANNOUNCED`) once an operator has reviewed and approved it — or is discarded permanently (`REJECTED`) if not.
 
-Coupons on a bond are raised automatically from the payment schedule rather than being remembered by a human, and the daily job that advances actions through their dates runs on its own.
+`COMPUTED` → `AWAITING_SETTLEMENT` needs sign-off from **two separate parties**, whichever way the action was raised: the issuer attests that the underlying obligation is actually ready — the cash for a coupon or dividend, the mechanics for a split or call — and then an operator confirms the register/on-chain side. The commonest catastrophic error in securities administration is paying the wrong list, and having two organisations, not two colleagues from one, sign off makes it far harder to happen unnoticed. Attesting is a normal authenticated action; only the operator's confirmation is [step-up](../../compliance/step-up-mfa.md) gated. If the issuer never attests, an operator can override the requirement — permanently and separately logged as an exception, never indistinguishable from a genuine attestation.
 
 ### The types Registerwerk models
 
+Only a subset can actually be created today — the rest are modelled (they have a place in the lifecycle and settlement machinery) but have no creation path yet.
+
+**Supported today**
+
+| | Raised by |
+|---|---|
+| `COUPON`, `INTEREST_PAYMENT` | System, from the payment schedule. |
+| `REDEMPTION` | System, at the maturity date. |
+| `DIVIDEND` | Issuer proposal, operator-reviewed. |
+| `SPLIT` | Issuer proposal, operator-reviewed. Settles by the operator's manual assertion — no supported token standard has an on-chain split primitive. |
+| `CALL` | Issuer proposal, operator-reviewed. The issuer repaying early, where terms allow. |
+
+**Modelled, not yet supported**
+
 | | |
 |---|---|
-| `COUPON`, `INTEREST_PAYMENT` | Periodic interest. |
-| `DIVIDEND` | A distribution to equity holders. |
-| `REDEMPTION`, `PARTIAL_REDEMPTION` | Repaying principal, in whole or in part. |
-| `CALL` | The issuer repaying early, where terms allow. |
-| `SPLIT`, `REVERSE_SPLIT` | Changing the number of units without changing total value. |
+| `PARTIAL_REDEMPTION` | Repaying part of the principal. |
+| `REVERSE_SPLIT` | Reducing the number of units without changing total value. |
 | `CONVERSION` | Turning the instrument into another one. |
 | `CAPITAL_CALL` | Requiring holders to contribute more. |
-| `PLEDGE` | Recording that a holding has been pledged. |
 
 ---
 
@@ -101,7 +114,7 @@ Mechanically this is a corporate action of type `REDEMPTION`, raised automatical
 
 1. The record-date snapshot is taken.
 2. Each holder's entitlement is their nominal at face value.
-3. Payment is approved under four eyes and settles.
+3. The issuer attests and an operator confirms; payment settles.
 4. The tokens are **burned** — destroyed on-chain, supply returns to zero.
 5. The asset moves to `REDEEMED`.
 

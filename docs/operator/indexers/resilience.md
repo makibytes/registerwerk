@@ -7,11 +7,23 @@ title: Resilience and Recovery
 This page describes how the registry detects indexer gaps, detects and recovers from chain
 reorgs, and recovers from outages. These procedures do not establish legal correctness — see
 `docs/operator/indexers/the-graph.md` for what a subgraph's `synced: true` does and does not mean.
+For what happens *downstream* of a detected reorg — the effect journal, automatic compensation,
+and the policy gate that can freeze an asset pending review — see
+[Finality Policy and Reorg Compensation](finality-and-compensation.md).
 
 !!! note "Corrected against the actual implementation"
     An earlier version of this page described a `chain_head_block`/`latest_indexed_block` schema,
     a `DEGRADED`/`CRITICAL` health-tier ladder, and a `POST /backfill` endpoint — none of which
     exist in this codebase. This page now describes what is actually implemented.
+
+!!! note "Two-tier to three-tier"
+    This page originally described a two-tier `token_transfer.finality_status` of
+    `PROVISIONAL`/`FINAL`/`ORPHANED`. That column was widened to the three-tier
+    `finality.api.FinalityLevel` (`PROVISIONAL`/`SAFE`/`FINALIZED`/`ORPHANED`) shared with the
+    sibling products chaincache and chaincheck — `FINAL` became `FINALIZED`, and a new `SAFE` tier
+    sits between PROVISIONAL and FINALIZED for chains that expose an intermediate checkpoint (e.g.
+    Ethereum's `safe` block tag, Starknet's `ACCEPTED_ON_L2`). Every example on this page has been
+    updated to the current column and enum.
 
 ## Indexer state tracking
 
@@ -29,44 +41,69 @@ ORDER BY last_synced_at ASC NULLS FIRST;
   transfers from at all, whether or not those rows have since been finalized.
 - `last_final_block` — the confirmed cursor: the highest block whose `token_transfer` rows have
   all cleared the configured confirmation depth and been verified against a freshly re-fetched
-  canonical hash/status (EVM, Starknet). Always `<= last_synced_block`. Null for chains with no
-  two-tier finality model (Solana/Stellar/Canton — see below).
+  canonical hash/status (EVM, Starknet). Always `<= last_synced_block`. Null for chains that are
+  final-on-write (Solana/Stellar/Canton — see below), which never have an unsettled window to track.
 - `status` — `ACTIVE`, `PAUSED`, or `ERROR`. An indexer in `ERROR` with
   `consecutive_errors >= 10` (5 for Canton) stops running until manually reset (see
   [Manual recovery](#manual-recovery)) — there is no automatic self-healing past that point.
 
 ## Chain reorg detection and recovery
 
-Every EVM chain (via graph-node) and Starknet chain re-verifies its still-provisional window on
-every sync tick:
+Every EVM chain (via graph-node) and Starknet chain re-verifies its still-unsettled
+(PROVISIONAL-or-SAFE) window on every sync tick, via `ReorgGuard`:
 
 - **EVM** — `token_transfer.block_hash` is recorded for rows within the configured confirmation
   depth (`registerwerk.blockchain.tx.confirmations-by-chain`); `ReorgGuard` re-fetches each such
-  block's canonical hash from graph-node's `_meta(block: {number})` and compares. A mismatch marks
-  every row at and after the fork point `ORPHANED` (never deleted — this is a regulated register
-  with an audit-trail requirement) and rewinds `last_synced_block`/`last_final_block` to
-  `fork_block - 1`, so the next tick re-indexes the affected range.
-- **Starknet** — no block-hash primitive is used; instead each provisional row's finality is
-  re-checked via `starknet_getBlockWithTxHashes`' `status` field. Rows only reach FINAL once
-  `ACCEPTED_ON_L1`; a `REJECTED` block triggers the same orphan-and-rewind path as EVM.
+  block's canonical hash from graph-node's `_meta(block: {number})` and compares. A block that
+  still matches is promoted one step (PROVISIONAL → SAFE → FINALIZED, tracking a `safe`-tagged
+  confirmation depth distinct from the `finalized` one); a mismatch marks every row at and after
+  the fork point `ORPHANED` (never deleted — this is a regulated register with an audit-trail
+  requirement) and rewinds `last_synced_block`/`last_final_block` to `fork_block - 1`, so the next
+  tick re-indexes the affected range. A chain whose `ChainConfig.finalitySource` is `CHAINCACHE`
+  (see [chaincache Integration](../blockchain/chaincache-integration.md)) gets this
+  re-verification from `ChaincacheFinalityProbe` — a call to that chain's chaincache workload's own
+  `GET /{chain}/api/blocks/{number}/finality` — instead of the RPC re-fetch above; any probe
+  failure (unreachable, 401, 404, 5xx) falls back to the RPC path rather than manufacturing a false
+  reorg, so chaincache being briefly unavailable degrades finality tracking to the plain-RPC
+  behavior instead of breaking it. Independently of which probe answers this query, the chain also
+  gets chaincache's push-based durable-event stream (`ChaincacheDurableStreamManager`) as an
+  *additional* gap-free source of `BLOCK`/`RETRACTION` observations feeding the same
+  `block_finality` ledger described below — the two are complementary, not exclusive: the durable
+  stream can observe a retraction before this poll-based re-verification would have caught it, and
+  the poll-based path keeps working even if the durable-stream connection is briefly down.
+- **Starknet** — no block-hash primitive is used; instead each unsettled row's finality is
+  re-checked via `starknet_getBlockWithTxHashes`'s `status` field: `ACCEPTED_ON_L2` promotes to
+  SAFE, `ACCEPTED_ON_L1` promotes to FINALIZED; a `REJECTED`/`REVERTED` block triggers the same
+  orphan-and-rewind path as EVM.
 - **Solana** — finality is established at write time: transfers are only indexed at
   `commitment: "finalized"`, and the signature's `err` field is checked so a failed transaction is
-  never indexed as a successful transfer. There is no separate provisional window to re-verify.
+  never indexed as a successful transfer. There is no separate unsettled window to re-verify.
 - **Stellar / Canton** — ledger close (Stellar/Horizon) and synchronizer commit (Canton) are final
   once observed; same reasoning as Solana.
 
-`token_transfer.finality_status ∈ {PROVISIONAL, FINAL, ORPHANED}` is queryable directly:
+Every block a chain's unsettled window ever touches — the ones actually re-probed above — is also
+recorded in `block_finality` (one row per `(chain_config_id, block_number)`, owned by the
+`finality` module, fed by `ReorgGuard`). This is a separate ledger from `token_transfer` itself:
+it's the source of truth `FinalityGate` and the effect-compensation machinery consult (see
+[Finality Policy and Reorg Compensation](finality-and-compensation.md)), so they never need to
+scan `token_transfer` or import the indexer module. `token_transfer.finality_status` remains a
+denormalised cache of the same fact, convenient for querying transfers directly.
+
+`token_transfer.finality_status ∈ {PROVISIONAL, SAFE, FINALIZED, ORPHANED}` is queryable directly:
 
 ```sql
 SELECT chain_config_id, finality_status, count(*)
 FROM token_transfer
-WHERE finality_status <> 'FINAL'
+WHERE finality_status <> 'FINALIZED'
 GROUP BY chain_config_id, finality_status;
 ```
 
 A nonzero `ORPHANED` count is expected transiently right after a real reorg; a count that isn't
 shrinking on subsequent ticks means the affected range is not successfully re-indexing — check
-`indexer_state.last_error` for that chain.
+`indexer_state.last_error` for that chain. A sustained `SAFE` count (rows not progressing to
+`FINALIZED`) usually means the chain's finality model expects a confirmation depth or block tag
+the configured RPC node isn't reporting — see
+`docs/operator/blockchain/adding-chains.md`'s finality-model section.
 
 **Known limitation:** there is no trusted-RPC/quorum policy — a single configured RPC endpoint's
 `_meta`/status response is trusted as-is for reorg detection. A misbehaving or lagging RPC node can

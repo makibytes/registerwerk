@@ -19,6 +19,7 @@ public record ChainEffectRecord(
         String effectType,
         String entityType,
         UUID entityId,
+        UUID assetId,
         CompensationCategory category,
         Map<String, Object> beforeState,
         Map<String, Object> afterState,

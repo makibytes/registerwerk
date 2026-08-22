@@ -2,8 +2,11 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { ChainConfig, ChainHealth, RpcNode, RpcNodeKind } from '../models';
+import { ChainConfig, ChainHealth, RpcNode } from '../models';
 
+// No finalitySource field on either request: it is fully auto-derived backend-side from the
+// chain's node set (see ChainConfig.FinalitySource's javadoc) — there is nothing for an operator
+// to set here.
 export interface ChainConfigCreateRequest {
   identifier: string;
   displayName: string;
@@ -17,7 +20,6 @@ export interface ChainConfigCreateRequest {
   graphSubgraphName?: string;
   finalityModel?: string;
   avgBlockSeconds?: number;
-  finalitySource?: string;
 }
 
 export interface ChainConfigUpdateRequest {
@@ -30,15 +32,14 @@ export interface ChainConfigUpdateRequest {
   graphSubgraphName?: string;
   finalityModel?: string;
   avgBlockSeconds?: number;
-  finalitySource?: string;
 }
 
+// No kind/managementUrl/remoteChainKey fields: whether this node is a chaincache connection is
+// auto-detected backend-side from `url` alone (see ChaincacheClient#detect) — there is nothing
+// else for an operator to declare.
 export interface RpcNodeWriteRequest {
   url: string;
   label?: string;
-  kind?: RpcNodeKind;
-  managementUrl?: string;
-  remoteChainKey?: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -86,8 +87,12 @@ export class ChainService {
     return this.http.put<RpcNode>(`${this.base}/${chainId}/nodes/${nodeId}`, request);
   }
 
-  refreshCapabilities(chainId: string, nodeId: string): Observable<RpcNode> {
-    return this.http.post<RpcNode>(`${this.base}/${chainId}/nodes/${nodeId}/refresh-capabilities`, {});
+  /** Re-runs chaincache detection for one node on demand — works in both directions (promotes a
+   *  DIRECT_RPC node whose URL now answers as chaincache; falls a CHAINCACHE node back to
+   *  DIRECT_RPC if chaincache no longer serves it). The periodic backend job already does this
+   *  for every enabled node on its own; this is a manual "check now" trigger. */
+  redetect(chainId: string, nodeId: string): Observable<RpcNode> {
+    return this.http.post<RpcNode>(`${this.base}/${chainId}/nodes/${nodeId}/redetect`, {});
   }
 
   enableNode(chainId: string, nodeId: string): Observable<void> {

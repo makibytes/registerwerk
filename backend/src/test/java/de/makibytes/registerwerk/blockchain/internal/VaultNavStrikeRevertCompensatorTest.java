@@ -56,7 +56,7 @@ class VaultNavStrikeRevertCompensatorTest {
 
     private ChainEffectRecord effect(UUID entityId) {
         return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
-                "blockchain", "VAULT_NAV_STRIKE_CONFIRMED", "VaultNavStrike", entityId, CompensationCategory.INVERSE_FLIP,
+                "blockchain", "VAULT_NAV_STRIKE_CONFIRMED", "VaultNavStrike", entityId, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
 

@@ -25,12 +25,14 @@ import java.util.UUID;
  * {@code blockchain.internal.tx.BlockchainTxRevertCompensator}'s javadoc for why).
  *
  * <p>Reverts the version to APPROVED (re-entering {@code MarketplaceTxPoller}'s pending set for
- * re-anchoring) and, if this was the listing's live version, takes the listing off PUBLISHED too.
- * Deliberately does <b>not</b> attempt to restore whichever version this one superseded to
- * PUBLISHED — {@code chain_effect} does not snapshot the pre-publish state (see
- * {@code ChainEffectDescriptor}'s javadoc on why pure snapshot-restore was rejected for effects
- * like this one), so "no version currently live" is the correct, honest post-compensation state
- * rather than guessing. A disclosed gap, not a silent one.
+ * re-anchoring) and, if this was the listing's live version, takes the listing off PUBLISHED. If a
+ * prior version exists in SUPERSEDED status (i.e. this publish superseded a previously-live one),
+ * restores that one to PUBLISHED and back onto the listing — the pre-publish state is fully
+ * reconstructible from {@code dapp_version.status} itself without needing a
+ * {@code chain_effect}-carried snapshot, so there is no reason to leave the listing with no live
+ * version when a perfectly good previous one is sitting right there in the same table. Falls back
+ * to "no version currently live" only for a listing's very first publish, where no such version
+ * exists.
  */
 @Component
 class DappVersionRevertCompensator implements ChainEffectCompensator {
@@ -65,19 +67,36 @@ class DappVersionRevertCompensator implements ChainEffectCompensator {
                     "DappVersion " + versionId + " is no longer PUBLISHED (status=" + version.getStatus() + ")");
         }
 
-        log.error("DappVersion id={} was PUBLISHED but its anchoring block was retracted by a reorg deep "
-                        + "enough to cross FINALIZED — reverting to APPROVED for re-anchoring.", versionId);
+        log.error("DappVersion id={} was PUBLISHED but its anchoring block was retracted by a reorg "
+                        + "— reverting to APPROVED for re-anchoring.", versionId);
         version.setStatus(DappVersionStatus.APPROVED);
         versionRepository.save(version);
 
         DappListing listing = listingRepository.findById(version.getListingId()).orElse(null);
-        if (listing != null && versionId.equals(listing.getCurrentVersionId())) {
-            listing.setStatus(DappListingStatus.APPROVED);
-            listing.setCurrentVersionId(null);
-            listing.setUpdatedAt(Instant.now());
-            listingRepository.save(listing);
+        if (listing == null || !versionId.equals(listing.getCurrentVersionId())) {
+            return new CompensationOutcome.Compensated(
+                    "Reverted DappVersion " + versionId + " to APPROVED after retraction");
         }
 
-        return new CompensationOutcome.Compensated("Reverted DappVersion " + versionId + " to APPROVED after retraction");
+        DappVersion previous = versionRepository.findByListingIdOrderByCreatedAtDesc(version.getListingId()).stream()
+                .filter(v -> v.getStatus() == DappVersionStatus.SUPERSEDED)
+                .findFirst()
+                .orElse(null);
+        if (previous != null) {
+            log.info("DappListing id={} restoring previously-superseded DappVersion id={} to PUBLISHED "
+                    + "in place of the retracted publish.", listing.getId(), previous.getId());
+            previous.setStatus(DappVersionStatus.PUBLISHED);
+            versionRepository.save(previous);
+            listing.setCurrentVersionId(previous.getId());
+            listing.setStatus(DappListingStatus.PUBLISHED);
+        } else {
+            listing.setStatus(DappListingStatus.APPROVED);
+            listing.setCurrentVersionId(null);
+        }
+        listing.setUpdatedAt(Instant.now());
+        listingRepository.save(listing);
+
+        return new CompensationOutcome.Compensated("Reverted DappVersion " + versionId + " to APPROVED after retraction"
+                + (previous != null ? "; restored previous version " + previous.getId() + " to PUBLISHED" : ""));
     }
 }

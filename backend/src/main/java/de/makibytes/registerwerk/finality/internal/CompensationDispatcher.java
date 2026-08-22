@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -28,9 +29,9 @@ import java.util.stream.Collectors;
  *
  * <p>Fails closed three distinct ways, each a {@link CompensationEscalatedEvent}, never only a log
  * line: no compensator registered for the row's {@code effectType}; the compensator returned
- * {@link CompensationOutcome.Failed}; or it returned {@link CompensationOutcome.Irreversible}. A
- * retry job (later phase) re-attempts {@code COMPENSATION_FAILED} rows; {@code
- * IRREVERSIBLE_ESCALATED} rows are never retried automatically.
+ * {@link CompensationOutcome.Failed}; or it returned {@link CompensationOutcome.Irreversible}.
+ * {@link ChainEffectRetryJob} re-attempts {@code COMPENSATION_FAILED} rows on a schedule;
+ * {@code IRREVERSIBLE_ESCALATED} rows are never retried automatically.
  */
 @Component
 class CompensationDispatcher {
@@ -68,12 +69,28 @@ class CompensationDispatcher {
                 this.compensatorsByEffectType.size(), this.compensatorsByEffectType.keySet());
     }
 
+    /** Looks up the compensator registered for {@code effectType}, if any — used by
+     *  {@code ChainEffectRecorderImpl} to validate a descriptor's category against its
+     *  compensator's declared category at journal time (fail fast at write time rather than only
+     *  discovering a mismatch when compensation actually runs). */
+    Optional<ChainEffectCompensator> compensatorFor(String effectType) {
+        return Optional.ofNullable(compensatorsByEffectType.get(effectType));
+    }
+
+    /** How long a row may sit in {@code COMPENSATING} before it's considered abandoned (the JVM
+     *  that claimed it died mid-compensate) and becomes reclaimable again — without this, a crash
+     *  mid-compensation leaves the row stuck forever, since {@code claimForCompensation} otherwise
+     *  only reclaims {@code ACTIVE}/{@code COMPENSATION_FAILED}. */
+    static final java.time.Duration STUCK_COMPENSATING_RECLAIM_AFTER = java.time.Duration.ofMinutes(5);
+
     /** Atomically claims {@code chainEffectId} (no-op, returning {@link CompensationOutcome.NotApplicable}
-     *  if it is not currently claimable - already resolved, or another dispatcher is already
-     *  processing it) and drives it through its registered compensator. */
+     *  if it is not currently claimable - already resolved, already being processed by another
+     *  dispatcher, or stuck {@code COMPENSATING} for less than {@link #STUCK_COMPENSATING_RECLAIM_AFTER})
+     *  and drives it through its registered compensator. */
     @Transactional
     CompensationOutcome compensate(UUID chainEffectId) {
-        if (repository.claimForCompensation(chainEffectId) == 0) {
+        Instant staleBefore = Instant.now().minus(STUCK_COMPENSATING_RECLAIM_AFTER);
+        if (repository.claimForCompensation(chainEffectId, staleBefore) == 0) {
             return new CompensationOutcome.NotApplicable(
                     "chain_effect " + chainEffectId + " was not claimable (already resolved or in progress)");
         }
@@ -86,7 +103,7 @@ class CompensationDispatcher {
         if (compensator == null) {
             String reason = "No ChainEffectCompensator registered for effectType=" + row.getEffectType();
             row.setAttemptCount(row.getAttemptCount() + 1);
-            row.setLastError(reason);
+            row.setResolutionDetail(reason);
             row.setStatus(ChainEffect.Status.COMPENSATION_FAILED);
             repository.save(row);
             escalate(row, CompensationEscalatedEvent.Reason.NO_COMPENSATOR, reason);
@@ -110,7 +127,7 @@ class CompensationDispatcher {
             case CompensationOutcome.Compensated compensated -> {
                 row.setStatus(ChainEffect.Status.COMPENSATED);
                 row.setCompensatedAt(Instant.now());
-                row.setLastError(null);
+                row.setResolutionDetail(compensated.detail());
                 repository.save(row);
                 eventPublisher.publishEvent(new ChainEffectCompensatedEvent(
                         row.getId(), row.getEffectType(), row.getEntityType(), row.getEntityId(),
@@ -120,19 +137,19 @@ class CompensationDispatcher {
             case CompensationOutcome.NotApplicable notApplicable -> {
                 row.setStatus(ChainEffect.Status.COMPENSATED);
                 row.setCompensatedAt(Instant.now());
-                row.setLastError(notApplicable.reason());
+                row.setResolutionDetail(notApplicable.reason());
                 repository.save(row);
                 notApplicableCounter.increment();
             }
             case CompensationOutcome.Failed failed -> {
                 row.setStatus(ChainEffect.Status.COMPENSATION_FAILED);
-                row.setLastError(failed.reason());
+                row.setResolutionDetail(failed.reason());
                 repository.save(row);
                 escalate(row, CompensationEscalatedEvent.Reason.FAILED, failed.reason());
             }
             case CompensationOutcome.Irreversible irreversible -> {
                 row.setStatus(ChainEffect.Status.IRREVERSIBLE_ESCALATED);
-                row.setLastError(irreversible.remediationHint());
+                row.setResolutionDetail(irreversible.remediationHint());
                 repository.save(row);
                 escalate(row, CompensationEscalatedEvent.Reason.IRREVERSIBLE, irreversible.remediationHint());
             }
@@ -165,7 +182,7 @@ class CompensationDispatcher {
         return new ChainEffectRecord(
                 row.getId(), row.getChainConfigId(), row.getBlockNumber(), row.getBlockHash(),
                 row.getTxHash(), row.getLogIndex(), row.getModuleName(), row.getEffectType(),
-                row.getEntityType(), row.getEntityId(), row.getCategory(), row.getBeforeState(),
+                row.getEntityType(), row.getEntityId(), row.getAssetId(), row.getCategory(), row.getBeforeState(),
                 row.getAfterState(), row.getAuditEventId(), row.getCorrelationId(),
                 row.getStatus().name(), row.getAttemptCount(), row.getRecordedAt());
     }

@@ -47,7 +47,7 @@ class EcosystemTrustedIssuerRevertCompensator implements ChainEffectCompensator 
         }
 
         log.error("EcosystemTrustedIssuer id={} was ACTIVE but its confirming block was retracted by a reorg "
-                        + "deep enough to cross FINALIZED — reverting to PENDING for re-verification.", id);
+                        + "— reverting to PENDING for re-verification.", id);
         issuer.setStatus(MemberWalletStatus.PENDING);
         repository.save(issuer);
 

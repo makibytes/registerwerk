@@ -93,11 +93,11 @@ class Erc3643ClaimConfirmationListener {
         claim.setBlockNumber(location.get().blockNumber());
         claimRepository.save(claim);
 
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash, null,
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "erc3643", OnchainClaimRevertCompensator.EFFECT_TYPE,
-                "OnchainClaim", claim.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+                "OnchainClaim", claim.getId(), null,
+                CompensationCategory.INVERSE_FLIP));
     }
 
     private void resolveRevocation(OnchainClaim claim) {

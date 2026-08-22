@@ -53,19 +53,29 @@ public class DeploymentController {
 
     /**
      * Lists all deployments for an asset.
+     *
+     * <p>{@code isHolderOfAsset} is required alongside {@code canRead} (issuer-only) — without
+     * it, an investor's own Investment Detail page (which loads this to find the confidential
+     * token's contract address and to know whether the ERC-3643 registration form applies) got a
+     * 403 for every non-issuer holder. See {@code indexer.web.TokenHistoryController}'s equivalent
+     * fix and {@code AssetAccessChecker.isHolderOfAsset}'s javadoc for why it's added at call
+     * sites like this rather than folded into {@code canRead} itself.
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication) "
+            + "or @assetAccessChecker.isHolderOfAsset(#assetId, authentication)")
     public ResponseEntity<List<DeploymentResponse>> listDeployments(@PathVariable UUID assetId) {
         List<AssetDeployment> deployments = assetDeploymentService.listDeployments(assetId);
         return ResponseEntity.ok(deployments.stream().map(deploymentMapper::toResponse).toList());
     }
 
     /**
-     * Returns a single deployment by ID.
+     * Returns a single deployment by ID. See {@link #listDeployments}'s javadoc for why
+     * {@code isHolderOfAsset} is included here too.
      */
     @GetMapping("/{depId}")
-    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication)")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT') or @assetAccessChecker.canRead(#assetId, authentication) "
+            + "or @assetAccessChecker.isHolderOfAsset(#assetId, authentication)")
     public ResponseEntity<DeploymentResponse> getDeployment(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {

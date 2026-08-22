@@ -1,6 +1,8 @@
 package de.makibytes.registerwerk.corporateactions.web;
 
 import de.makibytes.registerwerk.corporateactions.internal.CorporateActionConfirmationService;
+import de.makibytes.registerwerk.corporateactions.internal.CorporateActionService;
+import de.makibytes.registerwerk.corporateactions.web.dto.CorporateActionView;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -10,23 +12,52 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
- * Customer self-service corporate-action confirmation — a document type that was entirely
- * missing before {@code CorporateActionConfirmationService}: an investor had no way to obtain
- * proof that a coupon/dividend paid out to their own holding.
- * GET /api/v1/me/corporate-actions/{corporateActionId}/confirmation
+ * Customer self-service corporate-action endpoints — a holder had no way to see corporate
+ * actions affecting their own position at all before {@code /corporate-actions?assetId=} below:
+ * the confirmation-download endpoints ({@code /confirmation}, {@code /confirmation/iso20022})
+ * already existed but had zero frontend caller on either app, since nothing listed a holder's
+ * corporate actions to get an id from in the first place.
+ *
+ * <p>Renamed from {@code MeCorporateActionConfirmationController} now that it does more than
+ * confirmations.
  */
 @RestController
-public class MeCorporateActionConfirmationController {
+public class MeCorporateActionController {
 
+    private final CorporateActionService corporateActionService;
     private final CorporateActionConfirmationService confirmationService;
 
-    MeCorporateActionConfirmationController(CorporateActionConfirmationService confirmationService) {
+    MeCorporateActionController(CorporateActionService corporateActionService,
+                                 CorporateActionConfirmationService confirmationService) {
+        this.corporateActionService = corporateActionService;
         this.confirmationService = confirmationService;
+    }
+
+    /**
+     * Corporate actions for one asset, scoped to holdings the caller actually has — excludes
+     * {@code PROPOSED}/{@code REJECTED}: an investor sees register facts, not an issuer's drafts.
+     * Filtering happens in {@link CorporateActionService#findByAssetForHolder} via the dedicated
+     * {@code findByAssetIdAndStatusIn} query, not a Java-side filter here. Authorization is
+     * expressed entirely in the SpEL below (a runtime bean-name lookup, not a Java import of
+     * {@code asset.web.AssetAccessChecker} — {@code web} isn't a cross-module surface, only
+     * {@code api} is) exactly like {@code IssuerCorporateActionController}'s class-level annotation.
+     */
+    @GetMapping("/api/v1/me/corporate-actions")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
+            + "or @assetAccessChecker.isHolderOfAsset(#assetId, authentication) "
+            + "or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+    public ResponseEntity<List<CorporateActionView>> myCorporateActions(@RequestParam UUID assetId) {
+        List<CorporateActionView> views = corporateActionService.findByAssetForHolder(assetId).stream()
+                .map(CorporateActionView::of)
+                .toList();
+        return ResponseEntity.ok(views);
     }
 
     @GetMapping("/api/v1/me/corporate-actions/{corporateActionId}/confirmation")

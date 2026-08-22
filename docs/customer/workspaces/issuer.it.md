@@ -117,9 +117,11 @@ Un asset può portare entrambe le forme contemporaneamente.
 
 ### Operazioni societarie
 
-Cedole due volte l'anno e, alla fine, il rimborso. Registerwerk crea automaticamente le operazioni cedolari dal piano dei pagamenti e le fa avanzare lungo le loro date.
+Le cedole e, alla fine, il rimborso vengono creati automaticamente dal piano dei pagamenti e avanzano lungo le loro date — non li crei tu.
 
-Il tuo compito è approvare il regolamento — e questo richiede il [principio dei quattro occhi](../../compliance/step-up-mfa.md), perché pagare la lista di titolari sbagliata è l'errore catastrofico classico dell'amministrazione titoli ed è molto difficile da rimediare.
+I dividendi, i frazionamenti e i rimborsi anticipati sono diversi: li **proponi tu** (*Emissione → Operazioni societarie → Proponi*), e un operatore esamina la proposta — approvandola nel registro, o respingendola — prima che vada avanti.
+
+Comunque sia stata creata l'operazione, il regolamento richiede il via libera di due parti separate: **tu attesti** che l'obbligazione sottostante è pronta — il denaro per una cedola o un dividendo, il meccanismo per un frazionamento o un rimborso anticipato — e poi **un operatore conferma** il lato registro/on-chain. Attestare è un'azione autenticata normale, non richiede [autenticazione rafforzata](../../compliance/step-up-mfa.md) — solo la conferma dell'operatore la richiede. Se non attesti mai, un operatore può scavalcare il requisito; questo viene registrato come eccezione distinta e permanentemente visibile, mai indistinguibile da un'attestazione genuina.
 
 Le tre date che decidono chi viene pagato: **data di registrazione** (chi detiene in quell'istante ne ha diritto), **data di stacco** (da qui lo strumento tratta senza il pagamento), **data di pagamento** (il denaro si muove).
 
@@ -141,7 +143,7 @@ Per i titolari consumatori con iscrizione individuale, gli estratti del §19(2) 
 
 ### Rimborso
 
-A scadenza: fotografia delle posizioni, spettanze, approvazione a quattro occhi, pagamento, token distrutti, `REDEEMED`. Terminale — da lì non si esce.
+A scadenza: fotografia delle posizioni, spettanze, la tua attestazione e la conferma di un operatore, pagamento, token distrutti, `REDEEMED`. Terminale — da lì non si esce.
 
 Le righe dei titolari sono **cancellate logicamente, mai rimosse**: un'iscrizione ai sensi del §16 che sparisce non può soddisfare obblighi di conservazione né di prova di manomissione.
 

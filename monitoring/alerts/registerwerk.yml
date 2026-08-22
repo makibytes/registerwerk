@@ -331,6 +331,22 @@ groups:
           summary: "Reorg reached an already-SAFE block"
           description: "A chain reorg orphaned a row already promoted to SAFE — still within the confirmation policy's guarantee, but deeper than a purely-PROVISIONAL reorg. Worth a look, not yet a consensus failure."
 
+      # ── Chain-effect compensation escalation (CompensationDispatcher) ────────
+      # No compensator registered, a compensator failed after retries, or an effect was found
+      # IRREVERSIBLE — every case leaves FinalityGate frozen on the affected asset
+      # (UNRESOLVED_COMPENSATION) until an admin acknowledges it via the operator "Unresolved
+      # Compensation" queue. Without this alert, that freeze is a dashboard nobody watches until a
+      # trader/issuer notices their actions are blocked — see the portfolio plan's own warning.
+      - alert: CompensationEscalated
+        expr: |
+          increase(registerwerk_compensation_escalated_total{job="registerwerk-backend"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A reorg-caused compensation could not resolve automatically"
+          description: "A chain_effect row failed to compensate, or was found irreversible, or has no registered compensator for its effect_type. The affected asset is frozen (blocks every gated operation) until an operator reviews and acknowledges it in the Unresolved Compensation queue."
+
       # ── Blockchain tx submission -> confirmation latency (SLO-style) ─────────
       - alert: BlockchainTxConfirmationLatencyHigh
         expr: |

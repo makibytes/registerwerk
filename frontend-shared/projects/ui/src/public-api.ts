@@ -5,6 +5,7 @@
 export * from './lib/models';
 export * from './lib/async-section';
 export * from './lib/status-badge/status-badge.component';
+export * from './lib/finality-badge/finality-badge.component';
 export * from './lib/data-state-pill/data-state-pill.component';
 export * from './lib/chain-name.pipe';
 export * from './lib/bar-chart/bar-chart.component';

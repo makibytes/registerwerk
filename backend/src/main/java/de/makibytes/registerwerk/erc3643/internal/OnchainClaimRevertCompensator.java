@@ -14,8 +14,8 @@ import java.util.UUID;
 
 /**
  * The INVERSE_FLIP compensator for {@code ERC3643_CLAIM_CONFIRMED} — undoes an
- * {@link OnchainClaim} whose confirming {@code addClaim} block was later retracted by a reorg deep
- * enough to cross FINALIZED. Sets {@code confirmed=false} (immediately excluding the claim from
+ * {@link OnchainClaim} whose confirming {@code addClaim} block was later retracted by a reorg.
+ * Sets {@code confirmed=false} (immediately excluding the claim from
  * {@code ClaimIssuanceService#getActiveClaims} again — the claim's underlying compliance signal is
  * treated as never having been proven) and does <b>not</b> attempt to auto-resubmit the claim:
  * matches this plan's established pattern of reverting to the last-known-safe state and letting a
@@ -61,7 +61,7 @@ class OnchainClaimRevertCompensator implements ChainEffectCompensator {
         }
 
         log.error("OnchainClaim id={} topic={} was confirmed but its confirming block was retracted by a "
-                        + "reorg deep enough to cross FINALIZED — the claim was never actually added on-chain; "
+                        + "reorg — the claim was never actually added on-chain; "
                         + "reverting to unconfirmed (excluded from compliance checks).",
                 id, claim.getTopic());
         claim.setConfirmed(false);

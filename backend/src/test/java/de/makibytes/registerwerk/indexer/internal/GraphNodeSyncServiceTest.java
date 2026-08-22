@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
+import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.finality.api.BlockFinalityFeed;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
@@ -29,6 +30,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -61,6 +63,8 @@ class GraphNodeSyncServiceTest {
     @Mock private BlockFinalityFeed blockFinalityFeed;
     @Mock private de.makibytes.registerwerk.finality.api.BlockFinalityPort blockFinalityPort;
     @Mock private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
+    @Mock private de.makibytes.registerwerk.chain.api.RpcNodeRepository rpcNodeRepository;
+    @Mock private ChaincacheFinalityProbe chaincacheFinalityProbe;
 
     private final ExplorerUrlBuilder explorerUrlBuilder = new ExplorerUrlBuilder();
     private BlockchainTxProperties txProperties;
@@ -79,7 +83,8 @@ class GraphNodeSyncServiceTest {
         // existing depth-only tests never touch it.
         service = new GraphNodeSyncService(chainConfigRepository, indexerStateRepository,
                 tokenTransferRepository, graphNodeClient, explorerUrlBuilder,
-                assetDeploymentRepository, txProperties, reorgGuard, clientRegistry);
+                assetDeploymentRepository, txProperties, reorgGuard, clientRegistry,
+                rpcNodeRepository, chaincacheFinalityProbe);
 
         when(assetDeploymentRepository.findAll()).thenReturn(List.of());
     }
@@ -186,6 +191,82 @@ class GraphNodeSyncServiceTest {
         verify(indexerStateRepository).save(stateCaptor.capture());
         // No reorg and no new transfers -> cursor stays exactly where it was (fromBlock - 1).
         assertThat(stateCaptor.getValue().getLastSyncedBlock()).isEqualTo(200L);
+    }
+
+    @Test
+    @DisplayName("a CHAINCACHE-sourced chain re-verifies its unsettled window via "
+            + "ChaincacheFinalityProbe, never via RPC self-probing")
+    void syncChain_chaincacheFinalitySource_usesChaincacheProbeNotRpcSelfProbe() {
+        ChainConfig chain = ethereumChain();
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                chain, "finalitySource", ChainConfig.FinalitySource.CHAINCACHE);
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE))
+                .thenReturn(Optional.of(freshState(200L, 40L)));
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        when(graphNodeClient.fetchMeta(chain, null))
+                .thenReturn(Optional.of(new BlockMeta(200, "0xheadhash", false)));
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(201L), anyInt(), eq(0)))
+                .thenReturn(List.of());
+
+        RpcNode chaincacheNode = new RpcNode();
+        chaincacheNode.setKind(RpcNode.NodeKind.CHAINCACHE);
+        chaincacheNode.setManagementUrl("http://chaincache-sepolia:8080");
+        chaincacheNode.setRemoteChainKey("sepolia");
+        when(rpcNodeRepository.findByChainConfig_IdAndKindAndEnabledTrue(chainConfigId, RpcNode.NodeKind.CHAINCACHE))
+                .thenReturn(List.of(chaincacheNode));
+
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of(50L));
+        when(chaincacheFinalityProbe.observe(chaincacheNode, 50L))
+                .thenReturn(Optional.of(new ChaincacheFinalityProbe.Observation("0xhash50", ReorgGuard.ProbeResult.FINALIZED)));
+        when(tokenTransferRepository.findDistinctBlockHashesAt(chainConfigId, 50L))
+                .thenReturn(List.of("0xhash50")); // matches -> not orphaned
+        when(tokenTransferRepository.markLevelAtBlock(
+                chainConfigId, 50L, FinalityLevel.PROVISIONAL, FinalityLevel.FINALIZED)).thenReturn(1);
+
+        service.syncChain(chain);
+
+        verify(chaincacheFinalityProbe).observe(chaincacheNode, 50L);
+        verify(graphNodeClient, never()).fetchMeta(chain, 50L);
+        verify(tokenTransferRepository).markLevelAtBlock(
+                chainConfigId, 50L, FinalityLevel.PROVISIONAL, FinalityLevel.FINALIZED);
+        verify(tokenTransferRepository, never()).markOrphanedFromBlock(any(), any());
+    }
+
+    @Test
+    @DisplayName("a CHAINCACHE-sourced chain with no enabled chaincache node falls back to RPC "
+            + "self-probing rather than skipping reorg verification entirely")
+    void syncChain_chaincacheFinalitySource_noNode_fallsBackToRpcSelfProbe() {
+        ChainConfig chain = ethereumChain();
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                chain, "finalitySource", ChainConfig.FinalitySource.CHAINCACHE);
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE))
+                .thenReturn(Optional.of(freshState(200L, 40L)));
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        when(graphNodeClient.fetchMeta(chain, null))
+                .thenReturn(Optional.of(new BlockMeta(200, "0xheadhash", false)));
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(201L), anyInt(), eq(0)))
+                .thenReturn(List.of());
+        when(rpcNodeRepository.findByChainConfig_IdAndKindAndEnabledTrue(chainConfigId, RpcNode.NodeKind.CHAINCACHE))
+                .thenReturn(List.of());
+
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of(50L));
+        when(graphNodeClient.fetchMeta(chain, 50L))
+                .thenReturn(Optional.of(new BlockMeta(50, "0xhash50", false)));
+        when(tokenTransferRepository.findDistinctBlockHashesAt(chainConfigId, 50L))
+                .thenReturn(List.of("0xhash50"));
+        when(tokenTransferRepository.markLevelAtBlock(
+                chainConfigId, 50L, FinalityLevel.PROVISIONAL, FinalityLevel.FINALIZED)).thenReturn(1);
+
+        service.syncChain(chain);
+
+        verify(chaincacheFinalityProbe, never()).observe(any(), anyLong());
+        verify(graphNodeClient).fetchMeta(chain, 50L);
+        verify(tokenTransferRepository).markLevelAtBlock(
+                chainConfigId, 50L, FinalityLevel.PROVISIONAL, FinalityLevel.FINALIZED);
     }
 
     @Test

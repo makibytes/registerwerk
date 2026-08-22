@@ -22,6 +22,19 @@ public final class SecurityUtils {
                         || a.getAuthority().equals("ROLE_AUDIT"));
     }
 
+    /** Operator staff (registry-side) vs. customer-side (issuer/investor/trader/etc.) — the split
+     *  {@code indexer.web.TokenTransferMapper} uses to decide technical vs. plain-language finality
+     *  vocabulary. Deliberately excludes {@code ISSUER}: an issuer is a customer role even though
+     *  they manage their own asset, per CLAUDE.md's "two user groups" split. */
+    public static boolean isTechnicalRole(Authentication auth) {
+        if (auth == null) return false;
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_REGISTRY_ADMIN")
+                        || a.getAuthority().equals("ROLE_AUDIT")
+                        || a.getAuthority().equals("ROLE_COMPLIANCE_OFFICER")
+                        || a.getAuthority().equals("ROLE_RELATIONSHIP_MANAGER"));
+    }
+
     /** Returns true when the token was minted by the impersonation flow ({@code imp: true}). */
     public static boolean isImpersonatingAdmin(Authentication auth) {
         if (auth == null || !(auth.getPrincipal() instanceof Jwt jwt)) return false;

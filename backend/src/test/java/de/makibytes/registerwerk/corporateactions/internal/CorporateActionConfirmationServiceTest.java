@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.apache.pdfbox.Loader;
@@ -37,6 +38,7 @@ class CorporateActionConfirmationServiceTest {
     @Mock private AssetRepository assetRepository;
     @Mock private LegalEntityRepository entityRepository;
     @Mock private DocumentSigningService signingService;
+    @Mock private FinalityGate finalityGate;
 
     @InjectMocks
     private CorporateActionConfirmationService service;

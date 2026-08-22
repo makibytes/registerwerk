@@ -52,10 +52,13 @@ La respuesta no puede ser «a quien lo tenga cuando llegue el pago» — eso no 
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> ANNOUNCED
+    [*] --> PROPOSED: propuesta por el emisor
+    [*] --> ANNOUNCED: creada por el sistema
+    PROPOSED --> ANNOUNCED: el operador aprueba
+    PROPOSED --> REJECTED: el operador rechaza
     ANNOUNCED --> RECORD_DATE_SET
     RECORD_DATE_SET --> COMPUTED: instantánea tomada
-    COMPUTED --> AWAITING_SETTLEMENT: aprobada (doble control)
+    COMPUTED --> AWAITING_SETTLEMENT: emisor certifica + operador confirma
     AWAITING_SETTLEMENT --> SETTLED: pagada
     SETTLED --> CLOSED
     ANNOUNCED --> CANCELLED
@@ -63,22 +66,32 @@ stateDiagram-v2
     COMPUTED --> CANCELLED
 ```
 
-El paso `COMPUTED` → `AWAITING_SETTLEMENT` exige **[doble control](../../compliance/step-up-mfa.md)**: una segunda persona autorizada debe aprobar antes de que salga dinero frente a una lista de titulares. El error catastrófico más común en la administración de valores es pagar a la lista equivocada, y deshacerlo es muy difícil.
+Los cupones y las amortizaciones se **crean por el sistema** — generados automáticamente a partir del calendario de pagos o de la fecha de vencimiento, en lugar de confiarse a la memoria de alguien, y comienzan en `ANNOUNCED`. Los dividendos, los desdoblamientos y las amortizaciones anticipadas son **propuestos por el emisor**: el emisor presenta una operación que comienza en `PROPOSED`, y solo se incorpora al registro (`ANNOUNCED`) una vez que un operador la ha revisado y aprobado — o se descarta de forma definitiva (`REJECTED`) si no.
 
-Los cupones de un bono se generan automáticamente a partir del calendario de pagos en lugar de confiarse a la memoria de alguien, y la tarea diaria que hace avanzar las operaciones a lo largo de sus fechas se ejecuta sola.
+El paso `COMPUTED` → `AWAITING_SETTLEMENT` exige la conformidad de **dos partes separadas**, sea cual sea el origen de la operación: el emisor certifica que la obligación subyacente está realmente lista — el efectivo de un cupón o dividendo, el mecanismo de un desdoblamiento o una amortización anticipada — y después un operador confirma el lado del registro/on-chain. El error catastrófico más común en la administración de valores es pagar a la lista equivocada, y que deban conformarse dos organizaciones, no dos compañeros de la misma, hace mucho más difícil que eso ocurra sin ser detectado. La certificación del emisor es una acción autenticada normal; solo la confirmación del operador exige [verificación reforzada](../../compliance/step-up-mfa.md). Si el emisor nunca certifica, un operador puede anular el requisito — quedando registrado como una excepción distinta y permanentemente visible, nunca indistinguible de una certificación genuina.
 
 ### Los tipos que modela Registerwerk
 
+Solo un subconjunto puede crearse hoy realmente — el resto está modelado (tiene un lugar en el ciclo de vida y en la mecánica de liquidación) pero aún no tiene una vía de creación.
+
+**Compatible hoy**
+
+| | Creada por |
+|---|---|
+| `COUPON`, `INTEREST_PAYMENT` | El sistema, a partir del calendario de pagos. |
+| `REDEMPTION` | El sistema, en la fecha de vencimiento. |
+| `DIVIDEND` | Propuesta del emisor, revisada por el operador. |
+| `SPLIT` | Propuesta del emisor, revisada por el operador. Se liquida mediante la constatación manual del operador — ningún estándar de token compatible dispone de una primitiva de desdoblamiento on-chain. |
+| `CALL` | Propuesta del emisor, revisada por el operador. Amortización anticipada por el emisor, cuando las condiciones lo permiten. |
+
+**Modelado, aún no compatible**
+
 | | |
 |---|---|
-| `COUPON`, `INTEREST_PAYMENT` | Intereses periódicos. |
-| `DIVIDEND` | Un reparto a los tenedores de capital. |
-| `REDEMPTION`, `PARTIAL_REDEMPTION` | Devolución del principal, total o parcial. |
-| `CALL` | Amortización anticipada por el emisor, cuando las condiciones lo permiten. |
-| `SPLIT`, `REVERSE_SPLIT` | Cambiar el número de títulos sin cambiar el valor total. |
+| `PARTIAL_REDEMPTION` | Devolución parcial del principal. |
+| `REVERSE_SPLIT` | Reducir el número de títulos sin cambiar el valor total. |
 | `CONVERSION` | Transformar el instrumento en otro. |
 | `CAPITAL_CALL` | Requerir desembolsos adicionales a los titulares. |
-| `PLEDGE` | Dejar constancia de que una posición ha sido pignorada. |
 
 ---
 
@@ -101,7 +114,7 @@ Mecánicamente se trata de una operación societaria de tipo `REDEMPTION`, gener
 
 1. Se toma la instantánea de la fecha de registro.
 2. El derecho de cada titular es su nominal al valor nominal.
-3. El pago se aprueba con doble control y se liquida.
+3. El emisor certifica, un operador confirma, y el pago se liquida.
 4. Los tokens se **destruyen** — eliminados on-chain, la oferta vuelve a cero.
 5. El activo pasa a `REDEEMED`.
 

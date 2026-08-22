@@ -26,16 +26,18 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Admin CRUD for the finality policy model. No gate call sites consult this yet ({@code
- * FinalityGate} is a later phase) — this only changes what {@code FinalityPolicyService} would
- * report if asked.
+ * Admin CRUD for the finality policy model — consulted by {@code FinalityGate} at
+ * {@code registerstatement}/{@code registertransfer}'s gate sites today, with the remaining
+ * modules from the portfolio plan's Track B, P8 order (corporateactions, trading, asset,
+ * marketplace, erc3643, regreporting) still to be wired.
  *
- * <p>Reads are open to every role that needs visibility into what will gate an asset's actions
+ * <p>Reads are open to every role that needs visibility into what gates an asset's actions
  * (REGISTRY_ADMIN, AUDIT, COMPLIANCE_OFFICER, ISSUER — the last so an issuer can see why an
- * operation on their own asset isn't available yet, once the gate exists). Writes are
- * REGISTRY_ADMIN-only and step-up protected, same as {@code ChainConfigController}, which this
- * screen sits next to — {@code chain_config.finality_model} and the policy that gates on top of
- * it belong in the same place.
+ * operation on their own asset isn't available yet). Writes are REGISTRY_ADMIN-only and step-up
+ * protected, same as {@code ChainConfigController}, which this screen sits next to —
+ * {@code chain_config.finality_model} and the policy that gates on top of it belong in the same
+ * place. See {@code FinalityJournalController} for the sibling screen showing what is currently
+ * blocked and why.
  */
 @RestController
 @RequestMapping("/api/v1/finality-policies")

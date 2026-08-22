@@ -62,8 +62,9 @@ class AssetDeploymentRevertCompensator implements ChainEffectCompensator {
         }
 
         log.error("AssetDeployment id={} was CONFIRMED at block={} but that block was retracted by a reorg "
-                        + "deep enough to cross FINALIZED — reverting to PENDING for re-verification. This is "
-                        + "a consensus failure deeper than the configured confirmation policy guarantees.",
+                        + "— reverting to PENDING for re-verification. Compensation runs at any reorg depth; "
+                        + "if this retraction reached an already-FINALIZED block, that is additionally a "
+                        + "consensus failure deeper than the configured confirmation policy guarantees.",
                 deploymentId, deployment.getBlockNumber());
         deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
         deployment.setBlockHash(null);

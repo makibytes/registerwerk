@@ -133,6 +133,7 @@ plugins:
             Regulatory options: Regulatorische Optionen
             Blockchain operations: Blockchain-Betrieb
             Adding a chain: Chain hinzufügen
+            chaincache integration: chaincache-Integration
             Deploying contracts: Contracts ausbringen
             ERC-3643 setup: ERC-3643 einrichten
             Confidential tokens: Vertrauliche Token
@@ -262,6 +263,7 @@ plugins:
             Regulatory options: Options réglementaires
             Blockchain operations: Opérations blockchain
             Adding a chain: Ajouter une chaîne
+            chaincache integration: Intégration chaincache
             Deploying contracts: Déployer les contrats
             ERC-3643 setup: Configuration ERC-3643
             Confidential tokens: Jetons confidentiels
@@ -391,6 +393,7 @@ plugins:
             Regulatory options: Opzioni regolamentari
             Blockchain operations: Operazioni blockchain
             Adding a chain: Aggiungere una chain
+            chaincache integration: Integrazione chaincache
             Deploying contracts: Distribuire i contratti
             ERC-3643 setup: Configurazione ERC-3643
             Confidential tokens: Token riservati
@@ -520,6 +523,7 @@ plugins:
             Regulatory options: Opciones regulatorias
             Blockchain operations: Operaciones de blockchain
             Adding a chain: Añadir una cadena
+            chaincache integration: Integración de chaincache
             Deploying contracts: Desplegar contratos
             ERC-3643 setup: Configuración de ERC-3643
             Confidential tokens: Tokens confidenciales
@@ -732,6 +736,7 @@ nav:
       - Deploying contracts: operator/blockchain/deploying-contracts.md
       - ERC-3643 setup: operator/blockchain/erc3643-setup.md
       - Confidential tokens: operator/blockchain/confidential-tokens.md
+      - chaincache integration: operator/blockchain/chaincache-integration.md
     - Security operations:
       - HSM-backed wallets: operator/security/hsm-wallets.md
       - On-chain security review: operator/security/onchain-review.md
@@ -739,6 +744,7 @@ nav:
       - The Graph: operator/indexers/the-graph.md
       - Solana: operator/indexers/solana.md
       - Resilience: operator/indexers/resilience.md
+      - Finality policy and reorg compensation: operator/indexers/finality-and-compensation.md
     - Running it:
       - Monitoring: operator/maintenance/monitoring.md
       - Backups: operator/maintenance/backups.md

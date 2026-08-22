@@ -58,6 +58,11 @@ class ChainEffect {
     @Column(name = "entity_id", nullable = false)
     private UUID entityId;
 
+    /** The asset this effect is scoped to, when there is one — see {@code ChainEffectDescriptor
+     *  #assetId}'s javadoc. Null for effect types that are not asset-scoped. */
+    @Column(name = "asset_id")
+    private UUID assetId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "category", nullable = false, length = 20)
     private CompensationCategory category;
@@ -83,11 +88,23 @@ class ChainEffect {
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount = 0;
 
-    @Column(name = "last_error")
-    private String lastError;
+    /** Set on every terminal outcome — a real failure reason (Failed/Irreversible) or a benign
+     *  "already undone" explanation (NotApplicable) alike. Named for what it always is (an
+     *  explanation of how the row was resolved), not what it sometimes isn't (an error) — was
+     *  originally {@code last_error}, which mislabeled the NotApplicable case as if something had
+     *  gone wrong. */
+    @Column(name = "resolution_detail")
+    private String resolutionDetail;
 
     @Column(name = "recorded_at", nullable = false)
     private Instant recordedAt = Instant.now();
+
+    /** When this row was last claimed into {@code COMPENSATING} — lets
+     *  {@code ChainEffectRepository#claimForCompensation} reclaim a row whose compensator crashed
+     *  mid-run (stuck in {@code COMPENSATING} forever otherwise) after a timeout, instead of only
+     *  ever reclaiming {@code ACTIVE}/{@code COMPENSATION_FAILED}. Null until first claimed. */
+    @Column(name = "claimed_at")
+    private Instant claimedAt;
 
     @Column(name = "settled_at")
     private Instant settledAt;
@@ -100,6 +117,11 @@ class ChainEffect {
 
     @Column(name = "acknowledged_at")
     private Instant acknowledgedAt;
+
+    /** The mandatory, audited justification an admin gave for acknowledging (unblocking) this
+     *  effect — same break-glass convention as {@code finality_policy_override.reason}. */
+    @Column(name = "acknowledge_reason")
+    private String acknowledgeReason;
 
     UUID getId() { return id; }
 
@@ -133,6 +155,9 @@ class ChainEffect {
     UUID getEntityId() { return entityId; }
     void setEntityId(UUID entityId) { this.entityId = entityId; }
 
+    UUID getAssetId() { return assetId; }
+    void setAssetId(UUID assetId) { this.assetId = assetId; }
+
     CompensationCategory getCategory() { return category; }
     void setCategory(CompensationCategory category) { this.category = category; }
 
@@ -154,11 +179,14 @@ class ChainEffect {
     int getAttemptCount() { return attemptCount; }
     void setAttemptCount(int attemptCount) { this.attemptCount = attemptCount; }
 
-    String getLastError() { return lastError; }
-    void setLastError(String lastError) { this.lastError = lastError; }
+    String getResolutionDetail() { return resolutionDetail; }
+    void setResolutionDetail(String resolutionDetail) { this.resolutionDetail = resolutionDetail; }
 
     Instant getRecordedAt() { return recordedAt; }
     void setRecordedAt(Instant recordedAt) { this.recordedAt = recordedAt; }
+
+    Instant getClaimedAt() { return claimedAt; }
+    void setClaimedAt(Instant claimedAt) { this.claimedAt = claimedAt; }
 
     Instant getSettledAt() { return settledAt; }
     void setSettledAt(Instant settledAt) { this.settledAt = settledAt; }
@@ -171,4 +199,7 @@ class ChainEffect {
 
     Instant getAcknowledgedAt() { return acknowledgedAt; }
     void setAcknowledgedAt(Instant acknowledgedAt) { this.acknowledgedAt = acknowledgedAt; }
+
+    String getAcknowledgeReason() { return acknowledgeReason; }
+    void setAcknowledgeReason(String acknowledgeReason) { this.acknowledgeReason = acknowledgeReason; }
 }

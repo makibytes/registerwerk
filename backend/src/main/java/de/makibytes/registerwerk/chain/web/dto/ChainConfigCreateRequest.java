@@ -23,8 +23,7 @@ public record ChainConfigCreateRequest(
         /** Optional; defaults to {@code DEPTH_BASED} when omitted (existing behavior). */
         @Pattern(regexp = "(?i)TAG_BASED|DEPTH_BASED|INSTANT") String finalityModel,
         /** Optional; null means unknown — the gate shows no ETA rather than guessing one. */
-        @Positive Integer avgBlockSeconds,
-        /** Optional; defaults to {@code RPC_SELF_PROBE} when omitted (existing behavior) — opt a
-         *  chain into {@code CHAINCACHE} only once it has an enabled chaincache-kind RpcNode. */
-        @Pattern(regexp = "(?i)RPC_SELF_PROBE|CHAINCACHE") String finalitySource
+        @Positive Integer avgBlockSeconds
+        // No finalitySource field: it is fully auto-derived from the chain's node set — see
+        // ChainConfig.FinalitySource's javadoc. There is nothing for an operator to set here.
 ) {}

@@ -81,10 +81,10 @@ public class BlockchainTransactionCompletionWriter {
                 || tx.getChainConfigId() == null || tx.getBlockNumber() == null) {
             return;
         }
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                tx.getChainConfigId(), tx.getBlockNumber(), tx.getBlockHash(), tx.getTxHash(), null,
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                tx.getChainConfigId(), tx.getBlockNumber(), tx.getBlockHash(), tx.getTxHash(),
                 "blockchain", BlockchainTxRevertCompensator.EFFECT_TYPE, "BlockchainTransaction", tx.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+                tx.getAssetId(), CompensationCategory.INVERSE_FLIP));
     }
 
     @Transactional

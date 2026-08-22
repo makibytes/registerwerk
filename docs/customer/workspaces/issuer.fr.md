@@ -117,9 +117,11 @@ C'est la partie que l'on sous-estime. L'émission dure une semaine. L'administra
 
 ### Opérations sur titres
 
-Des coupons deux fois l'an, et finalement le remboursement. Registerwerk crée automatiquement les opérations de coupon à partir de l'échéancier et les fait avancer au fil de leurs dates.
+Les coupons, et finalement le remboursement, sont créés automatiquement à partir de l'échéancier et avancent au fil de leurs dates — vous ne les créez pas vous-même.
 
-Votre rôle est d'approuver le règlement — ce qui exige une [double validation](../../compliance/step-up-mfa.md), car payer la mauvaise liste de titulaires est l'erreur catastrophique classique de l'administration de titres, et elle est très difficile à rattraper.
+Les dividendes, les fractionnements et les remboursements anticipés sont différents : c'est vous qui les **proposez** (*Émission → Opérations sur titres → Proposer*), et un opérateur examine la proposition — l'approuvant sur le registre, ou la rejetant — avant qu'elle n'aille plus loin.
+
+Quelle que soit la façon dont l'opération a été créée, le règlement exige l'accord de deux parties distinctes : **vous attestez** que l'obligation sous-jacente est prête — les fonds pour un coupon ou un dividende, le mécanisme pour un fractionnement ou un remboursement anticipé — puis **un opérateur confirme** le volet registre/on-chain. Attester est une action authentifiée normale, sans [authentification renforcée](../../compliance/step-up-mfa.md) — seule la confirmation de l'opérateur l'exige. Si vous n'attestez jamais, un opérateur peut passer outre cette exigence ; ce contournement est enregistré comme une exception distincte et durablement visible, jamais indiscernable d'une attestation authentique.
 
 Les trois dates qui décident qui est payé : la **date d'enregistrement** (quiconque détient à cet instant y a droit), la **date de détachement** (à partir de là, le titre se négocie sans le versement), la **date de paiement** (l'argent bouge).
 
@@ -141,7 +143,7 @@ Pour les titulaires consommateurs en inscription individuelle, les relevés du �
 
 ### Remboursement
 
-À l'échéance : photographie des positions, droits, approbation en double validation, paiement, jetons détruits, `REDEEMED`. Terminal — on n'en ressort pas.
+À l'échéance : photographie des positions, droits, votre attestation et la confirmation d'un opérateur, paiement, jetons détruits, `REDEEMED`. Terminal — on n'en ressort pas.
 
 Les lignes de titulaires sont **supprimées logiquement, jamais effacées** : une inscription au titre du §16 qui disparaît ne peut satisfaire ni les obligations de conservation ni celles d'inviolabilité.
 

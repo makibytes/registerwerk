@@ -1,9 +1,8 @@
 package de.makibytes.registerwerk.finality.api;
 
 /**
- * A finality-gateable action, derived from real call sites across the modules the gate will
- * eventually be wired into (see the plan's P8 phase — {@code FinalityGate} itself does not exist
- * yet; this enum exists so the policy that will drive it is configurable ahead of time).
+ * A finality-gateable action, derived from real call sites across the modules {@link FinalityGate}
+ * is wired into — the argument its {@code require}/{@code isAllowed} methods take.
  *
  * <p>Every value that emits a document or export leaving the system boundary (register
  * statements/extracts/inspections, tax certificates, corporate-action and trade confirmations,
@@ -27,7 +26,10 @@ public enum GatedOperation {
     REGISTER_INSPECTION_FULFIL,
 
     // ── corporateactions ──────────────────────────────────────────────────────
-    /** Confirms/writes a balance-dependent corporate-action settlement outcome — {@code CorporateActionSettlementWriter}. */
+    /** Confirms/writes a balance-dependent corporate-action settlement outcome —
+     *  {@code CorporateActionService.confirmSettlementAsOperator}/{@code markSettledManually}/{@code settle}
+     *  (not {@code CorporateActionSettlementWriter}, which runs on a
+     *  {@code CompletableFuture} completion thread after Canton dispatch, where throwing is useless). */
     CORPORATE_ACTION_SETTLEMENT_CONFIRM,
     /** Generates investor/operator confirmation documents (incl. ISO 20022) — {@code CorporateActionConfirmationService}. */
     CORPORATE_ACTION_CONFIRMATION_EXPORT,

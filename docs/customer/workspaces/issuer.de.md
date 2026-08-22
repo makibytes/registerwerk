@@ -117,9 +117,11 @@ Diesen Teil unterschätzen die meisten. Die Emission dauert eine Woche. Die Verw
 
 ### Kapitalmaßnahmen
 
-Zweimal jährlich Kupons und irgendwann die Rückzahlung. Registerwerk legt Kupon-Maßnahmen automatisch aus dem Zahlungsplan an und führt sie durch ihre Termine.
+Kupons und irgendwann die Rückzahlung werden automatisch aus dem Zahlungsplan angelegt und durch ihre Termine geführt — die legen Sie nicht selbst an.
 
-Ihre Aufgabe ist es, die Abwicklung zu genehmigen — und das verlangt das [Vier-Augen-Prinzip](../../compliance/step-up-mfa.md), denn die falsche Inhaberliste zu bezahlen ist der klassische katastrophale Fehler der Wertpapierverwaltung und lässt sich sehr schwer rückgängig machen.
+Dividenden, Splits und vorzeitige Kündigungen sind anders: Die **schlagen Sie vor** (*Emission → Kapitalmaßnahmen → Vorschlagen*), und ein Betreiber prüft den Vorschlag — genehmigt ihn ins Register, oder lehnt ihn ab — bevor er weitergeht.
+
+Unabhängig davon, wie eine Maßnahme angelegt wurde, braucht die Abwicklung die Zustimmung zweier getrennter Parteien: **Sie bestätigen**, dass die zugrundeliegende Verpflichtung bereit ist — das Geld für einen Kupon oder eine Dividende, der Mechanismus für einen Split oder eine vorzeitige Kündigung —, und anschließend **bestätigt ein Betreiber** die Register-/Onchain-Seite. Die Bestätigung ist eine normale authentifizierte Aktion, kein [Step-up](../../compliance/step-up-mfa.md) — nur die Bestätigung des Betreibers verlangt Step-up. Bestätigen Sie nie selbst, kann ein Betreiber die Anforderung übersteuern; das wird als eigene, dauerhaft sichtbare Ausnahme protokolliert, niemals ununterscheidbar von einer echten Bestätigung.
 
 Die drei Termine, die entscheiden, wer Geld bekommt: **Nachweisstichtag** (wer in diesem Moment hält, ist berechtigt), **Ex-Tag** (ab hier wird ohne die Zahlung gehandelt), **Zahltag** (das Geld fließt).
 
@@ -141,7 +143,7 @@ Für Verbraucherinhaber mit Einzeleintragung werden §19(2)-Auszüge erzeugt und
 
 ### Rückzahlung
 
-Bei Fälligkeit: Bestandsaufnahme, Ansprüche, Genehmigung im Vier-Augen-Prinzip, Zahlung, Token vernichtet, `REDEEMED`. Endgültig — daraus führt kein Weg zurück.
+Bei Fälligkeit: Bestandsaufnahme, Ansprüche, Ihre Bestätigung und die Bestätigung eines Betreibers, Zahlung, Token vernichtet, `REDEEMED`. Endgültig — daraus führt kein Weg zurück.
 
 Inhaberzeilen werden **nur logisch gelöscht, nie entfernt**: Ein verschwundener §16-Registereintrag kann weder Aufbewahrungs- noch Nachweispflichten erfüllen.
 

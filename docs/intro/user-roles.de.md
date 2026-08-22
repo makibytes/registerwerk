@@ -80,7 +80,9 @@ Ein Emittent kann:
 - Eigene [Asset](../token-standards/index.md)-Definitionen anlegen und verwalten
 - Die Token-Ausbringung anstoßen (sofern erforderlich vorbehaltlich der Genehmigung durch den Betreiber)
 - Die Aufnahme von Anlegern für die eigenen Token verwalten
-- Die Historie der [Kapitalmaßnahmen](../intro/concepts.md) für die eigenen Wertpapiere einsehen
+- [Kapitalmaßnahmen](../intro/concepts.md) — Dividenden, Splits, vorzeitige Kündigungen — zur Prüfung durch den Betreiber vorschlagen und einen noch ungeprüften Vorschlag zurückziehen
+- Bestätigen, dass die Abwicklung einer Kapitalmaßnahme bereit ist — die erste der beiden erforderlichen Parteien, neben der Bestätigung eines Betreibers
+- Die Historie der Kapitalmaßnahmen für die eigenen Wertpapiere einsehen
 - Depotauszüge und aufsichtsrechtliche Unterlagen herunterladen
 
 ### INVESTOR
@@ -90,6 +92,7 @@ Ein Anleger kann:
 - Sein Portfolio einsehen (gehaltene Token, Bestände)
 - Übertragungsanfragen annehmen
 - Die Transaktionshistorie einsehen
+- Kapitalmaßnahmen einsehen, die die eigenen Bestände betreffen, und Abwicklungsbestätigungen herunterladen
 - Die eigenen Depotauszüge herunterladen
 
 ### COMPANY_ADMIN

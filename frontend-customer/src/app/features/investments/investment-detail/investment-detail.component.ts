@@ -24,7 +24,9 @@ import { IdentityRequestService } from '../../../core/api/identity-request.servi
 import { RegisterDocumentService } from '../../../core/api/register-document.service';
 import { RegisterInspectionService } from '../../../core/api/register-inspection.service';
 import { BondTermsService } from '../../../core/api/bond-terms.service';
-import { AssetBondTerms, AssetDeployment, InspectionLegalBasis, InvestmentRecord, RegisterDocumentMeta } from '../../../core/models';
+import { TokenHistoryService } from '../../../core/api/token-history.service';
+import { CorporateActionsService } from '../../../core/api/corporate-actions.service';
+import { AssetBondTerms, AssetDeployment, CorporateActionView, InspectionLegalBasis, InvestmentRecord, RegisterDocumentMeta, TokenTransferResponse } from '../../../core/models';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { AuthService } from '../../../core/auth/auth.service';
@@ -59,7 +61,7 @@ import {
   failAsyncSection,
   resolveAsyncSection,
 } from '../../../core/async/async-section';
-import { StatusBadgeComponent, DataStatePillComponent } from '@registerwerk/ui';
+import { StatusBadgeComponent, DataStatePillComponent, FinalityBadgeComponent } from '@registerwerk/ui';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
 
 import { AddressComponent } from '../../../shared/components/address.component';
@@ -87,6 +89,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     StatusBadgeComponent,
     ChainIconComponent,
     DataStatePillComponent,
+    FinalityBadgeComponent,
     AddressComponent,
     ExternalIdEditorComponent,
   ],
@@ -274,6 +277,16 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                 <div><span class="bt-label">Callable</span><span class="bt-value">{{ bondTerms.callable ? 'Yes' : 'No' }}</span></div>
                 <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus }}</span></div>
               </div>
+              @if (bondTerms.callable && bondTerms.callSchedule && bondTerms.callSchedule.length > 0) {
+                <div class="call-schedule">
+                  <span class="bt-label">Call schedule</span>
+                  <ul class="call-schedule-list">
+                    @for (entry of bondTerms.callSchedule; track $index) {
+                      <li>{{ entry.callDate }} — {{ entry.callPrice | number:'1.0-4' }}% of face value</li>
+                    }
+                  </ul>
+                </div>
+              }
             </mat-card-content>
           </mat-card>
         }
@@ -527,6 +540,128 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
             }
           </mat-card-content>
         </mat-card>
+
+        <mat-card class="section-card">
+          <mat-card-header>
+            <mat-card-title>Transfer History</mat-card-title>
+            <app-data-state-pill [status]="transferHistorySection.status" />
+          </mat-card-header>
+          <mat-card-content>
+            @if (transferHistorySection.status === 'error') {
+              <p class="confidential-error" role="alert">
+                Transfer history could not be loaded.
+                <button mat-button type="button" (click)="retryTransferHistory()">Retry</button>
+              </p>
+            } @else if (transferHistorySection.data.length > 0) {
+              <div class="table-wrap">
+              <table mat-table [dataSource]="transferHistorySection.data" class="mat-elevation-z0">
+                <ng-container matColumnDef="eventType">
+                  <th mat-header-cell *matHeaderCellDef>Event</th>
+                  <td mat-cell *matCellDef="let t">{{ formatEnum(t.eventType) }}</td>
+                </ng-container>
+                <ng-container matColumnDef="from">
+                  <th mat-header-cell *matHeaderCellDef>From</th>
+                  <td mat-cell *matCellDef="let t">
+                    @if (t.fromAddress) { <code>{{ t.fromAddress }}</code> } @else { — }
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="to">
+                  <th mat-header-cell *matHeaderCellDef>To</th>
+                  <td mat-cell *matCellDef="let t">
+                    @if (t.toAddress) { <code>{{ t.toAddress }}</code> } @else { — }
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="amount">
+                  <th mat-header-cell *matHeaderCellDef>Amount</th>
+                  <td mat-cell *matCellDef="let t">{{ t.amount }}</td>
+                </ng-container>
+                <ng-container matColumnDef="finality">
+                  <th mat-header-cell *matHeaderCellDef>Status</th>
+                  <td mat-cell *matCellDef="let t">
+                    <app-finality-badge [level]="t.finalityStatus" [label]="t.finalityLabel"></app-finality-badge>
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="occurredAt">
+                  <th mat-header-cell *matHeaderCellDef>Occurred</th>
+                  <td mat-cell *matCellDef="let t">{{ t.occurredAt | date:'short' }}</td>
+                </ng-container>
+
+                <tr mat-header-row *matHeaderRowDef="transferColumns"></tr>
+                <tr mat-row *matRowDef="let r; columns: transferColumns;"></tr>
+              </table>
+              </div>
+            } @else {
+              <p class="empty-text">
+                @if (transferHistorySection.status === 'pending') { Transfer history is still loading. }
+                @else { No on-chain transfers recorded yet. }
+              </p>
+            }
+          </mat-card-content>
+        </mat-card>
+
+        <mat-card class="section-card">
+          <mat-card-header>
+            <mat-card-title>Corporate Actions</mat-card-title>
+            <app-data-state-pill [status]="corporateActionsSection.status" />
+          </mat-card-header>
+          <mat-card-content>
+            @if (corporateActionsSection.status === 'error') {
+              <p class="confidential-error" role="alert">
+                Corporate actions could not be loaded.
+                <button mat-button type="button" (click)="retryCorporateActions()">Retry</button>
+              </p>
+            } @else if (corporateActionsSection.data.length > 0) {
+              <div class="table-wrap">
+                <table mat-table [dataSource]="corporateActionsSection.data" class="mat-elevation-z0">
+                  <ng-container matColumnDef="type">
+                    <th mat-header-cell *matHeaderCellDef>Type</th>
+                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.actionType) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="status">
+                    <th mat-header-cell *matHeaderCellDef>Status</th>
+                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.status) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="paymentDate">
+                    <th mat-header-cell *matHeaderCellDef>Payment date</th>
+                    <td mat-cell *matCellDef="let a">{{ a.paymentDate || '—' }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="entitlement">
+                    <th mat-header-cell *matHeaderCellDef>Amount / unit</th>
+                    <td mat-cell *matCellDef="let a">
+                      {{ a.amountPerUnit != null ? (a.amountPerUnit | number:'1.0-8') + ' ' + (a.currency ?? '') : '—' }}
+                    </td>
+                  </ng-container>
+                  <ng-container matColumnDef="progress">
+                    <th mat-header-cell *matHeaderCellDef>Settlement progress</th>
+                    <td mat-cell *matCellDef="let a">{{ corporateActionProgress(a) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="actions">
+                    <th mat-header-cell *matHeaderCellDef></th>
+                    <td mat-cell *matCellDef="let a">
+                      @if (a.status === 'SETTLED' || a.status === 'CLOSED') {
+                        <button mat-icon-button matTooltip="Download confirmation (PDF)" (click)="downloadCorporateActionConfirmation(a)">
+                          <mat-icon>picture_as_pdf</mat-icon>
+                        </button>
+                        <button mat-icon-button matTooltip="Download ISO 20022-shaped confirmation (XML)"
+                                (click)="downloadCorporateActionIso20022Confirmation(a)">
+                          <mat-icon>code</mat-icon>
+                        </button>
+                      }
+                    </td>
+                  </ng-container>
+
+                  <tr mat-header-row *matHeaderRowDef="corporateActionColumns"></tr>
+                  <tr mat-row *matRowDef="let r; columns: corporateActionColumns;"></tr>
+                </table>
+              </div>
+            } @else {
+              <p class="empty-text">
+                @if (corporateActionsSection.status === 'pending') { Corporate actions are still loading. }
+                @else { No corporate actions for this holding yet. }
+              </p>
+            }
+          </mat-card-content>
+        </mat-card>
       } @else {
         <mat-card>
           <mat-card-content class="load-error" role="alert">
@@ -573,6 +708,8 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     .bond-terms-grid > div { display: flex; flex-direction: column; gap: 2px; }
     .bt-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--rw-text-secondary); }
     .bt-value { font-size: 14px; color: var(--rw-text-primary); font-weight: 600; }
+    .call-schedule { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+    .call-schedule-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--rw-text-primary); }
     .identity-card { border-left: 4px solid #5e35b1; }
     .identity-icon { vertical-align: middle; margin-right: 6px; color: #5e35b1; }
     .identity-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
@@ -644,6 +781,8 @@ export class InvestmentDetailComponent implements OnInit {
   private readonly registerDocumentService = inject(RegisterDocumentService);
   private readonly registerInspectionService = inject(RegisterInspectionService);
   private readonly bondTermsService = inject(BondTermsService);
+  private readonly tokenHistoryService = inject(TokenHistoryService);
+  private readonly corporateActionsService = inject(CorporateActionsService);
   private readonly authService = inject(AuthService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
@@ -658,6 +797,9 @@ export class InvestmentDetailComponent implements OnInit {
   loading = true;
   deploymentsSection: AsyncSection<AssetDeployment[]> = createAsyncSection<AssetDeployment[]>([]);
   identitySection: AsyncSection<IdentityRegistryEntry | null> = createAsyncSection<IdentityRegistryEntry | null>(null);
+  transferHistorySection: AsyncSection<TokenTransferResponse[]> = createAsyncSection<TokenTransferResponse[]>([]);
+  corporateActionsSection: AsyncSection<CorporateActionView[]> = createAsyncSection<CorporateActionView[]>([]);
+  readonly corporateActionColumns = ['type', 'status', 'paymentDate', 'entitlement', 'progress', 'actions'];
   registerDocMeta: RegisterDocumentMeta | null = null;
   downloadingRegisterDoc = false;
   bondTerms: AssetBondTerms | null = null;
@@ -685,6 +827,7 @@ export class InvestmentDetailComponent implements OnInit {
   loadError = '';
 
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status'];
+  readonly transferColumns = ['eventType', 'from', 'to', 'amount', 'finality', 'occurredAt'];
 
   get isErc3643(): boolean {
     return this.record?.tokenStandard === 'ERC3643' || this.record?.tokenStandard === 'CONF_ERC3643';
@@ -717,6 +860,8 @@ export class InvestmentDetailComponent implements OnInit {
         this.loadDeployments(record.assetId, record.walletAddress);
         this.loadRegisterDocMeta(record.assetId);
         this.loadBondTerms(record.assetId);
+        this.loadTransferHistory(record.assetId);
+        this.loadCorporateActions(record.assetId);
       },
       error: (err) => {
         this.loadError = err?.error?.message ?? 'Failed to load the investment.';
@@ -747,6 +892,77 @@ export class InvestmentDetailComponent implements OnInit {
       error: () => {
         // 404 for the (common) case of a non-bond asset — no terms to show, not an error.
       },
+    });
+  }
+
+  /** Most-recent on-chain transfers for this asset — finality is rendered in plain language via
+   *  `finalityLabel`, resolved server-side for this app's roles (see `TokenHistoryService`'s
+   *  javadoc); `finalityStatus` (the raw enum) only drives the badge's color, never its text. */
+  private loadTransferHistory(assetId: string): void {
+    this.transferHistorySection = beginAsyncSection(this.transferHistorySection);
+    this.tokenHistoryService.getAssetHistory(assetId, 0, 20).subscribe({
+      next: (page) => {
+        this.transferHistorySection = resolveAsyncSection(this.transferHistorySection, page.content);
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.transferHistorySection = failAsyncSection(this.transferHistorySection);
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  retryTransferHistory(): void {
+    if (this.record) this.loadTransferHistory(this.record.assetId);
+  }
+
+  /** Corporate actions affecting this holding — excludes an issuer's own PROPOSED/REJECTED
+   *  drafts (`MeCorporateActionController` scopes this to register facts, not drafts). */
+  private loadCorporateActions(assetId: string): void {
+    this.corporateActionsSection = beginAsyncSection(this.corporateActionsSection);
+    this.corporateActionsService.listForHolder(assetId).subscribe({
+      next: (actions) => {
+        this.corporateActionsSection = resolveAsyncSection(this.corporateActionsSection, actions);
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.corporateActionsSection = failAsyncSection(this.corporateActionsSection);
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  /** Bound with no args from the template's Retry button. */
+  retryCorporateActions(): void {
+    if (this.record) this.loadCorporateActions(this.record.assetId);
+  }
+
+  corporateActionProgress(a: CorporateActionView): string {
+    switch (a.status) {
+      case 'PROPOSED': return 'Awaiting operator review';
+      case 'REJECTED': return 'Rejected';
+      case 'CANCELLED': return 'Cancelled';
+      case 'SETTLED':
+      case 'CLOSED':
+        return a.settlementTxHash ? `${a.settlementTxHash.slice(0, 10)}…` : 'Settled off-chain';
+      default:
+        if (!a.issuerAttestedAt) return 'Awaiting issuer attestation';
+        if (!a.dualControlApprovedAt) return 'Issuer attested — awaiting operator confirmation';
+        return 'Confirmed — awaiting settlement dispatch';
+    }
+  }
+
+  downloadCorporateActionConfirmation(a: CorporateActionView): void {
+    this.corporateActionsService.downloadConfirmation(a.id).subscribe({
+      next: (pdf) => downloadBlob(pdf, `confirmation-${a.id}.pdf`),
+      error: () => this.snackBar.open('Failed to generate the confirmation.', 'Dismiss', { duration: 4000 }),
+    });
+  }
+
+  downloadCorporateActionIso20022Confirmation(a: CorporateActionView): void {
+    this.corporateActionsService.downloadIso20022Confirmation(a.id).subscribe({
+      next: (xml) => downloadBlob(xml, `confirmation-${a.id}.xml`),
+      error: () => this.snackBar.open('Failed to generate the ISO 20022 confirmation.', 'Dismiss', { duration: 4000 }),
     });
   }
 

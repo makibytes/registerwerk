@@ -14,6 +14,7 @@ public record ChainConfigUpdateRequest(
         @Size(max = 512) @Pattern(regexp = "https?://\\S+") String graphNodeUrl,
         @Size(max = 200) String graphSubgraphName,
         @Pattern(regexp = "(?i)TAG_BASED|DEPTH_BASED|INSTANT") String finalityModel,
-        @Positive Integer avgBlockSeconds,
-        @Pattern(regexp = "(?i)RPC_SELF_PROBE|CHAINCACHE") String finalitySource
+        @Positive Integer avgBlockSeconds
+        // No finalitySource field: it is fully auto-derived from the chain's node set — see
+        // ChainConfig.FinalitySource's javadoc. There is nothing for an operator to set here.
 ) {}

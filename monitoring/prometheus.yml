@@ -31,6 +31,22 @@ scrape_configs:
     static_configs:
       - targets: ["postgres-exporter:9187"]
 
+  # One target per chaincache workload (see docker-compose.yml — one Spring Boot process per
+  # chain, sharing a Postgres instance but each its own scrape target). Requires
+  # chaincache.auth.prometheus-public=true on each workload (set in docker-compose.yml) — safe
+  # here since this scrape happens over the same internal docker network, never a published port;
+  # the Helm chart's own values.yaml documents the identical ClusterIP-only trust boundary for
+  # this setting.
+  - job_name: chaincache
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["chaincache-sepolia:8080"]
+        labels:
+          chaincache_workload: sepolia
+      - targets: ["chaincache-base:8080"]
+        labels:
+          chaincache_workload: base
+
   - job_name: node
     static_configs:
       - targets: ["node-exporter:9100"]

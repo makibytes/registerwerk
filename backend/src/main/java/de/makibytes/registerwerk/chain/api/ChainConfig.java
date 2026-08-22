@@ -19,11 +19,14 @@ public class ChainConfig {
 
     public enum NetworkType { MAINNET, TESTNET }
 
-    /** Where this chain's SAFE/FINALIZED promotions and reorg retractions come from. Defaults to
-     *  {@link #RPC_SELF_PROBE} (this registry's own poll-based tag/depth probing, unchanged
-     *  behavior) — an operator opts a chain into {@link #CHAINCACHE} only once it has an enabled
-     *  {@code RpcNode} of {@code NodeKind.CHAINCACHE} for it, giving push-based, gap-free,
-     *  replayable retractions instead. See {@code blockchain.internal.ChaincacheDurableStreamManager}. */
+    /** Where this chain's SAFE/FINALIZED promotions and reorg retractions come from. Fully
+     *  auto-derived, never operator-set (no create/update DTO field for it — see
+     *  {@code chain.web.dto.ChainConfigCreateRequest}/{@code ChainConfigUpdateRequest}):
+     *  {@code RpcNodeService#recomputeFinalitySource} recomputes it after every node lifecycle
+     *  event from whether the chain currently has an enabled {@code RpcNode} of
+     *  {@code NodeKind.CHAINCACHE}, switching it to {@link #CHAINCACHE} (push-based, gap-free,
+     *  replayable retractions) or back to {@link #RPC_SELF_PROBE} (this registry's own poll-based
+     *  tag/depth probing) as that changes. See {@code blockchain.internal.ChaincacheDurableStreamManager}. */
     public enum FinalitySource { RPC_SELF_PROBE, CHAINCACHE }
 
     /**

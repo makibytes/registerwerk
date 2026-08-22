@@ -4,7 +4,10 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.internal.CorporateActionConfirmationService;
 import de.makibytes.registerwerk.corporateactions.internal.CorporateActionService;
 import de.makibytes.registerwerk.corporateactions.web.dto.CancelCorporateActionRequest;
+import de.makibytes.registerwerk.corporateactions.web.dto.CorporateActionView;
 import de.makibytes.registerwerk.corporateactions.web.dto.MarkSettledRequest;
+import de.makibytes.registerwerk.corporateactions.web.dto.OverrideAttestationRequest;
+import de.makibytes.registerwerk.corporateactions.web.dto.RejectProposalRequest;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
@@ -29,15 +32,18 @@ import java.util.UUID;
  * Operator endpoints for the corporate-action lifecycle.
  * Base path: {@code /api/v1/corporate-actions}
  *
- * <p>{@code approve-settlement} records the dual-control (Vieraugenprinzip) sign-off that
- * the scheduled settlement job ({@code CorporateActionService.processDailyTransitions})
- * now requires before it will settle a due corporate action — a coupon payment, dividend,
- * split, or redemption moves real money/tokens and must not settle on one actor's say-so.
+ * <p>{@code confirm-settlement} records the operator's half of the two-party settlement control
+ * (see {@code CorporateActionService}'s class javadoc) — the issuer must have already attested
+ * (or an operator must have overridden that requirement) before this succeeds.
  *
- * <p>{@code mark-settled} is the manual fallback for every token standard other than Canton
- * bonds: {@code CorporateActionSettlementListener} only ever dispatches settlement
- * automatically for {@code DAML_BOND_*}; every other standard has no other path out of
- * AWAITING_SETTLEMENT.
+ * <p>{@code approve-proposal}/{@code reject-proposal} review an issuer's PROPOSED DIVIDEND/
+ * SPLIT/CALL before it joins the register-affecting ANNOUNCED pipeline — see
+ * {@code IssuerCorporateActionController} for where issuers submit those.
+ *
+ * <p>{@code mark-settled} is the manual fallback for every settlement path with no automated
+ * on-chain adapter: {@code CorporateActionSettlementListener} only ever dispatches settlement
+ * automatically for {@code DAML_BOND_*} coupons/redemptions/early-calls; SPLIT has no on-chain
+ * primitive on any supported standard and always settles this way.
  */
 @RestController
 @RequestMapping("/api/v1/corporate-actions")
@@ -58,13 +64,44 @@ public class CorporateActionAdminController {
         return ResponseEntity.ok(corporateActionService.findByAsset(assetId));
     }
 
-    @PostMapping("/{corporateActionId}/approve-settlement")
-    @RequiresStepUp(requireSecondApprover = true, reason = "CORPORATE_ACTION_SETTLEMENT_APPROVAL")
-    public ResponseEntity<CorporateAction> approveSettlement(
+    /** Every issuer-submitted proposal awaiting review, across all assets, oldest first. */
+    @GetMapping("/proposals")
+    public ResponseEntity<List<CorporateActionView>> pendingProposals() {
+        return ResponseEntity.ok(corporateActionService.findProposalsPendingReview().stream()
+                .map(CorporateActionView::of).toList());
+    }
+
+    @PostMapping("/{corporateActionId}/approve-proposal")
+    @RequiresStepUp(requireSecondApprover = false, reason = "CORPORATE_ACTION_PROPOSAL_REVIEW")
+    public ResponseEntity<CorporateAction> approveProposal(
             @PathVariable UUID corporateActionId, Authentication auth) {
-        CorporateAction approved = corporateActionService.approveForSettlement(
+        return ResponseEntity.ok(corporateActionService.approveProposal(corporateActionId,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+    }
+
+    @PostMapping("/{corporateActionId}/reject-proposal")
+    @RequiresStepUp(requireSecondApprover = false, reason = "CORPORATE_ACTION_PROPOSAL_REVIEW")
+    public ResponseEntity<CorporateAction> rejectProposal(
+            @PathVariable UUID corporateActionId, @Valid @RequestBody RejectProposalRequest request, Authentication auth) {
+        return ResponseEntity.ok(corporateActionService.rejectProposal(corporateActionId, request.reason(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+    }
+
+    @PostMapping("/{corporateActionId}/confirm-settlement")
+    @RequiresStepUp(requireSecondApprover = false, reason = "CORPORATE_ACTION_SETTLEMENT_CONFIRMATION")
+    public ResponseEntity<CorporateAction> confirmSettlement(
+            @PathVariable UUID corporateActionId, Authentication auth) {
+        CorporateAction confirmed = corporateActionService.confirmSettlementAsOperator(
                 corporateActionId, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
-        return ResponseEntity.ok(approved);
+        return ResponseEntity.ok(confirmed);
+    }
+
+    @PostMapping("/{corporateActionId}/override-attestation")
+    @RequiresStepUp(requireSecondApprover = false, reason = "CORPORATE_ACTION_ATTESTATION_OVERRIDE")
+    public ResponseEntity<CorporateAction> overrideAttestation(
+            @PathVariable UUID corporateActionId, @Valid @RequestBody OverrideAttestationRequest request, Authentication auth) {
+        return ResponseEntity.ok(corporateActionService.overrideIssuerAttestation(corporateActionId, request.reason(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
     @PostMapping("/{corporateActionId}/mark-settled")

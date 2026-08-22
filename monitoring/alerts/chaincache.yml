@@ -1,0 +1,98 @@
+groups:
+  - name: chaincache
+    interval: 1m
+    rules:
+
+      # ── Workload availability ────────────────────────────────────────────
+      - alert: ChaincacheWorkloadDown
+        expr: |
+          up{job="chaincache"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "chaincache workload {{ $labels.chaincache_workload }} is down"
+          description: "Prometheus has not been able to scrape chaincache workload {{ $labels.chaincache_workload }} ({{ $labels.instance }}) for at least 2 minutes."
+
+      # ── Upstream RPC health (chaincache.rpc.errors, chaincache.rpc.node.latency —
+      # see MetricsAggregator.recordMicrometer) ────────────────────────────────
+      - alert: ChaincacheUpstreamErrorRate
+        expr: |
+          sum by (chaincache_workload, chain, provider) (rate(chaincache_rpc_errors_total[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "chaincache upstream error rate elevated (workload={{ $labels.chaincache_workload }}, provider={{ $labels.provider }})"
+          description: "chaincache_rpc_errors_total is increasing faster than 0.5/s for provider {{ $labels.provider }} on chain {{ $labels.chain }}, workload {{ $labels.chaincache_workload }}."
+
+      # chaincache's rpc.node.latency Timer publishes only _count/_sum (no percentile histogram
+      # buckets are enabled), so this is average latency, not p95 — the honest thing this metric
+      # can actually answer.
+      - alert: ChaincacheUpstreamLatencyHigh
+        expr: |
+          (
+            sum by (chaincache_workload, chain, provider) (rate(chaincache_rpc_node_latency_seconds_sum[5m]))
+            /
+            sum by (chaincache_workload, chain, provider) (rate(chaincache_rpc_node_latency_seconds_count[5m]))
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "chaincache upstream average latency > 2s (workload={{ $labels.chaincache_workload }}, provider={{ $labels.provider }})"
+          description: "Average RPC latency to provider {{ $labels.provider }} on chain {{ $labels.chain }} has exceeded 2s for 5 minutes."
+
+      # ── WebSocket stability ───────────────────────────────────────────────
+      - alert: ChaincacheWsFlapping
+        expr: |
+          sum by (chaincache_workload, chain, provider) (increase(chaincache_rpc_ws_disconnects_total[15m])) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "chaincache WebSocket flapping (workload={{ $labels.chaincache_workload }}, provider={{ $labels.provider }})"
+          description: "More than 5 WebSocket disconnects in 15 minutes for provider {{ $labels.provider }} on chain {{ $labels.chain }}."
+
+      # ── Reorgs ────────────────────────────────────────────────────────────
+      - alert: ChaincacheReorgBurst
+        expr: |
+          sum by (chaincache_workload, chain) (increase(chaincache_chain_reorganizations_total[10m])) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusually frequent reorgs on chaincache workload {{ $labels.chaincache_workload }}"
+          description: "More than 3 reorgs detected in 10 minutes for chain {{ $labels.chain }} (workload {{ $labels.chaincache_workload }}) — check the upstream provider(s) for stability."
+
+      # ── Registerwerk's own durable-stream connection to chaincache
+      # (ChaincacheDurableStreamManager — registerwerk_chaincache_stream_* metrics) ─────────
+      - alert: RegisterwerkChaincacheStreamDown
+        expr: |
+          registerwerk_chaincache_stream_connected{job="registerwerk-backend"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Registerwerk's chaincache durable-event stream is disconnected (chain={{ $labels.chain }})"
+          description: "ChaincacheDurableStreamManager has had no live WebSocket connection to chaincache for chain {{ $labels.chain }} for at least 5 minutes — that chain's SAFE/FINALIZED promotions and reorg retractions are not being delivered. ReorgGuard's RPC self-probing is unaffected for other chains, but this one opted into chaincache specifically for gap-free delivery."
+
+      - alert: RegisterwerkChaincacheStreamStale
+        expr: |
+          time() - registerwerk_chaincache_stream_last_event_timestamp_seconds{job="registerwerk-backend"} > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Registerwerk's chaincache durable-event stream has gone quiet (chain={{ $labels.chain }})"
+          description: "No BLOCK or RETRACTION event has arrived on chain {{ $labels.chain }}'s chaincache durable stream for over 10 minutes, even though the connection itself may still report open — check whether the chain is actually producing blocks and whether chaincache's own ingest leadership/canonical-chain pipeline is healthy."
+
+      - alert: RegisterwerkChaincacheCapabilityProbeFailing
+        expr: |
+          sum by (management_url, reason) (increase(registerwerk_chaincache_capability_probe_failures_total{job="registerwerk-backend"}[15m])) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Registerwerk's chaincache capability probe is failing repeatedly ({{ $labels.management_url }}, reason={{ $labels.reason }})"
+          description: "More than 5 failed GET /api/capabilities probes in 15 minutes against {{ $labels.management_url }} (reason={{ $labels.reason }}) — if reason is \"unauthorized\", check registerwerk.chaincache.jwt-secret against that workload's chaincache.jwt.secret."

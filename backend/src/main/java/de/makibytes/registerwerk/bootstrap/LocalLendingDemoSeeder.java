@@ -190,6 +190,15 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         localNode.setLabel("Local Anvil");
         localNode.setEnabled(true);
         localNode.setExclusive(true);
+        // Also pin the chaincache-kind node (DemoDataSeeder.syncChaincacheDemoNode, which runs
+        // before this — DemoDataSeeder.getOrder()=0 < this class's 20) exclusive alongside anvil,
+        // not instead of it: BlockchainClientRegistry.selectBestNodeId ties on lag and prefers
+        // CHAINCACHE, so with both pinned chaincache actually receives routed traffic while anvil
+        // remains a real, live fallback (stopping the chaincache container demonstrably fails over
+        // to anvil) — a single exclusive chaincache node would have no fallback at all.
+        existingNodes.stream()
+                .filter(node -> node.getKind() == RpcNode.NodeKind.CHAINCACHE)
+                .forEach(node -> node.setExclusive(true));
         rpcNodes.saveAll(existingNodes);
         rpcNodes.save(localNode);
 

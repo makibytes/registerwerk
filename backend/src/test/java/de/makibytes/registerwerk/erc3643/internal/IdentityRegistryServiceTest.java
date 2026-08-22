@@ -145,6 +145,24 @@ class IdentityRegistryServiceTest {
     }
 
     @Test
+    @DisplayName("resets removalConfirmed so a re-removal (e.g. after IdentityRegistryRemovalRevertCompensator "
+            + "restored the entry post-reorg) is re-polled by the confirmation listener")
+    void removeInvestor_resetsRemovalConfirmedForARepeatRemoval() {
+        Erc3643IdentityRegistry entry = entry();
+        entry.setRemovalConfirmed(true); // left over from a first removal that was later reorg-reverted
+        when(registryRepo.findById(registryEntryId)).thenReturn(Optional.of(entry));
+        when(suiteRepo.findById(suiteId)).thenReturn(Optional.of(deployedSuite()));
+        when(deploymentRepo.findById(deploymentId)).thenReturn(Optional.of(deployment()));
+        when(blockchainClientRegistry.getEvmClient(any())).thenReturn(mock(Web3j.class));
+        when(evmContractService.signer(any(ChainDescriptor.class))).thenReturn(mock(de.makibytes.registerwerk.wallet.api.EvmSigner.class));
+        when(evmContractService.submit(any(), any(), anyString(), any())).thenReturn("0xdeletetx2");
+
+        service.removeInvestor(suiteId, registryEntryId, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(entry.isRemovalConfirmed()).isFalse();
+    }
+
+    @Test
     @DisplayName("a submission failure propagates and does not soft-delete the entry")
     void removeInvestor_submissionFails_doesNotSoftDelete() {
         Erc3643IdentityRegistry entry = entry();

@@ -38,33 +38,36 @@ public class RpcNodeController {
         return ResponseEntity.ok(nodes);
     }
 
-    /** Adds a new RPC node to the given chain. */
+    /** Adds a new RPC node to the given chain. Whether this becomes a chaincache connection is
+     *  auto-detected from {@code url} alone — there is no {@code kind} field to set; see
+     *  {@code RpcNodeService#addNode}. */
     @PostMapping
     public ResponseEntity<RpcNodeResponse> addNode(
             @PathVariable UUID chainId,
             @RequestBody @Valid RpcNodeCreateRequest request) {
-        RpcNode node = rpcNodeService.addNode(chainId, request.url(), request.label(),
-                request.kind(), request.managementUrl(), request.remoteChainKey());
+        RpcNode node = rpcNodeService.addNode(chainId, request.url(), request.label());
         return ResponseEntity.status(HttpStatus.CREATED).body(rpcNodeService.toResponse(node));
     }
 
-    /** Updates an existing node's connection details. */
+    /** Updates an existing node's URL/label — re-detected on every update, same as add. */
     @PutMapping("/{nodeId}")
     public ResponseEntity<RpcNodeResponse> updateNode(
             @PathVariable UUID chainId,
             @PathVariable UUID nodeId,
             @RequestBody @Valid RpcNodeUpdateRequest request) {
-        RpcNode node = rpcNodeService.updateNode(chainId, nodeId, request.url(), request.label(),
-                request.kind(), request.managementUrl(), request.remoteChainKey());
+        RpcNode node = rpcNodeService.updateNode(chainId, nodeId, request.url(), request.label());
         return ResponseEntity.ok(rpcNodeService.toResponse(node));
     }
 
-    /** Re-probes a {@code CHAINCACHE}-kind node's capabilities on demand. No-op for a
-     *  {@code DIRECT_RPC} node. */
-    @PostMapping("/{nodeId}/refresh-capabilities")
-    public ResponseEntity<RpcNodeResponse> refreshCapabilities(
+    /** Re-runs chaincache detection for one node on demand, in both directions (promotes a
+     *  {@code DIRECT_RPC} node whose URL now answers as chaincache; falls a {@code CHAINCACHE}
+     *  node back to {@code DIRECT_RPC} if chaincache no longer serves it) — a manual trigger for
+     *  the periodic background job {@code RpcNodeService#redetectAll} already runs on every
+     *  enabled node. */
+    @PostMapping("/{nodeId}/redetect")
+    public ResponseEntity<RpcNodeResponse> redetect(
             @PathVariable UUID chainId, @PathVariable UUID nodeId) {
-        RpcNode node = rpcNodeService.refreshCapabilities(chainId, nodeId);
+        RpcNode node = rpcNodeService.redetect(chainId, nodeId);
         return ResponseEntity.ok(rpcNodeService.toResponse(node));
     }
 

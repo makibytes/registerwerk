@@ -125,10 +125,10 @@ class OnchainIdentityReceiptListener {
         log.info("Resolved ONCHAINID identity={} address={} tx={}",
                 identity.getId(), realAddress, identity.getDeployedByTx());
 
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                identity.getChainConfigId(), blockNumber, receipt.getBlockHash(), identity.getDeployedByTx(), null,
-                "erc3643", OnchainIdentityRevertCompensator.EFFECT_TYPE, "OnchainIdentity", identity.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                identity.getChainConfigId(), blockNumber, receipt.getBlockHash(), identity.getDeployedByTx(),
+                "erc3643", OnchainIdentityRevertCompensator.EFFECT_TYPE, "OnchainIdentity", identity.getId(), null,
+                CompensationCategory.INVERSE_FLIP));
     }
 
     private static String extractIdentityAddress(TransactionReceipt receipt) {

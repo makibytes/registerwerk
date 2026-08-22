@@ -61,17 +61,20 @@ class VaultRequestFulfillmentRevertCompensator implements ChainEffectCompensator
                     "VaultRequest " + id + " is already PENDING (already reverted, or never resolved)");
         }
 
-        log.error("VaultRequest id={} was marked {} but its confirming block was retracted by a reorg deep "
-                        + "enough to cross FINALIZED — the fulfil/cancel never actually happened on-chain; "
+        log.error("VaultRequest id={} was marked {} but its confirming block was retracted by a reorg "
+                        + "— the fulfil/cancel never actually happened on-chain; "
                         + "reverting to PENDING so it can be resubmitted.",
                 id, request.getRequestStatus());
 
-        if (request.getRequestStatus() == VaultRequestStatus.FULFILLED) {
-            request.setFulfilledTx(null);
-            request.setFulfilledAt(null);
-            request.setNavAtFulfill(null);
-        } else {
-            request.setCancelledTx(null);
+        switch (request.getRequestStatus()) {
+            case FULFILLED -> {
+                request.setFulfilledTx(null);
+                request.setFulfilledAt(null);
+                request.setNavAtFulfill(null);
+            }
+            case CANCELLED -> request.setCancelledTx(null);
+            case PENDING -> throw new IllegalStateException(
+                    "VaultRequest " + id + " is PENDING here despite the PENDING check above — unreachable");
         }
         request.setRequestStatus(VaultRequestStatus.PENDING);
         request.setConfirmed(false);

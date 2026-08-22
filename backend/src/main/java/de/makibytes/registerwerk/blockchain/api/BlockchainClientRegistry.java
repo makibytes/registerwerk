@@ -211,7 +211,7 @@ public class BlockchainClientRegistry {
 
             NodeState state = new NodeState(
                     node.getId(), node.isHealthy(), node.isEnabled(), node.isExclusive(),
-                    node.getConsecutiveFailures(), node.getLastSuccessAt(), node.getLagFromBest());
+                    node.getConsecutiveFailures(), node.getLastSuccessAt(), node.getLagFromBest(), node.getKind());
 
             // NB: reuse must be lazy. `map.getOrDefault(id, factory.createClient(url))` reads as
             // "reuse, else create", but Java evaluates arguments eagerly — it built a client for
@@ -363,10 +363,16 @@ public class BlockchainClientRegistry {
                     "All RPC nodes for chain '" + identifier + "' are manually disabled");
         }
 
-        // Prefer healthy with smallest lag
+        // Prefer healthy with smallest lag; a tie (most commonly two nodes both fully caught up,
+        // lag 0) breaks toward a CHAINCACHE-kind node — its push-based, gap-free finality
+        // guarantees are strictly better than a DIRECT_RPC node's poll-based ones at equal lag,
+        // and this is the whole point of chaincache as a showcase: routed traffic should actually
+        // prefer it, not just coexist with it. Never overrides health/lag itself — an unhealthy
+        // or lagging chaincache node still loses to a healthy, caught-up direct node.
         Optional<NodeState> best = candidates.stream()
                 .filter(NodeState::healthy)
-                .min(Comparator.comparingInt(n -> n.lagFromBest() != null ? n.lagFromBest() : 0));
+                .min(Comparator.<NodeState>comparingInt(n -> n.lagFromBest() != null ? n.lagFromBest() : 0)
+                        .thenComparing(n -> n.kind() == RpcNode.NodeKind.CHAINCACHE ? 0 : 1));
 
         if (best.isPresent()) {
             return best.get().nodeId();
@@ -393,5 +399,6 @@ public class BlockchainClientRegistry {
             boolean exclusive,
             int consecutiveFailures,
             Instant lastSuccessAt,
-            Integer lagFromBest) {}
+            Integer lagFromBest,
+            RpcNode.NodeKind kind) {}
 }

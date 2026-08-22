@@ -200,6 +200,21 @@ registerwerk:
     # here previously broke the whole demo stack with a bare "Invalid CORS request" 403 on login
     # for anyone who happened to open the frontend via the other spelling.
     allowed-origins: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4201,http://127.0.0.1:4200,http://127.0.0.1:4201}
+  chaincache:
+    # HS256 signing key for the short-lived bearer token ChaincacheTokenFactory mints to
+    # authenticate against a chaincache instance's read APIs (GET /api/capabilities, the durable
+    # event WebSocket) — chaincache's own default is chaincache.auth.enabled: true, so without
+    # this every probe 401s and every chaincache node silently demotes to DIRECT_RPC. Blank means
+    # no credential is presented (fine against a chaincache instance running with
+    # chaincache.auth.enabled: false). Deliberately a SEPARATE secret from JWT_DEV_SECRET — never
+    # share a signing key across two products.
+    jwt-secret: ${CHAINCACHE_JWT_SECRET:}
+    # Identifies this Registerwerk process to chaincache's durable-event consumerId (see
+    # blockchain.internal.ChaincacheDurableStreamManager) — must be stable across restarts of the
+    # SAME process/pod so its durable-stream cursor resumes rather than starting over, but distinct
+    # per replica under >1 instance so replicas don't share one cursor and silently split the
+    # event stream between them.
+    instance-id: ${HOSTNAME:registerwerk}
   chains:
     ethereum:
       mainnet:

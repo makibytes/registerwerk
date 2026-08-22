@@ -197,13 +197,15 @@ class ReorgGuard {
      *  regardless of severity (shallow / crosses-SAFE / crosses-FINALIZED) — every one of those is
      *  still fully compensable by construction (the policy floors that would make an effect
      *  IRREVERSIBLE only apply to outward-facing documents, not balance aggregation); severity only
-     *  changes whether a later phase additionally freezes the gate on these assets. */
+     *  changes whether {@code FinalityGateImpl}'s per-asset {@code UNRESOLVED_COMPENSATION} freeze
+     *  additionally kicks in on these assets — it does, automatically, whenever a compensation here
+     *  fails or escalates as irreversible. */
     private void compensateAffectedAssets(UUID chainConfigId, long forkBlock) {
         for (UUID assetId : tokenTransferRepository.findDistinctAssetIdsAtOrAfter(chainConfigId, forkBlock)) {
-            ChainEffectDescriptor descriptor = new ChainEffectDescriptor(
-                    chainConfigId, forkBlock, null, null, null,
-                    "indexer", HolderRecomputeCompensator.EFFECT_TYPE, "Asset", assetId,
-                    CompensationCategory.RECOMPUTE, null, null, null, null);
+            ChainEffectDescriptor descriptor = ChainEffectDescriptor.of(
+                    chainConfigId, forkBlock, null, null,
+                    "indexer", HolderRecomputeCompensator.EFFECT_TYPE, "Asset", assetId, assetId,
+                    CompensationCategory.RECOMPUTE);
             chainEffectRecorder.recordAndCompensate(descriptor);
         }
     }

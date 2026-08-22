@@ -115,13 +115,13 @@ class MarketplaceTxPoller {
         listingRepository.save(listing);
         log.info("dApp {} v{} published (tx={})", listing.getSlug(), version.getVersion(), txHash);
 
-        // A reorg deep enough to cross FINALIZED on this anchor tx must not leave the catalog
+        // A reorg retracting this anchor tx's confirming block must not leave the catalog
         // asserting a version as live that the chain no longer agrees was ever anchored — see
         // DappVersionRevertCompensator.
         txGateway.confirmedLocation(txHash).ifPresent(location ->
-                chainEffectRecorder.record(new ChainEffectDescriptor(
-                        location.chainConfigId(), location.blockNumber(), location.blockHash(), txHash, null,
+                chainEffectRecorder.record(ChainEffectDescriptor.of(
+                        location.chainConfigId(), location.blockNumber(), location.blockHash(), txHash,
                         "marketplace", DappVersionRevertCompensator.EFFECT_TYPE, "DappVersion", version.getId(),
-                        CompensationCategory.INVERSE_FLIP, null, null, null, null)));
+                        null, CompensationCategory.INVERSE_FLIP)));
     }
 }

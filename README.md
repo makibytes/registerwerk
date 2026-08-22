@@ -101,6 +101,7 @@ immediately — no separate `npm start` needed:
 - Backend API: http://localhost:8080/swagger-ui.html
 - Kong proxy (customer API traffic only): http://localhost:8000
 - Kong admin API (loopback only, no GUI): http://localhost:8001 — reach it via `docker exec` or an SSH tunnel, never expose it publicly
+- chaincache workloads (one Spring Boot process per chain, loopback-only — see [chaincache Integration](docs/operator/blockchain/chaincache-integration.md)): `chaincache-sepolia` on http://localhost:18090/sepolia/rpc, `chaincache-base` on http://localhost:18091/base/rpc
 - Confidential (Zama fhEVM) token support is opt-in: `docker compose --profile confidential up -d` also starts `zama-relayer` on http://localhost:3005
 
 ### 3. Frontend development with hot-reload

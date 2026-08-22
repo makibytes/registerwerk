@@ -46,8 +46,8 @@ class PermissionGrantRevertCompensator implements ChainEffectCompensator {
                     "PermissionGrant " + id + " is no longer ACTIVE (status=" + grant.getStatus() + ")");
         }
 
-        log.error("PermissionGrant id={} was ACTIVE but its confirming block was retracted by a reorg deep "
-                        + "enough to cross FINALIZED — reverting to PENDING for re-verification.", id);
+        log.error("PermissionGrant id={} was ACTIVE but its confirming block was retracted by a reorg "
+                        + "— reverting to PENDING for re-verification.", id);
         grant.setStatus(PermissionGrantStatus.PENDING);
         repository.save(grant);
 

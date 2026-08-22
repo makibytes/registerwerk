@@ -1,25 +1,27 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
-import { ChainHealth, RpcNode, RpcNodeKind } from '../../core/models';
+import { ChainHealth, RpcNode } from '../../core/models';
 import { RpcNodeWriteRequest } from '../../core/api/chain.service';
 
-/** Add or edit an RPC node — kind-aware since a CHAINCACHE connection needs two more fields
- *  (managementUrl for the capability probe + durable stream, remoteChainKey to pick which of
- *  chaincache's multi-chain keys this ChainConfig maps to) that a DIRECT_RPC node has no use for. */
+/** Add or edit an RPC node. There is no kind selector — whether a URL is a plain direct-RPC
+ *  endpoint or a genuine chaincache connection is auto-detected backend-side from the URL alone
+ *  (see ChaincacheClient#detect); an operator has no way to declare or mis-declare it. On edit,
+ *  the currently-detected kind is shown read-only so it's clear what Registerwerk found, without
+ *  offering any control to override it. */
 @Component({
   selector: 'app-add-node-dialog',
   standalone: true,
   imports: [
     FormsModule,
     MatButtonModule,
-    MatButtonToggleModule,
     MatDialogModule,
     MatFormFieldModule,
+    MatIconModule,
     MatInputModule,
   ],
   styles: [`
@@ -27,9 +29,15 @@ import { RpcNodeWriteRequest } from '../../core/api/chain.service';
     .subtitle { font-size: 13px; color: var(--rw-text-muted); margin: 0 0 20px; }
     mat-form-field { width: 100%; }
     .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-    .kind-toggle { display: block; margin-bottom: 16px; }
-    .kind-toggle mat-button-toggle { font-size: 12px; }
     .hint { font-size: 12px; color: var(--rw-text-muted); margin: -8px 0 16px; }
+    .detected-kind {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; margin-bottom: 16px;
+      border-radius: 6px; background: var(--rw-bg); border: 1px solid var(--rw-border);
+      font-size: 12px; color: var(--rw-text-secondary);
+    }
+    .detected-kind mat-icon { font-size: 16px; width: 16px; height: 16px; color: var(--rw-accent); }
+    .detected-kind strong { color: var(--rw-text-primary); }
   `],
   template: `
     <div mat-dialog-title style="padding: 20px 24px 0">
@@ -37,34 +45,26 @@ import { RpcNodeWriteRequest } from '../../core/api/chain.service';
       <p class="subtitle">{{ data.chain.displayName }}</p>
     </div>
     <mat-dialog-content style="padding: 0 24px 8px">
-      <mat-button-toggle-group class="kind-toggle" [(ngModel)]="kind" name="kind" aria-label="Node kind">
-        <mat-button-toggle value="DIRECT_RPC">Direct RPC</mat-button-toggle>
-        <mat-button-toggle value="CHAINCACHE">chaincache</mat-button-toggle>
-      </mat-button-toggle-group>
-
-      @if (kind === 'CHAINCACHE') {
-        <p class="hint">
-          A chaincache connection gives push-based, gap-free retraction detection and a real SAFE
-          tier — a direct node connection can miss a short-lived reorg between polls and has no
-          SAFE tier without a <code>safe</code> block tag.
-        </p>
+      @if (isEdit) {
+        <div class="detected-kind">
+          <mat-icon>{{ data.node!.kind === 'CHAINCACHE' ? 'bolt' : 'lan' }}</mat-icon>
+          <span>
+            Detected as <strong>{{ data.node!.kind === 'CHAINCACHE' ? 'a chaincache connection' : 'a direct RPC node' }}</strong>
+            — re-checked automatically whenever the URL changes.
+          </span>
+        </div>
       }
 
       <mat-form-field appearance="outline">
-        <mat-label>{{ kind === 'CHAINCACHE' ? 'Per-chain RPC URL (e.g. http://chaincache:8080/anvil/rpc)' : 'RPC URL' }}</mat-label>
+        <mat-label>RPC URL</mat-label>
         <input matInput [(ngModel)]="url" placeholder="https://mainnet.infura.io/v3/..." type="url" />
       </mat-form-field>
-
-      @if (kind === 'CHAINCACHE') {
-        <mat-form-field appearance="outline">
-          <mat-label>chaincache instance URL</mat-label>
-          <input matInput [(ngModel)]="managementUrl" placeholder="http://chaincache:8080" type="url" />
-        </mat-form-field>
-        <mat-form-field appearance="outline">
-          <mat-label>Remote chain key</mat-label>
-          <input matInput [(ngModel)]="remoteChainKey" placeholder="anvil" />
-        </mat-form-field>
-      }
+      <p class="hint">
+        Registerwerk detects automatically whether this is a plain direct-RPC endpoint or a
+        chaincache connection. Chaincache runs one workload per chain, so the URL names both the
+        workload and the chain it serves, e.g. <code>http://chaincache-sepolia:8080/sepolia/rpc</code>
+        — there is nothing else to configure here.
+      </p>
 
       <mat-form-field appearance="outline">
         <mat-label>Label (optional)</mat-label>
@@ -87,18 +87,11 @@ export class AddNodeDialogComponent {
 
   readonly isEdit = !!this.data.node;
 
-  kind: RpcNodeKind = this.data.node?.kind ?? 'DIRECT_RPC';
   url = this.data.node?.url ?? '';
   label = this.data.node?.label ?? '';
-  managementUrl = this.data.node?.managementUrl ?? '';
-  remoteChainKey = this.data.node?.remoteChainKey ?? '';
 
   canSubmit(): boolean {
-    if (!this.url.trim()) return false;
-    if (this.kind === 'CHAINCACHE') {
-      return !!this.managementUrl.trim() && !!this.remoteChainKey.trim();
-    }
-    return true;
+    return !!this.url.trim();
   }
 
   submit() {
@@ -106,9 +99,6 @@ export class AddNodeDialogComponent {
     const request: RpcNodeWriteRequest = {
       url: this.url.trim(),
       label: this.label.trim(),
-      kind: this.kind,
-      managementUrl: this.kind === 'CHAINCACHE' ? this.managementUrl.trim() : undefined,
-      remoteChainKey: this.kind === 'CHAINCACHE' ? this.remoteChainKey.trim() : undefined,
     };
     this.dialogRef.close(request);
   }

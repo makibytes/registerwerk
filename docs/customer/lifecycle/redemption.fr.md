@@ -52,10 +52,13 @@ La réponse ne peut pas être « celui qui la détient quand le paiement arrive 
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> ANNOUNCED
+    [*] --> PROPOSED: proposée par l'émetteur
+    [*] --> ANNOUNCED: créée par le système
+    PROPOSED --> ANNOUNCED: l'opérateur approuve
+    PROPOSED --> REJECTED: l'opérateur rejette
     ANNOUNCED --> RECORD_DATE_SET
     RECORD_DATE_SET --> COMPUTED: instantané pris
-    COMPUTED --> AWAITING_SETTLEMENT: approuvé (double validation)
+    COMPUTED --> AWAITING_SETTLEMENT: émetteur atteste + opérateur confirme
     AWAITING_SETTLEMENT --> SETTLED: payé
     SETTLED --> CLOSED
     ANNOUNCED --> CANCELLED
@@ -63,22 +66,32 @@ stateDiagram-v2
     COMPUTED --> CANCELLED
 ```
 
-Le passage `COMPUTED` → `AWAITING_SETTLEMENT` exige la **[double validation](../../compliance/step-up-mfa.md)** : une seconde personne habilitée doit approuver avant que de l'argent ne parte au regard d'une liste de titulaires. L'erreur catastrophique la plus courante en administration de titres est de payer la mauvaise liste, et elle est très difficile à défaire.
+Les coupons, et finalement le remboursement, sont **créés par le système** — générés automatiquement à partir de l'échéancier ou de la date d'échéance, plutôt que confiés à la mémoire d'un humain, et démarrent à `ANNOUNCED`. Les dividendes, les fractionnements et les remboursements anticipés sont **proposés par l'émetteur** : l'émetteur soumet une opération qui démarre à `PROPOSED`, et elle ne rejoint le registre (`ANNOUNCED`) qu'une fois qu'un opérateur l'a examinée et approuvée — ou elle est définitivement écartée (`REJECTED`) sinon.
 
-Les coupons d'une obligation sont générés automatiquement à partir de l'échéancier plutôt que confiés à la mémoire d'un humain, et la tâche quotidienne qui fait progresser les opérations au fil de leurs dates s'exécute d'elle-même.
+Le passage `COMPUTED` → `AWAITING_SETTLEMENT` exige l'accord de **deux parties distinctes**, quelle que soit la façon dont l'opération a été créée : l'émetteur atteste que l'obligation sous-jacente est réellement prête — les fonds pour un coupon ou un dividende, le mécanisme pour un fractionnement ou un remboursement anticipé — puis un opérateur confirme le volet registre/on-chain. L'erreur catastrophique la plus courante en administration de titres est de payer la mauvaise liste, et le fait que deux organisations doivent donner leur accord, et non deux collègues d'une même organisation, rend cela bien plus difficile à laisser passer inaperçu. L'attestation de l'émetteur est une action authentifiée normale ; seule la confirmation de l'opérateur exige une [authentification renforcée](../../compliance/step-up-mfa.md). Si l'émetteur n'atteste jamais, un opérateur peut passer outre cette exigence — ce contournement est enregistré comme une exception distincte et durablement visible, jamais indiscernable d'une attestation authentique.
 
 ### Les types que Registerwerk modélise
 
+Seul un sous-ensemble peut réellement être créé aujourd'hui — le reste est modélisé (il a sa place dans le cycle de vie et le mécanisme de règlement) mais n'a pas encore de voie de création.
+
+**Pris en charge aujourd'hui**
+
+| | Créée par |
+|---|---|
+| `COUPON`, `INTEREST_PAYMENT` | Le système, à partir de l'échéancier. |
+| `REDEMPTION` | Le système, à la date d'échéance. |
+| `DIVIDEND` | Proposition de l'émetteur, examinée par l'opérateur. |
+| `SPLIT` | Proposition de l'émetteur, examinée par l'opérateur. Réglé par constat manuel de l'opérateur — aucun standard de jeton pris en charge ne dispose d'une primitive de fractionnement on-chain. |
+| `CALL` | Proposition de l'émetteur, examinée par l'opérateur. Remboursement anticipé par l'émetteur, lorsque les conditions le permettent. |
+
+**Modélisé, pas encore pris en charge**
+
 | | |
 |---|---|
-| `COUPON`, `INTEREST_PAYMENT` | Intérêts périodiques. |
-| `DIVIDEND` | Une distribution aux détenteurs de capital. |
-| `REDEMPTION`, `PARTIAL_REDEMPTION` | Remboursement du principal, en totalité ou en partie. |
-| `CALL` | Remboursement anticipé par l'émetteur, lorsque les conditions le permettent. |
-| `SPLIT`, `REVERSE_SPLIT` | Modifier le nombre de titres sans modifier la valeur totale. |
+| `PARTIAL_REDEMPTION` | Remboursement partiel du principal. |
+| `REVERSE_SPLIT` | Réduire le nombre de titres sans modifier la valeur totale. |
 | `CONVERSION` | Transformer l'instrument en un autre. |
 | `CAPITAL_CALL` | Appeler des versements complémentaires auprès des titulaires. |
-| `PLEDGE` | Consigner qu'une position a été nantie. |
 
 ---
 
@@ -101,7 +114,7 @@ Mécaniquement, il s'agit d'une opération sur titres de type `REDEMPTION`, gén
 
 1. L'instantané à la date d'enregistrement est pris.
 2. Le droit de chaque titulaire est son nominal à la valeur nominale.
-3. Le paiement est approuvé en double validation puis réglé.
+3. L'émetteur atteste, un opérateur confirme, et le paiement est réglé.
 4. Les jetons sont **détruits** — supprimés on-chain, l'offre revient à zéro.
 5. L'actif passe à `REDEEMED`.
 

@@ -27,6 +27,7 @@ import static org.mockito.Mockito.when;
 class RpcNodeHealthServiceTest {
 
     @Mock private RpcNodeRepository rpcNodeRepository;
+    @Mock private RpcNodeHealthPersister healthPersister;
     @Mock private Web3jClientFactory web3jClientFactory;
     @Mock private SolanaClientFactory solanaClientFactory;
     @Mock private BlockchainClientRegistry registry;
@@ -38,7 +39,8 @@ class RpcNodeHealthServiceTest {
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
         service = new RpcNodeHealthService(
-                rpcNodeRepository, web3jClientFactory, solanaClientFactory, null, registry, meterRegistry);
+                rpcNodeRepository, healthPersister, web3jClientFactory, solanaClientFactory, null, registry,
+                meterRegistry);
     }
 
     @Test

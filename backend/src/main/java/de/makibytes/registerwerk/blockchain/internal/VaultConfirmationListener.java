@@ -134,11 +134,11 @@ class VaultConfirmationListener {
         state.setLatestNavReportHash(strike.getReportHash());
         vaultStateRepository.save(state);
 
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash, null,
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "blockchain", VaultNavStrikeRevertCompensator.EFFECT_TYPE,
-                "VaultNavStrike", strike.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+                "VaultNavStrike", strike.getId(), strike.getAssetId(),
+                CompensationCategory.INVERSE_FLIP));
     }
 
     private void resolveFulfillment(VaultRequest request) {
@@ -163,11 +163,11 @@ class VaultConfirmationListener {
         request.setBlockNumber(location.get().blockNumber());
         vaultRequestRepository.save(request);
 
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash, null,
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "blockchain", VaultRequestFulfillmentRevertCompensator.EFFECT_TYPE,
-                "VaultRequest", request.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+                "VaultRequest", request.getId(), request.getAssetId(),
+                CompensationCategory.INVERSE_FLIP));
     }
 
     private void resolveCancellation(VaultRequest request) {
@@ -190,11 +190,11 @@ class VaultConfirmationListener {
         request.setBlockNumber(location.get().blockNumber());
         vaultRequestRepository.save(request);
 
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash, null,
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "blockchain", VaultRequestFulfillmentRevertCompensator.EFFECT_TYPE,
-                "VaultRequest", request.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+                "VaultRequest", request.getId(), request.getAssetId(),
+                CompensationCategory.INVERSE_FLIP));
     }
 
     private void resolveDepositCap(AssetVaultState state) {

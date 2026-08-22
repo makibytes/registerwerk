@@ -52,10 +52,13 @@ Die Antwort kann nicht lauten „wer sie hält, wenn die Zahlung ankommt" — da
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> ANNOUNCED
+    [*] --> PROPOSED: vom Emittenten vorgeschlagen
+    [*] --> ANNOUNCED: systemseitig angelegt
+    PROPOSED --> ANNOUNCED: Betreiber genehmigt
+    PROPOSED --> REJECTED: Betreiber lehnt ab
     ANNOUNCED --> RECORD_DATE_SET
     RECORD_DATE_SET --> COMPUTED: Momentaufnahme erstellt
-    COMPUTED --> AWAITING_SETTLEMENT: genehmigt (Vier-Augen)
+    COMPUTED --> AWAITING_SETTLEMENT: Emittent bestätigt + Betreiber bestätigt
     AWAITING_SETTLEMENT --> SETTLED: gezahlt
     SETTLED --> CLOSED
     ANNOUNCED --> CANCELLED
@@ -63,22 +66,32 @@ stateDiagram-v2
     COMPUTED --> CANCELLED
 ```
 
-`COMPUTED` → `AWAITING_SETTLEMENT` verlangt das **[Vier-Augen-Prinzip](../../compliance/step-up-mfa.md)**: Eine zweite berechtigte Person muss zustimmen, bevor Geld gegen eine Inhaberliste fließt. Der häufigste katastrophale Fehler in der Wertpapierverwaltung ist die Zahlung an die falsche Liste, und er lässt sich nur sehr schwer rückgängig machen.
+Kupons und Rückzahlungen werden **systemseitig angelegt** — automatisch aus dem Zahlungsplan oder dem Fälligkeitstermin erzeugt, statt dass ein Mensch daran denken muss, und starten bei `ANNOUNCED`. Dividenden, Splits und vorzeitige Kündigungen werden **vom Emittenten vorgeschlagen**: Der Emittent reicht eine Maßnahme ein, die bei `PROPOSED` beginnt, und sie tritt dem Register erst bei (`ANNOUNCED`), nachdem ein Betreiber sie geprüft und genehmigt hat — oder wird endgültig verworfen (`REJECTED`), falls nicht.
 
-Kupons einer Anleihe werden automatisch aus dem Zahlungsplan erzeugt, statt dass ein Mensch daran denken muss, und der tägliche Job, der Maßnahmen durch ihre Termine schiebt, läuft von selbst.
+`COMPUTED` → `AWAITING_SETTLEMENT` verlangt die Zustimmung **zweier getrennter Parteien**, unabhängig davon, wie die Maßnahme angelegt wurde: Der Emittent bestätigt, dass die zugrundeliegende Verpflichtung tatsächlich bereit ist — das Geld für einen Kupon oder eine Dividende, der Mechanismus für einen Split oder eine Kündigung —, und anschließend bestätigt ein Betreiber die Register-/Onchain-Seite. Der häufigste katastrophale Fehler in der Wertpapierverwaltung ist die Zahlung an die falsche Liste, und dass zwei Organisationen statt zwei Kollegen derselben Organisation zustimmen müssen, macht es deutlich schwerer, dass das unbemerkt passiert. Die Bestätigung des Emittenten ist eine normale authentifizierte Aktion; nur die Bestätigung des Betreibers verlangt [Step-up](../../compliance/step-up-mfa.md). Bestätigt der Emittent nie, kann ein Betreiber die Anforderung übersteuern — dauerhaft und gesondert als Ausnahme protokolliert, niemals ununterscheidbar von einer echten Bestätigung.
 
 ### Die Typen, die Registerwerk abbildet
 
+Nur eine Teilmenge lässt sich heute tatsächlich anlegen — der Rest ist modelliert (hat einen Platz im Lebenszyklus und in der Abwicklungsmechanik), hat aber noch keinen Weg der Anlage.
+
+**Heute unterstützt**
+
+| | Angelegt von |
+|---|---|
+| `COUPON`, `INTEREST_PAYMENT` | System, aus dem Zahlungsplan. |
+| `REDEMPTION` | System, zum Fälligkeitstermin. |
+| `DIVIDEND` | Emittentenvorschlag, vom Betreiber geprüft. |
+| `SPLIT` | Emittentenvorschlag, vom Betreiber geprüft. Wird per manueller Bestätigung des Betreibers abgewickelt — kein unterstützter Token-Standard verfügt über eine Onchain-Split-Primitive. |
+| `CALL` | Emittentenvorschlag, vom Betreiber geprüft. Vorzeitige Rückzahlung durch den Emittenten, wo die Bedingungen es zulassen. |
+
+**Modelliert, noch nicht unterstützt**
+
 | | |
 |---|---|
-| `COUPON`, `INTEREST_PAYMENT` | Periodische Zinsen. |
-| `DIVIDEND` | Eine Ausschüttung an Eigenkapitalgeber. |
-| `REDEMPTION`, `PARTIAL_REDEMPTION` | Rückzahlung des Kapitals, ganz oder teilweise. |
-| `CALL` | Vorzeitige Rückzahlung durch den Emittenten, wo die Bedingungen es zulassen. |
-| `SPLIT`, `REVERSE_SPLIT` | Änderung der Stückzahl ohne Änderung des Gesamtwerts. |
+| `PARTIAL_REDEMPTION` | Teilweise Rückzahlung des Kapitals. |
+| `REVERSE_SPLIT` | Verringerung der Stückzahl ohne Änderung des Gesamtwerts. |
 | `CONVERSION` | Umwandlung in ein anderes Instrument. |
 | `CAPITAL_CALL` | Aufforderung an die Inhaber, weiter einzuzahlen. |
-| `PLEDGE` | Vermerk, dass ein Bestand verpfändet wurde. |
 
 ---
 
@@ -101,7 +114,7 @@ Mechanisch ist das eine Kapitalmaßnahme vom Typ `REDEMPTION`, die bei Erreichen
 
 1. Die Momentaufnahme zum Nachweisstichtag wird erstellt.
 2. Der Anspruch jedes Inhabers ist sein Nennbetrag zum Nennwert.
-3. Die Zahlung wird im Vier-Augen-Prinzip genehmigt und abgewickelt.
+3. Der Emittent bestätigt, ein Betreiber bestätigt, und die Zahlung wird abgewickelt.
 4. Die Token werden **vernichtet** — on-chain zerstört, der Bestand geht auf null zurück.
 5. Das Asset wechselt zu `REDEEMED`.
 

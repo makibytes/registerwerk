@@ -46,8 +46,8 @@ class OrgMemberWalletRevertCompensator implements ChainEffectCompensator {
                     "OrgMemberWallet " + id + " is no longer ACTIVE (status=" + wallet.getStatus() + ")");
         }
 
-        log.error("OrgMemberWallet id={} was ACTIVE but its confirming block was retracted by a reorg deep "
-                        + "enough to cross FINALIZED — reverting to PENDING for re-verification.", id);
+        log.error("OrgMemberWallet id={} was ACTIVE but its confirming block was retracted by a reorg "
+                        + "— reverting to PENDING for re-verification.", id);
         wallet.setStatus(MemberWalletStatus.PENDING);
         repository.save(wallet);
 

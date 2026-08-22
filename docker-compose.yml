@@ -48,6 +48,18 @@ services:
       - "11155111"
       - "--state"
       - "/data/anvil-state.json"
+      # Starts on the default auto-mine-on-tx behavior (instant, one block per transaction) —
+      # `demo-onchain-deploy` needs that: `--block-time` interval mining measurably hangs
+      # `forge script --broadcast` for this stack's multi-hundred-transaction 7-standard deployment
+      # (confirmed live: the tx pool stays empty for many minutes mid-broadcast under interval
+      # mining, vs. completing normally under auto-mine — likely forge's own pre-broadcast
+      # simulation racing a chain whose state keeps advancing out from under it via empty blocks).
+      # `demo-onchain-deploy` switches this to interval mining via `anvil_setIntervalMining` only
+      # *after* deployment succeeds — see that service's command — so the chain still keeps
+      # producing blocks afterward (without which it reads as "stalled" to both Registerwerk's own
+      # stall-threshold health check and chaincache's depth-based finality promoter, and there is
+      # nothing for the SAFE/FINALIZED ladder to promote through), without ever fighting a live
+      # broadcast for it.
     ports:
       - "${ANVIL_BIND_ADDR:-0.0.0.0}:${ANVIL_HOST_PORT:-18545}:8545"
     volumes:
@@ -66,21 +78,36 @@ services:
   # Part of the default stack (`docker compose up` starts these) — per the portfolio plan's
   # product decision: chaincache default-on, side-by-side with direct-node chains, so the
   # operator node list shows a real A/B capability comparison out of the box rather than
-  # something only reachable via an opt-in profile. It fronts this stack's own anvil devnet
-  # (chaincache's own default chain key "local-devnet") as a genuine CHAINCACHE-kind RpcNode on
-  # ETHEREUM_SEPOLIA (DemoDataSeeder seeds it, see the node's managementUrl/remoteChainKey
-  # there) — every other chain stays direct-to-node, untouched. chaincache gets its own dedicated Postgres, per the
-  # single-instance architecture note in CLAUDE.md ("hosts only the registerwerk database") —
-  # it is not a second schema/database bolted onto the shared `postgres` service above.
+  # something only reachable via an opt-in profile.
+  #
+  # chaincache's own architecture is one Spring Boot WORKLOAD per chain — a deployment with zero
+  # or more than one configured chain refuses to start (see ChainRuntimeRegistry). This stack runs
+  # TWO workloads, sharing one Postgres instance (chain-scoped rows, exactly as the GKE Helm chart
+  # at chaincache/deploy/helm/chaincache shares one Cloud SQL instance across per-chain releases):
+  #   - chaincache-sepolia fronts this stack's own anvil devnet as a CHAINCACHE-kind RpcNode on
+  #     ETHEREUM_SEPOLIA (DemoDataSeeder seeds it) — DEPTH_BASED finality, since anvil has no
+  #     safe/finalized tags of its own.
+  #   - chaincache-base fronts real public Base Sepolia RPC providers — TAG_BASED finality with
+  #     real safe/finalized tags and required-provider-agreement: 2, demonstrating the capability
+  #     an isolated local devnet structurally cannot (real reorgs, cross-provider agreement).
+  # Every other chain stays direct-to-node, untouched. chaincache gets its own dedicated Postgres,
+  # per the single-instance architecture note in CLAUDE.md ("hosts only the registerwerk
+  # database") — it is not a second schema/database bolted onto the shared `postgres` service
+  # above.
   chaincache-postgres:
-    image: postgres:15-alpine
+    image: postgres:18.6-alpine
     logging: *default-logging
     environment:
       POSTGRES_DB: chaincache
       POSTGRES_USER: chaincache
       POSTGRES_PASSWORD: chaincache
     volumes:
-      - chaincache_pgdata:/var/lib/postgresql/data
+      # PostgreSQL 18 stores versioned data below /var/lib/postgresql, not /var/lib/postgresql/data
+      # — and chaincache's own Flyway history was squashed to a single fresh-install baseline with
+      # baseline-on-migrate disabled, so a volume carrying the old V1-V7 history would fail to
+      # validate against it anyway. New volume name (chaincache_pg18, not the old chaincache_pgdata)
+      # deliberately sidesteps both: nothing is deleted, the old volume is just orphaned.
+      - chaincache_pg18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U chaincache -d chaincache"]
       interval: 5s
@@ -88,7 +115,7 @@ services:
       retries: 10
     restart: unless-stopped
 
-  chaincache:
+  chaincache-sepolia:
     build:
       context: ../chaincache
     image: registerwerk-chaincache-demo:local
@@ -102,31 +129,92 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
       SPRING_DATASOURCE_USERNAME: chaincache
       SPRING_DATASOURCE_PASSWORD: chaincache
-      # This stack's own anvil devnet (chain-id 11155111, impersonating Ethereum Sepolia for
-      # the local demo — see ETH_SEPOLIA_RPC below, still pointed straight at anvil as the
-      # untouched direct-RPC fallback) as chaincache's sole upstream node, under chaincache's
-      # own baked-in default chain key "local-devnet" (application.yml) — deliberately reusing
-      # that key rather than introducing a new one (e.g. "anvil"): chaincache's Map-based
-      # @ConfigurationProperties binding *merges* env-var-provided chain keys with the YAML
-      # default rather than replacing the whole map, so an unrelated new key would leave
-      # "local-devnet" (pointing at localhost:8545/8546, unreachable from inside this
-      # container) still configured and spamming connection-refused errors alongside it.
-      # registerwerk's RpcNode.remoteChainKey for this connection must match: "local-devnet".
-      CHAINCACHE_CHAINS_LOCAL_DEVNET_RPC_NODES_0_PROVIDER: anvil
-      CHAINCACHE_CHAINS_LOCAL_DEVNET_RPC_NODES_0_HTTP: http://anvil:8545
-      CHAINCACHE_CHAINS_LOCAL_DEVNET_RPC_NODES_0_WS: ws://anvil:8545
-      CHAINCACHE_CHAINS_LOCAL_DEVNET_RPC_EXPECTED_CHAIN_ID: "11155111"
-      # anvil has no reorgs and no safe/finalized tags; DEPTH_BASED (chaincache's own default)
-      # is the wrong model for it — INSTANT matches anvil's actual (lack of) finality semantics.
-      CHAINCACHE_CHAINS_LOCAL_DEVNET_CHAIN_FINALITY_MODEL: INSTANT
-      # Off for the local demo stack; see chaincache's docs/ADMIN.md before exposing this
-      # beyond your own machine.
-      CHAINCACHE_AUTH_ENABLED: "false"
+      # This stack's own anvil devnet (chain-id 11155111, impersonating Ethereum Sepolia for the
+      # local demo — see ETH_SEPOLIA_RPC below, still pointed straight at anvil as the untouched
+      # direct-RPC fallback) as this workload's sole upstream node, under the chain key
+      # "sepolia" — registerwerk's RpcNode.remoteChainKey for this connection must match.
+      CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_PROVIDER: anvil
+      CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_HTTP: http://anvil:8545
+      CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_WS: ws://anvil:8545
+      # chaincache's RpcProviderIdentityValidator compares this against eth_chainId's response,
+      # which anvil (like every real EVM node) returns as a 0x-prefixed hex quantity — "0xaa36a7"
+      # for 11155111, Sepolia's chain id.
+      CHAINCACHE_CHAINS_SEPOLIA_RPC_EXPECTED_CHAIN_ID: "0xaa36a7"
+      # anvil has no native safe/finalized tags, so DEPTH_BASED (not TAG_BASED) is the correct
+      # model — confirmation-depth-based promotion, matched by --block-time on the anvil service
+      # above so blocks keep arriving for the ladder to promote through even when idle.
+      CHAINCACHE_CHAINS_SEPOLIA_CHAIN_FINALITY_MODEL: DEPTH_BASED
+      CHAINCACHE_CHAINS_SEPOLIA_CHAIN_SAFE_CONFIRMATIONS: "3"
+      CHAINCACHE_CHAINS_SEPOLIA_CHAIN_FINALIZED_CONFIRMATIONS: "6"
+      # On, matching chaincache's own default posture (chaincache.auth.enabled: true) — the demo
+      # is meant to exercise the reference integration exactly as a production operator would
+      # configure it, not a weakened variant. registerwerk.chaincache.jwt-secret on the backend
+      # service must be set to the same value. RPC/WS traffic stays open
+      # (chaincache.auth.rpc-enabled defaults to false) — only the read APIs
+      # (/api/capabilities, /{chain}/api/**) require this credential.
+      CHAINCACHE_AUTH_ENABLED: "true"
+      CHAINCACHE_JWT_SECRET: ${CHAINCACHE_JWT_SECRET:-registerwerk-chaincache-demo-secret-change-me}
+      # Safe here: monitoring/prometheus.yml scrapes this over the same internal docker network,
+      # never exposed on a published port — the exact same ClusterIP-only trust boundary the Helm
+      # chart's values.yaml comment describes for this same setting.
+      CHAINCACHE_AUTH_PROMETHEUS_PUBLIC: "true"
       CHAINCACHE_KAFKA_ENABLED: "false"
+      # Replicated-workload posture (also what the Helm chart configures) — exercised locally so
+      # the demo matches production guidance. Postgres-backed cache warmup remains available.
+      CHAINCACHE_CACHE_LOCAL_SNAPSHOT_ENABLED: "false"
+      CHAINCACHE_REQUEST_LOCAL_STATS_ENABLED: "false"
     ports:
       - "127.0.0.1:18090:8080"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      # /readiness (not the bare /health, and not /liveness — see chaincache's own Dockerfile
+      # HEALTHCHECK, which correctly uses /liveness for container-restart purposes) is the
+      # traffic-readiness signal: it additionally reports the rpcNodePool's status, so this
+      # container isn't marked healthy until it can actually answer RPC calls.
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  chaincache-base:
+    build:
+      context: ../chaincache
+    image: registerwerk-chaincache-demo:local
+    logging: *default-logging
+    depends_on:
+      chaincache-postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
+      SPRING_DATASOURCE_USERNAME: chaincache
+      SPRING_DATASOURCE_PASSWORD: chaincache
+      # Two independent real public Base Sepolia providers, under the chain key "base" —
+      # gives this workload an actual TAG_BASED chain with real safe/finalized tags and real
+      # reorgs to demonstrate, plus required-provider-agreement: 2 below (a local anvil devnet can
+      # never show either). Override with your own endpoints via CHAINCACHE_BASE_UPSTREAM_*_HTTP/
+      # WS if these public endpoints are unreachable/rate-limited in your environment.
+      CHAINCACHE_CHAINS_BASE_RPC_NODES_0_PROVIDER: base-sepolia-1
+      CHAINCACHE_CHAINS_BASE_RPC_NODES_0_HTTP: ${CHAINCACHE_BASE_UPSTREAM_1_HTTP:-https://sepolia.base.org}
+      CHAINCACHE_CHAINS_BASE_RPC_NODES_1_PROVIDER: base-sepolia-2
+      CHAINCACHE_CHAINS_BASE_RPC_NODES_1_HTTP: ${CHAINCACHE_BASE_UPSTREAM_2_HTTP:-https://base-sepolia-rpc.publicnode.com}
+      # Base Sepolia's chain id (84532) as the 0x-prefixed hex quantity eth_chainId returns.
+      CHAINCACHE_CHAINS_BASE_RPC_EXPECTED_CHAIN_ID: "0x14a34"
+      CHAINCACHE_CHAINS_BASE_CHAIN_FINALITY_MODEL: TAG_BASED
+      CHAINCACHE_CHAINS_BASE_FINALITY_REQUIRED_PROVIDER_AGREEMENT: "2"
+      CHAINCACHE_AUTH_ENABLED: "true"
+      CHAINCACHE_JWT_SECRET: ${CHAINCACHE_JWT_SECRET:-registerwerk-chaincache-demo-secret-change-me}
+      # Safe here: monitoring/prometheus.yml scrapes this over the same internal docker network,
+      # never exposed on a published port — the exact same ClusterIP-only trust boundary the Helm
+      # chart's values.yaml comment describes for this same setting.
+      CHAINCACHE_AUTH_PROMETHEUS_PUBLIC: "true"
+      CHAINCACHE_KAFKA_ENABLED: "false"
+      CHAINCACHE_CACHE_LOCAL_SNAPSHOT_ENABLED: "false"
+      CHAINCACHE_REQUEST_LOCAL_STATS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:18091:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health/readiness"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -192,6 +280,25 @@ services:
             --rpc-url http://anvil:8545 \
             --private-key "$${LOCAL_DEMO_DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}" >/dev/null
         fi
+        # Deployment is done — switch anvil from auto-mine to interval mining now, not before, so
+        # the whole broadcast above ran against the fast default mode instead of fighting a chain
+        # that keeps advancing empty blocks under it (see the anvil service's own comment on why).
+        # Idempotent: re-running this (e.g. after a backend-only restart, since main_ready/trex_code
+        # above make this script otherwise skip straight to the end) just re-asserts the same mode.
+        # Retried, not a bare call: anvil's own healthcheck (cast chain-id, 3s timeout) can time out
+        # right after the ~91M-gas TREX broadcast above while anvil is still working through that
+        # load, so a single immediate call here can hit the same transient unavailability and take
+        # the whole deploy job down with it — non-fatal on exhaustion since interval mining is a
+        # demo-quality-of-life switch, not a deployment-correctness requirement.
+        mining_attempts=0
+        until cast rpc anvil_setIntervalMining 2 --rpc-url http://anvil:8545 >/dev/null 2>&1; do
+          mining_attempts=$$((mining_attempts + 1))
+          if [ "$$mining_attempts" -ge 10 ]; then
+            echo "WARNING: could not switch anvil to interval mining after $$mining_attempts attempts — leaving it on auto-mine" >&2
+            break
+          fi
+          sleep 3
+        done
         echo "Registerwerk demo contracts and seven-standard manifest are ready"
     working_dir: /contracts
     user: "0:0"
@@ -342,6 +449,9 @@ services:
       ENTRA_AUTHORIZATION_URI: ${ENTRA_AUTHORIZATION_URI:-https://login.microsoftonline.com/common/oauth2/authorize}
       ENTRA_MFA_SETUP_URL: ${ENTRA_MFA_SETUP_URL:-https://mysignins.microsoft.com/security-info}
       ENTRA_REQUIRE_2FA_ENROLMENT: ${ENTRA_REQUIRE_2FA_ENROLMENT:-false}
+      # Must match the chaincache service's CHAINCACHE_JWT_SECRET below — a shared secret between
+      # Registerwerk and every chaincache workload it talks to. See ChaincacheTokenFactory.
+      CHAINCACHE_JWT_SECRET: ${CHAINCACHE_JWT_SECRET:-registerwerk-chaincache-demo-secret-change-me}
       ETH_MAINNET_RPC: ${ETH_MAINNET_RPC}
       ETH_SEPOLIA_RPC: ${ETH_SEPOLIA_RPC:-http://anvil:8545}
       LENDING_LOCAL_DEMO_BACKEND_RPC_URL: http://anvil:8545
@@ -427,6 +537,12 @@ services:
         condition: service_completed_successfully
       softhsm:
         condition: service_healthy
+      # service_started, not service_healthy: BlockchainClientRegistry's kind-aware routing (see
+      # blockchain/api/BlockchainClientRegistry) already fails over to the direct anvil node
+      # automatically when chaincache is unhealthy, so blocking the backend's own startup on
+      # chaincache's full health check would only add boot time for no correctness benefit.
+      chaincache-sepolia:
+        condition: service_started
     ports:
       - "${BACKEND_BIND_ADDR:-127.0.0.1}:8080:8080"
     volumes:
@@ -714,7 +830,7 @@ services:
 
 volumes:
   anvil_state:
-  chaincache_pgdata:
+  chaincache_pg18:
   lending_demo_addresses:
   pgdata:
   pg_backups:

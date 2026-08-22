@@ -3,7 +3,9 @@ package de.makibytes.registerwerk.indexer.web;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.indexer.web.dto.TokenTransferResponse;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 
 /**
@@ -15,8 +17,11 @@ import org.springframework.stereotype.Component;
  * {@code @AfterMapping} with an immutable record target while keeping the same API contract
  * expected by controllers.
  *
- * <p>The primary entry point for controllers is {@link #toResponse(TokenTransfer)}, which
- * resolves the chain identifier from {@link ChainConfigRepository}.
+ * <p>{@code finalityLabel} is resolved from {@code authentication} here, not left to the
+ * frontend, per the portfolio plan's "two vocabularies, one model, resolved server-side by
+ * principal role so the frontend cannot violate it" — previously this mapper shipped the raw
+ * {@code FinalityLevel} enum name to every caller regardless of role, including customers, who
+ * have no reason to know what PROVISIONAL/SAFE/FINALIZED/ORPHANED mean.
  */
 @Component
 public class TokenTransferMapper {
@@ -30,12 +35,18 @@ public class TokenTransferMapper {
 
     /**
      * Maps a {@link TokenTransfer} entity to a {@link TokenTransferResponse}, resolving the
-     * {@code chainIdentifier} via a repository lookup on {@code chainConfigId}.
+     * {@code chainIdentifier} via a repository lookup on {@code chainConfigId} and
+     * {@code finalityLabel} from the caller's role.
      */
-    public TokenTransferResponse toResponse(TokenTransfer transfer) {
+    public TokenTransferResponse toResponse(TokenTransfer transfer, Authentication authentication) {
         String identifier = chainConfigRepository.findById(transfer.getChainConfigId())
                 .map(c -> c.getIdentifier())
                 .orElse(transfer.getChainConfigId().toString());
+
+        boolean technical = SecurityUtils.isTechnicalRole(authentication);
+        String finalityLabel = technical
+                ? transfer.getFinalityStatus().name()
+                : transfer.getFinalityStatus().plainLabel();
 
         return new TokenTransferResponse(
                 transfer.getId(),
@@ -50,15 +61,8 @@ public class TokenTransferMapper {
                 transfer.getOccurredAt(),
                 transfer.getExplorerTxUrl(),
                 identifier,
-                transfer.getFinalityStatus().name()
+                transfer.getFinalityStatus().name(),
+                finalityLabel
         );
-    }
-
-    /**
-     * Alias kept for call-site compatibility with the original spec that used
-     * {@code toResponseWithChain}.
-     */
-    public TokenTransferResponse toResponseWithChain(TokenTransfer transfer) {
-        return toResponse(transfer);
     }
 }

@@ -99,9 +99,11 @@ class CorporateActionSettlementListener {
      * Dispatches a Canton bond corporate action by {@link CorporateAction.ActionType}, not just
      * token standard: COUPON routes to {@code payCoupon}, REDEMPTION exercises {@code Redeem} on
      * the DAML ledger and retires the position — routing both to {@code payCoupon} would pay a
-     * matured bond's face value without ever retiring it. SPLIT/REVERSE_SPLIT/
-     * CONVERSION/PLEDGE/CAPITAL_CALL have no Canton lifecycle-choice equivalent and fall through
-     * to "no automated adapter" like the other unsupported standards above.
+     * matured bond's face value without ever retiring it. SPLIT/REVERSE_SPLIT/CONVERSION/
+     * CAPITAL_CALL have no Canton lifecycle-choice equivalent and fall through to "no automated
+     * adapter" like the other unsupported standards above — this is deliberate for SPLIT (no
+     * supported token standard has an on-chain split primitive; it always settles via the
+     * operator's manual {@code mark-settled}), not an oversight.
      */
     private void dispatchCanton(CorporateAction ca) {
         Optional<AssetDeployment> deployment = resolveCantonDeployment(ca.getAssetId());

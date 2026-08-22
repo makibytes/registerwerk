@@ -41,8 +41,7 @@ public interface ChainConfigMapper {
     @Mapping(target = "finalityModel",
              expression = "java(request.finalityModel() == null ? ChainConfig.FinalityModel.DEPTH_BASED "
                      + ": ChainConfig.FinalityModel.valueOf(request.finalityModel().toUpperCase()))")
-    @Mapping(target = "finalitySource",
-             expression = "java(request.finalitySource() == null ? ChainConfig.FinalitySource.RPC_SELF_PROBE "
-                     + ": ChainConfig.FinalitySource.valueOf(request.finalitySource().toUpperCase()))")
+    // finalitySource is left at the entity's own default (RPC_SELF_PROBE) — no request field for
+    // it exists; RpcNodeService#recomputeFinalitySource takes over from there as nodes are added.
     ChainConfig toEntity(ChainConfigCreateRequest request);
 }

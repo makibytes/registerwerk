@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,14 +50,16 @@ class CorporateActionServiceTest {
     @Mock private AssetHolderRepository holderRepository;
     @Mock private CorporateActionSettlementWriter settlementWriter;
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
+    @Mock private CorporateActionProposalValidator proposalValidator;
     @Mock private ApplicationEventPublisher events;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private FinalityGate finalityGate;
 
     private CorporateActionService service;
 
     private CorporateActionServiceTest init() {
         service = new CorporateActionService(repository, entryRepository, holderRepository, settlementWriter,
-                couponPaymentRepository, events, holderBlockGate);
+                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate);
         return this;
     }
 
@@ -224,6 +227,8 @@ class CorporateActionServiceTest {
         UUID blockedInvestor = UUID.randomUUID();
         CorporateAction due = actionWithId(actionId, CorporateAction.Status.COMPUTED);
         due.setDualControlApproverId(UUID.randomUUID());
+        due.setIssuerAttestedBy(UUID.randomUUID());
+        due.setIssuerAttestedAt(java.time.Instant.now());
         due.setPaymentDate(LocalDate.now());
 
         when(repository.findReadyToCompute(any())).thenReturn(List.of());

@@ -21,6 +21,21 @@ bytecode still exist in persisted Anvil state; missing main-suite or ERC-3643 st
 independently. Existing PostgreSQL demo volumes receive new standards through additive catalogue
 reconciliation.
 
+Anvil starts in its default auto-mine mode (a block per transaction, not a fixed interval) —
+`demo-onchain-deploy`'s multi-hundred-transaction broadcast runs against that fast mode rather than
+fighting a chain that keeps advancing empty blocks under it. Only once that broadcast finishes does
+the deploy job switch Anvil to 2-second interval mining (`anvil_setIntervalMining 2`, retried for up
+to 30 seconds since Anvil can be briefly slow to answer RPC calls right after a large deployment) —
+interval mining is what lets a chaincache workload observe a steady sequence of blocks afterward for
+the `SAFE`/`FINALIZED` promotion demo described below, rather than a chain that goes quiet the
+moment deployment ends.
+
+Two [chaincache](chaincache-integration.md) workloads sit in front of this chain (and one real
+public testnet): `chaincache-sepolia` (port `18090`) fronts this Anvil devnet with a `DEPTH_BASED`
+finality model; `chaincache-base` (port `18091`) fronts real public Base Sepolia RPC providers with
+a `TAG_BASED` model. Both are seeded as `CHAINCACHE`-kind nodes so the operator node list shows a
+live comparison against the plain direct-RPC nodes also configured for demo chains.
+
 ```bash
 docker compose up -d anvil softhsm
 docker compose run --rm demo-onchain-deploy

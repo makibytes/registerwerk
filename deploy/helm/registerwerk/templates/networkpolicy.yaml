@@ -68,4 +68,23 @@ spec:
         - protocol: TCP
           port: {{ .Values.zamaRelayer.service.port }}
     {{- end }}
+    {{- if .Values.chaincache.enabled }}
+    # chaincache — an independent product this chart does NOT deploy (see values.yaml's
+    # chaincache block), installed as its own Helm release(s) in a separate namespace, one per
+    # chain. Reached via ChaincacheClient's GET /api/capabilities probe and
+    # ChaincacheDurableStreamManager's WebSocket, both against that Service's port — chaincache's
+    # own chart exposes port 80 (containerPort 8080 internally) by default. The generic "Kong
+    # upstream health checks and KMS" rule above only opens 443/8080, not 80, so this needs its
+    # own rule.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.chaincache.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.chaincache.podSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.chaincache.port }}
+    {{- end }}
 {{- end }}

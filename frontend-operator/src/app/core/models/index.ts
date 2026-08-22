@@ -86,27 +86,21 @@ export interface AssetSlot {
   createdAt: string;
 }
 
-// ── Coupon payment ────────────────────────────────────────────────────────────
-export interface AssetCouponPayment {
-  id: string;
-  assetId: string;
-  slotId?: string;
-  periodNo: number;
-  scheduledDate: string;
-  paidDate?: string;
-  amountPerUnit?: number;
-  couponStatus: 'SCHEDULED' | 'PAID' | 'MISSED';
-  txRef?: string;
-}
-
 // ── Corporate actions ──────────────────────────────────────────────────────────
+// PLEDGE was retired — never read/written by any code path (the real pledge/collateral
+// mechanism lives in the lending module); see backend V14__corporate_action_issuer_workflow.sql.
 export type CorporateActionType =
   | 'COUPON' | 'DIVIDEND' | 'SPLIT' | 'REVERSE_SPLIT' | 'CONVERSION'
-  | 'REDEMPTION' | 'PARTIAL_REDEMPTION' | 'PLEDGE' | 'CALL'
+  | 'REDEMPTION' | 'PARTIAL_REDEMPTION' | 'CALL'
   | 'CAPITAL_CALL' | 'INTEREST_PAYMENT';
 
+/** PROPOSED/REJECTED are the issuer-proposal pre-states for issuer-initiated types (DIVIDEND,
+ *  SPLIT, CALL): an issuer's proposal starts PROPOSED and an operator either approves it (→
+ *  ANNOUNCED) or rejects it (→ REJECTED, terminal). System-raised COUPON/REDEMPTION skip
+ *  PROPOSED entirely and start at ANNOUNCED. */
 export type CorporateActionStatus =
-  | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT' | 'SETTLED' | 'CLOSED' | 'CANCELLED';
+  | 'PROPOSED' | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT'
+  | 'SETTLED' | 'CLOSED' | 'CANCELLED' | 'REJECTED';
 
 /** §10 eWpG register inspection request. */
 export type InspectionLegalBasis = 'ISSUER' | 'HOLDER' | 'BENEFICIARY' | 'LEGITIMATE_INTEREST';
@@ -186,6 +180,14 @@ export interface CorporateAction {
   settlementChain?: string;
   settledAt?: string;
   initiatedBy: string;
+  /** The issuer's attestation that the underlying obligation/cash-leg is ready — the first of
+   *  the two required parties before an operator can confirm settlement. May instead be an
+   *  operator's audited override (issuerAttestationRef prefixed "OPERATOR_OVERRIDE: "). */
+  issuerAttestedBy?: string;
+  issuerAttestedAt?: string;
+  issuerAttestationRef?: string;
+  /** The operator's settlement confirmation — the second of the two required parties, refused
+   *  while issuerAttestedAt is still unset. */
   dualControlApproverId?: string;
   dualControlApprovedAt?: string;
   notes?: string;
@@ -208,6 +210,58 @@ export interface LegalEntity {
   clientCategory?: ClientCategory | null;
   clientCategoryClassifiedAt?: string | null;
   assignedRelationshipManagerId?: string | null;
+}
+
+// ─── Finality gate / policy / effect journal ─────────────────────────────────
+
+export type FinalityLevel = 'PROVISIONAL' | 'SAFE' | 'FINALIZED' | 'ORPHANED';
+export type FinalityPolicyProfile = 'FAST' | 'BALANCED' | 'CONSERVATIVE';
+export type FinalityPolicyScopeType = 'GLOBAL' | 'TOKEN_STANDARD' | 'ASSET';
+
+/** Mirrors the backend's `FinalityPolicyAssignmentView`. */
+export interface FinalityPolicyAssignmentView {
+  id: string;
+  scopeType: FinalityPolicyScopeType;
+  tokenStandard: TokenStandard | null;
+  assetId: string | null;
+  profile: FinalityPolicyProfile;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Mirrors the backend's `FinalityPolicyOverrideView`. */
+export interface FinalityPolicyOverrideView {
+  id: string;
+  assetId: string;
+  operation: string;
+  requiredLevel: FinalityLevel;
+  reason: string;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+/** Mirrors the backend's `ChainEffectView` — one row in the "unresolved compensation" queue. */
+export interface ChainEffectView {
+  id: string;
+  chainConfigId: string;
+  blockNumber: number;
+  txHash: string | null;
+  moduleName: string;
+  effectType: string;
+  entityType: string;
+  entityId: string;
+  assetId: string | null;
+  category: 'RECOMPUTE' | 'INVERSE_FLIP' | 'IRREVERSIBLE';
+  status: 'ACTIVE' | 'SETTLED' | 'COMPENSATING' | 'COMPENSATED' | 'COMPENSATION_FAILED' | 'IRREVERSIBLE_ESCALATED';
+  attemptCount: number;
+  /** Set on every terminal outcome — a real failure/remediation reason, or a benign "already
+   *  undone" explanation alike. Not always an error, despite the name of the backend column this
+   *  used to mirror before it was renamed for exactly that reason. */
+  resolutionDetail: string | null;
+  recordedAt: string;
+  acknowledgedBy: string | null;
+  acknowledgedAt: string | null;
+  acknowledgeReason: string | null;
 }
 
 export type ClientCategory = 'RETAIL' | 'PROFESSIONAL' | 'ELIGIBLE_COUNTERPARTY';
@@ -432,11 +486,20 @@ export interface TokenTransferResponse {
   explorerTxUrl: string | null;
   chainIdentifier: string;
   /**
-   * PROVISIONAL = seen but not yet past the chain's finality depth (can still be reorged out);
-   * FINAL = past finality, safe to treat as settled; ORPHANED = the block that contained this
-   * transfer was reorged out — the transfer no longer exists on the canonical chain.
+   * The raw three-tier `FinalityLevel` name — PROVISIONAL (seen but not yet past the chain's
+   * finality depth, can still be reorged out), SAFE (past a fast-but-not-final checkpoint, e.g.
+   * Ethereum's `safe` tag), FINALIZED (past finality, safe to treat as settled), or ORPHANED (the
+   * block that contained this transfer was reorged out — no longer exists on the canonical
+   * chain). Stable across roles — always this raw enum name, regardless of who's asking; see
+   * `finalityLabel` for the role-resolved display text.
    */
-  finalityStatus: 'PROVISIONAL' | 'FINAL' | 'ORPHANED';
+  finalityStatus: 'PROVISIONAL' | 'SAFE' | 'FINALIZED' | 'ORPHANED';
+  /** Display text for `finalityStatus`, resolved server-side by the caller's role (see backend
+   *  `TokenTransferMapper`) — equal to `finalityStatus` for operator staff, plain language
+   *  ("Being confirmed", "Confirmed", "Settled — final", "Did not go through") for customer-side
+   *  roles. The operator app always sees the former; render this, not `finalityStatus`, if a
+   *  future view here is ever shown to a non-operator role. */
+  finalityLabel: string;
 }
 
 /**
@@ -625,6 +688,14 @@ export interface WalletDefault {
 
 export type RpcNodeKind = 'DIRECT_RPC' | 'CHAINCACHE';
 
+/** chaincache's real `addressTraceCapability` field is a nested status object, not a plain
+ *  string — see ChaincacheClient.AddressTraceCapability on the backend. */
+export interface RpcNodeAddressTraceCapability {
+  attempted: boolean;
+  lastSuccessful: boolean;
+  lastAttemptAt: string | null;
+}
+
 /** Advisory snapshot of chaincache's own `GET /api/capabilities` response for one chain — see
  *  ChaincacheClient.ChainCapabilitiesProbe on the backend. Only present on a CHAINCACHE-kind node,
  *  and only once a probe has succeeded at least once. */
@@ -634,9 +705,14 @@ export interface RpcNodeCapabilities {
   finalizedConfirmations?: number;
   configuredApis?: string[];
   debugApiConfiguredOnAnyNode?: boolean;
-  addressTraceCapability?: string;
+  addressTraceCapability?: RpcNodeAddressTraceCapability | null;
   durableStreamAvailable?: boolean;
   kafkaRelayEnabled?: boolean;
+  /** From chaincache's GET /api/chains — how many upstream RPC providers this workload has
+   *  configured for the chain, and how many currently answer. Null when the enrichment probe
+   *  itself failed (a degraded, not fatal, outcome — see ChaincacheClient#fetchNodeCounts). */
+  configuredNodeCount?: number | null;
+  availableNodeCount?: number | null;
   probedAt?: string;
 }
 
@@ -660,6 +736,10 @@ export interface RpcNode {
   managementUrl?: string;
   remoteChainKey?: string;
   capabilities?: RpcNodeCapabilities;
+  /** Whether Registerwerk currently has a live durable-event WebSocket connection open to this
+   *  node's chaincache workload — see ChaincacheDurableStreamManager. Only meaningful for
+   *  kind === 'CHAINCACHE'; always false otherwise. */
+  streamConnected?: boolean;
 }
 
 export interface ChainHealth {

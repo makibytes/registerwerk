@@ -219,6 +219,30 @@ kong:
     prometheus.io/port: "8100"
     prometheus.io/path: /metrics
 
+# ─── chaincache (independent product — installed separately, once per chain) ────────────────
+# This chart does NOT deploy chaincache; chaincache/deploy/helm/chaincache is a separate chart
+# with its own release cycle, installed once per chain workload (e.g. "chaincache-ethereum",
+# "chaincache-base"), typically sharing one Cloud SQL/Postgres instance and one Kafka cluster
+# across those releases — see that chart's own README. This block only carries what Registerwerk
+# needs on its own side to reach it:
+#   - the CHAINCACHE_JWT_SECRET key in the registerwerk-secrets Secret (templates/secret.yaml,
+#     NOTES.txt) must be set to the same value every chaincache workload's chaincache.jwt.secret
+#     was installed with — see ChaincacheTokenFactory.
+#   - when networkPolicy.enabled, this namespace/selector/port drive an egress rule admitting
+#     traffic to it (templates/networkpolicy.yaml) — chaincache is a separate namespace this
+#     chart has no other reason to know about.
+# Registerwerk itself discovers which URL fronts which chain the same way in every environment:
+# an operator adds it as an RpcNode (Chain Config screen) and RpcNodeService auto-detects it —
+# there is nothing here that seeds or hardcodes a chain->URL mapping.
+chaincache:
+  enabled: false
+  namespace: chaincache
+  podSelector:
+    app.kubernetes.io/name: chaincache
+  # chaincache's own Helm chart's Service exposes port 80 (containerPort 8080 internally) — see
+  # chaincache/deploy/helm/chaincache/templates/service.yaml.
+  port: 80
+
 networkPolicy:
   enabled: true
   # templates/ingress.yaml routes external traffic directly to this chart's backend Service,

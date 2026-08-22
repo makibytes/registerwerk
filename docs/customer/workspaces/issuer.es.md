@@ -117,9 +117,11 @@ Esta es la parte que se subestima. La emisión dura una semana. La administraci�
 
 ### Operaciones societarias
 
-Cupones dos veces al año y, al final, la amortización. Registerwerk crea automáticamente las operaciones de cupón a partir del calendario de pagos y las hace avanzar por sus fechas.
+Los cupones y, al final, la amortización se crean automáticamente a partir del calendario de pagos y avanzan por sus fechas — usted no los crea.
 
-Su tarea es aprobar la liquidación — y eso exige [doble control](../../compliance/step-up-mfa.md), porque pagar a la lista de titulares equivocada es el error catastrófico clásico de la administración de valores y es muy difícil de revertir.
+Los dividendos, los desdoblamientos (splits) y las amortizaciones anticipadas son distintos: usted los **propone** (*Emisión → Operaciones societarias → Proponer*), y un operador revisa la propuesta — aprobándola en el registro, o rechazándola — antes de que continúe.
+
+Sea cual sea el origen de la operación, la liquidación exige la conformidad de dos partes separadas: **usted certifica** que la obligación subyacente está lista — el efectivo de un cupón o dividendo, el mecanismo de un split o una amortización anticipada — y después **un operador confirma** el lado del registro/on-chain. Certificar es una acción autenticada normal, no requiere [verificación reforzada](../../compliance/step-up-mfa.md) — solo la confirmación del operador la exige. Si usted nunca certifica, un operador puede anular el requisito; esa anulación queda registrada como una excepción distinta y permanentemente visible, nunca indistinguible de una certificación genuina.
 
 Las tres fechas que deciden quién cobra: la **fecha de registro** (quien mantiene en ese instante tiene derecho), la **fecha ex-cupón** (a partir de ahí se negocia sin el pago), la **fecha de pago** (el dinero se mueve).
 
@@ -141,7 +143,7 @@ Para los titulares consumidores con inscripción individual, los extractos del �
 
 ### Amortización
 
-Al vencimiento: fotografía de posiciones, derechos, aprobación bajo doble control, pago, tokens destruidos, `REDEEMED`. Terminal — de ahí no se sale.
+Al vencimiento: fotografía de posiciones, derechos, su certificación y la confirmación de un operador, pago, tokens destruidos, `REDEEMED`. Terminal — de ahí no se sale.
 
 Las filas de titulares se **borran lógicamente, nunca se eliminan**: una inscripción del §16 que desaparece no puede satisfacer obligaciones de conservación ni de prueba de manipulación.
 

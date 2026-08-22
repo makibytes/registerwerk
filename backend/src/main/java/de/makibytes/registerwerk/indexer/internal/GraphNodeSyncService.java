@@ -4,6 +4,8 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
 import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.RpcNode;
+import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
@@ -69,6 +71,8 @@ public class GraphNodeSyncService {
     private final BlockchainTxProperties txProperties;
     private final ReorgGuard reorgGuard;
     private final BlockchainClientRegistry clientRegistry;
+    private final RpcNodeRepository rpcNodeRepository;
+    private final ChaincacheFinalityProbe chaincacheFinalityProbe;
 
     public GraphNodeSyncService(
             ChainConfigRepository chainConfigRepository,
@@ -79,7 +83,9 @@ public class GraphNodeSyncService {
             AssetDeploymentRepository assetDeploymentRepository,
             BlockchainTxProperties txProperties,
             ReorgGuard reorgGuard,
-            BlockchainClientRegistry clientRegistry) {
+            BlockchainClientRegistry clientRegistry,
+            RpcNodeRepository rpcNodeRepository,
+            ChaincacheFinalityProbe chaincacheFinalityProbe) {
         this.chainConfigRepository = chainConfigRepository;
         this.indexerStateRepository = indexerStateRepository;
         this.tokenTransferRepository = tokenTransferRepository;
@@ -89,6 +95,8 @@ public class GraphNodeSyncService {
         this.txProperties = txProperties;
         this.reorgGuard = reorgGuard;
         this.clientRegistry = clientRegistry;
+        this.rpcNodeRepository = rpcNodeRepository;
+        this.chaincacheFinalityProbe = chaincacheFinalityProbe;
     }
 
     // ── Scheduling ────────────────────────────────────────────────────────────
@@ -220,9 +228,11 @@ public class GraphNodeSyncService {
             // can still redirect where the cursor lands this tick.
             Long forkBlock = null;
             if (effectiveHead != null) {
-                VerifyResult result = reorgGuard.reverifyUnsettledWindow(chain.getId(),
-                        blockNumber -> probeEvmBlock(chain, blockNumber, effectiveHead, required, safeRequired,
+                ReorgGuard.FinalityProbe probe = chaincacheProbeFor(chain)
+                        .<ReorgGuard.FinalityProbe>map(node -> blockNumber -> probeChaincacheBlock(chain, node, blockNumber))
+                        .orElse(blockNumber -> probeEvmBlock(chain, blockNumber, effectiveHead, required, safeRequired,
                                 safeBlockNumber, finalizedBlockNumber, hashCache));
+                VerifyResult result = reorgGuard.reverifyUnsettledWindow(chain.getId(), probe);
                 if (result.reorgDetected()) {
                     forkBlock = result.forkBlock();
                 }
@@ -289,6 +299,44 @@ public class GraphNodeSyncService {
     }
 
     // ── Reorg probe ───────────────────────────────────────────────────────────
+
+    /** The enabled {@link RpcNode.NodeKind#CHAINCACHE} node to probe for {@code chain}, when the
+     *  chain opted into {@link ChainConfig.FinalitySource#CHAINCACHE} — empty for every other
+     *  chain, or if it opted in but currently has no such node (an inconsistent, transient state
+     *  {@code RpcNodeService#recomputeFinalitySource} self-heals on the next node change; falling
+     *  back to RPC self-probing here rather than failing the tick is the right response to it). */
+    private Optional<RpcNode> chaincacheProbeFor(ChainConfig chain) {
+        if (chain.getFinalitySource() != ChainConfig.FinalitySource.CHAINCACHE) {
+            return Optional.empty();
+        }
+        return rpcNodeRepository.findByChainConfig_IdAndKindAndEnabledTrue(chain.getId(), RpcNode.NodeKind.CHAINCACHE)
+                .stream().findFirst();
+    }
+
+    /** {@link ReorgGuard.FinalityProbe} for a {@link ChainConfig.FinalitySource#CHAINCACHE} chain
+     *  — reads the block's finality directly from chaincache's own canonical-chain record
+     *  ({@link ChaincacheFinalityProbe}) instead of RPC-self-probing it (see
+     *  {@link #probeEvmBlock}). Detecting {@link ProbeResult#ORPHANED} by comparing the returned
+     *  hash against whatever baseline is already stored is identical to {@code probeEvmBlock}'s
+     *  own logic — chaincache reports what it currently has on record; recognizing that it
+     *  changed from Registerwerk's own stored baseline is this class's job either way. */
+    private ProbeOutcome probeChaincacheBlock(ChainConfig chain, RpcNode chaincacheNode, long blockNumber) {
+        Optional<ChaincacheFinalityProbe.Observation> observation =
+                chaincacheFinalityProbe.observe(chaincacheNode, blockNumber);
+        if (observation.isEmpty()) {
+            return ProbeOutcome.unknown();
+        }
+        String freshHash = observation.get().blockHash();
+
+        List<String> stored = tokenTransferRepository.findDistinctBlockHashesAt(chain.getId(), blockNumber);
+        if (!stored.isEmpty() && stored.stream().noneMatch(freshHash::equals)) {
+            return new ProbeOutcome(ProbeResult.ORPHANED, freshHash);
+        }
+        if (stored.isEmpty()) {
+            tokenTransferRepository.backfillBlockHashAtBlock(chain.getId(), blockNumber, freshHash);
+        }
+        return new ProbeOutcome(observation.get().level(), freshHash);
+    }
 
     /** EVM {@link ReorgGuard.FinalityProbe}: compares a freshly re-fetched canonical hash for
      *  {@code blockNumber} against whatever hash was previously recorded for it. */

@@ -80,7 +80,9 @@ An issuer can:
 - Create and manage their own [asset](../token-standards/index.md) definitions
 - Initiate token deployment (subject to operator approval if required)
 - Manage investor onboarding for their tokens
-- View [corporate action](../intro/concepts.md) history for their securities
+- Propose [corporate actions](../intro/concepts.md) — dividends, splits, early calls — for operator review, and withdraw a proposal before it's reviewed
+- Attest that a corporate action's settlement is ready — the first of the two required parties, alongside an operator's confirmation
+- View corporate action history for their securities
 - Download position statements and regulatory documents
 
 ### INVESTOR
@@ -90,6 +92,7 @@ An investor can:
 - View their portfolio (tokens held, positions)
 - Accept transfer requests
 - View transaction history
+- View corporate actions affecting their holdings and download settlement confirmations
 - Download their position statements
 
 ### COMPANY_ADMIN

@@ -9,15 +9,34 @@ import de.makibytes.registerwerk.finality.api.FinalityPolicyService;
 import de.makibytes.registerwerk.finality.api.GatedOperation;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.UUID;
 
+/**
+ * Default {@link FinalityGate}: resolves the required {@link FinalityLevel} for a
+ * {@link GatedOperation} via {@link FinalityPolicyService} and compares it against the caller's
+ * {@code currentLevel}, blocking with a specific {@link FinalityDecision.Blocked.Reason} when it
+ * isn't met.
+ *
+ * <p>Also enforces a per-asset freeze: while {@code assetId} has any {@link ChainEffect.Status#COMPENSATION_FAILED}
+ * or {@link ChainEffect.Status#IRREVERSIBLE_ESCALATED} row that no admin has acknowledged, every
+ * operation on that asset is blocked with {@link FinalityDecision.Blocked.Reason#UNRESOLVED_COMPENSATION}
+ * — regardless of {@code currentLevel}, since the whole point is that a dashboard nobody watches
+ * is not fail-closed. See {@code finality.web.FinalityJournalController} for the operator queue
+ * that lists and acknowledges these.
+ */
 @Component
 class FinalityGateImpl implements FinalityGate {
 
-    private final FinalityPolicyService policyService;
+    private static final List<ChainEffect.Status> UNRESOLVED_STATUSES =
+            List.of(ChainEffect.Status.COMPENSATION_FAILED, ChainEffect.Status.IRREVERSIBLE_ESCALATED);
 
-    FinalityGateImpl(FinalityPolicyService policyService) {
+    private final FinalityPolicyService policyService;
+    private final ChainEffectRepository chainEffectRepository;
+
+    FinalityGateImpl(FinalityPolicyService policyService, ChainEffectRepository chainEffectRepository) {
         this.policyService = policyService;
+        this.chainEffectRepository = chainEffectRepository;
     }
 
     @Override
@@ -28,6 +47,12 @@ class FinalityGateImpl implements FinalityGate {
             return new FinalityDecision.Blocked(operation, assetId, required, currentLevel,
                     FinalityDecision.Blocked.Reason.ORPHANED,
                     "The on-chain event this depends on was reorged out and is no longer valid.");
+        }
+        if (assetId != null && chainEffectRepository.existsByAssetIdAndStatusInAndAcknowledgedAtIsNull(assetId, UNRESOLVED_STATUSES)) {
+            return new FinalityDecision.Blocked(operation, assetId, required, currentLevel,
+                    FinalityDecision.Blocked.Reason.UNRESOLVED_COMPENSATION,
+                    "A reorg-caused compensation for this asset failed or could not be automatically "
+                            + "undone and has not yet been acknowledged by an administrator.");
         }
         if (currentLevel.atLeast(required)) {
             return new FinalityDecision.Allowed(currentLevel);

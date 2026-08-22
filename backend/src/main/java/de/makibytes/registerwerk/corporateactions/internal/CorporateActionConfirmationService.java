@@ -8,6 +8,10 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryReposi
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
+import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -56,17 +60,20 @@ public class CorporateActionConfirmationService {
     private final AssetRepository assetRepository;
     private final LegalEntityRepository entityRepository;
     private final DocumentSigningService signingService;
+    private final FinalityGate finalityGate;
 
     CorporateActionConfirmationService(CorporateActionRepository actionRepository,
                                         CorporateActionEntryRepository entryRepository,
                                         AssetRepository assetRepository,
                                         LegalEntityRepository entityRepository,
-                                        DocumentSigningService signingService) {
+                                        DocumentSigningService signingService,
+                                        FinalityGate finalityGate) {
         this.actionRepository = actionRepository;
         this.entryRepository = entryRepository;
         this.assetRepository = assetRepository;
         this.entityRepository = entityRepository;
         this.signingService = signingService;
+        this.finalityGate = finalityGate;
     }
 
     /** Operator-facing: every holder's entry for this corporate action. */
@@ -145,6 +152,15 @@ public class CorporateActionConfirmationService {
                 : unsigned;
     }
 
+    /**
+     * Common chokepoint for all four {@code generate*} methods — also where
+     * {@link GatedOperation#CORPORATE_ACTION_CONFIRMATION_EXPORT} is enforced:
+     * a confirmation document is exactly the kind of thing that must not go out describing a
+     * still-provisional settlement. {@code currentLevel} is {@code FINALIZED} unconditionally,
+     * same reasoning as every other gate call site in this codebase — the action is already
+     * required to be SETTLED/CLOSED here, and settlement itself is gated at
+     * {@code CorporateActionService.confirmSettlementAsOperator}/{@code markSettledManually}.
+     */
     private CorporateAction requireSettled(UUID corporateActionId) {
         CorporateAction action = actionRepository.findById(corporateActionId)
                 .orElseThrow(() -> new EntityNotFoundException("CorporateAction", corporateActionId));
@@ -152,6 +168,9 @@ public class CorporateActionConfirmationService {
             throw new IllegalStateException(
                     "Corporate action " + corporateActionId + " has not settled yet (status=" + action.getStatus() + ")");
         }
+        TokenStandard standard = assetRepository.findById(action.getAssetId())
+                .map(Asset::getTokenStandard).orElse(null);
+        finalityGate.require(GatedOperation.CORPORATE_ACTION_CONFIRMATION_EXPORT, action.getAssetId(), standard, FinalityLevel.FINALIZED);
         return action;
     }
 

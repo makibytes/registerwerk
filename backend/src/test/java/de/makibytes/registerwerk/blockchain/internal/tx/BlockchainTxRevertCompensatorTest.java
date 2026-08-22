@@ -37,7 +37,7 @@ class BlockchainTxRevertCompensatorTest {
 
     private ChainEffectRecord effect() {
         return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
-                "blockchain", "TX_COMPLETED", "BlockchainTransaction", txId, CompensationCategory.INVERSE_FLIP,
+                "blockchain", "TX_COMPLETED", "BlockchainTransaction", txId, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
 

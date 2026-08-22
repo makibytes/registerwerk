@@ -25,5 +25,6 @@ public record RpcNodeResponse(
         RpcNode.NodeKind kind,
         String managementUrl,
         String remoteChainKey,
-        Map<String, Object> capabilities
+        Map<String, Object> capabilities,
+        boolean streamConnected
 ) {}

@@ -52,10 +52,13 @@ La risposta non può essere «chi la detiene quando arriva il pagamento»: è im
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> ANNOUNCED
+    [*] --> PROPOSED: proposta dall'emittente
+    [*] --> ANNOUNCED: creata dal sistema
+    PROPOSED --> ANNOUNCED: l'operatore approva
+    PROPOSED --> REJECTED: l'operatore respinge
     ANNOUNCED --> RECORD_DATE_SET
     RECORD_DATE_SET --> COMPUTED: istantanea acquisita
-    COMPUTED --> AWAITING_SETTLEMENT: approvata (quattro occhi)
+    COMPUTED --> AWAITING_SETTLEMENT: emittente attesta + operatore conferma
     AWAITING_SETTLEMENT --> SETTLED: pagata
     SETTLED --> CLOSED
     ANNOUNCED --> CANCELLED
@@ -63,22 +66,32 @@ stateDiagram-v2
     COMPUTED --> CANCELLED
 ```
 
-Il passaggio `COMPUTED` → `AWAITING_SETTLEMENT` richiede il **[principio dei quattro occhi](../../compliance/step-up-mfa.md)**: una seconda persona autorizzata deve approvare prima che il denaro esca a fronte di un elenco di titolari. L'errore catastrofico più comune nell'amministrazione di strumenti finanziari è pagare l'elenco sbagliato, ed è molto difficile da disfare.
+Le cedole e, alla fine, il rimborso vengono **creati dal sistema** — generati automaticamente dal piano dei pagamenti o dalla data di scadenza, anziché essere affidati alla memoria di una persona, e partono da `ANNOUNCED`. I dividendi, i frazionamenti e i rimborsi anticipati sono **proposti dall'emittente**: l'emittente presenta un'operazione che parte da `PROPOSED`, e questa entra a far parte del registro (`ANNOUNCED`) solo dopo che un operatore l'ha esaminata e approvata — oppure viene scartata definitivamente (`REJECTED`) in caso contrario.
 
-Le cedole di un'obbligazione vengono generate automaticamente dal piano dei pagamenti anziché essere affidate alla memoria di una persona, e il job giornaliero che fa avanzare le operazioni lungo le loro date gira da solo.
+Il passaggio `COMPUTED` → `AWAITING_SETTLEMENT` richiede il via libera di **due parti separate**, comunque sia stata creata l'operazione: l'emittente attesta che l'obbligazione sottostante è realmente pronta — il denaro per una cedola o un dividendo, il meccanismo per un frazionamento o un rimborso anticipato — e poi un operatore conferma il lato registro/on-chain. L'errore catastrofico più comune nell'amministrazione di strumenti finanziari è pagare l'elenco sbagliato, e il fatto che debbano dare il via libera due organizzazioni, non due colleghi della stessa, rende molto più difficile che ciò accada inosservato. L'attestazione dell'emittente è un'azione autenticata normale; solo la conferma dell'operatore richiede [autenticazione rafforzata](../../compliance/step-up-mfa.md). Se l'emittente non attesta mai, un operatore può scavalcare il requisito — questo viene registrato come eccezione distinta e permanentemente visibile, mai indistinguibile da un'attestazione genuina.
 
 ### I tipi che Registerwerk modella
 
+Solo un sottoinsieme può essere effettivamente creato oggi — il resto è modellato (ha un posto nel ciclo di vita e nel meccanismo di regolamento) ma non ha ancora un percorso di creazione.
+
+**Supportati oggi**
+
+| | Creata da |
+|---|---|
+| `COUPON`, `INTEREST_PAYMENT` | Il sistema, dal piano dei pagamenti. |
+| `REDEMPTION` | Il sistema, alla data di scadenza. |
+| `DIVIDEND` | Proposta dell'emittente, esaminata dall'operatore. |
+| `SPLIT` | Proposta dell'emittente, esaminata dall'operatore. Si regola tramite constatazione manuale dell'operatore — nessuno standard di token supportato dispone di una primitiva di frazionamento on-chain. |
+| `CALL` | Proposta dell'emittente, esaminata dall'operatore. Rimborso anticipato da parte dell'emittente, ove le condizioni lo consentano. |
+
+**Modellati, non ancora supportati**
+
 | | |
 |---|---|
-| `COUPON`, `INTEREST_PAYMENT` | Interessi periodici. |
-| `DIVIDEND` | Una distribuzione ai detentori di capitale. |
-| `REDEMPTION`, `PARTIAL_REDEMPTION` | Rimborso del capitale, totale o parziale. |
-| `CALL` | Rimborso anticipato da parte dell'emittente, ove le condizioni lo consentano. |
-| `SPLIT`, `REVERSE_SPLIT` | Cambiare il numero di titoli senza cambiare il valore complessivo. |
+| `PARTIAL_REDEMPTION` | Rimborso parziale del capitale. |
+| `REVERSE_SPLIT` | Ridurre il numero di titoli senza cambiare il valore complessivo. |
 | `CONVERSION` | Trasformare lo strumento in un altro. |
 | `CAPITAL_CALL` | Richiamare versamenti aggiuntivi ai titolari. |
-| `PLEDGE` | Annotare che una posizione è stata costituita in garanzia. |
 
 ---
 
@@ -101,7 +114,7 @@ Meccanicamente si tratta di un'operazione societaria di tipo `REDEMPTION`, gener
 
 1. Viene acquisita l'istantanea alla data di registrazione.
 2. Il diritto di ciascun titolare è il suo nominale al valore nominale.
-3. Il pagamento viene approvato con i quattro occhi e regolato.
+3. L'emittente attesta, un operatore conferma, e il pagamento viene regolato.
 4. I token vengono **distrutti** — eliminati on-chain, l'offerta torna a zero.
 5. L'asset passa a `REDEEMED`.
 

@@ -66,6 +66,14 @@ public class RpcNode {
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> capabilities;
 
+    /** Consecutive {@code redetectAll} probe failures for a {@link NodeKind#CHAINCACHE} node —
+     *  see {@code RpcNodeService#redetectAll}'s demotion hysteresis. Reset to 0 on any successful
+     *  probe (whether it confirms CHAINCACHE or genuinely demotes to DIRECT_RPC because chaincache
+     *  no longer lists this remoteChainKey — that's a real signal, not noise). Always 0 for
+     *  {@link NodeKind#DIRECT_RPC} nodes that have never been chaincache. */
+    @Column(name = "chaincache_probe_failures", nullable = false)
+    private int chaincacheProbeFailures = 0;
+
     /** False when the operator has manually stopped this node from being used. */
     @Column(nullable = false)
     private boolean enabled = true;
@@ -143,6 +151,9 @@ public class RpcNode {
 
     public Map<String, Object> getCapabilities() { return capabilities; }
     public void setCapabilities(Map<String, Object> capabilities) { this.capabilities = capabilities; }
+
+    public int getChaincacheProbeFailures() { return chaincacheProbeFailures; }
+    public void setChaincacheProbeFailures(int chaincacheProbeFailures) { this.chaincacheProbeFailures = chaincacheProbeFailures; }
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

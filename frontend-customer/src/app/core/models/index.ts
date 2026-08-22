@@ -22,6 +22,14 @@ export type EntryType = 'COLLECTIVE' | 'INDIVIDUAL' | 'MIXED';
  * UI never presents a holding confirmation as if it were the legal register
  * extract. See `RegisterDocumentService`.
  */
+/** One entry in a callable bond's pre-captured call schedule (`AssetBondTerms.callSchedule`,
+ *  JSONB on the backend) — the date/price an issuer's CALL proposal can reference by index
+ *  instead of supplying a custom date/price (see `CorporateActionProposalValidator`). */
+export interface CallEntry {
+  callDate: string;
+  callPrice: number;
+}
+
 /** Bond economic terms — `asset.web.BondTermsController`. Present only for bond-type assets. */
 export interface AssetBondTerms {
   assetId: string;
@@ -36,8 +44,48 @@ export interface AssetBondTerms {
   dayCount: 'ACT_360' | 'ACT_365' | 'ACT_ACT_ICMA' | 'THIRTY_360' | 'THIRTY_E_360';
   paymentFrequency: 'ANNUAL' | 'SEMI_ANNUAL' | 'QUARTERLY' | 'MONTHLY' | 'ZERO';
   callable: boolean;
-  callSchedule: Record<string, unknown>[] | null;
+  callSchedule: CallEntry[] | null;
   bondStatus: 'ACTIVE' | 'MATURED' | 'CALLED' | 'DEFAULTED' | 'REDEEMED';
+}
+
+// ── Corporate actions ──────────────────────────────────────────────────────────
+// Only DIVIDEND/SPLIT/CALL are issuer-proposable today; the rest are system-raised
+// (COUPON/REDEMPTION) or not yet buildable. PLEDGE was retired — see backend
+// V14__corporate_action_issuer_workflow.sql.
+export type CorporateActionType =
+  | 'COUPON' | 'DIVIDEND' | 'SPLIT' | 'REVERSE_SPLIT' | 'CONVERSION'
+  | 'REDEMPTION' | 'PARTIAL_REDEMPTION' | 'CALL'
+  | 'CAPITAL_CALL' | 'INTEREST_PAYMENT';
+
+/** PROPOSED/REJECTED are the issuer-proposal pre-states for issuer-initiated types (DIVIDEND,
+ *  SPLIT, CALL). System-raised COUPON/REDEMPTION skip PROPOSED and start at ANNOUNCED. */
+export type CorporateActionStatus =
+  | 'PROPOSED' | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT'
+  | 'SETTLED' | 'CLOSED' | 'CANCELLED' | 'REJECTED';
+
+/** Issuer/investor-facing projection — `corporateactions.web.dto.CorporateActionView`.
+ *  Deliberately omits `notes` and every actor id (`initiatedBy`, `issuerAttestedBy`,
+ *  `dualControlApproverId`): callers need to know *whether* the two settlement-approval parties
+ *  have signed off, not *who* on the operator side did. */
+export interface CorporateActionView {
+  id: string;
+  assetId: string;
+  actionType: CorporateActionType;
+  status: CorporateActionStatus;
+  announcementDate: string | null;
+  recordDate: string | null;
+  paymentDate: string | null;
+  ratioNumerator: number | null;
+  ratioDenominator: number | null;
+  amountPerUnit: number | null;
+  totalAmount: number | null;
+  currency: string | null;
+  settlementTxHash: string | null;
+  settledAt: string | null;
+  issuerAttestedAt: string | null;
+  dualControlApprovedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RegisterDocumentMeta {
@@ -327,6 +375,43 @@ export interface PageResponse<T> {
   size: number;
   first: boolean;
   last: boolean;
+}
+
+/** Mirrors the backend's `shared.api.PageResponse` exactly — a different shape from the
+ *  `PageResponse` above (that one is Spring Data's native page JSON, used elsewhere in this app;
+ *  this backend DTO uses `page`, not `number`, and has no `first`/`last`). Used by
+ *  `TokenHistoryService`, the only current caller of this shape in this app. */
+export interface BackendPageResponse<T> {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  page: number;
+  size: number;
+}
+
+/**
+ * A single on-chain token transfer as recorded by the off-chain indexer. Mirrors the backend's
+ * `TokenTransferResponse` record exactly (`indexer/web/dto/TokenTransferResponse.java`).
+ */
+export interface TokenTransferResponse {
+  id: string;
+  contractAddress: string;
+  fromAddress: string | null;
+  toAddress: string | null;
+  tokenId: string | null;
+  amount: string;
+  eventType: string;
+  txHash: string;
+  blockNumber: number;
+  occurredAt: string;
+  explorerTxUrl: string | null;
+  chainIdentifier: string;
+  /** Raw `FinalityLevel` name — stable across roles. Render `finalityLabel`, not this, for
+   *  display text; this app's users always get plain language via that field. */
+  finalityStatus: 'PROVISIONAL' | 'SAFE' | 'FINALIZED' | 'ORPHANED';
+  /** Plain-language display text, resolved server-side for this app's customer-side roles
+   *  ("Being confirmed", "Confirmed", "Settled — final", "Did not go through"). */
+  finalityLabel: string;
 }
 
 // ─── Issuance Wizard Form Model ───────────────────────────────────────────────

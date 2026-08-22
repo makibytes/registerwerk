@@ -442,11 +442,18 @@ code {
   // wrong at a glance, not blend in with a neutral/pending look.
   &.status-error        { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
   &.status-paused        { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
-  // Token transfer finality (TokenTransfer.FinalityStatus) — PROVISIONAL reads as
-  // pending/unconfirmed, FINAL as a subtle success state, ORPHANED as a clear warning since it
-  // means the chain reorged past a transfer the registry previously recorded.
+  // Token transfer finality (finality.api.FinalityLevel, three-tier since the P3 rename) —
+  // PROVISIONAL reads as pending/unconfirmed, SAFE as "getting there" (a lighter version of the
+  // same pending look — still reorgable, just past the fastest checkpoint), FINALIZED as a
+  // success state, ORPHANED as a clear warning since it means the chain reorged past a transfer
+  // the registry previously recorded. `.status-final` (the old two-tier FINAL name) is kept
+  // alongside `.status-finalized` for any other lingering two-tier consumer — the badge class is
+  // derived directly from whatever string the backend sends (StatusBadgeComponent), and after the
+  // P3 rename every real caller here now sends FINALIZED, not FINAL.
   &.status-provisional   { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
-  &.status-final         { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-safe          { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-final,
+  &.status-finalized     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   &.status-orphaned      { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
 }
 
@@ -1190,6 +1197,80 @@ code {
   }
 }
 
+// ── network node health indicators ──────────────────────────────────────────
+// Health dot/label, block-lag chip, syncing badge, relative-time text — used by
+// network-nodes.component.ts's node table. Kept global for the same style-budget reason as the
+// chaincache capability comparison section right below.
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+}
+
+.health-dot.healthy   { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+.health-dot.unhealthy { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.3); }
+.health-dot.unknown   { background: var(--rw-text-muted); }
+
+.health-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.health-label.healthy   { color: #22c55e; }
+.health-label.unhealthy { color: #ef4444; }
+.health-label.unknown   { color: var(--rw-text-muted); }
+
+.block-num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--rw-text-secondary);
+}
+
+.lag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lag-chip.ok    { background: rgba(34,197,94,0.12); color: #16a34a; }
+.lag-chip.warn  { background: rgba(245,158,11,0.12); color: #d97706; }
+.lag-chip.crit  { background: rgba(239,68,68,0.12); color: #dc2626; }
+
+.syncing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.syncing-badge mat-icon {
+  font-size: 12px;
+  width: 12px;
+  height: 12px;
+}
+
+.last-seen {
+  font-size: 11px;
+  color: var(--rw-text-muted);
+}
+
 // ── chaincache capability comparison ────────────────────────────────────────
 // Shared by any page showing a chaincache-kind node's advertised capabilities next to a direct
 // node's connection — currently network-nodes.component.ts. Kept global (not per-component
@@ -1242,3 +1323,33 @@ code {
 .capabilities-empty { padding: 14px 16px; font-size: 12px; color: var(--rw-text-muted); font-style: italic; }
 .capabilities-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 .chaincheck-link { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+
+.capability-item.wide { grid-column: 1 / -1; }
+.capability-item .value.mono {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.api-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.api-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace;
+  background: var(--rw-bg);
+  border: 1px solid var(--rw-border);
+  color: var(--rw-text-secondary);
+}
+
+.stream-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.stream-status mat-icon { font-size: 12px; width: 12px; height: 12px; }
+.stream-status.connected { color: #16a34a; }
+.stream-status.disconnected { color: var(--rw-text-muted); }

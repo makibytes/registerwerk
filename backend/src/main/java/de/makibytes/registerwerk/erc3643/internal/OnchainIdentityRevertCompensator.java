@@ -53,8 +53,8 @@ class OnchainIdentityRevertCompensator implements ChainEffectCompensator {
                     "OnchainIdentity " + id + " is already pending/failed, not a resolved address");
         }
 
-        log.error("OnchainIdentity id={} address={} but its confirming block was retracted by a reorg deep "
-                        + "enough to cross FINALIZED — reverting to pending for re-verification.",
+        log.error("OnchainIdentity id={} address={} but its confirming block was retracted by a reorg "
+                        + "— reverting to pending for re-verification.",
                 id, identity.getIdentityAddress());
         identity.setIdentityAddress("0x-PENDING-ONCHAINID-" + UUID.randomUUID());
         repository.save(identity);

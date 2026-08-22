@@ -77,7 +77,7 @@ class VaultNavStrikeRevertCompensator implements ChainEffectCompensator {
                 .orElse(null);
 
         log.error("VaultNavStrike id={} asset={} strikeId={} was applied to AssetVaultState but its confirming "
-                        + "block was retracted by a reorg deep enough to cross FINALIZED — reverting to the "
+                        + "block was retracted by a reorg — reverting to the "
                         + "previous confirmed strike ({}).",
                 id, strike.getAssetId(), strike.getStrikeId(),
                 previous != null ? previous.getStrikeId() : "none — nulling out");

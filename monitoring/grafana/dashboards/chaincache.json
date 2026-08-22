@@ -1,0 +1,308 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "type": "datasource",
+      "pluginId": "prometheus"
+    }
+  ],
+  "title": "Chaincache",
+  "uid": "chaincache",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "workload",
+        "type": "query",
+        "datasource": "${DS_PROMETHEUS}",
+        "query": "label_values(up{job=\"chaincache\"}, chaincache_workload)",
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Upstream — per workload",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Workload availability",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "up{job=\"chaincache\", chaincache_workload=~\"$workload\"}",
+          "legendFormat": "{{ chaincache_workload }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "UP", "color": "green" } } },
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } }
+          ],
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 1, "color": "green" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "In-flight requests",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "expr": "chaincache_request_inflight{chaincache_workload=~\"$workload\"}",
+          "legendFormat": "{{ chaincache_workload }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Upstream RPC average latency (rpc.node.latency has no percentile buckets)",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum by (chaincache_workload, chain, provider) (rate(chaincache_rpc_node_latency_seconds_sum{chaincache_workload=~\"$workload\"}[5m])) / sum by (chaincache_workload, chain, provider) (rate(chaincache_rpc_node_latency_seconds_count{chaincache_workload=~\"$workload\"}[5m]))",
+          "legendFormat": "{{ chaincache_workload }} / {{ chain }} / {{ provider }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              { "value": 0.5, "color": "yellow" },
+              { "value": 2, "color": "red" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Upstream RPC error rate",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "expr": "sum by (chaincache_workload, chain, provider, status) (rate(chaincache_rpc_errors_total{chaincache_workload=~\"$workload\"}[5m]))",
+          "legendFormat": "{{ chaincache_workload }} / {{ chain }} / {{ provider }} ({{ status }})",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Chain reorganizations",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 9 },
+      "targets": [
+        {
+          "expr": "sum by (chaincache_workload, chain) (increase(chaincache_chain_reorganizations_total{chaincache_workload=~\"$workload\"}[10m]))",
+          "legendFormat": "{{ chaincache_workload }} / {{ chain }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "WebSocket disconnects",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 9 },
+      "targets": [
+        {
+          "expr": "sum by (chaincache_workload, chain, provider) (increase(chaincache_rpc_ws_disconnects_total{chaincache_workload=~\"$workload\"}[15m]))",
+          "legendFormat": "{{ chaincache_workload }} / {{ chain }} / {{ provider }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Block resolutions",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "targets": [
+        {
+          "expr": "sum by (chaincache_workload, chain) (rate(chaincache_block_resolutions_total{chaincache_workload=~\"$workload\"}[5m]))",
+          "legendFormat": "{{ chaincache_workload }} / {{ chain }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Transactions per block",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "targets": [
+        {
+          "expr": "sum by (chaincache_workload, chain) (rate(chaincache_block_transactions_sum{chaincache_workload=~\"$workload\"}[5m])) / sum by (chaincache_workload, chain) (rate(chaincache_block_transactions_count{chaincache_workload=~\"$workload\"}[5m]))",
+          "legendFormat": "{{ chaincache_workload }} / {{ chain }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Registerwerk — chaincache integration",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Durable-stream connection",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 26 },
+      "targets": [
+        {
+          "expr": "registerwerk_chaincache_stream_connected{job=\"registerwerk-backend\"}",
+          "legendFormat": "{{ chain }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "CONNECTED", "color": "green" } } },
+            { "type": "value", "options": { "0": { "text": "DISCONNECTED", "color": "red" } } }
+          ],
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 1, "color": "green" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Durable events received",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 26 },
+      "targets": [
+        {
+          "expr": "sum by (chain, stream, kind) (rate(registerwerk_chaincache_stream_events_total{job=\"registerwerk-backend\"}[5m]))",
+          "legendFormat": "{{ chain }} / {{ stream }} / {{ kind }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Seconds since last event",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 26 },
+      "targets": [
+        {
+          "expr": "time() - registerwerk_chaincache_stream_last_event_timestamp_seconds{job=\"registerwerk-backend\"}",
+          "legendFormat": "{{ chain }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              { "value": 300, "color": "yellow" },
+              { "value": 600, "color": "red" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Capability probe failures",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "targets": [
+        {
+          "expr": "sum by (management_url, reason) (increase(registerwerk_chaincache_capability_probe_failures_total{job=\"registerwerk-backend\"}[15m]))",
+          "legendFormat": "{{ management_url }} ({{ reason }})",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "RPC nodes by kind",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "targets": [
+        {
+          "expr": "registerwerk_chaincache_nodes_total{job=\"registerwerk-backend\"}",
+          "legendFormat": "{{ kind }}",
+          "datasource": "${DS_PROMETHEUS}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    }
+  ]
+}

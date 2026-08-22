@@ -39,7 +39,7 @@ class EcosystemTrustedIssuerRevertCompensatorTest {
 
     private ChainEffectRecord effect() {
         return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
-                "orgidentity", "TRUSTED_ISSUER_ADDED", "EcosystemTrustedIssuer", id, CompensationCategory.INVERSE_FLIP,
+                "orgidentity", "TRUSTED_ISSUER_ADDED", "EcosystemTrustedIssuer", id, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
 

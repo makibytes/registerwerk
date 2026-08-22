@@ -1,11 +1,18 @@
 package de.makibytes.registerwerk.bootstrap;
 
+import org.springframework.beans.factory.annotation.Value;
+
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.BondStatus;
+import de.makibytes.registerwerk.deployment.api.DayCountConvention;
 import de.makibytes.registerwerk.deployment.api.GasSponsorshipPolicy;
 import de.makibytes.registerwerk.deployment.api.GasSponsorshipPolicyRepository;
+import de.makibytes.registerwerk.deployment.api.PaymentFrequency;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import de.makibytes.registerwerk.dora.api.IctIncident;
@@ -94,6 +101,17 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
     private final KycDocumentContentRepository kycDocumentContents;
     private final KycJurisdictionApprovalRepository kycJurisdictionApprovals;
     private final HolderBlockRepository holderBlocks;
+    private final AssetBondTermsRepository bondTerms;
+
+    // ── chaincache demo node config ─────────────────────────────────────────
+    // Extracted from what used to be hardcoded literals in syncChaincacheDemoNode() so a second
+    // chaincache workload (see docker-compose.yml's chaincache-base service) is configuration,
+    // not another code path — see this constructor's javadoc.
+    private final String chaincacheDemoChainIdentifier;
+    private final String chaincacheDemoUrl;
+    private final String chaincacheDemoLabel;
+    private final String chaincacheDemoManagementUrl;
+    private final String chaincacheDemoRemoteChainKey;
 
     /** Fixed Base32 TOTP secret shared by every demo-seeded operator user (never used in
      *  production — DefaultAdminSeeder's own admin is never enrolled by this class). Lets a
@@ -124,7 +142,13 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
             KycDocumentRepository kycDocuments,
             KycDocumentContentRepository kycDocumentContents,
             KycJurisdictionApprovalRepository kycJurisdictionApprovals,
-            HolderBlockRepository holderBlocks) {
+            HolderBlockRepository holderBlocks,
+            AssetBondTermsRepository bondTerms,
+            @Value("${registerwerk.chaincache.demo.chain-identifier:ETHEREUM_SEPOLIA}") String chaincacheDemoChainIdentifier,
+            @Value("${registerwerk.chaincache.demo.url:http://chaincache-sepolia:8080/sepolia/rpc}") String chaincacheDemoUrl,
+            @Value("${registerwerk.chaincache.demo.label:chaincache (anvil)}") String chaincacheDemoLabel,
+            @Value("${registerwerk.chaincache.demo.management-url:http://chaincache-sepolia:8080}") String chaincacheDemoManagementUrl,
+            @Value("${registerwerk.chaincache.demo.remote-chain-key:sepolia}") String chaincacheDemoRemoteChainKey) {
         this.entities = entities;
         this.users = users;
         this.assets = assets;
@@ -144,13 +168,30 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         this.kycDocumentContents = kycDocumentContents;
         this.kycJurisdictionApprovals = kycJurisdictionApprovals;
         this.holderBlocks = holderBlocks;
+        this.bondTerms = bondTerms;
+        this.chaincacheDemoChainIdentifier = chaincacheDemoChainIdentifier;
+        this.chaincacheDemoUrl = chaincacheDemoUrl;
+        this.chaincacheDemoLabel = chaincacheDemoLabel;
+        this.chaincacheDemoManagementUrl = chaincacheDemoManagementUrl;
+        this.chaincacheDemoRemoteChainKey = chaincacheDemoRemoteChainKey;
     }
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
         syncPublicNodes();
-        syncChaincacheDemoNode();
+        syncChaincacheDemoNode(chaincacheDemoChainIdentifier, chaincacheDemoUrl, chaincacheDemoLabel,
+                chaincacheDemoManagementUrl, chaincacheDemoRemoteChainKey);
+        // The second chaincache workload (docker-compose.yml's chaincache-base service, fronting
+        // real public Base Sepolia RPC providers — TAG_BASED finality, required-provider-agreement
+        // 2) is default-on in the demo per the portfolio plan's explicit decision: a genuine
+        // TAG_BASED comparison next to the local DEPTH_BASED devnet above, not just a second copy
+        // of the same finality model. Unlike the sepolia node, this one is not @Value-overridable —
+        // BASE_SEPOLIA's three direct-RPC nodes below (syncPublicNodes) are hardcoded literals too,
+        // and a second full set of externalized properties for one fixed demo chain would be
+        // over-engineering a seeder that already has no config surface for its other 40+ nodes.
+        syncChaincacheDemoNode("BASE_SEPOLIA", "http://chaincache-base:8080/base/rpc", "chaincache (Base Sepolia)",
+                "http://chaincache-base:8080", "base");
 
         if (entities.findByEntityNumber("DEMO-MC-001").isPresent()) {
             if (hasCompleteDemoEntityBaseline()) {
@@ -482,6 +523,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 "1220a3f5bc99e1d38a7406db4e8c1db7e3a4e2d1c0b9a3f5e7d2c4b6a8e0f1d3",
                 "1220a3f5bc99e1d38a7406db4e8c1db7e3a4e2d1c0b9a3f5e7d2c4b6a8e0f1d3c5",
                 daysAgo(75));
+        seedCantonBondTerms(cantonBond.getId());
 
         // Asset pending approval (in review, no deployment yet)
         Asset infraBond2025 = asset("DEMO-BOND-MC-002",
@@ -1152,37 +1194,47 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
 
     /**
      * Seeds the demo stack's chaincache connection: an additional {@code CHAINCACHE}-kind
-     * {@link RpcNode} on ETHEREUM_SEPOLIA (this stack's anvil devnet, reached via chaincache's
-     * own baked-in default chain key "local-devnet" — see docker-compose.yml's {@code chaincache}
-     * service; deliberately reusing that key rather than a new one, since chaincache's
-     * Map-based config binding merges env-var-provided keys with its YAML default instead of
-     * replacing it), alongside the direct-RPC nodes {@link #syncPublicNodes} already seeds for
-     * that chain — per the portfolio plan's product decision that the demo stack runs
-     * chaincache default-on, side-by-side, so the operator node list shows a real capability
-     * comparison out of the box. Every other chain stays direct-to-node, untouched. Idempotent
-     * and self-healing: a second run finds the existing row by kind and reconciles its fields
-     * (matching {@link #syncChainNodes}'s own check-and-update idiom for the same reason —
-     * {@code RpcNodeHealthService}'s health-check cycle saves the full entity back after every
-     * probe, so a value changed only in a running database, never in this seeder, will not
-     * survive on its own) rather than assuming a once-seeded row stays correct forever.
+     * {@link RpcNode} on the configured chain (this stack's anvil devnet, reached via
+     * chaincache's own configured chain key — see docker-compose.yml's chaincache workload(s)),
+     * alongside the direct-RPC nodes {@link #syncPublicNodes} already seeds for that chain — per
+     * the portfolio plan's product decision that the demo stack runs chaincache default-on, side
+     * by side, so the operator node list shows a real capability comparison out of the box.
+     *
+     * <p>Idempotency key is {@code (chainConfigId, url)} — never {@code kind}, which is mutable
+     * (owned by {@code RpcNodeService#redetectAll}'s auto-detection and can legitimately flip
+     * between DIRECT_RPC and CHAINCACHE on its own, e.g. after a transient probe failure). Keying
+     * on {@code kind} previously meant exactly that kind of blip made this method fail to find
+     * "the" chaincache node on the next boot and seed a second, duplicate row for the same URL —
+     * V16's unique index on {@code (chain_config_id, lower(url))} now also guards against that at
+     * the schema level.
+     *
+     * <p>For that same reason, an <em>existing</em> row found by URL never has its
+     * kind/managementUrl/remoteChainKey touched here, whatever they currently are — those columns
+     * are {@code RpcNodeService}'s to own and reconcile via its own redetection job, not this
+     * seeder's to reassert over. Only a brand-new row gets them pre-set (optimistically, so a
+     * fresh demo stack shows the chaincache showcase node correctly from the moment the backend
+     * comes up, not ~15s later once the first redetect tick runs); reconciling label/enabled on
+     * every run (matching {@link #syncChainNodes}'s own check-and-update idiom) is safe regardless
+     * of kind.
      */
-    private void syncChaincacheDemoNode() {
-        chainConfigs.findByIdentifier("ETHEREUM_SEPOLIA").ifPresent(chain -> {
-            RpcNode node = rpcNodes.findByChainConfig_Identifier("ETHEREUM_SEPOLIA").stream()
-                    .filter(n -> n.getKind() == RpcNode.NodeKind.CHAINCACHE)
+    private void syncChaincacheDemoNode(String chainIdentifier, String url, String label,
+            String managementUrl, String remoteChainKey) {
+        chainConfigs.findByIdentifier(chainIdentifier).ifPresent(chain -> {
+            RpcNode node = rpcNodes.findByChainConfig_Identifier(chainIdentifier).stream()
+                    .filter(n -> url.equalsIgnoreCase(n.getUrl()))
                     .findFirst()
                     .orElseGet(() -> {
                         RpcNode fresh = new RpcNode();
                         fresh.setChainConfig(chain);
+                        fresh.setUrl(url);
                         fresh.setKind(RpcNode.NodeKind.CHAINCACHE);
+                        fresh.setManagementUrl(managementUrl);
+                        fresh.setRemoteChainKey(remoteChainKey);
                         return fresh;
                     });
 
             boolean changed = node.getId() == null;
-            changed |= setIfChanged(node::getUrl, node::setUrl, "http://chaincache:8080/local-devnet/rpc");
-            changed |= setIfChanged(node::getLabel, node::setLabel, "chaincache (anvil)");
-            changed |= setIfChanged(node::getManagementUrl, node::setManagementUrl, "http://chaincache:8080");
-            changed |= setIfChanged(node::getRemoteChainKey, node::setRemoteChainKey, "local-devnet");
+            changed |= setIfChanged(node::getLabel, node::setLabel, label);
             if (!node.isEnabled()) {
                 node.setEnabled(true);
                 changed = true;
@@ -1190,11 +1242,10 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
             if (changed) {
                 rpcNodes.save(node);
             }
-
-            if (chain.getFinalitySource() != ChainConfig.FinalitySource.CHAINCACHE) {
-                chain.setFinalitySource(ChainConfig.FinalitySource.CHAINCACHE);
-                chainConfigs.save(chain);
-            }
+            // finalitySource is intentionally left untouched here: it is fully auto-derived by
+            // RpcNodeService#recomputeFinalitySource, never seeder-set — the periodic
+            // RpcNodeService#redetectAll job (15s after boot) picks up this node's CHAINCACHE
+            // kind on its first tick and flips the chain over itself, same as a live admin add.
         });
     }
 
@@ -1367,6 +1418,33 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         d.setDeployedAt(deployedAt);
         d.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
         return deployments.save(d);
+    }
+
+    /**
+     * Seeds {@link AssetBondTerms} for the Canton institutional bond — before this,
+     * {@code AssetBondTerms} had zero rows anywhere in the demo instance, so an issuer-proposed
+     * CALL (see {@code CorporateActionProposalValidator}) had no bond to attach to and was
+     * untestable end-to-end in the demo stack. {@code callable = true} with a two-entry
+     * {@code callSchedule} lets the demo issuer ({@code heinz.weber@meridian-capital.de}) propose
+     * a CALL by {@code callScheduleIndex} against a real schedule, not just a custom date.
+     */
+    private void seedCantonBondTerms(java.util.UUID assetId) {
+        AssetBondTerms terms = new AssetBondTerms();
+        terms.setAssetId(assetId);
+        terms.setFaceValue(bd("5000"));
+        terms.setCurrencyIso("EUR");
+        terms.setIssueDate(LocalDate.of(2023, 6, 30));
+        terms.setMaturityDate(LocalDate.of(2033, 6, 30));
+        terms.setCouponRate(bd("0.042"));
+        terms.setIssuePrice(BigDecimal.ONE);
+        terms.setDayCount(DayCountConvention.ACT_ACT_ICMA);
+        terms.setPaymentFrequency(PaymentFrequency.ANNUAL);
+        terms.setCallable(true);
+        terms.setCallSchedule(List.of(
+                Map.of("callDate", "2028-06-30", "callPrice", bd("101.00")),
+                Map.of("callDate", "2030-06-30", "callPrice", bd("100.50"))));
+        terms.setBondStatus(BondStatus.ACTIVE);
+        bondTerms.save(terms);
     }
 
     private AssetHolder holder(java.util.UUID assetId, java.util.UUID investorId,

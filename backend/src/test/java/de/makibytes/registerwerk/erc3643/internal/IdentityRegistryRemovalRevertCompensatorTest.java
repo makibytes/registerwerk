@@ -38,7 +38,7 @@ class IdentityRegistryRemovalRevertCompensatorTest {
 
     private ChainEffectRecord effect() {
         return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
-                "erc3643", "ERC3643_IDENTITY_REMOVED", "Erc3643IdentityRegistry", id, CompensationCategory.INVERSE_FLIP,
+                "erc3643", "ERC3643_IDENTITY_REMOVED", "Erc3643IdentityRegistry", id, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
 

@@ -35,7 +35,7 @@ class HolderRecomputeCompensatorTest {
 
     private ChainEffectRecord effect() {
         return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", null, null,
-                "indexer", "HOLDER_BALANCE_SYNCED", "Asset", assetId, CompensationCategory.RECOMPUTE,
+                "indexer", "HOLDER_BALANCE_SYNCED", "Asset", assetId, null, CompensationCategory.RECOMPUTE,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
 

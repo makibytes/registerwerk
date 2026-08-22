@@ -45,7 +45,7 @@ class DappVersionRevertCompensatorTest {
 
     private ChainEffectRecord effect() {
         return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
-                "marketplace", "DAPP_VERSION_PUBLISHED", "DappVersion", versionId, CompensationCategory.INVERSE_FLIP,
+                "marketplace", "DAPP_VERSION_PUBLISHED", "DappVersion", versionId, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
 
@@ -76,6 +76,39 @@ class DappVersionRevertCompensatorTest {
         verify(listingRepository).save(listing);
         assertThat(listing.getStatus()).isEqualTo(DappListingStatus.APPROVED);
         assertThat(listing.getCurrentVersionId()).isNull();
+        assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
+    }
+
+    @Test
+    @DisplayName("restores a previously-superseded version to PUBLISHED instead of leaving the listing "
+            + "with no live version")
+    void compensateRestoresPreviousSupersededVersion() {
+        DappVersion version = new DappVersion();
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.setListingId(listingId);
+        version.setStatus(DappVersionStatus.PUBLISHED);
+        when(versionRepository.findById(versionId)).thenReturn(Optional.of(version));
+
+        DappListing listing = new DappListing();
+        listing.setId(listingId);
+        listing.setStatus(DappListingStatus.PUBLISHED);
+        listing.setCurrentVersionId(versionId);
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+
+        UUID previousId = UUID.randomUUID();
+        DappVersion previous = new DappVersion();
+        ReflectionTestUtils.setField(previous, "id", previousId);
+        previous.setListingId(listingId);
+        previous.setStatus(DappVersionStatus.SUPERSEDED);
+        when(versionRepository.findByListingIdOrderByCreatedAtDesc(listingId)).thenReturn(java.util.List.of(previous));
+
+        CompensationOutcome outcome = compensator.compensate(effect());
+
+        verify(versionRepository).save(previous);
+        assertThat(previous.getStatus()).isEqualTo(DappVersionStatus.PUBLISHED);
+        verify(listingRepository).save(listing);
+        assertThat(listing.getStatus()).isEqualTo(DappListingStatus.PUBLISHED);
+        assertThat(listing.getCurrentVersionId()).isEqualTo(previousId);
         assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
     }
 

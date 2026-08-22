@@ -41,4 +41,18 @@ public enum FinalityLevel {
             case ORPHANED -> -1;
         };
     }
+
+    /** The customer/trader-facing plain-language vocabulary — "Two vocabularies, one model,
+     *  resolved server-side by principal role so the frontend cannot violate it" (portfolio plan).
+     *  Technical-role callers (REGISTRY_ADMIN/AUDIT/COMPLIANCE_OFFICER/RELATIONSHIP_MANAGER) see
+     *  {@link #name()} instead — see {@code indexer.web.TokenTransferMapper}, the first real
+     *  consumer of this split. */
+    public String plainLabel() {
+        return switch (this) {
+            case PROVISIONAL -> "Being confirmed";
+            case SAFE -> "Confirmed";
+            case FINALIZED -> "Settled — final";
+            case ORPHANED -> "Did not go through";
+        };
+    }
 }

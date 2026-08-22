@@ -117,9 +117,11 @@ This is the part people underestimate. Issuance is a week. Administration is the
 
 ### Corporate actions
 
-Coupons twice a year, and eventually redemption. Registerwerk raises coupon actions automatically from the payment schedule and advances them through their dates.
+Coupons, and eventually redemption, are raised automatically from the payment schedule and advanced through their dates — you don't create these yourself.
 
-Your job is to approve settlement — which requires [four eyes](../../compliance/step-up-mfa.md), because paying the wrong holder list is the classic catastrophic error in securities administration and is very hard to reverse.
+Dividends, splits, and early calls are different: you **propose** them (*Issuance → Corporate Actions → Propose*), and an operator reviews the proposal — approving it onto the register, or rejecting it — before it goes any further.
+
+Whichever way an action was raised, settlement needs sign-off from two separate parties before it executes: **you attest** that the underlying obligation is ready — the cash for a coupon or dividend, the mechanics for a split or an early call — and then **an operator confirms** the register/on-chain side. Attesting is a normal authenticated action, not [step-up](../../compliance/step-up-mfa.md) — only the operator's confirmation is step-up gated. If you never log in to attest, an operator can override the requirement instead; that override is recorded as a distinct, permanently visible exception, never silently indistinguishable from your own attestation.
 
 The three dates that decide who gets paid: **record date** (whoever holds at this instant is entitled), **ex date** (from here it trades without the payment), **payment date** (money moves).
 
@@ -141,7 +143,7 @@ For individual-entry consumer holders, §19(2) statements are generated and reta
 
 ### Redemption
 
-At maturity: snapshot, entitlements, four-eyes approval, payment, tokens burned, `REDEEMED`. Terminal — there is no way out of it.
+At maturity: snapshot, entitlements, your attestation and an operator's confirmation, payment, tokens burned, `REDEEMED`. Terminal — there is no way out of it.
 
 Holder rows are **soft-deleted, never removed**: a §16 register entry that vanishes cannot satisfy retention or tamper-evidence obligations.
 

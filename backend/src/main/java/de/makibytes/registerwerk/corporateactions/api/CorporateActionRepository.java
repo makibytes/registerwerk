@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -44,12 +45,27 @@ public interface CorporateActionRepository extends JpaRepository<CorporateAction
      * pick it up here again and re-dispatch settlement a second time — a real double-payment
      * risk, not hypothetical. A stuck AWAITING_SETTLEMENT action requires deliberate operator
      * action (see {@code CorporateActionAdminController}) instead of a silent automatic retry.
+     *
+     * <p>Also excludes PROPOSED/REJECTED — an issuer-proposed DIVIDEND/SPLIT/CALL that hasn't
+     * been reviewed yet (or was rejected) must never be picked up for settlement dispatch just
+     * because a client-supplied {@code paymentDate} happens to be in the past; only an
+     * operator-approved (→ ANNOUNCED and beyond) action is a register fact.
      */
-    @Query("SELECT ca FROM CorporateAction ca WHERE ca.status NOT IN ('SETTLED','CLOSED','CANCELLED','AWAITING_SETTLEMENT') AND ca.paymentDate <= :date")
+    @Query("SELECT ca FROM CorporateAction ca WHERE ca.status NOT IN "
+            + "('PROPOSED','REJECTED','SETTLED','CLOSED','CANCELLED','AWAITING_SETTLEMENT') AND ca.paymentDate <= :date")
     List<CorporateAction> findDueForSettlement(@Param("date") LocalDate date);
 
     @Query("SELECT ca FROM CorporateAction ca WHERE ca.status = 'ANNOUNCED' AND ca.recordDate <= :today")
     List<CorporateAction> findReadyToCompute(@Param("today") LocalDate today);
+
+    /** The operator's proposal review queue — every issuer-submitted proposal awaiting
+     *  approve/reject, oldest first so nothing sits unreviewed indefinitely by accident. */
+    List<CorporateAction> findByStatusOrderByCreatedAtAsc(CorporateAction.Status status);
+
+    /** Backs both the issuer's own list view and the investor's {@code Me} view — each scoped
+     *  further (issuer: by assetId + ownership; investor: excluding PROPOSED/REJECTED) by the
+     *  caller, not here. */
+    List<CorporateAction> findByAssetIdAndStatusIn(UUID assetId, Collection<CorporateAction.Status> statuses);
 
     /**
      * Resolves the token standard of the asset linked to a corporate action without

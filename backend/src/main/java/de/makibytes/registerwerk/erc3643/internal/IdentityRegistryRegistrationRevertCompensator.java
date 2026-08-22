@@ -57,7 +57,7 @@ class IdentityRegistryRegistrationRevertCompensator implements ChainEffectCompen
         }
 
         log.error("Erc3643IdentityRegistry id={} wallet={} was registered but its confirming block was "
-                        + "retracted by a reorg deep enough to cross FINALIZED — the investor was never "
+                        + "retracted by a reorg — the investor was never "
                         + "actually registered on-chain; soft-removing this entry.",
                 id, entry.getWalletAddress());
         entry.setRemovedAt(Instant.now());

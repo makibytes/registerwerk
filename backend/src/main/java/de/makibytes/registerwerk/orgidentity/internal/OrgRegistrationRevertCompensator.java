@@ -51,8 +51,8 @@ class OrgRegistrationRevertCompensator implements ChainEffectCompensator {
                     "OrgRegistration " + id + " is no longer ACTIVE (status=" + registration.getStatus() + ")");
         }
 
-        log.error("OrgRegistration id={} was ACTIVE but its confirming block was retracted by a reorg deep "
-                        + "enough to cross FINALIZED — reverting to PENDING for re-verification.", id);
+        log.error("OrgRegistration id={} was ACTIVE but its confirming block was retracted by a reorg "
+                        + "— reverting to PENDING for re-verification.", id);
         registration.setStatus(OrgRegistrationStatus.PENDING);
         repository.save(registration);
 

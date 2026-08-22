@@ -80,7 +80,9 @@ Un émetteur peut :
 - Créer et gérer ses propres définitions d'[actif](../token-standards/index.md)
 - Lancer le déploiement d'un jeton (sous réserve, le cas échéant, de l'approbation de l'opérateur)
 - Gérer l'intégration des investisseurs pour ses jetons
-- Consulter l'historique des [opérations sur titres](../intro/concepts.md) de ses titres
+- Proposer des [opérations sur titres](../intro/concepts.md) — dividendes, fractionnements, remboursements anticipés — pour examen par l'opérateur, et retirer une proposition avant son examen
+- Attester qu'une opération sur titres est prête à être réglée — la première des deux parties requises, aux côtés de la confirmation d'un opérateur
+- Consulter l'historique des opérations sur titres de ses titres
 - Télécharger les relevés de positions et les documents réglementaires
 
 ### INVESTOR
@@ -90,6 +92,7 @@ Un investisseur peut :
 - Consulter son portefeuille (jetons détenus, positions)
 - Accepter des demandes de transfert
 - Consulter l'historique des transactions
+- Consulter les opérations sur titres affectant ses positions et télécharger les confirmations de règlement
 - Télécharger ses relevés de positions
 
 ### COMPANY_ADMIN

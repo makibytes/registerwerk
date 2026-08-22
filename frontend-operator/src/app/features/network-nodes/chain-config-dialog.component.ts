@@ -5,13 +5,17 @@ import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/materia
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
-import { ChainConfig, FinalitySource } from '../../core/models';
+import { MatIconModule } from '@angular/material/icon';
+import { ChainConfig, ChainHealth } from '../../core/models';
 import { ChainConfigCreateRequest, ChainConfigUpdateRequest } from '../../core/api/chain.service';
 
-/** The "chain config screen" — previously finalityModel/avgBlockSeconds/finalitySource and the
- *  RPC/WS/explorer/graph URLs were only reachable by a direct API call, unreachable from the
- *  product itself. Handles both create (a brand-new ChainConfig) and edit (PATCH an existing
- *  one) — create needs identifier/chainType/networkType/rpcUrl, which edit never changes. */
+/** The "chain config screen" — previously finalityModel/avgBlockSeconds and the RPC/WS/explorer/
+ *  graph URLs were only reachable by a direct API call, unreachable from the product itself.
+ *  Handles both create (a brand-new ChainConfig) and edit (PATCH an existing one) — create needs
+ *  identifier/chainType/networkType/rpcUrl, which edit never changes. finalitySource has no input
+ *  control at all: it is fully auto-derived backend-side from whether the chain has an enabled
+ *  chaincache-kind RpcNode (see RpcNodeService#recomputeFinalitySource) and is only ever shown
+ *  read-only, on edit, so the operator can see it without being able to set it wrong. */
 @Component({
   selector: 'app-chain-config-dialog',
   standalone: true,
@@ -22,6 +26,7 @@ import { ChainConfigCreateRequest, ChainConfigUpdateRequest } from '../../core/a
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
+    MatIconModule,
   ],
   styles: [`
     h2 { margin: 0 0 4px; font-size: 17px; font-weight: 700; }
@@ -34,6 +39,14 @@ import { ChainConfigCreateRequest, ChainConfigUpdateRequest } from '../../core/a
       color: var(--rw-text-muted); margin: 16px 0 8px;
     }
     .hint { font-size: 12px; color: var(--rw-text-muted); margin: -8px 0 16px; }
+    .derived-source {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; margin-bottom: 4px;
+      border-radius: 6px; background: var(--rw-bg); border: 1px solid var(--rw-border);
+      font-size: 12px; color: var(--rw-text-secondary);
+    }
+    .derived-source mat-icon { font-size: 16px; width: 16px; height: 16px; color: var(--rw-accent); }
+    .derived-source strong { color: var(--rw-text-primary); }
   `],
   template: `
     <div mat-dialog-title style="padding: 20px 24px 0">
@@ -92,17 +105,25 @@ import { ChainConfigCreateRequest, ChainConfigUpdateRequest } from '../../core/a
         </mat-form-field>
       </div>
 
-      <mat-form-field appearance="outline">
-        <mat-label>Finality source</mat-label>
-        <mat-select [(ngModel)]="finalitySource">
-          <mat-option value="RPC_SELF_PROBE">This registry's own RPC probing</mat-option>
-          <mat-option value="CHAINCACHE">chaincache durable stream</mat-option>
-        </mat-select>
-      </mat-form-field>
-      @if (finalitySource === 'CHAINCACHE') {
+      @if (isEdit) {
+        <div class="derived-source">
+          <mat-icon>{{ data.chain!.finalitySource === 'CHAINCACHE' ? 'bolt' : 'lan' }}</mat-icon>
+          <span>
+            @if (data.chain!.finalitySource === 'CHAINCACHE' && chaincacheWorkload()) {
+              Finality source: <strong>chaincache workload {{ chaincacheWorkload()!.managementUrl }}</strong>
+              (chain key <strong>{{ chaincacheWorkload()!.remoteChainKey }}</strong>) — SAFE/FINALIZED
+              promotions and reorg retractions are pushed from that workload's durable event stream.
+            } @else if (data.chain!.finalitySource === 'CHAINCACHE') {
+              Finality source: <strong>a chaincache workload</strong> (durable event stream)
+            } @else {
+              Finality source: <strong>this registry's own RPC polling</strong>
+            }
+          </span>
+        </div>
         <p class="hint">
-          Requires an enabled chaincache-kind RPC node for this chain — add one from the node list
-          first if you haven't yet.
+          Auto-derived — switches to chaincache the moment this chain has an enabled
+          chaincache-kind RPC node, and back the moment it doesn't. Add or remove a node from the
+          node list to change it; there is nothing to set here.
         </p>
       }
     </mat-dialog-content>
@@ -118,7 +139,7 @@ import { ChainConfigCreateRequest, ChainConfigUpdateRequest } from '../../core/a
 })
 export class ChainConfigDialogComponent {
   private readonly dialogRef = inject(MatDialogRef<ChainConfigDialogComponent>);
-  readonly data: { chain?: ChainConfig } = inject(MAT_DIALOG_DATA);
+  readonly data: { chain?: ChainConfig; chainHealth?: ChainHealth } = inject(MAT_DIALOG_DATA);
 
   readonly isEdit = !!this.data.chain;
 
@@ -129,7 +150,14 @@ export class ChainConfigDialogComponent {
   displayName = this.data.chain?.displayName ?? '';
   finalityModel = this.data.chain?.finalityModel ?? 'DEPTH_BASED';
   avgBlockSeconds: number | null = this.data.chain?.avgBlockSeconds ?? null;
-  finalitySource: FinalitySource = this.data.chain?.finalitySource ?? 'RPC_SELF_PROBE';
+
+  /** The enabled chaincache-kind node behind {@link ChainConfig#finalitySource}, if any — used
+   *  only to name the actual workload in the derived-source explanation above; picking among
+   *  more than one is a display nicety here (any lists first), unlike the backend's own real
+   *  routing/connection choice in RpcNodeService/ChaincacheDurableStreamManager. */
+  chaincacheWorkload() {
+    return this.data.chainHealth?.nodes.find(n => n.kind === 'CHAINCACHE' && n.enabled);
+  }
 
   canSubmit(): boolean {
     if (this.isEdit) return !!this.displayName.trim();
@@ -143,7 +171,6 @@ export class ChainConfigDialogComponent {
         displayName: this.displayName.trim(),
         finalityModel: this.finalityModel,
         avgBlockSeconds: this.avgBlockSeconds ?? undefined,
-        finalitySource: this.finalitySource,
       };
       this.dialogRef.close(request);
     } else {
@@ -155,7 +182,6 @@ export class ChainConfigDialogComponent {
         rpcUrl: this.rpcUrl.trim(),
         finalityModel: this.finalityModel,
         avgBlockSeconds: this.avgBlockSeconds ?? undefined,
-        finalitySource: this.finalitySource,
       };
       this.dialogRef.close(request);
     }

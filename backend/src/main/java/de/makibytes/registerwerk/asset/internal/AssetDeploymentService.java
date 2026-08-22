@@ -400,10 +400,10 @@ public class AssetDeploymentService {
         if (deployment.getChainConfigId() == null || blockNumber == null) {
             return;
         }
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                deployment.getChainConfigId(), blockNumber, blockHash, txHash, null,
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                deployment.getChainConfigId(), blockNumber, blockHash, txHash,
                 "asset", AssetDeploymentRevertCompensator.EFFECT_TYPE, "AssetDeployment", deployment.getId(),
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+                deployment.getAssetId(), CompensationCategory.INVERSE_FLIP));
     }
 
     /**

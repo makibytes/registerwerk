@@ -119,5 +119,23 @@ export const COMPLIANCE_ROUTES: Routes = [
         (m) => m.TokenAdminGrantListComponent,
       ),
   },
+  {
+    path: 'unresolved-compensation',
+    canActivate: [roleGuard],
+    data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+    loadComponent: () =>
+      import('./finality/unresolved-compensation-queue.component').then(
+        (m) => m.UnresolvedCompensationQueueComponent,
+      ),
+  },
+  {
+    path: 'finality-policy',
+    canActivate: [roleGuard],
+    data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+    loadComponent: () =>
+      import('./finality/finality-policy.component').then(
+        (m) => m.FinalityPolicyComponent,
+      ),
+  },
   { path: '', redirectTo: 'screening', pathMatch: 'full' },
 ];

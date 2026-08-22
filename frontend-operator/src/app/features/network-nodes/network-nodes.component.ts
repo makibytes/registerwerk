@@ -209,74 +209,9 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
       margin-top: 2px;
     }
 
-    .health-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      display: inline-block;
-      margin-right: 6px;
-      flex-shrink: 0;
-    }
-
-    .health-row {
-      display: flex;
-      align-items: center;
-    }
-
-    .health-dot.healthy   { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.4); }
-    .health-dot.unhealthy { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.3); }
-    .health-dot.unknown   { background: var(--rw-text-muted); }
-
-    .health-label {
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .health-label.healthy   { color: #22c55e; }
-    .health-label.unhealthy { color: #ef4444; }
-    .health-label.unknown   { color: var(--rw-text-muted); }
-
-    .block-num {
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 12px;
-      color: var(--rw-text-secondary);
-    }
-
-    .lag-chip {
-      display: inline-flex;
-      align-items: center;
-      padding: 1px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-
-    .lag-chip.ok    { background: rgba(34,197,94,0.12); color: #16a34a; }
-    .lag-chip.warn  { background: rgba(245,158,11,0.12); color: #d97706; }
-    .lag-chip.crit  { background: rgba(239,68,68,0.12); color: #dc2626; }
-
-    .syncing-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: rgba(99, 102, 241, 0.12);
-      color: #6366f1;
-      font-size: 11px;
-      font-weight: 600;
-    }
-
-    .syncing-badge mat-icon {
-      font-size: 12px;
-      width: 12px;
-      height: 12px;
-    }
-
-    .last-seen {
-      font-size: 11px;
-      color: var(--rw-text-muted);
-    }
+    /* .health-dot, .health-row, .health-label, .block-num, .lag-chip, .syncing-badge, .last-seen
+       — global, see styles.scss "network node health indicators" section: moved out to fit this
+       component under its style budget, same reasoning as the chaincache capability classes. */
 
     .action-row {
       display: flex;
@@ -500,6 +435,13 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                             </mat-icon>
                           </button>
                         </div>
+                        <div class="stream-status" [class.connected]="node.streamConnected" [class.disconnected]="!node.streamConnected"
+                             [matTooltip]="node.streamConnected
+                               ? 'Live durable-event stream connected — SAFE/FINALIZED promotions and reorg retractions are being pushed from this workload right now'
+                               : 'No live durable-event stream — reconnects automatically; RPC-based routing is unaffected'">
+                          <mat-icon>{{ node.streamConnected ? 'sensors' : 'sensors_off' }}</mat-icon>
+                          {{ node.streamConnected ? 'Stream live' : 'Stream idle' }}
+                        </div>
                       }
                     </td>
                     <td>
@@ -548,12 +490,11 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                           <mat-icon style="font-size: 18px">edit</mat-icon>
                         </button>
 
-                        @if (node.kind === 'CHAINCACHE') {
-                          <button mat-icon-button matTooltip="Re-probe capabilities"
-                                  (click)="refreshCapabilities(chain, node)">
-                            <mat-icon style="font-size: 18px">sync</mat-icon>
-                          </button>
-                        }
+                        <button mat-icon-button
+                                [matTooltip]="node.kind === 'CHAINCACHE' ? 'Re-check capabilities' : 'Re-check whether this is a chaincache connection'"
+                                (click)="redetect(chain, node)">
+                          <mat-icon style="font-size: 18px">sync</mat-icon>
+                        </button>
 
                         <button mat-icon-button class="delete-btn"
                                 matTooltip="Remove this node"
@@ -568,6 +509,10 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                       <td colspan="6">
                         @if (node.capabilities) {
                           <div class="capabilities-panel">
+                            <div class="capability-item wide">
+                              <div class="label">Workload</div>
+                              <div class="value mono">{{ node.managementUrl || '—' }} · chain key {{ node.remoteChainKey || '—' }}</div>
+                            </div>
                             <div class="capability-item">
                               <div class="label">Finality model</div>
                               <div class="value">{{ node.capabilities.finalityModel || '—' }}</div>
@@ -577,14 +522,50 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                               <div class="value">{{ node.capabilities.safeConfirmations ?? '—' }} / {{ node.capabilities.finalizedConfirmations ?? '—' }}</div>
                             </div>
                             <div class="capability-item">
+                              <div class="label">Upstream RPC providers</div>
+                              <div class="value">
+                                @if (node.capabilities.configuredNodeCount != null) {
+                                  {{ node.capabilities.availableNodeCount ?? '—' }} / {{ node.capabilities.configuredNodeCount }} available
+                                } @else {
+                                  —
+                                }
+                              </div>
+                            </div>
+                            <div class="capability-item">
                               <div class="label">Durable stream</div>
                               <div class="value" [class.yes]="node.capabilities.durableStreamAvailable" [class.no]="!node.capabilities.durableStreamAvailable">
                                 {{ node.capabilities.durableStreamAvailable ? 'Available' : 'Unavailable' }}
                               </div>
                             </div>
                             <div class="capability-item">
+                              <div class="label">Kafka relay (chaincache-internal)</div>
+                              <div class="value" [class.yes]="node.capabilities.kafkaRelayEnabled" [class.no]="!node.capabilities.kafkaRelayEnabled">
+                                {{ node.capabilities.kafkaRelayEnabled ? 'Enabled' : 'Disabled' }}
+                              </div>
+                            </div>
+                            @if (node.capabilities.configuredApis?.length) {
+                              <div class="capability-item wide">
+                                <div class="label">Configured APIs</div>
+                                <div class="api-chips">
+                                  @for (api of node.capabilities.configuredApis; track api) {
+                                    <span class="api-chip">{{ api }}</span>
+                                  }
+                                </div>
+                              </div>
+                            }
+                            <div class="capability-item">
                               <div class="label">Address trace</div>
-                              <div class="value">{{ node.capabilities.addressTraceCapability || 'Unknown' }}</div>
+                              <div class="value"
+                                   [class.yes]="node.capabilities.addressTraceCapability?.lastSuccessful"
+                                   [class.no]="node.capabilities.addressTraceCapability?.attempted && !node.capabilities.addressTraceCapability.lastSuccessful">
+                                @if (node.capabilities.addressTraceCapability?.lastSuccessful) {
+                                  Available
+                                } @else if (node.capabilities.addressTraceCapability?.attempted) {
+                                  Attempted, not yet successful
+                                } @else {
+                                  Not attempted
+                                }
+                              </div>
                             </div>
                             <div class="capability-item">
                               <div class="label">debug_* configured</div>
@@ -599,7 +580,9 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                           </div>
                         } @else {
                           <div class="capabilities-empty">
-                            No capability data yet — the last probe failed or hasn't run. Try "Re-probe capabilities".
+                            No capability data yet — the background re-check job runs on every enabled
+                            node roughly once a minute and will pick this up automatically, or use the
+                            refresh button above to check right now.
                           </div>
                         }
                         <div class="capabilities-actions">
@@ -778,15 +761,18 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
     });
   }
 
-  refreshCapabilities(chain: ChainHealth, node: RpcNode) {
-    this.chainService.refreshCapabilities(chain.id, node.id).subscribe({
+  redetect(chain: ChainHealth, node: RpcNode) {
+    this.chainService.redetect(chain.id, node.id).subscribe({
       next: updated => {
         this.updateNode(chain.id, node.id, updated);
-        this.snackBar.open(
-          updated.capabilities ? 'Capabilities refreshed' : 'Probe failed — chaincache may be unreachable',
-          'OK', { duration: 3000 });
+        const message = updated.kind !== node.kind
+          ? (updated.kind === 'CHAINCACHE' ? 'Now detected as a chaincache connection' : 'Now detected as a direct RPC node')
+          : updated.kind === 'CHAINCACHE'
+            ? (updated.capabilities ? 'Capabilities refreshed' : 'Probe failed — chaincache may be unreachable')
+            : 'Still a direct RPC node';
+        this.snackBar.open(message, 'OK', { duration: 3000 });
       },
-      error: () => this.snackBar.open('Failed to refresh capabilities', 'OK', { duration: 3000 }),
+      error: () => this.snackBar.open('Failed to re-check node', 'OK', { duration: 3000 }),
     });
   }
 
@@ -813,7 +799,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
     const config = this.chainConfigOf(chain);
     const ref = this.dialog.open(ChainConfigDialogComponent, {
       width: '520px',
-      data: { chain: config },
+      data: { chain: config, chainHealth: chain },
     });
 
     ref.afterClosed().subscribe((result: ChainConfigUpdateRequest | undefined) => {

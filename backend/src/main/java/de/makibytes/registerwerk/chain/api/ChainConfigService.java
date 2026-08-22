@@ -97,7 +97,11 @@ public class ChainConfigService {
         if (patch.getChainId() != null)            existing.setChainId(patch.getChainId());
         if (patch.getFinalityModel() != null)      existing.setFinalityModel(patch.getFinalityModel());
         if (patch.getAvgBlockSeconds() != null)    existing.setAvgBlockSeconds(patch.getAvgBlockSeconds());
-        if (patch.getFinalitySource() != null)     existing.setFinalitySource(patch.getFinalitySource());
+        // finalitySource is deliberately never copied here: it is fully auto-derived by
+        // RpcNodeService#recomputeFinalitySource, not a patchable field (see
+        // ChainConfig.FinalitySource's javadoc) — patch.getFinalitySource() would in fact always
+        // be non-null (the entity's own field initializer defaults it to RPC_SELF_PROBE), so
+        // copying it here unconditionally would silently reset every unrelated PATCH.
 
         ChainConfig saved = chainConfigRepository.save(existing);
         eventPublisher.publishEvent(new ChainUpdatedEvent(saved.getId(), null, null));

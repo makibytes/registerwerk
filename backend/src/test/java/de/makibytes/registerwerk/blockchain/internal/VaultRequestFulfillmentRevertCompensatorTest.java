@@ -56,7 +56,7 @@ class VaultRequestFulfillmentRevertCompensatorTest {
 
     private ChainEffectRecord effect() {
         return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
-                "blockchain", "VAULT_REQUEST_RESOLVED", "VaultRequest", id, CompensationCategory.INVERSE_FLIP,
+                "blockchain", "VAULT_REQUEST_RESOLVED", "VaultRequest", id, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
 

@@ -57,6 +57,7 @@ public class RpcNodeHealthService {
     private int maxLagBlocks;
 
     private final RpcNodeRepository rpcNodeRepository;
+    private final RpcNodeHealthPersister healthPersister;
     private final Web3jClientFactory web3jClientFactory;
     private final SolanaClientFactory solanaClientFactory;
     private final BlockchainClientRegistry registry;
@@ -83,12 +84,14 @@ public class RpcNodeHealthService {
 
     public RpcNodeHealthService(
             RpcNodeRepository rpcNodeRepository,
+            RpcNodeHealthPersister healthPersister,
             Web3jClientFactory web3jClientFactory,
             SolanaClientFactory solanaClientFactory,
             @Nullable CantonClientProvider cantonClientFactory,
             BlockchainClientRegistry registry,
             MeterRegistry meterRegistry) {
         this.rpcNodeRepository    = rpcNodeRepository;
+        this.healthPersister      = healthPersister;
         this.web3jClientFactory   = web3jClientFactory;
         this.solanaClientFactory  = solanaClientFactory;
         this.cantonClientFactory  = cantonClientFactory;
@@ -100,6 +103,15 @@ public class RpcNodeHealthService {
         Gauge.builder("registerwerk_rpc_nodes_unhealthy_total", rpcNodeRepository, RpcNodeRepository::countByHealthyFalse)
                 .description("Count of RpcNode rows currently marked unhealthy")
                 .register(meterRegistry);
+
+        // One series per RpcNode.NodeKind — how much of the fleet is actually routed through
+        // chaincache vs. direct nodes, the headline number for the whole showcase.
+        for (RpcNode.NodeKind kind : RpcNode.NodeKind.values()) {
+            Gauge.builder("registerwerk_chaincache_nodes_total", rpcNodeRepository, repo -> repo.countByKind(kind))
+                    .description("Count of RpcNode rows by kind (DIRECT_RPC vs CHAINCACHE)")
+                    .tag("kind", kind.name())
+                    .register(meterRegistry);
+        }
     }
 
     // Deliberately NOT @SchedulerLock'd: the tail of this method calls
@@ -134,8 +146,15 @@ public class RpcNodeHealthService {
             }
         }
 
-        // saveAll is transactional — merges the (now detached) modified entities
-        rpcNodeRepository.saveAll(allNodes);
+        // Targeted per-node column update instead of saveAll(allNodes): saveAll() persists every
+        // field of these detached entities, including kind/managementUrl/remoteChainKey/capabilities
+        // as they stood at the top of this method (seconds ago) — clobbering any chaincache
+        // detection write (or admin edit) that landed concurrently. This writer only ever owns the
+        // health-check columns; see RpcNodeRepository.updateHealthFields's javadoc. Delegated to a
+        // separate @Transactional bean — updateHealthFields flushes automatically and needs a live
+        // transaction, and checkAll() itself must stay non-transactional (see
+        // RpcNodeHealthPersister's javadoc for why this can't just be an annotation on this method).
+        healthPersister.persist(allNodes);
 
         // Purge stale health-check clients for nodes that were removed. EVM and Solana clients
         // hold no dedicated resources (see Web3jClientFactory) and are simply dropped; Canton
@@ -200,7 +219,7 @@ public class RpcNodeHealthService {
             return;
         }
 
-        long bestBlock = blockNumbers.values().stream().mapToLong(Long::longValue).max().getAsLong();
+        long bestBlock = bestAmongCandidates(nodes, blockNumbers);
 
         for (RpcNode node : nodes) {
             Long nb = blockNumbers.get(node.getId());
@@ -260,7 +279,7 @@ public class RpcNodeHealthService {
             return;
         }
 
-        long bestSlot = slots.values().stream().mapToLong(Long::longValue).max().getAsLong();
+        long bestSlot = bestAmongCandidates(nodes, slots);
 
         for (RpcNode node : nodes) {
             Long ns = slots.get(node.getId());
@@ -313,6 +332,41 @@ public class RpcNodeHealthService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * The best (highest) block/slot number reported by a node {@code selectBestNodeId} would
+     * actually route to — i.e. the routing candidate set (exclusive-and-enabled nodes if any
+     * exist, else every enabled node), matching {@code BlockchainClientRegistry.selectBestNodeId}'s
+     * own candidate derivation exactly. Computing this against every node on the chain (including
+     * ones outbound traffic would never be routed to — e.g. a real public mainnet node sitting on
+     * the same {@code ChainConfig} as this stack's own local devnet, or a node an operator disabled
+     * or didn't pin) previously made a node's lag look enormous, and therefore permanently
+     * "unhealthy", purely because of a node it will never be compared against for routing.
+     * Falls back to the best value among every node actually probed this tick if the candidate set
+     * itself reported nothing (e.g. every exclusive node happened to fail this one tick) — that's
+     * still a meaningfully-computed lag reference, just not the narrowest possible one, rather than
+     * silently reporting zero data.
+     */
+    private static long bestAmongCandidates(List<RpcNode> nodes, Map<UUID, Long> reported) {
+        Set<UUID> candidateIds = routingCandidateIds(nodes);
+        return reported.entrySet().stream()
+                .filter(e -> candidateIds.contains(e.getKey()))
+                .mapToLong(Map.Entry::getValue)
+                .max()
+                .orElseGet(() -> reported.values().stream().mapToLong(Long::longValue).max().getAsLong());
+    }
+
+    /** Mirrors {@code BlockchainClientRegistry.selectBestNodeId}'s candidate-set derivation:
+     *  exclusive-and-enabled nodes if any exist, else every enabled node. Duplicated rather than
+     *  shared — {@code blockchain.api} and {@code blockchain.internal} are different Modulith
+     *  layers, and this is a three-line pure function, not worth a new cross-module port for. */
+    private static Set<UUID> routingCandidateIds(List<RpcNode> nodes) {
+        List<RpcNode> exclusiveEnabled = nodes.stream().filter(n -> n.isExclusive() && n.isEnabled()).toList();
+        List<RpcNode> candidates = exclusiveEnabled.isEmpty()
+                ? nodes.stream().filter(RpcNode::isEnabled).toList()
+                : exclusiveEnabled;
+        return candidates.stream().map(RpcNode::getId).collect(Collectors.toSet());
+    }
 
     /**
      * Whether to skip probing this node on this round — either because it (or its chain) is

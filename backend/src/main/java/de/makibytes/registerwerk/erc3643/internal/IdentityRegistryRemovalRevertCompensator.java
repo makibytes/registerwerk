@@ -52,7 +52,7 @@ class IdentityRegistryRemovalRevertCompensator implements ChainEffectCompensator
         }
 
         log.error("Erc3643IdentityRegistry id={} wallet={} was removed but its confirming block was retracted "
-                        + "by a reorg deep enough to cross FINALIZED — the investor was never actually removed "
+                        + "by a reorg — the investor was never actually removed "
                         + "on-chain; restoring this entry to active.",
                 id, entry.getWalletAddress());
         entry.setRemovedAt(null);

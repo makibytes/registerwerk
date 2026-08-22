@@ -245,6 +245,11 @@ public class IdentityRegistryService {
                         java.util.Map.of("walletAddress", entry.getWalletAddress())
                 );
                 entry.setRemovedByTx(txHash);
+                // Reset in case this entry was previously removed, reorg-reverted back to active by
+                // IdentityRegistryRemovalRevertCompensator, and is now being removed again — without this,
+                // removalConfirmed would still be true from the first removal and
+                // Erc3643IdentityRegistryConfirmationListener would never re-poll this second attempt.
+                entry.setRemovalConfirmed(false);
             } catch (Exception e) {
                 throw new RuntimeException("deleteIdentity submission failed: " + e.getMessage(), e);
             }

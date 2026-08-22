@@ -155,7 +155,7 @@ class OrgEcosystemTxPoller {
                 grant.setStatus(PermissionGrantStatus.ACTIVE);
                 grantRepository.save(grant);
                 recordEffect(org.getChainConfigId(), verdict, grant.getGrantedTx(),
-                        "PERMISSION_GRANTED", "PermissionGrant", grant.getId());
+                        PermissionGrantRevertCompensator.EFFECT_TYPE, "PermissionGrant", grant.getId());
             }
             case FAILED -> {
                 grant.setStatus(PermissionGrantStatus.FAILED);
@@ -178,7 +178,7 @@ class OrgEcosystemTxPoller {
                 issuer.setStatus(MemberWalletStatus.ACTIVE);
                 trustedIssuerRepository.save(issuer);
                 recordEffect(issuer.getChainConfigId(), verdict, issuer.getAddedTx(),
-                        "TRUSTED_ISSUER_ADDED", "EcosystemTrustedIssuer", issuer.getId());
+                        EcosystemTrustedIssuerRevertCompensator.EFFECT_TYPE, "EcosystemTrustedIssuer", issuer.getId());
             }
             case FAILED -> {
                 issuer.setStatus(MemberWalletStatus.FAILED);
@@ -224,7 +224,7 @@ class OrgEcosystemTxPoller {
                         registration.getId(), registration.getRegisteredTx());
                 registrationRepository.save(registration);
                 recordEffect(registration.getChainConfigId(), verdict, registration.getRegisteredTx(),
-                        "ORG_REGISTRATION_CONFIRMED", "OrgRegistration", registration.getId());
+                        OrgRegistrationRevertCompensator.EFFECT_TYPE, "OrgRegistration", registration.getId());
             }
             case FAILED -> {
                 registration.setStatus(OrgRegistrationStatus.FAILED);
@@ -250,7 +250,7 @@ class OrgEcosystemTxPoller {
                 log.info("Member wallet={} binding confirmed (tx={})", wallet.getId(), wallet.getBoundTx());
                 walletRepository.save(wallet);
                 recordEffect(wallet.getChainConfigId(), verdict, wallet.getBoundTx(),
-                        "MEMBER_WALLET_BOUND", "OrgMemberWallet", wallet.getId());
+                        OrgMemberWalletRevertCompensator.EFFECT_TYPE, "OrgMemberWallet", wallet.getId());
             }
             case FAILED -> {
                 wallet.setStatus(MemberWalletStatus.FAILED);
@@ -331,9 +331,9 @@ class OrgEcosystemTxPoller {
         if (verdict.blockNumber() == null) {
             return;
         }
-        chainEffectRecorder.record(new ChainEffectDescriptor(
-                chainConfigId, verdict.blockNumber(), verdict.blockHash(), txHash, null,
-                "orgidentity", effectType, entityType, entityId,
-                CompensationCategory.INVERSE_FLIP, null, null, null, null));
+        chainEffectRecorder.record(ChainEffectDescriptor.of(
+                chainConfigId, verdict.blockNumber(), verdict.blockHash(), txHash,
+                "orgidentity", effectType, entityType, entityId, null,
+                CompensationCategory.INVERSE_FLIP));
     }
 }

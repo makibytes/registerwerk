@@ -80,7 +80,9 @@ Un emisor puede:
 - Crear y gestionar sus propias definiciones de [activo](../token-standards/index.md)
 - Iniciar el despliegue de tokens (sujeto, si procede, a la aprobación del operador)
 - Gestionar el alta de inversores para sus tokens
-- Consultar el historial de [operaciones societarias](../intro/concepts.md) de sus valores
+- Proponer [operaciones societarias](../intro/concepts.md) — dividendos, desdoblamientos, amortizaciones anticipadas — para revisión del operador, y retirar una propuesta antes de que sea revisada
+- Certificar que la liquidación de una operación societaria está lista — la primera de las dos partes requeridas, junto con la confirmación de un operador
+- Consultar el historial de operaciones societarias de sus valores
 - Descargar extractos de posición y documentos regulatorios
 
 ### INVESTOR
@@ -90,6 +92,7 @@ Un inversor puede:
 - Consultar su cartera (tokens mantenidos, posiciones)
 - Aceptar solicitudes de transmisión
 - Consultar el historial de transacciones
+- Consultar las operaciones societarias que afectan a sus posiciones y descargar las confirmaciones de liquidación
 - Descargar sus extractos de posición
 
 ### COMPANY_ADMIN

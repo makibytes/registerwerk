@@ -65,9 +65,10 @@ class BlockchainTxRevertCompensator implements ChainEffectCompensator {
                     "BlockchainTransaction " + txId + " is no longer SUCCESS (status=" + tx.getStatus() + ")");
         }
 
-        log.error("Blockchain tx={} was SUCCESS at block={} but that block was retracted by a reorg deep enough "
-                        + "to cross FINALIZED — reverting to PENDING for re-verification. This is a consensus "
-                        + "failure deeper than the configured confirmation policy guarantees.",
+        log.error("Blockchain tx={} was SUCCESS at block={} but that block was retracted by a reorg "
+                        + "— reverting to PENDING for re-verification. Compensation runs at any reorg depth; "
+                        + "if this retraction reached an already-FINALIZED block, that is additionally a "
+                        + "consensus failure deeper than the configured confirmation policy guarantees.",
                 tx.getTxHash(), tx.getBlockNumber());
         tx.setStatus(BlockchainTransaction.Status.PENDING);
         tx.setBlockHash(null);

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -22,9 +22,10 @@ import { IssuanceService } from '../../../core/api/issuance.service';
 import { TransactionService } from '../../../core/api/transaction.service';
 import { RegisterDocumentService } from '../../../core/api/register-document.service';
 import { BondTermsService } from '../../../core/api/bond-terms.service';
+import { CorporateActionsService, ProposeCorporateActionRequest } from '../../../core/api/corporate-actions.service';
 import { AuthService } from '../../../core/auth/auth.service';
 import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
-import { Asset, AssetBondTerms, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
+import { Asset, AssetBondTerms, AssetDeployment, AssetDocument, AssetHolder, Chain, CorporateActionType, CorporateActionView, Network } from '../../../core/models';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { downloadBlob } from '../../../core/utils/download.util';
@@ -284,9 +285,196 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 <div><span class="bt-label">Callable</span><span class="bt-value">{{ bondTerms.callable ? 'Yes' : 'No' }}</span></div>
                 <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus }}</span></div>
               </div>
+              @if (bondTerms.callable && bondTerms.callSchedule && bondTerms.callSchedule.length > 0) {
+                <div class="call-schedule">
+                  <span class="bt-label">Call schedule</span>
+                  <ul class="call-schedule-list">
+                    @for (entry of bondTerms.callSchedule; track $index) {
+                      <li>{{ entry.callDate }} — {{ entry.callPrice | number:'1.0-4' }}% of face value</li>
+                    }
+                  </ul>
+                </div>
+              }
             </mat-card-content>
           </mat-card>
         }
+
+        <!-- ── Corporate Actions ────────────────────────────────────────────── -->
+        <mat-card class="section-card">
+          <mat-card-header>
+            <mat-card-title>Corporate Actions</mat-card-title>
+            <app-data-state-pill [status]="corporateActionsState.status" />
+          </mat-card-header>
+          <mat-card-content>
+            <button mat-stroked-button type="button" color="primary" style="margin-bottom:12px"
+                    (click)="openProposeDialog()">
+              <mat-icon>add_circle_outline</mat-icon>
+              Propose a corporate action
+            </button>
+            @if (corporateActionsState.status === 'error') {
+              <p class="confidential-error" role="alert">
+                Corporate actions could not be loaded.
+                <button mat-button type="button" (click)="loadCorporateActions()">Retry</button>
+              </p>
+            } @else if (corporateActionsState.data.length > 0) {
+              <div class="table-wrap">
+                <table mat-table [dataSource]="corporateActionsState.data" class="mat-elevation-z0">
+                  <ng-container matColumnDef="type">
+                    <th mat-header-cell *matHeaderCellDef>Type</th>
+                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.actionType) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="status">
+                    <th mat-header-cell *matHeaderCellDef>Status</th>
+                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.status) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="paymentDate">
+                    <th mat-header-cell *matHeaderCellDef>Payment date</th>
+                    <td mat-cell *matCellDef="let a">{{ a.paymentDate || '—' }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="progress">
+                    <th mat-header-cell *matHeaderCellDef>Settlement progress</th>
+                    <td mat-cell *matCellDef="let a">{{ corporateActionProgress(a) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="actions">
+                    <th mat-header-cell *matHeaderCellDef></th>
+                    <td mat-cell *matCellDef="let a">
+                      @if (a.status === 'PROPOSED') {
+                        <button mat-button type="button" (click)="withdrawProposal(a)">Withdraw</button>
+                      }
+                      @if (isPreSettlement(a) && !a.issuerAttestedAt) {
+                        <button mat-button type="button" color="primary" (click)="openAttestDialog(a)">
+                          Attest settlement
+                        </button>
+                      }
+                    </td>
+                  </ng-container>
+
+                  <tr mat-header-row *matHeaderRowDef="corporateActionColumns"></tr>
+                  <tr mat-row *matRowDef="let r; columns: corporateActionColumns;"></tr>
+                </table>
+              </div>
+            } @else {
+              <p class="empty-text">
+                @if (corporateActionsState.status === 'pending') { Corporate actions are still loading. }
+                @else { No corporate actions for this asset yet. }
+              </p>
+            }
+          </mat-card-content>
+        </mat-card>
+
+        <ng-template #proposeDialogTpl>
+          <h2 mat-dialog-title>Propose a Corporate Action</h2>
+          <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+            <p style="margin:0;font-size:13px;color:var(--rw-text-secondary)">
+              Your proposal starts as a draft an operator must review before it joins the register.
+            </p>
+            <mat-form-field appearance="outline">
+              <mat-label>Type</mat-label>
+              <mat-select [(ngModel)]="proposeForm.actionType">
+                <mat-option value="DIVIDEND">Dividend</mat-option>
+                <mat-option value="SPLIT">Split</mat-option>
+                @if (bondTerms?.callable) {
+                  <mat-option value="CALL">Call</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+
+            @if (proposeForm.actionType === 'DIVIDEND') {
+              <mat-form-field appearance="outline">
+                <mat-label>Amount per unit</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="proposeForm.amountPerUnit" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Currency</mat-label>
+                <input matInput maxlength="3" [(ngModel)]="proposeForm.currency" placeholder="EUR" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Record date</mat-label>
+                <input matInput type="date" [(ngModel)]="proposeForm.recordDate" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Payment date</mat-label>
+                <input matInput type="date" [(ngModel)]="proposeForm.paymentDate" />
+              </mat-form-field>
+            }
+
+            @if (proposeForm.actionType === 'SPLIT') {
+              <mat-form-field appearance="outline">
+                <mat-label>Ratio numerator</mat-label>
+                <input matInput type="number" step="1" [(ngModel)]="proposeForm.ratioNumerator" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Ratio denominator</mat-label>
+                <input matInput type="number" step="1" [(ngModel)]="proposeForm.ratioDenominator" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Record date</mat-label>
+                <input matInput type="date" [(ngModel)]="proposeForm.recordDate" />
+              </mat-form-field>
+            }
+
+            @if (proposeForm.actionType === 'CALL') {
+              @if (bondTerms?.callSchedule && bondTerms!.callSchedule!.length > 0) {
+                <mat-form-field appearance="outline">
+                  <mat-label>Scheduled call</mat-label>
+                  <mat-select [(ngModel)]="proposeForm.callScheduleIndex">
+                    <mat-option [value]="null">Custom (not on the schedule)</mat-option>
+                    @for (entry of bondTerms!.callSchedule; track $index) {
+                      <mat-option [value]="$index">{{ entry.callDate }} — {{ entry.callPrice }}%</mat-option>
+                    }
+                  </mat-select>
+                </mat-form-field>
+              }
+              @if (proposeForm.callScheduleIndex === null) {
+                <mat-form-field appearance="outline">
+                  <mat-label>Call date</mat-label>
+                  <input matInput type="date" [(ngModel)]="proposeForm.paymentDate" />
+                </mat-form-field>
+                <mat-form-field appearance="outline">
+                  <mat-label>Call price (% of face value)</mat-label>
+                  <input matInput type="number" step="0.01" [(ngModel)]="proposeForm.amountPerUnit" />
+                </mat-form-field>
+              }
+            }
+
+            <mat-form-field appearance="outline">
+              <mat-label>Notes (optional)</mat-label>
+              <textarea matInput rows="2" maxlength="2000" [(ngModel)]="proposeForm.notes"></textarea>
+            </mat-form-field>
+          </mat-dialog-content>
+          <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+            <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
+            <button mat-raised-button color="primary" type="button"
+                    [disabled]="submittingProposal" (click)="submitPropose()">
+              <mat-icon>send</mat-icon>
+              Submit proposal
+            </button>
+          </mat-dialog-actions>
+        </ng-template>
+
+        <ng-template #attestDialogTpl>
+          <h2 mat-dialog-title>Attest Settlement Readiness</h2>
+          <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+            <p style="margin:0;font-size:13px;color:var(--rw-text-secondary)">
+              Confirm the underlying obligation/cash-leg for this corporate action is ready. An
+              operator confirmation still follows before settlement executes.
+            </p>
+            <mat-form-field appearance="outline">
+              <mat-label>Attestation reference</mat-label>
+              <input matInput maxlength="255" [(ngModel)]="attestForm.attestationReference"
+                     placeholder="Payment instruction id, bank reference, …" />
+            </mat-form-field>
+          </mat-dialog-content>
+          <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+            <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
+            <button mat-raised-button color="primary" type="button"
+                    [disabled]="submittingAttestation || !attestForm.attestationReference.trim()"
+                    (click)="submitAttest()">
+              <mat-icon>verified</mat-icon>
+              Attest
+            </button>
+          </mat-dialog-actions>
+        </ng-template>
 
         <!-- ── Term Sheet ────────────────────────────────────────────────── -->
         <mat-card class="section-card">
@@ -725,6 +913,8 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
     .bond-terms-grid > div { display: flex; flex-direction: column; gap: 2px; }
     .bt-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--rw-text-secondary); }
     .bt-value { font-size: 14px; color: var(--rw-text-primary); font-weight: 600; }
+    .call-schedule { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+    .call-schedule-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--rw-text-primary); }
     .asset-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
     .asset-title h1 { margin: 0 0 8px; font-size: 22px; }
     .asset-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -789,6 +979,7 @@ export class IssuanceDetailComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
   private readonly registerDocumentService = inject(RegisterDocumentService);
   private readonly bondTermsService = inject(BondTermsService);
+  private readonly corporateActionsService = inject(CorporateActionsService);
   protected readonly walletService = inject(WalletService);
   private readonly fheService = inject(FheClientService);
 
@@ -815,6 +1006,26 @@ export class IssuanceDetailComponent implements OnInit {
   liveHoldersState: AsyncSection<null> = { data: null, status: 'ready', hasLoaded: true };
 
   bondTerms: AssetBondTerms | null = null;
+
+  // ── Corporate actions ────────────────────────────────────────────────────
+  @ViewChild('proposeDialogTpl') proposeDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('attestDialogTpl') attestDialogTpl!: TemplateRef<unknown>;
+  corporateActionsState: AsyncSection<CorporateActionView[]> = createAsyncSection<CorporateActionView[]>([]);
+  readonly corporateActionColumns = ['type', 'status', 'paymentDate', 'progress', 'actions'];
+  proposeForm: {
+    actionType: CorporateActionType;
+    amountPerUnit: number | null;
+    currency: string;
+    recordDate: string;
+    paymentDate: string;
+    ratioNumerator: number | null;
+    ratioDenominator: number | null;
+    callScheduleIndex: number | null;
+    notes: string;
+  } = this.emptyProposeForm();
+  submittingProposal = false;
+  attestForm: { corporateActionId: string; attestationReference: string } = { corporateActionId: '', attestationReference: '' };
+  submittingAttestation = false;
 
   // ── Term Sheet ────────────────────────────────────────────────────────────
   termSheetDocs: AssetDocument[] = [];
@@ -916,6 +1127,7 @@ export class IssuanceDetailComponent implements OnInit {
         this.loadHolders(asset.id);
         this.loadTermSheetDocs(asset.id);
         this.loadBondTerms(asset.id);
+        this.loadCorporateActions(asset.id);
       },
       error: (err) => {
         this.loadError = err?.error?.message ?? 'Failed to load the issuance.';
@@ -1101,6 +1313,141 @@ export class IssuanceDetailComponent implements OnInit {
 
   formatEnum(value: string): string {
     return value.split('_').join(' ');
+  }
+
+  private emptyProposeForm() {
+    return {
+      actionType: 'DIVIDEND' as CorporateActionType,
+      amountPerUnit: null as number | null,
+      currency: '',
+      recordDate: '',
+      paymentDate: '',
+      ratioNumerator: null as number | null,
+      ratioDenominator: null as number | null,
+      callScheduleIndex: null as number | null,
+      notes: '',
+    };
+  }
+
+  /** Non-terminal, past the proposal stage — where the two-party settlement control applies. */
+  isPreSettlement(a: CorporateActionView): boolean {
+    return a.status === 'ANNOUNCED' || a.status === 'RECORD_DATE_SET' || a.status === 'COMPUTED';
+  }
+
+  corporateActionProgress(a: CorporateActionView): string {
+    switch (a.status) {
+      case 'PROPOSED': return 'Awaiting operator review';
+      case 'REJECTED': return 'Rejected — submit a fresh proposal';
+      case 'CANCELLED': return 'Cancelled';
+      case 'SETTLED':
+      case 'CLOSED':
+        return a.settlementTxHash ? `${a.settlementTxHash.slice(0, 10)}…` : 'Settled off-chain';
+      default:
+        if (!a.issuerAttestedAt) return 'Awaiting your attestation';
+        if (!a.dualControlApprovedAt) return 'Attested — awaiting operator confirmation';
+        return 'Confirmed — awaiting settlement dispatch';
+    }
+  }
+
+  loadCorporateActions(assetId: string = this.assetId): void {
+    if (!assetId) return;
+    this.corporateActionsState = beginAsyncSection(this.corporateActionsState);
+    this.corporateActionsService.listForAsset(assetId).subscribe({
+      next: (actions) => {
+        this.corporateActionsState = resolveAsyncSection(this.corporateActionsState, actions);
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.corporateActionsState = failAsyncSection(this.corporateActionsState);
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  openProposeDialog(): void {
+    this.proposeForm = this.emptyProposeForm();
+    this.dialog.open(this.proposeDialogTpl, { width: '480px', maxWidth: '95vw' });
+  }
+
+  submitPropose(): void {
+    if (!this.assetId || this.submittingProposal) return;
+    const f = this.proposeForm;
+    const request: ProposeCorporateActionRequest = {
+      actionType: f.actionType,
+      notes: f.notes.trim() || undefined,
+    };
+    if (f.actionType === 'DIVIDEND') {
+      request.amountPerUnit = f.amountPerUnit ?? undefined;
+      request.currency = f.currency.trim() || undefined;
+      request.recordDate = f.recordDate || undefined;
+      request.paymentDate = f.paymentDate || undefined;
+    } else if (f.actionType === 'SPLIT') {
+      request.ratioNumerator = f.ratioNumerator ?? undefined;
+      request.ratioDenominator = f.ratioDenominator ?? undefined;
+      request.recordDate = f.recordDate || undefined;
+    } else if (f.actionType === 'CALL') {
+      if (f.callScheduleIndex !== null) {
+        request.callScheduleIndex = f.callScheduleIndex;
+      } else {
+        request.paymentDate = f.paymentDate || undefined;
+        request.amountPerUnit = f.amountPerUnit ?? undefined;
+      }
+    }
+
+    this.submittingProposal = true;
+    this.cdr.detectChanges();
+    this.corporateActionsService.propose(this.assetId, request).subscribe({
+      next: () => {
+        this.dialog.closeAll();
+        this.submittingProposal = false;
+        this.cdr.detectChanges();
+        this.snackBar.open('Proposal submitted. An operator will review it.', 'Dismiss', { duration: 5000 });
+        this.loadCorporateActions();
+      },
+      error: (err) => {
+        this.submittingProposal = false;
+        this.cdr.detectChanges();
+        this.snackBar.open(err?.error?.message ?? 'Failed to submit the proposal.', 'Dismiss', { duration: 6000 });
+      },
+    });
+  }
+
+  withdrawProposal(a: CorporateActionView): void {
+    if (!this.assetId) return;
+    this.corporateActionsService.withdraw(this.assetId, a.id).subscribe({
+      next: () => {
+        this.snackBar.open('Proposal withdrawn.', 'Dismiss', { duration: 4000 });
+        this.loadCorporateActions();
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to withdraw the proposal.', 'Dismiss', { duration: 6000 }),
+    });
+  }
+
+  openAttestDialog(a: CorporateActionView): void {
+    this.attestForm = { corporateActionId: a.id, attestationReference: '' };
+    this.dialog.open(this.attestDialogTpl, { width: '440px', maxWidth: '95vw' });
+  }
+
+  submitAttest(): void {
+    if (!this.assetId || this.submittingAttestation || !this.attestForm.attestationReference.trim()) return;
+    this.submittingAttestation = true;
+    this.cdr.detectChanges();
+    this.corporateActionsService.attestSettlement(
+      this.assetId, this.attestForm.corporateActionId, this.attestForm.attestationReference.trim(),
+    ).subscribe({
+      next: () => {
+        this.dialog.closeAll();
+        this.submittingAttestation = false;
+        this.cdr.detectChanges();
+        this.snackBar.open('Attested. Awaiting operator confirmation.', 'Dismiss', { duration: 5000 });
+        this.loadCorporateActions();
+      },
+      error: (err) => {
+        this.submittingAttestation = false;
+        this.cdr.detectChanges();
+        this.snackBar.open(err?.error?.message ?? 'Failed to attest.', 'Dismiss', { duration: 6000 });
+      },
+    });
   }
 
   onTermSheetFileSelected(event: Event): void {

@@ -80,7 +80,9 @@ Un emittente può:
 - Creare e gestire le proprie definizioni di [asset](../token-standards/index.md)
 - Avviare la distribuzione dei token (se richiesto, previa approvazione dell'operatore)
 - Gestire l'attivazione degli investitori per i propri token
-- Consultare lo storico delle [operazioni societarie](../intro/concepts.md) relative ai propri strumenti
+- Proporre [operazioni societarie](../intro/concepts.md) — dividendi, frazionamenti, rimborsi anticipati — per la revisione dell'operatore, e ritirare una proposta prima che venga esaminata
+- Attestare che il regolamento di un'operazione societaria è pronto — la prima delle due parti richieste, insieme alla conferma di un operatore
+- Consultare lo storico delle operazioni societarie relative ai propri strumenti
 - Scaricare estratti posizione e documenti regolamentari
 
 ### INVESTOR
@@ -90,6 +92,7 @@ Un investitore può:
 - Consultare il proprio portafoglio (token detenuti, posizioni)
 - Accettare richieste di trasferimento
 - Consultare lo storico delle transazioni
+- Consultare le operazioni societarie che riguardano le proprie posizioni e scaricare le conferme di regolamento
 - Scaricare i propri estratti posizione
 
 ### COMPANY_ADMIN

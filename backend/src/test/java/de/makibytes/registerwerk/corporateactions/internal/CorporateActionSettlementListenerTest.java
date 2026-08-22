@@ -89,7 +89,7 @@ class CorporateActionSettlementListenerTest {
     }
 
     @Test
-    @DisplayName("PARTIAL_REDEMPTION also routes to redeem, not payCoupon")
+    @DisplayName("PARTIAL_REDEMPTION also routes to redeem, not payCoupon (not yet issuer-creatable, but documents routing if raised)")
     void partialRedemption_routesToRedeem() {
         actionOfType(CorporateAction.ActionType.PARTIAL_REDEMPTION);
         when(cantonBondOperations.redeem(eq(deploymentId), any(), any()))
@@ -118,6 +118,21 @@ class CorporateActionSettlementListenerTest {
     }
 
     @Test
+    @DisplayName("DIVIDEND routes to payCoupon just like COUPON/INTEREST_PAYMENT")
+    void dividend_routesToPayCoupon() {
+        actionOfType(CorporateAction.ActionType.DIVIDEND);
+        when(cantonBondOperations.payCoupon(eq(deploymentId), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture("tx-dividend-1"));
+
+        listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
+                corporateActionId, assetId, CorporateAction.ActionType.DIVIDEND));
+
+        verify(cantonBondOperations, timeout(1000)).payCoupon(eq(deploymentId), any(), any(), any());
+        verify(cantonBondOperations, never()).redeem(any(), any(), any());
+        verify(settlementWriter, timeout(1000)).markSettled(corporateActionId, "tx-dividend-1");
+    }
+
+    @Test
     @DisplayName("CALL routes to earlyCall using amountPerUnit as the call price")
     void call_routesToEarlyCall() {
         actionOfType(CorporateAction.ActionType.CALL);
@@ -131,7 +146,8 @@ class CorporateActionSettlementListenerTest {
     }
 
     @Test
-    @DisplayName("an action type with no Canton lifecycle mapping (e.g. SPLIT) dispatches nothing and stays AWAITING_SETTLEMENT")
+    @DisplayName("SPLIT has no Canton lifecycle mapping — no on-chain split primitive exists on any "
+            + "supported standard, so it dispatches nothing and always settles via the operator's mark-settled")
     void unmappedActionType_dispatchesNothing() {
         actionOfType(CorporateAction.ActionType.SPLIT);
 

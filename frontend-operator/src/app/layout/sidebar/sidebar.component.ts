@@ -258,6 +258,8 @@ export class SidebarComponent {
       items: [
         { label: 'Screening', icon: 'policy', route: '/compliance/screening', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Chain Drift', icon: 'sync_problem', route: '/compliance/chain-drift', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        { label: 'Unresolved Compensation', icon: 'report_problem', route: '/compliance/unresolved-compensation', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        { label: 'Finality Policy', icon: 'rule', route: '/compliance/finality-policy', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
         // Not under Infrastructure (REGISTRY_ADMIN-only, see the Operations section note below)
         // — IndexerAdminController's read access is REGISTRY_ADMIN/COMPLIANCE_OFFICER/AUDIT,
         // matching this section's roles exactly, and indexer sync health is the mechanical
