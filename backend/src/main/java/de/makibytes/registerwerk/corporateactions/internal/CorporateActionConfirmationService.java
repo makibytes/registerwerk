@@ -8,6 +8,10 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryReposi
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
+import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -56,17 +60,20 @@ public class CorporateActionConfirmationService {
     private final AssetRepository assetRepository;
     private final LegalEntityRepository entityRepository;
     private final DocumentSigningService signingService;
+    private final FinalityGate finalityGate;
 
     CorporateActionConfirmationService(CorporateActionRepository actionRepository,
                                         CorporateActionEntryRepository entryRepository,
                                         AssetRepository assetRepository,
                                         LegalEntityRepository entityRepository,
-                                        DocumentSigningService signingService) {
+                                        DocumentSigningService signingService,
+                                        FinalityGate finalityGate) {
         this.actionRepository = actionRepository;
         this.entryRepository = entryRepository;
         this.assetRepository = assetRepository;
         this.entityRepository = entityRepository;
         this.signingService = signingService;
+        this.finalityGate = finalityGate;
     }
 
     /** Operator-facing: every holder's entry for this corporate action. */
@@ -110,12 +117,50 @@ public class CorporateActionConfirmationService {
         }
     }
 
+    /** Operator-facing: ISO 20022-shaped notification covering every holder's entry — see
+     *  {@link Iso20022CorporateActionNotificationRenderer} for the scoping caveat. */
+    @Transactional(readOnly = true)
+    public byte[] generateIso20022ForOperator(UUID corporateActionId) {
+        CorporateAction action = requireSettled(corporateActionId);
+        List<CorporateActionEntry> entries = entryRepository.findByCorporateActionId(corporateActionId);
+        Asset asset = assetRepository.findById(action.getAssetId()).orElse(null);
+        Map<UUID, LegalEntity> entitiesById = entityRepository.findAllById(
+                entries.stream().map(CorporateActionEntry::getInvestorId).filter(java.util.Objects::nonNull).toList()
+        ).stream().collect(Collectors.toMap(LegalEntity::getId, Function.identity()));
+        return Iso20022CorporateActionNotificationRenderer.render(action, asset, entries, entitiesById);
+    }
+
+    /** Investor-facing: ISO 20022-shaped notification scoped to this investor's own entry. */
+    @Transactional(readOnly = true)
+    public byte[] generateIso20022ForInvestor(UUID corporateActionId, UUID investorId) {
+        CorporateAction action = requireSettled(corporateActionId);
+        List<CorporateActionEntry> own = entryRepository.findByCorporateActionId(corporateActionId).stream()
+                .filter(e -> investorId.equals(e.getInvestorId()))
+                .toList();
+        if (own.isEmpty()) {
+            throw new EntityNotFoundException("CorporateActionEntry for investor", investorId);
+        }
+        Asset asset = assetRepository.findById(action.getAssetId()).orElse(null);
+        LegalEntity investor = entityRepository.findById(investorId).orElse(null);
+        Map<UUID, LegalEntity> entitiesById = investor != null ? Map.of(investorId, investor) : Map.of();
+        return Iso20022CorporateActionNotificationRenderer.render(action, asset, own, entitiesById);
+    }
+
     private byte[] sign(byte[] unsigned, CorporateAction action, String kind) {
         return signingService.isConfigured()
                 ? signingService.signPdf(unsigned, "Corporate action confirmation (" + kind + ") — " + action.getId())
                 : unsigned;
     }
 
+    /**
+     * Common chokepoint for all four {@code generate*} methods — also where
+     * {@link GatedOperation#CORPORATE_ACTION_CONFIRMATION_EXPORT} is enforced:
+     * a confirmation document is exactly the kind of thing that must not go out describing a
+     * still-provisional settlement. {@code currentLevel} is {@code FINALIZED} unconditionally,
+     * same reasoning as every other gate call site in this codebase — the action is already
+     * required to be SETTLED/CLOSED here, and settlement itself is gated at
+     * {@code CorporateActionService.confirmSettlementAsOperator}/{@code markSettledManually}.
+     */
     private CorporateAction requireSettled(UUID corporateActionId) {
         CorporateAction action = actionRepository.findById(corporateActionId)
                 .orElseThrow(() -> new EntityNotFoundException("CorporateAction", corporateActionId));
@@ -123,6 +168,9 @@ public class CorporateActionConfirmationService {
             throw new IllegalStateException(
                     "Corporate action " + corporateActionId + " has not settled yet (status=" + action.getStatus() + ")");
         }
+        TokenStandard standard = assetRepository.findById(action.getAssetId())
+                .map(Asset::getTokenStandard).orElse(null);
+        finalityGate.require(GatedOperation.CORPORATE_ACTION_CONFIRMATION_EXPORT, action.getAssetId(), standard, FinalityLevel.FINALIZED);
         return action;
     }
 

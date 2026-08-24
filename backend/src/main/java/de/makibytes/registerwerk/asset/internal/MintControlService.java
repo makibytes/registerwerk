@@ -44,9 +44,10 @@ public class MintControlService {
         this.eventPublisher = eventPublisher;
     }
 
-    public MintControlRule createRule(UUID deploymentId, MintControlRule rule, UUID actorId, String actorRole) {
-        assetDeploymentRepository.findById(deploymentId)
-            .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+    public MintControlRule createRule(UUID assetId, UUID deploymentId, MintControlRule rule,
+                                      UUID actorId, String actorRole) {
+        requireDeployment(assetId, deploymentId);
+        validateRule(rule, false);
         rule.setAssetDeploymentId(deploymentId);
         rule.setActive(true);
         MintControlRule saved = mintControlRuleRepository.save(rule);
@@ -61,8 +62,10 @@ public class MintControlService {
      * Patches a mint control rule's target address, type, or max amount.
      * Null fields in the patch are ignored (partial update semantics).
      */
-    public MintControlRule updateRule(UUID ruleId, MintControlRule patch, UUID actorId, String actorRole) {
-        MintControlRule rule = mintControlRuleRepository.findById(ruleId)
+    public MintControlRule updateRule(UUID deploymentId, UUID ruleId, MintControlRule patch,
+                                      UUID actorId, String actorRole) {
+        validateRule(patch, true);
+        MintControlRule rule = mintControlRuleRepository.findByIdAndAssetDeploymentId(ruleId, deploymentId)
             .orElseThrow(() -> new EntityNotFoundException("MintControlRule", ruleId));
         if (patch.getTargetAddress() != null) rule.setTargetAddress(patch.getTargetAddress());
         if (patch.getRuleType()      != null) rule.setRuleType(patch.getRuleType());
@@ -75,8 +78,8 @@ public class MintControlService {
         return saved;
     }
 
-    public void deactivateRule(UUID ruleId, UUID actorId, String actorRole) {
-        MintControlRule rule = mintControlRuleRepository.findById(ruleId)
+    public void deactivateRule(UUID deploymentId, UUID ruleId, UUID actorId, String actorRole) {
+        MintControlRule rule = mintControlRuleRepository.findByIdAndAssetDeploymentId(ruleId, deploymentId)
             .orElseThrow(() -> new EntityNotFoundException("MintControlRule", ruleId));
         rule.setActive(false);
         mintControlRuleRepository.save(rule);
@@ -86,7 +89,29 @@ public class MintControlService {
     }
 
     @Transactional(readOnly = true)
-    public List<MintControlRule> listRules(UUID deploymentId) {
+    public List<MintControlRule> listRules(UUID assetId, UUID deploymentId) {
+        requireDeployment(assetId, deploymentId);
         return mintControlRuleRepository.findByAssetDeploymentIdAndActive(deploymentId, true);
+    }
+
+    @Transactional(readOnly = true)
+    public void requireDeployment(UUID assetId, UUID deploymentId) {
+        assetDeploymentRepository.findByIdAndAssetId(deploymentId, assetId)
+                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+    }
+
+    private static void validateRule(MintControlRule rule, boolean patch) {
+        if (!patch && (rule.getTargetAddress() == null || rule.getTargetAddress().isBlank())) {
+            throw new IllegalArgumentException("targetAddress is required");
+        }
+        if (!patch && rule.getRuleType() == null) {
+            throw new IllegalArgumentException("ruleType is required");
+        }
+        if (rule.getTargetAddress() != null && rule.getTargetAddress().isBlank()) {
+            throw new IllegalArgumentException("targetAddress must not be blank");
+        }
+        if (rule.getMaxAmount() != null && rule.getMaxAmount().signum() <= 0) {
+            throw new IllegalArgumentException("maxAmount must be greater than zero");
+        }
     }
 }

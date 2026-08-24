@@ -128,6 +128,10 @@ import { WalletService } from '../../../core/wallet/wallet.service';
     }
 
     .dialog-hint { font-size: 12px; color: var(--rw-text-muted); margin: 0; }
+    .table-wrap { overflow-x: auto; }
+    .table-wrap table { min-width: 720px; }
+    .dialog-content { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; width: min(480px, calc(100vw - 64px)); }
+    .root-error { display: grid; justify-items: center; gap: 10px; }
   `],
   template: `
     <div class="page-container">
@@ -149,11 +153,20 @@ import { WalletService } from '../../../core/wallet/wallet.service';
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #rla4="routerLinkActive" [active]="rla4.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
         </a>
+        <a mat-tab-link routerLink="/company-admin/beneficial-owners" routerLinkActive #rlaBo="routerLinkActive" [active]="rlaBo.isActive">
+          <mat-icon>diversity_3</mat-icon>&nbsp;Beneficial Owners
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 
       @if (loading) {
         <div class="empty-state"><mat-spinner diameter="36" style="margin:0 auto"></mat-spinner></div>
+      } @else if (loadError) {
+        <div class="empty-state root-error" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <span>Onchain organization details could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="loadOrganizations()">Retry</button>
+        </div>
       } @else if (orgs.length === 0) {
         <mat-card class="org-card">
           <mat-card-content>
@@ -226,13 +239,18 @@ import { WalletService } from '../../../core/wallet/wallet.service';
               </mat-card-subtitle>
             </mat-card-header>
             <mat-card-content>
-              @if (wallets.length === 0) {
+              @if (walletsError) {
+                <p class="error-message" role="alert">
+                  {{ walletsError }}
+                  <button mat-button type="button" (click)="loadWallets()">Retry</button>
+                </p>
+              } @else if (wallets.length === 0) {
                 <div class="empty-state">
                   <mat-icon>wallet</mat-icon>
                   <p>No wallets bound yet.</p>
                 </div>
               } @else {
-                <table mat-table [dataSource]="wallets" style="width:100%">
+                <div class="table-wrap"><table mat-table [dataSource]="wallets" style="width:100%">
                   <ng-container matColumnDef="walletAddress">
                     <th mat-header-cell *matHeaderCellDef>Wallet</th>
                     <td mat-cell *matCellDef="let w" style="font-family:'IBM Plex Mono',monospace;font-size:12px">
@@ -255,7 +273,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
                     <th mat-header-cell *matHeaderCellDef></th>
                     <td mat-cell *matCellDef="let w" style="text-align:right">
                       @if (w.status === 'ACTIVE' || w.status === 'PENDING') {
-                        <button mat-icon-button color="warn" (click)="removeWallet(w)"
+                        <button mat-icon-button color="warn" type="button" [disabled]="walletBusyIds.has(w.id)" (click)="removeWallet(w)"
                                 matTooltip="Unbind this wallet">
                           <mat-icon>link_off</mat-icon>
                         </button>
@@ -264,14 +282,11 @@ import { WalletService } from '../../../core/wallet/wallet.service';
                   </ng-container>
                   <tr mat-header-row *matHeaderRowDef="walletColumns"></tr>
                   <tr mat-row *matRowDef="let row; columns: walletColumns"></tr>
-                </table>
-              }
-              @if (walletsError) {
-                <p class="error-message">{{ walletsError }}</p>
+                </table></div>
               }
             </mat-card-content>
             <mat-card-actions align="end">
-              <button mat-raised-button color="primary"
+              <button mat-raised-button color="primary" type="button"
                       [disabled]="org.status !== 'ACTIVE'"
                       (click)="openAddWallet()">
                 <mat-icon>add_link</mat-icon>
@@ -290,13 +305,18 @@ import { WalletService } from '../../../core/wallet/wallet.service';
               </mat-card-subtitle>
             </mat-card-header>
             <mat-card-content>
-              @if (orgGrants.length === 0 && roleGrants.length === 0) {
+              @if (grantsError) {
+                <p class="error-message" role="alert">
+                  {{ grantsError }}
+                  <button mat-button type="button" (click)="loadGrants()">Retry</button>
+                </p>
+              } @else if (orgGrants.length === 0 && roleGrants.length === 0) {
                 <div class="empty-state">
                   <mat-icon>verified_user</mat-icon>
                   <p>No permissions granted yet. Permissions are granted by the registry operator.</p>
                 </div>
               } @else {
-                <table mat-table [dataSource]="orgGrants" style="width:100%">
+                <div class="table-wrap"><table mat-table [dataSource]="orgGrants" style="width:100%">
                   <ng-container matColumnDef="permissionCode">
                     <th mat-header-cell *matHeaderCellDef>Permission</th>
                     <td mat-cell *matCellDef="let g" style="font-family:'IBM Plex Mono',monospace;font-size:12px">
@@ -327,7 +347,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
                     <th mat-header-cell *matHeaderCellDef></th>
                     <td mat-cell *matCellDef="let g" style="text-align:right">
                       @if (g.status === 'ACTIVE') {
-                        <button mat-icon-button color="primary" (click)="openDelegateDialog(g)"
+                        <button mat-icon-button color="primary" type="button" (click)="openDelegateDialog(g)"
                                 matTooltip="Delegate to a member role">
                           <mat-icon>group_add</mat-icon>
                         </button>
@@ -336,11 +356,11 @@ import { WalletService } from '../../../core/wallet/wallet.service';
                   </ng-container>
                   <tr mat-header-row *matHeaderRowDef="grantColumns"></tr>
                   <tr mat-row *matRowDef="let row; columns: grantColumns"></tr>
-                </table>
+                </table></div>
 
                 @if (roleGrants.length > 0) {
                   <p class="org-field-label" style="margin-top:20px">Role delegations</p>
-                  <table mat-table [dataSource]="roleGrants" style="width:100%">
+                  <div class="table-wrap"><table mat-table [dataSource]="roleGrants" style="width:100%">
                     <ng-container matColumnDef="roleCode">
                       <th mat-header-cell *matHeaderCellDef>Role</th>
                       <td mat-cell *matCellDef="let g">{{ g.roleCode }}</td>
@@ -359,7 +379,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
                       <th mat-header-cell *matHeaderCellDef></th>
                       <td mat-cell *matCellDef="let g" style="text-align:right">
                         @if (g.status === 'ACTIVE' || g.status === 'PENDING') {
-                          <button mat-icon-button color="warn" (click)="revokeDelegation(g)"
+                          <button mat-icon-button color="warn" type="button" [disabled]="grantBusyIds.has(g.id)" (click)="revokeDelegation(g)"
                                   matTooltip="Revoke this delegation">
                             <mat-icon>group_remove</mat-icon>
                           </button>
@@ -368,11 +388,8 @@ import { WalletService } from '../../../core/wallet/wallet.service';
                     </ng-container>
                     <tr mat-header-row *matHeaderRowDef="roleGrantColumns"></tr>
                     <tr mat-row *matRowDef="let row; columns: roleGrantColumns"></tr>
-                  </table>
+                  </table></div>
                 }
-              }
-              @if (grantsError) {
-                <p class="error-message">{{ grantsError }}</p>
               }
             </mat-card-content>
           </mat-card>
@@ -383,7 +400,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
     <!-- Delegate permission to role dialog -->
     <ng-template #delegateDialog>
       <h2 mat-dialog-title>Delegate permission to role</h2>
-      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:440px">
+      <mat-dialog-content class="dialog-content">
         <p class="dialog-hint">
           Member wallets holding this role may use
           <strong style="font-family:'IBM Plex Mono',monospace">{{ delegateGrant?.permissionCode }}</strong>
@@ -394,12 +411,12 @@ import { WalletService } from '../../../core/wallet/wallet.service';
           <input matInput [(ngModel)]="delegateRole" placeholder="e.g. TRADER" />
         </mat-form-field>
         @if (dialogError) {
-          <p class="error-message">{{ dialogError }}</p>
+          <p class="error-message" role="alert">{{ dialogError }}</p>
         }
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="primary" type="button"
                 [disabled]="!delegateRole.trim() || delegating"
                 (click)="submitDelegation()">
           <mat-icon>group_add</mat-icon>
@@ -411,7 +428,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
     <!-- Bind wallet dialog -->
     <ng-template #addWalletDialog>
       <h2 mat-dialog-title>Bind wallet</h2>
-      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:480px">
+      <mat-dialog-content class="dialog-content">
         <mat-form-field appearance="outline">
           <mat-label>Wallet address</mat-label>
           <input matInput [(ngModel)]="newWalletAddress" [disabled]="!!challengeMessage"
@@ -435,7 +452,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
           <p class="dialog-hint">Step 2 — sign this exact message with the wallet:</p>
           <div class="challenge-box">{{ challengeMessage }}</div>
           @if (hasBrowserWallet) {
-            <button mat-stroked-button color="primary" (click)="signWithBrowserWallet()" [disabled]="binding">
+            <button mat-stroked-button color="primary" type="button" (click)="signWithBrowserWallet()" [disabled]="binding">
               <mat-icon>account_balance_wallet</mat-icon>
               Sign with browser wallet
             </button>
@@ -447,19 +464,19 @@ import { WalletService } from '../../../core/wallet/wallet.service';
         }
 
         @if (dialogError) {
-          <p class="error-message">{{ dialogError }}</p>
+          <p class="error-message" role="alert">{{ dialogError }}</p>
         }
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
+        <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
         @if (!challengeMessage) {
-          <button mat-raised-button color="primary"
+          <button mat-raised-button color="primary" type="button"
                   [disabled]="!isValidAddress(newWalletAddress) || requestingChallenge"
                   (click)="requestChallenge()">
             Request challenge
           </button>
         } @else {
-          <button mat-raised-button color="primary"
+          <button mat-raised-button color="primary" type="button"
                   [disabled]="!signature.trim() || binding"
                   (click)="bind()">
             <mat-icon>add_link</mat-icon>
@@ -480,6 +497,7 @@ export class OrgIdentityComponent implements OnInit {
   private readonly wallet = inject(WalletService);
 
   loading = true;
+  loadError = false;
   orgs: OrgRegistrationView[] = [];
   selectedOrgId: string | null = null;
 
@@ -506,6 +524,8 @@ export class OrgIdentityComponent implements OnInit {
   dialogError = '';
   requestingChallenge = false;
   binding = false;
+  readonly walletBusyIds = new Set<string>();
+  readonly grantBusyIds = new Set<string>();
 
   get selectedOrg(): OrgRegistrationView | null {
     return this.orgs.find((org) => org.id === this.selectedOrgId) ?? null;
@@ -516,6 +536,12 @@ export class OrgIdentityComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.loadOrganizations();
+  }
+
+  loadOrganizations(): void {
+    this.loading = true;
+    this.loadError = false;
     this.orgIdentityService.myOrgs().subscribe({
       next: (orgs) => {
         this.orgs = orgs;
@@ -529,6 +555,7 @@ export class OrgIdentityComponent implements OnInit {
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.markForCheck();
       },
     });
@@ -604,8 +631,8 @@ export class OrgIdentityComponent implements OnInit {
       this.signature = await this.wallet.signMessage(this.challengeMessage);
       this.cdr.markForCheck();
       this.bind();
-    } catch (err: any) {
-      this.dialogError = err?.message ?? 'Browser wallet signing failed.';
+    } catch (err: unknown) {
+      this.dialogError = err instanceof Error ? err.message : 'Browser wallet signing failed.';
       this.cdr.markForCheck();
     }
   }
@@ -626,7 +653,7 @@ export class OrgIdentityComponent implements OnInit {
         chainConfigId: org.chainConfigId,
         walletAddress: this.newWalletAddress.trim(),
         signature: this.signature.trim(),
-        roles,
+        roles: [...new Set(roles)],
         label: this.newWalletLabel.trim() || undefined,
       })
       .subscribe({
@@ -644,9 +671,16 @@ export class OrgIdentityComponent implements OnInit {
   }
 
   removeWallet(wallet: OrgMemberWalletView): void {
+    if (this.walletBusyIds.has(wallet.id)) return;
+    if (!confirm(`Unbind wallet ${wallet.walletAddress}?`)) return;
+    this.walletBusyIds.add(wallet.id);
     this.orgIdentityService.removeWallet(wallet.id).subscribe({
-      next: () => this.loadWallets(),
+      next: () => {
+        this.walletBusyIds.delete(wallet.id);
+        this.loadWallets();
+      },
       error: (err) => {
+        this.walletBusyIds.delete(wallet.id);
         this.walletsError = err?.error?.message ?? 'Failed to unbind wallet.';
         this.cdr.markForCheck();
       },
@@ -715,9 +749,16 @@ export class OrgIdentityComponent implements OnInit {
   }
 
   revokeDelegation(grant: PermissionGrantView): void {
+    if (this.grantBusyIds.has(grant.id)) return;
+    if (!confirm(`Revoke the ${grant.roleCode ?? 'role'} delegation?`)) return;
+    this.grantBusyIds.add(grant.id);
     this.orgIdentityService.revokeRoleGrant(grant.id).subscribe({
-      next: () => this.loadGrants(),
+      next: () => {
+        this.grantBusyIds.delete(grant.id);
+        this.loadGrants();
+      },
       error: (err) => {
+        this.grantBusyIds.delete(grant.id);
         this.grantsError = err?.error?.message ?? 'Failed to revoke delegation.';
         this.cdr.markForCheck();
       },

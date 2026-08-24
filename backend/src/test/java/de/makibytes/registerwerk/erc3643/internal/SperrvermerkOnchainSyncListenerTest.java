@@ -30,7 +30,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for the §16 Sperrvermerk → on-chain freeze sync (finding #1, Phase 7): a legally
+ * Unit tests for the §16 Sperrvermerk → on-chain freeze sync : a legally
  * blocked holder must not be able to repay/liquidate/withdraw pledged securities directly
  * on-chain, since {@code EwpgRepoMarket}'s lending contracts never consult the register.
  */

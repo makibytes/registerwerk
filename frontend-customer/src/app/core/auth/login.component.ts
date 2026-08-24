@@ -2,15 +2,10 @@ import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { HttpClient } from '@angular/common/http';
 import { AuthService } from './auth.service';
-import { environment } from '../../../environments/environment';
-
-interface LoginResponse {
-  token: string;
-}
 
 @Component({
   selector: 'app-login',
@@ -128,7 +123,7 @@ interface LoginResponse {
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 9px;
       padding: 11px 14px;
-      font-family: 'Manrope', sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 14px;
       font-weight: 500;
       color: #FFFFFF;
@@ -191,6 +186,13 @@ interface LoginResponse {
       }
     }
 
+    .entra-hint {
+      margin: 0 0 20px;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--rw-text-muted, #6B7280);
+    }
+
     .submit-btn {
       width: 100%;
       height: 46px;
@@ -198,7 +200,7 @@ interface LoginResponse {
       color: #FFFFFF;
       border: none;
       border-radius: 9px;
-      font-family: 'Manrope', sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 14px;
       font-weight: 700;
       letter-spacing: 0.1px;
@@ -220,6 +222,10 @@ interface LoginResponse {
     .card-footer {
       margin-top: 24px;
       text-align: center;
+    }
+
+    @media (max-width: 480px) {
+      .card { padding: 30px 22px; }
     }
 
     .onboarding-link {
@@ -246,7 +252,17 @@ interface LoginResponse {
           <p class="card-subtitle">Sign in to the Registerwerk Customer Portal</p>
         </div>
 
-        <form (ngSubmit)="onSubmit()">
+        @if (entraMode) {
+          <p class="entra-hint">
+            Sign in with your organisation's Microsoft account. Two-factor authentication is
+            required and is managed by Microsoft Entra ID.
+          </p>
+          <button class="submit-btn" type="button" (click)="signInWithMicrosoft()">
+            <mat-icon>login</mat-icon>
+            Sign in with Microsoft
+          </button>
+        } @else {
+        <form (ngSubmit)="onSubmit()" [attr.aria-busy]="loading">
           <div class="field-group">
             <div>
               <label class="field-label" for="email">Email address</label>
@@ -258,6 +274,8 @@ interface LoginResponse {
                 name="email"
                 required
                 autocomplete="email"
+                autocapitalize="none"
+                spellcheck="false"
                 placeholder="you@company.com"
               />
             </div>
@@ -275,7 +293,7 @@ interface LoginResponse {
                   autocomplete="current-password"
                   placeholder="••••••••"
                 />
-                <button type="button" class="toggle-btn" (click)="hidePassword = !hidePassword" [attr.aria-label]="'Toggle password'">
+                <button type="button" class="toggle-btn" (click)="hidePassword = !hidePassword" [attr.aria-label]="hidePassword ? 'Show password' : 'Hide password'">
                   <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
                 </button>
               </div>
@@ -283,7 +301,7 @@ interface LoginResponse {
           </div>
 
           @if (errorMessage) {
-            <div class="error-msg">
+            <div class="error-msg" role="alert">
               <mat-icon>error_outline</mat-icon>
               {{ errorMessage }}
             </div>
@@ -298,18 +316,20 @@ interface LoginResponse {
             }
           </button>
         </form>
+        }
 
-        <div class="card-footer">
-          <p class="onboarding-link">
-            New here? <a routerLink="/onboarding">Set up your account</a>
-          </p>
-        </div>
+        @if (!entraMode) {
+          <div class="card-footer">
+            <p class="onboarding-link">
+              New here? <a routerLink="/onboarding">Set up your account</a>
+            </p>
+          </div>
+        }
       </div>
     </div>
   `,
 })
 export class LoginComponent {
-  private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
@@ -320,31 +340,40 @@ export class LoginComponent {
   loading = false;
   errorMessage = '';
 
+  /**
+   * Under Entra sign-in the password form is not merely redundant — the backend's login,
+   * invite and password-reset endpoints all reject in that mode, so offering them would present
+   * flows that cannot succeed.
+   */
+  readonly entraMode = this.auth.isEntraMode();
+
+  signInWithMicrosoft(): void {
+    this.auth.login();
+  }
+
   onSubmit(): void {
-    if (!this.email || !this.password) return;
+    const email = this.email.trim().toLowerCase();
+    if (this.loading || !email || !this.password) return;
+    this.email = email;
     this.loading = true;
     this.errorMessage = '';
 
-    this.http
-      .post<LoginResponse>(`${environment.apiUrl}/public/auth/login`, {
-        email: this.email,
-        password: this.password,
-      })
-      .subscribe({
-        next: (res) => {
-          this.auth.setToken(res.token);
-          // REGISTRY_ADMIN with no entity context → company picker
-          if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
-            this.router.navigate(['/select-company']);
-          } else {
-            this.router.navigate(['/dashboard']);
-          }
-        },
-        error: () => {
-          this.loading = false;
-          this.errorMessage = 'Invalid credentials. Please check your email and password.';
-          this.cdr.markForCheck();
-        },
-      });
+    this.auth.loginWithCredentials(email, this.password).subscribe({
+      next: () => {
+        // REGISTRY_ADMIN with no entity context → company picker
+        if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
+          this.router.navigate(['/select-company']);
+        } else {
+          this.router.navigate(['/dashboard']);
+        }
+      },
+      error: (err: HttpErrorResponse) => {
+        this.loading = false;
+        this.errorMessage = err.status === 0 || err.status >= 500
+          ? 'The sign-in service is unavailable. Please try again shortly.'
+          : 'Invalid credentials. Please check your email and password.';
+        this.cdr.markForCheck();
+      },
+    });
   }
 }

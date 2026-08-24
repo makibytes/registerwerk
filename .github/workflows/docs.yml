@@ -1,0 +1,75 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main, develop, feat/**, fix/**, release/**]
+    paths:
+      - 'mkdocs.yml'
+      - 'docs/**'
+      - 'scripts/verify-docs-language-switcher.mjs'
+      - 'docker-compose.yml'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mkdocs.yml'
+      - 'docs/**'
+      - 'scripts/verify-docs-language-switcher.mjs'
+      - 'docker-compose.yml'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Strict MkDocs build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install docs test dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Verify runtime language-link origin handling
+        run: node scripts/verify-docs-language-switcher.mjs
+
+      # The compose `docs` profile ships an image built from docs/Dockerfile, not the bare
+      # upstream squidfunk/mkdocs-material image — this site requires mkdocs-static-i18n
+      # (mkdocs.yml's plugins list), which the bare image doesn't have. Build the real image
+      # first, then run the strict build inside it. Building the image also verifies the
+      # Dockerfile itself stays buildable, so this replaces what used to be a separate step.
+      #
+      # Using the bare image here (as this step previously did, and as the docs in CLAUDE.md
+      # still describe) fails outright with "Config value 'plugins': The 'i18n' plugin is not
+      # installed" — this was never actually green in CI once i18n was added; --strict was
+      # promoting a config error to a build failure that nothing caught.
+      - name: Build the docs container image
+        run: docker build -f docs/Dockerfile -t registerwerk-docs:ci .
+
+      - name: Verify docs runtime behavior
+        run: |
+          npx --prefix docs playwright install --with-deps chromium
+          docker run --rm -d --name registerwerk-docs-ci -p 8003:80 registerwerk-docs:ci
+          trap 'docker stop registerwerk-docs-ci' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:8003/healthz && break
+            sleep 1
+          done
+          npm --prefix docs run test:browser
+
+      # docs/Dockerfile runs `mkdocs build --strict` in its build stage. The resulting image is
+      # deliberately a static nginx image, so running `build --strict` *after* this step would
+      # try to execute a command named "build" in nginx and fail with exit 127.

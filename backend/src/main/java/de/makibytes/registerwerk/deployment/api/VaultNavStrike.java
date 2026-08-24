@@ -41,6 +41,25 @@ public class VaultNavStrike {
     @Column(name = "tx_hash", length = 80)
     private String txHash;
 
+    /** FK to {@code chain_config} — set only once {@link #confirmed} is true, letting the
+     *  reorg-retraction sweep find this row by (chainConfigId, blockNumber). */
+    @Column(name = "chain_config_id")
+    private UUID chainConfigId;
+
+    @Column(name = "block_number")
+    private Long blockNumber;
+
+    /** Exact block occurrence which produced the current confirmation. */
+    @Column(name = "block_hash", length = 128)
+    private String blockHash;
+
+    /** True once {@link VaultConfirmationListener} has confirmed {@link #txHash} SUCCESS and
+     *  applied this strike to {@code AssetVaultState}. False (the default) means either no tx has
+     *  been submitted yet, or it's still awaiting confirmation — scopes the listener's polling
+     *  query so it shrinks over time instead of re-scanning every strike ever made. */
+    @Column(name = "confirmed", nullable = false)
+    private boolean confirmed = false;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -71,4 +90,16 @@ public class VaultNavStrike {
 
     public String getTxHash() { return txHash; }
     public void setTxHash(String txHash) { this.txHash = txHash; }
+
+    public UUID getChainConfigId() { return chainConfigId; }
+    public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
+
+    public Long getBlockNumber() { return blockNumber; }
+    public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
+
+    public boolean isConfirmed() { return confirmed; }
+    public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }
 }

@@ -63,6 +63,10 @@ public class LendingMarket {
     @NotNull
     private Integer lltvBps;
 
+    /** Maximum origination LTV. Deliberately lower than {@link #lltvBps}. */
+    @Column(name = "max_ltv_bps")
+    private Integer maxLtvBps;
+
     @Column(name = "liquidation_bonus_bps", nullable = false)
     @NotNull
     private Integer liquidationBonusBps;
@@ -74,6 +78,15 @@ public class LendingMarket {
     @Column(name = "slope_wad", nullable = false, precision = 38, scale = 0)
     @NotNull
     private BigInteger slopeWad;
+
+    @Column(name = "max_price_age_seconds", precision = 78, scale = 0)
+    private BigInteger maxPriceAgeSeconds;
+
+    @Column(name = "liquidation_grace_period_seconds", precision = 78, scale = 0)
+    private BigInteger liquidationGracePeriodSeconds;
+
+    @Column(name = "loan_token_decimals")
+    private Integer loanTokenDecimals;
 
     @Column(name = "price_oracle_address", nullable = false, length = 66)
     @NotBlank
@@ -127,6 +140,9 @@ public class LendingMarket {
     public Integer getLltvBps() { return lltvBps; }
     public void setLltvBps(Integer lltvBps) { this.lltvBps = lltvBps; }
 
+    public Integer getMaxLtvBps() { return maxLtvBps; }
+    public void setMaxLtvBps(Integer maxLtvBps) { this.maxLtvBps = maxLtvBps; }
+
     public Integer getLiquidationBonusBps() { return liquidationBonusBps; }
     public void setLiquidationBonusBps(Integer liquidationBonusBps) { this.liquidationBonusBps = liquidationBonusBps; }
 
@@ -135,6 +151,15 @@ public class LendingMarket {
 
     public BigInteger getSlopeWad() { return slopeWad; }
     public void setSlopeWad(BigInteger slopeWad) { this.slopeWad = slopeWad; }
+
+    public BigInteger getMaxPriceAgeSeconds() { return maxPriceAgeSeconds; }
+    public void setMaxPriceAgeSeconds(BigInteger maxPriceAgeSeconds) { this.maxPriceAgeSeconds = maxPriceAgeSeconds; }
+
+    public BigInteger getLiquidationGracePeriodSeconds() { return liquidationGracePeriodSeconds; }
+    public void setLiquidationGracePeriodSeconds(BigInteger liquidationGracePeriodSeconds) { this.liquidationGracePeriodSeconds = liquidationGracePeriodSeconds; }
+
+    public Integer getLoanTokenDecimals() { return loanTokenDecimals; }
+    public void setLoanTokenDecimals(Integer loanTokenDecimals) { this.loanTokenDecimals = loanTokenDecimals; }
 
     public String getPriceOracleAddress() { return priceOracleAddress; }
     public void setPriceOracleAddress(String priceOracleAddress) { this.priceOracleAddress = priceOracleAddress; }

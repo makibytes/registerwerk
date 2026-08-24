@@ -5,7 +5,9 @@ description: JWT authentication, OIDC integration, role enforcement, and product
 
 # Security & Authentication
 
-Registerwerk uses a dual authentication model: a built-in HS256 JWT login for the operator frontend (development and single-tenant deployments) and OIDC via Kong for the customer frontend (production multi-tenant deployments).
+Registerwerk runs a dual authentication model: a built-in HS256 JWT login for the operator frontend, and Microsoft Entra ID (or any OIDC provider) for the customer frontend in production.
+
+**The backend is the sole JWT validator, in both modes.** Kong adds rate limiting, response caching and security headers in front of the customer API path; it does not validate tokens and does not inject identity headers. Nothing in the backend trusts a header for identity.
 
 ---
 
@@ -15,10 +17,30 @@ The `ENTRA_ENABLED` environment variable (and the more fundamental `JWT_ISSUER_U
 
 | `ENTRA_ENABLED` | `JWT_ISSUER_URI` | Auth mode |
 |---|---|---|
-| `false` | (blank) | Built-in HS256 — operator username/password login |
-| `true` | Set to OIDC issuer | OIDC via Kong — Microsoft Entra or any OIDC IdP |
+| `false` | (blank) | Built-in HS256 — username/password login for both portals |
+| `true` | Set to OIDC issuer | Entra sign-in for customers; operators keep built-in login |
 
-Both modes produce a JWT that the backend validates. The backend is a pure **resource server** — it never issues OIDC tokens itself.
+The two flags are related but distinct: `ENTRA_ENABLED` decides how users **sign in**, `JWT_ISSUER_URI` decides how their tokens are **validated**. The backend is a pure **resource server** — it never issues OIDC tokens itself.
+
+### The delegating decoder
+
+Both portals hit the same URLs (`/api/v1/wallets`, `/api/v1/holder-blocks`, …), so path-scoped filter chains cannot separate them. `DelegatingJwtDecoder` instead routes on the JWS `alg` header:
+
+- **HS256** → the local decoder, for session, impersonation and step-up tokens Registerwerk minted itself.
+- **anything else** → the JWKS decoder for the configured OIDC issuer.
+
+Routing on an unauthenticated header is safe because it only selects a decoder; each branch then performs full signature and claim validation. The risk that matters is cross-acceptance, so both branches are pinned:
+
+| Branch | Pinned by |
+|---|---|
+| Local HS256 | `iss` must equal `registerwerk-local`, so knowing `JWT_DEV_SECRET` is not on its own enough to forge an accepted token |
+| OIDC | issuer, expiry, **and `aud`** must match `JWT_AUDIENCE` — without it, a token Entra issued for any other app in the same tenant would be accepted here |
+
+This is what lets one deployment run Entra sign-in for customers while operators keep built-in login and local TOTP step-up.
+
+### Principal normalisation
+
+An Entra token's `sub` and `oid` are Entra's identifiers; the corresponding `app_user` row carries a DB-generated UUID. `EntraPrincipalNormalizationFilter` rewrites the authenticated token so `sub` is the `app_user.id`, and takes roles and entity scope from the account row rather than from the token's claims. Entra app roles are consulted only when an account is first provisioned; afterwards the database is authoritative, so an operator can revoke a role without waiting for a token to expire.
 
 ---
 
@@ -45,27 +67,39 @@ The operator frontend connects **directly** to the backend through nginx — it 
 
 ---
 
-## Customer frontend — OIDC via Kong
+## Customer frontend — Entra sign-in
 
 ```mermaid
 sequenceDiagram
     participant CustomerFE as Customer Frontend :4201
-    participant Nginx
+    participant Entra as Microsoft Entra ID
     participant Kong as Kong :8000
-    participant IdP as Identity Provider
     participant Backend as Backend :8080
 
-    CustomerFE->>Nginx: (OIDC login redirect)
-    Nginx->>Kong: proxy to /
-    Kong->>IdP: OIDC auth code flow
-    IdP-->>Kong: id_token + access_token
-    Kong->>Kong: Validate JWT, extract entity_id + roles claims
-    Kong->>Backend: Forward with X-Entity-Id + X-Entity-Roles headers
-    Backend->>Backend: Trust headers (Kong is the validator)
-    Backend->>Backend: Enforce @PreAuthorize based on roles
+    CustomerFE->>Backend: GET /api/v1/public/auth/config
+    Backend-->>CustomerFE: mode=ENTRA, authority, clientId, scopes
+    CustomerFE->>Entra: auth code + PKCE (MSAL redirect)
+    Entra->>Entra: Conditional Access — MFA enforced here
+    Entra-->>CustomerFE: access_token (with acrs when a CA auth context is satisfied)
+    CustomerFE->>Kong: Bearer token
+    Kong->>Backend: proxy (rate limiting, caching, security headers only)
+    Backend->>Backend: Validate signature, issuer, expiry AND audience
+    Backend->>Backend: Normalise principal, then enforce @PreAuthorize
 ```
 
-Kong validates the JWT from the OIDC provider, extracts `entity_id` and `roles` claims, and injects them as `X-Entity-Id` and `X-Entity-Roles` headers. The backend trusts these headers from Kong (mTLS between Kong and backend ensures they cannot be spoofed).
+The SPA fetches its sign-in configuration at runtime rather than having it baked in at build time, so one frontend image is deployable against any operator tenant — MSAL needs `clientId` and `authority` at construction time.
+
+**Two-factor authentication is enforced by Conditional Access, not by application code.** An unenrolled user is sent to Microsoft's registration flow during sign-in and never reaches the SPA with a valid token. Registerwerk shows a `/security` page with status and guidance, but deliberately does not gate the app on it: reading status from Graph on every navigation would turn a Graph outage into a full portal outage.
+
+### Step-up: claims challenge
+
+When a `@RequiresStepUp` endpoint is called in Entra mode and the token lacks the required Conditional Access authentication context, the backend replies **401** (not 403) with:
+
+```
+WWW-Authenticate: Bearer realm="", authorization_uri="…", error="insufficient_claims", claims="<base64>"
+```
+
+The SPA decodes `claims`, calls `acquireTokenRedirect({ claims })`, and retries — the user re-authenticates for that one action rather than being signed out. The challenge is repeated in the JSON body as well, because a header only reaches browser JavaScript if every proxy hop exposes it.
 
 ---
 
@@ -161,7 +195,9 @@ void validateProductionConfig() {
 Cross-Origin Resource Sharing is configured at two layers:
 
 1. **Kong** (for customer frontend): Kong's CORS plugin adds appropriate headers, configured with `OPERATOR_FRONTEND_URL` and `CUSTOMER_FRONTEND_URL`
-2. **Backend** (`SecurityConfig`): A permissive CORS configuration for development (`CORS_ALLOWED_ORIGINS` env var); tightened in production profile to exact frontend origins
+2. **Backend** (`WebConfig`): origins from `registerwerk.cors.allowed-origins`; tightened in production to exact frontend origins
+
+Both layers must expose `WWW-Authenticate` (browsers hide response headers from JavaScript otherwise, which would break the claims challenge) and allow `X-Dual-Control-Token` on requests (4-eyes endpoints).
 
 ---
 

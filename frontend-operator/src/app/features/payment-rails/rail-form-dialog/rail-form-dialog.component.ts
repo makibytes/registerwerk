@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, Inject, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
@@ -49,6 +49,11 @@ interface ChainAddressRow {
       color: var(--rw-text-muted);
     }
     .chain-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; align-items: center; }
+    .load-error { color: var(--rw-text-danger); font-size: 12px; }
+    @media (max-width: 620px) {
+      .form-grid { min-width: 0; }
+      .row-2, .chain-row { grid-template-columns: 1fr; }
+    }
   `],
   template: `
     <h2 mat-dialog-title>{{ isEdit ? 'Edit payment rail' : 'Add payment rail' }}</h2>
@@ -124,7 +129,7 @@ interface ChainAddressRow {
           <mat-form-field appearance="outline">
             <mat-label>Chain</mat-label>
             <mat-select [(ngModel)]="row.chainConfigId">
-              @for (chain of chains; track chain.id) {
+              @for (chain of chains(); track chain.id) {
                 <mat-option [value]="chain.id">{{ chain.displayName }}</mat-option>
               }
             </mat-select>
@@ -133,20 +138,26 @@ interface ChainAddressRow {
             <mat-label>Contract address</mat-label>
             <input matInput [(ngModel)]="row.tokenAddress" placeholder="0x…" />
           </mat-form-field>
-          <button mat-icon-button (click)="removeChainRow($index)" matTooltip="Remove">
+          <button type="button" mat-icon-button (click)="removeChainRow($index)" matTooltip="Remove">
             <mat-icon>delete</mat-icon>
           </button>
         </div>
       }
-      <button mat-stroked-button (click)="addChainRow()" style="align-self:flex-start">
+      <button type="button" mat-stroked-button (click)="addChainRow()" style="align-self:flex-start">
         <mat-icon>add</mat-icon>
         Add chain address
       </button>
+      @if (chainsLoadError()) {
+        <div class="load-error" role="alert">
+          Chains could not be loaded.
+          <button mat-button type="button" (click)="loadChains()">Retry</button>
+        </div>
+      }
       <p class="hint-text">Off-chain rails (Pontes API, SEPA) need no chain address.</p>
     </mat-dialog-content>
     <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-      <button mat-stroked-button mat-dialog-close>Cancel</button>
-      <button mat-raised-button color="primary" [disabled]="!isValid()" (click)="submit()">
+      <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+      <button type="button" mat-raised-button color="primary" [disabled]="!isValid()" (click)="submit()">
         <mat-icon>save</mat-icon>
         {{ isEdit ? 'Save changes' : 'Create rail' }}
       </button>
@@ -172,9 +183,13 @@ export class RailFormDialogComponent implements OnInit {
   whitePaperUrl = '';
   redemptionAtPar = false;
   chainRows: ChainAddressRow[] = [];
-  chains: ChainHealth[] = [];
+  readonly chains = signal<ChainHealth[]>([]);
+  readonly chainsLoadError = signal(false);
 
-  constructor(@Inject(MAT_DIALOG_DATA) public data: RailFormDialogData) {
+  readonly data = inject<RailFormDialogData>(MAT_DIALOG_DATA);
+
+  constructor() {
+    const data = this.data;
     this.isEdit = !!data.rail;
     if (data.rail) {
       const r = data.rail;
@@ -198,8 +213,14 @@ export class RailFormDialogComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.chainService.getHealth().subscribe((chains) => {
-      this.chains = chains.filter((c) => c.chainType === 'EVM' && c.enabled);
+    this.loadChains();
+  }
+
+  loadChains(): void {
+    this.chainsLoadError.set(false);
+    this.chainService.getHealth().subscribe({
+      next: (chains) => this.chains.set(chains.filter((c) => c.chainType === 'EVM' && c.enabled)),
+      error: () => this.chainsLoadError.set(true),
     });
   }
 

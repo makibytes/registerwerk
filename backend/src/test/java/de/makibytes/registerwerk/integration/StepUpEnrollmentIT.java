@@ -21,6 +21,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -32,7 +33,7 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end test of the previously-missing TOTP enrolment flow (Phase 5 finding #3):
+ * End-to-end test of the previously-missing TOTP enrolment flow :
  * without it, a real production deployment had no way to ever obtain a step-up token, making
  * every {@code @RequiresStepUp} endpoint permanently unreachable. Deliberately does NOT rely
  * on {@code registerwerk.auth.step-up.allow-unenrolled} (used by other step-up ITs to skip
@@ -41,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
 @DisplayName("TOTP enrolment integration test — step-up is reachable end-to-end")
 class StepUpEnrollmentIT {
@@ -81,7 +83,8 @@ class StepUpEnrollmentIT {
                 new LoginRequest(ADMIN_EMAIL, ADMIN_PASSWORD),
                 LoginResponse.class);
         assertThat(login.getStatusCode()).isEqualTo(HttpStatus.OK);
-        bearerToken = login.getBody().token();
+        // Set-Cookie header carries the bearer token now, not the body — see LoginResponse.
+        bearerToken = AuthApiIT.extractSessionToken(login);
     }
 
     private HttpHeaders authHeaders() {

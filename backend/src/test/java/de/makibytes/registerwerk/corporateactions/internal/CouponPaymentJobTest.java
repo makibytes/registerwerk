@@ -72,7 +72,7 @@ class CouponPaymentJobTest {
                 eq(CouponStatus.SCHEDULED), any(LocalDate.class))).thenReturn(List.of(payment));
         when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(false);
 
-        job.execute(null);
+        job.processDuePayments();
 
         verify(corporateActionService).announce(any(CorporateAction.class));
     }
@@ -85,7 +85,7 @@ class CouponPaymentJobTest {
                 eq(CouponStatus.SCHEDULED), any(LocalDate.class))).thenReturn(List.of(payment));
         when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(true);
 
-        job.execute(null);
+        job.processDuePayments();
 
         verify(corporateActionService, never()).announce(any());
     }
@@ -102,7 +102,7 @@ class CouponPaymentJobTest {
         when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(false);
         when(assetRepository.findById(payment.getAssetId())).thenReturn(Optional.of(transferredAsset));
 
-        job.execute(null);
+        job.processDuePayments();
 
         verify(corporateActionService, never()).announce(any());
     }

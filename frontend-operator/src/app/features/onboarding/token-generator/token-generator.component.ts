@@ -1,10 +1,11 @@
-import { ChangeDetectorRef, Component, OnInit, Input, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, Input, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { DatePipe } from '@angular/common';
 import { EntityService } from '../../../core/api/entity.service';
 import { OnboardingService } from '../../../core/api/onboarding.service';
@@ -20,6 +21,7 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
     MatIconModule,
     MatProgressSpinnerModule,
     MatDividerModule,
+    MatSnackBarModule,
     StatusBadgeComponent,
     DatePipe,
   ],
@@ -88,17 +90,39 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
       font-size: 14px;
       margin-bottom: 16px;
     }
+
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 40px 20px;
+      color: var(--rw-text-danger);
+      text-align: center;
+    }
+
+    @media (max-width: 560px) {
+      .entity-summary { grid-template-columns: 1fr; }
+      .token-actions { align-items: flex-start; flex-direction: column; }
+      .token-display { overflow-wrap: anywhere; }
+    }
   `],
   template: `
     <div class="back-row">
-      <button mat-button (click)="goBack()">
+      <button type="button" mat-button (click)="goBack()">
         <mat-icon>arrow_back</mat-icon>
         Back to Customers
       </button>
     </div>
+    <h1 class="sr-only">Onboarding token</h1>
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
+    } @else if (loadError) {
+      <div class="request-error" role="alert">
+        <mat-icon>cloud_off</mat-icon>
+        <span>The entity could not be loaded.</span>
+        <button mat-stroked-button type="button" (click)="loadEntity()">Retry</button>
+      </div>
     } @else if (entity) {
       <mat-card class="page-card">
         <mat-card-header>
@@ -139,7 +163,7 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
                  Click the button below to generate a secure, single-use onboarding token
                  for this entity. The token expires in 24 hours.
                </p>
-              <button
+              <button type="button"
                 mat-raised-button
                 color="primary"
                 (click)="generate()"
@@ -166,7 +190,7 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
                 </div>
 
                 <div class="token-actions">
-                  <button mat-raised-button color="accent" (click)="copyToken()">
+                  <button type="button" mat-raised-button color="accent" (click)="copyToken()">
                     <mat-icon>content_copy</mat-icon>
                     Copy Token
                   </button>
@@ -185,30 +209,50 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
     }
   `,
 })
-export class TokenGeneratorComponent implements OnInit {
+export class TokenGeneratorComponent implements OnInit, OnDestroy {
   @Input() entityId!: string;
 
   private readonly entityService = inject(EntityService);
   private readonly onboardingService = inject(OnboardingService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
+  private copiedTimer?: ReturnType<typeof setTimeout>;
 
   loading = true;
   generating = false;
   copied = false;
+  loadError = false;
 
   entity: LegalEntity | null = null;
   token: OnboardingToken | null = null;
 
   ngOnInit(): void {
+    this.loadEntity();
+  }
+
+  ngOnDestroy(): void {
+    if (this.copiedTimer) clearTimeout(this.copiedTimer);
+  }
+
+  loadEntity(): void {
+    if (!this.entityId) {
+      this.loading = false;
+      this.loadError = true;
+      return;
+    }
+    this.loading = true;
+    this.loadError = false;
     this.entityService.getEntity(this.entityId).subscribe({
       next: (entity) => {
         this.entity = entity;
         this.loading = false;
+        this.loadError = false;
         this.cdr.markForCheck();
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.markForCheck();
       },
     });
@@ -224,6 +268,7 @@ export class TokenGeneratorComponent implements OnInit {
       },
       error: () => {
         this.generating = false;
+        this.snackBar.open('Failed to generate the onboarding token.', 'Dismiss', { duration: 5000 });
         this.cdr.markForCheck();
       },
     });
@@ -234,10 +279,13 @@ export class TokenGeneratorComponent implements OnInit {
     navigator.clipboard.writeText(this.token.token).then(() => {
       this.copied = true;
       this.cdr.markForCheck();
-      setTimeout(() => {
+      if (this.copiedTimer) clearTimeout(this.copiedTimer);
+      this.copiedTimer = setTimeout(() => {
         this.copied = false;
         this.cdr.markForCheck();
       }, 3000);
+    }).catch(() => {
+      this.snackBar.open('Could not copy the token. Select and copy it manually.', 'Dismiss', { duration: 5000 });
     });
   }
 

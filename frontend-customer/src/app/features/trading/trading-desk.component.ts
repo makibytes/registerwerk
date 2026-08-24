@@ -1,7 +1,8 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { forkJoin } from 'rxjs';
+import { forkJoin, Observable, of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
@@ -18,6 +19,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../shared/components/address-picker-dialog.component';
 import { EndpointService } from '../../core/api/endpoint.service';
 import { TradingService } from '../../core/api/trading.service';
+import { downloadBlob } from '../../core/utils/download.util';
 import {
   CompanyTraderSettings,
   CompanyTraderWalletDefault,
@@ -31,7 +33,6 @@ import {
   TradingOrderType,
   TradingVenue,
   WalletPreferenceMode,
-  WalletTargetType,
   TokenStandard,
 } from '../../core/models';
 
@@ -97,6 +98,20 @@ interface BuyForm {
           </mat-card-content>
         </mat-card>
       } @else {
+        @if (loadWarnings.length > 0) {
+          <mat-card class="warning-card load-warning">
+            <mat-card-content role="alert">
+              <div class="warning-line">
+                <mat-icon>cloud_off</mat-icon>
+                <div>
+                  <strong>Some trading data is unavailable</strong>
+                  @for (warning of loadWarnings; track warning) { <p>{{ warning }}</p> }
+                </div>
+                <button mat-button type="button" (click)="reload()">Retry</button>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        }
         <mat-tab-group>
           <mat-tab label="Marketplace">
             <div class="tab-body">
@@ -223,7 +238,7 @@ interface BuyForm {
                             </td>
                             <td>
                               @if (isExecutable(offer)) {
-                                <button mat-flat-button color="primary" (click)="selectOffer(offer)">Buy</button>
+                                <button mat-flat-button color="primary" type="button" [disabled]="mutating" (click)="selectOffer(offer)">Buy</button>
                               } @else {
                                 <span class="readiness-only" matTooltip="This venue is connected for price discovery only — Registerwerk cannot yet execute an order against it.">
                                   Readiness only
@@ -248,7 +263,7 @@ interface BuyForm {
                     <div class="form-grid">
                       <mat-form-field appearance="outline">
                         <mat-label>Quantity</mat-label>
-                        <input matInput type="number" [(ngModel)]="buyForm.quantity">
+                        <input matInput type="number" min="0.0001" [max]="selectedOffer.quantityAvailable" [(ngModel)]="buyForm.quantity">
                       </mat-form-field>
 
                       <mat-form-field appearance="outline">
@@ -263,7 +278,7 @@ interface BuyForm {
                       @if (buyForm.orderType === 'LIMIT') {
                         <mat-form-field appearance="outline">
                           <mat-label>Limit price</mat-label>
-                          <input matInput type="number" [(ngModel)]="buyForm.limitPrice">
+                          <input matInput type="number" min="0.0001" [(ngModel)]="buyForm.limitPrice">
                         </mat-form-field>
                       }
 
@@ -309,8 +324,8 @@ interface BuyForm {
                     </div>
                   </mat-card-content>
                   <mat-card-actions align="end">
-                    <button mat-button (click)="clearSelectedOffer()">Cancel</button>
-                    <button mat-flat-button color="primary" (click)="submitBuy()">Submit buy order</button>
+                    <button mat-button type="button" (click)="clearSelectedOffer()">Cancel</button>
+                    <button mat-flat-button color="primary" type="button" [disabled]="mutating" (click)="submitBuy()">Submit buy order</button>
                   </mat-card-actions>
                 </mat-card>
               }
@@ -339,12 +354,12 @@ interface BuyForm {
 
                     <mat-form-field appearance="outline">
                       <mat-label>Quantity</mat-label>
-                      <input matInput type="number" [(ngModel)]="sellForm.quantity">
+                      <input matInput type="number" min="0.0001" [(ngModel)]="sellForm.quantity">
                     </mat-form-field>
 
                     <mat-form-field appearance="outline">
                       <mat-label>Price per unit</mat-label>
-                      <input matInput type="number" [(ngModel)]="sellForm.pricePerUnit">
+                      <input matInput type="number" min="0.0001" [(ngModel)]="sellForm.pricePerUnit">
                     </mat-form-field>
                   </div>
 
@@ -364,7 +379,7 @@ interface BuyForm {
                   }
                 </mat-card-content>
                 <mat-card-actions align="end">
-                  <button mat-flat-button color="primary" (click)="submitSell()">Create listing</button>
+                  <button mat-flat-button color="primary" type="button" [disabled]="mutating" (click)="submitSell()">Create listing</button>
                 </mat-card-actions>
               </mat-card>
 
@@ -407,7 +422,7 @@ interface BuyForm {
                             </td>
                             <td>
                               @if (listing.status === 'OPEN' || listing.status === 'PARTIALLY_FILLED') {
-                                <button mat-button color="warn" (click)="cancelListing(listing.id)">Cancel</button>
+                                <button type="button" mat-button color="warn" (click)="cancelListing(listing.id)">Cancel</button>
                               }
                             </td>
                           </tr>
@@ -458,11 +473,40 @@ interface BuyForm {
                             <td>{{ trade.unitPrice | number:'1.2-4' }}</td>
                             <td>{{ trade.totalPrice | number:'1.2-4' }}</td>
                             <td>{{ paymentLabel(trade.paymentOption) }}</td>
-                            <td>{{ trade.settlementStatus }}</td>
-                            <td class="mono">{{ trade.walletAddress }}</td>
                             <td>
+                              {{ trade.settlementStatus }}
+                              @if (trade.settlementStatus === 'FAILED' && trade.failureReason) {
+                                <mat-icon class="status-hint" [matTooltip]="trade.failureReason" inline="true">info</mat-icon>
+                              }
+                            </td>
+                            <td class="mono">{{ trade.walletAddress }}</td>
+                            <td class="actions-cell">
                               @if (trade.side === 'BUY' && trade.settlementStatus === 'PENDING') {
-                                <button mat-flat-button color="primary" (click)="settleTrade(trade.id)">Settle</button>
+                                <button type="button" mat-flat-button color="primary" (click)="openDeclarePaymentDialog(trade)">Declare payment</button>
+                              }
+                              @if (trade.settlementStatus === 'PENDING') {
+                                <button type="button" mat-stroked-button (click)="openCancelDialog(trade)">Cancel</button>
+                              }
+                              @if (trade.side === 'SELL' && trade.settlementStatus === 'AWAITING_SELLER_CONFIRMATION') {
+                                <button type="button" mat-flat-button color="primary" (click)="confirmPayment(trade.id)"
+                                        [matTooltip]="'Buyer declared payment reference: ' + trade.paymentReference">
+                                  Confirm receipt
+                                </button>
+                                <button type="button" mat-stroked-button color="warn" (click)="openDisputeDialog(trade)">Dispute</button>
+                              }
+                              @if (trade.side === 'BUY' && trade.settlementStatus === 'AWAITING_SELLER_CONFIRMATION') {
+                                <span class="dimmed small">Awaiting seller confirmation…</span>
+                              }
+                              @if (trade.settlementStatus === 'SETTLED') {
+                                <button type="button" mat-stroked-button (click)="downloadConfirmation(trade.id)">
+                                  <mat-icon>picture_as_pdf</mat-icon>
+                                  Confirmation
+                                </button>
+                                <button type="button" mat-stroked-button (click)="downloadIso20022Confirmation(trade.id)"
+                                        matTooltip="Download an ISO 20022-shaped settlement confirmation XML for straight-through processing">
+                                  <mat-icon>code</mat-icon>
+                                  ISO 20022
+                                </button>
                               }
                             </td>
                           </tr>
@@ -501,7 +545,7 @@ interface BuyForm {
                   <div class="wallet-defaults">
                     <div class="wallet-defaults-header">
                       <h3>Wallet defaults</h3>
-                      <button mat-stroked-button (click)="addWalletDefault()">
+                      <button type="button" mat-stroked-button (click)="addWalletDefault()">
                         <mat-icon>add</mat-icon>
                         Add wallet default
                       </button>
@@ -547,7 +591,7 @@ interface BuyForm {
                           </mat-form-field>
                         }
 
-                        <button mat-icon-button color="warn" (click)="removeWalletDefault(walletDefault)">
+                        <button type="button" mat-icon-button color="warn" (click)="removeWalletDefault(walletDefault)">
                           <mat-icon>delete</mat-icon>
                         </button>
                       </div>
@@ -555,7 +599,7 @@ interface BuyForm {
                   </div>
                 </mat-card-content>
                 <mat-card-actions align="end">
-                  <button mat-flat-button color="primary" (click)="saveSettings()">Save settings</button>
+                  <button type="button" mat-flat-button color="primary" (click)="saveSettings()">Save settings</button>
                 </mat-card-actions>
               </mat-card>
 
@@ -583,6 +627,65 @@ interface BuyForm {
         </mat-tab-group>
       }
     </div>
+
+    <ng-template #declarePaymentDialogTpl>
+      <h2 mat-dialog-title>Declare Payment</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+        <p class="dimmed small" style="margin:0">
+          This records evidence of payment for the seller to independently confirm — it does not
+          settle the trade by itself. Total due: {{ activeTrade?.totalPrice | number:'1.2-4' }}.
+        </p>
+        <mat-form-field appearance="outline">
+          <mat-label>Payment reference</mat-label>
+          <input matInput maxlength="500" [(ngModel)]="paymentReferenceInput" placeholder="Stablecoin tx hash, SEPA reference, etc.">
+        </mat-form-field>
+        @if (dialogError) { <p class="error-text" role="alert">{{ dialogError }}</p> }
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button type="button" [disabled]="mutating" mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="primary" type="button" [disabled]="mutating || !paymentReferenceInput.trim()" (click)="submitDeclarePayment()">
+          Declare payment
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
+
+    <ng-template #disputeDialogTpl>
+      <h2 mat-dialog-title>Dispute Payment</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+        <p class="dimmed small" style="margin:0">
+          The trade will fail and the units return to your listing. The buyer's payment
+          reference was: {{ activeTrade?.paymentReference }}.
+        </p>
+        <mat-form-field appearance="outline">
+          <mat-label>Reason</mat-label>
+          <textarea matInput rows="3" maxlength="2000" [(ngModel)]="disputeReasonInput" placeholder="e.g. no matching payment received"></textarea>
+        </mat-form-field>
+        @if (dialogError) { <p class="error-text" role="alert">{{ dialogError }}</p> }
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button type="button" [disabled]="mutating" mat-dialog-close>Cancel</button>
+        <button mat-raised-button color="warn" type="button" [disabled]="mutating || !disputeReasonInput.trim()" (click)="submitDisputePayment()">
+          Dispute payment
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
+
+    <ng-template #cancelDialogTpl>
+      <h2 mat-dialog-title>Cancel Trade</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+        <mat-form-field appearance="outline">
+          <mat-label>Reason</mat-label>
+          <textarea matInput rows="3" maxlength="2000" [(ngModel)]="cancelReasonInput" placeholder="e.g. buyer changed their mind"></textarea>
+        </mat-form-field>
+        @if (dialogError) { <p class="error-text" role="alert">{{ dialogError }}</p> }
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button type="button" [disabled]="mutating" mat-dialog-close>Keep trade</button>
+        <button mat-raised-button color="warn" type="button" [disabled]="mutating || !cancelReasonInput.trim()" (click)="submitCancelTrade()">
+          Cancel trade
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
   `,
   styles: [`
     .page-container { max-width: 1320px; margin: 0 auto; padding: 32px 24px; }
@@ -599,6 +702,10 @@ interface BuyForm {
     .desk-table { width: 100%; border-collapse: collapse; }
     .desk-table th, .desk-table td { padding: 12px 10px; border-bottom: 1px solid var(--rw-border); text-align: left; vertical-align: top; font-size: 13px; }
     .desk-table th { font-size: 11px; color: var(--rw-text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+    .actions-cell { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .status-hint { font-size: 15px; width: 15px; height: 15px; vertical-align: text-bottom; margin-left: 4px; color: var(--rw-text-muted); cursor: help; }
+    .dimmed { color: var(--rw-text-secondary); }
+    .small { font-size: 12px; }
     .asset-cell, .venue-cell { display: flex; flex-direction: column; gap: 2px; }
     .asset-cell span, .venue-cell span { color: var(--rw-text-secondary); font-size: 12px; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -622,6 +729,11 @@ interface BuyForm {
     .venue-tile p { margin: 0; color: var(--rw-text-secondary); font-size: 13px; }
     .mono { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
     .loading-overlay { display: flex; justify-content: center; padding: 48px 0; }
+    .tab-body mat-card-content { overflow-x: auto; }
+    .desk-table { min-width: 720px; }
+    .load-warning { margin-bottom: 16px; }
+    .load-warning .warning-line > div { flex: 1; }
+    .error-text { color: var(--rw-text-danger); font-size: 12px; }
     @media (max-width: 900px) {
       .summary-grid { grid-template-columns: 1fr; }
       .wallet-default-row { grid-template-columns: 1fr; }
@@ -636,8 +748,20 @@ export class TradingDeskComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
   private readonly dialog = inject(MatDialog);
 
+  @ViewChild('declarePaymentDialogTpl') declarePaymentDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('disputeDialogTpl') disputeDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('cancelDialogTpl') cancelDialogTpl!: TemplateRef<unknown>;
+
+  activeTrade: TradeExecution | null = null;
+  paymentReferenceInput = '';
+  disputeReasonInput = '';
+  cancelReasonInput = '';
+  dialogError = '';
+
   loading = true;
   tradingDisabled = false;
+  loadWarnings: string[] = [];
+  mutating = false;
 
   venues: TradingVenue[] = [];
   offers: TradingOffer[] = [];
@@ -768,18 +892,30 @@ export class TradingDeskComponent implements OnInit {
   }
 
   submitSell(): void {
-    if (!this.sellForm.holderId || !this.sellForm.quantity || !this.sellForm.pricePerUnit) {
+    if (this.mutating) return;
+    const holding = this.sellableHoldings.find((candidate) => candidate.holderId === this.sellForm.holderId);
+    const quantity = this.sellForm.quantity;
+    const pricePerUnit = this.sellForm.pricePerUnit;
+    if (!holding || quantity === null || !Number.isFinite(quantity) || quantity <= 0
+        || quantity > holding.availableQuantity || pricePerUnit === null || !Number.isFinite(pricePerUnit)
+        || pricePerUnit <= 0) {
       this.snackBar.open('Select a holding, quantity, and price.', 'OK', { duration: 3000 });
       return;
     }
+    if (!this.sellForm.useCompanyDefaultPaymentOption && this.sellForm.allowedPaymentOptions.length === 0) {
+      this.snackBar.open('Select at least one accepted payment option.', 'OK', { duration: 3000 });
+      return;
+    }
+    this.mutating = true;
     this.tradingService.createListing({
       holderId: this.sellForm.holderId,
-      quantity: this.sellForm.quantity,
-      pricePerUnit: this.sellForm.pricePerUnit,
+      quantity,
+      pricePerUnit,
       useCompanyDefaultPaymentOption: this.sellForm.useCompanyDefaultPaymentOption,
       allowedPaymentOptions: this.sellForm.allowedPaymentOptions,
     }).subscribe({
       next: () => {
+        this.mutating = false;
         this.snackBar.open('Sell listing created.', 'OK', { duration: 3000 });
         this.sellForm = {
           holderId: '',
@@ -790,25 +926,40 @@ export class TradingDeskComponent implements OnInit {
         };
         this.reload();
       },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to create listing.', 'OK', { duration: 4000 }),
+      error: (err) => {
+        this.mutating = false;
+        this.snackBar.open(err?.error?.message ?? 'Failed to create listing.', 'OK', { duration: 4000 });
+      },
     });
   }
 
   submitBuy(): void {
-    if (!this.selectedOffer || !this.buyForm.quantity || !this.buyForm.paymentOption) {
+    if (this.mutating) return;
+    const offer = this.selectedOffer;
+    const quantity = this.buyForm.quantity;
+    if (!offer || !this.isExecutable(offer) || quantity === null || !Number.isFinite(quantity) || quantity <= 0
+        || quantity > offer.quantityAvailable || !this.buyForm.paymentOption
+        || !offer.allowedPaymentOptions.includes(this.buyForm.paymentOption)
+        || !offer.supportedOrderTypes.includes(this.buyForm.orderType)
+        || (this.buyForm.orderType === 'LIMIT' && (!this.buyForm.limitPrice || this.buyForm.limitPrice <= 0))
+        || (this.buyForm.walletPreferenceMode === 'ENDPOINT'
+          && !this.walletEndpoints.some((endpoint) => endpoint.id === this.buyForm.endpointId))
+        || (this.buyForm.walletPreferenceMode === 'CUSTOM_ADDRESS' && !this.buyForm.walletAddress.trim())) {
       this.snackBar.open('Choose quantity and payment option.', 'OK', { duration: 3000 });
       return;
     }
-    this.tradingService.buy(this.selectedOffer.listingId, {
-      quantity: this.buyForm.quantity,
+    this.mutating = true;
+    this.tradingService.buy(offer.listingId, {
+      quantity,
       orderType: this.buyForm.orderType,
       limitPrice: this.buyForm.orderType === 'LIMIT' ? this.buyForm.limitPrice : null,
       paymentOption: this.buyForm.paymentOption,
       walletPreferenceMode: this.buyForm.walletPreferenceMode,
       endpointId: this.buyForm.walletPreferenceMode === 'ENDPOINT' ? this.buyForm.endpointId : null,
-      walletAddress: this.buyForm.walletPreferenceMode === 'CUSTOM_ADDRESS' ? this.buyForm.walletAddress : null,
+      walletAddress: this.buyForm.walletPreferenceMode === 'CUSTOM_ADDRESS' ? this.buyForm.walletAddress.trim() : null,
     }).subscribe({
       next: (trade) => {
+        this.mutating = false;
         this.snackBar.open(
           trade.settlementStatus === 'SETTLED' ? 'Buy order executed and settled.' : 'Buy order executed with pending settlement.',
           'OK',
@@ -817,27 +968,144 @@ export class TradingDeskComponent implements OnInit {
         this.clearSelectedOffer();
         this.reload();
       },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to submit buy order.', 'OK', { duration: 4000 }),
+      error: (err) => {
+        this.mutating = false;
+        this.snackBar.open(err?.error?.message ?? 'Failed to submit buy order.', 'OK', { duration: 4000 });
+      },
     });
   }
 
   cancelListing(listingId: string): void {
+    if (this.mutating || !confirm('Cancel this sell listing? This action cannot be undone.')) return;
+    this.mutating = true;
     this.tradingService.cancelListing(listingId).subscribe({
       next: () => {
+        this.mutating = false;
         this.snackBar.open('Listing cancelled.', 'OK', { duration: 3000 });
         this.reload();
       },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to cancel listing.', 'OK', { duration: 4000 }),
+      error: (err) => {
+        this.mutating = false;
+        this.snackBar.open(err?.error?.message ?? 'Failed to cancel listing.', 'OK', { duration: 4000 });
+      },
     });
   }
 
-  settleTrade(executionId: string): void {
-    this.tradingService.settle(executionId).subscribe({
+  openDeclarePaymentDialog(trade: TradeExecution): void {
+    this.activeTrade = trade;
+    this.paymentReferenceInput = '';
+    this.dialogError = '';
+    this.dialog.open(this.declarePaymentDialogTpl, { width: '480px', maxWidth: '95vw' });
+  }
+
+  submitDeclarePayment(): void {
+    const trade = this.activeTrade;
+    const reference = this.paymentReferenceInput.trim();
+    if (!trade || !reference || this.mutating) return;
+    this.mutating = true;
+    this.dialogError = '';
+    this.tradingService.declarePayment(trade.id, reference).subscribe({
       next: () => {
-        this.snackBar.open('Trade settled.', 'OK', { duration: 3000 });
+        this.mutating = false;
+        this.dialog.closeAll();
+        this.snackBar.open('Payment declared — waiting for the seller to confirm receipt.', 'OK', { duration: 4000 });
         this.reload();
       },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to settle trade.', 'OK', { duration: 4000 }),
+      error: (err) => {
+        this.mutating = false;
+        this.dialogError = err?.error?.message ?? 'Failed to declare payment.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  confirmPayment(executionId: string): void {
+    if (this.mutating || !confirm('Confirm that payment was received and settle this trade?')) return;
+    this.mutating = true;
+    this.tradingService.confirmPayment(executionId).subscribe({
+      next: () => {
+        this.mutating = false;
+        this.snackBar.open('Payment confirmed — trade settled.', 'OK', { duration: 3500 });
+        this.reload();
+      },
+      error: (err) => {
+        this.mutating = false;
+        this.snackBar.open(err?.error?.message ?? 'Failed to confirm payment.', 'OK', { duration: 4000 });
+      },
+    });
+  }
+
+  openDisputeDialog(trade: TradeExecution): void {
+    this.activeTrade = trade;
+    this.disputeReasonInput = '';
+    this.dialogError = '';
+    this.dialog.open(this.disputeDialogTpl, { width: '480px', maxWidth: '95vw' });
+  }
+
+  submitDisputePayment(): void {
+    const trade = this.activeTrade;
+    const reason = this.disputeReasonInput.trim();
+    if (!trade || !reason || this.mutating) return;
+    this.mutating = true;
+    this.dialogError = '';
+    this.tradingService.disputePayment(trade.id, reason).subscribe({
+      next: () => {
+        this.mutating = false;
+        this.dialog.closeAll();
+        this.snackBar.open('Payment disputed — trade failed and units returned to your listing.', 'OK', { duration: 4500 });
+        this.reload();
+      },
+      error: (err) => {
+        this.mutating = false;
+        this.dialogError = err?.error?.message ?? 'Failed to dispute payment.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  openCancelDialog(trade: TradeExecution): void {
+    this.activeTrade = trade;
+    this.cancelReasonInput = '';
+    this.dialogError = '';
+    this.dialog.open(this.cancelDialogTpl, { width: '480px', maxWidth: '95vw' });
+  }
+
+  submitCancelTrade(): void {
+    const trade = this.activeTrade;
+    const reason = this.cancelReasonInput.trim();
+    if (!trade || !reason || this.mutating) return;
+    this.mutating = true;
+    this.dialogError = '';
+    this.tradingService.cancelTrade(trade.id, reason).subscribe({
+      next: () => {
+        this.mutating = false;
+        this.dialog.closeAll();
+        this.snackBar.open('Trade cancelled.', 'OK', { duration: 3000 });
+        this.reload();
+      },
+      error: (err) => {
+        this.mutating = false;
+        this.dialogError = err?.error?.message ?? 'Failed to cancel trade.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  downloadConfirmation(executionId: string): void {
+    this.tradingService.downloadConfirmation(executionId).subscribe({
+      next: (pdf) => {
+        downloadBlob(pdf, `trade-confirmation-${executionId}.pdf`);
+      },
+      error: () => this.snackBar.open('Failed to generate the trade confirmation.', 'OK', { duration: 4000 }),
+    });
+  }
+
+  downloadIso20022Confirmation(executionId: string): void {
+    this.tradingService.downloadIso20022Confirmation(executionId).subscribe({
+      next: (xml) => {
+        downloadBlob(xml, `trade-confirmation-${executionId}.xml`);
+      },
+      error: () => this.snackBar.open('Failed to generate the ISO 20022 confirmation.', 'OK', { duration: 4000 }),
     });
   }
 
@@ -853,21 +1121,41 @@ export class TradingDeskComponent implements OnInit {
   }
 
   saveSettings(): void {
+    if (this.mutating) return;
+    const invalidDefault = this.settings.walletDefaults.some((walletDefault) =>
+      (walletDefault.targetType === 'ENDPOINT'
+        && !this.walletEndpoints.some((endpoint) => endpoint.id === walletDefault.endpointId))
+      || (walletDefault.targetType === 'CUSTOM_ADDRESS' && !walletDefault.walletAddress?.trim()),
+    );
+    if (invalidDefault) {
+      this.snackBar.open('Complete every wallet default before saving.', 'OK', { duration: 4000 });
+      return;
+    }
+    this.mutating = true;
     this.tradingService.saveSettings(this.settings).subscribe({
       next: (settings) => {
+        this.mutating = false;
         this.settings = settings;
         this.snackBar.open('Trader settings saved.', 'OK', { duration: 3000 });
         this.cdr.detectChanges();
       },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to save settings.', 'OK', { duration: 4000 }),
+      error: (err) => {
+        this.mutating = false;
+        this.snackBar.open(err?.error?.message ?? 'Failed to save settings.', 'OK', { duration: 4000 });
+      },
     });
   }
 
   pickWallet(setter: (addr: string) => void): void {
     this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
       AddressPickerDialogComponent,
-      { data: { mode: 'WALLET', title: 'Select wallet' }, width: '560px' }
-    ).afterClosed().subscribe(addr => { if (addr) setter(addr); });
+      { data: { mode: 'WALLET', title: 'Select wallet' }, width: '560px', maxWidth: '95vw' }
+    ).afterClosed().subscribe(addr => {
+      if (addr) {
+        setter(addr);
+        this.cdr.detectChanges();
+      }
+    });
   }
 
   paymentLabel(option: PaymentOption): string {
@@ -882,16 +1170,24 @@ export class TradingDeskComponent implements OnInit {
     return this.venues.find(venue => venue.code === code)?.displayName ?? code;
   }
 
-  private reload(): void {
+  reload(): void {
     this.loading = true;
+    this.loadWarnings = [];
+    const failures: { label: string; error: { status?: number } }[] = [];
+    const safe = <T>(source: Observable<T>, fallback: T, label: string): Observable<T> => source.pipe(
+      catchError((error) => {
+        failures.push({ label, error });
+        return of(fallback);
+      }),
+    );
     forkJoin({
-      venues: this.tradingService.listVenues(),
-      offers: this.tradingService.listMarketplaceOffers(),
-      sellableHoldings: this.tradingService.listSellableHoldings(),
-      companyListings: this.tradingService.listCompanyListings(),
-      history: this.tradingService.listHistory(),
-      settings: this.tradingService.getSettings(),
-      endpoints: this.endpointService.listEndpoints(),
+      venues: safe(this.tradingService.listVenues(), this.venues, 'Trading venues'),
+      offers: safe(this.tradingService.listMarketplaceOffers(), this.offers, 'Marketplace offers'),
+      sellableHoldings: safe(this.tradingService.listSellableHoldings(), this.sellableHoldings, 'Sellable holdings'),
+      companyListings: safe(this.tradingService.listCompanyListings(), this.companyListings, 'Company listings'),
+      history: safe(this.tradingService.listHistory(), this.history, 'Trade history'),
+      settings: safe(this.tradingService.getSettings(), this.settings, 'Trader settings'),
+      endpoints: safe(this.endpointService.listEndpoints(), this.walletEndpoints, 'Wallet endpoints'),
     }).subscribe({
       next: (payload) => {
         this.venues = payload.venues;
@@ -902,15 +1198,10 @@ export class TradingDeskComponent implements OnInit {
         this.settings = payload.settings;
         this.walletEndpoints = payload.endpoints.filter(endpoint => endpoint.addressType === 'WALLET');
         this.loading = false;
-        this.tradingDisabled = false;
-        this.cdr.detectChanges();
-      },
-      error: (err) => {
-        this.loading = false;
-        this.tradingDisabled = err?.status === 501;
-        if (!this.tradingDisabled) {
-          this.snackBar.open(err?.error?.message ?? 'Failed to load trading data.', 'OK', { duration: 4000 });
-        }
+        this.tradingDisabled = failures.some((failure) => failure.error?.status === 501);
+        this.loadWarnings = failures
+          .filter((failure) => failure.error?.status !== 501)
+          .map((failure) => `${failure.label} could not be loaded.`);
         this.cdr.detectChanges();
       },
     });

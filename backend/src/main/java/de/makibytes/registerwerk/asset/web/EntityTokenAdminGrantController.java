@@ -6,14 +6,12 @@ import de.makibytes.registerwerk.asset.web.dto.AssetTokenAdminGrantRequest;
 import de.makibytes.registerwerk.asset.web.dto.GrantRevokeRequest;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,11 +29,9 @@ import java.util.UUID;
 public class EntityTokenAdminGrantController {
 
     private final AssetTokenAdminGrantService service;
-    private final JwtDecoder jwtDecoder;
 
-    EntityTokenAdminGrantController(AssetTokenAdminGrantService service, JwtDecoder jwtDecoder) {
+    EntityTokenAdminGrantController(AssetTokenAdminGrantService service) {
         this.service = service;
-        this.jwtDecoder = jwtDecoder;
     }
 
     @GetMapping
@@ -49,14 +45,14 @@ public class EntityTokenAdminGrantController {
     public ResponseEntity<AssetTokenAdminGrant> create(
             @PathVariable UUID entityId,
             @RequestBody @Valid AssetTokenAdminGrantRequest req,
-            @RequestHeader(value = "X-Dual-Control-Token", required = false) String dualControlToken,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
             Authentication auth) {
         AssetTokenAdminGrant grant = req.toEntity(null); // assetId = null => entity-wide
         grant.setEntityId(entityId);
         UUID createdBy = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(service.grant(grant, createdBy, actorRole, dualControlApproverId(dualControlToken)));
+                .body(service.grant(grant, createdBy, actorRole, approverId));
     }
 
     @PostMapping("/{grantId}/revoke")
@@ -66,21 +62,12 @@ public class EntityTokenAdminGrantController {
             @PathVariable UUID entityId,
             @PathVariable UUID grantId,
             @RequestBody @Valid GrantRevokeRequest req,
-            @RequestHeader(value = "X-Dual-Control-Token", required = false) String dualControlToken,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
             Authentication auth) {
         UUID revokedBy = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
         return ResponseEntity.ok(
-                service.revoke(grantId, revokedBy, actorRole, req.reason(), dualControlApproverId(dualControlToken)));
+                service.revokeEntityWide(entityId, grantId, revokedBy, actorRole, req.reason(), approverId));
     }
 
-    private UUID dualControlApproverId(String dualControlToken) {
-        if (dualControlToken == null || dualControlToken.isBlank()) return null;
-        try {
-            Jwt approverJwt = jwtDecoder.decode(dualControlToken);
-            return UUID.fromString(approverJwt.getSubject());
-        } catch (JwtException | IllegalArgumentException e) {
-            return null;
-        }
-    }
 }

@@ -39,23 +39,79 @@ The `@RequiresStepUp` annotation is placed on the following endpoints and servic
 | KYC override (approve despite flag) | ✅ | ✅ | AML gate bypass |
 | Sperrvermerk create | ✅ | ✅ | Legal restriction on holder |
 | Sperrvermerk lift | ✅ | ✅ | Legal restriction removal |
-| Start impersonation | ✅ | ❌ | Privileged access to customer data |
+| Start impersonation | ❌ ¹ | ❌ | Privileged access to customer data |
 | Screening hit accept | ✅ (high-score) | ✅ (score ≥ 80) | AML override for confirmed hit |
 | Wallet private key export (break-glass) | ✅ | ✅ | Key material access |
+| Entra: delete one authentication method | ✅ | ❌ | Removes one stale factor |
+| Entra: reset all authentication methods | ✅ | ✅ | Forces MFA re-registration for another person |
+| Entra: revoke sign-in sessions | ✅ | ❌ | Availability impact only, no privilege gain |
+| Entra: issue Temporary Access Pass | ✅ | ✅ | A bearer credential that authenticates *as* the customer |
+
+¹ `AdminImpersonationController` carries no `@RequiresStepUp`, and impersonation is refused
+outright when `ENTRA_ENABLED=true`.
 
 ---
 
-## Authentication methods
+## Two tracks
 
-The `stepup` module supports two second factors:
+How the second factor is proved depends on who issues session tokens. Both are enforced by the
+same `@RequiresStepUp` annotation and the same aspect; only the check differs.
 
-**TOTP (Time-based One-Time Password)**
-: Standard RFC 6238 TOTP. The operator configures an authenticator app (Google Authenticator, Authy, etc.) when setting up their account. The TOTP code is valid for 30 seconds and can only be used once.
+### Local TOTP — `ENTRA_ENABLED=false`, and the operator portal always
 
-**WebAuthn / FIDO2** *(primary, higher assurance)*
-: Phishing-resistant hardware key (YubiKey, Apple Touch ID, Windows Hello). WebAuthn provides stronger assurance than TOTP because the credential is hardware-bound and cannot be phished.
+RFC 6238 TOTP (HMAC-SHA1, 30-second window, 6 digits), verified by
+`StepUpTokenIssuer`. Enrol at `POST /api/v1/auth/step-up/enroll`, confirm at
+`/enroll/confirm`, then exchange a code at `POST /api/v1/auth/step-up` for a short-lived token
+carrying `acr=stepup`, valid 10 minutes. The caller sends that token in place of their session
+token on the protected request. Rejection is **403**.
 
-On step-up challenge, the frontend prompts for the configured second factor. On success, the backend issues a short-lived **step-up token** (JWT claim `acr=stepup`) valid for 10 minutes. This token is passed as a header on the subsequent protected request.
+> **WebAuthn / FIDO2 is not implemented.** The `method` field on the step-up request is accepted
+> and ignored. Earlier versions of this document described it as the primary factor; it never
+> existed in the code. Under Entra sign-in, phishing-resistant MFA is available — but through
+> Conditional Access, not through this module.
+
+### Entra authentication context — `ENTRA_ENABLED=true`
+
+The access token must carry the required Conditional Access authentication context in its `acrs`
+claim. Registerwerk does not verify a factor itself; it states a requirement and lets Conditional
+Access decide what satisfies it — which is what allows an operator to demand phishing-resistant
+MFA for forced transfers without a code change.
+
+Rejection is a **401 claims challenge**, so the SPA re-authenticates for that one action instead
+of logging the user out:
+
+```
+WWW-Authenticate: Bearer realm="", authorization_uri="…",
+                  error="insufficient_claims", claims="<base64>"
+```
+
+The context id is configuration, keyed on `@RequiresStepUp(reason = …)`:
+
+```yaml
+registerwerk.auth.step-up.entra:
+  auth-context-id: c1                 # ENTRA_STEPUP_AUTH_CONTEXT_ID
+  reason-overrides:
+    FORCE_BURN_EWG26: c2
+    "Payment rail creation": c1       # quote reasons containing spaces
+```
+
+It is validated against the tenant at startup: a context that does not exist, or exists but is
+**not published to apps**, fails startup in production mode. An unpublished context can never be
+satisfied and produces a sign-in redirect loop with nothing in the logs to explain it.
+
+#### Freshness works differently here
+
+An Entra access token lives 60–90 minutes and `acrs` persists for its whole lifetime, so applying
+`maxAgeMinutes` to `iat` would force a full browser redirect on nearly every protected call.
+Instead:
+
+- the **primary** freshness control is the Conditional Access policy on the authentication
+  context (set *Sign-in frequency: Every time* for regulator-grade actions);
+- `maxAgeMinutes` is checked against the `auth_time` claim as a backstop.
+
+`auth_time` is an optional claim that must be requested on the API app registration. Without it
+the check falls back to `iat`, which is weaker — the backend logs a warning the first time it
+sees an Entra token lacking it.
 
 ---
 
@@ -65,28 +121,33 @@ The current dual-control enforcement requires two distinct `REGISTRY_ADMIN` user
 `SECOND_APPROVER` application role, and a `COMPLIANCE_OFFICER` is not accepted as a substitute
 unless the implementation is changed and separately reviewed.
 
+**4-eyes is identical in both tracks**: a dual-control token is always minted locally after TOTP
+verification and always validated against the local HS256 decoder, so it does not depend on how
+the primary factor was proved.
+
 ```mermaid
 sequenceDiagram
     participant Initiator
-    participant Backend
     participant Approver
+    participant Backend
 
-    Initiator->>Backend: POST /api/v1/stepup/initiate (operation details)
-    Backend-->>Initiator: dual_control_token (pending, 15 min TTL)
-    Initiator->>Approver: Share operation details + dual_control_token
-    Approver->>Backend: POST /api/v1/stepup/confirm (dual_control_token + approver step-up)
-    Backend-->>Approver: confirmed_token
-    Initiator->>Backend: Execute operation (step-up token + confirmed_token)
-    Backend->>Backend: Validate: initiator ≠ approver, both step-up current
-    Backend->>Backend: Execute + emit audit event with both identities
+    Approver->>Backend: POST /api/v1/auth/step-up { code, action }
+    Backend-->>Approver: approver token (acr=stepup, stepup_scope=action, 10 min)
+    Approver->>Initiator: Hand over the approver token
+    Initiator->>Backend: POST /api/v1/auth/step-up { code, action }
+    Backend-->>Initiator: initiator step-up token
+    Initiator->>Backend: Protected call — Authorization: initiator token,<br/>X-Dual-Control-Token: approver token
+    Backend->>Backend: Validate both, then execute + audit with both identities
 ```
 
-Key invariants enforced by `StepUpEnforcementAspect`:
+Key invariants enforced by `StepUpEnforcementAspect` and `StepUpTokenValidator`:
 
-- The initiator and the approver **must be different users**
-- Both must have valid, non-expired step-up tokens
-- The `dual_control_token` is single-use and expires after 15 minutes
-- The operation parameters are hashed into the `dual_control_token` — the approver is confirming the exact operation, not a blank authorisation
+- Initiator and approver **must be different users** (`sub` comparison)
+- The approver's token must carry `stepup_scope` **exactly equal** to the annotation's `reason` —
+  otherwise one approval would be a generic credential valid for any 4-eyes action in its window
+- The approver must still be an **enabled `REGISTRY_ADMIN` in the database**, not merely per the
+  token's claims, which reflect status only as of mint time
+- Both tokens expire after 10 minutes
 
 ---
 
@@ -94,10 +155,18 @@ Key invariants enforced by `StepUpEnforcementAspect`:
 
 The `StepUpEnforcementAspect` intercepts any method annotated with `@RequiresStepUp` and:
 
-1. Extracts the `Authorization: Bearer <jwt>` from the current request context
-2. Checks the JWT carries an `acr=stepup` claim issued within the last `maxAgeMinutes` (default: 10)
-3. If `requireSecondApprover = true`, also checks the request carries a valid `X-Dual-Control-Token` header
-4. On failure: returns HTTP 403 with body `{ "error": "STEP_UP_REQUIRED", "challenge": "totp|webauthn" }`
+1. Reads the authenticated JWT from the security context
+2. Branches on the active track:
+   - **local** — requires `acr=stepup` and `iat` within `maxAgeMinutes` (default 10); failure is **403**
+   - **Entra** — requires `acrs` to contain the configured authentication context and `auth_time`
+     within `maxAgeMinutes`; failure is a **401 claims challenge**
+3. If `requireSecondApprover = true`, validates the `X-Dual-Control-Token` header and exposes the
+   approver's id as request attribute `stepup.dualControlApproverId`, which controllers read with
+   `@RequestAttribute` — they must not re-decode the token themselves
+4. The claims challenge is emitted by `ClaimsChallengeAdvice`, not by Spring Security: the
+   exception is thrown from an AOP `@Around` and so is resolved by `@RestControllerAdvice`, and
+   Spring Security's `BearerTokenAuthenticationEntryPoint` has no code path that can serialise a
+   `claims=` parameter anyway
 
 ---
 
@@ -107,7 +176,7 @@ Every step-up authentication event and every protected operation generates an `A
 
 | Event type | Contents |
 |---|---|
-| `STEP_UP_ISSUED` | User ID, method (TOTP/WebAuthn), timestamp |
+| `STEP_UP_ISSUED` | User ID, method, timestamp |
 | `DUAL_CONTROL_INITIATED` | Initiator ID, operation type, operation parameters hash |
 | `DUAL_CONTROL_CONFIRMED` | Approver ID, operation type, confirmed_token reference |
 | `PROTECTED_OPERATION_EXECUTED` | Both user IDs, operation type, full operation parameters |

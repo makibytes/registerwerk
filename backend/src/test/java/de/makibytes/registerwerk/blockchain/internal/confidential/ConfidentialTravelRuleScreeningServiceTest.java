@@ -37,7 +37,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for the cursor retry/escalation logic added by findings #2/#5 (Phase 9): previously
+ * Unit tests for the cursor retry/escalation logic:
  * {@code screenDeployment} advanced its sync cursor past every event in a batch unconditionally,
  * even when a decrypt failed — silently and permanently skipping Travel Rule screening for that
  * transfer. These tests verify the bounded-retry replacement: a failed decrypt holds the cursor
@@ -45,7 +45,7 @@ import static org.mockito.Mockito.when;
  * cursor advances anyway rather than risking a permanent wedge.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("ConfidentialTravelRuleScreeningService — cursor retry/escalation (findings #2/#5)")
+@DisplayName("ConfidentialTravelRuleScreeningService — cursor retry/escalation")
 class ConfidentialTravelRuleScreeningServiceTest {
 
     @Mock private AssetLookupPort assetLookupPort;
@@ -183,7 +183,7 @@ class ConfidentialTravelRuleScreeningServiceTest {
     }
 
     @Test
-    @DisplayName("eventsSince failing (finding #12) does not advance the cursor and records lastError")
+    @DisplayName("eventsSince failing does not advance the cursor and records lastError")
     void eventsSinceThrows_cursorUnchanged_lastErrorRecorded() {
         when(chainConfigRepository.findByIdentifier(anyString())).thenReturn(Optional.of(chainConfig()));
         ConfidentialTransferScreeningState state = freshState();

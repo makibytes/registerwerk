@@ -6,8 +6,12 @@ public enum MemberWalletStatus {
     PENDING,
     /** Binding confirmed onchain. */
     ACTIVE,
-    /** removeMember executed; the wallet may be re-bound later. */
+    /** Removal was requested; deny access until its receipt reaches finality. */
+    REMOVAL_PENDING,
+    /** removeMember succeeded at finality; the wallet may be re-bound later. */
     REMOVED,
+    /** A finalized removeMember transaction reverted; access remains denied until retry. */
+    REMOVAL_FAILED,
     /** The binding transaction failed onchain. */
     FAILED
 }

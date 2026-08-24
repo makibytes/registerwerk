@@ -118,4 +118,4 @@ Liechtenstein offers the most blockchain-native legal framework in Europe:
 - The TVTG is technology-neutral (EVM, UTXO, and DAG all qualify)
 - No separate "crypto securities" designation needed — the token itself carries the right
 
-This makes `LI_TVTG` attractive for innovative instrument types such as [ERC-3525 semi-fungible bonds](../token-standards/erc3525.md), [ERC-4626 vault tokens](../token-standards/erc4626.md), and [DAML Finance instruments](../token-standards/canton-daml.md) where no equivalent national instrument type yet exists.
+This makes `LI_TVTG` attractive for innovative instrument types such as [ERC-3525 semi-fungible bonds](../token-standards/erc3525.md), [ERC-4626 vault tokens](../token-standards/erc4626.md), and [custom Daml bond lifecycles](../token-standards/canton-daml.md) where no equivalent national instrument type yet exists.

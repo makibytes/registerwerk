@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.customer.web.dto.CompanyExternalReferenceReques
 import de.makibytes.registerwerk.customer.web.dto.CompanyExternalReferenceValueResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -46,7 +47,7 @@ public class CompanyExternalReferenceController {
     @GetMapping("/lookup")
     public ResponseEntity<List<CompanyExternalReferenceLookupResponse>> lookup(
             Authentication authentication,
-            @RequestParam @NotBlank String externalId,
+            @RequestParam @NotBlank @Size(max = 255) String externalId,
             @RequestParam(required = false) ExternalReferenceSubjectType subjectType) {
         return ResponseEntity.ok(companyExternalReferenceService.lookup(authentication, externalId, subjectType));
     }

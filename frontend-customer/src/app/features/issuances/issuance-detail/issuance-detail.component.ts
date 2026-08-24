@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -21,11 +21,14 @@ import { numberToHex } from 'viem';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { TransactionService } from '../../../core/api/transaction.service';
 import { RegisterDocumentService } from '../../../core/api/register-document.service';
+import { BondTermsService } from '../../../core/api/bond-terms.service';
+import { CorporateActionsService, ProposeCorporateActionRequest } from '../../../core/api/corporate-actions.service';
 import { AuthService } from '../../../core/auth/auth.service';
 import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../../core/api/erc3643.service';
-import { Asset, AssetDeployment, AssetDocument, AssetHolder, Chain, Network } from '../../../core/models';
+import { Asset, AssetBondTerms, AssetDeployment, AssetDocument, AssetHolder, Chain, CorporateActionType, CorporateActionView, Network } from '../../../core/models';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
+import { downloadBlob } from '../../../core/utils/download.util';
 
 /** Minimal ABI fragment for reading a confidential balance handle — see
  *  `investment-detail.component.ts`'s identical fragment for the fuller rationale. */
@@ -123,7 +126,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
             <!-- Action buttons -->
             <div class="action-bar">
               @if (asset.status === 'DRAFT') {
-                <button
+                <button type="button"
                   mat-raised-button
                   color="primary"
                   [disabled]="actionLoading"
@@ -139,7 +142,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 </button>
               }
               @if (asset.status === 'APPROVED') {
-                <button
+                <button type="button"
                   mat-raised-button
                   color="accent"
                   [disabled]="actionLoading"
@@ -155,13 +158,13 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 </button>
               }
               @if (asset.status === 'ISSUED') {
-                <button mat-raised-button color="primary" (click)="openAddHolder()">
+                <button type="button" mat-raised-button color="primary" (click)="openAddHolder()">
                   <mat-icon>person_add</mat-icon>
                   Add Holder
                 </button>
               }
               @if (isIssuer) {
-                <button mat-stroked-button [disabled]="downloadingRegisterExtract" (click)="downloadRegisterExtract()"
+                <button type="button" mat-stroked-button [disabled]="downloadingRegisterExtract" (click)="downloadRegisterExtract()"
                         matTooltip="§ 10 eWpG register extract for this asset's full holder list">
                   <mat-icon>gavel</mat-icon>
                   @if (downloadingRegisterExtract) { Preparing… } @else { Register extract (§10) }
@@ -212,9 +215,15 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
               <app-data-state-pill [status]="deploymentsState.status" />
             </mat-card-header>
             <mat-card-content>
-            @if (deployments.length === 0) {
+            @if (deploymentsState.status === 'error') {
+              <p class="confidential-error" role="alert">
+                Deployments could not be loaded.
+                <button mat-button type="button" (click)="retryDeployments()">Retry</button>
+              </p>
+            } @else if (deployments.length === 0) {
               <p class="empty-text">No deployments yet.</p>
             } @else {
+              <div class="table-wrap">
               <table mat-table [dataSource]="deployments" class="mat-elevation-z0">
                 <ng-container matColumnDef="chain">
                   <th mat-header-cell *matHeaderCellDef>Chain</th>
@@ -248,9 +257,224 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 <tr mat-header-row *matHeaderRowDef="deploymentColumns"></tr>
                 <tr mat-row *matRowDef="let r; columns: deploymentColumns;"></tr>
               </table>
+              </div>
             }
           </mat-card-content>
         </mat-card>
+
+        <!-- ── Bond Terms ───────────────────────────────────────────────── -->
+        @if (bondTerms) {
+          <mat-card class="section-card">
+            <mat-card-header>
+              <mat-card-title>Bond Terms</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="bond-terms-grid">
+                <div><span class="bt-label">Face value</span><span class="bt-value">{{ bondTerms.faceValue | number }} {{ bondTerms.currencyIso }}</span></div>
+                <div><span class="bt-label">Issue date</span><span class="bt-value">{{ bondTerms.issueDate }}</span></div>
+                <div><span class="bt-label">Maturity date</span><span class="bt-value">{{ bondTerms.maturityDate }}</span></div>
+                @if (bondTerms.couponRate !== null) {
+                  <div><span class="bt-label">Coupon rate</span><span class="bt-value">{{ bondTerms.couponRate | percent:'1.2-4' }}</span></div>
+                }
+                @if (bondTerms.referenceRate) {
+                  <div><span class="bt-label">Reference rate</span><span class="bt-value">{{ bondTerms.referenceRate }}{{ bondTerms.spread !== null ? ' + ' + (bondTerms.spread | percent:'1.2-4') : '' }}</span></div>
+                }
+                <div><span class="bt-label">Payment frequency</span><span class="bt-value">{{ bondTerms.paymentFrequency.replace('_', ' ') }}</span></div>
+                <div><span class="bt-label">Day count</span><span class="bt-value">{{ formatEnum(bondTerms.dayCount) }}</span></div>
+                <div><span class="bt-label">Issue price</span><span class="bt-value">{{ bondTerms.issuePrice | percent:'1.0-2' }} of face value</span></div>
+                <div><span class="bt-label">Callable</span><span class="bt-value">{{ bondTerms.callable ? 'Yes' : 'No' }}</span></div>
+                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus }}</span></div>
+              </div>
+              @if (bondTerms.callable && bondTerms.callSchedule && bondTerms.callSchedule.length > 0) {
+                <div class="call-schedule">
+                  <span class="bt-label">Call schedule</span>
+                  <ul class="call-schedule-list">
+                    @for (entry of bondTerms.callSchedule; track $index) {
+                      <li>{{ entry.callDate }} — {{ entry.callPrice | number:'1.0-4' }}% of face value</li>
+                    }
+                  </ul>
+                </div>
+              }
+            </mat-card-content>
+          </mat-card>
+        }
+
+        <!-- ── Corporate Actions ────────────────────────────────────────────── -->
+        <mat-card class="section-card">
+          <mat-card-header>
+            <mat-card-title>Corporate Actions</mat-card-title>
+            <app-data-state-pill [status]="corporateActionsState.status" />
+          </mat-card-header>
+          <mat-card-content>
+            <button mat-stroked-button type="button" color="primary" style="margin-bottom:12px"
+                    (click)="openProposeDialog()">
+              <mat-icon>add_circle_outline</mat-icon>
+              Propose a corporate action
+            </button>
+            @if (corporateActionsState.status === 'error') {
+              <p class="confidential-error" role="alert">
+                Corporate actions could not be loaded.
+                <button mat-button type="button" (click)="loadCorporateActions()">Retry</button>
+              </p>
+            } @else if (corporateActionsState.data.length > 0) {
+              <div class="table-wrap">
+                <table mat-table [dataSource]="corporateActionsState.data" class="mat-elevation-z0">
+                  <ng-container matColumnDef="type">
+                    <th mat-header-cell *matHeaderCellDef>Type</th>
+                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.actionType) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="status">
+                    <th mat-header-cell *matHeaderCellDef>Status</th>
+                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.status) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="paymentDate">
+                    <th mat-header-cell *matHeaderCellDef>Payment date</th>
+                    <td mat-cell *matCellDef="let a">{{ a.paymentDate || '—' }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="progress">
+                    <th mat-header-cell *matHeaderCellDef>Settlement progress</th>
+                    <td mat-cell *matCellDef="let a">{{ corporateActionProgress(a) }}</td>
+                  </ng-container>
+                  <ng-container matColumnDef="actions">
+                    <th mat-header-cell *matHeaderCellDef></th>
+                    <td mat-cell *matCellDef="let a">
+                      @if (a.status === 'PROPOSED') {
+                        <button mat-button type="button" (click)="withdrawProposal(a)">Withdraw</button>
+                      }
+                      @if (isPreSettlement(a) && !a.issuerAttestedAt) {
+                        <button mat-button type="button" color="primary" (click)="openAttestDialog(a)">
+                          Attest settlement
+                        </button>
+                      }
+                    </td>
+                  </ng-container>
+
+                  <tr mat-header-row *matHeaderRowDef="corporateActionColumns"></tr>
+                  <tr mat-row *matRowDef="let r; columns: corporateActionColumns;"></tr>
+                </table>
+              </div>
+            } @else {
+              <p class="empty-text">
+                @if (corporateActionsState.status === 'pending') { Corporate actions are still loading. }
+                @else { No corporate actions for this asset yet. }
+              </p>
+            }
+          </mat-card-content>
+        </mat-card>
+
+        <ng-template #proposeDialogTpl>
+          <h2 mat-dialog-title>Propose a Corporate Action</h2>
+          <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+            <p style="margin:0;font-size:13px;color:var(--rw-text-secondary)">
+              Your proposal starts as a draft an operator must review before it joins the register.
+            </p>
+            <mat-form-field appearance="outline">
+              <mat-label>Type</mat-label>
+              <mat-select [(ngModel)]="proposeForm.actionType">
+                <mat-option value="DIVIDEND">Dividend</mat-option>
+                <mat-option value="SPLIT">Split</mat-option>
+                @if (bondTerms?.callable) {
+                  <mat-option value="CALL">Call</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+
+            @if (proposeForm.actionType === 'DIVIDEND') {
+              <mat-form-field appearance="outline">
+                <mat-label>Amount per unit</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="proposeForm.amountPerUnit" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Currency</mat-label>
+                <input matInput maxlength="3" [(ngModel)]="proposeForm.currency" placeholder="EUR" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Record date</mat-label>
+                <input matInput type="date" [(ngModel)]="proposeForm.recordDate" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Payment date</mat-label>
+                <input matInput type="date" [(ngModel)]="proposeForm.paymentDate" />
+              </mat-form-field>
+            }
+
+            @if (proposeForm.actionType === 'SPLIT') {
+              <mat-form-field appearance="outline">
+                <mat-label>Ratio numerator</mat-label>
+                <input matInput type="number" step="1" [(ngModel)]="proposeForm.ratioNumerator" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Ratio denominator</mat-label>
+                <input matInput type="number" step="1" [(ngModel)]="proposeForm.ratioDenominator" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Record date</mat-label>
+                <input matInput type="date" [(ngModel)]="proposeForm.recordDate" />
+              </mat-form-field>
+            }
+
+            @if (proposeForm.actionType === 'CALL') {
+              @if (bondTerms?.callSchedule && bondTerms!.callSchedule!.length > 0) {
+                <mat-form-field appearance="outline">
+                  <mat-label>Scheduled call</mat-label>
+                  <mat-select [(ngModel)]="proposeForm.callScheduleIndex">
+                    <mat-option [value]="null">Custom (not on the schedule)</mat-option>
+                    @for (entry of bondTerms!.callSchedule; track $index) {
+                      <mat-option [value]="$index">{{ entry.callDate }} — {{ entry.callPrice }}%</mat-option>
+                    }
+                  </mat-select>
+                </mat-form-field>
+              }
+              @if (proposeForm.callScheduleIndex === null) {
+                <mat-form-field appearance="outline">
+                  <mat-label>Call date</mat-label>
+                  <input matInput type="date" [(ngModel)]="proposeForm.paymentDate" />
+                </mat-form-field>
+                <mat-form-field appearance="outline">
+                  <mat-label>Call price (% of face value)</mat-label>
+                  <input matInput type="number" step="0.01" [(ngModel)]="proposeForm.amountPerUnit" />
+                </mat-form-field>
+              }
+            }
+
+            <mat-form-field appearance="outline">
+              <mat-label>Notes (optional)</mat-label>
+              <textarea matInput rows="2" maxlength="2000" [(ngModel)]="proposeForm.notes"></textarea>
+            </mat-form-field>
+          </mat-dialog-content>
+          <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+            <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
+            <button mat-raised-button color="primary" type="button"
+                    [disabled]="submittingProposal" (click)="submitPropose()">
+              <mat-icon>send</mat-icon>
+              Submit proposal
+            </button>
+          </mat-dialog-actions>
+        </ng-template>
+
+        <ng-template #attestDialogTpl>
+          <h2 mat-dialog-title>Attest Settlement Readiness</h2>
+          <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+            <p style="margin:0;font-size:13px;color:var(--rw-text-secondary)">
+              Confirm the underlying obligation/cash-leg for this corporate action is ready. An
+              operator confirmation still follows before settlement executes.
+            </p>
+            <mat-form-field appearance="outline">
+              <mat-label>Attestation reference</mat-label>
+              <input matInput maxlength="255" [(ngModel)]="attestForm.attestationReference"
+                     placeholder="Payment instruction id, bank reference, …" />
+            </mat-form-field>
+          </mat-dialog-content>
+          <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+            <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
+            <button mat-raised-button color="primary" type="button"
+                    [disabled]="submittingAttestation || !attestForm.attestationReference.trim()"
+                    (click)="submitAttest()">
+              <mat-icon>verified</mat-icon>
+              Attest
+            </button>
+          </mat-dialog-actions>
+        </ng-template>
 
         <!-- ── Term Sheet ────────────────────────────────────────────────── -->
         <mat-card class="section-card">
@@ -260,6 +484,11 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
           <mat-card-content>
             @if (tsLoading) {
               <div style="padding:16px;text-align:center"><mat-spinner diameter="32"></mat-spinner></div>
+            } @else if (termSheetError) {
+              <p class="confidential-error" role="alert">
+                {{ termSheetError }}
+                <button mat-button type="button" (click)="retryTermSheets()">Retry</button>
+              </p>
             } @else if (termSheetDocs.length > 0) {
               @for (doc of termSheetDocs; track doc.id) {
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--rw-border)">
@@ -272,7 +501,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     </div>
                   </div>
                   @if (doc.contentAvailable) {
-                    <button mat-icon-button matTooltip="Download" (click)="downloadTermSheet(doc)">
+                    <button mat-icon-button type="button" matTooltip="Download" (click)="downloadTermSheet(doc)">
                       <mat-icon>download</mat-icon>
                     </button>
                   }
@@ -287,7 +516,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     accept=".pdf,.html,.htm,.txt,.md,.json,.xml,.docx"
                     style="display:none"
                     (change)="onTermSheetFileSelected($event)" />
-                  <button mat-stroked-button (click)="tsFileInput.click()" [disabled]="tsUploading">
+                  <button mat-stroked-button type="button" (click)="tsFileInput.click()" [disabled]="tsUploading">
                     <mat-icon>upload_file</mat-icon>
                     @if (tsUploading) { Uploading… } @else { Upload Term Sheet }
                   </button>
@@ -302,7 +531,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
         </mat-card>
 
         <!-- ── T-REX Compliance (ERC-3643 only) ────────────────────────── -->
-        @if (isErc3643 && complianceStatus) {
+        @if (isErc3643 && (complianceStatus || complianceError || identityRegistryState.status === 'error')) {
           <mat-card class="section-card trex-card">
             <mat-card-header>
               <mat-card-title>
@@ -312,6 +541,10 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
               <app-data-state-pill [status]="identityRegistryState.status" />
             </mat-card-header>
             <mat-card-content>
+              @if (complianceError) {
+                <p class="confidential-error" role="alert">{{ complianceError }}</p>
+              }
+              @if (complianceStatus) {
               <div class="compliance-grid">
                 <div class="compliance-stat">
                   <span class="stat-label">Registered Investors</span>
@@ -351,10 +584,17 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                   </div>
                 </div>
               }
+              }
 
-              @if (identityRegistry.length > 0) {
+              @if (identityRegistryState.status === 'error') {
+                <p class="confidential-error" role="alert">
+                  Identity registry mappings could not be loaded.
+                  <button mat-button type="button" (click)="retryErc3643Data()">Retry</button>
+                </p>
+              } @else if (identityRegistry.length > 0) {
                 <div class="identity-table-wrap">
                   <span class="module-list-label">Identity Registry Mappings</span>
+                  <div class="table-wrap">
                   <table mat-table [dataSource]="identityRegistry" class="mat-elevation-z0">
                     <ng-container matColumnDef="wallet">
                       <th mat-header-cell *matHeaderCellDef>Wallet</th>
@@ -412,6 +652,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     <tr mat-header-row *matHeaderRowDef="identityRegistryColumns"></tr>
                     <tr mat-row *matRowDef="let row; columns: identityRegistryColumns;"></tr>
                   </table>
+                  </div>
                 </div>
               }
             </mat-card-content>
@@ -425,9 +666,15 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
               <app-data-state-pill [status]="holdersState.status" />
             </mat-card-header>
           <mat-card-content>
-            @if (holders.length === 0) {
+            @if (holdersState.status === 'error') {
+              <p class="confidential-error" role="alert">
+                Register holders could not be loaded.
+                <button mat-button type="button" (click)="retryHolders()">Retry</button>
+              </p>
+            } @else if (holders.length === 0) {
               <p class="empty-text">No holders recorded yet.</p>
             } @else {
+              <div class="table-wrap">
               <table mat-table [dataSource]="holders" class="mat-elevation-z0">
                 <ng-container matColumnDef="wallet">
                   <th mat-header-cell *matHeaderCellDef>Wallet Address</th>
@@ -491,6 +738,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 <tr mat-header-row *matHeaderRowDef="activeHolderColumns"></tr>
                 <tr mat-row *matRowDef="let r; columns: activeHolderColumns;"></tr>
               </table>
+              </div>
             }
           </mat-card-content>
         </mat-card>
@@ -513,11 +761,12 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
               </p>
 
               @if (!walletService.isConnected()) {
-                <button mat-stroked-button color="primary" (click)="connectIssuerWallet()" [disabled]="connectingWallet">
+                <button mat-stroked-button color="primary" type="button" (click)="connectIssuerWallet()" [disabled]="connectingWallet">
                   <mat-icon>account_balance_wallet</mat-icon>
                   {{ connectingWallet ? 'Connecting…' : 'Connect Viewer Wallet' }}
                 </button>
               } @else if (holders.length > 0) {
+                <div class="table-wrap">
                 <table mat-table [dataSource]="holders" class="mat-elevation-z0">
                   <ng-container matColumnDef="wallet">
                     <th mat-header-cell *matHeaderCellDef>Wallet Address</th>
@@ -533,7 +782,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                       @if (revealedBalances[h.walletAddress]) {
                         <span class="revealed-balance">{{ revealedBalances[h.walletAddress] }}</span>
                       } @else {
-                        <button mat-stroked-button (click)="revealHolderBalance(h.walletAddress)" [disabled]="revealingWallet === h.walletAddress">
+                        <button mat-stroked-button type="button" (click)="revealHolderBalance(h.walletAddress)" [disabled]="revealingWallet !== null">
                           {{ revealingWallet === h.walletAddress ? 'Decrypting…' : 'Reveal' }}
                         </button>
                       }
@@ -542,6 +791,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                   <tr mat-header-row *matHeaderRowDef="confidentialHolderColumns"></tr>
                   <tr mat-row *matRowDef="let r; columns: confidentialHolderColumns;"></tr>
                 </table>
+                </div>
                 @if (revealError) {
                   <p class="confidential-error">{{ revealError }}</p>
                 }
@@ -555,15 +805,15 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 <div class="confidential-mint-form">
                   <mat-form-field appearance="outline">
                     <mat-label>Recipient address</mat-label>
-                    <input matInput [(ngModel)]="mintToAddress" placeholder="0x…" />
+                    <input matInput [(ngModel)]="mintToAddress" placeholder="0x…" autocomplete="off" />
                   </mat-form-field>
                   <mat-form-field appearance="outline">
                     <mat-label>Amount</mat-label>
-                    <input matInput type="number" [(ngModel)]="mintAmount" min="0" />
+                    <input matInput type="number" [(ngModel)]="mintAmount" min="1" step="1" />
                   </mat-form-field>
-                  <button mat-flat-button color="primary"
+                  <button type="button" mat-flat-button color="primary"
                           (click)="submitConfidentialMint()"
-                          [disabled]="minting || !mintToAddress || mintAmount === null">
+                          [disabled]="minting || !isValidWalletAddress(mintToAddress) || !isValidMintAmount()">
                     <mat-icon>add_circle</mat-icon>
                     {{ minting ? 'Encrypting & submitting…' : 'Mint' }}
                   </button>
@@ -579,7 +829,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
             <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
               <mat-card-title>Token Holders (Live from Blockchain)</mat-card-title>
               <app-data-state-pill [status]="liveHoldersState.status" />
-              <button mat-icon-button (click)="refreshLiveHolders()" [disabled]="liveHoldersLoading" matTooltip="Refresh holder data">
+              <button mat-icon-button type="button" (click)="refreshLiveHolders()" [disabled]="liveHoldersLoading" matTooltip="Refresh holder data">
                 @if (liveHoldersLoading) {
                   <mat-spinner diameter="24"></mat-spinner>
                 } @else {
@@ -589,8 +839,13 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
             </div>
           </mat-card-header>
           <mat-card-content>
-            @if (asset && asset.status === 'ISSUED' && deployments.length > 0) {
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
+            @if (liveHoldersState.status === 'error') {
+              <p class="confidential-error" role="alert">
+                Live holder data could not be loaded.
+                <button mat-button type="button" (click)="loadLiveHolders()">Retry</button>
+              </p>
+            } @else if (asset && asset.status === 'ISSUED' && deployments.length > 0) {
+              <div class="live-holder-grid">
                 <!-- Left: Distribution -->
                 <div>
                   <app-holder-distribution [holders]="liveHolders"></app-holder-distribution>
@@ -608,6 +863,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     <app-token-admin-panel
                       [assetId]="asset.id"
                       [deploymentId]="deployments[0].id"
+                      [busy]="tokenActionInProgress"
                       (mint)="onMint($event)"
                       (burn)="onBurn($event)"
                       (forceTransfer)="onForceTransfer($event)"
@@ -633,12 +889,33 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
           </mat-card-content>
         </mat-card>
 
+      } @else {
+        <mat-card>
+          <mat-card-content class="load-error" role="alert">
+            <h1 class="sr-only">Issuance details</h1>
+            <mat-icon>cloud_off</mat-icon>
+            <p>{{ loadError || 'Issuance not found.' }}</p>
+            @if (assetId) {
+              <button mat-stroked-button type="button" (click)="load()">Retry</button>
+            }
+          </mat-card-content>
+        </mat-card>
       }
     </div>
   `,
   styles: [`
     .back-link { margin-bottom: 16px; display: inline-flex; }
     .header-card, .timeline-card, .section-card { margin-bottom: 16px; }
+    .bond-terms-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px 24px;
+    }
+    .bond-terms-grid > div { display: flex; flex-direction: column; gap: 2px; }
+    .bt-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--rw-text-secondary); }
+    .bt-value { font-size: 14px; color: var(--rw-text-primary); font-weight: 600; }
+    .call-schedule { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+    .call-schedule-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--rw-text-primary); }
     .asset-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
     .asset-title h1 { margin: 0 0 8px; font-size: 22px; }
     .asset-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -686,6 +963,10 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
      .confidential-mint-title { font-size: 14px; margin: 0 0 12px; color: var(--rw-text-primary); }
      .confidential-mint-form { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
      .confidential-mint-form mat-form-field { flex: 1; min-width: 220px; }
+     .table-wrap { overflow-x: auto; }
+     .live-holder-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+     .load-error { text-align: center; padding: 48px 16px; color: var(--rw-text-secondary); }
+     @media (max-width: 800px) { .live-holder-grid { grid-template-columns: 1fr; } }
    `]
 })
 export class IssuanceDetailComponent implements OnInit {
@@ -698,6 +979,8 @@ export class IssuanceDetailComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly registerDocumentService = inject(RegisterDocumentService);
+  private readonly bondTermsService = inject(BondTermsService);
+  private readonly corporateActionsService = inject(CorporateActionsService);
   protected readonly walletService = inject(WalletService);
   private readonly fheService = inject(FheClientService);
 
@@ -706,6 +989,8 @@ export class IssuanceDetailComponent implements OnInit {
   deployments: AssetDeployment[] = [];
   holders: AssetHolder[] = [];
   loading = true;
+  assetId = '';
+  loadError = '';
   actionLoading = false;
   deploymentsState: AsyncSection<null> = createAsyncSection<null>(null);
   holdersState: AsyncSection<null> = createAsyncSection<null>(null);
@@ -721,10 +1006,33 @@ export class IssuanceDetailComponent implements OnInit {
   identityRegistryState: AsyncSection<null> = createAsyncSection<null>(null);
   liveHoldersState: AsyncSection<null> = { data: null, status: 'ready', hasLoaded: true };
 
+  bondTerms: AssetBondTerms | null = null;
+
+  // ── Corporate actions ────────────────────────────────────────────────────
+  @ViewChild('proposeDialogTpl') proposeDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('attestDialogTpl') attestDialogTpl!: TemplateRef<unknown>;
+  corporateActionsState: AsyncSection<CorporateActionView[]> = createAsyncSection<CorporateActionView[]>([]);
+  readonly corporateActionColumns = ['type', 'status', 'paymentDate', 'progress', 'actions'];
+  proposeForm: {
+    actionType: CorporateActionType;
+    amountPerUnit: number | null;
+    currency: string;
+    recordDate: string;
+    paymentDate: string;
+    ratioNumerator: number | null;
+    ratioDenominator: number | null;
+    callScheduleIndex: number | null;
+    notes: string;
+  } = this.emptyProposeForm();
+  submittingProposal = false;
+  attestForm: { corporateActionId: string; attestationReference: string } = { corporateActionId: '', attestationReference: '' };
+  submittingAttestation = false;
+
   // ── Term Sheet ────────────────────────────────────────────────────────────
   termSheetDocs: AssetDocument[] = [];
   tsLoading = false;
   tsUploading = false;
+  termSheetError = '';
 
   get isIssuer(): boolean {
     return this.auth?.hasRole('ISSUER') || this.auth?.hasRole('REGISTRY_ADMIN') || false;
@@ -732,11 +1040,13 @@ export class IssuanceDetailComponent implements OnInit {
 
   // ERC-3643 state
   complianceStatus: ComplianceStatus | null = null;
+  complianceError = '';
   identityRegistry: IdentityRegistryEntry[] = [];
 
   // Live token holders (blockchain state)
   liveHolders: LiveHolder[] = [];
   liveHoldersLoading = false;
+  tokenActionInProgress = false;
 
   readonly deploymentColumns = ['chain', 'network', 'contract', 'status', 'deployedAt'];
   readonly baseHolderColumns  = ['wallet', 'amount', 'whitelisted', 'externalId'];
@@ -795,17 +1105,33 @@ export class IssuanceDetailComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    const id = this.route.snapshot.paramMap.get('id')!;
-    this.issuanceService.getIssuance(id).subscribe({
+    this.assetId = this.route.snapshot.paramMap.get('id')?.trim() ?? '';
+    if (!this.assetId) {
+      this.loading = false;
+      this.loadError = 'The issuance address is incomplete.';
+      return;
+    }
+    this.load();
+  }
+
+  load(): void {
+    if (!this.assetId) return;
+    this.loading = true;
+    this.loadError = '';
+    this.asset = null;
+    this.issuanceService.getIssuance(this.assetId).subscribe({
       next: (asset) => {
         this.asset = asset;
         this.loading = false;
         this.cdr.detectChanges();
         this.loadDeployments(asset.id);
         this.loadHolders(asset.id);
-        this.loadTermSheetDocs(id);
+        this.loadTermSheetDocs(asset.id);
+        this.loadBondTerms(asset.id);
+        this.loadCorporateActions(asset.id);
       },
-      error: () => {
+      error: (err) => {
+        this.loadError = err?.error?.message ?? 'Failed to load the issuance.';
         this.loading = false;
         this.cdr.detectChanges();
       },
@@ -821,6 +1147,9 @@ export class IssuanceDetailComponent implements OnInit {
         this.cdr.detectChanges();
         if (this.isErc3643 && deployments.length > 0) {
           this.loadErc3643Data(assetId, deployments[0].id);
+        }
+        if (this.asset?.status === 'ISSUED' && deployments.length > 0) {
+          this.loadLiveHolders();
         }
       },
       error: () => {
@@ -847,12 +1176,14 @@ export class IssuanceDetailComponent implements OnInit {
 
   private loadErc3643Data(assetId: string, deploymentId: string): void {
     this.identityRegistryState = beginAsyncSection(this.identityRegistryState);
+    this.complianceError = '';
     this.erc3643Service.getComplianceStatus(assetId, deploymentId).subscribe({
       next: (compliance) => {
         this.complianceStatus = compliance;
         this.cdr.detectChanges();
       },
       error: () => {
+        this.complianceError = 'Compliance configuration could not be loaded.';
         this.cdr.detectChanges();
       },
     });
@@ -869,8 +1200,21 @@ export class IssuanceDetailComponent implements OnInit {
     });
   }
 
+  retryDeployments(): void {
+    if (this.asset) this.loadDeployments(this.asset.id);
+  }
+
+  retryHolders(): void {
+    if (this.asset) this.loadHolders(this.asset.id);
+  }
+
+  retryErc3643Data(): void {
+    const deployment = this.deployments[0];
+    if (this.asset && deployment) this.loadErc3643Data(this.asset.id, deployment.id);
+  }
+
   submitForApproval(): void {
-    if (!this.asset) return;
+    if (!this.asset || this.actionLoading || this.asset.status !== 'DRAFT') return;
     this.actionLoading = true;
 
     this.issuanceService.submitIssuance(this.asset.id).subscribe({
@@ -884,13 +1228,14 @@ export class IssuanceDetailComponent implements OnInit {
       },
       error: () => {
         this.actionLoading = false;
+        this.snackBar.open('Could not submit the issuance for approval.', 'Close', { duration: 5000 });
         this.cdr.detectChanges();
       },
     });
   }
 
   deploy(): void {
-    if (!this.asset?.chain || !this.asset?.network) return;
+    if (!this.asset?.chain || !this.asset?.network || this.actionLoading || this.asset.status !== 'APPROVED') return;
     this.actionLoading = true;
 
     this.issuanceService
@@ -904,22 +1249,18 @@ export class IssuanceDetailComponent implements OnInit {
         },
         error: () => {
           this.actionLoading = false;
+          this.snackBar.open('Could not start the deployment.', 'Close', { duration: 5000 });
           this.cdr.detectChanges();
         },
       });
   }
 
   downloadRegisterExtract(): void {
-    if (!this.asset) return;
+    if (!this.asset || this.downloadingRegisterExtract) return;
     this.downloadingRegisterExtract = true;
     this.registerDocumentService.downloadIssuerRegisterExtract(this.asset.id).subscribe({
       next: (pdf) => {
-        const url = URL.createObjectURL(pdf);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `registereinsicht-${this.asset!.assetNumber}.pdf`;
-        link.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(pdf, `registereinsicht-${this.asset!.assetNumber}.pdf`);
         this.downloadingRegisterExtract = false;
         this.cdr.detectChanges();
       },
@@ -947,15 +1288,172 @@ export class IssuanceDetailComponent implements OnInit {
 
   private loadTermSheetDocs(assetId: string): void {
     this.tsLoading = true;
+    this.termSheetError = '';
     this.issuanceService.listDocuments(assetId).subscribe({
       next: docs => { this.termSheetDocs = docs; this.tsLoading = false; this.cdr.detectChanges(); },
-      error: () => { this.tsLoading = false; this.cdr.detectChanges(); },
+      error: () => {
+        this.termSheetError = 'Term-sheet documents could not be loaded.';
+        this.tsLoading = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  retryTermSheets(): void {
+    if (this.asset) this.loadTermSheetDocs(this.asset.id);
+  }
+
+  private loadBondTerms(assetId: string): void {
+    this.bondTermsService.getBondTerms(assetId).subscribe({
+      next: (terms) => { this.bondTerms = terms; this.cdr.detectChanges(); },
+      error: () => {
+        // 404 for the (common) case of a non-bond asset — no terms to show, not an error.
+      },
+    });
+  }
+
+  formatEnum(value: string): string {
+    return value.split('_').join(' ');
+  }
+
+  private emptyProposeForm() {
+    return {
+      actionType: 'DIVIDEND' as CorporateActionType,
+      amountPerUnit: null as number | null,
+      currency: '',
+      recordDate: '',
+      paymentDate: '',
+      ratioNumerator: null as number | null,
+      ratioDenominator: null as number | null,
+      callScheduleIndex: null as number | null,
+      notes: '',
+    };
+  }
+
+  /** Non-terminal, past the proposal stage — where the two-party settlement control applies. */
+  isPreSettlement(a: CorporateActionView): boolean {
+    return a.status === 'ANNOUNCED' || a.status === 'RECORD_DATE_SET' || a.status === 'COMPUTED';
+  }
+
+  corporateActionProgress(a: CorporateActionView): string {
+    switch (a.status) {
+      case 'PROPOSED': return 'Awaiting operator review';
+      case 'REJECTED': return 'Rejected — submit a fresh proposal';
+      case 'CANCELLED': return 'Cancelled';
+      case 'SETTLED':
+      case 'CLOSED':
+        return a.settlementTxHash ? `${a.settlementTxHash.slice(0, 10)}…` : 'Settled off-chain';
+      default:
+        if (!a.issuerAttestedAt) return 'Awaiting your attestation';
+        if (!a.dualControlApprovedAt) return 'Attested — awaiting operator confirmation';
+        return 'Confirmed — awaiting settlement dispatch';
+    }
+  }
+
+  loadCorporateActions(assetId: string = this.assetId): void {
+    if (!assetId) return;
+    this.corporateActionsState = beginAsyncSection(this.corporateActionsState);
+    this.corporateActionsService.listForAsset(assetId).subscribe({
+      next: (actions) => {
+        this.corporateActionsState = resolveAsyncSection(this.corporateActionsState, actions);
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.corporateActionsState = failAsyncSection(this.corporateActionsState);
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  openProposeDialog(): void {
+    this.proposeForm = this.emptyProposeForm();
+    this.dialog.open(this.proposeDialogTpl, { width: '480px', maxWidth: '95vw' });
+  }
+
+  submitPropose(): void {
+    if (!this.assetId || this.submittingProposal) return;
+    const f = this.proposeForm;
+    const request: ProposeCorporateActionRequest = {
+      actionType: f.actionType,
+      notes: f.notes.trim() || undefined,
+    };
+    if (f.actionType === 'DIVIDEND') {
+      request.amountPerUnit = f.amountPerUnit ?? undefined;
+      request.currency = f.currency.trim() || undefined;
+      request.recordDate = f.recordDate || undefined;
+      request.paymentDate = f.paymentDate || undefined;
+    } else if (f.actionType === 'SPLIT') {
+      request.ratioNumerator = f.ratioNumerator ?? undefined;
+      request.ratioDenominator = f.ratioDenominator ?? undefined;
+      request.recordDate = f.recordDate || undefined;
+    } else if (f.actionType === 'CALL') {
+      if (f.callScheduleIndex !== null) {
+        request.callScheduleIndex = f.callScheduleIndex;
+      } else {
+        request.paymentDate = f.paymentDate || undefined;
+        request.amountPerUnit = f.amountPerUnit ?? undefined;
+      }
+    }
+
+    this.submittingProposal = true;
+    this.cdr.detectChanges();
+    this.corporateActionsService.propose(this.assetId, request).subscribe({
+      next: () => {
+        this.dialog.closeAll();
+        this.submittingProposal = false;
+        this.cdr.detectChanges();
+        this.snackBar.open('Proposal submitted. An operator will review it.', 'Dismiss', { duration: 5000 });
+        this.loadCorporateActions();
+      },
+      error: (err) => {
+        this.submittingProposal = false;
+        this.cdr.detectChanges();
+        this.snackBar.open(err?.error?.message ?? 'Failed to submit the proposal.', 'Dismiss', { duration: 6000 });
+      },
+    });
+  }
+
+  withdrawProposal(a: CorporateActionView): void {
+    if (!this.assetId) return;
+    this.corporateActionsService.withdraw(this.assetId, a.id).subscribe({
+      next: () => {
+        this.snackBar.open('Proposal withdrawn.', 'Dismiss', { duration: 4000 });
+        this.loadCorporateActions();
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to withdraw the proposal.', 'Dismiss', { duration: 6000 }),
+    });
+  }
+
+  openAttestDialog(a: CorporateActionView): void {
+    this.attestForm = { corporateActionId: a.id, attestationReference: '' };
+    this.dialog.open(this.attestDialogTpl, { width: '440px', maxWidth: '95vw' });
+  }
+
+  submitAttest(): void {
+    if (!this.assetId || this.submittingAttestation || !this.attestForm.attestationReference.trim()) return;
+    this.submittingAttestation = true;
+    this.cdr.detectChanges();
+    this.corporateActionsService.attestSettlement(
+      this.assetId, this.attestForm.corporateActionId, this.attestForm.attestationReference.trim(),
+    ).subscribe({
+      next: () => {
+        this.dialog.closeAll();
+        this.submittingAttestation = false;
+        this.cdr.detectChanges();
+        this.snackBar.open('Attested. Awaiting operator confirmation.', 'Dismiss', { duration: 5000 });
+        this.loadCorporateActions();
+      },
+      error: (err) => {
+        this.submittingAttestation = false;
+        this.cdr.detectChanges();
+        this.snackBar.open(err?.error?.message ?? 'Failed to attest.', 'Dismiss', { duration: 6000 });
+      },
     });
   }
 
   onTermSheetFileSelected(event: Event): void {
     const file = (event.target as HTMLInputElement).files?.[0];
-    if (!file || !this.asset) return;
+    if (!file || !this.asset || this.tsUploading) return;
     this.tsUploading = true;
     this.issuanceService.uploadDocument(this.asset.id, file).subscribe({
       next: doc => {
@@ -975,13 +1473,11 @@ export class IssuanceDetailComponent implements OnInit {
 
   downloadTermSheet(doc: AssetDocument): void {
     if (!this.asset) return;
-    this.issuanceService.downloadDocument(this.asset.id, doc.id).subscribe(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = doc.fileName ?? 'term_sheet';
-      a.click();
-      URL.revokeObjectURL(url);
+    this.issuanceService.downloadDocument(this.asset.id, doc.id).subscribe({
+      next: (blob) => {
+        downloadBlob(blob, doc.fileName ?? 'term_sheet');
+      },
+      error: () => this.snackBar.open('Term-sheet download failed.', 'Close', { duration: 5000 }),
     });
   }
 
@@ -989,6 +1485,7 @@ export class IssuanceDetailComponent implements OnInit {
     if (!this.asset) return;
     const ref = this.dialog.open(AddHolderDialogComponent, {
       width: '480px',
+      maxWidth: '95vw',
       data: { assetId: this.asset.id },
     });
 
@@ -1003,14 +1500,13 @@ export class IssuanceDetailComponent implements OnInit {
   // ── Live Token Holders ────────────────────────────────────────────────────
 
   refreshLiveHolders(): void {
-    if (!this.asset?.id) return;
+    if (!this.asset?.id || this.liveHoldersLoading) return;
     this.liveHoldersLoading = true;
     this.liveHoldersState = beginAsyncSection(this.liveHoldersState);
     this.issuanceService.refreshHolders(this.asset.id).subscribe({
       next: (response) => {
-        this.liveHoldersLoading = false;
-        this.liveHoldersState = resolveAsyncSection(this.liveHoldersState, null);
         this.snackBar.open(response.message || 'Holder data refresh initiated', '', { duration: 3000 });
+        this.loadLiveHolders();
       },
       error: (error) => {
         this.liveHoldersLoading = false;
@@ -1021,53 +1517,102 @@ export class IssuanceDetailComponent implements OnInit {
     });
   }
 
+  loadLiveHolders(): void {
+    const deployment = this.deployments[0];
+    if (!this.asset || !deployment) return;
+    this.liveHoldersLoading = true;
+    this.liveHoldersState = beginAsyncSection(this.liveHoldersState);
+    this.issuanceService.getLiveHolders(this.asset.id, deployment.id).subscribe({
+      next: (holders) => {
+        this.liveHolders = holders;
+        this.liveHoldersLoading = false;
+        this.liveHoldersState = resolveAsyncSection(this.liveHoldersState, null);
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.liveHoldersLoading = false;
+        this.liveHoldersState = failAsyncSection(this.liveHoldersState);
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
   onMint(action: MintAction): void {
-    if (!this.asset?.id || this.deployments.length === 0) return;
+    if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
+    this.tokenActionInProgress = true;
     this.issuanceService.mint(this.asset.id, this.deployments[0].id, {
       toAddress: action.recipient,
       amount: action.amount.toString(),
     }).subscribe({
-      next: (r) => this.txService.track(r.txId, `Mint ${action.amount} tokens`),
-      error: () => this.snackBar.open('Mint failed.', 'Close', { duration: 5000 }),
+      next: (r) => {
+        this.tokenActionInProgress = false;
+        this.txService.track(r.txId, `Mint ${action.amount} tokens`);
+      },
+      error: () => {
+        this.tokenActionInProgress = false;
+        this.snackBar.open('Mint failed.', 'Close', { duration: 5000 });
+      },
     });
   }
 
   onBurn(action: BurnAction): void {
-    if (!this.asset?.id || this.deployments.length === 0) return;
+    if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
+    this.tokenActionInProgress = true;
     this.issuanceService.burn(this.asset.id, this.deployments[0].id, {
       fromAddress: action.fromWallet ?? '',
       amount: action.amount.toString(),
     }).subscribe({
-      next: (r) => this.txService.track(r.txId, `Burn ${action.amount} tokens`),
-      error: () => this.snackBar.open('Burn failed.', 'Close', { duration: 5000 }),
+      next: (r) => {
+        this.tokenActionInProgress = false;
+        this.txService.track(r.txId, `Burn ${action.amount} tokens`);
+      },
+      error: () => {
+        this.tokenActionInProgress = false;
+        this.snackBar.open('Burn failed.', 'Close', { duration: 5000 });
+      },
     });
   }
 
   onForceTransfer(action: ForceTransferAction): void {
-    if (!this.asset?.id || this.deployments.length === 0) return;
+    if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
+    this.tokenActionInProgress = true;
     this.issuanceService.forceTransfer(this.asset.id, this.deployments[0].id, {
       from: action.fromWallet, to: action.toWallet,
-      value: action.amount.toString(), legalBasis: '',
+      value: action.amount.toString(), legalBasis: action.legalBasis,
     }).subscribe({
-      next: (r) => this.txService.track(r.txId, 'Forced transfer'),
-      error: () => this.snackBar.open('Force transfer failed.', 'Close', { duration: 5000 }),
+      next: (r) => {
+        this.tokenActionInProgress = false;
+        this.txService.track(r.txId, 'Forced transfer');
+      },
+      error: () => {
+        this.tokenActionInProgress = false;
+        this.snackBar.open('Force transfer failed.', 'Close', { duration: 5000 });
+      },
     });
   }
 
   onForceApprove(action: ForceApproveAction): void {
-    if (!this.asset?.id || this.deployments.length === 0) return;
+    if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
+    this.tokenActionInProgress = true;
     this.issuanceService.forceApprove(this.asset.id, this.deployments[0].id, {
       owner: action.ownerWallet, spender: action.spenderWallet,
-      value: action.amount.toString(), legalBasis: '',
+      value: action.amount.toString(), legalBasis: action.legalBasis,
     }).subscribe({
-      next: (r) => this.txService.track(r.txId, 'Forced approve'),
-      error: () => this.snackBar.open('Force approve failed.', 'Close', { duration: 5000 }),
+      next: (r) => {
+        this.tokenActionInProgress = false;
+        this.txService.track(r.txId, 'Forced approve');
+      },
+      error: () => {
+        this.tokenActionInProgress = false;
+        this.snackBar.open('Force approve failed.', 'Close', { duration: 5000 });
+      },
     });
   }
 
   // ── Confidential balances: issuer reveal-all + confidential mint ─────────
 
   async connectIssuerWallet(): Promise<void> {
+    if (this.connectingWallet) return;
     this.connectingWallet = true;
     this.cdr.detectChanges();
     try {
@@ -1081,7 +1626,8 @@ export class IssuanceDetailComponent implements OnInit {
   }
 
   async revealHolderBalance(walletAddress: string): Promise<void> {
-    if (!this.asset || this.deployments.length === 0) return;
+    if (!this.asset || this.deployments.length === 0 || this.revealingWallet !== null
+        || !this.isValidWalletAddress(walletAddress)) return;
     this.revealingWallet = walletAddress;
     this.revealError = null;
     this.cdr.detectChanges();
@@ -1106,12 +1652,14 @@ export class IssuanceDetailComponent implements OnInit {
   }
 
   submitConfidentialMint(): void {
-    if (!this.asset?.id || this.deployments.length === 0 || !this.mintToAddress || this.mintAmount === null) return;
+    if (!this.asset?.id || this.deployments.length === 0 || this.minting
+        || !this.isValidWalletAddress(this.mintToAddress) || !this.isValidMintAmount()) return;
+    const amount = this.mintAmount!;
     this.minting = true;
     this.cdr.detectChanges();
     this.issuanceService.mintConfidential(this.asset.id, this.deployments[0].id, {
-      toAddress: this.mintToAddress,
-      amount: this.mintAmount.toString(),
+      toAddress: this.mintToAddress.trim(),
+      amount: amount.toString(),
     }).subscribe({
       next: (r) => {
         this.txService.track(r.txId, 'Confidential mint');
@@ -1126,5 +1674,15 @@ export class IssuanceDetailComponent implements OnInit {
         this.cdr.detectChanges();
       },
     });
+  }
+
+  isValidWalletAddress(address: string): boolean {
+    return /^0x[0-9a-fA-F]{40}$/.test(address.trim());
+  }
+
+  isValidMintAmount(): boolean {
+    return this.mintAmount !== null
+      && Number.isSafeInteger(this.mintAmount)
+      && this.mintAmount > 0;
   }
 }

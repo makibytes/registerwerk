@@ -51,8 +51,7 @@ public class ConfidentialContextController {
     @GetMapping
     public ResponseEntity<ConfidentialContextResponse> context(
             @PathVariable UUID assetId, @PathVariable UUID depId) {
-        AssetDeployment dep = deploymentRepository.findById(depId)
-                .filter(d -> assetId.equals(d.getAssetId()))
+        AssetDeployment dep = deploymentRepository.findByIdAndAssetId(depId, assetId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", depId));
 
         AssetLookupPort.AssetInfo asset = assetLookupPort.findById(assetId)

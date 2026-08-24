@@ -1,15 +1,16 @@
 import request from 'supertest';
-import { loadConfig } from '../src/config';
-import { createServer } from '../src/server';
-import { getFheInstance } from '../src/fheInstance';
-import { loadOperatorAccount, signUserDecryptRequest } from '../src/operatorSigner';
+import { beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
+import { loadConfig } from '../src/config.js';
+import { createServer } from '../src/server.js';
+import { getFheInstance } from '../src/fheInstance.js';
+import { loadOperatorAccount, signUserDecryptRequest } from '../src/operatorSigner.js';
 
-jest.mock('../src/fheInstance');
-jest.mock('../src/operatorSigner');
+vi.mock('../src/fheInstance.js');
+vi.mock('../src/operatorSigner.js');
 
-const mockedGetFheInstance = getFheInstance as jest.MockedFunction<typeof getFheInstance>;
-const mockedLoadOperatorAccount = loadOperatorAccount as jest.MockedFunction<typeof loadOperatorAccount>;
-const mockedSignUserDecryptRequest = signUserDecryptRequest as jest.MockedFunction<typeof signUserDecryptRequest>;
+const mockedGetFheInstance = getFheInstance as MockedFunction<typeof getFheInstance>;
+const mockedLoadOperatorAccount = loadOperatorAccount as MockedFunction<typeof loadOperatorAccount>;
+const mockedSignUserDecryptRequest = signUserDecryptRequest as MockedFunction<typeof signUserDecryptRequest>;
 
 const API_KEY = 'test-relayer-api-key';
 const AUTH_HEADER = `Bearer ${API_KEY}`;
@@ -23,9 +24,9 @@ describe('POST /v1/operator-decrypt', () => {
   });
 
   it('generates a keypair, signs, and decrypts in one round trip', async () => {
-    const generateKeypair = jest.fn().mockReturnValue({ publicKey: 'pub', privateKey: 'priv' });
-    const createEIP712 = jest.fn().mockReturnValue({ domain: {}, types: {}, message: {} });
-    const userDecrypt = jest.fn().mockResolvedValue({ '0xhandle': 777n });
+    const generateKeypair = vi.fn().mockReturnValue({ publicKey: 'pub', privateKey: 'priv' });
+    const createEIP712 = vi.fn().mockReturnValue({ domain: {}, types: {}, message: {} });
+    const userDecrypt = vi.fn().mockResolvedValue({ '0xhandle': 777n });
     mockedGetFheInstance.mockResolvedValue({ generateKeypair, createEIP712, userDecrypt } as never);
 
     const app = createServer(config);
@@ -67,9 +68,9 @@ describe('POST /v1/operator-decrypt', () => {
   });
 
   it('surfaces a non-bigint result as an error', async () => {
-    const generateKeypair = jest.fn().mockReturnValue({ publicKey: 'pub', privateKey: 'priv' });
-    const createEIP712 = jest.fn().mockReturnValue({ domain: {}, types: {}, message: {} });
-    const userDecrypt = jest.fn().mockResolvedValue({ '0xhandle': '0xnotabigint' });
+    const generateKeypair = vi.fn().mockReturnValue({ publicKey: 'pub', privateKey: 'priv' });
+    const createEIP712 = vi.fn().mockReturnValue({ domain: {}, types: {}, message: {} });
+    const userDecrypt = vi.fn().mockResolvedValue({ '0xhandle': '0xnotabigint' });
     mockedGetFheInstance.mockResolvedValue({ generateKeypair, createEIP712, userDecrypt } as never);
 
     const app = createServer(config);
@@ -79,7 +80,7 @@ describe('POST /v1/operator-decrypt', () => {
     expect(res.status).toBe(502);
   });
 
-  // ── finding #6, Phase 9: shared-secret auth ──────────────────────────────────────────────
+  // ── Shared-secret auth ────────────────────────────────────────────────
   it('rejects a request with no Authorization header', async () => {
     const app = createServer(config);
     const res = await request(app)

@@ -71,7 +71,7 @@ public class ConfidentialBalanceReconciliationService {
     // No dedicated table records confidential-reconciliation mismatches (unlike
     // indexer/ChainDriftDetectionJob's chain_drift_event) — the only trace today is a
     // fire-and-forget audit event, so this in-memory "last known state per asset" is what
-    // backs the alerting gauges below (repo-wide alerting-gap follow-up).
+    // Backs the alerting gauges below.
     private final Map<UUID, Integer> lastMismatchCountByAsset = new ConcurrentHashMap<>();
     private final AtomicLong lastRunEpochSecond = new AtomicLong(0);
 

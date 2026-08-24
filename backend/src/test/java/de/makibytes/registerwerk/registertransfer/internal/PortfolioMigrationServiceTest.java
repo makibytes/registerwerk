@@ -45,12 +45,13 @@ class PortfolioMigrationServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private de.makibytes.registerwerk.finality.api.FinalityGate finalityGate;
 
     private PortfolioMigrationService service;
 
     private PortfolioMigrationServiceTest init() {
         service = new PortfolioMigrationService(repository, holderRepository, assetRepository, objectMapper,
-                eventPublisher, holderBlockGate);
+                eventPublisher, holderBlockGate, finalityGate);
         // Compliant-by-default: tests exercising the block check override this explicitly.
         lenient().when(holderBlockGate.isBlocked(any(), any())).thenReturn(false);
         return this;
@@ -97,7 +98,7 @@ class PortfolioMigrationServiceTest {
     }
 
     @Test
-    @DisplayName("initiate refuses a legally blocked holding (finding #6) — the earliest point to stop it")
+    @DisplayName("initiate refuses a legally blocked holding — the earliest point to stop it")
     void initiate_refusesBlockedHolder() {
         init();
         UUID holderId = UUID.randomUUID();
@@ -298,7 +299,7 @@ class PortfolioMigrationServiceTest {
     }
 
     @Test
-    @DisplayName("recordOnchainTransfer refuses a holding blocked mid-flight, after initiate already passed (finding #6 defense-in-depth)")
+    @DisplayName("recordOnchainTransfer refuses a holding blocked mid-flight, after initiate already passed (defense-in-depth)")
     void recordOnchainTransfer_refusesBlockedHolder() {
         init();
         UUID migrationId = UUID.randomUUID();
@@ -336,7 +337,7 @@ class PortfolioMigrationServiceTest {
     }
 
     @Test
-    @DisplayName("complete closes the source register entry — the previously-missing step (finding #3)")
+    @DisplayName("complete closes the source register entry — the previously-missing step")
     void complete_closesSourceRegisterEntry() {
         init();
         UUID migrationId = UUID.randomUUID();
@@ -373,6 +374,53 @@ class PortfolioMigrationServiceTest {
 
         assertThat(result.getStatus()).isEqualTo(TransferStatus.COMPLETED);
         verify(holderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("complete with a known asset consults FinalityGate before completing")
+    void complete_withKnownAsset_consultsFinalityGate() {
+        init();
+        UUID migrationId = UUID.randomUUID();
+        UUID assetId = UUID.randomUUID();
+        PortfolioMigrationRequest migration = new PortfolioMigrationRequest();
+        migration.setStatus(TransferStatus.HANDED_OVER);
+        migration.setAssetId(assetId);
+        when(repository.findById(migrationId)).thenReturn(Optional.of(migration));
+        when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        de.makibytes.registerwerk.asset.api.Asset asset = new de.makibytes.registerwerk.asset.api.Asset();
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+
+        service.complete(migrationId, UUID.randomUUID());
+
+        verify(finalityGate).require(de.makibytes.registerwerk.finality.api.GatedOperation.PORTFOLIO_MIGRATION_COMPLETE,
+                assetId, asset.getTokenStandard(), de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED);
+    }
+
+    @Test
+    @DisplayName("a FinalityGate rejection propagates and the migration never transitions to COMPLETED")
+    void complete_blockedByFinalityGate_propagates() {
+        init();
+        UUID migrationId = UUID.randomUUID();
+        UUID assetId = UUID.randomUUID();
+        PortfolioMigrationRequest migration = new PortfolioMigrationRequest();
+        migration.setStatus(TransferStatus.HANDED_OVER);
+        migration.setAssetId(assetId);
+        when(repository.findById(migrationId)).thenReturn(Optional.of(migration));
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(new de.makibytes.registerwerk.asset.api.Asset()));
+        org.mockito.Mockito.doThrow(new de.makibytes.registerwerk.finality.api.FinalityNotReachedException(
+                        new de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked(
+                                de.makibytes.registerwerk.finality.api.GatedOperation.PORTFOLIO_MIGRATION_COMPLETE,
+                                assetId, de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED,
+                                de.makibytes.registerwerk.finality.api.FinalityLevel.SAFE,
+                                de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked.Reason.BELOW_REQUIRED,
+                                "not yet final")))
+                .when(finalityGate).require(any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.complete(migrationId, UUID.randomUUID()))
+                .isInstanceOf(de.makibytes.registerwerk.finality.api.FinalityNotReachedException.class);
+
+        assertThat(migration.getStatus()).isEqualTo(TransferStatus.HANDED_OVER);
+        verify(repository, never()).save(any());
     }
 
     @Test

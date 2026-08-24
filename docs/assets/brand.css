@@ -5,6 +5,8 @@
   --md-primary-fg-color--dark:  #07091a;
   --md-primary-bg-color:        #ffffff;
   --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+  /* A cooler blue distinguishes links from body copy while retaining 6.8:1 contrast on white. */
+  --md-typeset-a-color:         #315b96;
 }
 
 [data-md-color-scheme="slate"] {
@@ -12,6 +14,10 @@
   --md-primary-fg-color--light: #2d3a5c;
   --md-primary-fg-color--dark:  #07091a;
   --md-hue:                     220;
+  /* The primary navy is effectively invisible on slate (1.08:1). Use the brand's warm accent. */
+  --md-typeset-a-color:         #f6c453;
+  --md-accent-fg-color:         #f6c453;
+  --md-accent-fg-color--transparent: rgba(246, 196, 83, 0.12);
 }
 
 /* Amber accent on links and highlights to match operator frontend */
@@ -20,6 +26,30 @@
   --md-accent-fg-color--transparent: rgba(245, 158, 11, 0.1);
   --md-accent-bg-color:        #ffffff;
   --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+/* Material's small search status sits on a tinted panel; its stock muted colour narrowly misses
+   WCAG AA in light mode and is further below it in slate. */
+[data-md-color-scheme="default"] .md-search-result__meta {
+  color: #4a5568;
+}
+
+[data-md-color-scheme="slate"] .md-search-result__meta {
+  color: #c7cbd1;
+}
+
+/* Pygments' stock slate token colours sit just below 4.5:1 on Material's code surface.
+   Keep the same semantic hues, lifted enough for small monospace text to meet WCAG AA. */
+[data-md-color-scheme="slate"] .highlight :is(.m, .mb, .mf, .mh, .mi, .mo) {
+  color: #f0786b;
+}
+
+[data-md-color-scheme="slate"] .highlight :is(.k, .kc, .kd, .kn, .kp, .kr, .kt, .nt) {
+  color: #7ea7f2;
+}
+
+[data-md-color-scheme="slate"] .highlight .nb {
+  color: #a99af2;
 }
 
 /* IBM Plex Mono already set via theme.font.code but reinforce for code blocks */

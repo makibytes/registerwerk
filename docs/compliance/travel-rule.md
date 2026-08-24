@@ -97,11 +97,19 @@ Registerwerk also receives Travel Rule messages from other VASPs when they trans
 POST /api/v1/public/travel-rule/inbox
 ```
 
-This endpoint is publicly accessible (no JWT required) but requires Kong-side mTLS to prevent spoofing. On receipt:
+This endpoint does not require a Registerwerk JWT, but it is not anonymous. Configure
+`REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY` and require counterparties to send it in
+`X-Travel-Rule-Api-Key`; a blank configuration disables the inbox. The `X-Vasp-Id` header must
+also match `originatingVasp.vaspId` in the payload. Production gateways should add mTLS as a
+second layer where available; the shipped Kong configuration does not configure client certificates.
+On receipt:
 
-1. The `Ivms101` payload is validated and stored as a `TravelRuleMessage` with status `RECEIVED`
-2. The corresponding `token_transfer` record is linked via `transferRef`
-3. If the originator VASP is unknown or the payload is malformed, the message is stored as `SUSPICIOUS` and flagged for `COMPLIANCE_OFFICER` review
+1. The credential, VASP identity match, account numbers, and transfer reference are validated
+2. The `Ivms101` payload is stored once as a `TravelRuleMessage` with status `RECEIVED`; replayed transfer references from the same VASP are ignored
+3. Invalid payloads are rejected with HTTP 400 and are not written as trusted Travel Rule messages
+
+The shared API key authenticates access to the inbox, not an individual VASP identity. Use
+per-counterparty mTLS or equivalent identity-aware gateway controls in production.
 
 ---
 
@@ -123,7 +131,7 @@ VASP lookups are cached for 30 seconds using the existing Caffeine cache configu
 |---|---|---|
 | CASP-to-CASP transfer | **Any amount** | Full IVMS-101 transmission required — no de minimis (TFR Art. 14–16) |
 | CASP-to-self-hosted wallet | ≤ €1,000 | Collect and retain originator info (`UNHOSTED_RECORDED`) |
-| CASP-to-self-hosted wallet | > €1,000 | Additionally verify ownership/control of the address (Art. 14(5)) — `UNHOSTED_VERIFY_REQUIRED` |
+| CASP-to-self-hosted wallet | > €1,000 | Block execution until ownership/control of the address is verified (Art. 14(5)) — `UNHOSTED_VERIFY_REQUIRED` |
 | Same-entity self-custody | Any amount | Outside CASP-to-CASP transmission duty — recorded |
 | CASP counterparty but no protocol adapter configured | Any amount | **Transfer is rejected (fail closed)** — executing without the required information would breach Art. 14 |
 

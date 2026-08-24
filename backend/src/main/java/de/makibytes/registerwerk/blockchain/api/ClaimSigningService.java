@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.blockchain.api;
 
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.springframework.stereotype.Service;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.datatypes.Address;
@@ -8,7 +9,6 @@ import org.web3j.abi.datatypes.DynamicBytes;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.crypto.Credentials;
 import org.web3j.crypto.Hash;
 import org.web3j.crypto.Sign;
 import org.web3j.utils.Numeric;
@@ -83,10 +83,10 @@ public class ClaimSigningService {
      */
     public SignedClaim signClaim(java.util.UUID chainConfigId, String identityAddress,
                                  long topic, Instant expiresAt) {
-        Credentials credentials = chainConfigId != null
-                ? walletSigner.credentialsForChain(chainConfigId)
-                : walletSigner.credentialsForAnyEvm();
-        String issuer = credentials.getAddress();
+        EvmSigner signer = chainConfigId != null
+                ? walletSigner.evmSignerForChain(chainConfigId)
+                : walletSigner.evmSignerForAnyEvm();
+        String issuer = signer.address();
 
         long expiry = expiresAt != null ? expiresAt.getEpochSecond() : 0L;
 
@@ -125,7 +125,7 @@ public class ClaimSigningService {
         byte[] claimHash = Hash.sha3(hashInput);
 
         // EIP-191 prefix: "\x19Ethereum Signed Message:\n32" + claimHash → sign
-        Sign.SignatureData sig = Sign.signPrefixedMessage(claimHash, credentials.getEcKeyPair());
+        Sign.SignatureData sig = signer.signPrefixedHash(claimHash);
         byte[] sigBytes = new byte[65];
         System.arraycopy(sig.getR(), 0, sigBytes, 0, 32);
         System.arraycopy(sig.getS(), 0, sigBytes, 32, 32);

@@ -3,9 +3,8 @@ package de.makibytes.registerwerk.erc3643.internal;
 import de.makibytes.registerwerk.erc3643.events.OnchainIdentityDeployedEvent;
 import de.makibytes.registerwerk.erc3643.events.OnchainIdentityLinkedEvent;
 import org.springframework.context.ApplicationEventPublisher;
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.erc3643.internal.Erc3643DeploymentService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -24,8 +23,7 @@ import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
-import org.web3j.crypto.Credentials;
-import org.web3j.protocol.Web3j;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
@@ -58,7 +56,7 @@ public class OnChainIdService {
     private final Erc3643DeploymentService deploymentService;
     private final ApplicationEventPublisher eventPublisher;
     private final EvmContractService evmContractService;
-    private final BlockchainClientRegistry blockchainClientRegistry;
+    private final DurableEvmTransactionGateway evmTransactions;
     private final ContractAddressConfig contractAddressConfig;
     private final BlockchainTransactionService blockchainTransactionService;
 
@@ -69,7 +67,7 @@ public class OnChainIdService {
             Erc3643DeploymentService deploymentService,
             ApplicationEventPublisher eventPublisher,
             EvmContractService evmContractService,
-            BlockchainClientRegistry blockchainClientRegistry,
+            DurableEvmTransactionGateway evmTransactions,
             ContractAddressConfig contractAddressConfig,
             BlockchainTransactionService blockchainTransactionService) {
         this.identityRepository = identityRepository;
@@ -78,7 +76,7 @@ public class OnChainIdService {
         this.deploymentService = deploymentService;
         this.eventPublisher = eventPublisher;
         this.evmContractService = evmContractService;
-        this.blockchainClientRegistry = blockchainClientRegistry;
+        this.evmTransactions = evmTransactions;
         this.contractAddressConfig = contractAddressConfig;
         this.blockchainTransactionService = blockchainTransactionService;
     }
@@ -121,17 +119,20 @@ public class OnChainIdService {
 
         try {
             String idFactoryAddress = contractAddressConfig.requireIdFactory(chainConfig.getIdentifier());
-            Web3j web3j = blockchainClientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
-            Credentials creds = evmContractService.credentials(chainConfigId);
+            EvmSigner signer = evmContractService.signer(chainConfigId);
 
             // IdFactory.deployIdentityProxy(address _managementKey) returns address
             // The management key is the registry wallet (it manages the identity on behalf of the entity)
             Function fn = new Function(
                     "deployIdentityProxy",
-                    List.of(new Address(creds.getAddress())),
+                    List.of(new Address(signer.address())),
                     List.of(new TypeReference<Address>() {})
             );
-            deployTxHash = evmContractService.submit(web3j, creds, idFactoryAddress, fn);
+            Map<String, Object> params = Map.of(
+                    "legalEntityId", legalEntityId.toString(),
+                    "chainConfigId", chainConfigId.toString(),
+                    "identityPlaceholder", identityAddress);
+            deployTxHash = evmTransactions.submit(chainConfigId, idFactoryAddress, fn, params);
             blockchainTransactionService.record(
                     deployTxHash,
                     fn.getName(),
@@ -140,15 +141,8 @@ public class OnChainIdService {
                     parseChain(chainConfig.getIdentifier()),
                     chainConfig.getNetworkType().name(),
                     idFactoryAddress,
-                    Map.of(
-                            "legalEntityId", legalEntityId.toString(),
-                            "chainConfigId", chainConfigId.toString(),
-                            "identityPlaceholder", identityAddress
-                    )
+                    params
             );
-        } catch (IllegalStateException e) {
-            // IdFactory not configured for this chain — persist placeholder
-            log.warn("IdFactory not configured for chain={}; persisting placeholder identity", chainConfigId);
         } catch (Exception e) {
             throw new RuntimeException("deployIdentityProxy submission failed for entity=" + legalEntityId
                     + " on chain=" + chainConfigId + ": " + e.getMessage(), e);

@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * have no dedicated table to count against (unlike indexer/ChainDriftDetectionJob's
  * chain_drift_event) — shared by {@link OrgChainReconciliationService} and {@link
  * PermissionChainReconciliationService} so the gauge-registration boilerplate isn't copy-pasted
- * per job (repo-wide alerting-gap follow-up).
+ * per job.
  */
 class SweepDriftCounter {
 

@@ -56,7 +56,8 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <input matInput type="number"
                 [(ngModel)]="mintForm.amount"
                 placeholder="0.00"
-                step="0.01">
+                min="1"
+                step="1">
             </mat-form-field>
 
             <div class="preview-box">
@@ -70,9 +71,9 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               </span>
             </div>
 
-            <button mat-raised-button color="accent" class="full-width" 
+            <button type="button" mat-raised-button color="accent" class="full-width"
               (click)="submitMint()"
-              [disabled]="!isValidMintForm()">
+              [disabled]="busy || !isValidMintForm()">
               <mat-icon>add_circle</mat-icon>
               Mint Tokens
             </button>
@@ -101,7 +102,8 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <input matInput type="number"
                 [(ngModel)]="burnForm.amount"
                 placeholder="0.00"
-                step="0.01">
+                min="1"
+                step="1">
             </mat-form-field>
 
             <div class="preview-box warning">
@@ -109,9 +111,9 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <span class="preview-label">This action is irreversible</span>
             </div>
 
-            <button mat-raised-button color="warn" class="full-width"
+            <button type="button" mat-raised-button color="warn" class="full-width"
               (click)="submitBurn()"
-              [disabled]="!isValidBurnForm()">
+              [disabled]="busy || !isValidBurnForm()">
               <mat-icon>delete_forever</mat-icon>
               Burn Tokens
             </button>
@@ -152,7 +154,15 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <input matInput type="number"
                 [(ngModel)]="forceTransferForm.amount"
                 placeholder="0.00"
-                step="0.01">
+                min="1"
+                step="1">
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Legal authority / reference</mat-label>
+              <textarea matInput rows="2" maxlength="2000"
+                [(ngModel)]="forceTransferForm.legalBasis"
+                placeholder="e.g. BaFin decision, court order, or §24 eWpG correction reference"></textarea>
             </mat-form-field>
 
             <div class="preview-box">
@@ -168,9 +178,9 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               </span>
             </div>
 
-            <button mat-raised-button color="primary" class="full-width"
+            <button type="button" mat-raised-button color="primary" class="full-width"
               (click)="submitForceTransfer()"
-              [disabled]="!isValidForceTransferForm()">
+              [disabled]="busy || !isValidForceTransferForm()">
               <mat-icon>swap_horiz</mat-icon>
               Force Transfer
             </button>
@@ -211,7 +221,15 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <input matInput type="number"
                 [(ngModel)]="forceApproveForm.amount"
                 placeholder="0.00"
-                step="0.01">
+                min="1"
+                step="1">
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Legal authority / reference</mat-label>
+              <textarea matInput rows="2" maxlength="2000"
+                [(ngModel)]="forceApproveForm.legalBasis"
+                placeholder="Reference authorizing this allowance override"></textarea>
             </mat-form-field>
 
             <div class="preview-box">
@@ -227,9 +245,9 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               </span>
             </div>
 
-            <button mat-raised-button color="primary" class="full-width"
+            <button type="button" mat-raised-button color="primary" class="full-width"
               (click)="submitForceApprove()"
-              [disabled]="!isValidForceApproveForm()">
+              [disabled]="busy || !isValidForceApproveForm()">
               <mat-icon>verified</mat-icon>
               Force Approve
             </button>
@@ -354,6 +372,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
 export class TokenAdminPanelComponent {
   @Input() assetId!: string;
   @Input() deploymentId!: string;
+  @Input() busy = false;
 
   @Output() mint = new EventEmitter<MintAction>();
   @Output() burn = new EventEmitter<BurnAction>();
@@ -377,18 +396,20 @@ export class TokenAdminPanelComponent {
     fromWallet: '',
     toWallet: '',
     amount: 0,
+    legalBasis: '',
   };
 
   forceApproveForm = {
     ownerWallet: '',
     spenderWallet: '',
     amount: 0,
+    legalBasis: '',
   };
 
   pickWallet(setter: (addr: string) => void): void {
     this.dialog.open<AddressPickerDialogComponent, AddressPickerDialogData, string>(
       AddressPickerDialogComponent,
-      { data: { mode: 'WALLET', title: 'Select wallet' }, width: '560px' }
+      { data: { mode: 'WALLET', title: 'Select wallet' }, width: '560px', maxWidth: '95vw' }
     ).afterClosed().subscribe(addr => {
       if (addr) {
         setter(addr);
@@ -398,18 +419,20 @@ export class TokenAdminPanelComponent {
   }
 
   isValidMintForm(): boolean {
-    return this.isValidAddress(this.mintForm.recipient) && this.mintForm.amount > 0;
+    return this.isValidAddress(this.mintForm.recipient) && this.isValidAmount(this.mintForm.amount);
   }
 
   isValidBurnForm(): boolean {
-    return this.burnForm.amount > 0;
+    return (!this.burnForm.fromWallet.trim() || this.isValidAddress(this.burnForm.fromWallet))
+      && this.isValidAmount(this.burnForm.amount);
   }
 
   isValidForceTransferForm(): boolean {
     return (
       this.isValidAddress(this.forceTransferForm.fromWallet) &&
       this.isValidAddress(this.forceTransferForm.toWallet) &&
-      this.forceTransferForm.amount > 0
+      this.isValidAmount(this.forceTransferForm.amount) &&
+      !!this.forceTransferForm.legalBasis.trim()
     );
   }
 
@@ -417,44 +440,50 @@ export class TokenAdminPanelComponent {
     return (
       this.isValidAddress(this.forceApproveForm.ownerWallet) &&
       this.isValidAddress(this.forceApproveForm.spenderWallet) &&
-      this.forceApproveForm.amount > 0
+      this.isValidAmount(this.forceApproveForm.amount) &&
+      !!this.forceApproveForm.legalBasis.trim()
     );
   }
 
   private isValidAddress(address: string): boolean {
-    return /^0x[a-fA-F0-9]{40}$/.test(address);
+    return /^0x[a-fA-F0-9]{40}$/.test(address.trim());
+  }
+
+  private isValidAmount(amount: number): boolean {
+    return Number.isSafeInteger(amount) && amount > 0;
   }
 
   submitMint(): void {
-    if (!this.isValidMintForm()) return;
-    this.mint.emit({ recipient: this.mintForm.recipient, amount: this.mintForm.amount });
-    this.mintForm = { recipient: '', amount: 0 };
+    if (this.busy || !this.isValidMintForm()) return;
+    this.mint.emit({ recipient: this.mintForm.recipient.trim(), amount: this.mintForm.amount });
   }
 
   submitBurn(): void {
-    if (!this.isValidBurnForm()) return;
-    this.burn.emit({ amount: this.burnForm.amount, fromWallet: this.burnForm.fromWallet || undefined });
-    this.burnForm = { fromWallet: '', amount: 0 };
+    if (this.busy || !this.isValidBurnForm()
+        || !confirm('Burn these tokens? This action is irreversible.')) return;
+    this.burn.emit({ amount: this.burnForm.amount, fromWallet: this.burnForm.fromWallet.trim() || undefined });
   }
 
   submitForceTransfer(): void {
-    if (!this.isValidForceTransferForm()) return;
+    if (this.busy || !this.isValidForceTransferForm()
+        || !confirm('Execute this legally authorized forced transfer?')) return;
     this.forceTransfer.emit({
-      fromWallet: this.forceTransferForm.fromWallet,
-      toWallet: this.forceTransferForm.toWallet,
+      fromWallet: this.forceTransferForm.fromWallet.trim(),
+      toWallet: this.forceTransferForm.toWallet.trim(),
       amount: this.forceTransferForm.amount,
+      legalBasis: this.forceTransferForm.legalBasis.trim(),
     });
-    this.forceTransferForm = { fromWallet: '', toWallet: '', amount: 0 };
   }
 
   submitForceApprove(): void {
-    if (!this.isValidForceApproveForm()) return;
+    if (this.busy || !this.isValidForceApproveForm()
+        || !confirm('Execute this legally authorized allowance override?')) return;
     this.forceApprove.emit({
       ownerWallet: this.forceApproveForm.ownerWallet,
       spenderWallet: this.forceApproveForm.spenderWallet,
       amount: this.forceApproveForm.amount,
+      legalBasis: this.forceApproveForm.legalBasis.trim(),
     });
-    this.forceApproveForm = { ownerWallet: '', spenderWallet: '', amount: 0 };
   }
 
   shortenAddress(address: string): string {

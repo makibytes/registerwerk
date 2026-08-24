@@ -21,6 +21,8 @@ public interface DeploymentMapper {
     @Mapping(target = "deployedAt", ignore = true)
     @Mapping(target = "deployedByTx", ignore = true)
     @Mapping(target = "deploymentStatus", ignore = true)
+    @Mapping(target = "blockHash", ignore = true)
+    @Mapping(target = "blockNumber", ignore = true)
     AssetDeployment toEntity(DeploymentCreateRequest request);
 
     /**

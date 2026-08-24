@@ -38,6 +38,14 @@ public class BlockchainTransaction {
     @Column(name = "deployment_id")
     private UUID deploymentId;
 
+    /** FK to {@code chain_config} — lets the reorg-retraction sweep
+     *  ({@code finality.internal.BlockFinalityServiceImpl#recordRetraction}) find affected rows by
+     *  (chainConfigId, blockNumber) directly, rather than string-matching {@link #chain}/{@link #network}.
+     *  Null for rows written before this column existed, or if the chain+network couldn't be
+     *  resolved to a known {@code ChainConfig} at submission time. */
+    @Column(name = "chain_config_id")
+    private UUID chainConfigId;
+
     @Column(name = "asset_id")
     private UUID assetId;
 
@@ -60,6 +68,14 @@ public class BlockchainTransaction {
     @Column(name = "block_number")
     private Long blockNumber;
 
+    /**
+     * Receipt block hash, recorded the first poll a receipt is seen and re-verified on every
+     * subsequent poll before the confirmation count is trusted (reorg guard). Null until a
+     * receipt has been observed at least once.
+     */
+    @Column(name = "block_hash", length = 66)
+    private String blockHash;
+
     @Column(name = "error_message", columnDefinition = "text")
     private String errorMessage;
 
@@ -68,6 +84,20 @@ public class BlockchainTransaction {
 
     @Column(name = "completed_at")
     private Instant completedAt;
+
+    /**
+     * Operator annotation for a FAILED/TIMEOUT transaction, once handled — usually out-of-band
+     * via the chain's own tooling, since TIMEOUT is currently terminal (see the global
+     * transaction console's Javadoc for why an automated gas-bump resubmit isn't implemented).
+     */
+    @Column(name = "ops_note", columnDefinition = "text")
+    private String opsNote;
+
+    @Column(name = "ops_reviewed_at")
+    private Instant opsReviewedAt;
+
+    @Column(name = "ops_reviewed_by")
+    private UUID opsReviewedBy;
 
     // ── Getters & Setters ──────────────────────────────────────────────────────
 
@@ -91,6 +121,9 @@ public class BlockchainTransaction {
     public UUID getDeploymentId() { return deploymentId; }
     public void setDeploymentId(UUID deploymentId) { this.deploymentId = deploymentId; }
 
+    public UUID getChainConfigId() { return chainConfigId; }
+    public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
+
     public UUID getAssetId() { return assetId; }
     public void setAssetId(UUID assetId) { this.assetId = assetId; }
 
@@ -112,6 +145,9 @@ public class BlockchainTransaction {
     public Long getBlockNumber() { return blockNumber; }
     public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
 
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
+
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
 
@@ -119,4 +155,13 @@ public class BlockchainTransaction {
 
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
+
+    public String getOpsNote() { return opsNote; }
+    public void setOpsNote(String opsNote) { this.opsNote = opsNote; }
+
+    public Instant getOpsReviewedAt() { return opsReviewedAt; }
+    public void setOpsReviewedAt(Instant opsReviewedAt) { this.opsReviewedAt = opsReviewedAt; }
+
+    public UUID getOpsReviewedBy() { return opsReviewedBy; }
+    public void setOpsReviewedBy(UUID opsReviewedBy) { this.opsReviewedBy = opsReviewedBy; }
 }

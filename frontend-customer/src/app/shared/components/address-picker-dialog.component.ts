@@ -33,7 +33,7 @@ export interface AddressPickerDialogData {
     MatTooltipModule,
   ],
   styles: [`
-    .dialog-content { min-width: 500px; max-width: 620px; padding: 8px 0 4px; }
+    .dialog-content { width: min(500px, 80vw); max-width: 620px; padding: 8px 0 4px; }
 
     .search-row {
       display: flex;
@@ -87,6 +87,11 @@ export interface AddressPickerDialogData {
       cursor: pointer;
       border-bottom: 1px solid var(--rw-border);
       transition: background 0.12s;
+      width: 100%;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
 
       &:last-child { border-bottom: none; }
       &:hover { background: var(--rw-bg); }
@@ -160,14 +165,19 @@ export interface AddressPickerDialogData {
 
               @if (data.mode === 'ANY') {
                 <div class="filter-chips">
-                  <span class="chip" [class.active]="typeFilter === 'ALL'" (click)="setTypeFilter('ALL')">All</span>
-                  <span class="chip" [class.active]="typeFilter === 'WALLET'" (click)="setTypeFilter('WALLET')">Wallets</span>
-                  <span class="chip" [class.active]="typeFilter === 'CONTRACT'" (click)="setTypeFilter('CONTRACT')">Contracts</span>
+                  <button class="chip" type="button" [class.active]="typeFilter === 'ALL'" [attr.aria-pressed]="typeFilter === 'ALL'" (click)="setTypeFilter('ALL')">All</button>
+                  <button class="chip" type="button" [class.active]="typeFilter === 'WALLET'" [attr.aria-pressed]="typeFilter === 'WALLET'" (click)="setTypeFilter('WALLET')">Wallets</button>
+                  <button class="chip" type="button" [class.active]="typeFilter === 'CONTRACT'" [attr.aria-pressed]="typeFilter === 'CONTRACT'" (click)="setTypeFilter('CONTRACT')">Contracts</button>
                 </div>
               }
 
               @if (loading) {
                 <div style="display:flex;justify-content:center;padding:24px"><mat-spinner diameter="32" /></div>
+              } @else if (loadError) {
+                <div class="empty-state" role="alert">
+                  {{ loadError }}
+                  <button mat-button type="button" (click)="loadEndpoints()">Retry</button>
+                </div>
               } @else if (filteredEndpoints.length === 0) {
                 <div class="empty-state">
                   @if (searchQuery) {
@@ -179,7 +189,12 @@ export interface AddressPickerDialogData {
               } @else {
                 <div class="endpoint-list">
                   @for (ep of filteredEndpoints; track ep.id) {
-                    <div class="endpoint-item" (click)="pick(ep.address)" [matTooltip]="ep.address">
+                    <button
+                      class="endpoint-item"
+                      type="button"
+                      (click)="pick(ep.address)"
+                      [matTooltip]="ep.address"
+                    >
                       <span class="type-badge" [class.wallet]="ep.addressType === 'WALLET'" [class.contract]="ep.addressType === 'CONTRACT'">
                         {{ ep.addressType === 'WALLET' ? 'Wallet' : 'Contract' }}
                       </span>
@@ -188,10 +203,12 @@ export interface AddressPickerDialogData {
                         <div class="ep-addr">{{ ep.address }}</div>
                       </div>
                       @if (ep.riskLevel) {
-                        <span class="risk-badge" [class]="ep.riskLevel">{{ ep.riskLevel }}</span>
+                        <span class="risk-badge" [class.LOW]="ep.riskLevel === 'LOW'"
+                              [class.MEDIUM]="ep.riskLevel === 'MEDIUM'"
+                              [class.HIGH]="ep.riskLevel === 'HIGH'">{{ ep.riskLevel }}</span>
                       }
                       <mat-icon style="color:var(--rw-text-muted);font-size:18px;flex-shrink:0">chevron_right</mat-icon>
-                    </div>
+                    </button>
                   }
                 </div>
               }
@@ -208,7 +225,7 @@ export interface AddressPickerDialogData {
                   <mat-hint>Enter a custom {{ modeLabel }} address</mat-hint>
                 </mat-form-field>
                 <div style="margin-top:16px">
-                  <button mat-flat-button color="primary" [disabled]="!customAddress.trim()" (click)="pick(customAddress.trim())">
+                  <button mat-flat-button color="primary" type="button" [disabled]="!customAddress.trim()" (click)="pick(customAddress.trim())">
                     Use this address
                   </button>
                 </div>
@@ -220,7 +237,7 @@ export interface AddressPickerDialogData {
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-button type="button" mat-dialog-close>Cancel</button>
     </mat-dialog-actions>
   `,
 })
@@ -236,6 +253,7 @@ export class AddressPickerDialogComponent implements OnInit {
   searchQuery = '';
   typeFilter: 'ALL' | EndpointAddressType = 'ALL';
   customAddress = '';
+  loadError = '';
 
   get modeLabel(): string {
     return this.data.mode === 'WALLET' ? 'wallet' : this.data.mode === 'CONTRACT' ? 'contract' : 'wallet or contract';
@@ -245,6 +263,12 @@ export class AddressPickerDialogComponent implements OnInit {
     if (this.data.mode !== 'ANY') {
       this.typeFilter = this.data.mode;
     }
+    this.loadEndpoints();
+  }
+
+  loadEndpoints(): void {
+    this.loading = true;
+    this.loadError = '';
     this.endpointService.listEndpoints().subscribe({
       next: (eps) => {
         this.endpoints = eps;
@@ -253,6 +277,7 @@ export class AddressPickerDialogComponent implements OnInit {
         this.cdr.markForCheck();
       },
       error: () => {
+        this.loadError = 'The address book could not be loaded.';
         this.loading = false;
         this.cdr.markForCheck();
       },
@@ -272,7 +297,7 @@ export class AddressPickerDialogComponent implements OnInit {
       result = result.filter(ep => ep.addressType === this.data.mode);
     }
     if (this.searchQuery.trim()) {
-      const q = this.searchQuery.toLowerCase();
+      const q = this.searchQuery.trim().toLowerCase();
       result = result.filter(ep =>
         ep.name.toLowerCase().includes(q) || ep.address.toLowerCase().includes(q)
       );

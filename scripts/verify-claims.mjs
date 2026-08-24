@@ -29,16 +29,7 @@ const EVIDENCE_TYPES = new Set(["REPOSITORY", "TEST", "OFFICIAL", "DECISION"]);
 const MAX_REVIEW_DAYS = 183;
 const MAX_SCANNABLE_BYTES = 2_000_000;
 const EXPECTED_SCHEMA_SHA256 = "c08d7c3958b3b7b301760418fd0c997ff9f8dbf3a36e13c6ee0afd8510379b4a";
-const APPROVED_SUPPRESSIONS = Object.freeze({
-  "RW-SUP-0001": Object.freeze({
-    path: "backend/src/main/resources/db/migration/V1__initial_schema.sql",
-    statement: "-- MiCAR-compliant e-money-token stablecoins (AUEUR, USDC, …), the Pontes instant-payment",
-    textSha256: "bfa43378664f5724186f8c3209d75739ed6d91fb98456be43b69d536db037925",
-    sourceSha256: "04d95f952890f7ef140215c53f7d0ec1b0903b64b0ee7ff24f706a47ebc8c58f",
-    correctiveReference: "backend/src/main/resources/db/migration/V12__payment_rail_micar_verification.sql",
-    correctiveSha256: "7232420d664e0f89d59af3635cebbc17556edab2ac5ce3b321bf77aea07e9d38"
-  })
-});
+const APPROVED_SUPPRESSIONS = Object.freeze({});
 
 const highRiskPatterns = [
   ["unqualified-compliance", /\b(?:fully[- ]compliant|completely[- ]compliant|the compliant alternative)\b/gi],

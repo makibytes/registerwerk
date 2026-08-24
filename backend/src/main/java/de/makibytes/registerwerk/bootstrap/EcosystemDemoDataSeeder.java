@@ -553,7 +553,7 @@ public class EcosystemDemoDataSeeder implements ApplicationRunner, Ordered {
         issuer.setChainConfigId(chain.getId());
         issuer.setIssuerAddress(walletAddress(deriveDemoKeyPair("demo-kyc-issuer")));
         issuer.setClaimTopics(List.of(1L, 2L, 3L)); // KYC, AML, Accreditation
-        issuer.setStatus(MemberWalletStatus.ACTIVE);
+        issuer.setStatus(TrustedIssuerStatus.ACTIVE);
         issuer.setAddedTx(keccak256Hex("demo-kyc-issuer-add-tx"));
         trustedIssuers.save(issuer);
     }

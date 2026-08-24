@@ -7,7 +7,7 @@ services:
   # (backend StarknetTransferSyncService) can be exercised end-to-end without any external
   # dependency.
   starknet-devnet:
-    image: shardlabs/starknet-devnet-rs:${STARKNET_DEVNET_TAG:-latest}
+    image: shardlabs/starknet-devnet-rs:${STARKNET_DEVNET_TAG:-0.9.1}
     command: >
       --seed ${STARKNET_DEVNET_SEED:-0}
       --accounts ${STARKNET_DEVNET_ACCOUNTS:-10}

@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, HostListener, inject, signal } from '@angular/core';
+import { BreakpointObserver } from '@angular/cdk/layout';
 import { RouterOutlet } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -6,6 +7,8 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { SidebarComponent } from '../sidebar/sidebar.component';
 import { AuthService } from '../../core/auth/auth.service';
 import { environment } from '../../../environments/environment';
+import { map } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-shell',
@@ -27,10 +30,12 @@ import { environment } from '../../../environments/environment';
       overflow-y: auto;
       overflow-x: hidden;
       border-right: 1px solid var(--rw-sidebar-border);
+      z-index: 20;
     }
 
     .main {
       flex: 1;
+      min-width: 0;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -77,19 +82,95 @@ import { environment } from '../../../environments/environment';
 
     .content {
       flex: 1;
+      min-width: 0;
       overflow-y: auto;
       padding: 28px 28px;
       background: var(--rw-bg);
     }
+
+    .menu-btn,
+    .sidebar-backdrop {
+      display: none;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 100;
+      padding: 8px 12px;
+      border-radius: var(--rw-radius);
+      background: var(--rw-surface);
+      color: var(--rw-text-primary);
+      box-shadow: var(--rw-shadow-md);
+      transform: translateY(-150%);
+      transition: transform 120ms ease;
+
+      &:focus { transform: translateY(0); }
+    }
+
+    @media (max-width: 900px) {
+      .sidebar-col {
+        position: fixed;
+        inset: 0 auto 0 0;
+        transform: translateX(-100%);
+        transition: transform 180ms ease;
+        box-shadow: 12px 0 32px rgba(0, 0, 0, 0.28);
+
+        &.open { transform: translateX(0); }
+      }
+
+      .menu-btn { display: inline-flex; }
+
+      .sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: block;
+        padding: 0;
+        border: 0;
+        background: rgba(7, 9, 26, 0.55);
+        cursor: default;
+      }
+
+      .content { padding: 22px 20px; }
+    }
+
+    @media (max-width: 520px) {
+      .topbar { padding: 0 10px; }
+      .topbar-title { font-size: 13px; }
+      .content { padding: 18px 14px; }
+    }
   `],
   template: `
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <div class="shell">
-      <aside class="sidebar-col">
-        <app-sidebar />
+      <aside
+        id="operator-navigation"
+        class="sidebar-col"
+        [class.open]="sidebarOpen()"
+        [attr.inert]="isCompact() && !sidebarOpen() ? '' : null"
+      >
+        <app-sidebar (navigated)="closeSidebar()" />
       </aside>
+
+      @if (sidebarOpen()) {
+        <button class="sidebar-backdrop" type="button" aria-label="Close navigation" (click)="closeSidebar()"></button>
+      }
 
       <div class="main">
         <header class="topbar">
+          <button
+            class="menu-btn"
+            mat-icon-button
+            type="button"
+            aria-label="Open navigation"
+            aria-controls="operator-navigation"
+            [attr.aria-expanded]="sidebarOpen()"
+            (click)="openSidebar()"
+          >
+            <mat-icon>menu</mat-icon>
+          </button>
           <span class="topbar-title">Operator Administration</span>
           @if (isTestEnv) {
             <span class="env-badge">Test</span>
@@ -98,6 +179,8 @@ import { environment } from '../../../environments/environment';
           <button
             class="logout-btn"
             mat-icon-button
+            type="button"
+            aria-label="Sign out"
             (click)="logout()"
             matTooltip="Sign out"
             matTooltipPosition="below"
@@ -106,7 +189,7 @@ import { environment } from '../../../environments/environment';
           </button>
         </header>
 
-        <main class="content">
+        <main id="main-content" class="content" tabindex="-1">
           <router-outlet />
         </main>
       </div>
@@ -115,6 +198,20 @@ import { environment } from '../../../environments/environment';
 })
 export class ShellComponent {
   readonly isTestEnv = environment.testEnvironment;
-  constructor(private readonly authService: AuthService) {}
+  readonly sidebarOpen = signal(false);
+  private readonly authService = inject(AuthService);
+  private readonly breakpointObserver = inject(BreakpointObserver);
+  readonly isCompact = toSignal(
+    this.breakpointObserver.observe('(max-width: 900px)').pipe(map((state) => state.matches)),
+    { initialValue: false },
+  );
+
+  openSidebar(): void { this.sidebarOpen.set(true); }
+  closeSidebar(): void { this.sidebarOpen.set(false); }
   logout(): void { this.authService.logout(); }
+
+  @HostListener('document:keydown.escape')
+  closeSidebarOnEscape(): void {
+    if (this.isCompact()) this.closeSidebar();
+  }
 }

@@ -267,6 +267,54 @@ contract EwpgRepoMarketTest is Test {
         market.pledgeAndBorrow(100, 5_000e6);
     }
 
+    function test_addCollateral_improvesAnExistingPositionWithoutBorrowPermission() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        vm.prank(operator);
+        permissions.revokeFromOrg(address(orgId), borrowPermission);
+
+        vm.prank(alice);
+        market.addCollateral(25);
+
+        (uint256 collateralAmount,) = market.positions(alice);
+        assertEq(collateralAmount, 125);
+        assertEq(collateralToken.balanceOf(address(market)), 125);
+    }
+
+    function test_addCollateral_rejectsWalletWithoutAnOutstandingLoan() public {
+        vm.prank(mallory);
+        vm.expectRevert(EwpgRepoMarket.NoOutstandingDebt.selector);
+        market.addCollateral(1);
+    }
+
+    function test_withdrawCollateral_releasesOnlyExcessAboveOriginationBuffer() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(125, 7_000e6);
+
+        vm.prank(alice);
+        market.withdrawCollateral(25);
+
+        (uint256 collateralAmount,) = market.positions(alice);
+        assertEq(collateralAmount, 100);
+        assertEq(collateralToken.balanceOf(alice), 900);
+    }
+
+    function test_withdrawCollateral_revertsWhenItWouldExceedOriginationLtv() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoMarket.ExceedsLltv.selector);
+        market.withdrawCollateral(1);
+    }
+
     // ── reserve factor ───────────────────────────────────────────────────────
 
     function test_reserveFactor_splitsInterestBetweenReservesAndDepositors() public {
@@ -373,7 +421,7 @@ contract EwpgRepoMarketTest is Test {
         // Drop price so the position is unhealthy but only mildly so — 100 * 85e6 * 0.80 /
         // 7_000e6 = 0.971 — below 1.0 (liquidatable) but at/above
         // FULL_CLOSE_HEALTH_FACTOR_THRESHOLD_WAD (0.95), so the ordinary CLOSE_FACTOR_BPS
-        // applies rather than a full close (finding #14's severity-scaled close factor).
+        // applies rather than a full close ('s severity-scaled close factor).
         vm.prank(alice);
         navOracle.pushPrice(address(collateralToken), 85e6);
 
@@ -396,7 +444,7 @@ contract EwpgRepoMarketTest is Test {
         // RegisterwerkNavOracle.t.sol) — simulating one here requires the override path, the
         // same as a real deep NAV correction would. A crash this severe also lands well below
         // FULL_CLOSE_HEALTH_FACTOR_THRESHOLD_WAD, so MAX_CLOSE_FACTOR_BPS (100%) applies
-        // (finding #14) rather than the ordinary 50% — in practice this now unwinds in a single
+        // rather than the ordinary 50% — in practice this now unwinds in a single
         // call, but the loop is kept as a bound so the position can never be *permanently*
         // stuck with unclosable dust regardless of tuning.
         vm.prank(alice);
@@ -419,7 +467,7 @@ contract EwpgRepoMarketTest is Test {
 
         // 100 * 50e6 * 0.80 / 7_000e6 = 0.571 — well below
         // FULL_CLOSE_HEALTH_FACTOR_THRESHOLD_WAD (0.95), so a single call may close the full
-        // outstanding debt instead of being capped at CLOSE_FACTOR_BPS (finding #14, Phase 7).
+        // outstanding debt instead of being capped at CLOSE_FACTOR_BPS .
         vm.prank(alice);
         navOracle.pushPriceWithOverride(address(collateralToken), 50e6);
 
@@ -590,7 +638,7 @@ contract EwpgRepoMarketTest is Test {
         market.reconcileCollateral(alice, 40);
     }
 
-    // ── bad-debt write-off (finding #5, Phase 7) ────────────────────────────
+    // ── bad-debt write-off  ────────────────────────────
 
     function test_liquidate_writesOffBadDebtWhenCollateralExhausted() public {
         vm.prank(lender1);
@@ -674,7 +722,7 @@ contract EwpgRepoMarketTest is Test {
         assertGt(market.debtOf(alice), 0, "debt untouched when some collateral remains");
     }
 
-    // ── healthFactor reliability (finding #8, Phase 7) ──────────────────────
+    // ── healthFactor reliability  ──────────────────────
 
     function test_healthFactor_unreliableWhenNeverPriced() public {
         RegisterwerkNavOracle freshOracle = new RegisterwerkNavOracle(ecosystemOracle);
@@ -709,7 +757,7 @@ contract EwpgRepoMarketTest is Test {
         assertGt(factor, 0, "still computed off the stale mark, not zeroed - callers gate on priceReliable");
     }
 
-    // ── liquidate() stale-price grace period (finding #9, Phase 7 — per a joint Repo/Lending-
+    // ── liquidate() stale-price grace period — per a joint Repo/Lending-
     //    desk and trading-desk business ruling) ──────────────────────────────
 
     function _newGraceAwareMarket() private returns (EwpgRepoMarket m) {

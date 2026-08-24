@@ -22,10 +22,12 @@ export interface ForceTransferAction {
   fromWallet: string;
   toWallet: string;
   amount: number;
+  legalBasis: string;
 }
 
 export interface ForceApproveAction {
   ownerWallet: string;
   spenderWallet: string;
   amount: number;
+  legalBasis: string;
 }

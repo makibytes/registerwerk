@@ -20,15 +20,42 @@ scrape_configs:
         target_label: instance
         replacement: registerwerk-backend
 
+  # Kong's Status API, not its Admin API. Admin stays bound to 127.0.0.1 inside the Kong
+  # container, so the previous kong:8001 target was unreachable from here by construction.
   - job_name: kong
     static_configs:
-      - targets: ["kong:8001"]
+      - targets: ["kong:8100"]
     metrics_path: /metrics
 
   - job_name: postgres
     static_configs:
       - targets: ["postgres-exporter:9187"]
 
+  # One target per chaincache workload (see docker-compose.yml — one Spring Boot process per
+  # chain, sharing a Postgres instance but each its own scrape target). Requires
+  # chaincache.auth.prometheus-public=true on each workload (set in docker-compose.yml) — safe
+  # here since this scrape happens over the same internal docker network, never a published port;
+  # the Helm chart's own values.yaml documents the identical ClusterIP-only trust boundary for
+  # this setting.
+  - job_name: chaincache
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["chaincache-sepolia:8080"]
+        labels:
+          chaincache_workload: sepolia
+      - targets: ["chaincache-base:8080"]
+        labels:
+          chaincache_workload: base
+
   - job_name: node
     static_configs:
       - targets: ["node-exporter:9100"]
+
+  # Scrapes whatever a backup job has pushed since ephemeral CronJob pods can't be scraped
+  # directly — see pushgateway's comment in docker-compose.yml. honor_labels keeps the pushed
+  # "job" label (e.g. registerwerk_pg_backup) instead of Prometheus overwriting it with
+  # "pushgateway".
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]

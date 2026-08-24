@@ -10,9 +10,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * methods: a chain transaction is irreversible the moment it is sent, so sending it
  * before the DB commit means a rollback (e.g. a failed audit write, which deliberately
  * propagates) leaves the chain ahead of the database. With this helper the DB state is
- * the committed source of intent and the broadcast follows; if the broadcast itself
- * fails, the row's missing tx hash marks it for retry by the module's poller (or the
- * drift reconciliation catches the divergence).
+ * the committed source of intent and the broadcast follows. Callers must persist their own
+ * durable retry signal before registering the callback; EVM submissions use the exact signed-byte
+ * outbox, while other adapters retain their operation-specific pending state.
  *
  * <p>Outside a transaction the action runs immediately.
  */

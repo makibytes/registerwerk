@@ -1,99 +1,86 @@
 import { Injectable, inject } from '@angular/core';
-import { Router } from '@angular/router';
 import { Observable, of } from 'rxjs';
+import { AUTH_CONFIG } from './auth-config';
+import { TokenSource } from './token-source';
 
+/**
+ * The app's view of "who is signed in".
+ *
+ * Its public surface is unchanged from when it owned localStorage directly — every guard,
+ * component and interceptor still calls the same methods. What changed is that token custody
+ * now lives behind {@link TokenSource}, so the same code works whether the token was minted by
+ * our own backend or acquired from Microsoft Entra.
+ */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly TOKEN_KEY = 'registerwerk_customer_token';
-  private readonly ADMIN_TOKEN_KEY = 'registerwerk_customer_admin_token';
-  private readonly IMP_META_KEY = 'registerwerk_customer_impersonation_meta';
-  private readonly router = inject(Router);
+  private readonly tokens = inject(TokenSource);
+  private readonly config = inject(AUTH_CONFIG);
 
   // ── Token storage ──────────────────────────────────────────────────────────
 
   getToken(): string | null {
-    return localStorage.getItem(this.TOKEN_KEY);
+    return this.tokens.getToken();
   }
 
   setToken(token: string): void {
-    localStorage.setItem(this.TOKEN_KEY, token);
+    this.tokens.setToken(token);
   }
 
   clearToken(): void {
-    localStorage.removeItem(this.TOKEN_KEY);
+    this.tokens.clearToken();
+  }
+
+  /** A token fit to send, refreshing it if the source supports that. Used by the interceptor. */
+  acquireToken$(): Observable<string | null> {
+    return this.tokens.acquireToken$();
+  }
+
+  /** Re-authenticate to satisfy an OAuth2 claims challenge. Redirects; does not return. */
+  acquireTokenWithClaims(claimsBase64: string): void {
+    this.tokens.acquireTokenWithClaims(claimsBase64);
   }
 
   // ── Authentication state ───────────────────────────────────────────────────
 
   isAuthenticated(): Observable<boolean> {
-    const token = this.getToken();
-    if (!token) return of(false);
-    try {
-      const payload = this.decodePayload(token);
-      const now = Math.floor(Date.now() / 1000);
-      return of((payload['exp'] as number) > now);
-    } catch {
-      return of(false);
-    }
+    return of(this.tokens.isAuthenticated());
   }
 
   isAuthenticatedSync(): boolean {
-    const token = this.getToken();
-    if (!token) return false;
-    try {
-      const payload = this.decodePayload(token);
-      const now = Math.floor(Date.now() / 1000);
-      return (payload['exp'] as number) > now;
-    } catch {
-      return false;
-    }
+    return this.tokens.isAuthenticated();
   }
 
   // ── JWT claims ─────────────────────────────────────────────────────────────
 
   getUserRoles(): string[] {
-    const token = this.getToken();
-    if (!token) return [];
-    try {
-      const payload = this.decodePayload(token);
-      const roles = payload['roles'] ?? (payload['realm_access'] as Record<string, unknown>)?.['roles'] ?? [];
-      return Array.isArray(roles) ? roles : [];
-    } catch {
-      return [];
-    }
+    const payload = this.payload();
+    if (!payload) return [];
+    const roles =
+      payload['roles'] ?? (payload['realm_access'] as Record<string, unknown>)?.['roles'] ?? [];
+    return Array.isArray(roles) ? roles : [];
   }
 
   getEntityId(): string | null {
-    const token = this.getToken();
-    if (!token) return null;
-    try {
-      const payload = this.decodePayload(token);
-      return (payload['entityId'] as string) ?? (payload['entity_id'] as string) ?? null;
-    } catch {
-      return null;
-    }
+    const payload = this.payload();
+    if (!payload) return null;
+    return (payload['entityId'] as string) ?? (payload['entity_id'] as string) ?? null;
   }
 
   getUserEmail(): string | null {
-    const token = this.getToken();
-    if (!token) return null;
-    try {
-      const payload = this.decodePayload(token);
-      return (payload['email'] as string) ?? (payload['upn'] as string) ?? null;
-    } catch {
-      return null;
-    }
+    const payload = this.payload();
+    if (!payload) return null;
+    return (
+      (payload['email'] as string) ??
+      (payload['preferred_username'] as string) ??
+      (payload['upn'] as string) ??
+      null
+    );
   }
 
   getUserName(): string | null {
-    const token = this.getToken();
-    if (!token) return null;
-    try {
-      const payload = this.decodePayload(token);
-      return (payload['name'] as string) ?? null;
-    } catch {
-      return null;
-    }
+    const payload = this.payload();
+    if (!payload) return null;
+    return (payload['name'] as string) ?? null;
   }
 
   hasRole(role: string): boolean {
@@ -101,66 +88,59 @@ export class AuthService {
   }
 
   // ── Impersonation ──────────────────────────────────────────────────────────
+  // Only available in local auth mode. The backend refuses to mint an impersonation token when
+  // ENTRA_ENABLED=true, because there is no way to represent "admin acting as customer" in a
+  // token Entra issued — so the UI must not offer the flow either.
 
   isImpersonating(): boolean {
-    const token = this.getToken();
-    if (!token) return false;
-    try {
-      return this.decodePayload(token)['imp'] === true;
-    } catch {
-      return false;
-    }
+    const payload = this.payload();
+    return payload ? payload['impersonating'] === true : false;
+  }
+
+  supportsImpersonation(): boolean {
+    return this.tokens.supportsImpersonation();
   }
 
   getImpersonationMeta(): { entityId: string; entityName: string } | null {
-    const raw = localStorage.getItem(this.IMP_META_KEY);
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as { entityId: string; entityName: string };
-    } catch {
-      return null;
-    }
+    return this.tokens.getImpersonationMeta();
   }
 
-  enterImpersonation(impersonationToken: string, entityId: string, entityName: string): void {
-    const currentToken = this.getToken();
-    if (currentToken) {
-      localStorage.setItem(this.ADMIN_TOKEN_KEY, currentToken);
-    }
-    localStorage.setItem(this.TOKEN_KEY, impersonationToken);
-    localStorage.setItem(this.IMP_META_KEY, JSON.stringify({ entityId, entityName }));
+  enterImpersonation(impersonationToken: string, entityId: string, entityName: string): Observable<void> {
+    return this.tokens.enterImpersonation(impersonationToken, entityId, entityName);
   }
 
-  exitImpersonation(): void {
-    const adminToken = localStorage.getItem(this.ADMIN_TOKEN_KEY);
-    localStorage.removeItem(this.IMP_META_KEY);
-    localStorage.removeItem(this.ADMIN_TOKEN_KEY);
-    if (adminToken) {
-      localStorage.setItem(this.TOKEN_KEY, adminToken);
-    } else {
-      localStorage.removeItem(this.TOKEN_KEY);
-    }
+  exitImpersonation(): Observable<void> {
+    return this.tokens.exitImpersonation();
+  }
+
+  // ── Sign-in mode ───────────────────────────────────────────────────────────
+
+  isEntraMode(): boolean {
+    return this.config.mode === 'ENTRA';
+  }
+
+  /** Whether invite and password-reset links should be offered — false under Entra sign-in. */
+  isLocalRegistrationEnabled(): boolean {
+    return this.config.localRegistrationEnabled;
   }
 
   // ── Navigation helpers ─────────────────────────────────────────────────────
 
   login(): void {
-    this.router.navigate(['/login']);
+    this.tokens.login();
+  }
+
+  loginWithCredentials(email: string, password: string): Observable<void> {
+    return this.tokens.loginWithCredentials(email, password);
   }
 
   logout(): void {
-    localStorage.removeItem(this.TOKEN_KEY);
-    localStorage.removeItem(this.ADMIN_TOKEN_KEY);
-    localStorage.removeItem(this.IMP_META_KEY);
-    this.router.navigate(['/login']);
+    this.tokens.logout();
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  private decodePayload(token: string): Record<string, unknown> {
-    const base64 = token.split('.')[1];
-    if (!base64) throw new Error('Invalid token');
-    const json = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(json) as Record<string, unknown>;
+  private payload(): Record<string, unknown> | null {
+    return this.tokens.getProfile();
   }
 }

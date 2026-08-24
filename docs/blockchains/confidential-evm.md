@@ -13,19 +13,16 @@ against **Zama's** fhEVM — specifically the `TFHE.sol`/Gateway API vendored un
 
 ---
 
-## Chains that actually run Zama's fhEVM
+## Configured chain scope
 
-| Chain | Status | Source |
-|---|---|---|
-| Ethereum Sepolia | Real, documented addresses (ACL, TFHEExecutor, FHEPayment, KMSVerifier, Gateway) — see `contracts/lib/fhevm/config/ZamaFHEVMConfig.sol`, and `SepoliaConfig` bundled in `@zama-fhe/relayer-sdk` itself | Vendored library / npm package |
-| Ethereum mainnet | Targeted, addresses not finalised at time of writing (Q3 2026 target) and governance-upgradeable once live | Zama's public roadmap / community forum |
-| Base | Zama's own "fhEVM Coprocessor" announcement names Base alongside Ethereum | Zama product announcement |
-| T-REX Chain | Zama announced (March 2026) it is becoming T-REX Ledger's confidentiality layer — directly relevant to `CONF_ERC3643` — but T-REX Chain has no `Chain` enum entry here yet and has not published its own FHEVM addresses | Public T-REX/Zama press release |
+| Chain | Registerwerk behavior |
+|---|---|
+| Ethereum | Confidential deployment is accepted when the network-specific factory is configured. |
+| Base | Confidential deployment is accepted when the network-specific factory is configured. |
+| Other `Chain` values | Confidential deployment is rejected. |
 
-`AssetDeploymentService.FHEVM_CHAINS` gates confidential deployment to `Chain.ETHEREUM` and
-`Chain.BASE` for exactly this reason. **Fhenix and Inco are deliberately excluded** — they remain
-listed as ordinary EVM chains in the `Chain` enum (with their own RPC nodes for informational/
-tracking purposes) but are not valid confidential-deployment targets.
+`AssetDeploymentService.FHEVM_CHAINS` is the authoritative allowlist. Fhenix and Inco remain
+ordinary EVM entries in the `Chain` enum but are not valid confidential-deployment targets.
 
 ---
 
@@ -60,7 +57,7 @@ struct FhevmInfra {
 
 ## Who can decrypt — the viewer ACL model
 
-See [Confidential Tokens](../token-standards/confidential.md#who-can-decrypt-what--the-viewer-acl-model)
+See [Confidential Tokens](../token-standards/confidential.md#who-can-decrypt-what-the-viewer-acl-model)
 for the full explanation. In short: every holder can decrypt only their OWN balance handle; a
 small operator/auditor/issuer "viewer" set can decrypt every handle. This lives entirely in
 `ConfidentialERC20`'s `isViewer`/`addViewer`/`removeViewer` — no separate per-investor contracts.

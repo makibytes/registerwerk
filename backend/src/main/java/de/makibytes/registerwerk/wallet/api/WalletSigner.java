@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.wallet.api;
 
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.wallet.api.OperatorWallet;
 import de.makibytes.registerwerk.wallet.api.WalletChainDefault;
@@ -12,7 +13,9 @@ import org.p2p.solanaj.core.Account;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.internal.SoftwareEvmSigner;
+import de.makibytes.registerwerk.wallet.internal.Pkcs11EvmSigner;
+import de.makibytes.registerwerk.wallet.internal.Pkcs11HsmService;
 
 import java.util.List;
 import java.util.UUID;
@@ -33,8 +36,9 @@ public class WalletSigner {
     private final WalletChainDefaultRepository defaultRepository;
     private final OperatorWalletRepository walletRepository;
     private final WalletStorage walletStorage;
+    private final Pkcs11HsmService pkcs11HsmService;
 
-    private final ConcurrentHashMap<UUID, Credentials>    evmCache      = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, EvmSigner>      evmCache      = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Account>        solanaCache   = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, CantonContext>  cantonCache   = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, byte[]>         rawBytesCache = new ConcurrentHashMap<>();
@@ -43,10 +47,12 @@ public class WalletSigner {
     public WalletSigner(
             WalletChainDefaultRepository defaultRepository,
             OperatorWalletRepository walletRepository,
-            WalletStorage walletStorage) {
+            WalletStorage walletStorage,
+            Pkcs11HsmService pkcs11HsmService) {
         this.defaultRepository = defaultRepository;
         this.walletRepository  = walletRepository;
         this.walletStorage     = walletStorage;
+        this.pkcs11HsmService  = pkcs11HsmService;
     }
 
     // ── EVM ───────────────────────────────────────────────────────────────────
@@ -56,12 +62,15 @@ public class WalletSigner {
      *
      * @throws IllegalStateException if no default wallet is set for this chain
      */
-    public Credentials credentialsForChain(UUID chainConfigId) {
+    public EvmSigner evmSignerForChain(UUID chainConfigId) {
         UUID walletId = resolveWalletId(chainConfigId);
         return evmCache.computeIfAbsent(walletId, id -> {
             OperatorWallet wallet = loadWallet(id);
-            log.debug("Loading EVM credentials for wallet '{}' ({})", wallet.getName(), id);
-            return walletStorage.loadEvm(wallet.getKeystorePath());
+            log.debug("Loading {} EVM signer for wallet '{}' ({})", wallet.getCustodyType(), wallet.getName(), id);
+            if (wallet.getCustodyType() == OperatorWallet.CustodyType.PKCS11) {
+                return new Pkcs11EvmSigner(pkcs11HsmService, wallet.getKeyReference(), wallet.getAddress());
+            }
+            return new SoftwareEvmSigner(walletStorage.loadEvm(wallet.getKeystorePath()));
         });
     }
 
@@ -71,13 +80,13 @@ public class WalletSigner {
      *
      * @throws IllegalStateException if no default wallet is set
      */
-    public Credentials credentialsForDescriptor(ChainDescriptor descriptor) {
+    public EvmSigner evmSignerForDescriptor(ChainDescriptor descriptor) {
         String identifier = descriptor.chain().name() + "_" + descriptor.network().name();
         WalletChainDefault match = defaultRepository.findByChainIdentifier(identifier)
                 .orElseThrow(() -> new IllegalStateException(
                         "No default wallet for chain '" + identifier + "'. " +
                         "Please configure a wallet default via the Operator Portal → Wallets."));
-        return credentialsForChain(match.getChainConfigId());
+        return evmSignerForChain(match.getChainConfigId());
     }
 
     /**
@@ -86,14 +95,14 @@ public class WalletSigner {
      *
      * @throws IllegalStateException if no EVM wallet defaults are configured
      */
-    public Credentials credentialsForAnyEvm() {
+    public EvmSigner evmSignerForAnyEvm() {
         List<WalletChainDefault> defaults = defaultRepository.findAllEvmDefaults();
         if (defaults.isEmpty()) {
             throw new IllegalStateException(
                     "No EVM wallet default is configured. Please add a wallet and set it as default " +
                     "for at least one EVM chain via the Operator Portal → Wallets.");
         }
-        return credentialsForChain(defaults.get(0).getChainConfigId());
+        return evmSignerForChain(defaults.get(0).getChainConfigId());
     }
 
     // ── Solana ────────────────────────────────────────────────────────────────

@@ -75,6 +75,8 @@ public class BlockchainClientRegistry {
     private volatile Map<UUID, CantonLedgerEndpoint> nodeCantonClients = new ConcurrentHashMap<>();
     /** chainIdentifier → ordered node states for routing */
     private volatile Map<String, List<NodeState>> nodesByChain = new ConcurrentHashMap<>();
+    /** nodeId → the RPC URL its cached client was built against, so URL edits invalidate it */
+    private volatile Map<UUID, String>            nodeClientUrls = new ConcurrentHashMap<>();
 
     private ChainConfigRepository chainConfigRepository;
     private Web3jClientFactory web3jClientFactory;
@@ -167,6 +169,14 @@ public class BlockchainClientRegistry {
     // ── Legacy descriptor-based lookups ──────────────────────────────────────
 
     public Web3j getEvmClient(ChainDescriptor descriptor) {
+        String identifier = resolveIdentifier(descriptor, ChainConfig.ChainType.EVM);
+        if (identifier != null) {
+            try {
+                return getEvmClientByIdentifier(identifier);
+            } catch (IllegalArgumentException noDynamicClient) {
+                // Static descriptor clients remain a supported bootstrap fallback.
+            }
+        }
         Web3j client = staticEvmClients.get(descriptor);
         if (client == null) throw new IllegalArgumentException(
                 "No EVM client configured for chain descriptor: " + descriptor);
@@ -174,6 +184,14 @@ public class BlockchainClientRegistry {
     }
 
     public RpcClient getSolanaClient(ChainDescriptor descriptor) {
+        String identifier = resolveIdentifier(descriptor, ChainConfig.ChainType.SOLANA);
+        if (identifier != null) {
+            try {
+                return getSolanaClientByIdentifier(identifier);
+            } catch (IllegalArgumentException noDynamicClient) {
+                // Static descriptor clients remain a supported bootstrap fallback.
+            }
+        }
         RpcClient client = staticSolanaClients.get(descriptor);
         if (client == null) throw new IllegalArgumentException(
                 "No Solana client configured for chain descriptor: " + descriptor);
@@ -181,10 +199,37 @@ public class BlockchainClientRegistry {
     }
 
     public CantonLedgerEndpoint getCantonClient(ChainDescriptor descriptor) {
+        String identifier = resolveIdentifier(descriptor, ChainConfig.ChainType.CANTON);
+        if (identifier != null) {
+            try {
+                return getCantonClientByIdentifier(identifier);
+            } catch (IllegalArgumentException noDynamicClient) {
+                // Static descriptor clients remain a supported bootstrap fallback.
+            }
+        }
         CantonLedgerEndpoint client = staticCantonClients.get(descriptor);
         if (client == null) throw new IllegalArgumentException(
                 "No Canton client configured for chain descriptor: " + descriptor);
         return client;
+    }
+
+    private String resolveIdentifier(
+            ChainDescriptor descriptor, ChainConfig.ChainType expectedType) {
+        if (chainConfigRepository == null) {
+            return null;
+        }
+        List<ChainConfig> matches = chainConfigRepository
+                .findByIdentifierStartingWith(descriptor.chain().name() + "_").stream()
+                .filter(ChainConfig::isEnabled)
+                .filter(config -> config.getChainType() == expectedType)
+                .filter(config -> config.getNetworkType().name()
+                        .equals(descriptor.network().name()))
+                .toList();
+        if (matches.size() > 1) {
+            throw new IllegalStateException("Ambiguous enabled chain configuration for "
+                    + descriptor + ": " + matches.size() + " matches");
+        }
+        return matches.isEmpty() ? null : matches.getFirst().getIdentifier();
     }
 
     // ── Node pool refresh (called by health service) ──────────────────────────
@@ -200,6 +245,7 @@ public class BlockchainClientRegistry {
         Map<UUID, RpcClient>          newSolanaClients = new ConcurrentHashMap<>();
         Map<UUID, CantonLedgerEndpoint> newCantonClients = new ConcurrentHashMap<>();
         Map<String, List<NodeState>>  newByChain       = new ConcurrentHashMap<>();
+        Map<UUID, String>             newClientUrls    = new ConcurrentHashMap<>();
 
         for (RpcNode node : nodes) {
             String identifier = node.getChainConfig().getIdentifier();
@@ -208,36 +254,76 @@ public class BlockchainClientRegistry {
 
             NodeState state = new NodeState(
                     node.getId(), node.isHealthy(), node.isEnabled(), node.isExclusive(),
-                    node.getConsecutiveFailures(), node.getLastSuccessAt(), node.getLagFromBest());
+                    node.getConsecutiveFailures(), node.getLastSuccessAt(), node.getLagFromBest(), node.getKind());
 
+            // NB: reuse must be lazy. `map.getOrDefault(id, factory.createClient(url))` reads as
+            // "reuse, else create", but Java evaluates arguments eagerly — it built a client for
+            // every node on every refresh (this method runs every 30s) and discarded it on a cache
+            // hit. Each discarded web3j client used to pin a JVM shutdown hook, so it could never
+            // be collected; see Web3jClientFactory's javadoc. It also meant an edited node URL
+            // never took effect, because the cached client always won.
+            String url = node.getUrl();
             if (type == ChainConfig.ChainType.EVM && web3jClientFactory != null) {
-                Web3j client = nodeEvmClients.getOrDefault(node.getId(),
-                        web3jClientFactory.createClient(node.getUrl()));
+                Web3j client = reusable(nodeEvmClients, node.getId(), url)
+                        ? nodeEvmClients.get(node.getId())
+                        : web3jClientFactory.createClient(url);
                 newEvmClients.put(node.getId(), client);
+                newClientUrls.put(node.getId(), url);
             } else if (type == ChainConfig.ChainType.SOLANA && solanaClientFactory != null) {
-                RpcClient client = nodeSolanaClients.getOrDefault(node.getId(),
-                        solanaClientFactory.createClient(node.getUrl()));
+                RpcClient client = reusable(nodeSolanaClients, node.getId(), url)
+                        ? nodeSolanaClients.get(node.getId())
+                        : solanaClientFactory.createClient(url);
                 newSolanaClients.put(node.getId(), client);
+                newClientUrls.put(node.getId(), url);
             } else if (type == ChainConfig.ChainType.CANTON && cantonClientFactory != null) {
-                CantonLedgerEndpoint client = nodeCantonClients.getOrDefault(node.getId(),
-                        cantonClientFactory.createClient(
-                                node.getUrl(),
+                CantonLedgerEndpoint client = reusable(nodeCantonClients, node.getId(), url)
+                        ? nodeCantonClients.get(node.getId())
+                        : cantonClientFactory.createClient(
+                                url,
                                 chain.getSynchronizerId(),
                                 chain.getApplicationId() != null ? chain.getApplicationId() : "registerwerk",
-                                null));
+                                null);
                 newCantonClients.put(node.getId(), client);
+                newClientUrls.put(node.getId(), url);
             }
 
             newByChain.computeIfAbsent(identifier, k -> new ArrayList<>()).add(state);
         }
 
+        Map<UUID, CantonLedgerEndpoint> previousCantonClients = this.nodeCantonClients;
+
         this.nodeEvmClients    = newEvmClients;
         this.nodeSolanaClients = newSolanaClients;
         this.nodeCantonClients = newCantonClients;
         this.nodesByChain      = newByChain;
+        this.nodeClientUrls    = newClientUrls;
+
+        // EVM and Solana clients hold no dedicated resources (see Web3jClientFactory) and are
+        // simply dropped, but a Canton endpoint owns a gRPC channel with its own event-loop
+        // threads. Close any that this refresh orphaned — a removed node, or one whose URL
+        // changed so a replacement client was built.
+        for (Map.Entry<UUID, CantonLedgerEndpoint> previous : previousCantonClients.entrySet()) {
+            if (newCantonClients.get(previous.getKey()) != previous.getValue()) {
+                try {
+                    previous.getValue().close();
+                } catch (Exception e) {
+                    log.debug("Failed to close orphaned Canton endpoint {}: {}",
+                            previous.getKey(), e.getMessage());
+                }
+            }
+        }
 
         log.debug("Node pool refreshed: {} chains, {} EVM nodes, {} Solana nodes, {} Canton nodes",
                 newByChain.size(), newEvmClients.size(), newSolanaClients.size(), newCantonClients.size());
+    }
+
+    /**
+     * True when {@code clients} already holds a client for {@code nodeId} that was built against
+     * {@code url}. A URL change invalidates the cached client — otherwise editing a node's
+     * endpoint would leave the registry routing to the old one indefinitely.
+     */
+    private boolean reusable(Map<UUID, ?> clients, UUID nodeId, String url) {
+        return clients.containsKey(nodeId) && Objects.equals(nodeClientUrls.get(nodeId), url);
     }
 
     // ── Legacy single-client refresh (from chain_config table) ───────────────
@@ -320,10 +406,16 @@ public class BlockchainClientRegistry {
                     "All RPC nodes for chain '" + identifier + "' are manually disabled");
         }
 
-        // Prefer healthy with smallest lag
+        // Prefer healthy with smallest lag; a tie (most commonly two nodes both fully caught up,
+        // lag 0) breaks toward a CHAINCACHE-kind node — its push-based, gap-free finality
+        // guarantees are strictly better than a DIRECT_RPC node's poll-based ones at equal lag,
+        // and this is the whole point of chaincache as a showcase: routed traffic should actually
+        // prefer it, not just coexist with it. Never overrides health/lag itself — an unhealthy
+        // or lagging chaincache node still loses to a healthy, caught-up direct node.
         Optional<NodeState> best = candidates.stream()
                 .filter(NodeState::healthy)
-                .min(Comparator.comparingInt(n -> n.lagFromBest() != null ? n.lagFromBest() : 0));
+                .min(Comparator.<NodeState>comparingInt(n -> n.lagFromBest() != null ? n.lagFromBest() : 0)
+                        .thenComparing(n -> n.kind() == RpcNode.NodeKind.CHAINCACHE ? 0 : 1));
 
         if (best.isPresent()) {
             return best.get().nodeId();
@@ -350,5 +442,6 @@ public class BlockchainClientRegistry {
             boolean exclusive,
             int consecutiveFailures,
             Instant lastSuccessAt,
-            Integer lagFromBest) {}
+            Integer lagFromBest,
+            RpcNode.NodeKind kind) {}
 }

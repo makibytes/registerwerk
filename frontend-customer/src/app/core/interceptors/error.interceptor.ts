@@ -1,12 +1,31 @@
-import { HttpInterceptorFn, HttpStatusCode } from '@angular/common/http';
+import { HttpErrorResponse, HttpInterceptorFn, HttpStatusCode } from '@angular/common/http';
 import { inject } from '@angular/core';
-import { catchError, throwError } from 'rxjs';
+import { catchError, tap, throwError } from 'rxjs';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { AuthService } from '../auth/auth.service';
+import { clearAuthRedirectCooldown, requestAuthRedirect } from '../auth/redirect-guard';
+
+/**
+ * Reads an OAuth2 claims challenge out of a 401.
+ *
+ * The header is authoritative, but browsers hide response headers from JavaScript unless every
+ * hop exposes them (Kong's CORS `exposed_headers`, nginx, any future proxy). The backend
+ * therefore repeats the challenge in the body, and we fall back to it — a stripped header would
+ * otherwise present as an inexplicable logout loop.
+ */
+function extractClaimsChallenge(err: HttpErrorResponse): string | null {
+  const header = err.headers?.get('WWW-Authenticate');
+  const fromHeader = header?.match(/claims="([^"]+)"/)?.[1];
+  if (fromHeader) return fromHeader;
+
+  const body = err.error as { error?: string; claims?: string } | null;
+  return body?.error === 'insufficient_claims' && body.claims ? body.claims : null;
+}
 
 /**
  * Global HTTP error handler:
- *  401 → clears auth and redirects to /login
+ *  401 with a claims challenge → re-authenticates for the required auth context
+ *  401 otherwise               → clears auth and redirects to /login
  *  403 → shows "Access denied" toast
  *  5xx → shows generic error toast
  */
@@ -15,12 +34,38 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
 
   return next(req).pipe(
+    // Any successful response proves the session is good, so a later genuine expiry is not
+    // mistaken for the redirect loop the cooldown exists to break.
+    tap(() => clearAuthRedirectCooldown()),
     catchError(err => {
       switch (err.status) {
-        case HttpStatusCode.Unauthorized:
-          auth.clearToken();
-          auth.login();
+        case HttpStatusCode.Unauthorized: {
+          // A 401 carrying an OAuth2 claims challenge is not a rejected session — it means the
+          // action needs a Conditional Access authentication context the current token lacks.
+          // Signing the user out here would turn every step-up into an apparent logout.
+          const claims = extractClaimsChallenge(err);
+          if (claims) {
+            // Both branches go through requestAuthRedirect because in Entra mode these are full
+            // page navigations: without it, parallel 401s each start one, and a token Entra keeps
+            // reissuing but the backend keeps rejecting produces an endless reload loop.
+            if (!requestAuthRedirect(() => auth.acquireTokenWithClaims(claims))) {
+              snackBar.open(
+                'Additional verification was requested but could not be completed. Please sign in again.',
+                'Dismiss',
+                { duration: 8000, panelClass: 'snack-error' }
+              );
+            }
+            break;
+          }
+          if (!requestAuthRedirect(() => { auth.clearToken(); auth.login(); })) {
+            snackBar.open(
+              'Your session could not be authenticated. Please sign in again.',
+              'Dismiss',
+              { duration: 8000, panelClass: 'snack-error' }
+            );
+          }
           break;
+        }
 
         case HttpStatusCode.Forbidden:
           snackBar.open(

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KYC Expiring — Registerwerk</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .header { background: #b45309; color: #ffffff; padding: 32px 40px; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .badge { display: inline-block; background: #fef3c7; color: #b45309; font-weight: bold; padding: 6px 16px; border-radius: 20px; font-size: 14px; margin-bottom: 16px; }
+        .body { padding: 32px 40px; color: #333333; line-height: 1.6; }
+        .body p { margin: 0 0 16px 0; }
+        .footer { background: #f4f6f8; padding: 20px 40px; color: #888; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1 th:text="${expired} ? 'KYC Verification Expired' : 'KYC Verification Expiring Soon'">KYC Expiring</h1>
+    </div>
+    <div class="body">
+        <span class="badge" th:text="${expired} ? 'EXPIRED' : 'EXPIRING SOON'">EXPIRING SOON</span>
+        <p>Dear <strong th:text="${entityName}">Entity Name</strong>,</p>
+        <p th:if="${expired}">
+            Your KYC (Know Your Customer) verification has expired. Trading, subscription, and
+            other regulated activity may be restricted until it is renewed.
+        </p>
+        <p th:unless="${expired}">
+            Your KYC (Know Your Customer) verification will expire soon. Please renew it in good
+            time to avoid any interruption to your regulated activity on the registry.
+        </p>
+        <p>Kind regards,<br/>The Registerwerk Compliance Team</p>
+    </div>
+    <div class="footer">
+        This notification was sent as part of ongoing KYC monitoring (GwG §10).
+    </div>
+</div>
+</body>
+</html>

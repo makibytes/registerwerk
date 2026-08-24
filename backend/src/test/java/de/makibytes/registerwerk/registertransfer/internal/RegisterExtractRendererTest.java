@@ -135,7 +135,7 @@ class RegisterExtractRendererTest {
                 InspectionLegalBasis.HOLDER, "Requester");
 
         String text = extractText(pdf);
-        // §10 must disclose every holder of record (finding #12) — overflow now continues on
+        // §10 must disclose every holder of record — overflow now continues on
         // additional pages instead of silently truncating past the first page's capacity.
         assertThat(text).doesNotContain("gekürzt");
         assertThat(text).contains("HREF-0").contains("HREF-79");

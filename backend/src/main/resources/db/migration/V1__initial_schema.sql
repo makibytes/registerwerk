@@ -1,9 +1,4 @@
--- ─────────────────────────────────────────────────────────────────────────────
--- Registerwerk — squashed schema (previously V1–V24, then V1–V9).
--- Single migration for a clean-slate deploy. Never edit a released version of
--- this file in place — squashing again requires wiping every environment's
--- flyway_schema_history (see backend/CLAUDE.md / the squash note in git history).
--- ─────────────────────────────────────────────────────────────────────────────
+-- Registerwerk database schema for clean installations.
 
 -- ── Audit sequence (referenced by audit_event DEFAULT) ───────────────────────
 CREATE SEQUENCE IF NOT EXISTS audit_event_seq START 1 INCREMENT 1;
@@ -26,13 +21,28 @@ CREATE TABLE legal_entity (
     kyc_expiry_date      DATE,
     idp_issuer_url       VARCHAR(500),
     idp_client_id        VARCHAR(255),
+    -- Retained but never written. Inbound B2B federation is configured tenant-to-tenant in the
+    -- Entra portal; Registerwerk never runs an authorization-code flow against a customer's
+    -- tenant, so it has no use for their client secret and must not hold one in plaintext.
     idp_client_secret    VARCHAR(500),
+    -- Per-legal-entity identity model: whether the operator invites this customer's users as B2B
+    -- guests into its own tenant (and therefore manages their MFA), or federates to the
+    -- customer's own Entra tenant (and therefore does not). This records operator *intent*;
+    -- once a user has actually signed in, app_user.entra_tenant_id is the ground truth.
+    identity_model       VARCHAR(20) NOT NULL DEFAULT 'WORKFORCE_GUEST',
+    idp_tenant_id        UUID,
+    -- Whether MFA performed in the customer's home tenant is trusted here (Entra cross-tenant
+    -- access settings). Operator-controlled only: a customer self-asserting "trust my MFA"
+    -- would be a privilege-escalation vector.
+    idp_mfa_trusted      BOOLEAN NOT NULL DEFAULT FALSE,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by           UUID,
     CONSTRAINT chk_entity_type   CHECK (type IN ('ISSUER','INVESTOR','AUDITOR')),
     CONSTRAINT chk_entity_status CHECK (status IN ('PENDING_ONBOARDING','ACTIVE','SUSPENDED','DISSOLVED')),
-    CONSTRAINT chk_kyc_status    CHECK (kyc_status IN ('NOT_STARTED','IN_PROGRESS','APPROVED','REJECTED','EXPIRED'))
+    CONSTRAINT chk_kyc_status    CHECK (kyc_status IN ('NOT_STARTED','IN_PROGRESS','APPROVED','REJECTED','EXPIRED')),
+    CONSTRAINT chk_legal_entity_identity_model
+        CHECK (identity_model IN ('WORKFORCE_MEMBER', 'WORKFORCE_GUEST', 'FEDERATED'))
 );
 
 CREATE INDEX idx_legal_entity_type   ON legal_entity (type);
@@ -156,6 +166,20 @@ CREATE TABLE app_user (
     totp_secret      TEXT,
     totp_enabled     BOOLEAN      NOT NULL DEFAULT FALSE,
     totp_enrolled_at TIMESTAMPTZ,
+    -- Microsoft Entra ID identity mapping. entra_object_id is the token's `oid`: stable per user
+    -- per tenant, and the join key between an Entra principal and this row. Without it app_user.id
+    -- and the token's `sub` would be unrelated values, so SecurityUtils.extractUserId() would
+    -- return an id matching no row — breaking step-up issuance, dual-control self-approval checks
+    -- and every audit_event actor_id. NULL for LOCAL accounts.
+    entra_object_id  UUID,
+    -- Home tenant of the principal (token `tid`). When it differs from our own tenant the user is
+    -- federated from a customer's tenant, and we can neither read nor manage their MFA methods.
+    entra_tenant_id  UUID,
+    -- Advisory cache of the Microsoft Graph second-factor lookup, so the nav banner does not cost
+    -- a Graph round-trip on every page load. NEVER an authorisation input: Conditional Access is
+    -- the enforcement point, and a stale cache must not be able to grant or deny access.
+    entra_mfa_registered_at TIMESTAMPTZ,
+    entra_mfa_checked_at    TIMESTAMPTZ,
     CONSTRAINT chk_app_user_role CHECK (
         role IN (
             'REGISTRY_ADMIN','AUDIT','COMPLIANCE_OFFICER',
@@ -167,6 +191,17 @@ CREATE TABLE app_user (
 
 CREATE INDEX idx_app_user_email_lower     ON app_user (LOWER(email));
 CREATE INDEX idx_app_user_legal_entity_id ON app_user (legal_entity_id);
+
+COMMENT ON COLUMN app_user.entra_object_id IS
+    'Entra object id (token `oid`). Stable per user per tenant; the join key between an Entra '
+    'principal and this row. NULL for LOCAL accounts.';
+
+-- Partial unique index rather than a UNIQUE constraint: every LOCAL account leaves this NULL,
+-- and Postgres treats NULLs as distinct, but a partial index states the intent explicitly and
+-- keeps the index off the many LOCAL rows.
+CREATE UNIQUE INDEX ux_app_user_entra_object_id
+    ON app_user (entra_object_id)
+    WHERE entra_object_id IS NOT NULL;
 
 CREATE TABLE app_user_role (
     app_user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -272,6 +307,12 @@ CREATE TABLE asset (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_holder_sync_time TIMESTAMP WITH TIME ZONE,
+    -- Optimistic-lock version. AssetLifecycleService's submit/approve/reject/issue/suspend/
+    -- reactivate/redeem methods all do a read-modify-write on asset.status; without a version
+    -- check two concurrent transitions can both pass their precondition and both commit
+    -- silently. JPA's @Version turns a lost update into an optimistic-lock failure (HTTP 409) —
+    -- mirrors the identical guard on asset_holder.version below.
+    version          BIGINT NOT NULL DEFAULT 0,
     CONSTRAINT chk_token_standard CHECK (
         token_standard IN (
             'ERC20','ERC721','ERC1155','ERC3643','CONF_ERC20','CONF_ERC3643',
@@ -343,6 +384,8 @@ CREATE TABLE asset_deployment (
     contract_address   VARCHAR(66),
     deployed_at        TIMESTAMPTZ,
     deployed_by_tx     VARCHAR(66),
+    block_hash         VARCHAR(66),
+    block_number       BIGINT,
     deployment_status  VARCHAR(10) NOT NULL DEFAULT 'PENDING',
     CONSTRAINT chk_chain CHECK (
         chain IN (
@@ -362,6 +405,11 @@ CREATE TABLE asset_holder (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     asset_id          UUID NOT NULL REFERENCES asset(id),
     investor_id       UUID NOT NULL REFERENCES legal_entity(id),
+    -- 0x-prefixed (EVM/Starknet) addresses are normalized to lowercase at write time
+    -- (EvmUtils.normalizeAddress), matching indexer.api.HolderDataService's convention, so that
+    -- an indexer-persisted address and a UI-entered checksummed one match. Solana (base58) and
+    -- Stellar (base32) addresses also live in this column and are case-SENSITIVE by
+    -- construction — lowercasing those would corrupt them, so normalization is 0x-only.
     wallet_address    VARCHAR(66) NOT NULL,
     whitelisted       BOOLEAN NOT NULL DEFAULT false,
     whitelist_tx_hash VARCHAR(66),
@@ -408,6 +456,9 @@ CREATE TABLE asset_bond_terms (
     callable          BOOLEAN NOT NULL DEFAULT FALSE,
     call_schedule     JSONB,
     bond_status       VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    -- Fraction of face value paid at issue (e.g. 0.80 for 80%). The entire point of a
+    -- zero-coupon bond; fixed/floating bonds leave it at par.
+    issue_price       NUMERIC(10, 8) NOT NULL DEFAULT 1.0,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -508,15 +559,12 @@ CREATE INDEX ON vault_nav_strike (asset_id, effective_at DESC);
 -- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE token_transfer (
-    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    id               UUID        NOT NULL DEFAULT gen_random_uuid(),
     asset_id         UUID        REFERENCES asset(id),
     deployment_id    UUID        REFERENCES asset_deployment(id),
     chain_config_id  UUID        NOT NULL REFERENCES chain_config(id),
-    -- Widened to 128 (from an original 66) and from/to/block_number made nullable: Solana
-    -- signatures are base58-encoded ~87-88 chars (already wider than 66), and
-    -- SolanaTransferSyncService leaves from/to NULL for mints/burns and never sets block_number
-    -- (Solana has slots, not blocks) — the original NOT NULL/VARCHAR(66) constraints made every
-    -- such insert fail. Also gives Starknet felt addresses and Stellar G-addresses headroom.
+    -- Sized for EVM hashes, Solana signatures, Starknet felts, and Stellar G-addresses.
+    -- Non-EVM indexers may use slots/cursors and omit block or counterparty fields.
     contract_address VARCHAR(128) NOT NULL,
     from_address     VARCHAR(128),
     to_address       VARCHAR(128),
@@ -530,10 +578,16 @@ CREATE TABLE token_transfer (
     occurred_at      TIMESTAMPTZ NOT NULL,
     explorer_tx_url  VARCHAR(600),
     raw_data         JSONB,
+    finality_status  VARCHAR(12) NOT NULL DEFAULT 'FINAL',
+    block_hash       VARCHAR(128),
     CONSTRAINT chk_event_type     CHECK (event_type IN ('MINT','TRANSFER','BURN')),
-    CONSTRAINT uq_transfer_evm    UNIQUE NULLS NOT DISTINCT (chain_config_id, tx_hash, log_index),
-    CONSTRAINT uq_transfer_solana UNIQUE NULLS NOT DISTINCT (chain_config_id, tx_hash, slot)
-);
+    CONSTRAINT chk_transfer_finality CHECK (finality_status IN ('PROVISIONAL','FINAL','ORPHANED')),
+    CONSTRAINT token_transfer_pkey PRIMARY KEY (id, occurred_at),
+    CONSTRAINT uq_transfer_evm    UNIQUE NULLS NOT DISTINCT (chain_config_id, tx_hash, log_index, occurred_at),
+    CONSTRAINT uq_transfer_solana UNIQUE NULLS NOT DISTINCT (chain_config_id, tx_hash, slot, occurred_at)
+) PARTITION BY RANGE (occurred_at);
+
+CREATE TABLE token_transfer_default PARTITION OF token_transfer DEFAULT;
 
 CREATE INDEX idx_transfer_asset      ON token_transfer (asset_id);
 CREATE INDEX idx_transfer_deployment ON token_transfer (deployment_id);
@@ -541,13 +595,15 @@ CREATE INDEX idx_transfer_chain      ON token_transfer (chain_config_id, block_n
 CREATE INDEX idx_transfer_contract   ON token_transfer (contract_address, occurred_at DESC);
 CREATE INDEX idx_transfer_from       ON token_transfer (from_address);
 CREATE INDEX idx_transfer_to         ON token_transfer (to_address);
-CREATE INDEX idx_transfer_event_type ON token_transfer (event_type);
+CREATE INDEX idx_transfer_finality   ON token_transfer (chain_config_id, finality_status, block_number)
+    WHERE finality_status <> 'FINAL';
 
 CREATE TABLE indexer_state (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     chain_config_id       UUID        NOT NULL REFERENCES chain_config(id),
     indexer_type          VARCHAR(30) NOT NULL,
     last_synced_block     BIGINT,
+    last_final_block      BIGINT,
     -- Widened to 200 (from 100) — reused as a generic string cursor (Solana signature, Canton
     -- ledger offset, Horizon paging token), matching what the JPA entity always declared.
     last_synced_signature VARCHAR(200),
@@ -564,6 +620,55 @@ CREATE TABLE indexer_state (
 
 CREATE INDEX idx_indexer_state_chain  ON indexer_state (chain_config_id);
 CREATE INDEX idx_indexer_state_status ON indexer_state (status);
+
+-- Per-mint Solana cursor. indexer_state above is keyed only by (chain, indexer_type), which is
+-- too coarse for Solana: one shared cursor across every tracked mint on a chain permanently
+-- freezes the "until" boundary and silently loses transfer history once a mint's backlog
+-- exceeds MAX_SIGNATURES_PER_POLL. Each mint therefore gets its own advancing cursor.
+CREATE TABLE solana_mint_sync_cursor (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_config_id       UUID NOT NULL REFERENCES chain_config(id),
+    mint_address          VARCHAR(64) NOT NULL,
+    last_synced_signature VARCHAR(200),
+    last_synced_at        TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_solana_mint_sync_cursor UNIQUE (chain_config_id, mint_address)
+);
+
+-- Durable mirror of the Canton Holdings the indexer has seen Created and not yet seen Archived.
+-- Daml's Archived ledger event carries only the contract ID, never its former argument payload,
+-- so without this table an Archived event cannot be attributed to an instrument/owner/amount.
+CREATE TABLE canton_holding_snapshot (
+    contract_id      VARCHAR(255) PRIMARY KEY,
+    chain_config_id  UUID NOT NULL REFERENCES chain_config(id),
+    instrument       VARCHAR(255) NOT NULL,
+    owner            VARCHAR(255) NOT NULL,
+    amount           NUMERIC(38,18) NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_canton_holding_snapshot_chain ON canton_holding_snapshot (chain_config_id);
+
+-- Per-deployment cursor for ConfidentialTravelRuleScreeningService: the last indexed block
+-- screened for Travel Rule obligations, so each scheduled run only decrypts and evaluates
+-- confidential transfer/mint events new since the previous run.
+CREATE TABLE confidential_transfer_screening_state (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_deployment_id  UUID NOT NULL REFERENCES asset_deployment(id),
+    last_screened_block  BIGINT NOT NULL DEFAULT 0,
+    last_run_at          TIMESTAMPTZ,
+    last_error           TEXT,
+    -- Consecutive runs that failed to resolve the earliest unresolved event. The cursor must
+    -- not advance unconditionally past a failed decrypt (a transient relayer/KMS hiccup would
+    -- permanently and silently skip screening for that transfer), but nor may it retry forever
+    -- (a non-transient failure would wedge the service). This bounds the retries; on exhaustion
+    -- the service advances past the event and logs at ERROR.
+    consecutive_decrypt_failures INT NOT NULL DEFAULT 0,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_conf_transfer_screening_deployment UNIQUE (asset_deployment_id)
+);
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ERC-3643 / ONCHAIN IDENTITY
@@ -654,9 +759,13 @@ CREATE TABLE erc3643_identity_registry (
     country_code        SMALLINT,
     registered_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     registered_by_tx    VARCHAR(66),
-    removed_at          TIMESTAMPTZ,
-    UNIQUE (suite_id, wallet_address)
+    removed_at          TIMESTAMPTZ
 );
+
+-- Only active registrations are unique; removed registrations remain as history.
+CREATE UNIQUE INDEX erc3643_identity_registry_active_unique
+    ON erc3643_identity_registry (suite_id, wallet_address)
+    WHERE removed_at IS NULL;
 
 CREATE INDEX idx_erc3643_ir_suite    ON erc3643_identity_registry (suite_id);
 CREATE INDEX idx_erc3643_ir_identity ON erc3643_identity_registry (onchain_identity_id);
@@ -666,7 +775,7 @@ CREATE INDEX idx_erc3643_ir_identity ON erc3643_identity_registry (onchain_ident
 -- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE blockchain_transaction (
-    id               UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    id               UUID        NOT NULL DEFAULT gen_random_uuid(),
     tx_hash          VARCHAR(66),
     status           VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     chain            VARCHAR(30),
@@ -680,10 +789,17 @@ CREATE TABLE blockchain_transaction (
     actor_role       VARCHAR(30),
     gas_used         BIGINT,
     block_number     BIGINT,
+    block_hash       VARCHAR(66),
     error_message    TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    completed_at     TIMESTAMPTZ
-);
+    completed_at     TIMESTAMPTZ,
+    ops_note         TEXT,
+    ops_reviewed_at  TIMESTAMPTZ,
+    ops_reviewed_by  UUID,
+    CONSTRAINT blockchain_transaction_pkey PRIMARY KEY (id, created_at)
+) PARTITION BY RANGE (created_at);
+
+CREATE TABLE blockchain_transaction_default PARTITION OF blockchain_transaction DEFAULT;
 
 CREATE INDEX idx_btx_deployment ON blockchain_transaction (deployment_id);
 CREATE INDEX idx_btx_asset      ON blockchain_transaction (asset_id);
@@ -696,12 +812,32 @@ CREATE TABLE operator_wallet (
     name          VARCHAR(120) NOT NULL UNIQUE,
     type          VARCHAR(10)  NOT NULL,
     address       VARCHAR(64)  NOT NULL,
-    keystore_path VARCHAR(255) NOT NULL,
+    keystore_path VARCHAR(255),
+    custody_type  VARCHAR(20)  NOT NULL DEFAULT 'SOFTWARE',
+    key_reference VARCHAR(255),
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     created_by    UUID,
     CONSTRAINT chk_wallet_type CHECK (type IN ('EVM','SOLANA')),
+    CONSTRAINT chk_wallet_custody_type CHECK (custody_type IN ('SOFTWARE', 'PKCS11')),
+    CONSTRAINT chk_wallet_custody_reference CHECK (
+        (custody_type = 'SOFTWARE' AND keystore_path IS NOT NULL AND key_reference IS NULL)
+        OR
+        (custody_type = 'PKCS11' AND type = 'EVM' AND keystore_path IS NULL AND key_reference IS NOT NULL)
+    ),
     CONSTRAINT uq_wallet_addr  UNIQUE (type, address)
+);
+
+CREATE UNIQUE INDEX uq_operator_wallet_pkcs11_reference
+    ON operator_wallet (key_reference)
+    WHERE custody_type = 'PKCS11';
+
+CREATE TABLE wallet_nonce_lease (
+    chain_id       BIGINT        NOT NULL,
+    sender_address VARCHAR(42)   NOT NULL,
+    next_nonce     NUMERIC(78,0) NOT NULL,
+    updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    PRIMARY KEY (chain_id, sender_address)
 );
 
 CREATE TABLE wallet_chain_default (
@@ -868,9 +1004,12 @@ CREATE TABLE trade_execution (
     wallet_address         VARCHAR(128)   NOT NULL,
     created_at             TIMESTAMPTZ    NOT NULL DEFAULT now(),
     settled_at             TIMESTAMPTZ,
-    -- Populated for FAILED/CANCELLED/REFUNDED executions — a venue rejection previously threw
-    -- and rolled back the whole transaction, leaving no record of the attempt at all.
+    -- Failure detail retained for FAILED/CANCELLED/REFUNDED executions.
     failure_reason         TEXT,
+    -- Evidence of the actual cash leg (a stablecoin tx hash, a SEPA transfer reference, …).
+    -- Settling a PENDING trade otherwise required nothing beyond the buyer's own HTTP call,
+    -- leaving reconciliation with pure self-attestation to check.
+    payment_reference      VARCHAR(255),
     CONSTRAINT chk_trade_execution_venue CHECK (
         venue_code IN ('SIMULATED','ASSETERA','ARCHAX','TALOS')
     ),
@@ -1203,7 +1342,11 @@ CREATE TABLE regreport_submission (
     id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     report_type            VARCHAR(30) NOT NULL,
     jurisdiction           VARCHAR(20) NOT NULL,
-    status                 VARCHAR(20) NOT NULL DEFAULT 'GENERATING',
+    -- Transport-only statuses. Regulatory reporting here is an opt-in, non-production draft
+    -- generator: none of these states proves official-schema validity, filing, acceptance, or
+    -- legal compliance. Earlier authority-outcome labels (ACCEPTED / ACKNOWLEDGED / REJECTED)
+    -- described local gateway outcomes far too strongly.
+    status                 VARCHAR(30) NOT NULL DEFAULT 'DRAFT_UNVALIDATED',
     reporting_period_start DATE NOT NULL,
     reporting_period_end   DATE NOT NULL,
     entity_id              UUID,
@@ -1211,10 +1354,15 @@ CREATE TABLE regreport_submission (
     document_s3_key        TEXT,
     document_hash          BYTEA,
     document_signature     BYTEA,
+    -- Legacy adapter-evidence columns. Retained so that historical rows keep their evidence;
+    -- new code writes transported_at / transport_ref / transport_error instead.
     submitted_at           TIMESTAMPTZ,
     submission_ref         TEXT,
     acknowledged_at        TIMESTAMPTZ,
     rejection_reason       TEXT,
+    transported_at         TIMESTAMPTZ,
+    transport_ref          TEXT,
+    transport_error        TEXT,
     generated_by           UUID,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -1222,7 +1370,9 @@ CREATE TABLE regreport_submission (
 
 CREATE INDEX idx_regreport_type_period ON regreport_submission (report_type, reporting_period_end);
 CREATE INDEX idx_regreport_entity      ON regreport_submission (entity_id) WHERE entity_id IS NOT NULL;
-CREATE INDEX idx_regreport_status      ON regreport_submission (status)    WHERE status NOT IN ('ACKNOWLEDGED');
+CREATE INDEX idx_regreport_status      ON regreport_submission (status)
+    WHERE status IN ('DRAFT_UNVALIDATED', 'NOT_TRANSPORTED', 'TRANSPORT_FAILED',
+                     'TRANSPORTED_UNVERIFIED');
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- DORA ICT INCIDENTS & THIRD-PARTY REGISTER (Art. 5-17, Art. 28)
@@ -1238,10 +1388,17 @@ CREATE TABLE ict_incident (
     source_event_type       TEXT,
     source_event_ref        UUID,
     detected_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- DORA Art. 19(4) / RTS (EU) 2025/301 impose *two* deadlines. Tracking only the 24h
+    -- initial-report clock let an incident look "on track" for up to 20h after the stricter
+    -- 4h-from-classification deadline had already passed.
+    classified_at           TIMESTAMPTZ,
+    classification_deadline TIMESTAMPTZ,
     initial_report_deadline TIMESTAMPTZ,
     final_report_deadline   TIMESTAMPTZ,
     initial_reported_at     TIMESTAMPTZ,
     final_reported_at       TIMESTAMPTZ,
+    -- Actor responsible for the Art. 19 authority-notification decision.
+    reported_by             UUID,
     authority_ref           TEXT,
     contained_at            TIMESTAMPTZ,
     resolved_at             TIMESTAMPTZ,
@@ -1360,6 +1517,114 @@ CREATE TABLE audit_event_default PARTITION OF audit_event DEFAULT;
 -- Bootstrap 12 months of partitions
 SELECT audit_event_ensure_partitions(12);
 
+CREATE OR REPLACE FUNCTION rw_ensure_monthly_partitions(
+    p_table        regclass,
+    p_time_column  text,
+    p_months_ahead int DEFAULT 6
+) RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE
+    schema_name TEXT;
+    bare_name   TEXT;
+    actual_col  TEXT;
+    month_start DATE;
+    month_end   DATE;
+    part_name   TEXT;
+BEGIN
+    SELECT n.nspname, c.relname INTO schema_name, bare_name
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.oid = p_table;
+
+    SELECT a.attname INTO actual_col
+    FROM pg_partitioned_table pt
+    JOIN pg_attribute a ON a.attrelid = pt.partrelid AND a.attnum = pt.partattrs[0]
+    WHERE pt.partrelid = p_table;
+
+    IF actual_col IS NULL THEN
+        RAISE EXCEPTION 'rw_ensure_monthly_partitions: % is not a partitioned table', p_table;
+    ELSIF actual_col IS DISTINCT FROM p_time_column THEN
+        RAISE EXCEPTION 'rw_ensure_monthly_partitions: % is partitioned on column % not %',
+            p_table, actual_col, p_time_column;
+    END IF;
+
+    FOR i IN 0..p_months_ahead LOOP
+        month_start := date_trunc('month', CURRENT_DATE + (i || ' months')::INTERVAL)::DATE;
+        month_end   := (month_start + INTERVAL '1 month')::DATE;
+        part_name   := bare_name || '_' || to_char(month_start, 'YYYY_MM');
+        BEGIN
+            EXECUTE format(
+                'CREATE TABLE IF NOT EXISTS %I.%I PARTITION OF %s FOR VALUES FROM (%L) TO (%L)',
+                schema_name, part_name, p_table::text, month_start, month_end
+            );
+        EXCEPTION WHEN duplicate_table THEN
+            NULL;
+        END;
+    END LOOP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION rw_retire_partitions(
+    p_table       regclass,
+    p_time_column text,
+    p_keep_months int,
+    p_mode        text DEFAULT 'DETACH'
+) RETURNS SETOF text LANGUAGE plpgsql AS $$
+DECLARE
+    schema_name TEXT;
+    bare_name   TEXT;
+    actual_col  TEXT;
+    cutoff      DATE;
+    child       RECORD;
+    part_month  DATE;
+    new_name    TEXT;
+BEGIN
+    IF p_mode <> 'DETACH' THEN
+        RAISE EXCEPTION 'rw_retire_partitions: mode % is not supported; only DETACH is allowed', p_mode;
+    END IF;
+
+    SELECT n.nspname, c.relname INTO schema_name, bare_name
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.oid = p_table;
+
+    SELECT a.attname INTO actual_col
+    FROM pg_partitioned_table pt
+    JOIN pg_attribute a ON a.attrelid = pt.partrelid AND a.attnum = pt.partattrs[0]
+    WHERE pt.partrelid = p_table;
+
+    IF actual_col IS NULL THEN
+        RAISE EXCEPTION 'rw_retire_partitions: % is not a partitioned table', p_table;
+    ELSIF actual_col IS DISTINCT FROM p_time_column THEN
+        RAISE EXCEPTION 'rw_retire_partitions: % is partitioned on column % not %',
+            p_table, actual_col, p_time_column;
+    END IF;
+
+    cutoff := date_trunc('month', now())::DATE - (p_keep_months || ' months')::INTERVAL;
+
+    FOR child IN
+        SELECT ch.relname AS child_name, chn.nspname AS child_schema
+        FROM pg_inherits i
+        JOIN pg_class ch ON ch.oid = i.inhrelid
+        JOIN pg_namespace chn ON chn.oid = ch.relnamespace
+        WHERE i.inhparent = p_table
+          AND ch.relname ~ (bare_name || '_[0-9]{4}_[0-9]{2}$')
+        ORDER BY ch.relname
+    LOOP
+        part_month := to_date(substring(child.child_name FROM '([0-9]{4}_[0-9]{2})$'), 'YYYY_MM');
+        IF part_month + INTERVAL '1 month' <= cutoff THEN
+            new_name := bare_name || '_archived_' || to_char(part_month, 'YYYY_MM');
+            EXECUTE format('ALTER TABLE %s DETACH PARTITION %I.%I',
+                p_table::text, child.child_schema, child.child_name);
+            EXECUTE format('ALTER TABLE %I.%I RENAME TO %I',
+                child.child_schema, child.child_name, new_name);
+            RETURN NEXT new_name;
+        END IF;
+    END LOOP;
+    RETURN;
+END;
+$$;
+
+SELECT rw_ensure_monthly_partitions('token_transfer', 'occurred_at', 6);
+SELECT rw_ensure_monthly_partitions('blockchain_transaction', 'created_at', 6);
+
 -- Single-row pointer to the most recent audit_event.entry_hash. AuditEventRecorder locks
 -- this row with SELECT ... FOR UPDATE for the duration of its append transaction, serializing
 -- hash-chain appends across threads and backend instances so the chain can never fork under
@@ -1397,128 +1662,6 @@ CREATE INDEX event_publication_by_completion_date_idx
     ON event_publication (completion_date);
 CREATE INDEX event_publication_serialized_event_hash_idx
     ON event_publication USING hash(serialized_event);
-
--- ═══════════════════════════════════════════════════════════════════════════
--- QUARTZ PERSISTENT JOB STORE (Quartz 2.3.x PostgreSQL schema)
--- ═══════════════════════════════════════════════════════════════════════════
-
-CREATE TABLE qrtz_job_details (
-    sched_name        VARCHAR(120) NOT NULL,
-    job_name          VARCHAR(200) NOT NULL,
-    job_group         VARCHAR(200) NOT NULL,
-    description       VARCHAR(250),
-    job_class_name    VARCHAR(250) NOT NULL,
-    is_durable        BOOLEAN      NOT NULL,
-    is_nonconcurrent  BOOLEAN      NOT NULL,
-    is_update_data    BOOLEAN      NOT NULL,
-    requests_recovery BOOLEAN      NOT NULL,
-    job_data          BYTEA,
-    PRIMARY KEY (sched_name, job_name, job_group)
-);
-
-CREATE TABLE qrtz_triggers (
-    sched_name     VARCHAR(120) NOT NULL,
-    trigger_name   VARCHAR(200) NOT NULL,
-    trigger_group  VARCHAR(200) NOT NULL,
-    job_name       VARCHAR(200) NOT NULL,
-    job_group      VARCHAR(200) NOT NULL,
-    description    VARCHAR(250),
-    next_fire_time BIGINT,
-    prev_fire_time BIGINT,
-    priority       INTEGER,
-    trigger_state  VARCHAR(16)  NOT NULL,
-    trigger_type   VARCHAR(8)   NOT NULL,
-    start_time     BIGINT       NOT NULL,
-    end_time       BIGINT,
-    calendar_name  VARCHAR(200),
-    misfire_instr  SMALLINT,
-    job_data       BYTEA,
-    PRIMARY KEY (sched_name, trigger_name, trigger_group),
-    FOREIGN KEY (sched_name, job_name, job_group)
-        REFERENCES qrtz_job_details (sched_name, job_name, job_group)
-);
-
-CREATE TABLE qrtz_simple_triggers (
-    sched_name      VARCHAR(120) NOT NULL,
-    trigger_name    VARCHAR(200) NOT NULL,
-    trigger_group   VARCHAR(200) NOT NULL,
-    repeat_count    BIGINT       NOT NULL,
-    repeat_interval BIGINT       NOT NULL,
-    times_triggered BIGINT       NOT NULL,
-    PRIMARY KEY (sched_name, trigger_name, trigger_group),
-    FOREIGN KEY (sched_name, trigger_name, trigger_group)
-        REFERENCES qrtz_triggers (sched_name, trigger_name, trigger_group)
-);
-
-CREATE TABLE qrtz_cron_triggers (
-    sched_name      VARCHAR(120) NOT NULL,
-    trigger_name    VARCHAR(200) NOT NULL,
-    trigger_group   VARCHAR(200) NOT NULL,
-    cron_expression VARCHAR(200) NOT NULL,
-    time_zone_id    VARCHAR(80),
-    PRIMARY KEY (sched_name, trigger_name, trigger_group),
-    FOREIGN KEY (sched_name, trigger_name, trigger_group)
-        REFERENCES qrtz_triggers (sched_name, trigger_name, trigger_group)
-);
-
-CREATE TABLE qrtz_fired_triggers (
-    sched_name        VARCHAR(120) NOT NULL,
-    entry_id          VARCHAR(140) NOT NULL,
-    trigger_name      VARCHAR(200) NOT NULL,
-    trigger_group     VARCHAR(200) NOT NULL,
-    instance_name     VARCHAR(200) NOT NULL,
-    fired_time        BIGINT       NOT NULL,
-    sched_time        BIGINT       NOT NULL,
-    priority          INTEGER      NOT NULL,
-    state             VARCHAR(16)  NOT NULL,
-    job_name          VARCHAR(200),
-    job_group         VARCHAR(200),
-    is_nonconcurrent  BOOLEAN,
-    requests_recovery BOOLEAN,
-    PRIMARY KEY (sched_name, entry_id)
-);
-
-CREATE TABLE qrtz_scheduler_state (
-    sched_name        VARCHAR(120) NOT NULL,
-    instance_name     VARCHAR(200) NOT NULL,
-    last_checkin_time BIGINT       NOT NULL,
-    checkin_interval  BIGINT       NOT NULL,
-    PRIMARY KEY (sched_name, instance_name)
-);
-
-CREATE TABLE qrtz_locks (
-    sched_name VARCHAR(120) NOT NULL,
-    lock_name  VARCHAR(40)  NOT NULL,
-    PRIMARY KEY (sched_name, lock_name)
-);
-
-CREATE TABLE qrtz_blob_triggers (
-    sched_name    VARCHAR(120) NOT NULL,
-    trigger_name  VARCHAR(200) NOT NULL,
-    trigger_group VARCHAR(200) NOT NULL,
-    blob_data     BYTEA,
-    PRIMARY KEY (sched_name, trigger_name, trigger_group),
-    FOREIGN KEY (sched_name, trigger_name, trigger_group)
-        REFERENCES qrtz_triggers (sched_name, trigger_name, trigger_group)
-);
-
-CREATE TABLE qrtz_calendars (
-    sched_name    VARCHAR(120) NOT NULL,
-    calendar_name VARCHAR(200) NOT NULL,
-    calendar      BYTEA        NOT NULL,
-    PRIMARY KEY (sched_name, calendar_name)
-);
-
-CREATE TABLE qrtz_paused_trigger_grps (
-    sched_name    VARCHAR(120) NOT NULL,
-    trigger_group VARCHAR(200) NOT NULL,
-    PRIMARY KEY (sched_name, trigger_group)
-);
-
-CREATE INDEX idx_qrtz_j_req_recovery    ON qrtz_job_details    (sched_name, requests_recovery);
-CREATE INDEX idx_qrtz_t_next_fire_time  ON qrtz_triggers       (sched_name, next_fire_time);
-CREATE INDEX idx_qrtz_t_state           ON qrtz_triggers       (sched_name, trigger_state);
-CREATE INDEX idx_qrtz_ft_trig_inst_name ON qrtz_fired_triggers (sched_name, instance_name);
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- DB ROLE SEPARATION — audit log immutability defence-in-depth
@@ -1619,7 +1762,21 @@ ALTER TABLE asset_holder
     -- balance (eWpG §16) and is mutated by read-modify-write in several paths that
     -- can run concurrently (trade settlement, manual §24 corrections, indexer sync).
     -- JPA's @Version turns a lost update into an optimistic-lock failure (HTTP 409).
-    ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+    ADD COLUMN version BIGINT NOT NULL DEFAULT 0,
+    -- Soft-delete marker. Removal must never hard-delete the row: a §16 eWpG register entry
+    -- disappearing entirely conflicts with retention/tamper-evidence obligations.
+    ADD COLUMN removed_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN asset_holder.removed_at IS
+    'Soft-delete marker. NULL = still an active register entry. Non-null = the instant '
+    'HolderService.removeHolder closed this holder out; the row is retained (never hard-deleted) '
+    'for eWpG §16 retention/tamper-evidence. Compliance-facing reads should exclude removed rows '
+    '(see AssetHolderRepository.findActive* methods); reconciliation/audit reads may still need them.';
+
+-- Compliance-facing listings filter on this predicate constantly (findActiveByAssetId /
+-- findActiveByInvestorId / existsActiveBy...); index it alongside the existing lookup columns.
+CREATE INDEX idx_holder_asset_active    ON asset_holder (asset_id)    WHERE removed_at IS NULL;
+CREATE INDEX idx_holder_investor_active ON asset_holder (investor_id) WHERE removed_at IS NULL;
 
 COMMENT ON COLUMN asset_holder.holder_reference IS
     'eWpG §17(2) pseudonymous unique identifier for single-entry (Einzeleintragung) holders.';
@@ -1729,11 +1886,8 @@ CREATE INDEX idx_register_transfer_status ON register_transfer (status)
 -- DSGVO ART. 17 ERASURE REQUESTS
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- The erasure endpoint previously acknowledged a request ("ERASURE_REQUESTED") without
--- storing anything, so a legally-binding request was dropped and no operator could act
--- on it. This table makes each request a persisted operator work item carrying the
--- 30-day response clock (Art. 12(3)) and its resolution. Actual erasure remains a manual,
--- reviewed step because most fields fall under statutory retention (eWpG §15(3), GwG §8).
+-- Persisted operator work items for the Art. 12(3) response clock and resolution.
+-- Actual erasure is reviewed because statutory retention may apply.
 
 CREATE TABLE erasure_request (
     id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1828,7 +1982,7 @@ CREATE INDEX idx_wallet_bind_challenge_lookup
     ON wallet_bind_challenge (legal_entity_id, chain_config_id, lower(wallet_address))
     WHERE used_at IS NULL;
 
--- Permission framework (PermissionRegistry mirror; grants managed from Phase 2 on).
+-- Permission framework (PermissionRegistry mirror).
 CREATE TABLE permission_definition (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code            VARCHAR(120) NOT NULL UNIQUE,
@@ -1857,6 +2011,10 @@ CREATE TABLE permission_grant (
     revoked_tx               VARCHAR(66),
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at               TIMESTAMPTZ,
+    -- 4-eyes: operator-tier permission grants/revocations carry step-up *and* a second
+    -- approver, matching the asset_token_admin_grant pattern.
+    dual_control_approver_id UUID,
+    dual_control_approved_at TIMESTAMPTZ,
     CONSTRAINT chk_permission_grant_type CHECK (grant_type IN ('ORG','ROLE')),
     CONSTRAINT chk_permission_grant_status CHECK (
         status IN ('PENDING','ACTIVE','REVOKED','FAILED')
@@ -1881,6 +2039,9 @@ CREATE TABLE ecosystem_trusted_issuer (
     removed_tx      VARCHAR(66),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     removed_at      TIMESTAMPTZ,
+    -- 4-eyes, as for permission_grant above.
+    dual_control_approver_id UUID,
+    dual_control_approved_at TIMESTAMPTZ,
     CONSTRAINT chk_ecosystem_trusted_issuer_status CHECK (
         status IN ('PENDING','ACTIVE','REMOVED','FAILED')
     )
@@ -1895,7 +2056,7 @@ CREATE UNIQUE INDEX uq_ecosystem_trusted_issuer_live
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- The operator curates the payment methods the registry provides as ready-made rails:
--- MiCAR-compliant e-money-token stablecoins (AUEUR, USDC, …), the Pontes instant-payment
+-- Stablecoin payment rails with operator-recorded MiCAR disclosure metadata, the Pontes instant-payment
 -- API, ERC-7573-style DvP settlement, and classic SEPA. dApp manifests reference rails
 -- by code (advisory model — dApps may also declare custom methods they implement
 -- themselves; the operator sees both at review time).
@@ -1918,6 +2079,13 @@ CREATE TABLE payment_rail (
     -- disclosure-surfacing only; Registerwerk is not the EMT issuer.
     white_paper_url     VARCHAR(500),
     redemption_at_par   BOOLEAN       NOT NULL DEFAULT false,
+    -- The fields above are operator-entered free text. These three record that an operator
+    -- attested to having checked them, so "disclosed" is distinguishable from "actually
+    -- checked against a real register". This is an auditable attestation, NOT a live
+    -- register cross-check performed by Registerwerk.
+    micar_verified      BOOLEAN       NOT NULL DEFAULT FALSE,
+    micar_verified_at   TIMESTAMPTZ,
+    micar_verified_by   UUID,
     enabled             BOOLEAN       NOT NULL DEFAULT true,
     created_at          TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ   NOT NULL DEFAULT now(),
@@ -2177,6 +2345,8 @@ CREATE TABLE login_attempt (
     updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
+CREATE INDEX idx_login_attempt_updated_at ON login_attempt (updated_at);
+
 COMMENT ON TABLE login_attempt IS
     'Shared brute-force counter for the built-in HS256 login (POST /api/v1/public/auth/login), '
     'keyed by normalized email. Rows are upserted per attempt and deleted on success; a row '
@@ -2277,6 +2447,10 @@ CREATE TABLE lending_position (
     collateral_amount NUMERIC(78,0) NOT NULL DEFAULT 0,
     current_debt      NUMERIC(78,0) NOT NULL DEFAULT 0,
     health_factor_wad NUMERIC(78,0),
+    -- Whether health_factor_wad can be trusted. NULL = not read (no debt, or the read itself
+    -- failed); FALSE = read succeeded but the price backing it is unpriced or stale. Without
+    -- this flag a stale mark is indistinguishable from a good one.
+    health_factor_reliable BOOLEAN,
     status            VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
     last_synced_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -2319,12 +2493,17 @@ CREATE TABLE asset_token_admin_grant (
     chain_config_id          UUID,
     legal_basis              TEXT NOT NULL,
     created_by               UUID NOT NULL,
+    -- Set at GRANT time and never overwritten.
     dual_control_approver_id UUID,
     dual_control_approved_at TIMESTAMPTZ,
     expires_at               TIMESTAMPTZ,
     revoked_at               TIMESTAMPTZ,
     revoked_by               UUID,
     revoke_reason            TEXT,
+    -- Revocation needs 4-eyes too, and needs its *own* pair: reusing the grant-time columns
+    -- would erase the record of who approved the original grant.
+    revoke_dual_control_approver_id UUID,
+    revoke_dual_control_approved_at TIMESTAMPTZ,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -2338,10 +2517,6 @@ CREATE INDEX idx_asset_token_admin_grant_expires        ON asset_token_admin_gra
 -- ═══════════════════════════════════════════════════════════════════════════
 -- CUSTOMER SUPPORT — support tickets + threaded messages
 -- ═══════════════════════════════════════════════════════════════════════════
---
--- Previously nothing existed — no ticketing, no support concept at all. A customer's only
--- "raise something with the operator" channel was DSAR erasure requests (a narrow, GDPR-specific
--- flow), and KYC document review.
 
 CREATE TABLE support_ticket (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2384,10 +2559,7 @@ CREATE INDEX idx_support_ticket_message_ticket ON support_ticket_message (ticket
 -- PORTFOLIO MIGRATION — investor off-ramp to a successor/competitor registrar
 -- ═══════════════════════════════════════════════════════════════════════════
 --
--- Investor-side counterpart to register_transfer above (§§21/22 eWpG, asset-scoped): a
--- portfolio-migration request moves ONE investor's ONE holding out to a successor/competitor
--- registrar. Previously there was no holder-side "move my portfolio out" flow at all — only the
--- asset's own register/on-chain-control handover existed.
+-- Investor-side counterpart to register_transfer above (§§21/22 eWpG, asset-scoped).
 
 CREATE TABLE portfolio_migration_request (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2414,3 +2586,445 @@ CREATE INDEX idx_portfolio_migration_investor ON portfolio_migration_request (in
 CREATE INDEX idx_portfolio_migration_holder ON portfolio_migration_request (holder_id);
 CREATE INDEX idx_portfolio_migration_status ON portfolio_migration_request (status)
     WHERE status NOT IN ('COMPLETED', 'CANCELLED');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- DEFAULT RPC AVAILABILITY
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Placeholder endpoints remain visible but disabled until an operator configures them.
+
+UPDATE rpc_node
+SET    enabled = false
+WHERE  url LIKE '%/v3/changeme';
+
+UPDATE rpc_node
+SET    enabled = false
+WHERE  url IN (
+    'https://api.fhenix.zone:7747',
+    'https://api.helium.fhenix.zone:7747',
+    'https://mainnet.inco.org',
+    'https://validator.rivest.inco.org'
+);
+
+-- Graph Node indexing is opt-in per chain.
+UPDATE chain_config
+SET    graph_node_url      = NULL,
+       graph_subgraph_name = NULL
+WHERE  graph_node_url = 'http://graph-node:8000/subgraphs/name';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- DATABASE-BACKED WALLET KEYSTORE
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Stores KEK-wrapped keys and ciphertext; it never contains plaintext key material.
+
+CREATE TABLE wallet_keystore_blob (
+    relative_path VARCHAR(255) PRIMARY KEY,
+    content       BYTEA NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ASSET ECONOMIC TERMS
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Baseline economic terms on every asset, regardless of token standard — distinct from
+-- asset_bond_terms, which only exists for bond-standard assets and is entered separately.
+-- Without these, statements, valuations, tax reporting, and corporate actions have no
+-- amount or currency to work from for any non-bond asset.
+ALTER TABLE asset
+    ADD COLUMN currency VARCHAR(3),
+    ADD COLUMN issue_size NUMERIC(38, 8),
+    ADD COLUMN denomination NUMERIC(38, 8),
+    ADD COLUMN issue_date DATE,
+    ADD COLUMN maturity_date DATE;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PRIMARY-MARKET SUBSCRIPTION ORDERS
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE subscription_order (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id            UUID NOT NULL REFERENCES asset(id),
+    investor_entity_id  UUID NOT NULL,
+    wallet_address      TEXT NOT NULL,
+    requested_amount    NUMERIC(38,18) NOT NULL,
+    allocated_amount    NUMERIC(38,18),
+    status              VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
+    submitted_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    allocated_at        TIMESTAMPTZ,
+    allocated_by        UUID,
+    confirmed_at        TIMESTAMPTZ,
+    resulting_holder_id UUID,
+    rejection_reason    TEXT
+);
+
+CREATE INDEX idx_subscription_order_asset ON subscription_order (asset_id);
+CREATE INDEX idx_subscription_order_investor ON subscription_order (investor_entity_id);
+CREATE INDEX idx_subscription_order_status ON subscription_order (asset_id, status);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- TRADE PAYMENT CONFIRMATION
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Adds the AWAITING_SELLER_CONFIRMATION settlement status: a buyer declaring payment no longer
+-- credits the register directly — the selling company must independently confirm receipt first.
+ALTER TABLE trade_execution ADD COLUMN payment_declared_at TIMESTAMPTZ;
+
+ALTER TABLE trade_execution ALTER COLUMN settlement_status TYPE VARCHAR(30);
+
+ALTER TABLE trade_execution DROP CONSTRAINT chk_trade_execution_settlement_status;
+ALTER TABLE trade_execution ADD CONSTRAINT chk_trade_execution_settlement_status CHECK (
+    settlement_status IN ('PENDING','AWAITING_SELLER_CONFIRMATION','SETTLED','FAILED','CANCELLED','REFUNDED')
+);
+
+CREATE INDEX idx_trade_execution_awaiting_confirmation ON trade_execution (payment_declared_at)
+    WHERE settlement_status = 'AWAITING_SELLER_CONFIRMATION';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- MIFID CLIENT CLASSIFICATION AND SUITABILITY
+-- ═══════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE legal_entity ADD COLUMN client_category VARCHAR(30);
+ALTER TABLE legal_entity ADD COLUMN client_category_classified_at TIMESTAMPTZ;
+ALTER TABLE legal_entity ADD COLUMN client_category_classified_by UUID;
+ALTER TABLE legal_entity ADD CONSTRAINT chk_legal_entity_client_category CHECK (
+    client_category IS NULL OR client_category IN ('RETAIL', 'PROFESSIONAL', 'ELIGIBLE_COUNTERPARTY')
+);
+
+CREATE TABLE suitability_assessment (
+    id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id                     UUID NOT NULL REFERENCES legal_entity(id),
+    knowledge_experience          VARCHAR(20) NOT NULL,
+    risk_tolerance                VARCHAR(20) NOT NULL,
+    investment_horizon_years      INTEGER,
+    financial_situation_adequate  BOOLEAN NOT NULL,
+    notes                         TEXT,
+    assessed_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    assessed_by                   UUID,
+    CONSTRAINT chk_suitability_knowledge CHECK (knowledge_experience IN ('NONE', 'BASIC', 'ADVANCED')),
+    CONSTRAINT chk_suitability_risk CHECK (risk_tolerance IN ('LOW', 'MEDIUM', 'HIGH'))
+);
+CREATE INDEX idx_suitability_assessment_entity ON suitability_assessment (entity_id, assessed_at DESC);
+
+ALTER TABLE asset ADD COLUMN target_market_min_experience VARCHAR(20);
+ALTER TABLE asset ADD CONSTRAINT chk_asset_target_market_min_experience CHECK (
+    target_market_min_experience IS NULL OR target_market_min_experience IN ('NONE', 'BASIC', 'ADVANCED')
+);
+
+CREATE TABLE asset_target_market_category (
+    asset_id         UUID NOT NULL REFERENCES asset(id),
+    client_category  VARCHAR(30) NOT NULL,
+    PRIMARY KEY (asset_id, client_category),
+    CONSTRAINT chk_asset_target_market_category CHECK (
+        client_category IN ('RETAIL', 'PROFESSIONAL', 'ELIGIBLE_COUNTERPARTY')
+    )
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- INVESTOR LIMITS
+-- ═══════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE asset ADD COLUMN min_investment_amount NUMERIC(38, 8);
+ALTER TABLE asset ADD COLUMN max_holding_amount NUMERIC(38, 8);
+
+CREATE TABLE investor_limit (
+    id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id                  UUID NOT NULL REFERENCES asset(id),
+    investor_entity_id        UUID NOT NULL,
+    min_investment_override   NUMERIC(38, 8),
+    max_holding_override      NUMERIC(38, 8),
+    lockup_until              DATE,
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by                UUID,
+    CONSTRAINT uq_investor_limit_asset_investor UNIQUE (asset_id, investor_entity_id)
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- RELATIONSHIP MANAGERS
+-- ═══════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE app_user DROP CONSTRAINT chk_app_user_role;
+ALTER TABLE app_user ADD CONSTRAINT chk_app_user_role CHECK (
+    role IN (
+        'REGISTRY_ADMIN','AUDIT','COMPLIANCE_OFFICER','RELATIONSHIP_MANAGER',
+        'ISSUER','INVESTOR','COMPANY_ADMIN','TRADER','DAPP_PUBLISHER'
+    )
+);
+
+ALTER TABLE app_user_role DROP CONSTRAINT chk_app_user_role_entry;
+ALTER TABLE app_user_role ADD CONSTRAINT chk_app_user_role_entry CHECK (
+    role IN (
+        'REGISTRY_ADMIN','AUDIT','COMPLIANCE_OFFICER','RELATIONSHIP_MANAGER',
+        'ISSUER','INVESTOR','COMPANY_ADMIN','TRADER','DAPP_PUBLISHER'
+    )
+);
+
+ALTER TABLE legal_entity ADD COLUMN assigned_relationship_manager_id UUID;
+CREATE INDEX idx_legal_entity_assigned_rm ON legal_entity (assigned_relationship_manager_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OUTBOUND WEBHOOKS
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE webhook_subscription (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id    UUID NOT NULL,
+    url          TEXT NOT NULL,
+    secret       TEXT NOT NULL,
+    event_types  TEXT NOT NULL, -- comma-separated WebhookEventType names; empty = all curated types
+    enabled      BOOLEAN NOT NULL DEFAULT true,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by   UUID
+);
+CREATE INDEX idx_webhook_subscription_entity ON webhook_subscription (entity_id);
+CREATE INDEX idx_webhook_subscription_enabled ON webhook_subscription (entity_id, enabled);
+
+CREATE TABLE webhook_delivery (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subscription_id UUID NOT NULL REFERENCES webhook_subscription(id),
+    event_type      VARCHAR(50) NOT NULL,
+    payload         TEXT NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    response_code   INTEGER,
+    attempt_count   INTEGER NOT NULL DEFAULT 0,
+    last_attempted_at TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_webhook_delivery_status CHECK (status IN ('PENDING', 'SUCCESS', 'FAILED'))
+);
+CREATE INDEX idx_webhook_delivery_subscription ON webhook_delivery (subscription_id, created_at DESC);
+CREATE INDEX idx_webhook_delivery_pending ON webhook_delivery (status) WHERE status IN ('PENDING', 'FAILED');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- IDEMPOTENCY KEYS
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE idempotency_record (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id        UUID NOT NULL,
+    idempotency_key  VARCHAR(255) NOT NULL,
+    request_hash     VARCHAR(64) NOT NULL,
+    status           VARCHAR(20) NOT NULL DEFAULT 'IN_PROGRESS',
+    response_status  INTEGER,
+    response_body    TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at     TIMESTAMPTZ,
+    CONSTRAINT uq_idempotency_record_entity_key UNIQUE (entity_id, idempotency_key),
+    CONSTRAINT chk_idempotency_record_status CHECK (status IN ('IN_PROGRESS', 'COMPLETED'))
+);
+
+-- Input for the cleanup job — old records (of either status; a crashed IN_PROGRESS row must not
+-- block that key forever) are purged after the retention window.
+CREATE INDEX idx_idempotency_record_created_at ON idempotency_record (created_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- GENERIC OIDC PRINCIPALS
+-- ═══════════════════════════════════════════════════════════════════════════
+ALTER TABLE app_user ADD COLUMN external_subject VARCHAR(255);
+
+COMMENT ON COLUMN app_user.external_subject IS
+    'OIDC `sub` claim for a principal resolved via a non-Entra OIDC issuer (JWT_ISSUER_URI). '
+    'NULL for LOCAL and ENTRA accounts, which are keyed by id / entra_object_id respectively.';
+
+CREATE UNIQUE INDEX ux_app_user_external_subject
+    ON app_user (external_subject)
+    WHERE external_subject IS NOT NULL;
+
+ALTER TABLE app_user DROP CONSTRAINT chk_app_user_auth_provider;
+ALTER TABLE app_user ADD CONSTRAINT chk_app_user_auth_provider CHECK (auth_provider IN ('LOCAL','ENTRA','OIDC'));
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ACCESS RECERTIFICATION
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE access_review_campaign (
+    id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(200) NOT NULL,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
+    due_date    DATE,
+    started_by  UUID         NOT NULL,
+    started_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    closed_by   UUID,
+    closed_at   TIMESTAMPTZ,
+    CONSTRAINT chk_access_review_campaign_status CHECK (status IN ('OPEN','CLOSED'))
+);
+
+-- One row per app_user, snapshotted at campaign start — the roles snapshot is what's actually
+-- being attested to, independent of any role change the account undergoes mid-campaign.
+CREATE TABLE access_review_item (
+    id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id         UUID         NOT NULL REFERENCES access_review_campaign(id) ON DELETE CASCADE,
+    app_user_id         UUID         NOT NULL REFERENCES app_user(id),
+    email_snapshot      VARCHAR(320) NOT NULL,
+    full_name_snapshot  VARCHAR(200),
+    roles_snapshot      VARCHAR(500) NOT NULL,
+    decision            VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+    reviewed_by         UUID,
+    reviewed_at         TIMESTAMPTZ,
+    notes               TEXT,
+    CONSTRAINT chk_access_review_item_decision CHECK (decision IN ('PENDING','CONFIRMED','REVOKED')),
+    CONSTRAINT ux_access_review_item UNIQUE (campaign_id, app_user_id)
+);
+
+CREATE INDEX idx_access_review_item_campaign ON access_review_item (campaign_id);
+CREATE INDEX idx_access_review_item_app_user ON access_review_item (app_user_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- TRAVEL-RULE INBOX IDEMPOTENCY
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Bind inbound replay protection to the originating VASP and its transfer reference.
+-- Multiple counterparties may use the same reference, but one VASP must not create duplicate
+-- compliance records by retrying the same delivery.
+CREATE UNIQUE INDEX uq_trm_inbound_vasp_transfer_ref
+    ON travel_rule_message (originator_vasp_did, protocol_message_id)
+    WHERE direction = 'INBOUND' AND protocol_message_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- VERIFIED LENDING-MARKET PARAMETERS
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Immutable EwpgRepoMarket parameters verified from chain at registration time. Existing rows
+-- remain nullable and therefore fail closed for new borrowing until an operator re-registers or
+-- reconciles them against the deployed contract; inventing a max-LTV would be
+-- materially unsafe.
+ALTER TABLE lending_market
+    ADD COLUMN max_ltv_bps INTEGER,
+    ADD COLUMN max_price_age_seconds NUMERIC(78,0),
+    ADD COLUMN liquidation_grace_period_seconds NUMERIC(78,0),
+    ADD COLUMN loan_token_decimals INTEGER;
+
+ALTER TABLE lending_market
+    ADD CONSTRAINT chk_lending_market_max_ltv
+        CHECK (max_ltv_bps IS NULL OR (max_ltv_bps > 0 AND max_ltv_bps < lltv_bps)),
+    ADD CONSTRAINT chk_lending_market_loan_decimals
+        CHECK (loan_token_decimals IS NULL OR (loan_token_decimals >= 0 AND loan_token_decimals <= 36));
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- REPO RFQS AND QUOTES
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE repo_rfq (
+    id UUID PRIMARY KEY,
+    version BIGINT NOT NULL DEFAULT 0,
+    requester_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    requester_user_id UUID,
+    side VARCHAR(20) NOT NULL,
+    visibility VARCHAR(20) NOT NULL,
+    collateral_asset_id UUID NOT NULL REFERENCES asset(id),
+    collateral_quantity NUMERIC(38,18) NOT NULL,
+    cash_amount NUMERIC(38,18) NOT NULL,
+    cash_currency CHAR(3) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    proposed_repo_rate NUMERIC(12,8),
+    proposed_haircut_bps INTEGER,
+    settlement_method VARCHAR(20) NOT NULL DEFAULT 'DVP',
+    status VARCHAR(20) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    notes VARCHAR(1000),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_repo_rfq_side CHECK (side IN ('BORROW_CASH', 'LEND_CASH')),
+    CONSTRAINT ck_repo_rfq_visibility CHECK (visibility IN ('TARGETED', 'BROADCAST')),
+    CONSTRAINT ck_repo_rfq_status CHECK (status IN ('OPEN', 'MATCHED', 'CANCELLED', 'EXPIRED')),
+    CONSTRAINT ck_repo_rfq_settlement CHECK (settlement_method IN ('DVP', 'FOP')),
+    CONSTRAINT ck_repo_rfq_quantity CHECK (collateral_quantity > 0),
+    CONSTRAINT ck_repo_rfq_cash CHECK (cash_amount > 0),
+    CONSTRAINT ck_repo_rfq_dates CHECK (end_date > start_date),
+    CONSTRAINT ck_repo_rfq_haircut CHECK (proposed_haircut_bps IS NULL OR proposed_haircut_bps BETWEEN 0 AND 10000)
+);
+
+CREATE TABLE repo_rfq_target (
+    repo_rfq_id UUID NOT NULL REFERENCES repo_rfq(id) ON DELETE CASCADE,
+    target_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    PRIMARY KEY (repo_rfq_id, target_entity_id)
+);
+
+CREATE TABLE repo_quote (
+    id UUID PRIMARY KEY,
+    version BIGINT NOT NULL DEFAULT 0,
+    rfq_id UUID NOT NULL REFERENCES repo_rfq(id) ON DELETE CASCADE,
+    quoting_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    quoting_user_id UUID,
+    cash_amount NUMERIC(38,18) NOT NULL,
+    repo_rate NUMERIC(12,8) NOT NULL,
+    haircut_bps INTEGER NOT NULL,
+    valid_until TIMESTAMPTZ NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    message VARCHAR(500),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_repo_quote_counterparty UNIQUE (rfq_id, quoting_entity_id),
+    CONSTRAINT ck_repo_quote_cash CHECK (cash_amount > 0),
+    CONSTRAINT ck_repo_quote_rate CHECK (repo_rate >= 0),
+    CONSTRAINT ck_repo_quote_haircut CHECK (haircut_bps BETWEEN 0 AND 10000),
+    CONSTRAINT ck_repo_quote_status CHECK (status IN ('ACTIVE', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED'))
+);
+
+CREATE INDEX idx_repo_rfq_requester ON repo_rfq(requester_entity_id, created_at DESC);
+CREATE INDEX idx_repo_rfq_open ON repo_rfq(status, expires_at);
+CREATE INDEX idx_repo_rfq_target_entity ON repo_rfq_target(target_entity_id, repo_rfq_id);
+CREATE INDEX idx_repo_quote_rfq ON repo_quote(rfq_id, created_at DESC);
+CREATE INDEX idx_repo_quote_entity ON repo_quote(quoting_entity_id, created_at DESC);
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- REPO TRADE LIFECYCLE
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE repo_trade (
+    id UUID PRIMARY KEY,
+    version BIGINT NOT NULL DEFAULT 0,
+    rfq_id UUID NOT NULL UNIQUE REFERENCES repo_rfq(id),
+    accepted_quote_id UUID NOT NULL UNIQUE REFERENCES repo_quote(id),
+    cash_borrower_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    cash_lender_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    collateral_asset_id UUID NOT NULL REFERENCES asset(id),
+    collateral_quantity NUMERIC(38,18) NOT NULL,
+    cash_amount NUMERIC(38,18) NOT NULL,
+    cash_currency CHAR(3) NOT NULL,
+    repo_rate NUMERIC(12,8) NOT NULL,
+    haircut_bps INTEGER NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    repurchase_amount NUMERIC(38,18) NOT NULL,
+    settlement_method VARCHAR(20) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    open_cash_confirmed BOOLEAN NOT NULL DEFAULT false,
+    open_collateral_confirmed BOOLEAN NOT NULL DEFAULT false,
+    close_cash_confirmed BOOLEAN NOT NULL DEFAULT false,
+    close_collateral_confirmed BOOLEAN NOT NULL DEFAULT false,
+    margin_call_amount NUMERIC(38,18),
+    margin_call_due_at TIMESTAMPTZ,
+    pending_substitution_asset_id UUID REFERENCES asset(id),
+    pending_substitution_quantity NUMERIC(38,18),
+    substitution_requested_by UUID REFERENCES legal_entity(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_repo_trade_status CHECK (status IN ('PENDING_OPEN_SETTLEMENT', 'OPEN', 'MARGIN_CALL', 'PENDING_CLOSE', 'CLOSED', 'DEFAULTED', 'CANCELLED')),
+    CONSTRAINT ck_repo_trade_quantity CHECK (collateral_quantity > 0),
+    CONSTRAINT ck_repo_trade_cash CHECK (cash_amount > 0 AND repurchase_amount >= cash_amount),
+    CONSTRAINT ck_repo_trade_parties CHECK (cash_borrower_entity_id <> cash_lender_entity_id),
+    CONSTRAINT ck_repo_trade_haircut CHECK (haircut_bps BETWEEN 0 AND 10000)
+);
+
+CREATE TABLE repo_lifecycle_event (
+    id UUID PRIMARY KEY,
+    repo_trade_id UUID NOT NULL REFERENCES repo_trade(id) ON DELETE CASCADE,
+    event_type VARCHAR(40) NOT NULL,
+    actor_entity_id UUID NOT NULL REFERENCES legal_entity(id),
+    actor_user_id UUID,
+    amount NUMERIC(38,18),
+    asset_id UUID REFERENCES asset(id),
+    quantity NUMERIC(38,18),
+    reference VARCHAR(200),
+    note VARCHAR(1000),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_repo_trade_party_borrower ON repo_trade(cash_borrower_entity_id, created_at DESC);
+CREATE INDEX idx_repo_trade_party_lender ON repo_trade(cash_lender_entity_id, created_at DESC);
+CREATE INDEX idx_repo_trade_status ON repo_trade(status, end_date);
+CREATE INDEX idx_repo_event_trade ON repo_lifecycle_event(repo_trade_id, created_at);
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- REPO CURRENCY TYPES
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Hibernate maps @Column(length=3) String as VARCHAR. PostgreSQL CHAR(3) pads values and is a
+-- different JDBC type, so keep ISO currency validation while matching the entity mapping.
+ALTER TABLE repo_rfq ALTER COLUMN cash_currency TYPE VARCHAR(3);
+ALTER TABLE repo_trade ALTER COLUMN cash_currency TYPE VARCHAR(3);

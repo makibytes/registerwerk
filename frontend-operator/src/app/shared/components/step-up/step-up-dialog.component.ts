@@ -172,10 +172,10 @@ export interface StepUpDialogResult {
       @if (data.requireDualControl) {
         <div class="section-label">Second approver</div>
         <div class="dual-control-note">
-          A second REGISTRY_ADMIN must separately authenticate and paste their scoped step-up
-          token below. Both tokens must be from different users.
+          A second REGISTRY_ADMIN or COMPLIANCE_OFFICER must separately authenticate and paste
+          their scoped step-up token below. Both tokens must be from different users.
         </div>
-        <button mat-button color="primary" class="generate-link" (click)="openTokenGenerator()">
+        <button type="button" mat-button color="primary" class="generate-link" (click)="openTokenGenerator()">
           <mat-icon>open_in_new</mat-icon>
           Generate approver token…
         </button>
@@ -197,8 +197,8 @@ export interface StepUpDialogResult {
     </mat-dialog-content>
 
     <mat-dialog-actions class="dialog-actions">
-      <button mat-stroked-button (click)="cancel()" [disabled]="loading">Cancel</button>
-      <button mat-raised-button color="primary"
+      <button type="button" mat-stroked-button (click)="cancel()" [disabled]="loading">Cancel</button>
+      <button type="button" mat-raised-button color="primary"
               (click)="submit()"
               [disabled]="loading || !totpCode || totpCode.length < 6 || (data.requireDualControl && !approverToken)">
         <mat-icon>{{ loading ? 'hourglass_empty' : 'lock_open' }}</mat-icon>

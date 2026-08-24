@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.apache.pdfbox.Loader;
@@ -37,6 +38,7 @@ class CorporateActionConfirmationServiceTest {
     @Mock private AssetRepository assetRepository;
     @Mock private LegalEntityRepository entityRepository;
     @Mock private DocumentSigningService signingService;
+    @Mock private FinalityGate finalityGate;
 
     @InjectMocks
     private CorporateActionConfirmationService service;
@@ -112,5 +114,68 @@ class CorporateActionConfirmationServiceTest {
 
         assertThatThrownBy(() -> service.generateForInvestor(actionId, requestingInvestor))
                 .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    // ── ISO 20022 rendering (Track 6-3) ──────────────────────────────────────────
+
+    @Test
+    @DisplayName("ISO 20022 investor notification is scoped to only that investor's own entry")
+    void iso20022InvestorNotification_scopedToOwnEntry() {
+        UUID actionId = UUID.randomUUID();
+        UUID investorA = UUID.randomUUID();
+        UUID investorB = UUID.randomUUID();
+        CorporateAction ca = settledAction(actionId);
+
+        when(actionRepository.findById(actionId)).thenReturn(Optional.of(ca));
+        when(entryRepository.findByCorporateActionId(actionId)).thenReturn(List.of(
+                entry(actionId, investorA, new BigDecimal("45.00")),
+                entry(actionId, investorB, new BigDecimal("90.00"))
+        ));
+        when(assetRepository.findById(ca.getAssetId())).thenReturn(Optional.empty());
+        when(entityRepository.findById(investorA)).thenReturn(Optional.empty());
+
+        byte[] xml = service.generateIso20022ForInvestor(actionId, investorA);
+        String content = new String(xml, java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(content).contains("seev.031.001.13", "CorpActnNtfctn", "45.00");
+        assertThat(content).doesNotContain("90.00");
+    }
+
+    @Test
+    @DisplayName("ISO 20022 investor notification throws when the investor has no entry for this action")
+    void iso20022InvestorNotification_throwsWhenNoOwnEntry() {
+        UUID actionId = UUID.randomUUID();
+        UUID otherInvestor = UUID.randomUUID();
+        UUID requestingInvestor = UUID.randomUUID();
+        CorporateAction ca = settledAction(actionId);
+
+        when(actionRepository.findById(actionId)).thenReturn(Optional.of(ca));
+        when(entryRepository.findByCorporateActionId(actionId))
+                .thenReturn(List.of(entry(actionId, otherInvestor, new BigDecimal("45.00"))));
+
+        assertThatThrownBy(() -> service.generateIso20022ForInvestor(actionId, requestingInvestor))
+                .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("ISO 20022 operator notification includes every holder's entry")
+    void iso20022OperatorNotification_includesAllEntries() {
+        UUID actionId = UUID.randomUUID();
+        UUID investorA = UUID.randomUUID();
+        UUID investorB = UUID.randomUUID();
+        CorporateAction ca = settledAction(actionId);
+
+        when(actionRepository.findById(actionId)).thenReturn(Optional.of(ca));
+        when(entryRepository.findByCorporateActionId(actionId)).thenReturn(List.of(
+                entry(actionId, investorA, new BigDecimal("45.00")),
+                entry(actionId, investorB, new BigDecimal("90.00"))
+        ));
+        when(assetRepository.findById(ca.getAssetId())).thenReturn(Optional.empty());
+        when(entityRepository.findAllById(List.of(investorA, investorB))).thenReturn(List.of());
+
+        byte[] xml = service.generateIso20022ForOperator(actionId);
+        String content = new String(xml, java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(content).contains("45.00", "90.00");
     }
 }

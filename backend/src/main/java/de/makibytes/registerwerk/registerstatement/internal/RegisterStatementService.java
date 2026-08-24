@@ -14,6 +14,9 @@ import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.deployment.api.EntryType;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
+import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.kyc.api.HolderBlock;
 import de.makibytes.registerwerk.kyc.api.HolderBlockRepository;
 import de.makibytes.registerwerk.kyc.api.JurisdictionRequirementConfig;
@@ -82,6 +85,7 @@ public class RegisterStatementService {
     private final EmailPort emailService;
     private final DocumentSigningService signingService;
     private final ApplicationEventPublisher eventPublisher;
+    private final FinalityGate finalityGate;
     private final String registryName;
     private final String registryCountry;
 
@@ -98,6 +102,7 @@ public class RegisterStatementService {
             EmailPort emailService,
             DocumentSigningService signingService,
             ApplicationEventPublisher eventPublisher,
+            FinalityGate finalityGate,
             @Value("${registerwerk.registry.name:Registerwerk eWpG-Registry}") String registryName,
             @Value("${registerwerk.registry.country:DE}") String registryCountry) {
         this.statementRepository = statementRepository;
@@ -112,6 +117,7 @@ public class RegisterStatementService {
         this.emailService = emailService;
         this.signingService = signingService;
         this.eventPublisher = eventPublisher;
+        this.finalityGate = finalityGate;
         this.registryName = registryName;
         this.registryCountry = registryCountry;
     }
@@ -224,6 +230,22 @@ public class RegisterStatementService {
         if (asset == null || investor == null) {
             log.warn("Register statement skipped: missing asset/investor for holder {}", holderId);
             return Optional.empty();
+        }
+
+        // The first real FinalityGate call site (P8 — closes the "irreversible hole" the plan
+        // flagged: a §19 statement PDF, once emailed, cannot be un-sent, matching this operation's
+        // hard floor at FINALIZED). Only chain-derived balances are gated at all — an off-chain
+        // register entry (indexer.api.HolderDataService's javadoc: chainDerived == false) has no
+        // finality concept to check. currentLevel is passed as FINALIZED, not looked up, because
+        // that is not a guess: HolderDataService.syncHoldersFromBlockchain only ever counts
+        // FINALIZED transfers, so any chain-derived nominalAmount was computed from FINALIZED data
+        // by construction. This makes today's check a no-op in practice — the real point is
+        // establishing the correct enforcement point now, so it starts protecting immediately if
+        // that invariant ever changes (e.g. a future policy-driven read filter, see
+        // HolderDataService's own disclosed P5 deferral), without any further wiring here.
+        if (holder.isChainDerived()) {
+            finalityGate.require(GatedOperation.REGISTER_STATEMENT_ISSUE, holder.getAssetId(), asset.getTokenStandard(),
+                    FinalityLevel.FINALIZED);
         }
 
         Instant issuedAt = Instant.now();

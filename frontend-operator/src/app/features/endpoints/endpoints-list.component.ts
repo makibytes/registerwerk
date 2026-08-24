@@ -26,7 +26,7 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
       &:hover { background: var(--rw-bg); }
       &.active { background: var(--rw-accent); color: #fff; border-color: var(--rw-accent); }
     }
-    .content-card { background: var(--rw-surface); border: 1px solid var(--rw-border); border-radius: 10px; overflow: hidden; }
+    .content-card { background: var(--rw-surface); border: 1px solid var(--rw-border); border-radius: 10px; overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; }
     thead th { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--rw-text-muted); padding: 12px 20px; text-align: left; border-bottom: 1px solid var(--rw-border); }
     tbody tr:not(:last-child) td { border-bottom: 1px solid var(--rw-border); }
@@ -40,6 +40,11 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
     .risk-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; &.low { background: rgba(34,197,94,.12); color: #16a34a; } &.medium { background: rgba(245,158,11,.12); color: #D97706; } &.high { background: rgba(239,68,68,.12); color: #DC2626; } &.none { color: var(--rw-text-muted); font-weight: 400; } }
     .notes-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--rw-text-secondary); font-size: 12px; }
     .empty-state { padding: 60px 24px; text-align: center; mat-icon { font-size: 40px; width: 40px; height: 40px; color: var(--rw-text-muted); margin-bottom: 12px; } p { color: var(--rw-text-muted); font-size: 14px; margin: 4px 0; } }
+    @media (max-width: 620px) {
+      .page-header { gap: 12px; flex-direction: column; }
+      .filter-row { align-items: flex-start; flex-wrap: wrap; }
+      table { min-width: 760px; }
+    }
   `],
   template: `
     <div class="page-header">
@@ -47,20 +52,31 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
         <h1>Endpoints</h1>
         <p class="page-subtitle">Named address-book entries for wallets and contracts</p>
       </div>
-      <button mat-flat-button color="primary" (click)="openCreate()">
+      <button type="button" mat-flat-button color="primary" (click)="openCreate()">
         <mat-icon>add</mat-icon> New endpoint
       </button>
     </div>
 
     <div class="filter-row">
       <span class="filter-label">Type</span>
-      <button class="filter-chip" [class.active]="typeFilter() === null" (click)="typeFilter.set(null)">All</button>
-      <button class="filter-chip" [class.active]="typeFilter() === 'WALLET'" (click)="typeFilter.set('WALLET')">Wallets</button>
-      <button class="filter-chip" [class.active]="typeFilter() === 'CONTRACT'" (click)="typeFilter.set('CONTRACT')">Contracts</button>
+      <button type="button" class="filter-chip" [class.active]="typeFilter() === null" (click)="typeFilter.set(null)">All</button>
+      <button type="button" class="filter-chip" [class.active]="typeFilter() === 'WALLET'" (click)="typeFilter.set('WALLET')">Wallets</button>
+      <button type="button" class="filter-chip" [class.active]="typeFilter() === 'CONTRACT'" (click)="typeFilter.set('CONTRACT')">Contracts</button>
     </div>
 
     <div class="content-card">
-      @if (filtered().length === 0) {
+      @if (loading()) {
+        <div class="empty-state" role="status">
+          <mat-icon>hourglass_top</mat-icon>
+          <p>Loading endpoints…</p>
+        </div>
+      } @else if (loadError()) {
+        <div class="empty-state" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <p><strong>Endpoints could not be loaded</strong></p>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
+      } @else if (filtered().length === 0) {
         <div class="empty-state">
           <mat-icon>contacts</mat-icon>
           <p><strong>No endpoints yet</strong></p>
@@ -81,7 +97,7 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
                 <td>
                   <span class="addr-cell">
                     <span class="addr-mono" [title]="ep.address">{{ shorten(ep.address) }}</span>
-                    <button class="addr-copy" (click)="copyAddress(ep.address)" type="button"><mat-icon>content_copy</mat-icon></button>
+                    <button class="addr-copy" (click)="copyAddress(ep.address)" type="button" aria-label="Copy endpoint address"><mat-icon>content_copy</mat-icon></button>
                   </span>
                 </td>
                 <td>
@@ -93,10 +109,10 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
                 </td>
                 <td class="notes-cell" [title]="ep.notes || ''">{{ ep.notes || '' }}</td>
                 <td>
-                  <button mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions"><mat-icon>more_vert</mat-icon></button>
+                  <button type="button" mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions"><mat-icon>more_vert</mat-icon></button>
                   <mat-menu #actionMenu>
-                    <button mat-menu-item (click)="openEdit(ep)"><mat-icon>edit</mat-icon> Edit</button>
-                    <button mat-menu-item (click)="confirmDelete(ep)" style="color:#ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
+                    <button type="button" mat-menu-item (click)="openEdit(ep)"><mat-icon>edit</mat-icon> Edit</button>
+                    <button type="button" mat-menu-item (click)="confirmDelete(ep)" style="color:#ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
                   </mat-menu>
                 </td>
               </tr>
@@ -114,6 +130,8 @@ export class EndpointsListComponent implements OnInit {
 
   readonly endpoints  = signal<Endpoint[]>([]);
   readonly typeFilter = signal<EndpointAddressType | null>(null);
+  readonly loading = signal(true);
+  readonly loadError = signal(false);
   readonly filtered   = computed(() => {
     const f = this.typeFilter();
     return f ? this.endpoints().filter((e: Endpoint) => e.addressType === f) : this.endpoints();
@@ -121,7 +139,20 @@ export class EndpointsListComponent implements OnInit {
 
   ngOnInit(): void { this.load(); }
 
-  private load(): void { this.endpointService.listEndpoints().subscribe(list => this.endpoints.set(list)); }
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(false);
+    this.endpointService.listEndpoints().subscribe({
+      next: (list) => {
+        this.endpoints.set(list);
+        this.loading.set(false);
+      },
+      error: () => {
+        this.loading.set(false);
+        this.loadError.set(true);
+      },
+    });
+  }
 
   openCreate(): void {
     this.dialog.open<EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialogResult>(
@@ -160,5 +191,10 @@ export class EndpointsListComponent implements OnInit {
     return `${address.slice(0, 8)}…${address.slice(-6)}`;
   }
 
-  copyAddress(address: string): void { navigator.clipboard.writeText(address).catch(() => {}); }
+  copyAddress(address: string): void {
+    navigator.clipboard.writeText(address).then(
+      () => this.snackBar.open('Address copied', 'OK', { duration: 2000 }),
+      () => this.snackBar.open('Could not copy the address', 'OK', { duration: 4000 }),
+    );
+  }
 }

@@ -6,8 +6,8 @@ const EVENT_DERIVED = 'EVENT_DERIVED'
 
 /**
  * Handles EwpgRepoMarketFactory.MarketCreated(market, loanToken, collateralToken, lltvBps,
- * priceOracle) — the auto-registration hook for isolated repo/lending markets (finding #7,
- * Phase 7). The emitted address/configuration is provisional event context, not verification
+ * priceOracle) — the auto-registration hook for isolated repo/lending markets. The emitted
+ * address/configuration is provisional event context, not verification
  * of deployment success or runtime code identity.
  */
 export function handleMarketCreated(event: MarketCreated): void {

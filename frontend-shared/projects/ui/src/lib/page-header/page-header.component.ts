@@ -13,7 +13,7 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
       margin-bottom: 24px;
       flex-wrap: wrap;
     }
-    .header-text h2 {
+    .header-text h1 {
       margin: 0 0 4px;
       font-size: 20px;
       font-weight: 600;
@@ -36,7 +36,7 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
   template: `
     <div class="page-header">
       <div class="header-text">
-        <h2>{{ title }}</h2>
+        <h1>{{ title }}</h1>
         @if (subtitle) {
           <p class="subtitle">{{ subtitle }}</p>
         }

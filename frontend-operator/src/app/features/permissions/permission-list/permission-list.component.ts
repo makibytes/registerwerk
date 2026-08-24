@@ -66,17 +66,18 @@ import {
             [columns]="permissionColumns"
             [rows]="permissions"
             [state]="permissionState"
+            (retry)="loadPermissions()"
             filterPlaceholder="Filter by code or name…"
             emptyMessage="No permissions defined yet."
             [actionsTemplate]="permissionActions">
-            <button tableToolbar mat-raised-button color="primary" (click)="openCreateDialog()">
+            <button type="button" tableToolbar mat-raised-button color="primary" (click)="openCreateDialog()">
               <mat-icon>add</mat-icon>
               Define permission
             </button>
           </rw-data-table>
 
           <ng-template #permissionActions let-permission>
-            <button mat-icon-button color="primary" (click)="openDetail(permission)"
+            <button type="button" mat-icon-button color="primary" (click)="openDetail(permission)"
                     matTooltip="Manage grants">
               <mat-icon>chevron_right</mat-icon>
             </button>
@@ -90,10 +91,11 @@ import {
             [columns]="issuerColumns"
             [rows]="issuers"
             [state]="issuerState"
+            (retry)="loadIssuers()"
             filterPlaceholder="Filter by address…"
             emptyMessage="No trusted claim issuers registered."
             [actionsTemplate]="issuerActions">
-            <button tableToolbar mat-raised-button color="primary" (click)="openIssuerDialog()">
+            <button type="button" tableToolbar mat-raised-button color="primary" (click)="openIssuerDialog()">
               <mat-icon>add_moderator</mat-icon>
               Add trusted issuer
             </button>
@@ -101,7 +103,7 @@ import {
 
           <ng-template #issuerActions let-issuer>
             @if (issuer.status === 'ACTIVE' || issuer.status === 'PENDING') {
-              <button mat-icon-button color="warn" (click)="removeIssuer(issuer)"
+              <button type="button" mat-icon-button color="warn" (click)="removeIssuer(issuer)"
                       matTooltip="Remove trusted issuer (step-up)">
                 <mat-icon>remove_moderator</mat-icon>
               </button>
@@ -130,8 +132,8 @@ import {
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!newCode.trim() || !newName.trim() || submitting"
                 (click)="submitCreate()">
           <mat-icon>add</mat-icon>
@@ -167,8 +169,8 @@ import {
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!issuerChainId || !isValidAddress(issuerAddress) || parseTopics().length === 0 || submitting"
                 (click)="submitIssuer()">
           <mat-icon>add_moderator</mat-icon>

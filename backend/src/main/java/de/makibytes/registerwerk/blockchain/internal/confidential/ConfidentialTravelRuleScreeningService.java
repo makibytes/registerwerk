@@ -90,7 +90,7 @@ public class ConfidentialTravelRuleScreeningService {
         this.eventPublisher = eventPublisher;
     }
 
-    @Scheduled(fixedDelay = 60_000)
+    @Scheduled(fixedDelay = 60_000, initialDelay = 85_000)
     @SchedulerLock(name = "confidentialTravelRuleScreening", lockAtMostFor = "PT2M", lockAtLeastFor = "PT20S")
     public void screenAll() {
         if (!zamaRelayerClient.isConfigured()) {

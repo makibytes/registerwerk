@@ -16,8 +16,10 @@ public interface ChainConfigMapper {
      * Maps a {@link ChainConfig} entity to a {@link ChainConfigResponse} DTO.
      * Enum values are mapped to their string names.
      */
-    @Mapping(target = "chainType",   expression = "java(config.getChainType().name())")
-    @Mapping(target = "networkType", expression = "java(config.getNetworkType().name())")
+    @Mapping(target = "chainType",      expression = "java(config.getChainType().name())")
+    @Mapping(target = "networkType",    expression = "java(config.getNetworkType().name())")
+    @Mapping(target = "finalityModel",  expression = "java(config.getFinalityModel().name())")
+    @Mapping(target = "finalitySource", expression = "java(config.getFinalitySource().name())")
     ChainConfigResponse toResponse(ChainConfig config);
 
     /**
@@ -36,5 +38,10 @@ public interface ChainConfigMapper {
              expression = "java(ChainConfig.ChainType.valueOf(request.chainType().toUpperCase()))")
     @Mapping(target = "networkType",
              expression = "java(ChainConfig.NetworkType.valueOf(request.networkType().toUpperCase()))")
+    @Mapping(target = "finalityModel",
+             expression = "java(request.finalityModel() == null ? ChainConfig.FinalityModel.DEPTH_BASED "
+                     + ": ChainConfig.FinalityModel.valueOf(request.finalityModel().toUpperCase()))")
+    // finalitySource is left at the entity's own default (RPC_SELF_PROBE) — no request field for
+    // it exists; RpcNodeService#recomputeFinalitySource takes over from there as nodes are added.
     ChainConfig toEntity(ChainConfigCreateRequest request);
 }

@@ -24,7 +24,10 @@ public record TxRecordResponse(
         Long blockNumber,
         String errorMessage,
         Instant createdAt,
-        Instant completedAt
+        Instant completedAt,
+        String opsNote,
+        Instant opsReviewedAt,
+        UUID opsReviewedBy
 ) {
     public static TxRecordResponse from(BlockchainTransactionView tx) {
         return new TxRecordResponse(
@@ -33,6 +36,7 @@ public record TxRecordResponse(
                 tx.contractAddress(), tx.deploymentId(), tx.assetId(),
                 tx.actorName(), tx.actorRole(), tx.params(),
                 tx.gasUsed(), tx.blockNumber(), tx.errorMessage(),
-                tx.createdAt(), tx.completedAt());
+                tx.createdAt(), tx.completedAt(),
+                tx.opsNote(), tx.opsReviewedAt(), tx.opsReviewedBy());
     }
 }

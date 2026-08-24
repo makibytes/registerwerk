@@ -33,12 +33,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for the operator-wallet lifecycle (finding #11, Phase 8) — the highest-blast-
- * radius module in the repo had zero test coverage before this. Also covers findings #3
- * (actor identity threaded into every lifecycle event) and #9 (KEK rotation).
+ * Unit tests for the operator-wallet lifecycle, including actor attribution and KEK rotation.
  */
 @ExtendWith(MockitoExtension.class)
 class WalletServiceTest {
@@ -47,6 +46,7 @@ class WalletServiceTest {
     @Mock private WalletStorage walletStorage;
     @Mock private WalletDefaultService defaultService;
     @Mock private WalletSigner walletSigner;
+    @Mock private Pkcs11HsmService pkcs11HsmService;
     @Mock private ApplicationEventPublisher eventPublisher;
 
     private WalletService service;
@@ -55,7 +55,8 @@ class WalletServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new WalletService(walletRepository, walletStorage, defaultService, walletSigner, eventPublisher);
+        service = new WalletService(walletRepository, walletStorage, defaultService, walletSigner,
+                pkcs11HsmService, eventPublisher);
         lenient().when(walletRepository.save(any(OperatorWallet.class))).thenAnswer(inv -> {
             OperatorWallet w = inv.getArgument(0);
             if (w.getId() == null) {
@@ -77,7 +78,7 @@ class WalletServiceTest {
     // ── generate ──────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("generate(EVM) persists the wallet, auto-promotes it, and publishes an event carrying the real actor (finding #3)")
+    @DisplayName("generate(EVM) persists the wallet, auto-promotes it, and publishes an event carrying the real actor")
     void generate_evm_publishesEventWithActor() {
         when(walletRepository.findByName("my-wallet")).thenReturn(Optional.empty());
         when(walletStorage.storeEvm(any(), any())).thenReturn("some-id.json");
@@ -106,7 +107,7 @@ class WalletServiceTest {
     // ── importRaw / importKeystore ────────────────────────────────────────────
 
     @Test
-    @DisplayName("importRaw publishes an event carrying the real actor (finding #3)")
+    @DisplayName("importRaw publishes an event carrying the real actor")
     void importRaw_publishesEventWithActor() throws Exception {
         when(walletRepository.findByName("imported")).thenReturn(Optional.empty());
         when(walletStorage.importEvmRaw(any(), any())).thenReturn("some-id.json");
@@ -120,7 +121,7 @@ class WalletServiceTest {
     }
 
     @Test
-    @DisplayName("importKeystore publishes an event carrying the real actor (finding #3)")
+    @DisplayName("importKeystore publishes an event carrying the real actor")
     void importKeystore_publishesEventWithActor() throws Exception {
         when(walletRepository.findByName("imported")).thenReturn(Optional.empty());
         when(walletStorage.importEvmKeystore(any(), any(), any())).thenReturn("some-id.json");
@@ -147,7 +148,7 @@ class WalletServiceTest {
     }
 
     @Test
-    @DisplayName("exportKeystore publishes an event carrying the real actor (finding #3)")
+    @DisplayName("exportKeystore publishes an event carrying the real actor")
     void exportKeystore_publishesEventWithActor() {
         UUID id = UUID.randomUUID();
         when(walletRepository.findById(id)).thenReturn(Optional.of(wallet(id, WalletType.EVM, id + ".json")));
@@ -160,10 +161,28 @@ class WalletServiceTest {
         assertThat(captor.getValue().actorId()).isEqualTo(actorId);
     }
 
+    @Test
+    @DisplayName("HSM wallets cannot export private key material")
+    void export_hsmWallet_rejectsRawAndKeystore() {
+        UUID id = UUID.randomUUID();
+        OperatorWallet hsmWallet = wallet(id, WalletType.EVM, null);
+        hsmWallet.setCustodyType(OperatorWallet.CustodyType.PKCS11);
+        hsmWallet.setKeyReference("registerwerk-operator");
+        when(walletRepository.findById(id)).thenReturn(Optional.of(hsmWallet));
+
+        assertThatThrownBy(() -> service.exportRaw(id, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("non-exportable");
+        assertThatThrownBy(() -> service.exportKeystore(id, "pw", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("non-exportable");
+        verifyNoInteractions(walletStorage);
+    }
+
     // ── rename ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("rename rejects a duplicate name and publishes an event carrying the real actor otherwise (finding #3)")
+    @DisplayName("rename rejects a duplicate name and publishes an event carrying the real actor otherwise")
     void rename_publishesEventWithActor() {
         UUID id = UUID.randomUUID();
         when(walletRepository.findById(id)).thenReturn(Optional.of(wallet(id, WalletType.EVM, id + ".json")));
@@ -179,7 +198,7 @@ class WalletServiceTest {
     // ── delete ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("delete removes chain defaults, evicts the signer cache, and publishes an event carrying the real actor (finding #3)")
+    @DisplayName("delete removes chain defaults, evicts the signer cache, and publishes an event carrying the real actor")
     void delete_removesDefaultsEvictsSignerAndPublishesEvent() {
         UUID id = UUID.randomUUID();
         OperatorWallet w = wallet(id, WalletType.EVM, id + ".json");
@@ -195,7 +214,24 @@ class WalletServiceTest {
         assertThat(captor.getValue().actorId()).isEqualTo(actorId);
     }
 
-    // ── KEK rotation (finding #9, Phase 8) ─────────────────────────────────────
+    @Test
+    @DisplayName("deleting HSM wallet metadata does not delete the PKCS#11 key")
+    void delete_hsmWallet_preservesTokenKey() {
+        UUID id = UUID.randomUUID();
+        OperatorWallet hsmWallet = wallet(id, WalletType.EVM, null);
+        hsmWallet.setCustodyType(OperatorWallet.CustodyType.PKCS11);
+        hsmWallet.setKeyReference("registerwerk-operator");
+        when(walletRepository.findById(id)).thenReturn(Optional.of(hsmWallet));
+
+        service.delete(id, actorId, "REGISTRY_ADMIN");
+
+        verify(defaultService).removeDefaultsForWallet(id);
+        verify(walletSigner).evict(id);
+        verify(walletRepository).delete(hsmWallet);
+        verifyNoInteractions(walletStorage);
+    }
+
+    // ── KEK rotation  ─────────────────────────────────────
 
     @Test
     @DisplayName("rotateKek(EVM) delegates to WalletStorage and publishes rotated=true")

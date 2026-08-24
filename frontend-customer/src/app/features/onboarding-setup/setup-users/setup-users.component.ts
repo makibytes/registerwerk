@@ -64,6 +64,7 @@ import { CompanyUser, UserRole } from '../../../core/models';
               <button
                 mat-raised-button
                 color="primary"
+                type="button"
                 [disabled]="!inviteEmail || !inviteName || inviting || inviteRoles.length === 0"
                 (click)="invite()"
               >
@@ -72,6 +73,13 @@ import { CompanyUser, UserRole } from '../../../core/models';
               </button>
             </div>
           </div>
+
+          @if (usersLoadError) {
+            <p class="load-error" role="alert">
+              Company users could not be loaded.
+              <button mat-button type="button" (click)="loadUsers()">Retry</button>
+            </p>
+          }
 
           <!-- Existing users list -->
           @if (users.length > 0) {
@@ -89,8 +97,8 @@ import { CompanyUser, UserRole } from '../../../core/models';
         </mat-card-content>
 
         <mat-card-actions align="end">
-          <button mat-button (click)="skip()">Skip for now</button>
-          <button mat-raised-button color="accent" (click)="next()">
+          <button mat-button type="button" (click)="skip()">Skip for now</button>
+          <button mat-raised-button color="accent" type="button" (click)="next()">
             Next: IdP Settings
             <mat-icon>arrow_forward</mat-icon>
           </button>
@@ -105,6 +113,7 @@ import { CompanyUser, UserRole } from '../../../core/models';
     .invite-form { margin-bottom: 24px; }
     .form-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .flex-field { flex: 1; min-width: 180px; }
+    .load-error { color: var(--rw-text-danger); font-size: 13px; }
   `]
 })
 export class SetupUsersComponent implements OnInit {
@@ -118,6 +127,7 @@ export class SetupUsersComponent implements OnInit {
   inviteName = '';
   inviteRoles: UserRole[] = ['ISSUER'];
   inviting = false;
+  usersLoadError = false;
 
   readonly availableRoles = [
     { value: 'ISSUER' as UserRole,        label: 'Issuer' },
@@ -128,9 +138,16 @@ export class SetupUsersComponent implements OnInit {
   ];
 
   ngOnInit(): void {
+    this.loadUsers();
+  }
+
+  loadUsers(): void {
+    this.usersLoadError = false;
     this.company.getEntityUsers().subscribe({
       next: users => { this.users = users; this.cdr.markForCheck(); },
       error: () => {
+        this.users = [];
+        this.usersLoadError = true;
         this.snackBar.open('Failed to load company users', 'Dismiss', { duration: 5000 });
         this.cdr.markForCheck();
       }
@@ -138,8 +155,11 @@ export class SetupUsersComponent implements OnInit {
   }
 
   invite(): void {
+    const email = this.inviteEmail.trim().toLowerCase();
+    const name = this.inviteName.trim();
+    if (this.inviting || !email || !name || this.inviteRoles.length === 0) return;
     this.inviting = true;
-    this.company.inviteUser({ email: this.inviteEmail, name: this.inviteName, roles: this.inviteRoles }).subscribe({
+    this.company.inviteUser({ email, name, roles: [...this.inviteRoles] }).subscribe({
       next: (user) => {
         this.inviting = false;
         this.users = [...this.users, user];

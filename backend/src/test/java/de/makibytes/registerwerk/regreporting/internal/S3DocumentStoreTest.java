@@ -21,7 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** Verifies Phase 5 finding #6: document_hash was defined in the schema but never populated. */
+/** Verifies : document_hash was defined in the schema but never populated. */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("S3DocumentStore unit tests")
 class S3DocumentStoreTest {

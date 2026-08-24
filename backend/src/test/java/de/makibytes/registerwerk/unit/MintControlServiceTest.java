@@ -51,6 +51,7 @@ class MintControlServiceTest {
 
     private MintControlRule buildRule(UUID deploymentId) {
         MintControlRule rule = new MintControlRule();
+        rule.setAssetDeploymentId(deploymentId);
         rule.setTargetAddress("0xABCDEF1234567890abcdef1234567890abcdef12");
         rule.setRuleType(MintControlRule.RuleType.MINT_ALLOWANCE);
         rule.setMaxAmount(BigDecimal.valueOf(1_000_000));
@@ -72,15 +73,18 @@ class MintControlServiceTest {
         UUID actorId = UUID.randomUUID();
         MintControlRule rule = buildRule(deploymentId);
 
-        when(assetDeploymentRepository.findById(deploymentId))
-            .thenReturn(Optional.of(buildDeployment(deploymentId)));
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment deployment = buildDeployment(deploymentId);
+        deployment.setAssetId(assetId);
+        when(assetDeploymentRepository.findByIdAndAssetId(deploymentId, assetId))
+            .thenReturn(Optional.of(deployment));
         when(mintControlRuleRepository.save(any())).thenAnswer(inv -> {
             MintControlRule r = inv.getArgument(0);
             r.setId(UUID.randomUUID());
             return r;
         });
 
-        MintControlRule saved = mintControlService.createRule(deploymentId, rule, actorId, "REGISTRY_ADMIN");
+        MintControlRule saved = mintControlService.createRule(assetId, deploymentId, rule, actorId, "REGISTRY_ADMIN");
 
         assertThat(saved.getActive()).isTrue();
         assertThat(saved.getAssetDeploymentId()).isEqualTo(deploymentId);
@@ -103,10 +107,10 @@ class MintControlServiceTest {
         MintControlRule patch = new MintControlRule();
         patch.setMaxAmount(BigDecimal.valueOf(2_000_000));
 
-        when(mintControlRuleRepository.findById(ruleId)).thenReturn(Optional.of(rule));
+        when(mintControlRuleRepository.findByIdAndAssetDeploymentId(ruleId, deploymentId)).thenReturn(Optional.of(rule));
         when(mintControlRuleRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        MintControlRule updated = mintControlService.updateRule(ruleId, patch, actorId, "REGISTRY_ADMIN");
+        MintControlRule updated = mintControlService.updateRule(deploymentId, ruleId, patch, actorId, "REGISTRY_ADMIN");
 
         assertThat(updated.getMaxAmount()).isEqualByComparingTo(BigDecimal.valueOf(2_000_000));
         verify(eventPublisher).publishEvent(any(MintControlRuleUpdatedEvent.class));
@@ -123,10 +127,11 @@ class MintControlServiceTest {
         rule.setId(ruleId);
         rule.setActive(true);
 
-        when(mintControlRuleRepository.findById(ruleId)).thenReturn(Optional.of(rule));
+        when(mintControlRuleRepository.findByIdAndAssetDeploymentId(ruleId, rule.getAssetDeploymentId()))
+            .thenReturn(Optional.of(rule));
         when(mintControlRuleRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        mintControlService.deactivateRule(ruleId, actorId, "REGISTRY_ADMIN");
+        mintControlService.deactivateRule(rule.getAssetDeploymentId(), ruleId, actorId, "REGISTRY_ADMIN");
 
         assertThat(rule.getActive()).isFalse();
         verify(mintControlRuleRepository).save(rule);
@@ -145,12 +150,46 @@ class MintControlServiceTest {
         activeRule.setActive(true);
         activeRule.setAssetDeploymentId(deploymentId);
 
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment deployment = buildDeployment(deploymentId);
+        deployment.setAssetId(assetId);
+        when(assetDeploymentRepository.findByIdAndAssetId(deploymentId, assetId)).thenReturn(Optional.of(deployment));
         when(mintControlRuleRepository.findByAssetDeploymentIdAndActive(deploymentId, true))
             .thenReturn(List.of(activeRule));
 
-        List<MintControlRule> rules = mintControlService.listRules(deploymentId);
+        List<MintControlRule> rules = mintControlService.listRules(assetId, deploymentId);
 
         assertThat(rules).hasSize(1);
         assertThat(rules.get(0).getActive()).isTrue();
+    }
+
+    @Test
+    @DisplayName("updateRule rejects a rule that belongs to a different deployment")
+    void updateRule_rejectsCrossDeploymentRuleId() {
+        UUID requestedDeploymentId = UUID.randomUUID();
+        UUID ruleId = UUID.randomUUID();
+        when(mintControlRuleRepository.findByIdAndAssetDeploymentId(ruleId, requestedDeploymentId))
+            .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> mintControlService.updateRule(
+                requestedDeploymentId, ruleId, new MintControlRule(), UUID.randomUUID(), "REGISTRY_ADMIN"))
+            .isInstanceOf(de.makibytes.registerwerk.shared.EntityNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("createRule rejects non-positive max amounts at the service boundary")
+    void createRule_rejectsNonPositiveAmount() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        MintControlRule rule = buildRule(deploymentId);
+        rule.setMaxAmount(BigDecimal.ZERO);
+        AssetDeployment deployment = buildDeployment(deploymentId);
+        deployment.setAssetId(assetId);
+        when(assetDeploymentRepository.findByIdAndAssetId(deploymentId, assetId)).thenReturn(Optional.of(deployment));
+
+        assertThatThrownBy(() -> mintControlService.createRule(
+                assetId, deploymentId, rule, UUID.randomUUID(), "REGISTRY_ADMIN"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("greater than zero");
     }
 }

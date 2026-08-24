@@ -11,6 +11,8 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatNativeDateModule } from '@angular/material/core';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { DatePipe, JsonPipe } from '@angular/common';
 import { AuditService } from '../../core/api/audit.service';
 import { AuditEvent, ChainVerificationResult } from '../../core/models';
@@ -33,6 +35,7 @@ type ReportMode = 'all' | 'kyc-overrides';
     MatDatepickerModule,
     MatNativeDateModule,
     MatButtonToggleModule,
+    MatTooltipModule,
     DatePipe,
     JsonPipe,
   ],
@@ -62,6 +65,25 @@ type ReportMode = 'all' | 'kyc-overrides';
       padding: 48px;
       color: var(--rw-text-muted);
     }
+
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--rw-text-danger);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .table-scroll { overflow-x: auto; }
+    table { min-width: 980px; }
 
     .event-type-cell {
       font-family: 'IBM Plex Mono', 'Courier New', monospace;
@@ -120,14 +142,35 @@ type ReportMode = 'all' | 'kyc-overrides';
       border: 1px solid var(--rw-border);
       mat-icon.status-icon { color: var(--rw-text-muted); }
     }
+
+    @media (max-width: 720px) {
+      .page-header { align-items: flex-start; gap: 12px; flex-direction: column; }
+      .header-actions { justify-content: flex-start; }
+      .chain-status-card { align-items: flex-start; flex-wrap: wrap; }
+      .chain-status-card button { margin-left: 36px; }
+      .filter-row mat-form-field { width: 100%; }
+    }
   `],
   template: `
     <div class="page-header">
       <h1>Audit Log</h1>
-      <button mat-stroked-button (click)="clearFilters()">
-        <mat-icon>clear</mat-icon>
-        Clear Filters
-      </button>
+      <div class="header-actions">
+        @if (reportMode === 'all') {
+        <button type="button" mat-stroked-button (click)="exportEvents()">
+          <mat-icon>download</mat-icon>
+          Export (CSV)
+        </button>
+        <button type="button" mat-stroked-button (click)="exportEventsSigned()"
+                matTooltip="CSV with per-row hash-chain columns, Ed25519-signed for independent verification">
+          <mat-icon>verified</mat-icon>
+          Signed export
+        </button>
+        }
+        <button type="button" mat-stroked-button (click)="clearFilters()">
+          <mat-icon>clear</mat-icon>
+          Clear Filters
+        </button>
+      </div>
     </div>
 
     <div class="chain-status-card" [class.valid]="chainStatus?.valid === true"
@@ -137,7 +180,11 @@ type ReportMode = 'all' | 'kyc-overrides';
         {{ chainStatus == null ? 'help_outline' : chainStatus.valid ? 'verified' : 'gpp_bad' }}
       </mat-icon>
       <div class="chain-status-text">
-        @if (chainStatus == null) {
+        @if (chainStatusLoading) {
+          Loading the latest hash-chain verification…
+        } @else if (chainStatusError) {
+          <strong>Hash-chain status unavailable.</strong> Verify again to retry the integrity check.
+        } @else if (chainStatus == null) {
           Hash-chain integrity has not been checked yet in this session.
         } @else if (chainStatus.valid) {
           <strong>Audit hash chain intact</strong> — {{ chainStatus.rowsChecked }} rows verified.
@@ -147,7 +194,7 @@ type ReportMode = 'all' | 'kyc-overrides';
           <div class="chain-status-detail">{{ chainStatus.rowsChecked }} rows checked before failure — checked {{ chainStatus.checkedAt | date:'short' }}</div>
         }
       </div>
-      <button mat-stroked-button (click)="verifyChainNow()" [disabled]="verifyingChain">
+      <button type="button" mat-stroked-button (click)="verifyChainNow()" [disabled]="verifyingChain">
         <mat-icon>{{ verifyingChain ? 'hourglass_empty' : 'refresh' }}</mat-icon>
         {{ verifyingChain ? 'Verifying…' : 'Verify now' }}
       </button>
@@ -210,7 +257,14 @@ type ReportMode = 'all' | 'kyc-overrides';
         <div class="spinner-container">
           <mat-spinner diameter="40" />
         </div>
+      } @else if (loadError) {
+        <div class="request-error" role="alert">
+          <mat-icon>cloud_off</mat-icon>
+          <span>Audit events could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="loadData()">Retry</button>
+        </div>
       } @else {
+        <div class="table-scroll">
         <table mat-table [dataSource]="dataSource" class="full-width-table">
           <ng-container matColumnDef="occurredAt">
             <th mat-header-cell *matHeaderCellDef>Occurred At</th>
@@ -258,6 +312,7 @@ type ReportMode = 'all' | 'kyc-overrides';
           <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
           <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
         </table>
+        </div>
 
         @if (dataSource.data.length === 0) {
           <div class="no-data">No audit events found.</div>
@@ -277,6 +332,7 @@ type ReportMode = 'all' | 'kyc-overrides';
 })
 export class AuditLogComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly snackBar = inject(MatSnackBar);
   private readonly auditService = inject(AuditService);
 
   readonly displayedColumns = [
@@ -285,6 +341,7 @@ export class AuditLogComponent implements OnInit {
 
   dataSource = new MatTableDataSource<AuditEvent>([]);
   loading = false;
+  loadError = false;
   totalElements = 0;
   pageSize = 25;
   pageIndex = 0;
@@ -298,6 +355,8 @@ export class AuditLogComponent implements OnInit {
   filterTo = '';
 
   chainStatus: ChainVerificationResult | null = null;
+  chainStatusLoading = true;
+  chainStatusError = false;
   verifyingChain = false;
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
@@ -307,25 +366,33 @@ export class AuditLogComponent implements OnInit {
     this.auditService.chainStatus().subscribe({
       next: (result) => {
         this.chainStatus = result;
+        this.chainStatusLoading = false;
+        this.chainStatusError = false;
         this.cdr.detectChanges();
       },
       error: () => {
-        // Leave chainStatus null on request failure — rendered as "not checked yet".
+        this.chainStatusLoading = false;
+        this.chainStatusError = true;
+        this.cdr.detectChanges();
       },
     });
   }
 
   verifyChainNow(): void {
     this.verifyingChain = true;
+    this.chainStatusError = false;
     this.cdr.detectChanges();
     this.auditService.verifyChainNow().subscribe({
       next: (result) => {
         this.chainStatus = result;
         this.verifyingChain = false;
+        this.chainStatusError = false;
         this.cdr.detectChanges();
       },
       error: () => {
         this.verifyingChain = false;
+        this.chainStatusError = true;
+        this.snackBar.open('Hash-chain verification failed.', 'Dismiss', { duration: 5000 });
         this.cdr.detectChanges();
       },
     });
@@ -333,6 +400,7 @@ export class AuditLogComponent implements OnInit {
 
   loadData(): void {
     this.loading = true;
+    this.loadError = false;
     const request$ = this.reportMode === 'kyc-overrides'
       ? this.auditService.kycOverrideReport({
           jurisdiction: this.filterJurisdiction || undefined,
@@ -345,8 +413,8 @@ export class AuditLogComponent implements OnInit {
           eventType: this.filterEventType || undefined,
           subjectType: this.filterSubjectType || undefined,
           subjectId: this.filterSubjectId || undefined,
-          from: this.filterFrom || undefined,
-          to: this.filterTo || undefined,
+          from: this.toIsoDateTime(this.filterFrom, 'start'),
+          to: this.toIsoDateTime(this.filterTo, 'end'),
           page: this.pageIndex,
           size: this.pageSize,
         });
@@ -356,10 +424,12 @@ export class AuditLogComponent implements OnInit {
         this.dataSource.data = resp.content;
         this.totalElements = resp.totalElements;
         this.loading = false;
+        this.loadError = false;
         this.cdr.detectChanges();
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.detectChanges();
       },
     });
@@ -370,6 +440,52 @@ export class AuditLogComponent implements OnInit {
   private toIsoDateTime(date: string, bound: 'start' | 'end'): string | undefined {
     if (!date) return undefined;
     return bound === 'start' ? `${date}T00:00:00Z` : `${date}T23:59:59Z`;
+  }
+
+  /** CSV/evidence export for the currently-applied filters — a compliance officer or auditor
+   *  previously had no way to get a data extract for a date range or case without DB access. */
+  exportEvents(): void {
+    this.auditService.exportEvents({
+      eventType: this.filterEventType || undefined,
+      subjectType: this.filterSubjectType || undefined,
+      subjectId: this.filterSubjectId || undefined,
+      from: this.toIsoDateTime(this.filterFrom, 'start'),
+      to: this.toIsoDateTime(this.filterTo, 'end'),
+    }).subscribe({
+      next: blob => {
+        this.download(blob, `audit-export-${new Date().toISOString().slice(0, 10)}.csv`);
+      },
+      error: () => this.snackBar.open('Failed to export audit events.', 'Close', { duration: 4000 }),
+    });
+  }
+
+  /** Same filters as {@link exportEvents}, but the CSV carries each row's hash-chain position
+   *  and signature, and the whole export is itself Ed25519-signed (headers) so an auditor can
+   *  verify the exact file they received against `/audit/signing-key`. */
+  exportEventsSigned(): void {
+    this.auditService.exportEventsSigned({
+      eventType: this.filterEventType || undefined,
+      subjectType: this.filterSubjectType || undefined,
+      subjectId: this.filterSubjectId || undefined,
+      from: this.toIsoDateTime(this.filterFrom, 'start'),
+      to: this.toIsoDateTime(this.filterTo, 'end'),
+    }).subscribe({
+      next: response => {
+        const blob = response.body;
+        if (!blob) return;
+        this.download(blob, `audit-export-signed-${new Date().toISOString().slice(0, 10)}.csv`);
+
+        const signed = response.headers.get('X-Export-Signed') === 'true';
+        this.snackBar.open(
+          signed
+            ? `Signed with ${response.headers.get('X-Audit-Signing-Key-Name')} — digest ${response.headers.get('X-Export-Digest-Sha256')?.slice(0, 16)}…`
+            : 'No signing key configured in this environment — export is unsigned.',
+          'Close',
+          { duration: 8000 },
+        );
+      },
+      error: () => this.snackBar.open('Failed to export signed audit events.', 'Close', { duration: 4000 }),
+    });
   }
 
   onReportModeChange(): void {
@@ -397,5 +513,16 @@ export class AuditLogComponent implements OnInit {
     this.filterTo = '';
     this.pageIndex = 0;
     this.loadData();
+  }
+
+  private download(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 }

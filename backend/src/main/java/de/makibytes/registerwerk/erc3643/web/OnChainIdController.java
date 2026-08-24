@@ -13,6 +13,9 @@ import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
 import de.makibytes.registerwerk.shared.api.AsyncDataStatus;
 import de.makibytes.registerwerk.erc3643.web.dto.ClaimInfo;
 import de.makibytes.registerwerk.erc3643.web.dto.OnchainIdentityResponse;
+import de.makibytes.registerwerk.erc3643.web.dto.ClaimExpiryRequest;
+import de.makibytes.registerwerk.erc3643.web.dto.CustomClaimRequest;
+import de.makibytes.registerwerk.erc3643.web.dto.DeployIdentityRequest;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import org.slf4j.Logger;
@@ -22,6 +25,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.time.Instant;
 import java.util.List;
@@ -87,13 +91,9 @@ public class OnChainIdController {
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<OnchainIdentityResponse> deployIdentity(
             @PathVariable UUID entityId,
-            @RequestBody Map<String, String> body,
+            @RequestBody @Valid DeployIdentityRequest body,
             Authentication auth) {
-        String chainConfigIdStr = body.get("chainConfigId");
-        if (chainConfigIdStr == null || chainConfigIdStr.isBlank()) {
-            return ResponseEntity.badRequest().build();
-        }
-        UUID chainConfigId = UUID.fromString(chainConfigIdStr);
+        UUID chainConfigId = body.chainConfigId();
         log.info("POST deploy-identity for entityId={} on chainConfigId={}", entityId, chainConfigId);
 
         OnchainIdentity identity = onChainIdService.getOrCreate(
@@ -119,6 +119,7 @@ public class OnChainIdController {
             @PathVariable UUID entityId,
             @PathVariable UUID identityId) {
         log.debug("GET claims for identityId={}", identityId);
+        requireIdentity(entityId, identityId);
         List<OnchainClaim> claims = claimRepository.findByOnchainIdentityId(identityId);
         return ResponseEntity.ok(claims.stream().map(this::toClaimInfo).toList());
     }
@@ -133,12 +134,12 @@ public class OnChainIdController {
     public ResponseEntity<ClaimInfo> issueKycClaim(
             @PathVariable UUID entityId,
             @PathVariable UUID identityId,
-            @RequestBody(required = false) Map<String, String> body,
+            @RequestBody(required = false) @Valid ClaimExpiryRequest body,
             Authentication auth) {
         log.info("POST KYC claim for entityId={} identityId={}", entityId, identityId);
 
-        OnchainIdentity identity = requireIdentity(identityId);
-        Instant expiresAt = parseExpiresAt(body);
+        OnchainIdentity identity = requireIdentity(entityId, identityId);
+        Instant expiresAt = body != null ? body.expiresAt() : null;
 
         OnchainClaim claim = claimIssuanceService.issueKycClaim(
             entityId, identity.getChainConfigId(), expiresAt,
@@ -158,7 +159,7 @@ public class OnChainIdController {
             Authentication auth) {
         log.info("POST AML claim for entityId={} identityId={}", entityId, identityId);
 
-        OnchainIdentity identity = requireIdentity(identityId);
+        OnchainIdentity identity = requireIdentity(entityId, identityId);
         OnchainClaim claim = claimIssuanceService.issueAmlClaim(entityId, identity.getChainConfigId(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toClaimInfo(claim));
@@ -174,15 +175,12 @@ public class OnChainIdController {
     public ResponseEntity<ClaimInfo> issueCustomClaim(
             @PathVariable UUID entityId,
             @PathVariable UUID identityId,
-            @RequestBody Map<String, String> body,
+            @RequestBody @Valid CustomClaimRequest body,
             Authentication auth) {
         log.info("POST custom claim for entityId={} identityId={}", entityId, identityId);
-        OnchainIdentity identity = requireIdentity(identityId);
-        long topic = Long.parseLong(body.getOrDefault("topic", "0"));
-        String topicLabel = body.getOrDefault("topicLabel", "TOPIC_" + topic);
-        Instant expiresAt = parseExpiresAt(body);
+        OnchainIdentity identity = requireIdentity(entityId, identityId);
         OnchainClaim claim = claimIssuanceService.issueCustomClaim(
-            entityId, identity.getChainConfigId(), topic, topicLabel, expiresAt,
+            entityId, identity.getChainConfigId(), body.topic(), body.topicLabel().trim(), body.expiresAt(),
             actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).body(toClaimInfo(claim));
     }
@@ -199,7 +197,9 @@ public class OnChainIdController {
             @PathVariable UUID claimId,
             Authentication auth) {
         log.info("DELETE (revoke) claim={} on identityId={}", claimId, identityId);
-        claimIssuanceService.revokeClaim(claimId, actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        requireIdentity(entityId, identityId);
+        claimIssuanceService.revokeClaim(identityId, claimId, actorId(auth),
+                SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 
@@ -209,8 +209,8 @@ public class OnChainIdController {
         return SecurityUtils.extractUserId(auth);
     }
 
-    private OnchainIdentity requireIdentity(UUID identityId) {
-        return identityRepository.findById(identityId)
+    private OnchainIdentity requireIdentity(UUID entityId, UUID identityId) {
+        return identityRepository.findByIdAndLegalEntityId(identityId, entityId)
             .orElseThrow(() -> new EntityNotFoundException("OnchainIdentity", identityId));
     }
 
@@ -263,14 +263,4 @@ public class OnChainIdController {
         );
     }
 
-    private Instant parseExpiresAt(Map<String, String> body) {
-        if (body == null) {
-            return null;
-        }
-        String expiresAtStr = body.get("expiresAt");
-        if (expiresAtStr == null || expiresAtStr.isBlank()) {
-            return null;
-        }
-        return Instant.parse(expiresAtStr);
-    }
 }

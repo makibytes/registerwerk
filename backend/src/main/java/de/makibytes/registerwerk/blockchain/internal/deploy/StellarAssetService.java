@@ -29,6 +29,8 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
+import de.makibytes.registerwerk.finality.api.ChainSubmissionExecutor;
 
 /**
  * Creates and administers Stellar assets (classic trustline-based tokens) via the Horizon REST API.
@@ -112,16 +114,19 @@ public class StellarAssetService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final ChainSubmissionExecutor submissions;
 
     public StellarAssetService(
             ChainConfigRepository chainConfigRepository,
             WalletSigner walletSigner,
             ObjectMapper objectMapper,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            ChainSubmissionExecutor submissions) {
         this.chainConfigRepository = chainConfigRepository;
         this.walletSigner = walletSigner;
         this.objectMapper = objectMapper;
         this.eventPublisher = eventPublisher;
+        this.submissions = submissions;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
@@ -143,8 +148,7 @@ public class StellarAssetService {
     public CompletableFuture<StellarDeployment> createStellarAsset(UUID assetId, Network network, String issuerAddress) {
         log.info("Creating Stellar asset: assetId={}, network={}", assetId, network);
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainConfig chain = resolveChainConfig(network);
+        return submitOnChain(network, chain -> {
             String horizonUrl = chain.getRpcUrl();
 
             IssuerKeys keys = loadIssuerKeys(chain);
@@ -196,8 +200,7 @@ public class StellarAssetService {
         log.info("ADMIN clawback Stellar asset={} from account={} amount={} network={}",
                 assetId, accountAddress, amount, network);
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainConfig chain = resolveChainConfig(network);
+        return submitOnChain(network, chain -> {
             String horizonUrl = chain.getRpcUrl();
 
             IssuerKeys keys = loadIssuerKeys(chain);
@@ -250,8 +253,7 @@ public class StellarAssetService {
         log.info("ADMIN {} Stellar trustline: asset={} account={} network={}",
                 authorize ? "authorize" : "revoke", assetId, accountAddress, network);
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainConfig chain = resolveChainConfig(network);
+        return submitOnChain(network, chain -> {
             String horizonUrl = chain.getRpcUrl();
 
             IssuerKeys keys = loadIssuerKeys(chain);
@@ -284,6 +286,13 @@ public class StellarAssetService {
                                      UUID actorId, String actorRole) {
         eventPublisher.publishEvent(new de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent(
                 deploymentId, methodName, actorId, actorRole, params));
+    }
+
+    private <T> CompletableFuture<T> submitOnChain(
+            Network network, Function<ChainConfig, T> submission) {
+        ChainConfig chain = resolveChainConfig(network);
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                chain.getId(), () -> submission.apply(chain)));
     }
 
     // ── Credential helper ─────────────────────────────────────────────────────

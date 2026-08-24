@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject, Input } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, OnInit, inject, Input, ViewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -11,29 +11,34 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatTableModule } from '@angular/material/table';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
-import { MatDialogModule } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { DatePipe } from '@angular/common';
-import { forkJoin } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { EntityService } from '../../../core/api/entity.service';
 import { AdminUserService } from '../../../core/api/admin-user.service';
 import { ScreeningService } from '../../../core/api/screening.service';
 import { HolderBlockService } from '../../../core/api/holder-block.service';
+import { BeneficialOwnerService } from '../../../core/api/beneficial-owner.service';
+import { PortfolioMigrationComponent } from '../wizards/portfolio-migration/portfolio-migration.component';
+import { MifidClassificationComponent } from '../mifid-classification/mifid-classification.component';
 import { CorporateActionsService } from '../../../core/api/corporate-actions.service';
 import { environment } from '../../../../environments/environment';
 import { AddressComponent } from '../../../shared/components/address.component';
 import { KycService } from '../../../core/api/kyc.service';
 import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../../core/api/gas-sponsorship.service';
+import { StepUpDialogComponent } from '../../../shared/components/step-up/step-up-dialog.component';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 import {
   LegalEntity, KycDocument, LegalEntityNameHistory, EntityMergeRecordView,
   KycJurisdictionApproval, KycComplianceResponse, Jurisdiction,
-  JurisdictionRequirement, DocumentStatus, SyncStatus, ScreeningRun, HolderBlock,
+  SyncStatus, ScreeningRun, HolderBlock,
+  BeneficialOwner,
 } from '../../../core/models';
 
 import { DataStatePillComponent, StatusBadgeComponent } from '@registerwerk/ui';
+import { AuthService } from '../../../core/auth/auth.service';
 
 interface OnchainIdentityView {
   id: string;
@@ -66,6 +71,8 @@ interface OnchainIdentityView {
     MatTooltipModule,
     DataStatePillComponent,
     StatusBadgeComponent,
+    PortfolioMigrationComponent,
+    MifidClassificationComponent,
     DatePipe,
     AddressComponent,
   ],
@@ -88,6 +95,7 @@ interface OnchainIdentityView {
       .entity-actions {
         display: flex;
         gap: 8px;
+        flex-wrap: wrap;
       }
     }
 
@@ -147,6 +155,15 @@ interface OnchainIdentityView {
       padding: 40px;
     }
 
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 40px 20px;
+      color: var(--rw-text-danger);
+      text-align: center;
+    }
+
     .reject-form {
       margin-top: 12px;
       display: flex;
@@ -154,17 +171,29 @@ interface OnchainIdentityView {
       gap: 12px;
       max-width: 480px;
     }
+
+    @media (max-width: 720px) {
+      .entity-header { gap: 16px; flex-direction: column; }
+      .kyc-actions { align-items: flex-start; flex-direction: column; }
+    }
   `],
   template: `
     <div class="back-row">
-      <button mat-button (click)="goBack()">
+      <button type="button" mat-button (click)="goBack()">
         <mat-icon>arrow_back</mat-icon>
         Back to Customers
       </button>
     </div>
+    <h1 class="sr-only">Customer details</h1>
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
+    } @else if (loadError) {
+      <div class="request-error" role="alert">
+        <mat-icon>cloud_off</mat-icon>
+        <span>The customer could not be loaded.</span>
+        <button mat-stroked-button type="button" (click)="loadEntity()">Retry</button>
+      </div>
     } @else if (entity) {
       <div class="entity-header">
         <div class="entity-title">
@@ -174,23 +203,30 @@ interface OnchainIdentityView {
           <app-status-badge [status]="entity.status" />
         </div>
         <div class="entity-actions">
+          @if (canMutate) {
           @if (entity.status === 'ACTIVE') {
-            <button mat-stroked-button color="warn" (click)="suspend()">Suspend</button>
+            <button type="button" mat-stroked-button color="warn" (click)="suspend()">Suspend</button>
           }
           @if (entity.status === 'SUSPENDED') {
-            <button mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
+            <button type="button" mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
           }
           @if (entity.status !== 'DISSOLVED') {
-            <button mat-stroked-button color="warn" (click)="dissolve()">Dissolve</button>
+            <button type="button" mat-stroked-button color="warn" (click)="dissolve()">Dissolve</button>
           }
-          <button mat-raised-button color="primary" (click)="generateToken()">
+          @if (entity.status !== 'CLOSED' && entity.status !== 'DISSOLVED') {
+            <button type="button" mat-stroked-button color="warn" (click)="terminate()" matTooltip="End the customer relationship: disables users, cancels open listings, revokes admin grants, moves to CLOSED. Requires step-up + a second approver.">
+              Terminate
+            </button>
+          }
+          <button type="button" mat-raised-button color="primary" (click)="generateToken()">
             <mat-icon>key</mat-icon>
             Onboarding Token
           </button>
-          <button mat-stroked-button (click)="openAsCompany()" matTooltip="Open this company in the customer portal as an admin">
+          <button type="button" mat-stroked-button (click)="openAsCompany()" matTooltip="Open this company in the customer portal as an admin">
             <mat-icon>open_in_new</mat-icon>
             Open as Company
           </button>
+          }
         </div>
       </div>
 
@@ -233,6 +269,30 @@ interface OnchainIdentityView {
                 <div class="field-label">Created At</div>
                 <div class="field-value">{{ entity.createdAt | date:'medium' }}</div>
               </div>
+              <div class="field-item">
+                <div class="field-label">Relationship Manager</div>
+                <div class="field-value">
+                  @if (canMutate && editingRm) {
+                    <div style="display:flex;gap:8px;align-items:center">
+                      <input matInput [(ngModel)]="rmIdInput" placeholder="Staff user ID (blank to clear)"
+                             style="border:1px solid var(--rw-border);border-radius:4px;padding:4px 8px;font-size:13px;width:220px" />
+                      <button type="button" mat-icon-button color="primary" (click)="saveRelationshipManager()" matTooltip="Save">
+                        <mat-icon>check</mat-icon>
+                      </button>
+                      <button type="button" mat-icon-button (click)="editingRm = false" matTooltip="Cancel">
+                        <mat-icon>close</mat-icon>
+                      </button>
+                    </div>
+                  } @else {
+                    <code>{{ entity.assignedRelationshipManagerId ?? 'Unassigned' }}</code>
+                    @if (canMutate) {
+                    <button type="button" mat-icon-button (click)="startEditRelationshipManager()" matTooltip="Assign relationship manager">
+                      <mat-icon>edit</mat-icon>
+                    </button>
+                    }
+                  }
+                </div>
+              </div>
             </div>
           </div>
         </mat-tab>
@@ -240,14 +300,16 @@ interface OnchainIdentityView {
         <!-- KYC Documents -->
         <mat-tab label="KYC Documents">
           <div class="tab-content">
+            @if (canMutate) {
             <div class="kyc-actions">
               <label>
                 <input #fileInput type="file" style="display:none" (change)="onFileSelected($event)" />
-                <button mat-raised-button color="primary" (click)="fileInput.click()">
+                <button type="button" mat-raised-button color="primary" (click)="fileInput.click()">
                   <mat-icon>upload</mat-icon> Upload Document
                 </button>
               </label>
             </div>
+            }
 
             @if (docsLoading) {
               <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
@@ -276,7 +338,7 @@ interface OnchainIdentityView {
                 <ng-container matColumnDef="actions">
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let doc">
-                    <button mat-icon-button (click)="downloadDoc(doc)" matTooltip="Download">
+                    <button type="button" mat-icon-button (click)="downloadDoc(doc)" matTooltip="Download">
                       <mat-icon>download</mat-icon>
                     </button>
                   </td>
@@ -353,34 +415,167 @@ interface OnchainIdentityView {
                     </div>
                   } @else {
                     <p style="font-size:12px;color:var(--rw-text-muted);margin-bottom:12px">
-                      <button mat-button (click)="loadCompliance(jur)">Load compliance checklist</button>
+                      <button type="button" mat-button (click)="loadCompliance(jur)">Load compliance checklist</button>
                     </p>
                   }
 
+                  @if (canMutate) {
                   <div style="display:flex;gap:8px">
-                    <button mat-raised-button color="primary" (click)="approveJurisdiction(jur)"
+                    <button type="button" mat-raised-button color="primary" (click)="approveJurisdiction(jur)"
                             [disabled]="jurActionLoading[jur]">
                       <mat-icon>check_circle</mat-icon> Approve
                     </button>
-                    <button mat-stroked-button color="warn" (click)="rejectJurisdiction(jur)"
+                    <button type="button" mat-stroked-button color="warn" (click)="rejectJurisdiction(jur)"
                             [disabled]="jurActionLoading[jur]">
                       <mat-icon>cancel</mat-icon> Reject
                     </button>
                   </div>
+                  }
                 </mat-card-content>
               </mat-card>
             }
           </div>
         </mat-tab>
 
+        <!-- Beneficial Owners (UBO) -->
+        <mat-tab label="Beneficial Owners">
+          <div class="tab-content">
+            <p style="font-size:13px;color:var(--rw-text-secondary);margin-bottom:16px">
+              Beneficial owners (GwG §3, AMLR Art. 42). Adding an owner immediately triggers a
+              sanctions/PEP screening; <code>BeneficialOwnerScreeningJob</code> re-screens active
+              owners nightly.
+            </p>
+
+            @if (ubosLoading) {
+              <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
+            } @else {
+              <table mat-table [dataSource]="beneficialOwners" style="width:100%;margin-bottom:24px">
+                <ng-container matColumnDef="name">
+                  <th mat-header-cell *matHeaderCellDef>Name</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.givenName }} {{ bo.familyName }}</td>
+                </ng-container>
+                <ng-container matColumnDef="country">
+                  <th mat-header-cell *matHeaderCellDef>Country</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.country ?? '—' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="pepStatus">
+                  <th mat-header-cell *matHeaderCellDef>PEP Status</th>
+                  <td mat-cell *matCellDef="let bo">
+                    <span [style.color]="bo.pepStatus === 'NOT_PEP' || bo.pepStatus === 'UNKNOWN' ? 'var(--rw-text-secondary)' : 'var(--rw-text-danger)'">
+                      {{ bo.pepStatus.replace('_',' ') }}
+                    </span>
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="ownershipPct">
+                  <th mat-header-cell *matHeaderCellDef>Ownership</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.ownershipPct != null ? (bo.ownershipPct + '%') : '—' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="controlType">
+                  <th mat-header-cell *matHeaderCellDef>Control Type</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.controlType.replace('_',' ') }}</td>
+                </ng-container>
+                <ng-container matColumnDef="registeredAt">
+                  <th mat-header-cell *matHeaderCellDef>Registered</th>
+                  <td mat-cell *matCellDef="let bo">{{ bo.registeredAt | date:'mediumDate' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="actions">
+                  <th mat-header-cell *matHeaderCellDef></th>
+                  <td mat-cell *matCellDef="let bo">
+                    @if (canMutate) {
+                    <button type="button" mat-icon-button color="warn" matTooltip="Cease (mark no longer a beneficial owner)"
+                            (click)="ceaseBeneficialOwner(bo)">
+                      <mat-icon style="font-size:18px">person_remove</mat-icon>
+                    </button>
+                    }
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="uboColumns"></tr>
+                <tr mat-row *matRowDef="let row; columns: uboColumns;"></tr>
+              </table>
+              @if (beneficialOwners.length === 0) {
+                <p style="text-align:center;padding:24px;color:var(--rw-text-secondary);font-size:13px">
+                  No beneficial owners registered for this entity.
+                </p>
+              }
+            }
+
+            @if (canMutate) {
+            <mat-divider style="margin-bottom:20px"></mat-divider>
+            <h4 style="margin:0 0 12px">Register a Beneficial Owner</h4>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+              <mat-form-field appearance="outline">
+                <mat-label>Given name</mat-label>
+                <input matInput [(ngModel)]="uboForm.givenName" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Family name</mat-label>
+                <input matInput [(ngModel)]="uboForm.familyName" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Date of birth</mat-label>
+                <input matInput type="date" [(ngModel)]="uboForm.dateOfBirth" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Nationality</mat-label>
+                <input matInput [(ngModel)]="uboForm.nationality" placeholder="DE" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Country of residence</mat-label>
+                <input matInput [(ngModel)]="uboForm.countryOfResidence" placeholder="DE" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Ownership %</mat-label>
+                <input matInput type="number" min="0" max="100" step="0.01" [(ngModel)]="uboForm.ownershipPct" />
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Control type</mat-label>
+                <mat-select [(ngModel)]="uboForm.controlType">
+                  <mat-option value="DIRECT_OWNERSHIP">Direct ownership</mat-option>
+                  <mat-option value="INDIRECT_OWNERSHIP">Indirect ownership</mat-option>
+                  <mat-option value="OTHER_CONTROL">Other control</mat-option>
+                  <mat-option value="LEGAL_REPRESENTATIVE">Legal representative</mat-option>
+                  <mat-option value="TRUSTEE">Trustee</mat-option>
+                </mat-select>
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Source</mat-label>
+                <input matInput [(ngModel)]="uboForm.source" placeholder="e.g. Commercial register extract" />
+              </mat-form-field>
+              <button type="button" mat-raised-button color="primary"
+                      [disabled]="!uboForm.givenName || !uboForm.familyName || uboSaving"
+                      (click)="addBeneficialOwner()">
+                <mat-icon>person_add</mat-icon>
+                Register
+              </button>
+            </div>
+            }
+          </div>
+        </mat-tab>
+
+        <!-- Portfolio Migration (investors only) -->
+        @if (canMutate && entity.type === 'INVESTOR') {
+          <mat-tab label="Portfolio Migration">
+            <app-portfolio-migration [investorEntityId]="id" />
+          </mat-tab>
+        }
+
+        <!-- MiFID II Classification & Suitability -->
+        @if (canMutate) {
+          <mat-tab label="MiFID Classification">
+            <app-mifid-classification [entityId]="id" />
+          </mat-tab>
+        }
+
         <!-- Identities Tab (ONCHAINID) -->
         <mat-tab label="Identities">
           <div class="tab-content">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
               <strong>On-Chain Identities (ONCHAINID)</strong>
-              <button mat-raised-button color="primary" (click)="deployIdentity()">
+              @if (canMutate) {
+              <button type="button" mat-raised-button color="primary" (click)="deployIdentity()">
                 <mat-icon>add</mat-icon> Deploy ONCHAINID
               </button>
+              }
             </div>
             @if (identitiesLoading) {
               <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
@@ -418,19 +613,21 @@ interface OnchainIdentityView {
                         <span style="font-size:12px;color:var(--rw-text-secondary)">No claims issued</span>
                       }
                      </div>
+                     @if (canMutate) {
                      <div style="display:flex;gap:8px">
-                       <button mat-stroked-button color="primary" (click)="issueKycClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
+                       <button type="button" mat-stroked-button color="primary" (click)="issueKycClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
                          <mat-icon>verified</mat-icon> Issue KYC Claim
                        </button>
-                       <button mat-stroked-button (click)="issueAmlClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
+                       <button type="button" mat-stroked-button (click)="issueAmlClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
                          Issue AML Claim
                        </button>
                      </div>
+                     }
                    </mat-card-content>
                 </mat-card>
               } @empty {
                 <p style="text-align:center;padding:24px;color:var(--rw-text-secondary)">
-                  No ONCHAINID deployed yet. Click "Deploy ONCHAINID" to create one on a supported chain.
+                  {{ canMutate ? 'No ONCHAINID deployed yet. Click "Deploy ONCHAINID" to create one on a supported chain.' : 'No ONCHAINID identities are deployed.' }}
                 </p>
               }
             }
@@ -479,7 +676,7 @@ interface OnchainIdentityView {
                 <p class="text-muted" style="text-align:center;padding:16px">No merge records.</p>
               }
 
-              @if (entity && entity.status !== 'DISSOLVED') {
+              @if (canMutate && entity && entity.status !== 'DISSOLVED') {
                 <mat-divider style="margin:16px 0" />
                 <h4 style="margin:0 0 8px">Record a Merger</h4>
                 <p class="hint-text" style="margin:0 0 8px;font-size:12px;color:var(--rw-text-secondary)">
@@ -507,7 +704,7 @@ interface OnchainIdentityView {
                     <input matInput [(ngModel)]="mergeForm.notes" />
                   </mat-form-field>
                 </div>
-                <button mat-raised-button color="warn"
+                <button type="button" mat-raised-button color="warn"
                         [disabled]="!mergeForm.targetEntityId || !mergeForm.effectiveDate"
                         (click)="recordMerger()">
                   <mat-icon>call_merge</mat-icon>
@@ -528,11 +725,13 @@ interface OnchainIdentityView {
                   Active legal blocks on this entity's wallets
                 </div>
               </div>
-              <button mat-stroked-button color="warn"
-                      [routerLink]="'/compliance/holder-blocks'">
-                <mat-icon>gavel</mat-icon>
-                Manage Blocks
-              </button>
+              @if (canMutate) {
+                <button type="button" mat-stroked-button color="warn"
+                        [routerLink]="'/compliance/holder-blocks'">
+                  <mat-icon>gavel</mat-icon>
+                  Manage Blocks
+                </button>
+              }
             </div>
 
             @if (blocksLoading) {
@@ -583,6 +782,7 @@ interface OnchainIdentityView {
                 pay their own gas.
               </p>
 
+              @if (canMutate) {
               <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:20px;flex-wrap:wrap">
                 <mat-form-field appearance="outline">
                   <mat-label>Sponsor</mat-label>
@@ -595,11 +795,12 @@ interface OnchainIdentityView {
                   <mat-label>Monthly cap (ETH)</mat-label>
                   <input matInput type="number" min="0" step="0.01" [(ngModel)]="gasMonthlyCapEth" />
                 </mat-form-field>
-                <button mat-raised-button color="primary" (click)="saveGasSponsorshipDefault()">
+                <button type="button" mat-raised-button color="primary" (click)="saveGasSponsorshipDefault()">
                   <mat-icon>save</mat-icon>
                   Set default
                 </button>
               </div>
+              }
 
               @if (gasPoliciesLoading) {
                 <div class="spinner-wrap"><mat-spinner diameter="28" /></div>
@@ -627,8 +828,8 @@ interface OnchainIdentityView {
                     <th mat-header-cell *matHeaderCellDef>Created</th>
                     <td mat-cell *matCellDef="let p">
                       {{ p.createdAt | date:'mediumDate' }}
-                      @if (p.active) {
-                        <button mat-icon-button color="warn" matTooltip="Deactivate" (click)="deactivateGasPolicy(p)">
+                      @if (p.active && canMutate) {
+                        <button type="button" mat-icon-button color="warn" matTooltip="Deactivate" (click)="deactivateGasPolicy(p)">
                           <mat-icon style="font-size:18px">delete</mat-icon>
                         </button>
                       }
@@ -659,7 +860,7 @@ interface OnchainIdentityView {
                   <p style="font-size:12px;color:var(--rw-text-secondary)">
                     Current portfolio statement including all token holdings, balances and valuations.
                   </p>
-                  <button mat-stroked-button color="primary" (click)="downloadStatement()">
+                  <button type="button" mat-stroked-button color="primary" (click)="downloadStatement()">
                     <mat-icon>download</mat-icon>
                     Download Statement (PDF)
                   </button>
@@ -679,7 +880,7 @@ interface OnchainIdentityView {
                     <input matInput type="number" [(ngModel)]="taxCertYear"
                            [min]="2020" [max]="currentYear" />
                   </mat-form-field>
-                  <button mat-stroked-button color="primary" (click)="downloadTaxCert()">
+                  <button type="button" mat-stroked-button color="primary" (click)="downloadTaxCert()">
                     <mat-icon>download</mat-icon>
                     Download Certificate (PDF)
                   </button>
@@ -699,12 +900,14 @@ interface OnchainIdentityView {
                   GwG §10 ongoing monitoring — last {{ screeningRuns.length }} run(s)
                 </div>
               </div>
-              <button mat-stroked-button color="primary"
-                      (click)="reScreenEntity()"
-                      [disabled]="screeningLoading">
-                <mat-icon>search</mat-icon>
-                Re-screen Now
-              </button>
+              @if (canMutate) {
+                <button type="button" mat-stroked-button color="primary"
+                        (click)="reScreenEntity()"
+                        [disabled]="screeningLoading">
+                  <mat-icon>search</mat-icon>
+                  Re-screen Now
+                </button>
+              }
             </div>
 
             @if (screeningLoading) {
@@ -733,13 +936,13 @@ interface OnchainIdentityView {
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let run">
                     @if (run.status === 'HIT') {
-                      <button mat-stroked-button color="warn" style="font-size:12px"
+                      <button type="button" mat-stroked-button color="warn" style="font-size:12px"
                               (click)="viewScreeningRun(run)">
                         <mat-icon style="font-size:16px;width:16px;height:16px">warning</mat-icon>
                         Review Hits
                       </button>
                     } @else {
-                      <button mat-icon-button (click)="viewScreeningRun(run)"
+                      <button type="button" mat-icon-button (click)="viewScreeningRun(run)"
                               matTooltip="View run details">
                         <mat-icon>open_in_new</mat-icon>
                       </button>
@@ -771,14 +974,20 @@ export class CustomerDetailComponent implements OnInit {
   private readonly adminUserService = inject(AdminUserService);
   private readonly screeningService = inject(ScreeningService);
   private readonly holderBlockService = inject(HolderBlockService);
+  private readonly beneficialOwnerService = inject(BeneficialOwnerService);
   private readonly corporateActionsService = inject(CorporateActionsService);
   private readonly gasSponsorshipService = inject(GasSponsorshipService);
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
+  private readonly auth = inject(AuthService);
+
+  readonly canMutate = this.auth.hasRole('REGISTRY_ADMIN');
 
   loading = true;
+  loadError = false;
   docsLoading = false;
   historyLoading = false;
   identitiesLoading = false;
@@ -786,6 +995,8 @@ export class CustomerDetailComponent implements OnInit {
   blocksLoading = false;
 
   entity: LegalEntity | null = null;
+  editingRm = false;
+  rmIdInput = '';
   documents: KycDocument[] = [];
   nameHistory: LegalEntityNameHistory[] = [];
   mergeRecords: EntityMergeRecordView[] = [];
@@ -794,6 +1005,17 @@ export class CustomerDetailComponent implements OnInit {
   identities: OnchainIdentityView[] = [];
   screeningRuns: ScreeningRun[] = [];
   holderBlocks: HolderBlock[] = [];
+  beneficialOwners: BeneficialOwner[] = [];
+  ubosLoading = false;
+  uboSaving = false;
+  uboForm: {
+    givenName: string; familyName: string; dateOfBirth: string; nationality: string;
+    countryOfResidence: string; ownershipPct: number | null;
+    controlType: BeneficialOwner['controlType']; source: string;
+  } = {
+    givenName: '', familyName: '', dateOfBirth: '', nationality: '',
+    countryOfResidence: '', ownershipPct: null, controlType: 'DIRECT_OWNERSHIP', source: '',
+  };
 
   readonly currentYear = new Date().getFullYear();
   taxCertYear = this.currentYear - 1;
@@ -801,6 +1023,7 @@ export class CustomerDetailComponent implements OnInit {
   docColumns = ['documentType', 'jurisdiction', 'fileName', 'sizeBytes', 'uploadedAt', 'actions'];
   screeningRunColumns = ['status', 'trigger', 'provider', 'startedAt', 'actions'];
   holderBlockColumns = ['blockType', 'walletAddress', 'legalBasis', 'startsAt', 'expiresAt'];
+  uboColumns = ['name', 'country', 'pepStatus', 'ownershipPct', 'controlType', 'registeredAt', 'actions'];
   showRejectForm = false;
   rejectReason = '';
 
@@ -817,16 +1040,20 @@ export class CustomerDetailComponent implements OnInit {
   gasMonthlyCapEth: number | null = 0.5;
   readonly gasPolicyColumns = ['scope', 'sponsor', 'monthlyCapEth', 'active', 'createdAt'];
 
+  @ViewChild('fileInput') private fileInput?: ElementRef<HTMLInputElement>;
+
   ngOnInit(): void {
     this.loadEntity();
   }
 
   loadEntity(): void {
     this.loading = true;
+    this.loadError = false;
     this.entityService.getEntity(this.id).subscribe({
       next: (entity) => {
         this.entity = entity;
         this.loading = false;
+        this.loadError = false;
         this.cdr.markForCheck();
         this.loadDocuments();
         this.loadHistory();
@@ -834,12 +1061,14 @@ export class CustomerDetailComponent implements OnInit {
         this.loadJurisdictionApprovals();
         this.loadScreeningRuns();
         this.loadHolderBlocks();
+        this.loadBeneficialOwners();
         if (entity.type === 'ISSUER') {
           this.loadGasPolicies();
         }
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.markForCheck();
       },
     });
@@ -865,7 +1094,7 @@ export class CustomerDetailComponent implements OnInit {
       monthlyCapEth: this.gasMonthlyCapEth ?? undefined,
     }).subscribe({
       next: () => this.loadGasPolicies(),
-      error: () => this.loadGasPolicies(),
+      error: (err) => this.showActionError('Failed to save gas sponsorship policy.', err),
     });
   }
 
@@ -873,6 +1102,7 @@ export class CustomerDetailComponent implements OnInit {
     if (!confirm('Deactivate this gas sponsorship policy?')) return;
     this.gasSponsorshipService.deactivate(policy.id).subscribe({
       next: () => this.loadGasPolicies(),
+      error: (err) => this.showActionError('Failed to deactivate gas sponsorship policy.', err),
     });
   }
 
@@ -899,6 +1129,7 @@ export class CustomerDetailComponent implements OnInit {
         this.screeningRuns = [run, ...this.screeningRuns];
         this.cdr.markForCheck();
       },
+      error: (err) => this.showActionError('Failed to start screening.', err),
     });
   }
 
@@ -922,15 +1153,82 @@ export class CustomerDetailComponent implements OnInit {
     });
   }
 
+  loadBeneficialOwners(): void {
+    this.ubosLoading = true;
+    this.cdr.markForCheck();
+    this.beneficialOwnerService.list(this.id).subscribe({
+      next: (owners) => {
+        this.beneficialOwners = owners;
+        this.ubosLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.ubosLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  addBeneficialOwner(): void {
+    if (!this.uboForm.givenName || !this.uboForm.familyName) return;
+    this.uboSaving = true;
+    this.cdr.markForCheck();
+
+    this.beneficialOwnerService.add(this.id, {
+      person: {
+        givenName: this.uboForm.givenName,
+        familyName: this.uboForm.familyName,
+        dateOfBirth: this.uboForm.dateOfBirth || undefined,
+        nationality: this.uboForm.nationality || undefined,
+        countryOfResidence: this.uboForm.countryOfResidence || undefined,
+        country: this.uboForm.countryOfResidence || undefined,
+      },
+      ownershipPct: this.uboForm.ownershipPct ?? undefined,
+      controlType: this.uboForm.controlType,
+      source: this.uboForm.source || undefined,
+    }).subscribe({
+      next: (owner) => {
+        this.beneficialOwners = [owner, ...this.beneficialOwners];
+        this.uboForm = {
+          givenName: '', familyName: '', dateOfBirth: '', nationality: '',
+          countryOfResidence: '', ownershipPct: null, controlType: 'DIRECT_OWNERSHIP', source: '',
+        };
+        this.uboSaving = false;
+        this.cdr.markForCheck();
+        this.snackBar.open('Beneficial owner registered. Sanctions/PEP screening triggered.', 'Dismiss', { duration: 5000 });
+      },
+      error: (err) => {
+        this.uboSaving = false;
+        this.cdr.markForCheck();
+        this.snackBar.open(err?.error?.message ?? 'Failed to register beneficial owner.', 'Dismiss', { duration: 6000 });
+      },
+    });
+  }
+
+  ceaseBeneficialOwner(bo: BeneficialOwner): void {
+    if (!confirm(`Mark ${bo.givenName} ${bo.familyName} as no longer a beneficial owner?`)) return;
+    this.beneficialOwnerService.cease(this.id, bo.id).subscribe({
+      next: (updated) => {
+        this.beneficialOwners = this.beneficialOwners.map(o => o.id === updated.id ? updated : o)
+          .filter(o => !o.ceasedAt);
+        this.cdr.markForCheck();
+        this.snackBar.open('Beneficial owner ceased.', 'Dismiss', { duration: 4000 });
+      },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to cease beneficial owner.', 'Dismiss', { duration: 6000 }),
+    });
+  }
+
   downloadStatement(): void {
     this.corporateActionsService.downloadPositionStatement(this.id).subscribe({
       next: (blob) => triggerBlobDownload(blob, `depotauszug-${this.id}-${new Date().toISOString().split('T')[0]}.pdf`),
+      error: (err) => this.showActionError('Failed to generate position statement.', err),
     });
   }
 
   downloadTaxCert(): void {
     this.corporateActionsService.downloadTaxCertificate(this.id, this.taxCertYear).subscribe({
       next: (blob) => triggerBlobDownload(blob, `steuerbescheinigung-${this.id}-${this.taxCertYear}.pdf`),
+      error: (err) => this.showActionError('Failed to generate tax certificate.', err),
     });
   }
 
@@ -1016,8 +1314,7 @@ export class CustomerDetailComponent implements OnInit {
   }
 
   uploadDoc(): void {
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
-    input?.click();
+    this.fileInput?.nativeElement.click();
   }
 
   onFileSelected(event: Event): void {
@@ -1025,17 +1322,15 @@ export class CustomerDetailComponent implements OnInit {
     if (!file) return;
     this.kycService.uploadDocument(this.id, file, 'GENERAL').subscribe({
       next: () => this.loadDocuments(),
+      error: (err) => this.showActionError('Failed to upload KYC document.', err),
     });
+    (event.target as HTMLInputElement).value = '';
   }
 
   downloadDoc(doc: KycDocument): void {
-    this.kycService.downloadDocument(this.id, doc.id).subscribe((blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = doc.fileName;
-      a.click();
-      URL.revokeObjectURL(url);
+    this.kycService.downloadDocument(this.id, doc.id).subscribe({
+      next: (blob) => triggerBlobDownload(blob, doc.fileName),
+      error: (err) => this.showActionError('Failed to download KYC document.', err),
     });
   }
 
@@ -1051,6 +1346,7 @@ export class CustomerDetailComponent implements OnInit {
           this.identities.forEach(identity => this.issueKycClaim(identity));
         }
       },
+      error: (err) => this.showActionError('Failed to approve KYC.', err),
     });
   }
 
@@ -1082,7 +1378,8 @@ export class CustomerDetailComponent implements OnInit {
       `${environment.apiUrl}/entities/${this.id}/onchain-identity`,
       { chainConfigId }
     ).subscribe({
-      next: (identity) => { this.identities = [...this.identities, identity]; },
+      next: (identity) => { this.identities = [...this.identities, identity]; this.cdr.markForCheck(); },
+      error: (err) => this.showActionError('Failed to deploy on-chain identity.', err),
     });
   }
 
@@ -1094,6 +1391,7 @@ export class CustomerDetailComponent implements OnInit {
       { expiresAt: expiresAt.toISOString() }
     ).subscribe({
       next: () => this.loadIdentities(),
+      error: (err) => this.showActionError('Failed to issue KYC claim.', err),
     });
   }
 
@@ -1103,6 +1401,7 @@ export class CustomerDetailComponent implements OnInit {
       {}
     ).subscribe({
       next: () => this.loadIdentities(),
+      error: (err) => this.showActionError('Failed to issue AML claim.', err),
     });
   }
 
@@ -1113,20 +1412,80 @@ export class CustomerDetailComponent implements OnInit {
         this.rejectReason = '';
         this.loadEntity();
       },
+      error: (err) => this.showActionError('Failed to reject KYC.', err),
     });
   }
 
   suspend(): void {
-    this.entityService.suspendEntity(this.id).subscribe({ next: () => this.loadEntity() });
+    this.entityService.suspendEntity(this.id).subscribe({
+      next: () => this.loadEntity(),
+      error: (err) => this.showActionError('Failed to suspend customer.', err),
+    });
   }
 
   reactivate(): void {
-    this.entityService.reactivateEntity(this.id).subscribe({ next: () => this.loadEntity() });
+    this.entityService.reactivateEntity(this.id).subscribe({
+      next: () => this.loadEntity(),
+      error: (err) => this.showActionError('Failed to reactivate customer.', err),
+    });
   }
 
   dissolve(): void {
     if (!confirm('Are you sure you want to dissolve this entity? This action cannot be undone.')) return;
-    this.entityService.dissolveEntity(this.id).subscribe({ next: () => this.loadEntity() });
+    this.entityService.dissolveEntity(this.id).subscribe({
+      next: () => this.loadEntity(),
+      error: (err) => this.showActionError('Failed to dissolve customer.', err),
+    });
+  }
+
+  startEditRelationshipManager(): void {
+    this.rmIdInput = this.entity?.assignedRelationshipManagerId ?? '';
+    this.editingRm = true;
+  }
+
+  saveRelationshipManager(): void {
+    const value = this.rmIdInput.trim() || null;
+    this.entityService.assignRelationshipManager(this.id, value).subscribe({
+      next: (updated) => {
+        this.entity = updated;
+        this.editingRm = false;
+        this.snackBar.open('Relationship manager updated.', 'Dismiss', { duration: 4000 });
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.snackBar.open(err?.error?.message ?? 'Failed to update relationship manager.', 'Dismiss', { duration: 5000 });
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  terminate(): void {
+    const reason = prompt(
+      'Reason for terminating this customer relationship (required for audit trail):'
+    );
+    if (!reason) return;
+
+    const ref = this.dialog.open(StepUpDialogComponent, {
+      data: {
+        requireDualControl: true,
+        reason: `Terminate customer relationship for ${this.entity?.currentName} (offboarding)`,
+        action: 'CUSTOMER_OFFBOARDING',
+      },
+      width: '500px',
+      disableClose: true,
+    });
+
+    ref.afterClosed().subscribe((result) => {
+      if (!result) return;
+
+      this.entityService.terminateEntity(this.id, reason, result.stepUpToken, result.dualControlToken!).subscribe({
+        next: () => {
+          this.snackBar.open('Customer relationship terminated. Audit event recorded.', 'Dismiss', { duration: 5000 });
+          this.loadEntity();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to terminate customer.', 'Dismiss', { duration: 6000 }),
+      });
+    });
   }
 
   recordMerger(): void {
@@ -1152,11 +1511,30 @@ export class CustomerDetailComponent implements OnInit {
 
   openAsCompany(): void {
     if (!this.entity) return;
+    const handoffTab = window.open('', '_blank');
+    if (handoffTab) {
+      handoffTab.opener = null;
+      handoffTab.document.title = 'Opening customer portal…';
+    }
     this.adminUserService.impersonate(this.entity.id).subscribe({
       next: (res) => {
-        window.open(res.handoffUrl, '_blank');
+        let url: URL;
+        try {
+          url = new URL(res.handoffUrl, window.location.origin);
+          if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported protocol');
+        } catch {
+          handoffTab?.close();
+          this.snackBar.open('The server returned an invalid customer-portal URL.', 'Dismiss', { duration: 6000 });
+          return;
+        }
+        if (handoffTab) {
+          handoffTab.location.replace(url.href);
+        } else {
+          this.snackBar.open('The customer portal was blocked. Allow pop-ups and try again.', 'Dismiss', { duration: 6000 });
+        }
       },
       error: (err) => {
+        handoffTab?.close();
         this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
       },
     });
@@ -1165,13 +1543,20 @@ export class CustomerDetailComponent implements OnInit {
   goBack(): void {
     this.router.navigate(['/customers']);
   }
+
+  private showActionError(fallback: string, error: { error?: { message?: string } }): void {
+    this.snackBar.open(error?.error?.message ?? fallback, 'Dismiss', { duration: 6000 });
+    this.cdr.markForCheck();
+  }
 }
 
 function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

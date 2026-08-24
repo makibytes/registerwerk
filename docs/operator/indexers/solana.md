@@ -1,8 +1,5 @@
 ---
-id: solana
 title: Solana (Yellowstone gRPC)
-sidebar_label: Solana Indexer
-sidebar_position: 2
 ---
 
 # Solana Indexer — Yellowstone gRPC

@@ -91,6 +91,19 @@ public class CorrectionCapabilityService {
             "cancel-deposit-request", "Cancel a pending deposit request", true,
             "Reversible in place — withdraws a not-yet-fulfilled deposit request before NAV strike.");
 
+    // ── SPL Token-2022 (SolanaTokenAdminController, Permanent Delegate) ──────
+    private static final CorrectionCapability FREEZE_SPL = new CorrectionCapability(
+            "spl-freeze", "Freeze / thaw token account", true,
+            "AWG §17, GwG §40, MiCAR Art. 36 — via the Token-2022 freeze authority; reversible in place.");
+    private static final CorrectionCapability FORCED_TRANSFER_SPL = new CorrectionCapability(
+            "spl-forced-transfer", "Forced transfer (§24 Berichtigung)", false,
+            "Moves tokens via the Token-2022 Permanent Delegate extension, bypassing holder consent. "
+                    + "Book an opposite forced-transfer to correct a wrongful one.");
+    private static final CorrectionCapability FORCE_BURN_SPL = new CorrectionCapability(
+            "spl-force-burn", "Forced burn (§26 Einziehung)", false,
+            "Compulsory cancellation via the Token-2022 Permanent Delegate extension. Irreversible "
+                    + "on-chain — correcting a wrongful force-burn requires a fresh mint of equal amount.");
+
     // ── Canton (TokenAdminController Canton-only endpoints) ─────────────────
     private static final CorrectionCapability FREEZE_HOLDING = new CorrectionCapability(
             "freeze-holding", "Freeze / unfreeze a holding", true, "Reversible in place, per-holding freeze.");
@@ -143,9 +156,11 @@ public class CorrectionCapabilityService {
             // ERC-7540 (async vault): only the deposit-request cancel is actually wired up
             // (VaultController never calls Erc7540AdminService.cancelRedeemRequest).
             case ERC7540 -> List.of(CANCEL_DEPOSIT_REQUEST);
-            case CANTON_TOKEN ->
-                    List.of(FREEZE_HOLDING, PAUSE, FORCE_TRANSFER_CANTON, BURN_HOLDING);
-            // DAML Finance bonds (CantonBondOperations) expose only scheduled lifecycle events
+            // CIP-0056 standardizes interfaces and registry/wallet workflows; it does not define
+            // universal issuer-admin choices. A registry-specific adapter is required before any
+            // CANTON_TOKEN correction can be advertised safely.
+            case CANTON_TOKEN -> List.of();
+            // Registerwerk Daml bonds (CantonBondOperations) expose only scheduled lifecycle events
             // (coupon payment, rate fixing, redemption, early call) — no freeze/pause/forced
             // -transfer/force-burn primitive exists for this standard today.
             case DAML_BOND_FIXED, DAML_BOND_FLOATING, DAML_BOND_ZERO -> List.of();
@@ -153,8 +168,12 @@ public class CorrectionCapabilityService {
             // requires a configured Zama relayer sidecar). Freeze/pause have no equivalent on
             // ConfidentialERC20.sol at all (only ConfidentialERC3643 has them).
             case CONF_ERC20 -> List.of(FORCE_BURN_CONFIDENTIAL);
-            // Solana admin corrections are Phase-4 (SolanaTokenAdminService not yet implemented).
-            case SPL, SPL_2022, SPL_2022_BOND, SPL_2022_CONFIDENTIAL -> List.of();
+            // SolanaTokenAdminController wires freeze/thaw + Permanent-Delegate forced-transfer
+            // and force-burn for all four SPL Token-2022 variants (the extension presets only
+            // change which OTHER extensions are active on the mint, not what the Permanent
+            // Delegate / freeze authority can do).
+            case SPL, SPL_2022, SPL_2022_BOND, SPL_2022_CONFIDENTIAL ->
+                    List.of(FREEZE_SPL, FORCED_TRANSFER_SPL, FORCE_BURN_SPL);
             // StarknetTokenService.freezeAccount/unfreezeAccount and StellarAssetService's
             // clawbackAsset/setAuthorizationFlags exist but neither has controller wiring yet —
             // listed as empty here for the same reason as SPL above, not an oversight.

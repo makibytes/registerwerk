@@ -9,16 +9,16 @@ Confidential tokens use **Fully Homomorphic Encryption (FHE)** to shield token b
 transfer amounts from public view while preserving the compliance and audit capabilities
 required by regulators.
 
-:::caution Registerwerk IS the client
-Earlier revisions of this page described the encrypt/decrypt lifecycle as "someone else's
-problem" — the browser's job, a companion service you must supply yourself. That was the wrong
-framing: the only parties allowed to decrypt confidential balances — issuers, investors, the
-registry operator, and an auditor — all act *through* Registerwerk. Building the full
-`@zama-fhe/relayer-sdk` integration is therefore Registerwerk's own responsibility, and it is now
-built: contracts, an in-repo relayer sidecar, backend services, and browser integration in both
-frontends. See the [status matrix](#status) below for exactly what's real vs. what still needs a
-live network to exercise.
-:::
+!!! warning "Registerwerk IS the client"
+    Earlier revisions of this page described the encrypt/decrypt lifecycle as "someone else's
+    problem" — the browser's job, a companion service you must supply yourself. That was the wrong
+    framing: the only parties allowed to decrypt confidential balances — issuers, investors, the
+    registry operator, and an auditor — all act *through* Registerwerk. Building the full
+    `@zama-fhe/relayer-sdk` integration is therefore Registerwerk's own responsibility, and it is now
+    built: contracts, an in-repo relayer sidecar, backend services, and browser integration in both
+    frontends. See the [status matrix](#status) below for exactly what's real vs. what still needs a
+    live network to exercise.
+
 
 ---
 

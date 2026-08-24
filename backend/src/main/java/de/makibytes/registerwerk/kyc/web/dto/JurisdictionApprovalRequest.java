@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.kyc.web.dto;
 
+import jakarta.validation.constraints.Future;
+import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 
 /**
@@ -9,6 +11,6 @@ import java.time.LocalDate;
  * @param overrideNote required when approving despite missing/expired compliance requirements
  */
 public record JurisdictionApprovalRequest(
-    LocalDate expiresAt,
-    String overrideNote
+    @Future LocalDate expiresAt,
+    @Size(max = 2000) String overrideNote
 ) {}

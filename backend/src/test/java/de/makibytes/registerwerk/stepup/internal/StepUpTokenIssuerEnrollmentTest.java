@@ -22,7 +22,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
- * Verifies the TOTP enrolment flow (Phase 5 finding #3) — previously no code path existed by
+ * Verifies the TOTP enrolment flow  — previously no code path existed by
  * which a real user could ever enrol, meaning every {@code @RequiresStepUp} endpoint was
  * permanently unreachable in a production deployment.
  */

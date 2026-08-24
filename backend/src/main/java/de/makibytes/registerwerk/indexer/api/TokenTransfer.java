@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.indexer.api;
 
+import de.makibytes.registerwerk.finality.api.BlockIdentity;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
@@ -21,7 +23,10 @@ import java.util.UUID;
         @Index(name = "idx_tt_contract_address",   columnList = "contract_address"),
         @Index(name = "idx_tt_asset_id",           columnList = "asset_id"),
         @Index(name = "idx_tt_deployment_id",      columnList = "deployment_id"),
-        @Index(name = "idx_tt_dedup",              columnList = "chain_config_id, tx_hash, log_index", unique = true)
+        // PostgreSQL requires every UNIQUE key on this RANGE-partitioned table to contain the
+        // partition key (occurred_at). block_hash is part of the logical EVM occurrence: the same
+        // tx/log may be mined into B after A was orphaned, while A itself may later return.
+        @Index(name = "idx_tt_evm_occurrence",      columnList = "chain_config_id, tx_hash, log_index, block_hash, occurred_at", unique = true)
     }
 )
 public class TokenTransfer {
@@ -93,6 +98,27 @@ public class TokenTransfer {
     @Column(name = "raw_data", columnDefinition = "jsonb")
     private Map<String, Object> rawData;
 
+    /**
+     * Defaults to FINALIZED, matching the DB column default — correct for chains that are final
+     * on write (Solana/Stellar/Canton — final at commitment=finalized / ledger close /
+     * synchronizer commit respectively). EVM (via GraphNodeSyncService) and Starknet explicitly
+     * set PROVISIONAL or SAFE at write time when the row hasn't yet reached the chain's configured
+     * finality model's strongest level — Starknet's ACCEPTED_ON_L2 maps to SAFE, ACCEPTED_ON_L1 to
+     * FINALIZED, REJECTED/REVERTED to ORPHANED. ORPHANED rows are never deleted, only marked — this
+     * is a regulated register with an audit-trail requirement. See {@link FinalityLevel}'s javadoc
+     * for the full three-tier model and how it aligns with the sibling products' vocabulary.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "finality_status", nullable = false, length = 16)
+    private FinalityLevel finalityStatus = FinalityLevel.FINALIZED;
+
+    /**
+     * Canonical block/identity hash recorded at write time (EVM block hash, Starknet block
+     * hash). Null for chains/rows where no reorg primitive applies — see V4 migration comment.
+     */
+    @Column(name = "block_hash", length = 128)
+    private String blockHash;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -126,7 +152,7 @@ public class TokenTransfer {
     public void setEventType(EventType eventType) { this.eventType = eventType; }
 
     public String getTxHash() { return txHash; }
-    public void setTxHash(String txHash) { this.txHash = txHash; }
+    public void setTxHash(String txHash) { this.txHash = BlockIdentity.normalize(txHash); }
 
     public Long getBlockNumber() { return blockNumber; }
     public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
@@ -145,4 +171,10 @@ public class TokenTransfer {
 
     public Map<String, Object> getRawData() { return rawData; }
     public void setRawData(Map<String, Object> rawData) { this.rawData = rawData; }
+
+    public FinalityLevel getFinalityStatus() { return finalityStatus; }
+    public void setFinalityStatus(FinalityLevel finalityStatus) { this.finalityStatus = finalityStatus; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = BlockIdentity.normalize(blockHash); }
 }

@@ -28,7 +28,7 @@ import { MatInputModule } from '@angular/material/input';
           <div class="header-icon-wrap">
             <mat-icon class="header-icon">how_to_reg</mat-icon>
           </div>
-          <mat-card-title>Account Setup</mat-card-title>
+          <h1 mat-card-title>Account Setup</h1>
           <mat-card-subtitle>Registerwerk Customer Portal</mat-card-subtitle>
         </mat-card-header>
 
@@ -51,7 +51,7 @@ import { MatInputModule } from '@angular/material/input';
           </mat-form-field>
 
           @if (error) {
-            <p class="error-message">{{ error }}</p>
+            <p class="error-message" role="alert">{{ error }}</p>
           }
         </mat-card-content>
 
@@ -60,6 +60,7 @@ import { MatInputModule } from '@angular/material/input';
           <button
             mat-raised-button
             color="primary"
+            type="button"
             [disabled]="!token.trim()"
             (click)="proceed()"
           >

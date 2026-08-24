@@ -34,9 +34,18 @@ public class IndexerState {
     @Column(name = "indexer_type", nullable = false, length = 30)
     private IndexerType indexerType;
 
-    /** Last successfully processed block number (EVM or Starknet). Null before first sync. */
+    /** Last successfully processed block number (EVM or Starknet). Null before first sync.
+     *  Head/provisional cursor — the highest block read from at all, FINAL or still PROVISIONAL. */
     @Column(name = "last_synced_block")
     private Long lastSyncedBlock;
+
+    /**
+     * Highest block number whose token_transfer rows have all been re-verified and flipped to
+     * FINAL. Always {@code <= lastSyncedBlock}. Null before the first successful finality pass,
+     * or for indexer types with no two-tier model.
+     */
+    @Column(name = "last_final_block")
+    private Long lastFinalBlock;
 
     /**
      * Last successfully processed cursor as a string: Solana transaction signature, Canton
@@ -84,6 +93,9 @@ public class IndexerState {
 
     public Long getLastSyncedBlock() { return lastSyncedBlock; }
     public void setLastSyncedBlock(Long lastSyncedBlock) { this.lastSyncedBlock = lastSyncedBlock; }
+
+    public Long getLastFinalBlock() { return lastFinalBlock; }
+    public void setLastFinalBlock(Long lastFinalBlock) { this.lastFinalBlock = lastFinalBlock; }
 
     public String getLastSyncedSignature() { return lastSyncedSignature; }
     public void setLastSyncedSignature(String lastSyncedSignature) { this.lastSyncedSignature = lastSyncedSignature; }

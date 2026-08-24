@@ -1,13 +1,16 @@
-site_name: Registerwerk — Technical & Regulatory Reference
+site_name: Registerwerk
+site_url: !ENV [DOCS_SITE_URL, "http://localhost:8003/"]
 site_description: >-
-  Implementation reference for operators, compliance teams, and engineers.
-  Covers all supported legal frameworks, token standards, blockchains, and platform architecture.
+  How a tokenised security is issued, held, traded, financed and redeemed —
+  and how Registerwerk implements each step. Written for customers, operators,
+  compliance teams and engineers.
 
 docs_dir: docs
 site_dir: site
 
 theme:
   name: material
+  custom_dir: docs/overrides
   palette:
     - scheme: default
       primary: custom
@@ -25,34 +28,625 @@ theme:
     text: Manrope
     code: IBM Plex Mono
   features:
-    - navigation.instant
+    # navigation.instant is deliberately NOT enabled: mkdocs-static-i18n cannot make the
+    # language switcher contextual alongside it, so switching language would drop you on
+    # the other language's home page instead of the page you were reading. Staying put
+    # is worth more than the instant-loading nicety.
     - navigation.tracking
     - navigation.sections
-    - navigation.expand
     - navigation.top
     - navigation.indexes
+    - navigation.footer
     - toc.follow
     - search.suggest
     - search.highlight
+    - search.share
     - content.code.copy
     - content.tabs.link
+    - content.tooltips
 
 extra_css:
   - assets/brand.css
+  - assets/i18n.css
+
+# mkdocs-static-i18n emits root-relative language links. Explicitly bind them to the browser's
+# current origin at runtime so a docs instance reached on a non-default port (for example
+# http://nibbler:8003) keeps that port when changing language.
+extra_javascript:
+  - assets/language-switcher-origin.js
 
 plugins:
+  # Order matters: i18n must come first so that it can reconfigure the theme and hand
+  # the per-language page sets to search.
+  - i18n:
+      docs_structure: suffix          # customer/intro.md + customer/intro.de.md
+      fallback_to_default: true       # untranslated page → English, never a 404
+      reconfigure_material: true      # contextual language switcher, per-language search
+      reconfigure_search: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+          site_name: Registerwerk
+
+        - locale: de
+          name: Deutsch
+          build: true
+          site_name: Registerwerk
+          site_description: >-
+            Wie ein tokenisiertes Wertpapier emittiert, gehalten, gehandelt, beliehen und
+            zurückgezahlt wird — und wie Registerwerk jeden Schritt umsetzt.
+          nav_translations:
+            Home: Startseite
+            For customers: Für Kunden
+            For operators: Für Betreiber
+            Reference: Referenz
+            Start here: Erste Schritte
+            What Registerwerk is: Was Registerwerk ist
+            Getting your account: Zugang erhalten
+            Signing in: Anmeldung
+            Getting verified (KYC): Verifizierung (KYC)
+            Connecting a wallet: Wallet verbinden
+            The life of a security: Der Lebenszyklus eines Wertpapiers
+            1. Design and approval: 1. Konzeption und Genehmigung
+            2. Primary issuance: 2. Primäremission
+            3. Holding and custody: 3. Verwahrung und Bestand
+            4. Secondary trading: 4. Sekundärmarkt
+            5. Repo and lending: 5. Pensionsgeschäfte und Beleihung
+            6. Corporate actions and redemption: 6. Kapitalmaßnahmen und Rückzahlung
+            Your workspace: Ihr Arbeitsbereich
+            Investor: Anleger
+            Trader: Händler
+            Issuer: Emittent
+            Company administrator: Unternehmensadministrator
+            dApp publisher: dApp-Anbieter
+            Auditor: Prüfer
+            Your dashboard: Ihr Dashboard
+            Choosing a token standard: Token-Standard wählen
+            Deploying to a blockchain: Auf eine Blockchain ausbringen
+            Managing your investors: Anleger verwalten
+            Questions and answers: Fragen und Antworten
+            Glossary: Glossar
+            What an operator does: Aufgaben des Registerbetreibers
+            How Registerwerk is built: Aufbau von Registerwerk
+            Roles and permissions: Rollen und Berechtigungen
+            Serving customers: Kundenbetreuung
+            Onboarding a customer: Kunden aufnehmen
+            Reviewing KYC: KYC prüfen
+            Approving an issuance: Emission genehmigen
+            Impersonation — seeing what they see: Support-Modus — die Kundensicht
+            Two-factor support (lost phone): 2FA-Support (Gerät verloren)
+            Offboarding and register transfer: Beendigung und Registerübertragung
+            Installation: Installation
+            Prerequisites: Voraussetzungen
+            Docker Compose: Docker Compose
+            Backend: Backend
+            Frontends: Frontends
+            API gateway: API-Gateway
+            Configuration: Konfiguration
+            Environment: Umgebungsvariablen
+            Blockchains: Blockchains
+            Identity provider: Identitätsanbieter
+            Email: E-Mail
+            Indexers: Indexer
+            Regulatory options: Regulatorische Optionen
+            Blockchain operations: Blockchain-Betrieb
+            Adding a chain: Chain hinzufügen
+            chaincache integration: chaincache-Integration
+            Deploying contracts: Contracts ausbringen
+            ERC-3643 setup: ERC-3643 einrichten
+            Confidential tokens: Vertrauliche Token
+            The Graph: The Graph
+            Solana: Solana
+            Resilience: Ausfallsicherheit
+            Running it: Betrieb
+            Monitoring: Überwachung
+            Backups: Datensicherung
+            Upgrades: Aktualisierungen
+            Service levels: Service-Level
+            Disaster recovery: Notfallwiederherstellung
+            Troubleshooting: Fehlerbehebung
+            API reference: API-Referenz
+            Concepts and architecture: Konzepte und Architektur
+            Core concepts: Grundbegriffe
+            System architecture: Systemarchitektur
+            User roles and permissions: Benutzerrollen und Berechtigungen
+            Legal frameworks: Rechtsrahmen
+            Germany — eWpG: Deutschland — eWpG
+            Luxembourg — CSSF: Luxemburg — CSSF
+            France — AMF: Frankreich — AMF
+            Liechtenstein — TVTG: Liechtenstein — TVTG
+            Compliance components: Compliance-Komponenten
+            KYC & AML: KYC und Geldwäscheprävention
+            Sanctions screening: Sanktionsprüfung
+            Travel Rule (TFR): Travel Rule (TFR)
+            Step-up MFA & 4-eyes: Step-up-MFA und Vier-Augen-Prinzip
+            Token admin grants: Token-Adminrechte
+            DORA — ICT risk: DORA — IKT-Risiko
+            MiFIR transaction reporting: MiFIR-Transaktionsmeldung
+            DAC8 / CARF: DAC8 / CARF
+            Data protection (DSGVO): Datenschutz (DSGVO)
+            Records of processing: Verarbeitungsverzeichnis
+            DPIA — Germany: DSFA — Deutschland
+            DPIA — Luxembourg: DSFA — Luxemburg
+            DPIA — France: DSFA — Frankreich
+            DPIA — Liechtenstein: DSFA — Liechtenstein
+            Lending facility review: Prüfung der Beleihungsfazilität
+            Token standards: Token-Standards
+            ERC-20 — fungible: ERC-20 — fungibel
+            ERC-721 — non-fungible: ERC-721 — nicht fungibel
+            ERC-1155 — multi-token: ERC-1155 — Multi-Token
+            ERC-3525 — semi-fungible: ERC-3525 — teilfungibel
+            ERC-3643 — T-REX regulated: ERC-3643 — T-REX reguliert
+            ERC-4626 — tokenised vault: ERC-4626 — tokenisierter Vault
+            ERC-7540 — async vault: ERC-7540 — asynchroner Vault
+            DAML Finance bonds: DAML-Finance-Anleihen
+            Solana SPL-2022: Solana SPL-2022
+            Confidential tokens (Zama fhEVM): Vertrauliche Token (Zama fhEVM)
+            Supported blockchains: Unterstützte Blockchains
+            Ethereum & EVM chains: Ethereum und EVM-Chains
+            Confidential EVM (Fhenix / Inco): Vertrauliche EVM (Fhenix / Inco)
+            Canton / DAML ledger: Canton / DAML-Ledger
+            StarkNet & Stellar: StarkNet und Stellar
+            Platform internals: Plattform-Interna
+            Module architecture: Modularchitektur
+            Security & authentication: Sicherheit und Authentifizierung
+            Microsoft Entra ID setup: Microsoft Entra ID einrichten
+            Audit log: Prüfprotokoll
+            REST API overview: REST-API-Überblick
+            Account abstraction: Account Abstraction
+            DeFi interoperability: DeFi-Interoperabilität
+            dApp development & marketplace: dApp-Entwicklung und Marktplatz
+            Assurance review ledger: Prüfungsregister
+
+        - locale: fr
+          name: Français
+          build: true
+          site_name: Registerwerk
+          site_description: >-
+            Comment un titre financier tokenisé est émis, détenu, négocié, financé et
+            remboursé — et comment Registerwerk met en œuvre chaque étape.
+          nav_translations:
+            Home: Accueil
+            For customers: Pour les clients
+            For operators: Pour les opérateurs
+            Reference: Référence
+            Start here: Commencer ici
+            What Registerwerk is: Qu'est-ce que Registerwerk
+            Getting your account: Obtenir votre compte
+            Signing in: Connexion
+            Getting verified (KYC): Vérification (KYC)
+            Connecting a wallet: Connecter un portefeuille
+            The life of a security: La vie d'un titre financier
+            1. Design and approval: 1. Conception et approbation
+            2. Primary issuance: 2. Émission primaire
+            3. Holding and custody: 3. Détention et conservation
+            4. Secondary trading: 4. Marché secondaire
+            5. Repo and lending: 5. Pension livrée et financement
+            6. Corporate actions and redemption: 6. Opérations sur titres et remboursement
+            Your workspace: Votre espace de travail
+            Investor: Investisseur
+            Trader: Négociateur
+            Issuer: Émetteur
+            Company administrator: Administrateur de société
+            dApp publisher: Éditeur de dApp
+            Auditor: Auditeur
+            Your dashboard: Votre tableau de bord
+            Choosing a token standard: Choisir une norme de jeton
+            Deploying to a blockchain: Déployer sur une blockchain
+            Managing your investors: Gérer vos investisseurs
+            Questions and answers: Questions et réponses
+            Glossary: Glossaire
+            What an operator does: Le rôle de l'opérateur
+            How Registerwerk is built: L'architecture de Registerwerk
+            Roles and permissions: Rôles et autorisations
+            Serving customers: Servir les clients
+            Onboarding a customer: Intégrer un client
+            Reviewing KYC: Examiner le KYC
+            Approving an issuance: Approuver une émission
+            Impersonation — seeing what they see: Mode support — voir ce qu'ils voient
+            Two-factor support (lost phone): Support 2FA (téléphone perdu)
+            Offboarding and register transfer: Résiliation et transfert de registre
+            Installation: Installation
+            Prerequisites: Prérequis
+            Docker Compose: Docker Compose
+            Backend: Backend
+            Frontends: Interfaces
+            API gateway: Passerelle API
+            Configuration: Configuration
+            Environment: Environnement
+            Blockchains: Blockchains
+            Identity provider: Fournisseur d'identité
+            Email: Courriel
+            Indexers: Indexeurs
+            Regulatory options: Options réglementaires
+            Blockchain operations: Opérations blockchain
+            Adding a chain: Ajouter une chaîne
+            chaincache integration: Intégration chaincache
+            Deploying contracts: Déployer les contrats
+            ERC-3643 setup: Configuration ERC-3643
+            Confidential tokens: Jetons confidentiels
+            The Graph: The Graph
+            Solana: Solana
+            Resilience: Résilience
+            Running it: Exploitation
+            Monitoring: Supervision
+            Backups: Sauvegardes
+            Upgrades: Mises à niveau
+            Service levels: Niveaux de service
+            Disaster recovery: Reprise après sinistre
+            Troubleshooting: Dépannage
+            API reference: Référence API
+            Concepts and architecture: Concepts et architecture
+            Core concepts: Notions fondamentales
+            System architecture: Architecture du système
+            User roles and permissions: Rôles et autorisations
+            Legal frameworks: Cadres juridiques
+            Germany — eWpG: Allemagne — eWpG
+            Luxembourg — CSSF: Luxembourg — CSSF
+            France — AMF: France — AMF
+            Liechtenstein — TVTG: Liechtenstein — TVTG
+            Compliance components: Composants de conformité
+            KYC & AML: KYC et LCB-FT
+            Sanctions screening: Filtrage des sanctions
+            Travel Rule (TFR): Travel Rule (TFR)
+            Step-up MFA & 4-eyes: Authentification renforcée et double validation
+            Token admin grants: Droits d'administration des jetons
+            DORA — ICT risk: DORA — risque informatique
+            MiFIR transaction reporting: Déclaration des transactions MiFIR
+            DAC8 / CARF: DAC8 / CARF
+            Data protection (DSGVO): Protection des données (RGPD)
+            Records of processing: Registre des traitements
+            DPIA — Germany: AIPD — Allemagne
+            DPIA — Luxembourg: AIPD — Luxembourg
+            DPIA — France: AIPD — France
+            DPIA — Liechtenstein: AIPD — Liechtenstein
+            Lending facility review: Revue du dispositif de financement
+            Token standards: Normes de jetons
+            ERC-20 — fungible: ERC-20 — fongible
+            ERC-721 — non-fungible: ERC-721 — non fongible
+            ERC-1155 — multi-token: ERC-1155 — multi-jetons
+            ERC-3525 — semi-fungible: ERC-3525 — semi-fongible
+            ERC-3643 — T-REX regulated: ERC-3643 — T-REX réglementé
+            ERC-4626 — tokenised vault: ERC-4626 — coffre tokenisé
+            ERC-7540 — async vault: ERC-7540 — coffre asynchrone
+            DAML Finance bonds: Obligations DAML Finance
+            Solana SPL-2022: Solana SPL-2022
+            Confidential tokens (Zama fhEVM): Jetons confidentiels (Zama fhEVM)
+            Supported blockchains: Blockchains prises en charge
+            Ethereum & EVM chains: Ethereum et chaînes EVM
+            Confidential EVM (Fhenix / Inco): EVM confidentielle (Fhenix / Inco)
+            Canton / DAML ledger: Registre Canton / DAML
+            StarkNet & Stellar: StarkNet et Stellar
+            Platform internals: Internes de la plateforme
+            Module architecture: Architecture modulaire
+            Security & authentication: Sécurité et authentification
+            Microsoft Entra ID setup: Configuration Microsoft Entra ID
+            Audit log: Piste d'audit
+            REST API overview: Aperçu de l'API REST
+            Account abstraction: Abstraction de compte
+            DeFi interoperability: Interopérabilité DeFi
+            dApp development & marketplace: Développement de dApp et place de marché
+            Assurance review ledger: Registre des revues d'assurance
+
+        - locale: it
+          name: Italiano
+          build: true
+          site_name: Registerwerk
+          site_description: >-
+            Come uno strumento finanziario digitale viene emesso, detenuto, negoziato,
+            finanziato e rimborsato — e come Registerwerk realizza ogni fase.
+          nav_translations:
+            Home: Pagina iniziale
+            For customers: Per i clienti
+            For operators: Per gli operatori
+            Reference: Riferimento
+            Start here: Da qui si comincia
+            What Registerwerk is: Che cos'è Registerwerk
+            Getting your account: Ottenere l'account
+            Signing in: Accesso
+            Getting verified (KYC): Verifica (KYC)
+            Connecting a wallet: Collegare un wallet
+            The life of a security: La vita di uno strumento finanziario
+            1. Design and approval: 1. Progettazione e approvazione
+            2. Primary issuance: 2. Emissione primaria
+            3. Holding and custody: 3. Detenzione e custodia
+            4. Secondary trading: 4. Mercato secondario
+            5. Repo and lending: 5. Pronti contro termine e finanziamento
+            6. Corporate actions and redemption: 6. Operazioni societarie e rimborso
+            Your workspace: La tua area di lavoro
+            Investor: Investitore
+            Trader: Negoziatore
+            Issuer: Emittente
+            Company administrator: Amministratore aziendale
+            dApp publisher: Editore di dApp
+            Auditor: Revisore
+            Your dashboard: La tua dashboard
+            Choosing a token standard: Scegliere uno standard di token
+            Deploying to a blockchain: Distribuire su una blockchain
+            Managing your investors: Gestire gli investitori
+            Questions and answers: Domande e risposte
+            Glossary: Glossario
+            What an operator does: Il ruolo dell'operatore
+            How Registerwerk is built: Com'è costruito Registerwerk
+            Roles and permissions: Ruoli e autorizzazioni
+            Serving customers: Servire i clienti
+            Onboarding a customer: Attivare un cliente
+            Reviewing KYC: Esaminare il KYC
+            Approving an issuance: Approvare un'emissione
+            Impersonation — seeing what they see: Modalità supporto — vedere ciò che vedono
+            Two-factor support (lost phone): Supporto 2FA (telefono smarrito)
+            Offboarding and register transfer: Cessazione e trasferimento del registro
+            Installation: Installazione
+            Prerequisites: Prerequisiti
+            Docker Compose: Docker Compose
+            Backend: Backend
+            Frontends: Interfacce
+            API gateway: Gateway API
+            Configuration: Configurazione
+            Environment: Ambiente
+            Blockchains: Blockchain
+            Identity provider: Provider di identità
+            Email: Email
+            Indexers: Indicizzatori
+            Regulatory options: Opzioni regolamentari
+            Blockchain operations: Operazioni blockchain
+            Adding a chain: Aggiungere una chain
+            chaincache integration: Integrazione chaincache
+            Deploying contracts: Distribuire i contratti
+            ERC-3643 setup: Configurazione ERC-3643
+            Confidential tokens: Token riservati
+            The Graph: The Graph
+            Solana: Solana
+            Resilience: Resilienza
+            Running it: Gestione operativa
+            Monitoring: Monitoraggio
+            Backups: Backup
+            Upgrades: Aggiornamenti
+            Service levels: Livelli di servizio
+            Disaster recovery: Ripristino di emergenza
+            Troubleshooting: Risoluzione dei problemi
+            API reference: Riferimento API
+            Concepts and architecture: Concetti e architettura
+            Core concepts: Concetti fondamentali
+            System architecture: Architettura del sistema
+            User roles and permissions: Ruoli utente e autorizzazioni
+            Legal frameworks: Quadri normativi
+            Germany — eWpG: Germania — eWpG
+            Luxembourg — CSSF: Lussemburgo — CSSF
+            France — AMF: Francia — AMF
+            Liechtenstein — TVTG: Liechtenstein — TVTG
+            Compliance components: Componenti di conformità
+            KYC & AML: KYC e antiriciclaggio
+            Sanctions screening: Screening sanzioni
+            Travel Rule (TFR): Travel Rule (TFR)
+            Step-up MFA & 4-eyes: Autenticazione rafforzata e quattro occhi
+            Token admin grants: Diritti di amministrazione dei token
+            DORA — ICT risk: DORA — rischio ICT
+            MiFIR transaction reporting: Segnalazione delle operazioni MiFIR
+            DAC8 / CARF: DAC8 / CARF
+            Data protection (DSGVO): Protezione dei dati (GDPR)
+            Records of processing: Registro dei trattamenti
+            DPIA — Germany: DPIA — Germania
+            DPIA — Luxembourg: DPIA — Lussemburgo
+            DPIA — France: DPIA — Francia
+            DPIA — Liechtenstein: DPIA — Liechtenstein
+            Lending facility review: Revisione della linea di finanziamento
+            Token standards: Standard di token
+            ERC-20 — fungible: ERC-20 — fungibile
+            ERC-721 — non-fungible: ERC-721 — non fungibile
+            ERC-1155 — multi-token: ERC-1155 — multi-token
+            ERC-3525 — semi-fungible: ERC-3525 — semi-fungibile
+            ERC-3643 — T-REX regulated: ERC-3643 — T-REX regolamentato
+            ERC-4626 — tokenised vault: ERC-4626 — vault tokenizzato
+            ERC-7540 — async vault: ERC-7540 — vault asincrono
+            DAML Finance bonds: Obbligazioni DAML Finance
+            Solana SPL-2022: Solana SPL-2022
+            Confidential tokens (Zama fhEVM): Token riservati (Zama fhEVM)
+            Supported blockchains: Blockchain supportate
+            Ethereum & EVM chains: Ethereum e chain EVM
+            Confidential EVM (Fhenix / Inco): EVM riservata (Fhenix / Inco)
+            Canton / DAML ledger: Registro Canton / DAML
+            StarkNet & Stellar: StarkNet e Stellar
+            Platform internals: Interni della piattaforma
+            Module architecture: Architettura a moduli
+            Security & authentication: Sicurezza e autenticazione
+            Microsoft Entra ID setup: Configurazione Microsoft Entra ID
+            Audit log: Registro di controllo
+            REST API overview: Panoramica dell'API REST
+            Account abstraction: Account abstraction
+            DeFi interoperability: Interoperabilità DeFi
+            dApp development & marketplace: Sviluppo di dApp e marketplace
+            Assurance review ledger: Registro delle revisioni
+
+        - locale: es
+          name: Español
+          build: true
+          site_name: Registerwerk
+          site_description: >-
+            Cómo se emite, mantiene, negocia, financia y amortiza un valor tokenizado —
+            y cómo Registerwerk implementa cada paso.
+          nav_translations:
+            Home: Inicio
+            For customers: Para clientes
+            For operators: Para operadores
+            Reference: Referencia
+            Start here: Empiece aquí
+            What Registerwerk is: Qué es Registerwerk
+            Getting your account: Obtener su cuenta
+            Signing in: Iniciar sesión
+            Getting verified (KYC): Verificación (KYC)
+            Connecting a wallet: Conectar un monedero
+            The life of a security: La vida de un valor
+            1. Design and approval: 1. Diseño y aprobación
+            2. Primary issuance: 2. Emisión primaria
+            3. Holding and custody: 3. Tenencia y custodia
+            4. Secondary trading: 4. Mercado secundario
+            5. Repo and lending: 5. Repo y financiación
+            6. Corporate actions and redemption: 6. Operaciones societarias y amortización
+            Your workspace: Su espacio de trabajo
+            Investor: Inversor
+            Trader: Negociador
+            Issuer: Emisor
+            Company administrator: Administrador de la empresa
+            dApp publisher: Editor de dApp
+            Auditor: Auditor
+            Your dashboard: Su panel
+            Choosing a token standard: Elegir un estándar de token
+            Deploying to a blockchain: Desplegar en una blockchain
+            Managing your investors: Gestionar sus inversores
+            Questions and answers: Preguntas y respuestas
+            Glossary: Glosario
+            What an operator does: Qué hace un operador
+            How Registerwerk is built: Cómo está construido Registerwerk
+            Roles and permissions: Funciones y permisos
+            Serving customers: Atender a los clientes
+            Onboarding a customer: Dar de alta a un cliente
+            Reviewing KYC: Revisar el KYC
+            Approving an issuance: Aprobar una emisión
+            Impersonation — seeing what they see: Modo soporte — ver lo que ellos ven
+            Two-factor support (lost phone): Soporte 2FA (teléfono perdido)
+            Offboarding and register transfer: Baja y traspaso del registro
+            Installation: Instalación
+            Prerequisites: Requisitos previos
+            Docker Compose: Docker Compose
+            Backend: Backend
+            Frontends: Interfaces
+            API gateway: Pasarela API
+            Configuration: Configuración
+            Environment: Entorno
+            Blockchains: Blockchains
+            Identity provider: Proveedor de identidad
+            Email: Correo electrónico
+            Indexers: Indexadores
+            Regulatory options: Opciones regulatorias
+            Blockchain operations: Operaciones de blockchain
+            Adding a chain: Añadir una cadena
+            chaincache integration: Integración de chaincache
+            Deploying contracts: Desplegar contratos
+            ERC-3643 setup: Configuración de ERC-3643
+            Confidential tokens: Tokens confidenciales
+            The Graph: The Graph
+            Solana: Solana
+            Resilience: Resiliencia
+            Running it: Operación
+            Monitoring: Supervisión
+            Backups: Copias de seguridad
+            Upgrades: Actualizaciones
+            Service levels: Niveles de servicio
+            Disaster recovery: Recuperación ante desastres
+            Troubleshooting: Resolución de problemas
+            API reference: Referencia de la API
+            Concepts and architecture: Conceptos y arquitectura
+            Core concepts: Conceptos básicos
+            System architecture: Arquitectura del sistema
+            User roles and permissions: Funciones de usuario y permisos
+            Legal frameworks: Marcos jurídicos
+            Germany — eWpG: Alemania — eWpG
+            Luxembourg — CSSF: Luxemburgo — CSSF
+            France — AMF: Francia — AMF
+            Liechtenstein — TVTG: Liechtenstein — TVTG
+            Compliance components: Componentes de cumplimiento
+            KYC & AML: KYC y prevención del blanqueo
+            Sanctions screening: Filtrado de sanciones
+            Travel Rule (TFR): Travel Rule (TFR)
+            Step-up MFA & 4-eyes: Autenticación reforzada y doble control
+            Token admin grants: Derechos de administración de tokens
+            DORA — ICT risk: DORA — riesgo TIC
+            MiFIR transaction reporting: Comunicación de operaciones MiFIR
+            DAC8 / CARF: DAC8 / CARF
+            Data protection (DSGVO): Protección de datos (RGPD)
+            Records of processing: Registro de actividades de tratamiento
+            DPIA — Germany: EIPD — Alemania
+            DPIA — Luxembourg: EIPD — Luxemburgo
+            DPIA — France: EIPD — Francia
+            DPIA — Liechtenstein: EIPD — Liechtenstein
+            Lending facility review: Revisión de la facilidad de financiación
+            Token standards: Estándares de token
+            ERC-20 — fungible: ERC-20 — fungible
+            ERC-721 — non-fungible: ERC-721 — no fungible
+            ERC-1155 — multi-token: ERC-1155 — multitoken
+            ERC-3525 — semi-fungible: ERC-3525 — semifungible
+            ERC-3643 — T-REX regulated: ERC-3643 — T-REX regulado
+            ERC-4626 — tokenised vault: ERC-4626 — bóveda tokenizada
+            ERC-7540 — async vault: ERC-7540 — bóveda asíncrona
+            DAML Finance bonds: Bonos DAML Finance
+            Solana SPL-2022: Solana SPL-2022
+            Confidential tokens (Zama fhEVM): Tokens confidenciales (Zama fhEVM)
+            Supported blockchains: Blockchains admitidas
+            Ethereum & EVM chains: Ethereum y cadenas EVM
+            Confidential EVM (Fhenix / Inco): EVM confidencial (Fhenix / Inco)
+            Canton / DAML ledger: Registro Canton / DAML
+            StarkNet & Stellar: StarkNet y Stellar
+            Platform internals: Interioridades de la plataforma
+            Module architecture: Arquitectura de módulos
+            Security & authentication: Seguridad y autenticación
+            Microsoft Entra ID setup: Configuración de Microsoft Entra ID
+            Audit log: Registro de auditoría
+            REST API overview: Visión general de la API REST
+            Account abstraction: Abstracción de cuentas
+            DeFi interoperability: Interoperabilidad DeFi
+            dApp development & marketplace: Desarrollo de dApps y mercado
+            Assurance review ledger: Registro de revisiones
+
   - search:
-      lang: en
+      lang:
+        - en
+        - de
+        - fr
+        - it
+        - es
 
 hooks:
   - docs/hooks.py
 
+# docs/ also holds a dormant Docusaurus setup (docusaurus.config.ts, sidebars-*.ts,
+# src/, static/, node_modules/). MkDocs Material is the documentation server that
+# docker-compose actually runs, so everything below is excluded from the build —
+# without this, every npm package README in node_modules ships as a doc page.
 exclude_docs: |
   hooks.py
+  includes/
+  Dockerfile
+  translate.py
+  TRANSLATION-TERMINOLOGY.md
+  node_modules/
+  build/
+  src/
+  static/
+  *.ts
+  *.json
+  package-lock.json
+
+not_in_nav: |
+  claims/README.md
 
 markdown_extensions:
+  - abbr
   - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - pymdownx.caret
   - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.tilde
+  # Every page gets the abbreviation list appended, so any defined term anywhere in
+  # the documentation shows its definition on hover without the author linking it.
+  - pymdownx.snippets:
+      base_path:
+        - docs
+      auto_append:
+        - includes/glossary.md
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -64,11 +658,8 @@ markdown_extensions:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
-  - pymdownx.inlinehilite
-  - pymdownx.snippets
-  - tables
-  - attr_list
-  - md_in_html
+  - pymdownx.tasklist:
+      custom_checkbox: true
   - toc:
       permalink: true
       title: On this page
@@ -78,51 +669,147 @@ extra:
 
 nav:
   - Home: index.md
-  - Introduction:
-    - intro/index.md
-    - Core Concepts: intro/concepts.md
-    - System Architecture: intro/architecture.md
-    - User Roles & Permissions: intro/user-roles.md
-  - Legal Frameworks:
-    - legal/index.md
-    - Germany — eWpG: legal/ewpg.md
-    - Luxembourg — CSSF: legal/cssf-lu.md
-    - France — AMF: legal/amf-fr.md
-    - Liechtenstein — TVTG: legal/tvtg-li.md
-  - Compliance Components:
-    - compliance/index.md
-    - KYC & AML: compliance/kyc-aml.md
-    - Sanctions Screening: compliance/sanctions-screening.md
-    - Travel Rule (TFR): compliance/travel-rule.md
-    - Sperrvermerk §16 eWpG: compliance/sperrvermerk.md
-    - Step-Up MFA & 4-Eyes: compliance/step-up-mfa.md
-    - DORA — ICT Risk: compliance/dora.md
-    - MiFIR Transaction Reporting: compliance/mifir.md
-    - DAC8 / CARF: compliance/dac8.md
-    - Data Protection (DSGVO): compliance/data-protection.md
-  - Token Standards:
-    - token-standards/index.md
-    - ERC-20 — Fungible Token: token-standards/erc20.md
-    - ERC-721 — Non-Fungible Token: token-standards/erc721.md
-    - ERC-1155 — Multi-Token: token-standards/erc1155.md
-    - ERC-3525 — Semi-Fungible: token-standards/erc3525.md
-    - ERC-3643 — T-REX Regulated: token-standards/erc3643.md
-    - ERC-4626 — Tokenised Vault: token-standards/erc4626.md
-    - ERC-7540 — Async Vault: token-standards/erc7540.md
-    - DAML Finance Bonds: token-standards/canton-daml.md
-    - Solana SPL-2022: token-standards/spl-2022.md
-    - Confidential Tokens (Zama fhEVM): token-standards/confidential.md
-  - Supported Blockchains:
-    - blockchains/index.md
-    - Ethereum & EVM Chains: blockchains/evm.md
-    - Confidential EVM (Fhenix / Inco): blockchains/confidential-evm.md
-    - Solana: blockchains/solana.md
-    - Canton / DAML Ledger: blockchains/canton.md
-    - StarkNet & Stellar: blockchains/starknet-stellar.md
-  - Platform Architecture:
-    - platform/index.md
-    - Module Architecture: platform/modules.md
-    - Security & Authentication: platform/security.md
-    - Audit Log: platform/audit-log.md
-    - REST API Overview: platform/api.md
-    - dApp Development & Marketplace: platform/dapp-development.md
+
+  - For customers:
+    - customer/index.md
+    - Start here:
+      - What Registerwerk is: customer/intro.md
+      - Getting your account: customer/onboarding.md
+      - Signing in: customer/authentication.md
+      - Getting verified (KYC): customer/kyc.md
+      - Connecting a wallet: customer/investors/wallet-setup.md
+    - The life of a security:
+      - customer/lifecycle/index.md
+      - 1. Design and approval: customer/lifecycle/design.md
+      - 2. Primary issuance: customer/lifecycle/primary-issuance.md
+      - 3. Holding and custody: customer/lifecycle/holding.md
+      - 4. Secondary trading: customer/lifecycle/secondary-market.md
+      - 5a. Repo trading: customer/lifecycle/repo-trading.md
+      - 5b. Securities-backed lending: customer/lifecycle/repo-lending.md
+      - 6. Corporate actions and redemption: customer/lifecycle/redemption.md
+    - Your workspace:
+      - customer/workspaces/index.md
+      - Investor: customer/workspaces/investor.md
+      - Trader: customer/workspaces/trader.md
+      - Issuer: customer/workspaces/issuer.md
+      - Company administrator: customer/workspaces/company-admin.md
+      - dApp publisher: customer/workspaces/dapp-publisher.md
+      - Auditor: customer/workspaces/auditor.md
+    - Reference:
+      - Your dashboard: customer/dashboard.md
+      - Choosing a token standard: customer/issuers/token-standards.md
+      - Deploying to a blockchain: customer/issuers/deploying-to-chain.md
+      - Managing your investors: customer/issuers/managing-investors.md
+      - Questions and answers: customer/faq.md
+      - Glossary: customer/glossary.md
+
+  - For operators:
+    - operator/index.md
+    - Start here:
+      - What an operator does: operator/getting-started.md
+      - How Registerwerk is built: operator/architecture.md
+      - Roles and permissions: operator/customers/roles.md
+    - Serving customers:
+      - operator/customers/index.md
+      - Onboarding a customer: operator/customers/onboarding-flow.md
+      - Reviewing KYC: operator/customers/kyc-process.md
+      - Approving an issuance: operator/customers/approving-issuances.md
+      - Impersonation — seeing what they see: operator/customers/impersonation.md
+      - Two-factor support (lost phone): operator/customers/two-factor-support.md
+      - Offboarding and register transfer: operator/customers/offboarding.md
+    - Installation:
+      - Prerequisites: operator/installation/prerequisites.md
+      - Docker Compose: operator/installation/docker.md
+      - Backend: operator/installation/backend.md
+      - Frontends: operator/installation/frontends.md
+      - API gateway: operator/installation/api-gateway.md
+    - Configuration:
+      - Environment: operator/configuration/environment.md
+      - Blockchains: operator/configuration/chains.md
+      - Identity provider: operator/configuration/identity-provider.md
+      - Email: operator/configuration/email.md
+      - Indexers: operator/configuration/indexers.md
+      - Regulatory options: operator/configuration/regulatory-compliance.md
+    - Blockchain operations:
+      - Anvil demo and address manifest: operator/blockchain/anvil-demo.md
+      - Adding a chain: operator/blockchain/adding-chains.md
+      - Deploying contracts: operator/blockchain/deploying-contracts.md
+      - ERC-3643 setup: operator/blockchain/erc3643-setup.md
+      - Confidential tokens: operator/blockchain/confidential-tokens.md
+      - chaincache integration: operator/blockchain/chaincache-integration.md
+    - Security operations:
+      - HSM-backed wallets: operator/security/hsm-wallets.md
+      - On-chain security review: operator/security/onchain-review.md
+    - Indexers:
+      - The Graph: operator/indexers/the-graph.md
+      - Solana: operator/indexers/solana.md
+      - Resilience: operator/indexers/resilience.md
+      - Finality policy and reorg compensation: operator/indexers/finality-and-compensation.md
+    - Running it:
+      - Monitoring: operator/maintenance/monitoring.md
+      - Backups: operator/maintenance/backups.md
+      - Upgrades: operator/maintenance/upgrades.md
+      - Service levels: operator/slo.md
+      - Disaster recovery: operator/dr/runbook.md
+      - Troubleshooting: operator/troubleshooting.md
+    - API reference: operator/api-reference.md
+
+  - Reference:
+    - Concepts and architecture:
+      - intro/index.md
+      - Core concepts: intro/concepts.md
+      - System architecture: intro/architecture.md
+      - User roles and permissions: intro/user-roles.md
+    - Legal frameworks:
+      - legal/index.md
+      - Germany — eWpG: legal/ewpg.md
+      - Luxembourg — CSSF: legal/cssf-lu.md
+      - France — AMF: legal/amf-fr.md
+      - Liechtenstein — TVTG: legal/tvtg-li.md
+    - Compliance components:
+      - compliance/index.md
+      - KYC & AML: compliance/kyc-aml.md
+      - Sanctions screening: compliance/sanctions-screening.md
+      - Travel Rule (TFR): compliance/travel-rule.md
+      - Sperrvermerk §16 eWpG: compliance/sperrvermerk.md
+      - Step-up MFA & 4-eyes: compliance/step-up-mfa.md
+      - Token admin grants: compliance/token-admin-grants.md
+      - DORA — ICT risk: compliance/dora.md
+      - MiFIR transaction reporting: compliance/mifir.md
+      - DAC8 / CARF: compliance/dac8.md
+      - Data protection (DSGVO): compliance/data-protection.md
+      - Records of processing: compliance/ropa.md
+      - DPIA — Germany: compliance/dpia-DE.md
+      - DPIA — Luxembourg: compliance/dpia-LU.md
+      - DPIA — France: compliance/dpia-FR.md
+      - DPIA — Liechtenstein: compliance/dpia-LI.md
+      - Lending facility review: compliance/lending-facility-review.md
+    - Token standards:
+      - token-standards/index.md
+      - ERC-20 — fungible: token-standards/erc20.md
+      - ERC-721 — non-fungible: token-standards/erc721.md
+      - ERC-1155 — multi-token: token-standards/erc1155.md
+      - ERC-3525 — semi-fungible: token-standards/erc3525.md
+      - ERC-3643 — T-REX regulated: token-standards/erc3643.md
+      - ERC-4626 — tokenised vault: token-standards/erc4626.md
+      - ERC-7540 — async vault: token-standards/erc7540.md
+      - DAML Finance bonds: token-standards/canton-daml.md
+      - Solana SPL-2022: token-standards/spl-2022.md
+      - Confidential tokens (Zama fhEVM): token-standards/confidential.md
+    - Supported blockchains:
+      - blockchains/index.md
+      - Ethereum & EVM chains: blockchains/evm.md
+      - Confidential EVM (Fhenix / Inco): blockchains/confidential-evm.md
+      - Solana: blockchains/solana.md
+      - Canton / DAML ledger: blockchains/canton.md
+      - StarkNet & Stellar: blockchains/starknet-stellar.md
+    - Platform internals:
+      - platform/index.md
+      - Module architecture: platform/modules.md
+      - Security & authentication: platform/security.md
+      - Microsoft Entra ID setup: platform/entra-setup.md
+      - Audit log: platform/audit-log.md
+      - REST API overview: platform/api.md
+      - Account abstraction: platform/account-abstraction.md
+      - DeFi interoperability: platform/defi-interoperability.md
+      - dApp development & marketplace: platform/dapp-development.md

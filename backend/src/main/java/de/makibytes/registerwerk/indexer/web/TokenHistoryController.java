@@ -39,32 +39,43 @@ public class TokenHistoryController {
     /**
      * Returns a paginated list of all token transfers linked to the given asset,
      * across all its deployments.
+     *
+     * <p>{@code isHolderOfAsset} is required alongside {@code canRead} (issuer-only) — without
+     * it, an investor viewing their own position's transfer history (the customer app's
+     * "Transfer History" section on Investment Detail) got a 403: {@code canRead} only allows the
+     * asset's issuer or operator staff, never a holder who isn't the issuer. See {@code
+     * AssetAccessChecker.isHolderOfAsset}'s javadoc for why it's added at call sites like this one
+     * rather than folded into {@code canRead} itself.
      */
     @GetMapping("/assets/{assetId}/history")
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
-            + "or @assetAccessChecker.canRead(#assetId, authentication)")
+            + "or @assetAccessChecker.canRead(#assetId, authentication) "
+            + "or @assetAccessChecker.isHolderOfAsset(#assetId, authentication)")
     public ResponseEntity<PageResponse<TokenTransferResponse>> getAssetHistory(
             @PathVariable UUID assetId,
             Pageable pageable,
             Authentication authentication) {
         Page<TokenTransfer> page = tokenHistoryService.getTransfersByAsset(assetId, pageable);
-        Page<TokenTransferResponse> mapped = page.map(tokenTransferMapper::toResponseWithChain);
+        Page<TokenTransferResponse> mapped = page.map(t -> tokenTransferMapper.toResponse(t, authentication));
         return ResponseEntity.ok(PageResponse.of(mapped));
     }
 
     /**
      * Returns a paginated list of token transfers linked to a specific deployment of an asset.
+     * See {@link #getAssetHistory}'s javadoc for why {@code isHolderOfAsset} is included here too.
      */
     @GetMapping("/assets/{assetId}/deployments/{deploymentId}/history")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
-            + "or @assetAccessChecker.canRead(#assetId, authentication)")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#deploymentId, #assetId) and "
+            + "(hasRole('REGISTRY_ADMIN') or hasRole('AUDIT') "
+            + "or @assetAccessChecker.canRead(#assetId, authentication) "
+            + "or @assetAccessChecker.isHolderOfAsset(#assetId, authentication))")
     public ResponseEntity<PageResponse<TokenTransferResponse>> getDeploymentHistory(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
             Pageable pageable,
             Authentication authentication) {
         Page<TokenTransfer> page = tokenHistoryService.getTransfersByDeployment(deploymentId, pageable);
-        Page<TokenTransferResponse> mapped = page.map(tokenTransferMapper::toResponseWithChain);
+        Page<TokenTransferResponse> mapped = page.map(t -> tokenTransferMapper.toResponse(t, authentication));
         return ResponseEntity.ok(PageResponse.of(mapped));
     }
 

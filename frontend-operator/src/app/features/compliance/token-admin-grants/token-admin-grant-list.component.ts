@@ -15,6 +15,7 @@ import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerw
 import { TokenAdminGrantService } from '../../../core/api/token-admin-grant.service';
 import { TokenAdminGrant } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
+import { AuthService } from '../../../core/auth/auth.service';
 
 /**
  * Entity-wide ASSET_TOKEN_ADMIN grant management — a grant here (assetId = null) applies
@@ -42,14 +43,16 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         <mat-label>Entity ID</mat-label>
         <input matInput [(ngModel)]="entityId" placeholder="UUID" (keyup.enter)="load()" />
       </mat-form-field>
-      <button mat-stroked-button (click)="load()" [disabled]="!entityId">
+      <button type="button" mat-stroked-button (click)="load()" [disabled]="!entityId">
         <mat-icon>search</mat-icon>
         Load
       </button>
-      <button mat-raised-button color="warn" (click)="openCreateDialog()" [disabled]="!entityId">
-        <mat-icon>admin_panel_settings</mat-icon>
-        Grant entity-wide permission
-      </button>
+      @if (canManage) {
+        <button type="button" mat-raised-button color="warn" (click)="openCreateDialog()" [disabled]="!entityId">
+          <mat-icon>admin_panel_settings</mat-icon>
+          Grant entity-wide permission
+        </button>
+      }
     </div>
 
     @if (loadedFor) {
@@ -57,14 +60,15 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         [columns]="columns"
         [rows]="grants"
         [state]="state"
+        (retry)="load()"
         filterPlaceholder="Filter…"
         emptyMessage="No active entity-wide grants for this entity."
-        [actionsTemplate]="rowActions">
+        [actionsTemplate]="canManage ? rowActions : undefined">
       </rw-data-table>
     }
 
     <ng-template #rowActions let-grant>
-      <button mat-stroked-button color="warn"
+      <button type="button" mat-stroked-button color="warn"
               (click)="revoke(grant)"
               matTooltip="Revoke — requires step-up auth + a second approver">
         <mat-icon>block</mat-icon>
@@ -98,8 +102,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn"
                 (click)="submitCreate()"
                 [disabled]="!form.walletAddress || !form.chainConfigId || !form.legalBasis">
           <mat-icon>admin_panel_settings</mat-icon>
@@ -118,6 +122,10 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       border: 1px solid rgba(239,68,68,.18);
       border-radius: 6px;
     }
+    @media (max-width: 720px) {
+      .lookup-row { align-items: stretch; flex-direction: column; }
+      .lookup-row mat-form-field { max-width: none !important; }
+    }
   `],
 })
 export class TokenAdminGrantListComponent {
@@ -127,6 +135,9 @@ export class TokenAdminGrantListComponent {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly auth = inject(AuthService);
+
+  readonly canManage = this.auth.hasRole('REGISTRY_ADMIN');
 
   entityId = '';
   loadedFor: string | null = null;

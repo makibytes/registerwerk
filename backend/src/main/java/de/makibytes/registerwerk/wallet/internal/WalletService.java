@@ -15,13 +15,15 @@ import de.makibytes.registerwerk.wallet.api.OperatorWallet.WalletType;
 import de.makibytes.registerwerk.wallet.api.OperatorWalletRepository;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.wallet.api.WalletStorage;
+import de.makibytes.registerwerk.wallet.api.WalletManagement;
 import org.p2p.solanaj.core.Account;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.crypto.ECKeyPair;
+import org.web3j.crypto.Credentials;
 import org.web3j.crypto.Keys;
 
 import java.security.SecureRandom;
@@ -37,7 +39,7 @@ import java.util.UUID;
  */
 @Service
 @Transactional
-public class WalletService {
+public class WalletService implements WalletManagement {
 
     private static final Logger log = LoggerFactory.getLogger(WalletService.class);
     private static final SecureRandom RNG = new SecureRandom();
@@ -46,6 +48,7 @@ public class WalletService {
     private final WalletStorage            walletStorage;
     private final WalletDefaultService     defaultService;
     private final WalletSigner             walletSigner;
+    private final Pkcs11HsmService         pkcs11HsmService;
     private final ApplicationEventPublisher eventPublisher;
 
     public WalletService(
@@ -53,11 +56,13 @@ public class WalletService {
             WalletStorage walletStorage,
             WalletDefaultService defaultService,
             WalletSigner walletSigner,
+            Pkcs11HsmService pkcs11HsmService,
             ApplicationEventPublisher eventPublisher) {
         this.walletRepository   = walletRepository;
         this.walletStorage      = walletStorage;
         this.defaultService     = defaultService;
         this.walletSigner       = walletSigner;
+        this.pkcs11HsmService   = pkcs11HsmService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -145,8 +150,8 @@ public class WalletService {
         UUID id = UUID.randomUUID();
         String relativePath = walletStorage.importEvmKeystore(id, keystoreJson, userPassword);
 
-        Credentials creds = walletStorage.loadEvm(relativePath);
-        String address = creds.getAddress();
+        Credentials credentials = walletStorage.loadEvm(relativePath);
+        String address = credentials.getAddress();
 
         OperatorWallet wallet = persist(id, name, WalletType.EVM, address, relativePath);
         defaultService.autoPromoteIfFirstOfType(wallet);
@@ -154,6 +159,33 @@ public class WalletService {
         eventPublisher.publishEvent(new WalletImportedKeystoreEvent(wallet.getId(), actorId, actorRole));
         log.info("Imported keystore as wallet '{}': address={}", name, address);
         return wallet;
+    }
+
+    /** Registers an EVM key which already exists in the instance's configured PKCS#11 token. */
+    @Override
+    public OperatorWallet attachHsm(String name, String keyAlias, String address,
+                                    UUID actorId, String actorRole) {
+        requireUniqueName(name);
+        if (!pkcs11HsmService.isEnabled()) {
+            throw new IllegalStateException("PKCS#11 HSM support is not enabled for this instance");
+        }
+        // A challenge proves that the alias really controls the supplied address before it can
+        // become a chain default. No transaction or private-key export is involved.
+        Pkcs11EvmSigner signer = new Pkcs11EvmSigner(pkcs11HsmService, keyAlias, address);
+        signer.signDigest(org.web3j.crypto.Hash.sha3(
+                ("registerwerk-hsm-enrollment:" + name).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+        OperatorWallet wallet = new OperatorWallet();
+        wallet.setName(name);
+        wallet.setType(WalletType.EVM);
+        wallet.setAddress(org.web3j.crypto.Keys.toChecksumAddress(address));
+        wallet.setCustodyType(OperatorWallet.CustodyType.PKCS11);
+        wallet.setKeyReference(keyAlias);
+        wallet.setCreatedBy(actorId);
+        OperatorWallet saved = walletRepository.save(wallet);
+        defaultService.autoPromoteIfFirstOfType(saved);
+        eventPublisher.publishEvent(new WalletGeneratedEvent(saved.getId(), actorId, actorRole));
+        return saved;
     }
 
     // ── Export ────────────────────────────────────────────────────────────────
@@ -164,6 +196,9 @@ public class WalletService {
      */
     public String exportKeystore(UUID walletId, String exportPassword, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
+        if (wallet.getCustodyType() == OperatorWallet.CustodyType.PKCS11) {
+            throw new UnsupportedOperationException("HSM keys are non-exportable");
+        }
         if (wallet.getType() != WalletType.EVM) {
             throw new UnsupportedOperationException("Keystore export is only supported for EVM wallets");
         }
@@ -179,6 +214,9 @@ public class WalletService {
      */
     public String exportRaw(UUID walletId, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
+        if (wallet.getCustodyType() == OperatorWallet.CustodyType.PKCS11) {
+            throw new UnsupportedOperationException("HSM keys are non-exportable");
+        }
         String raw = wallet.getType() == WalletType.EVM
                 ? walletStorage.exportEvmRaw(wallet.getKeystorePath())
                 : java.util.HexFormat.of().formatHex(walletStorage.loadSolana(wallet.getKeystorePath()));
@@ -210,7 +248,9 @@ public class WalletService {
         OperatorWallet wallet = getById(walletId);
         defaultService.removeDefaultsForWallet(walletId);
         walletSigner.evict(walletId);
-        walletStorage.delete(wallet.getKeystorePath());
+        if (wallet.getCustodyType() == OperatorWallet.CustodyType.SOFTWARE) {
+            walletStorage.delete(wallet.getKeystorePath());
+        }
         walletRepository.delete(wallet);
         eventPublisher.publishEvent(new WalletDeletedEvent(walletId, actorId, actorRole));
         log.info("Deleted wallet '{}' ({})", wallet.getName(), walletId);
@@ -227,6 +267,9 @@ public class WalletService {
      */
     public boolean rotateKek(UUID walletId, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
+        if (wallet.getCustodyType() == OperatorWallet.CustodyType.PKCS11) {
+            return false;
+        }
         boolean rotated = walletStorage.rewrapDek(wallet.getKeystorePath(), wallet.getType() == WalletType.EVM);
         eventPublisher.publishEvent(new WalletKekRotatedEvent(walletId, actorId, actorRole, rotated));
         log.info("KEK rotation for wallet '{}' ({}): {}", wallet.getName(), walletId,

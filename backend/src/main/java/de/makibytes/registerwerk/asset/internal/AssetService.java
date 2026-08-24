@@ -9,8 +9,11 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import org.hibernate.Hibernate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -50,24 +53,42 @@ public class AssetService {
         return saved;
     }
 
+    // Evicted by every writer of this asset's row: updateAsset/updateTargetMarket below, and all
+    // seven status-transition methods in AssetLifecycleService (submit/approve/reject/issue/
+    // suspend/reactivate/redeem) - a miss there would let stale status/name/terms serve for up to
+    // this cache's 30s TTL (see CacheConfig).
+    @Cacheable(value = "assets", key = "#id")
     @Transactional(readOnly = true)
     public Asset getAsset(UUID id) {
         return assetRepository.findById(id)
+            .map(this::initializeTargetMarketCategories)
             .orElseThrow(() -> new EntityNotFoundException("Asset", id));
     }
 
     @Transactional(readOnly = true)
     public Page<Asset> listAssets(UUID issuerId, AssetStatus status, Pageable pageable) {
+        Page<Asset> assets;
         if (issuerId != null && status != null) {
-            return assetRepository.findByIssuerIdAndStatus(issuerId, status, pageable);
+            assets = assetRepository.findByIssuerIdAndStatus(issuerId, status, pageable);
         } else if (issuerId != null) {
-            return assetRepository.findByIssuerId(issuerId, pageable);
+            assets = assetRepository.findByIssuerId(issuerId, pageable);
         } else if (status != null) {
-            return assetRepository.findByStatus(status, pageable);
+            assets = assetRepository.findByStatus(status, pageable);
+        } else {
+            assets = assetRepository.findAll(pageable);
         }
-        return assetRepository.findAll(pageable);
+        // The web layer maps the returned entities after this transaction closes
+        // (spring.jpa.open-in-view=false). Initialize every relationship that AssetResponse
+        // needs here rather than letting a controller or JSON mapper trigger lazy I/O later.
+        return assets.map(this::initializeTargetMarketCategories);
     }
 
+    private Asset initializeTargetMarketCategories(Asset asset) {
+        Hibernate.initialize(asset.getTargetMarketCategories());
+        return asset;
+    }
+
+    @CacheEvict(value = "assets", key = "#id")
     public Asset updateAsset(UUID id, Asset patch, UUID actorId) {
         Asset existing = getAsset(id);
         if (patch.getName() != null) existing.setName(patch.getName());
@@ -80,8 +101,33 @@ public class AssetService {
         if (patch.getJurisdiction() != null) existing.setJurisdiction(patch.getJurisdiction());
         if (patch.getChain() != null) existing.setChain(patch.getChain());
         if (patch.getNetwork() != null) existing.setNetwork(patch.getNetwork());
+        if (patch.getCurrency() != null) existing.setCurrency(patch.getCurrency());
+        if (patch.getIssueSize() != null) existing.setIssueSize(patch.getIssueSize());
+        if (patch.getDenomination() != null) existing.setDenomination(patch.getDenomination());
+        if (patch.getIssueDate() != null) existing.setIssueDate(patch.getIssueDate());
+        if (patch.getMaturityDate() != null) existing.setMaturityDate(patch.getMaturityDate());
+        if (patch.getMinInvestmentAmount() != null) existing.setMinInvestmentAmount(patch.getMinInvestmentAmount());
+        if (patch.getMaxHoldingAmount() != null) existing.setMaxHoldingAmount(patch.getMaxHoldingAmount());
         Asset saved = assetRepository.save(existing);
         eventPublisher.publishEvent(new AssetUpdatedEvent(id, actorId, null));
+        return saved;
+    }
+
+    /**
+     * Sets the asset's MiFID II target market (product governance) — an explicit replace, not a
+     * merge, since "which categories may buy this" is a single coherent decision, unlike the
+     * other patchable fields on {@link #updateAsset}. An empty {@code categories} set means
+     * unrestricted (see {@link Asset#isEligibleForTargetMarket}).
+     */
+    @CacheEvict(value = "assets", key = "#id")
+    public Asset updateTargetMarket(UUID id, java.util.Set<de.makibytes.registerwerk.customer.api.ClientCategory> categories,
+                                     de.makibytes.registerwerk.customer.api.KnowledgeExperienceLevel minExperience, UUID actorId) {
+        Asset existing = getAsset(id);
+        existing.setTargetMarketCategories(categories);
+        existing.setTargetMarketMinExperience(minExperience);
+        Asset saved = assetRepository.save(existing);
+        eventPublisher.publishEvent(new AssetUpdatedEvent(id, actorId, null));
+        log.info("Updated target market for asset: id={} categories={} minExperience={}", id, categories, minExperience);
         return saved;
     }
 

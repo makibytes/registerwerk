@@ -1,0 +1,90 @@
+{{- if .Values.frontendOperator.enabled }}
+{{- $ctx := dict "context" . "component" "frontend-operator" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "registerwerk.componentFullname" $ctx }}
+  labels:
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontendOperator.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- toYaml .Values.frontendOperator.podAnnotations | nindent 8 }}
+      labels:
+        {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Static-asset serving needs no cluster API access at all — see the backend Deployment's
+      # own serviceAccountName for why that one does mount a (read-only, empty-permission) token;
+      # nothing in this pod calls the Kubernetes API, so automountServiceAccountToken stays at the
+      # "default" ServiceAccount's default (false, per templates/serviceaccount.yaml).
+      securityContext:
+        {{- toYaml .Values.frontendOperator.podSecurityContext | nindent 8 }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{/* Same rationale as the backend Deployment's identical block (see that file's comment):
+           hardcoded because the label selector needs registerwerk.componentSelectorLabels, only
+           computable at template time, not expressible as static values.yaml data. */}}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 14 }}
+      {{- with .Values.frontendOperator.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      containers:
+        - name: frontend-operator
+          securityContext:
+            {{- toYaml .Values.frontendOperator.securityContext | nindent 12 }}
+          image: "{{ .Values.frontendOperator.image.repository }}:{{ .Values.frontendOperator.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.frontendOperator.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          {{- with .Values.frontendOperator.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.frontendOperator.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.frontendOperator.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.frontendOperator.resources | nindent 12 }}
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            # securityContext.readOnlyRootFilesystem (below) means nginx can no longer write its
+            # own default cache/pid paths under /var/cache/nginx and /var/run at startup — both
+            # would otherwise fail closed with "Permission denied" before the first request is
+            # ever served. Backed by emptyDir, not a PVC: purely ephemeral scratch space, gone
+            # (and recreated empty) on every pod restart, which is exactly what nginx expects.
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: {{ include "registerwerk.componentFullname" $ctx }}-nginx
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+{{- end }}

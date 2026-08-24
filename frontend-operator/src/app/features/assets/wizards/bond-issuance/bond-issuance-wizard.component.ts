@@ -1,5 +1,5 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit, inject
+  ChangeDetectionStrategy, ChangeDetectorRef, Component, inject
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormBuilder, FormGroup, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -15,7 +15,7 @@ import { CommonModule } from '@angular/common';
 import { BondService } from '../../../../core/api/bond.service';
 import { AssetService } from '../../../../core/api/asset.service';
 import {
-  BOND_STANDARDS, TokenStandard, DayCountConvention, PaymentFrequency
+  TokenStandard
 } from '../../../../core/models';
 
 @Component({
@@ -43,7 +43,7 @@ import {
             <h2 class="step-heading">Select token standard</h2>
             <div class="standard-grid">
               @for (std of bondStandards; track std) {
-                <button
+                <button type="button"
                   class="std-card"
                   [class.selected]="selectedStandard === std"
                   (click)="selectedStandard = std">
@@ -53,7 +53,7 @@ import {
               }
             </div>
             <div class="step-actions">
-              <button mat-flat-button class="btn-primary" [disabled]="!selectedStandard" matStepperNext>
+              <button type="button" mat-flat-button class="btn-primary" [disabled]="!selectedStandard" matStepperNext>
                 Next <mat-icon>arrow_forward</mat-icon>
               </button>
             </div>
@@ -142,8 +142,8 @@ import {
               </div>
             </form>
             <div class="step-actions">
-              <button mat-stroked-button matStepperPrevious class="btn-back">Back</button>
-              <button mat-flat-button class="btn-primary" [disabled]="termsForm.invalid" matStepperNext>
+              <button type="button" mat-stroked-button matStepperPrevious class="btn-back">Back</button>
+              <button type="button" mat-flat-button class="btn-primary" [disabled]="termsForm.invalid" matStepperNext>
                 Next <mat-icon>arrow_forward</mat-icon>
               </button>
             </div>
@@ -167,12 +167,12 @@ import {
                   <div class="call-row">
                     <input type="date" [(ngModel)]="entry.callDate" class="call-input">
                     <input type="number" [(ngModel)]="entry.callPrice" step="0.01" placeholder="101.00" class="call-input">
-                    <button mat-icon-button (click)="removeCallEntry($index)" class="call-remove">
+                    <button type="button" mat-icon-button (click)="removeCallEntry($index)" class="call-remove">
                       <mat-icon>remove_circle_outline</mat-icon>
                     </button>
                   </div>
                 }
-                <button mat-stroked-button (click)="addCallEntry()" class="btn-add-row">
+                <button type="button" mat-stroked-button (click)="addCallEntry()" class="btn-add-row">
                   <mat-icon>add</mat-icon> Add call date
                 </button>
               </div>
@@ -180,8 +180,8 @@ import {
               <p class="empty-note">No call schedule required — this bond is not callable.</p>
             }
             <div class="step-actions">
-              <button mat-stroked-button matStepperPrevious class="btn-back">Back</button>
-              <button mat-flat-button class="btn-primary" matStepperNext>
+              <button type="button" mat-stroked-button matStepperPrevious class="btn-back">Back</button>
+              <button type="button" mat-flat-button class="btn-primary" matStepperNext>
                 Next <mat-icon>arrow_forward</mat-icon>
               </button>
             </div>
@@ -213,8 +213,8 @@ import {
               <p class="empty-note">Slot/tranche configuration is only needed for ERC-3525 semi-fungible tokens.</p>
             }
             <div class="step-actions">
-              <button mat-stroked-button matStepperPrevious class="btn-back">Back</button>
-              <button mat-flat-button class="btn-primary" matStepperNext>
+              <button type="button" mat-stroked-button matStepperPrevious class="btn-back">Back</button>
+              <button type="button" mat-flat-button class="btn-primary" matStepperNext>
                 Review <mat-icon>arrow_forward</mat-icon>
               </button>
             </div>
@@ -266,8 +266,8 @@ import {
             </div>
 
             <div class="step-actions">
-              <button mat-stroked-button matStepperPrevious class="btn-back">Back</button>
-              <button mat-flat-button class="btn-deploy" [disabled]="deploying" (click)="deploy()">
+              <button type="button" mat-stroked-button matStepperPrevious class="btn-back">Back</button>
+              <button type="button" mat-flat-button class="btn-deploy" [disabled]="deploying" (click)="deploy()">
                 @if (deploying) {
                   <span class="spinner"></span> Deploying…
                 } @else {
@@ -312,7 +312,7 @@ import {
     }
 
     .wizard-title {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 2rem;
       font-weight: 800;
       color: #f0f4ff;
@@ -342,7 +342,7 @@ import {
     }
 
     .step-heading {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 1.125rem;
       font-weight: 700;
       color: #e2e8f8;

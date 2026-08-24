@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.chain.api;
 
-import com.daml.ledger.rxjava.DamlLedgerClient;
 // CantonLedgerEndpoint is in the same package — no import needed
 import io.grpc.*;
 import io.grpc.stub.MetadataUtils;
@@ -8,6 +7,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Locale;
 
 /**
  * Factory that creates {@link CantonLedgerClient} instances from participant connection settings.
@@ -21,7 +24,8 @@ public class CantonClientFactory implements CantonClientProvider {
     /**
      * Creates a new {@link CantonLedgerClient} connected to the given participant endpoint.
      *
-     * @param ledgerApiUrl  host:port of the participant's Ledger API gRPC endpoint
+     * @param ledgerApiUrl  participant Ledger API endpoint. Use {@code grpcs://host:port} for
+     *                      TLS or {@code grpc://host:port} for explicitly plaintext development.
      * @param synchronizerId Canton synchronizer alias (used in command submissions)
      * @param applicationId  application ID registered with the participant
      * @param authToken      optional JWT bearer token for authentication (null or blank = no auth)
@@ -33,49 +37,79 @@ public class CantonClientFactory implements CantonClientProvider {
             String applicationId,
             String authToken) {
 
-        String host = extractHost(ledgerApiUrl);
-        int    port = extractPort(ledgerApiUrl);
+        Endpoint endpoint = Endpoint.parse(ledgerApiUrl);
 
         ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder
-                .forAddress(host, port)
+                .forAddress(endpoint.host(), endpoint.port())
                 .maxInboundMessageSize(64 * 1024 * 1024); // 64 MB
 
         if (StringUtils.hasText(authToken)) {
+            String token = authToken.trim();
+            if (token.indexOf('\r') >= 0 || token.indexOf('\n') >= 0) {
+                throw new IllegalArgumentException("Canton auth token must not contain line breaks");
+            }
             Metadata headers = new Metadata();
             headers.put(
                     Metadata.Key.of("Authorization", Metadata.ASCII_STRING_MARSHALLER),
-                    "Bearer " + authToken);
+                    "Bearer " + token);
             channelBuilder.intercept(MetadataUtils.newAttachHeadersInterceptor(headers));
         }
 
-        // Use plaintext for dev (no-TLS); operators enable TLS via participant config or via
-        // a TLS-terminating proxy. For production, replace usePlaintext() with useTransportSecurity()
-        // and supply the participant's TLS certificate.
-        channelBuilder.usePlaintext();
+        if (endpoint.tls()) {
+            channelBuilder.useTransportSecurity();
+        } else {
+            channelBuilder.usePlaintext();
+        }
 
         ManagedChannel channel = channelBuilder.build();
 
-        DamlLedgerClient damlClient = DamlLedgerClient.newBuilder(channel).build();
-        damlClient.connect();
+        log.info("Canton Ledger API client configured: {}:{} transport={} app={} synchronizer={}",
+                endpoint.host(), endpoint.port(), endpoint.tls() ? "TLS" : "PLAINTEXT",
+                applicationId, synchronizerId);
 
-        log.info("Canton Ledger API client connected: {}  app={} synchronizer={}",
-                ledgerApiUrl, applicationId, synchronizerId);
-
-        return new CantonLedgerClient(damlClient, channel, applicationId, synchronizerId, ledgerApiUrl);
+        return new CantonLedgerClient(channel, applicationId, synchronizerId, ledgerApiUrl);
     }
 
-    private static String extractHost(String ledgerApiUrl) {
-        int colon = ledgerApiUrl.lastIndexOf(':');
-        return colon > 0 ? ledgerApiUrl.substring(0, colon) : ledgerApiUrl;
-    }
+    record Endpoint(String host, int port, boolean tls) {
 
-    private static int extractPort(String ledgerApiUrl) {
-        int colon = ledgerApiUrl.lastIndexOf(':');
-        if (colon > 0 && colon < ledgerApiUrl.length() - 1) {
+        static Endpoint parse(String value) {
+            if (!StringUtils.hasText(value)) {
+                throw new IllegalArgumentException("Canton Ledger API URL is required");
+            }
+
+            String input = value.trim();
+            boolean explicitScheme = input.contains("://");
+            URI uri;
             try {
-                return Integer.parseInt(ledgerApiUrl.substring(colon + 1));
-            } catch (NumberFormatException ignored) {}
+                uri = new URI(explicitScheme ? input : "grpc://" + input);
+            } catch (URISyntaxException ex) {
+                throw new IllegalArgumentException("Invalid Canton Ledger API URL: " + value, ex);
+            }
+
+            String scheme = uri.getScheme() == null
+                    ? ""
+                    : uri.getScheme().toLowerCase(Locale.ROOT);
+            boolean tls = switch (scheme) {
+                case "grpcs", "https" -> true;
+                case "grpc" -> false;
+                default -> throw new IllegalArgumentException(
+                        "Canton Ledger API URL scheme must be grpcs:// (TLS) or grpc:// (plaintext)");
+            };
+
+            if (!StringUtils.hasText(uri.getHost()) || uri.getUserInfo() != null
+                    || uri.getQuery() != null || uri.getFragment() != null
+                    || (StringUtils.hasText(uri.getPath()) && !"/".equals(uri.getPath()))) {
+                throw new IllegalArgumentException(
+                        "Canton Ledger API URL must contain only a host and optional port");
+            }
+
+            int port = uri.getPort() >= 0 ? uri.getPort() : (tls ? 443 : 5001);
+            if (!explicitScheme) {
+                log.warn("Scheme-less Canton Ledger API endpoint '{}' is treated as plaintext; "
+                        + "use grpcs:// for production or grpc:// to make development plaintext explicit",
+                        input);
+            }
+            return new Endpoint(uri.getHost(), port, tls);
         }
-        return 5001;
     }
 }

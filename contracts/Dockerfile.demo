@@ -1,0 +1,40 @@
+FROM ghcr.io/foundry-rs/foundry:v1.7.1 AS dependencies
+
+# A Docker build context contains the checked-out files, not the contents of uninitialized git
+# submodules. Fetch the exact commits recorded by this repository's gitlinks so a clean clone and
+# CI build produce the same dependency tree as a developer checkout. `forge build <script>` only
+# follows that script's imports, but `forge script` performs a project-wide compilation before
+# execution, so all six top-level submodules must be present in the runtime image.
+ARG FORGE_STD_REF=bf647bd6046f2f7da30d0c2bf435e5c76a780c1b
+ARG OPENZEPPELIN_CONTRACTS_REF=5fd1781b1454fd1ef8e722282f86f9293cacf256
+ARG OPENZEPPELIN_CONTRACTS_UPGRADEABLE_REF=7bf4727aacdbfaa0f36cbd664654d0c9e1dc52bf
+ARG ERC3643_REF=a708758313f7589c6709c29d003f73b6db24663a
+ARG FHEVM_REF=c90044bbe594af26bcaac0b6224eea2c54817c18
+ARG ONCHAIN_ID_REF=0e681fbf40f7982be5f76f3bbb1f2995e28e40f8
+ADD --chmod=644 https://codeload.github.com/foundry-rs/forge-std/tar.gz/${FORGE_STD_REF} /tmp/forge-std.tar.gz
+ADD --chmod=644 https://codeload.github.com/OpenZeppelin/openzeppelin-contracts/tar.gz/${OPENZEPPELIN_CONTRACTS_REF} /tmp/openzeppelin-contracts.tar.gz
+ADD --chmod=644 https://codeload.github.com/OpenZeppelin/openzeppelin-contracts-upgradeable/tar.gz/${OPENZEPPELIN_CONTRACTS_UPGRADEABLE_REF} /tmp/openzeppelin-contracts-upgradeable.tar.gz
+ADD --chmod=644 https://codeload.github.com/ERC-3643/ERC-3643/tar.gz/${ERC3643_REF} /tmp/erc3643.tar.gz
+ADD --chmod=644 https://codeload.github.com/zama-ai/fhevm-solidity/tar.gz/${FHEVM_REF} /tmp/fhevm.tar.gz
+ADD --chmod=644 https://codeload.github.com/onchain-id/solidity/tar.gz/${ONCHAIN_ID_REF} /tmp/onchain-id.tar.gz
+RUN for dependency in forge-std openzeppelin-contracts openzeppelin-contracts-upgradeable erc3643 fhevm onchain-id; do \
+      mkdir -p "/tmp/dependencies/${dependency}"; \
+      tar -xzf "/tmp/${dependency}.tar.gz" --strip-components=1 -C "/tmp/dependencies/${dependency}"; \
+    done
+
+FROM ghcr.io/foundry-rs/foundry:v1.7.1
+
+ADD --chmod=755 https://github.com/ethereum/solidity/releases/download/v0.8.30/solc-static-linux /home/foundry/.local/share/svm/0.8.30/solc-0.8.30
+ADD --chmod=755 https://github.com/ethereum/solidity/releases/download/v0.8.36/solc-static-linux /home/foundry/.local/share/svm/0.8.36/solc-0.8.36
+
+WORKDIR /contracts
+COPY . .
+COPY --from=dependencies /tmp/dependencies ./lib
+
+# The runtime Foundry image intentionally does not bundle every solc release. Resolve and cache
+# the repository's pinned compiler while the image is built, so demo startup itself is offline
+# and deterministic.
+RUN forge build script/DeployLocalLendingDemo.s.sol
+RUN forge build script/DeployLocalTrexDemo.s.sol
+
+ENTRYPOINT ["sh", "-c"]

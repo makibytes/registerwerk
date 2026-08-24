@@ -33,10 +33,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link OrgChainReconciliationService}, including the
- * {@code registerwerk_org_chain_drift_open_total} gauge added as part of the repo-wide
- * "detected but not alerted" follow-up (no dedicated table backs this drift, so the gauge is
- * an in-memory reset-then-recount-per-sweep snapshot).
+ * Unit tests for {@link OrgChainReconciliationService}, including the in-memory
+ * {@code registerwerk_org_chain_drift_open_total} snapshot gauge.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("OrgChainReconciliationService — detection-only drift checks")

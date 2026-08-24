@@ -17,9 +17,10 @@ import { MatMenuModule } from '@angular/material/menu';
 import { AdminUserService, AppUserRole, OperatorUser } from '../../core/api/admin-user.service';
 import { InviteUserDialogComponent } from './invite-user-dialog.component';
 import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component';
+import { User2faDialogComponent } from './user-2fa-dialog.component';
 
 const ALL_ROLES: AppUserRole[] = [
-  'REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER',
+  'REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER', 'RELATIONSHIP_MANAGER',
   'COMPANY_ADMIN', 'ISSUER', 'INVESTOR', 'TRADER'
 ];
 
@@ -27,6 +28,7 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
   REGISTRY_ADMIN: 'Registry Admin',
   AUDIT: 'Audit',
   COMPLIANCE_OFFICER: 'Compliance Officer',
+  RELATIONSHIP_MANAGER: 'Relationship Manager',
   COMPANY_ADMIN: 'Company Admin',
   ISSUER: 'Issuer',
   INVESTOR: 'Investor',
@@ -160,11 +162,28 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
       padding: 32px;
       color: var(--rw-text-muted);
     }
+
+    .request-error {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--rw-text-danger);
+    }
+
+    .table-scroll { overflow-x: auto; }
+    table { min-width: 860px; }
+
+    @media (max-width: 640px) {
+      .page-header { align-items: flex-start; gap: 12px; flex-direction: column; }
+      .filter-row mat-form-field { width: 100%; }
+    }
   `],
   template: `
     <div class="page-header">
       <h1>Users</h1>
-      <button mat-raised-button color="primary" (click)="openInvite()">
+      <button type="button" mat-raised-button color="primary" (click)="openInvite()">
         <mat-icon>person_add</mat-icon>
         Invite user
       </button>
@@ -209,7 +228,14 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
 
       @if (loading) {
         <div class="spinner-container"><mat-spinner diameter="36" /></div>
+      } @else if (loadError) {
+        <div class="request-error" role="alert">
+          <mat-icon>cloud_off</mat-icon>
+          <span>Users could not be loaded.</span>
+          <button mat-stroked-button type="button" (click)="loadUsers()">Retry</button>
+        </div>
       } @else {
+        <div class="table-scroll">
         <table mat-table [dataSource]="users" class="full-width-table">
           <ng-container matColumnDef="user">
             <th mat-header-cell *matHeaderCellDef>User</th>
@@ -271,7 +297,7 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let u">
               <div class="actions-cell">
-                <button mat-icon-button [matMenuTriggerFor]="userMenu" [matMenuTriggerData]="{ user: u }" matTooltip="Actions">
+                <button type="button" mat-icon-button [matMenuTriggerFor]="userMenu" [matMenuTriggerData]="{ user: u }" matTooltip="Actions">
                   <mat-icon>more_vert</mat-icon>
                 </button>
               </div>
@@ -280,20 +306,24 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
 
           <mat-menu #userMenu="matMenu">
             <ng-template matMenuContent let-u="user">
-              <button mat-menu-item (click)="editRoles(u)">
+              <button type="button" mat-menu-item (click)="editRoles(u)">
                 <mat-icon>manage_accounts</mat-icon>
                 Edit roles
               </button>
-              <button mat-menu-item (click)="toggleEnabled(u)">
+              <button type="button" mat-menu-item (click)="toggleEnabled(u)">
                 <mat-icon>{{ u.enabled ? 'block' : 'check_circle' }}</mat-icon>
                 {{ u.enabled ? 'Disable' : 'Enable' }}
               </button>
-              <button mat-menu-item [disabled]="u.authProvider !== 'LOCAL'" (click)="sendPasswordReset(u)">
+              <button type="button" mat-menu-item [disabled]="u.authProvider !== 'LOCAL'" (click)="sendPasswordReset(u)">
                 <mat-icon>lock_reset</mat-icon>
                 Reset password
               </button>
+              <button type="button" mat-menu-item [disabled]="u.authProvider !== 'ENTRA'" (click)="manage2fa(u)">
+                <mat-icon>security</mat-icon>
+                Manage 2FA
+              </button>
               <mat-divider />
-              <button mat-menu-item class="menu-delete" (click)="deleteUser(u)">
+              <button type="button" mat-menu-item class="menu-delete" (click)="deleteUser(u)">
                 <mat-icon>delete</mat-icon>
                 Delete
               </button>
@@ -306,6 +336,7 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
             <td [attr.colspan]="columns.length">No users found.</td>
           </tr>
         </table>
+        </div>
 
         <mat-paginator
           [length]="totalElements"
@@ -332,6 +363,7 @@ export class UserListComponent implements OnInit {
   pageIndex = 0;
   pageSize = 25;
   loading = true;
+  loadError = false;
 
   searchQuery = '';
   selectedRole = '';
@@ -411,6 +443,19 @@ export class UserListComponent implements OnInit {
     });
   }
 
+  /**
+   * Opens the Microsoft Entra 2FA support console — list registered methods, reset them, revoke
+   * sessions, and issue a Temporary Access Pass. Only meaningful for ENTRA accounts; local
+   * accounts use the password-reset action above.
+   */
+  manage2fa(user: OperatorUser): void {
+    this.dialog.open(User2faDialogComponent, {
+      data: user,
+      width: '620px',
+      autoFocus: false,
+    });
+  }
+
   deleteUser(user: OperatorUser): void {
     if (!confirm(`Delete ${user.name || user.email}? This cannot be undone.`)) return;
     this.adminUserService.deleteUser(user.id).subscribe({
@@ -431,11 +476,12 @@ export class UserListComponent implements OnInit {
   }
 
   isOperatorRole(role: AppUserRole): boolean {
-    return ['REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER'].includes(role);
+    return ['REGISTRY_ADMIN', 'AUDIT', 'COMPLIANCE_OFFICER', 'RELATIONSHIP_MANAGER'].includes(role);
   }
 
-  private loadUsers(): void {
+  loadUsers(): void {
     this.loading = true;
+    this.loadError = false;
     this.adminUserService.listUsers({
       search: this.searchQuery || undefined,
       role: this.selectedRole || undefined,
@@ -448,10 +494,12 @@ export class UserListComponent implements OnInit {
         this.users = page.content;
         this.totalElements = page.totalElements;
         this.loading = false;
+        this.loadError = false;
         this.cdr.detectChanges();
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.detectChanges();
       },
     });

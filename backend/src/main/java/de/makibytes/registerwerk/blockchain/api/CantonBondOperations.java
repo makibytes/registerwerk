@@ -8,7 +8,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Public API contract for Canton DAML Finance bond instrument operations.
+ * Public API contract for Registerwerk's custom Canton Daml bond lifecycle operations.
  * Decouples callers from the DAML-backed implementation so they compile
  * without the {@code canton} Maven profile.
  *
@@ -57,15 +57,15 @@ public interface CantonBondOperations {
      *                  {@code TokenDeploymentPortImpl})
      * @param actorRole the triggering actor's role, for the audit record
      */
-    CompletableFuture<String> createFixedBond(
+    CompletableFuture<TokenDeploymentResult> createFixedBond(
             UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
             UUID actorId, String actorRole);
 
-    CompletableFuture<String> createFloatingBond(
+    CompletableFuture<TokenDeploymentResult> createFloatingBond(
             UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
             UUID actorId, String actorRole);
 
-    CompletableFuture<String> createZeroBond(
+    CompletableFuture<TokenDeploymentResult> createZeroBond(
             UUID assetId, Network network, String issuerPartyId, BondCreationTerms terms,
             UUID actorId, String actorRole);
 

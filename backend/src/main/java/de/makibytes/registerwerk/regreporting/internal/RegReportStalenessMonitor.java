@@ -38,9 +38,7 @@ class RegReportStalenessMonitor {
         this.jdbc = jdbc;
         this.props = props;
 
-        // Live-queried at scrape time, reusing the exact query checkStaleSubmissions() already
-        // runs daily — this class's own Javadoc anticipated this follow-up ("loud logging today,
-        // wireable to a real alert channel later without changing this job's shape").
+        // Query at scrape time so the gauge reflects the same stale submissions as the daily job.
         Gauge.builder("registerwerk_regreport_stale_submissions_total", this, RegReportStalenessMonitor::countStaleSubmissions)
                 .description("Count of transported draft reports still lacking verified authority evidence beyond the threshold")
                 .register(meterRegistry);

@@ -65,7 +65,8 @@ public class BeneficialOwnerController {
             @PathVariable UUID beneficialOwnerId,
             Authentication auth) {
         BeneficialOwner saved = beneficialOwnerService.ceaseBeneficialOwner(
-                beneficialOwnerId, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+                entityId, beneficialOwnerId, SecurityUtils.extractUserId(auth),
+                SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(BeneficialOwnerResponse.from(saved, beneficialOwnerService.requireNaturalPerson(saved.getNaturalPersonId())));
     }
 }

@@ -13,6 +13,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTableModule } from '@angular/material/table';
 import { MatTabsModule } from '@angular/material/tabs';
 import { CompanyService } from '../../../core/api/company.service';
+import { AuthService } from '../../../core/auth/auth.service';
 import {
   CompanyExternalReferenceRecord,
   ExternalReferenceSubjectType,
@@ -60,6 +61,9 @@ import {
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #orgRla="routerLinkActive" [active]="orgRla.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
         </a>
+        <a mat-tab-link routerLink="/company-admin/beneficial-owners" routerLinkActive #rlaBo="routerLinkActive" [active]="rlaBo.isActive">
+          <mat-icon>diversity_3</mat-icon>&nbsp;Beneficial Owners
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 
@@ -85,11 +89,11 @@ import {
             </mat-form-field>
 
             <div class="action-row">
-              <button mat-raised-button color="primary" [disabled]="loading || !lookupExternalId.trim()" (click)="lookup()">
+              <button mat-raised-button color="primary" type="button" [disabled]="loading || !lookupExternalId.trim()" (click)="lookup()">
                 <mat-icon>search</mat-icon>
                 Lookup
               </button>
-              <button mat-stroked-button [disabled]="loading" (click)="loadAll()">
+              <button mat-stroked-button type="button" [disabled]="loading" (click)="loadAll()">
                 <mat-icon>list</mat-icon>
                 Show all
               </button>
@@ -118,6 +122,7 @@ import {
 
             <button
               mat-raised-button
+              type="button"
               color="accent"
               class="assign-button"
               [disabled]="savingAssignment || !assignSubjectType || !assignSubjectId.trim() || !assignExternalId.trim()"
@@ -145,7 +150,14 @@ import {
         <mat-card-content>
           @if (loading) {
             <div class="loading-overlay"><mat-spinner diameter="40"></mat-spinner></div>
+          } @else if (loadError) {
+            <div class="load-error" role="alert">
+              <mat-icon>error_outline</mat-icon>
+              <span>{{ loadError }}</span>
+              <button mat-stroked-button type="button" (click)="lookupMode ? lookup() : loadAll()">Retry</button>
+            </div>
           } @else {
+            <div class="table-wrap">
             <table mat-table [dataSource]="records" class="mat-elevation-z0 full-width-table">
               <ng-container matColumnDef="externalId">
                 <th mat-header-cell *matHeaderCellDef>External ID</th>
@@ -201,6 +213,7 @@ import {
                 </td>
               </tr>
             </table>
+            </div>
           }
         </mat-card-content>
       </mat-card>
@@ -274,15 +287,20 @@ import {
       padding: 32px;
       color: var(--rw-text-muted);
     }
+    .table-wrap { overflow-x: auto; }
+    .table-wrap table { min-width: 820px; }
+    .load-error { display: grid; justify-items: center; gap: 10px; padding: 40px 16px; color: var(--rw-text-secondary); text-align: center; }
+    .load-error mat-icon { color: var(--rw-text-danger); }
   `],
 })
 export class ExternalIdAdminComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly companyService = inject(CompanyService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly auth = inject(AuthService);
 
   readonly displayedColumns = ['externalId', 'subjectType', 'displayName', 'contextLabel', 'updatedAt', 'actions'];
-  readonly subjectTypeOptions: Array<{ value: ExternalReferenceSubjectType; label: string }> = [
+  readonly subjectTypeOptions: { value: ExternalReferenceSubjectType; label: string }[] = [
     { value: 'ASSET', label: 'Assets / issuances' },
     { value: 'LEGAL_ENTITY', label: 'Legal entities' },
     { value: 'ASSET_HOLDER', label: 'Asset holders / investments' },
@@ -295,6 +313,7 @@ export class ExternalIdAdminComponent implements OnInit {
   lookupExternalId = '';
   lookupMode = false;
   loading = true;
+  loadError = '';
 
   assignSubjectType: ExternalReferenceSubjectType = 'ASSET';
   assignSubjectId = '';
@@ -307,12 +326,16 @@ export class ExternalIdAdminComponent implements OnInit {
         this.entity = entity;
         this.cdr.detectChanges();
       },
+      error: () => {
+        this.snackBar.open('Company details could not be loaded.', 'Dismiss', { duration: 5000 });
+      },
     });
     this.loadAll();
   }
 
   loadAll(): void {
     this.loading = true;
+    this.loadError = '';
     this.lookupMode = false;
     this.companyService.listExternalIds(this.selectedSubjectType ?? undefined).subscribe({
       next: (records) => {
@@ -323,6 +346,7 @@ export class ExternalIdAdminComponent implements OnInit {
       error: () => {
         this.records = [];
         this.loading = false;
+        this.loadError = 'External IDs could not be loaded.';
         this.cdr.detectChanges();
       },
     });
@@ -334,6 +358,7 @@ export class ExternalIdAdminComponent implements OnInit {
       return;
     }
     this.loading = true;
+    this.loadError = '';
     this.lookupMode = true;
     this.companyService.lookupExternalIds(externalId, this.selectedSubjectType ?? undefined).subscribe({
       next: (records) => {
@@ -344,15 +369,20 @@ export class ExternalIdAdminComponent implements OnInit {
       error: () => {
         this.records = [];
         this.loading = false;
+        this.loadError = 'The external-ID lookup failed.';
         this.cdr.detectChanges();
       },
     });
   }
 
   saveAssignment(): void {
+    if (this.savingAssignment) return;
+    const subjectId = this.assignSubjectId.trim();
+    const externalId = this.assignExternalId.trim();
+    if (!subjectId || !externalId) return;
     this.savingAssignment = true;
     this.companyService
-      .saveExternalId(this.assignSubjectType, this.assignSubjectId.trim(), this.assignExternalId.trim())
+      .saveExternalId(this.assignSubjectType, subjectId, externalId)
       .subscribe({
         next: () => {
           this.savingAssignment = false;
@@ -377,11 +407,17 @@ export class ExternalIdAdminComponent implements OnInit {
   linkFor(record: CompanyExternalReferenceRecord): string[] | null {
     switch (record.subjectType) {
       case 'ASSET':
-        return ['/issuances', record.subjectId];
+        return this.auth.hasRole('ISSUER') || this.auth.hasRole('REGISTRY_ADMIN')
+          ? ['/issuances', record.subjectId]
+          : null;
       case 'ASSET_HOLDER':
-        return ['/investments', record.subjectId];
+        return this.auth.hasRole('INVESTOR') || this.auth.hasRole('REGISTRY_ADMIN')
+          ? ['/investments', record.subjectId]
+          : null;
       case 'ERC3643_IDENTITY_REGISTRY_ENTRY':
-        return record.relatedAssetId ? ['/issuances', record.relatedAssetId] : null;
+        return record.relatedAssetId && (this.auth.hasRole('ISSUER') || this.auth.hasRole('REGISTRY_ADMIN'))
+          ? ['/issuances', record.relatedAssetId]
+          : null;
       case 'LEGAL_ENTITY':
         return this.entity?.id === record.subjectId ? ['/company-admin', 'users'] : null;
       default:

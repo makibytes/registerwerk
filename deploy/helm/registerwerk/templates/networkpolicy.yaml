@@ -1,19 +1,37 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $ctx := dict "context" . "component" "backend" }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "registerwerk.fullname" . }}
   labels:
-    {{- include "registerwerk.labels" . | nindent 4 }}
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
 spec:
+  {{/* componentSelectorLabels (component: backend) — the bare selectorLabels would apply this
+       policy's ingress/egress rules to every frontend-operator/frontend-customer/zama-relayer
+       pod too, since they all carry app.kubernetes.io/{name,instance} as a subset. */}}
   podSelector:
     matchLabels:
-      {{- include "registerwerk.selectorLabels" . | nindent 6 }}
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
   policyTypes:
     - Ingress
     - Egress
   ingress:
     {{- toYaml .Values.networkPolicy.ingress | nindent 4 }}
+    {{- if .Values.ingress.enabled }}
+    # Admits the cluster's ingress controller — see the comment on networkPolicy above for
+    # why this is required whenever ingress.enabled is true.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerPodSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    {{- end }}
   egress:
     # Allow DNS
     - ports:
@@ -35,4 +53,38 @@ spec:
           protocol: TCP
         - port: 8080
           protocol: TCP
+    {{- if .Values.zamaRelayer.enabled }}
+    # zama-relayer's Service port (zamaRelayer.service.port, default 3001) doesn't fall under
+    # either generic rule above — it's neither 443 nor 8080 — so without this the backend's
+    # operator-initiated confidential mint/force-burn and balance-reconciliation calls
+    # (HttpZamaRelayerClient, REGISTERWERK_ZAMA_RELAYER_URL below) would be silently dropped at
+    # the network layer whenever this policy is enabled, the same class of gap this file's own
+    # ingress-controller comment already describes for a different path.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "registerwerk.componentSelectorLabels" (dict "context" . "component" "zama-relayer") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.zamaRelayer.service.port }}
+    {{- end }}
+    {{- if .Values.chaincache.enabled }}
+    # chaincache — an independent product this chart does NOT deploy (see values.yaml's
+    # chaincache block), installed as its own Helm release(s) in a separate namespace, one per
+    # chain. Reached via ChaincacheClient's GET /api/capabilities probe and
+    # ChaincacheDurableStreamManager's WebSocket, both against that Service's port — chaincache's
+    # own chart exposes port 80 (containerPort 8080 internally) by default. The generic "Kong
+    # upstream health checks and KMS" rule above only opens 443/8080, not 80, so this needs its
+    # own rule.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.chaincache.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.chaincache.podSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.chaincache.port }}
+    {{- end }}
 {{- end }}

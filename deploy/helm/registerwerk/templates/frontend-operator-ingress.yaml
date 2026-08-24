@@ -1,0 +1,47 @@
+{{- if and .Values.frontendOperator.enabled .Values.frontendOperator.ingress.enabled -}}
+{{- $ctx := dict "context" . "component" "frontend-operator" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "registerwerk.componentFullname" $ctx }}
+  labels:
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
+  {{- if or .Values.frontendOperator.ingress.annotations .Values.frontendOperator.ingress.certManagerClusterIssuer }}
+  annotations:
+    {{- with .Values.frontendOperator.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.frontendOperator.ingress.certManagerClusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.frontendOperator.ingress.certManagerClusterIssuer }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if .Values.frontendOperator.ingress.className }}
+  ingressClassName: {{ .Values.frontendOperator.ingress.className }}
+  {{- end }}
+  {{- if .Values.frontendOperator.ingress.tls }}
+  tls:
+    {{- range .Values.frontendOperator.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.frontendOperator.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "registerwerk.componentFullname" $ctx }}
+                port:
+                  number: {{ $.Values.frontendOperator.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

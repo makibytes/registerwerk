@@ -10,6 +10,7 @@ import {
   KycComplianceResponse,
   PageResponse,
   AssetFilterParams,
+  TokenTransferResponse,
 } from '../models';
 
 @Injectable({ providedIn: 'root' })
@@ -94,6 +95,11 @@ export class AssetService {
     return this.http.get(`${this.base}/${assetId}/documents/${docId}/content`, { responseType: 'blob' });
   }
 
+  /** Full holder register as CSV — the registered DB entries, not the live on-chain balances. */
+  exportHolders(assetId: string): Observable<Blob> {
+    return this.http.get(`${this.base}/${assetId}/holders/export`, { responseType: 'blob' });
+  }
+
   deleteDocument(assetId: string, docId: string): Observable<void> {
     return this.http.delete<void>(`${this.base}/${assetId}/documents/${docId}`);
   }
@@ -109,5 +115,15 @@ export class AssetService {
 
   deployAsset(assetId: string, body: { chain: string; network: string; tokenStandard: string }): Observable<AssetDeployment> {
     return this.http.post<AssetDeployment>(`${this.base}/${assetId}/deploy`, body);
+  }
+
+  /**
+   * Indexed on-chain token transfers for this asset, across all its deployments — the
+   * `token_transfer` table via `TokenHistoryController`, not the registry's own
+   * `blockchain_transaction` log (see {@link TransactionService}).
+   */
+  getTransferHistory(assetId: string, page = 0, size = 20): Observable<PageResponse<TokenTransferResponse>> {
+    const params = new HttpParams().set('page', page).set('size', size);
+    return this.http.get<PageResponse<TokenTransferResponse>>(`${this.base}/${assetId}/history`, { params });
   }
 }

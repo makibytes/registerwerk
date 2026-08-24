@@ -12,7 +12,7 @@ public enum TokenStandard {
     SPL_2022,          // Solana Token-2022 / Token Extensions (no extensions configured)
     STARKNET_ERC20,    // Cairo ERC-20 on Starknet (deployed via UDC, STARK ECDSA signed)
     STELLAR_ASSET,     // Stellar classic asset (Horizon, Ed25519)
-    CANTON_TOKEN,      // Canton / Daml generic instrument (Daml Token Standard CIP-0056)
+    CANTON_TOKEN,      // Reserved for a registry-specific CIP-0056 adapter; not deployable today
 
     // ── Securities-grade additions ────────────────────────────────────────
     // EVM (Ethereum, Polygon, Base, Arbitrum, Avalanche, Optimism)
@@ -23,10 +23,10 @@ public enum TokenStandard {
     // Starknet
     STARKNET_ERC3525,  // Cairo semi-fungible token (Carbonable-derived), slot+value on Starknet
 
-    // Canton — DAML Finance bond instruments
-    DAML_BOND_FIXED,   // Fixed-rate bond via Daml.Finance.Instrument.Bond.FixedRate
-    DAML_BOND_FLOATING, // Floating-rate bond via Daml.Finance.Instrument.Bond.FloatingRate
-    DAML_BOND_ZERO,    // Zero-coupon bond via Daml.Finance.Instrument.Bond.ZeroCoupon
+    // Canton — Registerwerk's audited DAML bond lifecycle templates
+    DAML_BOND_FIXED,
+    DAML_BOND_FLOATING,
+    DAML_BOND_ZERO,
 
     // Solana — Token-2022 extension presets
     SPL_2022_BOND,         // Token-2022 + Interest-Bearing + Permanent Delegate + Transfer Hook

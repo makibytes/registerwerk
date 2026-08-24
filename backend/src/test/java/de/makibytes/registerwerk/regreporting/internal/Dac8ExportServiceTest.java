@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Verifies Phase 5 findings #6 (audit trail / actor threading) and #9 (on-demand generation
+ * Verifies audit trail / actor threading and on-demand generation
  * previously silently ignored the requested period and always used "now").
  */
 @ExtendWith(MockitoExtension.class)
@@ -99,6 +99,31 @@ class Dac8ExportServiceTest {
         verify(submissions, org.mockito.Mockito.atLeastOnce())
                 .markTransportedUnverified(org.mockito.ArgumentMatchers.eq(submissionId), anyString(),
                         org.mockito.ArgumentMatchers.eq(actorId), org.mockito.ArgumentMatchers.eq("REGISTRY_ADMIN"));
+    }
+
+    @Test
+    @DisplayName("the holdings query only counts FINALIZED transfers, not merely non-ORPHANED ones")
+    void generateAnnualCarf_onlyCountsFinalizedTransfers() {
+        UUID actorId = UUID.randomUUID();
+        when(jdbc.queryForList(anyString(), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(holdingRow()));
+        when(submissions.persist(anyString(), anyString(), any(), any(), any())).thenReturn(UUID.randomUUID());
+        when(documentStore.store(any(), anyString(), anyString(), any(), any())).thenReturn("key");
+        when(submissionGateway.submit(any(), anyString(), anyString(), any()))
+                .thenReturn(SubmissionResult.transportedUnverified("REF-1"));
+
+        service.generateAnnualCarf(2021, actorId, "REGISTRY_ADMIN");
+
+        // A reorg that orphans a transfer must not leave it permanently counted toward a holder's
+        // reported transaction count — but the predicate must also exclude PROVISIONAL/SAFE rows,
+        // not just ORPHANED ones (a not-yet-final transfer isn't reportable settled data). This is
+        // the exact gap HolderDataService's javadoc names Dac8ExportService for; tightened from
+        // `<> 'ORPHANED'` to `= 'FINALIZED'` so the (currently unused, but not a trap for whoever
+        // next consumes it) tx_count column can never include a not-yet-final transfer.
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc, org.mockito.Mockito.atLeastOnce())
+                .queryForList(sql.capture(), any(LocalDate.class), any(LocalDate.class));
+        assertThat(sql.getAllValues()).allMatch(s -> s.contains("tt.finality_status = 'FINALIZED'"));
+        assertThat(sql.getAllValues()).noneMatch(s -> s.contains("<> 'ORPHANED'"));
     }
 
     @Test

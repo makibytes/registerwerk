@@ -1,6 +1,10 @@
-version: "3.9"
-
 # Standalone Kong gateway (OSS, DB-less) — docker compose -f docker-compose.kong.yml up
+#
+# ⚠ NOT PART OF THE MAIN STACK. The root docker-compose.yml defines its own `kong` service using
+# the same gateway/kong.yml and the same ports (8000/8443/8001), so the two cannot run at the same
+# time. This file exists only for running the gateway in isolation (e.g. to test a kong.yml change
+# without booting the backend). Keep its image tag and healthcheck in step with the root compose
+# file, or isolated runs will not reproduce what the real stack does.
 #
 # Design decisions:
 #   - DB-less mode: the declarative kong.yml is the single source of truth and
@@ -15,8 +19,28 @@ version: "3.9"
 #     JWT enforcement otherwise happens in the Spring backend.
 
 services:
+  # Backs kong.yml's rate-limiting plugin (policy: redis) — see the root docker-compose.yml's
+  # redis service comment for the full rationale. Kept in step with that service here since this
+  # file loads the same kong.yml and would otherwise fail to boot standalone (rate-limiting
+  # errors out at startup if it can't reach its configured Redis host).
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+
   kong:
-    image: kong:3.8
+    image: kong:3.9.3
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
@@ -27,15 +51,32 @@ services:
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_PLUGINS: bundled
+    depends_on:
+      redis:
+        condition: service_healthy
     ports:
       - "8000:8000"
       - "8443:8443"
       # Admin API only ever on the host's loopback — never expose publicly.
       - "127.0.0.1:8001:8001"
     healthcheck:
-      test: ["CMD", "kong", "health"]
-      interval: 10s
+      # Mirrors the root docker-compose.yml. `kong health` is the Kong CLI, not a probe: it spawns
+      # a full resty/LuaJIT process on every invocation. The image ships no curl/wget/nc, but it
+      # does ship bash, so /dev/tcp gives a real HTTP round trip for the cost of one process.
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/8000; printf "GET / HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3; head -c 12 <&3 | grep -q "^HTTP/"'
+      interval: 30s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
     volumes:
       - ./kong.yml:/etc/kong/kong.yml:ro

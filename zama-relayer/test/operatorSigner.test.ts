@@ -1,5 +1,6 @@
-import { loadOperatorAccount, signUserDecryptRequest } from '../src/operatorSigner';
-import { loadConfig } from '../src/config';
+import { describe, expect, it, vi } from 'vitest';
+import { loadOperatorAccount, signUserDecryptRequest } from '../src/operatorSigner.js';
+import { loadConfig } from '../src/config.js';
 
 const TEST_KEY = `0x${'ab'.repeat(32)}` as const;
 
@@ -18,7 +19,7 @@ describe('operatorSigner', () => {
   it('signs UserDecryptRequestVerification with correct domain/message field conversions', async () => {
     const config = loadConfig({ RELAYER_API_KEY: 'test-relayer-api-key', OPERATOR_DECRYPT_PRIVATE_KEY: TEST_KEY });
     const account = loadOperatorAccount(config);
-    const spy = jest.spyOn(account, 'signTypedData').mockResolvedValue('0xsig' as `0x${string}`);
+    const spy = vi.spyOn(account, 'signTypedData').mockResolvedValue('0xsig' as `0x${string}`);
 
     const eip712 = {
       types: {

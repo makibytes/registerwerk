@@ -1,13 +1,13 @@
 package de.makibytes.registerwerk.asset.web;
 
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
-import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
-import de.makibytes.registerwerk.deployment.api.BondStatus;
+import de.makibytes.registerwerk.asset.internal.BondTermsService;
 import de.makibytes.registerwerk.asset.web.dto.BondTermsRequest;
-import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -25,41 +25,33 @@ import java.util.UUID;
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
 public class BondTermsController {
 
-    private final AssetBondTermsRepository bondTermsRepository;
+    private final BondTermsService bondTermsService;
 
-    public BondTermsController(AssetBondTermsRepository bondTermsRepository) {
-        this.bondTermsRepository = bondTermsRepository;
+    public BondTermsController(BondTermsService bondTermsService) {
+        this.bondTermsService = bondTermsService;
     }
 
     @PostMapping
     public ResponseEntity<AssetBondTerms> upsertBondTerms(
             @PathVariable UUID assetId,
-            @Valid @RequestBody BondTermsRequest request) {
-        AssetBondTerms terms = bondTermsRepository.findById(assetId)
-                .orElseGet(() -> { AssetBondTerms t = new AssetBondTerms(); t.setAssetId(assetId); return t; });
-
-        terms.setFaceValue(request.faceValue());
-        terms.setCurrencyIso(request.currencyIso());
-        terms.setIssueDate(request.issueDate());
-        terms.setMaturityDate(request.maturityDate());
-        terms.setCouponRate(request.couponRate());
-        terms.setReferenceRate(request.referenceRate());
-        terms.setSpread(request.spread());
-        terms.setDayCount(request.dayCount());
-        terms.setPaymentFrequency(request.paymentFrequency());
-        terms.setCallable(request.callable());
-        terms.setCallSchedule(request.callSchedule());
-        if (terms.getBondStatus() == null) {
-            terms.setBondStatus(BondStatus.ACTIVE);
-        }
-
-        return ResponseEntity.ok(bondTermsRepository.save(terms));
+            @Valid @RequestBody BondTermsRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(bondTermsService.upsert(
+                assetId, request, SecurityUtils.extractUserId(auth),
+                SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    /**
+     * Readable by the asset's issuer or its current holders, in addition to REGISTRY_ADMIN —
+     * previously this whole controller was REGISTRY_ADMIN-only, so an issuer or investor could
+     * never see the terms of the bond they issued or hold. Write (upsert, above) stays operator-
+     * only: the class-level {@code @PreAuthorize} still governs it.
+     */
     @GetMapping
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') "
+            + "or @assetAccessChecker.canRead(#assetId, authentication) "
+            + "or @assetAccessChecker.isHolderOfAsset(#assetId, authentication)")
     public ResponseEntity<AssetBondTerms> getBondTerms(@PathVariable UUID assetId) {
-        return ResponseEntity.ok(
-                bondTermsRepository.findById(assetId)
-                        .orElseThrow(() -> new EntityNotFoundException("AssetBondTerms", assetId)));
+        return ResponseEntity.ok(bondTermsService.get(assetId));
     }
 }

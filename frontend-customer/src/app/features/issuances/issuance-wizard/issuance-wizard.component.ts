@@ -13,7 +13,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { IssuanceService } from '../../../core/api/issuance.service';
+import { IssuanceService, IssuanceCreateRequest } from '../../../core/api/issuance.service';
 import { KycService } from '../../../core/api/kyc.service';
 import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, JurisdictionRequirement } from '../../../core/models';
 
@@ -54,13 +54,12 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
             <mat-step [stepControl]="detailsForm" label="Details">
               <form [formGroup]="detailsForm" class="step-form">
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Issuance Name *</mat-label>
+                  <mat-label>Issuance Name</mat-label>
                   <input matInput formControlName="name" placeholder="e.g. Green Bond 2025" />
                   @if (detailsForm.get('name')?.hasError('required') && detailsForm.get('name')?.touched) {
                     <mat-error>Name is required</mat-error>
                   }
                 </mat-form-field>
-
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>ISIN (optional)</mat-label>
                   <input matInput formControlName="isin" placeholder="DE000XXXXXX0" />
@@ -71,7 +70,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Jurisdiction *</mat-label>
+                  <mat-label>Jurisdiction</mat-label>
                   <mat-select formControlName="jurisdiction">
                     @for (j of jurisdictions; track j.value) {
                       <mat-option [value]="j.value">{{ j.label }}</mat-option>
@@ -79,6 +78,9 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                   </mat-select>
                   <mat-hint>Regulatory jurisdiction for this security issuance</mat-hint>
                 </mat-form-field>
+                @if (jurisdictionProfilesError) {
+                  <p class="error-message" role="alert">{{ jurisdictionProfilesError }}</p>
+                }
 
                 @if (selectedJurisdictionProfile) {
                   <div class="jurisdiction-requirements">
@@ -99,7 +101,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 }
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Onchain Level *</mat-label>
+                  <mat-label>Onchain Level</mat-label>
                   <mat-select formControlName="onchainLevel">
                     @for (lvl of onchainLevels; track lvl.value) {
                       <mat-option [value]="lvl.value">{{ lvl.label }}</mat-option>
@@ -107,6 +109,50 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                   </mat-select>
                   <mat-hint>Defines the degree of on-chain representation</mat-hint>
                 </mat-form-field>
+
+                <mat-divider style="margin: 16px 0"></mat-divider>
+                <h3 class="section-heading">Economic Terms</h3>
+                <p class="section-hint">
+                  Optional at this stage, but statements, valuations, and tax reporting have
+                  nothing to work from until these are set — either here or later on the asset.
+                </p>
+
+                <div class="form-row">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Currency</mat-label>
+                    <input matInput formControlName="currency" placeholder="EUR" maxlength="3"
+                      style="text-transform:uppercase" (input)="onCurrencyInput($event)" />
+                    <mat-hint>ISO-4217 code</mat-hint>
+                    @if (detailsForm.get('currency')?.hasError('pattern')) {
+                      <mat-error>3-letter ISO code, e.g. EUR</mat-error>
+                    }
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Issue Size</mat-label>
+                    <input matInput type="number" formControlName="issueSize" placeholder="50000000" />
+                    <mat-hint>Total nominal amount</mat-hint>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Denomination</mat-label>
+                    <input matInput type="number" formControlName="denomination" placeholder="1000" />
+                    <mat-hint>Minimum tradable unit</mat-hint>
+                  </mat-form-field>
+                </div>
+
+                <div class="form-row">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Issue Date</mat-label>
+                    <input matInput type="date" formControlName="issueDate" />
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Maturity Date</mat-label>
+                    <input matInput type="date" formControlName="maturityDate" />
+                    <mat-hint>Leave blank for perpetual/equity-like instruments</mat-hint>
+                  </mat-form-field>
+                </div>
 
                 <!-- Optional term sheet upload -->
                 <div class="termsheet-upload-section">
@@ -118,7 +164,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                     <div class="termsheet-file-selected">
                       <mat-icon style="color:#10b981">check_circle</mat-icon>
                       <span>{{ selectedTermSheetFile.name }}</span>
-                      <button mat-icon-button (click)="clearTermSheet()">
+                      <button mat-icon-button type="button" (click)="clearTermSheet()">
                         <mat-icon>close</mat-icon>
                       </button>
                     </div>
@@ -138,7 +184,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </div>
 
                 <div class="step-actions">
-                  <button mat-raised-button color="primary" matStepperNext [disabled]="detailsForm.invalid">
+                  <button mat-raised-button color="primary" type="button" matStepperNext [disabled]="detailsForm.invalid">
                     Next
                     <mat-icon>arrow_forward</mat-icon>
                   </button>
@@ -150,7 +196,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
             <mat-step [stepControl]="chainForm" label="Chain &amp; Standard">
               <form [formGroup]="chainForm" class="step-form">
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Blockchain *</mat-label>
+                  <mat-label>Blockchain</mat-label>
                   <mat-select formControlName="chain" (valueChange)="onChainChange($event)">
                     @for (c of chains; track c.value) {
                       <mat-option [value]="c.value" [disabled]="c.comingSoon === true">
@@ -161,7 +207,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Network *</mat-label>
+                  <mat-label>Network</mat-label>
                   <mat-select formControlName="network">
                     <mat-option value="MAINNET">Mainnet</mat-option>
                     <mat-option value="TESTNET">Testnet</mat-option>
@@ -169,7 +215,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Token Standard *</mat-label>
+                  <mat-label>Token Standard</mat-label>
                   <mat-select formControlName="tokenStandard">
                     @for (std of filteredStandards; track std.value) {
                       <mat-option [value]="std.value" [disabled]="std.comingSoon === true">
@@ -180,8 +226,8 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 </mat-form-field>
 
                 <div class="step-actions">
-                  <button mat-button matStepperPrevious>Back</button>
-                  <button mat-raised-button color="primary" matStepperNext [disabled]="chainForm.invalid">
+                  <button mat-button type="button" matStepperPrevious>Back</button>
+                  <button mat-raised-button color="primary" type="button" matStepperNext [disabled]="chainForm.invalid">
                     Next
                     <mat-icon>arrow_forward</mat-icon>
                   </button>
@@ -208,6 +254,26 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                     <span class="review-value">{{ detailsForm.get('onchainLevel')?.value }}</span>
                   </div>
                   <div class="review-item">
+                    <span class="review-label">Currency</span>
+                    <span class="review-value">{{ detailsForm.get('currency')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
+                    <span class="review-label">Issue Size</span>
+                    <span class="review-value">{{ detailsForm.get('issueSize')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
+                    <span class="review-label">Denomination</span>
+                    <span class="review-value">{{ detailsForm.get('denomination')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
+                    <span class="review-label">Issue Date</span>
+                    <span class="review-value">{{ detailsForm.get('issueDate')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
+                    <span class="review-label">Maturity Date</span>
+                    <span class="review-value">{{ detailsForm.get('maturityDate')?.value || '—' }}</span>
+                  </div>
+                  <div class="review-item">
                     <span class="review-label">Chain</span>
                     <span class="review-value">{{ chainForm.get('chain')?.value }}</span>
                   </div>
@@ -230,10 +296,11 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                 }
 
                 <div class="step-actions">
-                  <button mat-button matStepperPrevious>Back</button>
+                  <button mat-button type="button" matStepperPrevious>Back</button>
                   <button
                     mat-raised-button
                     color="primary"
+                    type="button"
                     [disabled]="submitting"
                     (click)="submit()"
                   >
@@ -257,6 +324,10 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
   `,
   styles: [`
     .step-form { padding: 24px 0; display: flex; flex-direction: column; gap: 4px; }
+    .section-heading { font-size: 14px; font-weight: 600; margin: 0 0 2px; color: var(--rw-text-primary); }
+    .section-hint { font-size: 12px; color: var(--rw-text-muted); margin: 0 0 12px; }
+    .form-row { display: flex; gap: 16px; }
+    .form-row mat-form-field { flex: 1; }
     .coming-soon-badge { font-size: 0.8em; opacity: 0.6; font-style: italic; }
     .full-width { width: 100%; }
     .step-actions { display: flex; gap: 12px; align-items: center; margin-top: 24px; }
@@ -321,6 +392,7 @@ export class IssuanceWizardComponent implements OnInit {
   submitError = '';
   selectedTermSheetFile: File | null = null;
   jurisdictionProfiles: JurisdictionRequirement[] = [];
+  jurisdictionProfilesError = '';
 
   readonly jurisdictions: { value: Jurisdiction; label: string }[] = [
     { value: 'DE_EWPG', label: 'Germany — eWpG / BaFin' },
@@ -337,16 +409,25 @@ export class IssuanceWizardComponent implements OnInit {
   ngOnInit(): void {
     this.kycService.getJurisdictionRequirements().subscribe({
       next: (profiles) => { this.jurisdictionProfiles = profiles; this.cdr.markForCheck(); },
+      error: () => {
+        this.jurisdictionProfilesError = 'Jurisdiction-specific document requirements could not be loaded.';
+        this.cdr.markForCheck();
+      },
     });
   }
 
   // ── Form groups ────────────────────────────────────────────────────────────
 
   readonly detailsForm = this.fb.group({
-    name:         ['', Validators.required],
+    name:         ['', [Validators.required, Validators.maxLength(200)]],
     isin:         ['', [Validators.pattern(/^[A-Z0-9]{12}$/)]],
     jurisdiction: [null as Jurisdiction | null, Validators.required],
     onchainLevel: ['SIMPLE' as OnchainLevel, Validators.required],
+    currency:     ['', [Validators.pattern(/^[A-Z]{3}$/)]],
+    issueSize:    [null as number | null, Validators.min(0.00000001)],
+    denomination: [null as number | null, Validators.min(0.00000001)],
+    issueDate:    [''],
+    maturityDate: [''],
   });
 
   readonly chainForm = this.fb.group({
@@ -427,6 +508,11 @@ export class IssuanceWizardComponent implements OnInit {
 
   filteredStandards = this.standardsByChain['ETHEREUM'];
 
+  onCurrencyInput(event: Event): void {
+    const value = (event.target as HTMLInputElement).value.toUpperCase();
+    this.detailsForm.get('currency')?.setValue(value, { emitEvent: false });
+  }
+
   onChainChange(chain: Chain): void {
     this.filteredStandards = this.standardsByChain[chain] ?? [];
     this.chainForm.patchValue({ tokenStandard: this.filteredStandards[0]?.value ?? null });
@@ -435,31 +521,50 @@ export class IssuanceWizardComponent implements OnInit {
   // ── Submit ─────────────────────────────────────────────────────────────────
 
   submit(): void {
+    if (this.submitting) return;
+    if (this.detailsForm.invalid || this.chainForm.invalid) {
+      this.detailsForm.markAllAsTouched();
+      this.chainForm.markAllAsTouched();
+      this.submitError = 'Complete all required fields before creating the issuance.';
+      return;
+    }
+    const issueDate = this.detailsForm.value.issueDate;
+    const maturityDate = this.detailsForm.value.maturityDate;
+    if (issueDate && maturityDate && maturityDate < issueDate) {
+      this.submitError = 'Maturity date cannot be before the issue date.';
+      return;
+    }
     this.submitting = true;
     this.submitError = '';
 
-    const body = {
-      name:          this.detailsForm.value.name!,
-      isin:          this.detailsForm.value.isin || null,
+    const body: IssuanceCreateRequest = {
+      name:          this.detailsForm.value.name!.trim(),
+      isin:          this.detailsForm.value.isin?.trim().toUpperCase() || null,
       jurisdiction:  this.detailsForm.value.jurisdiction || null,
       onchainLevel:  this.detailsForm.value.onchainLevel!,
       chain:         this.chainForm.value.chain!,
       network:       this.chainForm.value.network!,
       tokenStandard: this.chainForm.value.tokenStandard!,
+      currency:      this.detailsForm.value.currency || null,
+      issueSize:     this.detailsForm.value.issueSize ?? null,
+      denomination:  this.detailsForm.value.denomination ?? null,
+      issueDate:     this.detailsForm.value.issueDate || null,
+      maturityDate:  this.detailsForm.value.maturityDate || null,
     };
 
     this.issuanceService.createIssuance(body).subscribe({
       next: (asset) => {
-        this.submitting = false;
-        this.cdr.markForCheck();
         if (this.selectedTermSheetFile) {
-          // Upload term sheet asynchronously after creation (non-blocking for navigation)
           this.issuanceService.uploadDocument(asset.id, this.selectedTermSheetFile).subscribe({
-            error: () => this.snackBar.open('Issuance created, but term sheet upload failed.', 'Close', { duration: 5000 }),
+            next: () => this.finishCreation(asset.id, 'Issuance and term sheet created successfully.'),
+            error: () => {
+              this.snackBar.open('Issuance created, but term sheet upload failed.', 'Close', { duration: 6000 });
+              this.finishCreation(asset.id);
+            },
           });
+        } else {
+          this.finishCreation(asset.id, 'Issuance created successfully!');
         }
-        this.snackBar.open('Issuance created successfully!', 'OK', { duration: 3000 });
-        this.router.navigate(['/issuances', asset.id]);
       },
       error: (err) => {
         this.submitting = false;
@@ -470,10 +575,25 @@ export class IssuanceWizardComponent implements OnInit {
   }
 
   onTermSheetSelected(event: Event): void {
-    this.selectedTermSheetFile = (event.target as HTMLInputElement).files?.[0] ?? null;
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    input.value = '';
+    if (file && file.size > 20 * 1024 * 1024) {
+      this.selectedTermSheetFile = null;
+      this.snackBar.open('The term sheet must not exceed 20 MB.', 'Close', { duration: 5000 });
+      return;
+    }
+    this.selectedTermSheetFile = file;
   }
 
   clearTermSheet(): void {
     this.selectedTermSheetFile = null;
+  }
+
+  private finishCreation(assetId: string, message?: string): void {
+    this.submitting = false;
+    this.cdr.markForCheck();
+    if (message) this.snackBar.open(message, 'OK', { duration: 3000 });
+    this.router.navigate(['/issuances', assetId]);
   }
 }

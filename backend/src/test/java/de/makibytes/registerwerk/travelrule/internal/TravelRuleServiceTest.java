@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.travelrule.internal;
 import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.travelrule.api.Ivms101;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleProtocolPort;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -56,7 +58,8 @@ class TravelRuleServiceTest {
 
     private TravelRuleService serviceWith(List<TravelRuleProtocolPort> protocols) {
         TravelRuleService service = new TravelRuleService(
-                protocols, jdbc, objectMapper, caspRegistry, eventPublisher, new SimpleMeterRegistry());
+                protocols, jdbc, objectMapper, caspRegistry, eventPublisher, new SimpleMeterRegistry(),
+                new TravelRuleCompletionWriter(jdbc, eventPublisher));
         ReflectionTestUtils.setField(service, "selfHostedVerificationThresholdEur", new BigDecimal("1000"));
         return service;
     }
@@ -95,39 +98,41 @@ class TravelRuleServiceTest {
     }
 
     @Test
-    @DisplayName("self-hosted beneficiary above EUR 1,000 — Art. 14(5) verification required")
-    void selfHostedAboveThreshold_flagsVerification() {
+    @DisplayName("self-hosted beneficiary above EUR 1,000 — blocked until Art. 14(5) verification")
+    void selfHostedAboveThreshold_blocksUntilVerified() {
         TravelRuleProtocolPort protocol = mock(TravelRuleProtocolPort.class);
         when(protocol.lookupVasp(anyString())).thenReturn(Optional.empty());
         TravelRuleService service = serviceWith(List.of(protocol));
 
-        boolean sent = service.checkAndSend(assetId, "0xfrom", "0xunhosted", new BigDecimal("1500.00"), payload);
-
-        assertThat(sent).isFalse();
+        assertThatThrownBy(() -> service.checkAndSend(
+                assetId, "0xfrom", "0xunhosted", new BigDecimal("1500.00"), payload))
+                .isInstanceOf(ComplianceGateException.class)
+                .hasMessageContaining("must be verified");
         assertThat(capturedStatuses()).contains(TravelRuleService.STATUS_UNHOSTED_VERIFY_REQUIRED);
     }
 
     @Test
     @DisplayName("self-hosted beneficiary with unknown EUR value — verification required (fail closed)")
-    void selfHostedUnknownValue_flagsVerification() {
+    void selfHostedUnknownValue_blocksUntilVerified() {
         TravelRuleProtocolPort protocol = mock(TravelRuleProtocolPort.class);
         when(protocol.lookupVasp(anyString())).thenReturn(Optional.empty());
         TravelRuleService service = serviceWith(List.of(protocol));
 
-        boolean sent = service.checkAndSend(assetId, "0xfrom", "0xunhosted", null, payload);
-
-        assertThat(sent).isFalse();
+        assertThatThrownBy(() -> service.checkAndSend(assetId, "0xfrom", "0xunhosted", null, payload))
+                .isInstanceOf(ComplianceGateException.class)
+                .hasMessageContaining("must be verified");
         assertThat(capturedStatuses()).contains(TravelRuleService.STATUS_UNHOSTED_VERIFY_REQUIRED);
     }
 
     @Test
-    @DisplayName("no protocol adapter configured — self-hosted path applies (no VASP resolvable)")
-    void noProtocols_treatedAsSelfHosted() {
+    @DisplayName("no protocol adapter and high value — blocked as an unverifiable self-hosted transfer")
+    void noProtocols_highValueTransferIsBlocked() {
         TravelRuleService service = serviceWith(List.of());
 
-        boolean sent = service.checkAndSend(assetId, "0xfrom", "0xto", new BigDecimal("2000"), payload);
-
-        assertThat(sent).isFalse();
+        assertThatThrownBy(() -> service.checkAndSend(
+                assetId, "0xfrom", "0xto", new BigDecimal("2000"), payload))
+                .isInstanceOf(ComplianceGateException.class)
+                .hasMessageContaining("must be verified");
         assertThat(capturedStatuses()).contains(TravelRuleService.STATUS_UNHOSTED_VERIFY_REQUIRED);
     }
 
@@ -170,11 +175,11 @@ class TravelRuleServiceTest {
     void micaBlockedCounterparty_recordsAndThrows() {
         TravelRuleProtocolPort protocol = vaspResolvingProtocol();
         TravelRuleService service = serviceWith(List.of(protocol));
-        org.mockito.Mockito.doThrow(new IllegalStateException("MiCA check: counterparty CASP blocked"))
+        org.mockito.Mockito.doThrow(new ComplianceGateException("MiCA check: counterparty CASP blocked"))
                 .when(caspRegistry).assertCounterpartyPermitted("did:example:vasp1");
 
         assertThatThrownBy(() -> service.checkAndSend(assetId, "0xfrom", "0xto", new BigDecimal("10"), payload))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(ComplianceGateException.class)
                 .hasMessageContaining("MiCA");
 
         // The blocked attempt must appear in the message log (audit trail).
@@ -183,15 +188,62 @@ class TravelRuleServiceTest {
     }
 
     @Test
-    @DisplayName("failed-messages gauge reflects a live count (repo-wide alerting follow-up)")
+    @DisplayName("failed-messages gauge reflects a live count (alerting metrics)")
     void failedMessagesGauge_reflectsLiveCount() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         when(jdbc.queryForObject(anyString(), org.mockito.ArgumentMatchers.eq(Long.class), any()))
                 .thenReturn(2L);
-        new TravelRuleService(List.of(), jdbc, objectMapper, caspRegistry, eventPublisher, registry);
+        new TravelRuleService(List.of(), jdbc, objectMapper, caspRegistry, eventPublisher, registry,
+                new TravelRuleCompletionWriter(jdbc, eventPublisher));
 
         double value = registry.get("registerwerk_travelrule_failed_messages_recent_total").gauge().value();
 
         assertThat(value).isEqualTo(2.0);
+    }
+
+    @Test
+    @DisplayName("inbound messages require a VASP identity that matches the authenticated header")
+    void receiveInbound_rejectsMismatchedVaspIdentity() {
+        TravelRuleService service = serviceWith(List.of());
+
+        assertThatThrownBy(() -> service.receiveInbound("did:example:other", validInboundPayload()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must match");
+
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    }
+
+    @Test
+    @DisplayName("inbound messages are persisted with a stable replay-protection reference")
+    void receiveInbound_persistsTransferReferenceAndPublishesEvent() {
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
+        TravelRuleService service = serviceWith(List.of());
+
+        service.receiveInbound("did:example:vasp1", validInboundPayload());
+
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc).update(anyString(), args.capture());
+        assertThat(args.getValue()).contains("did:example:vasp1", "transfer-123", "0xfrom", "0xto");
+        verify(eventPublisher).publishEvent(any(de.makibytes.registerwerk.travelrule.events.TravelRuleMessageReceivedEvent.class));
+    }
+
+    @Test
+    @DisplayName("replayed inbound messages do not publish duplicate audit events")
+    void receiveInbound_replayDoesNotPublishEvent() {
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(0);
+        TravelRuleService service = serviceWith(List.of());
+
+        service.receiveInbound("did:example:vasp1", validInboundPayload());
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    private static Ivms101.TravelRuleMessage validInboundPayload() {
+        return new Ivms101.TravelRuleMessage(
+                new Ivms101.OriginatingVasp(new Ivms101.VaspIdentity("did:example:vasp1", "VASP One")),
+                List.of(new Ivms101.Originator(null, "0xfrom")),
+                new Ivms101.BeneficiaryVasp(new Ivms101.VaspIdentity("did:example:registerwerk", "Registerwerk")),
+                List.of(new Ivms101.Beneficiary(null, "0xto")),
+                new Ivms101.TransferDetails("transfer-123", "2026-08-08", "10", "EUR", "CRYPTO"));
     }
 }

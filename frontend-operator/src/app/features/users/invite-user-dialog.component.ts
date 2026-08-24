@@ -15,6 +15,7 @@ const OPERATOR_ROLES: { value: AppUserRole; label: string }[] = [
   { value: 'REGISTRY_ADMIN', label: 'Registry Admin (Operator)' },
   { value: 'AUDIT', label: 'Audit (Operator)' },
   { value: 'COMPLIANCE_OFFICER', label: 'Compliance Officer (Operator)' },
+  { value: 'RELATIONSHIP_MANAGER', label: 'Relationship Manager (Operator)' },
 ];
 
 const COMPANY_ROLES: { value: AppUserRole; label: string }[] = [
@@ -89,8 +90,8 @@ const COMPANY_ROLES: { value: AppUserRole; label: string }[] = [
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
-      <button
+      <button type="button" mat-button mat-dialog-close>Cancel</button>
+      <button type="button"
         mat-raised-button
         color="primary"
         [disabled]="saving || !email || !fullName || selectedRoles.length === 0"

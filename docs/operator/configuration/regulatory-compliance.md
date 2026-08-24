@@ -1,6 +1,5 @@
 ---
 title: Regulatory Compliance Scope
-sidebar_label: Regulatory Compliance Scope
 ---
 
 This page defines what Registerwerk implements for compliance support and what remains with the regulated operator.

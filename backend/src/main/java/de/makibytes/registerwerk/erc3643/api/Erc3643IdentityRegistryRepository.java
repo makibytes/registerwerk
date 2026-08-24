@@ -22,4 +22,12 @@ public interface Erc3643IdentityRegistryRepository extends JpaRepository<Erc3643
     List<Erc3643IdentityRegistry> findByOnchainIdentityIdAndRemovedAtIsNull(UUID onchainIdentityId);
 
     boolean existsBySuiteIdAndWalletAddressAndRemovedAtIsNull(UUID suiteId, String walletAddress);
+
+    /** Registrations with a submitted tx not yet resolved — scoped so this shrinks over time
+     *  instead of re-scanning every registration ever made (see
+     *  {@code Erc3643IdentityRegistryConfirmationListener}). */
+    List<Erc3643IdentityRegistry> findByRegisteredByTxIsNotNullAndRegistrationConfirmedFalse();
+
+    /** Removals with a submitted tx not yet resolved — mirrors the registration query above. */
+    List<Erc3643IdentityRegistry> findByRemovedByTxIsNotNullAndRemovalConfirmedFalse();
 }

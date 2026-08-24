@@ -7,6 +7,7 @@ import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import {Account as ERC4337Account} from "@openzeppelin/contracts/account/Account.sol";
 import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
 import {P256} from "@openzeppelin/contracts/utils/cryptography/P256.sol";
+import {Execution} from "@openzeppelin/contracts/interfaces/draft-IERC7579.sol";
 import "../../src/ecosystem/EwpgPasskeyAccount.sol";
 import "./mocks/MockEntryPoint.sol";
 
@@ -121,5 +122,23 @@ contract EwpgPasskeyAccountTest is Test {
 
     function test_entryPoint_returnsConstructorValue() public view {
         assertEq(address(account.entryPoint()), address(entryPoint));
+    }
+
+    function test_entryPointCannotExecuteAdminClassifiedCall() public {
+        bytes4 selector = bytes4(keccak256("pause()"));
+        account.setCallRole(address(0xB0B), selector, account.ROLE_ADMIN());
+        Execution[] memory calls = new Execution[](1);
+        calls[0] = Execution({target: address(0xB0B), value: 0, callData: abi.encodeWithSelector(selector)});
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(abi.encodeWithSelector(EwpgPasskeyAccount.GuardianRequired.selector, address(0xB0B), selector));
+        account.execute(bytes32(uint256(1) << 248), abi.encode(calls));
+    }
+
+    function test_onlyGuardianCanConfigureHighRiskPolicy() public {
+        bytes32 adminRole = account.ROLE_ADMIN();
+        vm.expectRevert(EwpgPasskeyAccount.NotGuardian.selector);
+        vm.prank(address(0xBAD));
+        account.setCallRole(address(0xB0B), bytes4(keccak256("pause()")), adminRole);
     }
 }

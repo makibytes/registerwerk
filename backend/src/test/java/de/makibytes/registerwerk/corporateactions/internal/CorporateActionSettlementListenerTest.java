@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementRequestedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.chain.api.Chain;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Verifies Phase 6 finding #1: previously EVERY DAML bond corporate action (coupon or
+ * Verifies : previously EVERY DAML bond corporate action (coupon or
  * redemption alike) was routed to {@code payCoupon}, so a REDEMPTION action paid face value
  * but never exercised {@code Redeem} on the DAML ledger. Also verifies the pre-existing
  * (separately discovered while fixing #1) bug where the wrong ID — the corporate action's, not
@@ -58,6 +59,9 @@ class CorporateActionSettlementListenerTest {
 
         AssetDeployment deployment = new AssetDeployment();
         ReflectionTestUtils.setField(deployment, "id", deploymentId);
+        deployment.setChain(Chain.CANTON);
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        deployment.setContractAddress("00canton-contract-id");
         when(assetDeploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment));
         when(corporateActionRepository.findTokenStandardByCorpAction(corporateActionId)).thenReturn("DAML_BOND_FIXED");
     }
@@ -89,16 +93,14 @@ class CorporateActionSettlementListenerTest {
     }
 
     @Test
-    @DisplayName("PARTIAL_REDEMPTION also routes to redeem, not payCoupon")
-    void partialRedemption_routesToRedeem() {
+    @DisplayName("PARTIAL_REDEMPTION never exercises terminal Redeem and stays awaiting manual settlement")
+    void partialRedemption_doesNotArchiveTheWholeBond() {
         actionOfType(CorporateAction.ActionType.PARTIAL_REDEMPTION);
-        when(cantonBondOperations.redeem(eq(deploymentId), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture("tx-redeem-2"));
 
         listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
                 corporateActionId, assetId, CorporateAction.ActionType.PARTIAL_REDEMPTION));
 
-        verify(cantonBondOperations, timeout(1000)).redeem(eq(deploymentId), any(), any());
+        verify(cantonBondOperations, never()).redeem(any(), any(), any());
         verify(cantonBondOperations, never()).payCoupon(any(), any(), any(), any());
     }
 
@@ -118,6 +120,18 @@ class CorporateActionSettlementListenerTest {
     }
 
     @Test
+    @DisplayName("DIVIDEND is not silently reinterpreted as a bond coupon")
+    void dividend_doesNotRouteToPayCoupon() {
+        actionOfType(CorporateAction.ActionType.DIVIDEND);
+
+        listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
+                corporateActionId, assetId, CorporateAction.ActionType.DIVIDEND));
+
+        verify(cantonBondOperations, never()).payCoupon(any(), any(), any(), any());
+        verify(cantonBondOperations, never()).redeem(any(), any(), any());
+    }
+
+    @Test
     @DisplayName("CALL routes to earlyCall using amountPerUnit as the call price")
     void call_routesToEarlyCall() {
         actionOfType(CorporateAction.ActionType.CALL);
@@ -131,7 +145,8 @@ class CorporateActionSettlementListenerTest {
     }
 
     @Test
-    @DisplayName("an action type with no Canton lifecycle mapping (e.g. SPLIT) dispatches nothing and stays AWAITING_SETTLEMENT")
+    @DisplayName("SPLIT has no Canton lifecycle mapping — no on-chain split primitive exists on any "
+            + "supported standard, so it dispatches nothing and always settles via the operator's mark-settled")
     void unmappedActionType_dispatchesNothing() {
         actionOfType(CorporateAction.ActionType.SPLIT);
 
@@ -153,5 +168,29 @@ class CorporateActionSettlementListenerTest {
                 corporateActionId, assetId, CorporateAction.ActionType.REDEMPTION));
 
         verify(cantonBondOperations, never()).redeem(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an unrelated EVM deployment is never selected for a Canton exercise")
+    void selectsOnlyConfirmedCantonDeployment() {
+        actionOfType(CorporateAction.ActionType.REDEMPTION);
+        AssetDeployment evm = new AssetDeployment();
+        ReflectionTestUtils.setField(evm, "id", UUID.randomUUID());
+        evm.setChain(Chain.ETHEREUM);
+        evm.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        evm.setContractAddress("0x0000000000000000000000000000000000000001");
+        AssetDeployment canton = new AssetDeployment();
+        ReflectionTestUtils.setField(canton, "id", deploymentId);
+        canton.setChain(Chain.CANTON);
+        canton.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        canton.setContractAddress("00canton-contract-id");
+        when(assetDeploymentRepository.findByAssetId(assetId)).thenReturn(List.of(evm, canton));
+        when(cantonBondOperations.redeem(eq(deploymentId), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture("tx-redeem"));
+
+        listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
+                corporateActionId, assetId, CorporateAction.ActionType.REDEMPTION));
+
+        verify(cantonBondOperations, timeout(1000)).redeem(eq(deploymentId), any(), any());
     }
 }

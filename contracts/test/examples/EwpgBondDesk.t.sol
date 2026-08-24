@@ -414,7 +414,7 @@ contract EwpgBondDeskTest is Test {
         desk.payCoupon(holders);
     }
 
-    /// @notice Regression test for finding #5 (Phase 8): the original desk paid from a
+    /// @notice Regression test for: the original desk paid from a
     ///         live {IERC3643-balanceOf} read, so a holder paid in one call could transfer
     ///         their units to a second address and collect the same period's coupon again
     ///         there once that address appeared in a later call. The record-date snapshot
@@ -478,7 +478,7 @@ contract EwpgBondDeskTest is Test {
         assertTrue(desk.periodBalanceSnapshotted(1, investor3));
     }
 
-    // ── pause (finding #2) ────────────────────────────────────────────────
+    // ── pause ────────────────────────────────────────────────
 
     function test_pause_blocksSubscribePayCouponAndRedeem() public {
         vm.prank(alice);

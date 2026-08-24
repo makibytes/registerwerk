@@ -259,9 +259,10 @@ class AssetTokenAdminGrantServiceTest {
         AssetTokenAdminGrant existing = grantRequest(ASSET_ID, ENTITY);
         existing.setStatus(AssetTokenAdminGrant.Status.ACTIVE);
         UUID grantId = UUID.randomUUID();
-        when(repository.findById(grantId)).thenReturn(Optional.of(existing));
+        when(repository.findByIdAndAssetId(grantId, ASSET_ID)).thenReturn(Optional.of(existing));
 
-        AssetTokenAdminGrant revoked = service.revoke(grantId, ACTOR, "REGISTRY_ADMIN", "no longer needed", APPROVER);
+        AssetTokenAdminGrant revoked = service.revokeForAsset(
+                ASSET_ID, grantId, ACTOR, "REGISTRY_ADMIN", "no longer needed", APPROVER);
 
         assertThat(revoked.getStatus()).isEqualTo(AssetTokenAdminGrant.Status.REVOKED);
         assertThat(revoked.getRevokedBy()).isEqualTo(ACTOR);
@@ -275,9 +276,10 @@ class AssetTokenAdminGrantServiceTest {
         AssetTokenAdminGrant existing = grantRequest(ASSET_ID, ENTITY);
         existing.setStatus(AssetTokenAdminGrant.Status.ACTIVE);
         UUID grantId = UUID.randomUUID();
-        when(repository.findById(grantId)).thenReturn(Optional.of(existing));
+        when(repository.findByIdAndAssetId(grantId, ASSET_ID)).thenReturn(Optional.of(existing));
 
-        AssetTokenAdminGrant revoked = service.revoke(grantId, ACTOR, "REGISTRY_ADMIN", "no longer needed", APPROVER);
+        AssetTokenAdminGrant revoked = service.revokeForAsset(
+                ASSET_ID, grantId, ACTOR, "REGISTRY_ADMIN", "no longer needed", APPROVER);
 
         assertThat(revoked.getRevokeDualControlApproverId()).isEqualTo(APPROVER);
         assertThat(revoked.getRevokeDualControlApprovedAt()).isNotNull();
@@ -292,10 +294,23 @@ class AssetTokenAdminGrantServiceTest {
         AssetTokenAdminGrant existing = grantRequest(ASSET_ID, ENTITY);
         existing.setStatus(AssetTokenAdminGrant.Status.REVOKED);
         UUID grantId = UUID.randomUUID();
-        when(repository.findById(grantId)).thenReturn(Optional.of(existing));
+        when(repository.findByIdAndAssetId(grantId, ASSET_ID)).thenReturn(Optional.of(existing));
 
-        assertThatThrownBy(() -> service.revoke(grantId, ACTOR, "REGISTRY_ADMIN", "x", APPROVER))
+        assertThatThrownBy(() -> service.revokeForAsset(
+                ASSET_ID, grantId, ACTOR, "REGISTRY_ADMIN", "x", APPROVER))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void revokeForAsset_cannotUseGrantFromAnotherAsset() {
+        UUID requestedAssetId = UUID.randomUUID();
+        UUID grantId = UUID.randomUUID();
+        when(repository.findByIdAndAssetId(grantId, requestedAssetId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.revokeForAsset(
+                requestedAssetId, grantId, ACTOR, "REGISTRY_ADMIN", "x", APPROVER))
+                .isInstanceOf(de.makibytes.registerwerk.shared.EntityNotFoundException.class);
+        verify(repository, org.mockito.Mockito.never()).save(any());
     }
 
     @Test

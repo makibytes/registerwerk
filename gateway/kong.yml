@@ -2,7 +2,9 @@ _format_version: "3.0"
 
 # ─── Registerwerk API Gateway (Kong OSS, DB-less) ─────────────────────────────
 #
-# Loaded via KONG_DECLARATIVE_CONFIG (see docker-compose.kong.yml). Kong's
+# Loaded via KONG_DECLARATIVE_CONFIG by the root docker-compose.yml, which is what the running
+# stack uses. (docker-compose.kong.yml in this directory runs the gateway standalone against the
+# same file and cannot run at the same time — see its header.) Kong's
 # declarative format performs NO environment substitution — deployment-specific
 # values (CORS origins, admin IP allowlist) are edited here or rendered by your
 # deployment tooling before start.
@@ -14,9 +16,42 @@ _format_version: "3.0"
 # into this file only when running Kong Enterprise/Konnect. Never forward
 # identity headers from clients: the backend derives identity from the JWT.
 
+# routes through a Kong upstream (active + passive health checks) instead of a bare
+# `url:` pointing straight at the backend hostname. This is on top of, not instead of, whatever
+# L4 load balancing the deployment platform's own service discovery already does (a Docker
+# Compose service name round-robins DNS across replicas; a Kubernetes Service load-balances
+# across pod endpoints via kube-proxy) — Kong's own health checks add faster, L7-aware detection
+# of a struggling replica (a specific target actively probed and passively marked down on real
+# response codes) than waiting for a Kubernetes readiness probe to catch up, and this same
+# config works identically whether "backend" resolves to one container or many.
+upstreams:
+  - name: registerwerk-backend-upstream
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health/readiness
+        healthy:
+          interval: 10
+          successes: 2
+        unhealthy:
+          interval: 10
+          http_failures: 3
+          timeouts: 3
+      passive:
+        healthy:
+          successes: 2
+        unhealthy:
+          http_failures: 5
+          timeouts: 5
+    targets:
+      - target: backend:8080
+        weight: 100
+
 services:
   - name: registerwerk-backend
-    url: http://backend:8080
+    protocol: http
+    host: registerwerk-backend-upstream
+    port: 8080
     connect_timeout: 10000
     read_timeout: 60000
     write_timeout: 60000
@@ -57,9 +92,26 @@ services:
 
 # ─── Plugins ───────────────────────────────────────────────────────────────────
 plugins:
+  # Exposes Kong's own metrics on the Status API (:8100/metrics — see KONG_STATUS_LISTEN in
+  # docker-compose.yml), which is what monitoring/prometheus.yml scrapes. Bundled in Kong OSS.
+  # Without this plugin the endpoint exists but reports nothing about routes or upstreams.
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      upstream_health_metrics: true
+
   # Response caching — PUBLIC routes only. Caching authenticated registry data
   # at the gateway would serve stale compliance state (and, mis-keyed, another
   # user's responses); an eWpG register must always read current state.
+  #
+  # strategy: memory is inherently per-Kong-node — Kong OSS's proxy-cache plugin has no
+  # Redis-backed strategy at all (that needs the Enterprise-only proxy-cache-advanced plugin), so
+  # this is deliberately NOT switched to Redis alongside rate-limiting below. Accepted as a low-
+  # risk limitation, not a bug: worst case with multiple Kong replicas is a client hitting a
+  # different node and getting a cache miss (an extra backend request within the 30-60s TTL), not
+  # stale or incorrect data — unlike rate-limiting, where per-node counting would silently
+  # multiply the effective throttle by the replica count.
   - name: proxy-cache
     route: api-public
     config:
@@ -112,14 +164,22 @@ plugins:
           - X-Entity-Id
           - X-Entity-Roles
 
-  # Rate limiting. `local` works on a single node out of the box; for multiple
-  # Kong replicas switch to policy: redis (see plugins/rate-limiting.yml).
+  # Rate limiting — Redis-backed so the per-minute/hour throttle is a real fleet-wide
+  # limit shared across every Kong replica, not a per-node counter. policy: local (the previous
+  # default) counts independently on each node, so N Kong replicas silently multiplied the
+  # effective limit by N — the throttle got weaker exactly when horizontal scale-out made it more
+  # important. redis.host below is Compose's service name; the Helm copy
+  # (deploy/helm/registerwerk/files/kong.yml) points at the Bitnami redis subchart's Service
+  # instead — see that file's own comment.
   - name: rate-limiting
     service: registerwerk-backend
     config:
       minute: 300
       hour: 10000
-      policy: local
+      policy: redis
+      redis:
+        host: redis
+        port: 6379
       fault_tolerant: true
       hide_client_headers: false
 
@@ -158,12 +218,22 @@ plugins:
       message: "Access denied by IP restriction policy."
 
   # CORS — set the deployed frontend origins here per environment.
+  #
+  # Both the localhost and 127.0.0.1 spelling are listed for each port: a browser's Origin
+  # header is whatever hostname the address bar actually used, and "localhost" vs "127.0.0.1"
+  # are different origins to CORS even though they reach the same machine. For a frontend
+  # deployed on a remote host, Compose derives Spring's enforcing allow-list from
+  # OPERATOR_FRONTEND_URL and CUSTOMER_FRONTEND_URL. Update this list too only when a browser
+  # calls Kong directly from a separate origin; the same-origin frontend proxy does not require
+  # Kong CORS response headers.
   - name: cors
     service: registerwerk-backend
     config:
       origins:
         - http://localhost:4200
         - http://localhost:4201
+        - http://127.0.0.1:4200
+        - http://127.0.0.1:4201
       methods:
         - GET
         - POST
@@ -176,8 +246,19 @@ plugins:
         - Authorization
         - Content-Type
         - X-Requested-With
+        # Second-approver token for 4-eyes (Vieraugenprinzip) endpoints — see
+        # stepup/internal/StepUpEnforcementAspect. Without it the browser preflight
+        # rejects every dual-control call routed through Kong.
+        - X-Dual-Control-Token
+        # CSRF header Angular's withXsrfConfiguration attaches automatically, reading it back
+        # from the (non-httpOnly) XSRF-TOKEN cookie SpaCsrfConfig sets — required now that the
+        # session moved from the login response body into an httpOnly cookie (SessionCookieService).
+        - X-XSRF-TOKEN
       exposed_headers:
         - X-Total-Count
+        # Carries the OAuth2 claims challenge (error="insufficient_claims") the
+        # customer SPA reads to trigger an Entra step-up redirect.
+        - WWW-Authenticate
       credentials: true
       max_age: 3600
 

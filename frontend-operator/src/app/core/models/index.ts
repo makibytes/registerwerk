@@ -86,27 +86,81 @@ export interface AssetSlot {
   createdAt: string;
 }
 
-// ── Coupon payment ────────────────────────────────────────────────────────────
-export interface AssetCouponPayment {
-  id: string;
-  assetId: string;
-  slotId?: string;
-  periodNo: number;
-  scheduledDate: string;
-  paidDate?: string;
-  amountPerUnit?: number;
-  couponStatus: 'SCHEDULED' | 'PAID' | 'MISSED';
-  txRef?: string;
-}
-
 // ── Corporate actions ──────────────────────────────────────────────────────────
+// PLEDGE was retired — never read/written by any code path (the real pledge/collateral
+// mechanism lives in the lending module); see backend V14__corporate_action_issuer_workflow.sql.
 export type CorporateActionType =
   | 'COUPON' | 'DIVIDEND' | 'SPLIT' | 'REVERSE_SPLIT' | 'CONVERSION'
-  | 'REDEMPTION' | 'PARTIAL_REDEMPTION' | 'PLEDGE' | 'CALL'
+  | 'REDEMPTION' | 'PARTIAL_REDEMPTION' | 'CALL'
   | 'CAPITAL_CALL' | 'INTEREST_PAYMENT';
 
+/** PROPOSED/REJECTED are the issuer-proposal pre-states for issuer-initiated types (DIVIDEND,
+ *  SPLIT, CALL): an issuer's proposal starts PROPOSED and an operator either approves it (→
+ *  ANNOUNCED) or rejects it (→ REJECTED, terminal). System-raised COUPON/REDEMPTION skip
+ *  PROPOSED entirely and start at ANNOUNCED. */
 export type CorporateActionStatus =
-  | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT' | 'SETTLED' | 'CLOSED' | 'CANCELLED';
+  | 'PROPOSED' | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT'
+  | 'SETTLED' | 'CLOSED' | 'CANCELLED' | 'REJECTED';
+
+/** §10 eWpG register inspection request. */
+export type InspectionLegalBasis = 'ISSUER' | 'HOLDER' | 'BENEFICIARY' | 'LEGITIMATE_INTEREST';
+export type InspectionStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'FULFILLED';
+
+export interface RegisterInspectionRequest {
+  id: string;
+  assetId: string;
+  requesterEntityId: string | null;
+  requesterName: string;
+  requesterEmail: string | null;
+  legalBasis: InspectionLegalBasis;
+  statedInterest: string | null;
+  status: InspectionStatus;
+  decisionReason: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  fulfilledAt: string | null;
+  createdAt: string;
+}
+
+/** §§21/22 eWpG register transfer to a successor registry operator. */
+export type TransferStatus = 'INITIATED' | 'EXPORTED' | 'HANDED_OVER' | 'COMPLETED' | 'CANCELLED';
+
+export interface RegisterTransfer {
+  id: string;
+  assetId: string;
+  successorName: string;
+  successorIdentifier: string | null;
+  reason: string;
+  status: TransferStatus;
+  exportHash: string | null;
+  onchainTxHash: string | null;
+  initiatedBy: string | null;
+  initiatedAt: string;
+  exportedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+}
+
+/** Investor-side counterpart to {@link RegisterTransfer}: moves one holding to a successor
+ *  registrar. Reuses {@link TransferStatus} — the lifecycle shape is identical. */
+export interface PortfolioMigrationRequest {
+  id: string;
+  investorEntityId: string;
+  assetId: string;
+  holderId: string;
+  destinationRegistrarName: string | null;
+  destinationRegistrarIdentifier: string | null;
+  destinationWalletAddress: string | null;
+  reason: string;
+  status: TransferStatus;
+  exportHash: string | null;
+  onchainTxHash: string | null;
+  initiatedBy: string | null;
+  initiatedAt: string;
+  exportedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+}
 
 export interface CorporateAction {
   id: string;
@@ -126,6 +180,14 @@ export interface CorporateAction {
   settlementChain?: string;
   settledAt?: string;
   initiatedBy: string;
+  /** The issuer's attestation that the underlying obligation/cash-leg is ready — the first of
+   *  the two required parties before an operator can confirm settlement. May instead be an
+   *  operator's audited override (issuerAttestationRef prefixed "OPERATOR_OVERRIDE: "). */
+  issuerAttestedBy?: string;
+  issuerAttestedAt?: string;
+  issuerAttestationRef?: string;
+  /** The operator's settlement confirmation — the second of the two required parties, refused
+   *  while issuerAttestedAt is still unset. */
   dualControlApproverId?: string;
   dualControlApprovedAt?: string;
   notes?: string;
@@ -137,7 +199,7 @@ export interface LegalEntity {
   id: string;
   entityNumber: string;
   type: 'ISSUER' | 'INVESTOR' | 'AUDITOR';
-  status: 'PENDING_ONBOARDING' | 'ACTIVE' | 'SUSPENDED' | 'DISSOLVED';
+  status: 'PENDING_ONBOARDING' | 'ACTIVE' | 'SUSPENDED' | 'DISSOLVED' | 'CLOSED';
   currentName: string;
   leiCode?: string;
   registrationNumber?: string;
@@ -145,6 +207,77 @@ export interface LegalEntity {
   kycStatus: 'NOT_STARTED' | 'IN_PROGRESS' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
   createdAt: string;
   updatedAt?: string;
+  clientCategory?: ClientCategory | null;
+  clientCategoryClassifiedAt?: string | null;
+  assignedRelationshipManagerId?: string | null;
+}
+
+// ─── Finality gate / policy / effect journal ─────────────────────────────────
+
+export type FinalityLevel = 'PROVISIONAL' | 'SAFE' | 'FINALIZED' | 'ORPHANED';
+export type FinalityPolicyProfile = 'FAST' | 'BALANCED' | 'CONSERVATIVE';
+export type FinalityPolicyScopeType = 'GLOBAL' | 'TOKEN_STANDARD' | 'ASSET';
+
+/** Mirrors the backend's `FinalityPolicyAssignmentView`. */
+export interface FinalityPolicyAssignmentView {
+  id: string;
+  scopeType: FinalityPolicyScopeType;
+  tokenStandard: TokenStandard | null;
+  assetId: string | null;
+  profile: FinalityPolicyProfile;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Mirrors the backend's `FinalityPolicyOverrideView`. */
+export interface FinalityPolicyOverrideView {
+  id: string;
+  assetId: string;
+  operation: string;
+  requiredLevel: FinalityLevel;
+  reason: string;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+/** Mirrors the backend's `ChainEffectView` — one row in the "unresolved compensation" queue. */
+export interface ChainEffectView {
+  id: string;
+  chainConfigId: string;
+  blockNumber: number;
+  txHash: string | null;
+  moduleName: string;
+  effectType: string;
+  entityType: string;
+  entityId: string;
+  assetId: string | null;
+  category: 'RECOMPUTE' | 'INVERSE_FLIP' | 'IRREVERSIBLE';
+  status: 'ACTIVE' | 'SETTLED' | 'COMPENSATING' | 'COMPENSATED' | 'COMPENSATION_FAILED' | 'IRREVERSIBLE_ESCALATED';
+  attemptCount: number;
+  /** Set on every terminal outcome — a real failure/remediation reason, or a benign "already
+   *  undone" explanation alike. Not always an error, despite the name of the backend column this
+   *  used to mirror before it was renamed for exactly that reason. */
+  resolutionDetail: string | null;
+  recordedAt: string;
+  acknowledgedBy: string | null;
+  acknowledgedAt: string | null;
+  acknowledgeReason: string | null;
+}
+
+export type ClientCategory = 'RETAIL' | 'PROFESSIONAL' | 'ELIGIBLE_COUNTERPARTY';
+export type KnowledgeExperienceLevel = 'NONE' | 'BASIC' | 'ADVANCED';
+export type RiskTolerance = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface SuitabilityAssessment {
+  id: string;
+  entityId: string;
+  knowledgeExperience: KnowledgeExperienceLevel;
+  riskTolerance: RiskTolerance;
+  investmentHorizonYears: number | null;
+  financialSituationAdequate: boolean;
+  notes: string | null;
+  assessedAt: string;
+  assessedBy: string | null;
 }
 
 export interface LegalEntityNameHistory {
@@ -202,6 +335,41 @@ export interface KycJurisdictionApproval {
   overrideNote?: string;
 }
 
+/** GwG §3 / AMLR Art. 42 beneficial-owner (UBO) registration. */
+export interface BeneficialOwner {
+  id: string;
+  entityId: string;
+  naturalPersonId: string;
+  givenName: string;
+  familyName: string;
+  country?: string;
+  pepStatus: 'UNKNOWN' | 'NOT_PEP' | 'DOMESTIC_PEP' | 'FOREIGN_PEP' | 'INTERNATIONAL_PEP' | 'PEP_FAMILY' | 'PEP_ASSOCIATE';
+  ownershipPct?: number;
+  controlType: 'DIRECT_OWNERSHIP' | 'INDIRECT_OWNERSHIP' | 'OTHER_CONTROL' | 'LEGAL_REPRESENTATIVE' | 'TRUSTEE';
+  registeredAt: string;
+  ceasedAt?: string;
+}
+
+export interface BeneficialOwnerRequest {
+  person: {
+    givenName: string;
+    familyName: string;
+    dateOfBirth?: string;
+    nationality?: string;
+    countryOfResidence?: string;
+    taxId?: string;
+    taxIdCountry?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    postalCode?: string;
+    country?: string;
+  };
+  ownershipPct?: number;
+  controlType: BeneficialOwner['controlType'];
+  source?: string;
+}
+
 export interface KycComplianceResponse {
   jurisdiction: Jurisdiction;
   jurisdictionDisplayName: string;
@@ -234,13 +402,33 @@ export interface Asset {
   isin?: string;
   tokenStandard: TokenStandard;
   onchainLevel: 'NONE' | 'SIMPLE' | 'CONTROL';
-  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEEMED';
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEEMED' | 'TRANSFERRED_OUT';
   jurisdiction?: Jurisdiction;
   totalSupply?: number;
   decimals?: number;
   createdAt: string;
   updatedAt?: string;
   hasTermSheet: boolean;
+  currency?: string | null;
+  issueSize?: number | null;
+  denomination?: number | null;
+  issueDate?: string | null;
+  maturityDate?: string | null;
+  targetMarketCategories?: ClientCategory[];
+  targetMarketMinExperience?: KnowledgeExperienceLevel | null;
+  minInvestmentAmount?: number | null;
+  maxHoldingAmount?: number | null;
+}
+
+export interface InvestorLimit {
+  id: string;
+  assetId: string;
+  investorEntityId: string;
+  minInvestmentOverride: number | null;
+  maxHoldingOverride: number | null;
+  lockupUntil: string | null;
+  updatedAt: string;
+  updatedBy: string | null;
 }
 
 export interface AssetDocument {
@@ -277,6 +465,61 @@ export interface AssetHolder {
   percentage: number;
 }
 
+/**
+ * A single on-chain token transfer as recorded by the off-chain indexer (`token_transfer`
+ * table) — distinct from `TxRecord`/`blockchain_transaction`, which is the registry's own
+ * record of transactions *it* submitted. This is the indexer's view of everything that moved
+ * on-chain, including transfers the registry didn't initiate itself. Mirrors the backend's
+ * `TokenTransferResponse` record exactly (`indexer/web/dto/TokenTransferResponse.java`).
+ */
+export interface TokenTransferResponse {
+  id: string;
+  contractAddress: string;
+  fromAddress: string | null;
+  toAddress: string | null;
+  tokenId: string | null;
+  amount: string;
+  eventType: string;
+  txHash: string;
+  blockNumber: number;
+  occurredAt: string;
+  explorerTxUrl: string | null;
+  chainIdentifier: string;
+  /**
+   * The raw three-tier `FinalityLevel` name — PROVISIONAL (seen but not yet past the chain's
+   * finality depth, can still be reorged out), SAFE (past a fast-but-not-final checkpoint, e.g.
+   * Ethereum's `safe` tag), FINALIZED (past finality, safe to treat as settled), or ORPHANED (the
+   * block that contained this transfer was reorged out — no longer exists on the canonical
+   * chain). Stable across roles — always this raw enum name, regardless of who's asking; see
+   * `finalityLabel` for the role-resolved display text.
+   */
+  finalityStatus: 'PROVISIONAL' | 'SAFE' | 'FINALIZED' | 'ORPHANED';
+  /** Display text for `finalityStatus`, resolved server-side by the caller's role (see backend
+   *  `TokenTransferMapper`) — equal to `finalityStatus` for operator staff, plain language
+   *  ("Being confirmed", "Confirmed", "Settled — final", "Did not go through") for customer-side
+   *  roles. The operator app always sees the former; render this, not `finalityStatus`, if a
+   *  future view here is ever shown to a non-operator role. */
+  finalityLabel: string;
+}
+
+/**
+ * Operator visibility/recovery surface for `indexer_state` — one row per chain x indexer type.
+ * Mirrors the backend's `IndexerStateResponse` record exactly
+ * (`indexer/web/dto/IndexerStateResponse.java`).
+ */
+export interface IndexerStateResponse {
+  id: string;
+  chainConfigId: string;
+  indexerType: 'GRAPH_NODE' | 'SOLANA_GEYSER' | 'SOLANA_POLL' | 'CANTON_STREAM' | 'STARKNET_POLL' | 'STELLAR_HORIZON';
+  status: 'ACTIVE' | 'PAUSED' | 'ERROR';
+  lastSyncedBlock: number | null;
+  lastFinalBlock: number | null;
+  lastSyncedSignature: string | null;
+  lastSyncedAt: string | null;
+  consecutiveErrors: number;
+  lastError: string | null;
+}
+
 export interface KycDocument {
   id: string;
   entityId: string;
@@ -310,6 +553,66 @@ export interface OnboardingToken {
   token: string;
   entityId: string;
   expiresAt: string;
+}
+
+/** Customer support ticket — `support.web.SupportTicketAdminController`. */
+export interface SupportTicket {
+  id: string;
+  entityId: string;
+  createdBy: string;
+  subject: string;
+  description: string;
+  category: 'TECHNICAL' | 'COMPLIANCE' | 'BILLING' | 'ASSET_ISSUE' | 'TRADING' | 'ONBOARDING' | 'OTHER';
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  assignedTo?: string;
+  resolutionNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  closedAt?: string;
+}
+
+export interface SupportTicketMessage {
+  id: string;
+  authorId: string;
+  authorIsOperator: boolean;
+  body: string;
+  createdAt: string;
+}
+
+export interface ChainDriftEvent {
+  id: string;
+  assetId: string;
+  deploymentId: string;
+  walletAddress: string;
+  dbBalance: number;
+  onchainBalance: number;
+  delta: number;
+  severity: 'WARNING' | 'CRITICAL';
+  status: 'OPEN' | 'RESOLVED';
+  detectedAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolutionNotes: string | null;
+}
+
+export type SubscriptionOrderStatus = 'SUBMITTED' | 'ALLOCATED' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
+
+export interface SubscriptionOrder {
+  id: string;
+  assetId: string;
+  investorEntityId: string;
+  walletAddress: string;
+  requestedAmount: number;
+  allocatedAmount: number | null;
+  status: SubscriptionOrderStatus;
+  submittedAt: string;
+  allocatedAt: string | null;
+  allocatedBy: string | null;
+  confirmedAt: string | null;
+  resultingHolderId: string | null;
+  rejectionReason: string | null;
 }
 
 export interface PageResponse<T> {
@@ -367,6 +670,8 @@ export interface OperatorWallet {
   name: string;
   type: 'EVM' | 'SOLANA' | 'CANTON';
   address: string;
+  custodyType: 'SOFTWARE' | 'PKCS11';
+  keyReference: string | null;
   defaultForChains: string[]; // chain config UUIDs
   createdAt: string;
   updatedAt: string;
@@ -379,6 +684,36 @@ export interface WalletDefault {
   walletId: string;
   walletName: string;
   walletAddress: string;
+}
+
+export type RpcNodeKind = 'DIRECT_RPC' | 'CHAINCACHE';
+
+/** chaincache's real `addressTraceCapability` field is a nested status object, not a plain
+ *  string — see ChaincacheClient.AddressTraceCapability on the backend. */
+export interface RpcNodeAddressTraceCapability {
+  attempted: boolean;
+  lastSuccessful: boolean;
+  lastAttemptAt: string | null;
+}
+
+/** Advisory snapshot of chaincache's own `GET /api/capabilities` response for one chain — see
+ *  ChaincacheClient.ChainCapabilitiesProbe on the backend. Only present on a CHAINCACHE-kind node,
+ *  and only once a probe has succeeded at least once. */
+export interface RpcNodeCapabilities {
+  finalityModel?: string;
+  safeConfirmations?: number;
+  finalizedConfirmations?: number;
+  configuredApis?: string[];
+  debugApiConfiguredOnAnyNode?: boolean;
+  addressTraceCapability?: RpcNodeAddressTraceCapability | null;
+  durableStreamAvailable?: boolean;
+  kafkaRelayEnabled?: boolean;
+  /** From chaincache's GET /api/chains — how many upstream RPC providers this workload has
+   *  configured for the chain, and how many currently answer. Null when the enrichment probe
+   *  itself failed (a degraded, not fatal, outcome — see ChaincacheClient#fetchNodeCounts). */
+  configuredNodeCount?: number | null;
+  availableNodeCount?: number | null;
+  probedAt?: string;
 }
 
 export interface RpcNode {
@@ -397,6 +732,14 @@ export interface RpcNode {
   consecutiveFailures: number;
   lagFromBest?: number;
   syncing: boolean;
+  kind: RpcNodeKind;
+  managementUrl?: string;
+  remoteChainKey?: string;
+  capabilities?: RpcNodeCapabilities;
+  /** Whether Registerwerk currently has a live durable-event WebSocket connection open to this
+   *  node's chaincache workload — see ChaincacheDurableStreamManager. Only meaningful for
+   *  kind === 'CHAINCACHE'; always false otherwise. */
+  streamConnected?: boolean;
 }
 
 export interface ChainHealth {
@@ -408,6 +751,24 @@ export interface ChainHealth {
   chainId?: number;
   enabled: boolean;
   nodes: RpcNode[];
+}
+
+export type FinalitySource = 'RPC_SELF_PROBE' | 'CHAINCACHE';
+
+/** Full chain configuration — the "chain config screen" the operator UI previously had no way
+ *  to edit finalityModel/avgBlockSeconds/finalitySource/rpcUrl/wsUrl/graphNodeUrl from. */
+export interface ChainConfig {
+  id: string;
+  identifier: string;
+  displayName: string;
+  chainType: 'EVM' | 'SOLANA' | 'STARKNET' | 'STELLAR' | 'CANTON';
+  networkType: 'MAINNET' | 'TESTNET';
+  chainId?: number;
+  blockExplorerUrl?: string;
+  finalityModel: 'TAG_BASED' | 'DEPTH_BASED' | 'INSTANT';
+  avgBlockSeconds?: number;
+  finalitySource: FinalitySource;
+  enabled: boolean;
 }
 
 export interface RegistryOverviewSummary {
@@ -423,7 +784,7 @@ export interface RegistryEntityNode {
   entityNumber: string;
   currentName: string;
   storedType: 'ISSUER' | 'INVESTOR' | 'AUDITOR';
-  roles: Array<'ISSUER' | 'INVESTOR' | 'AUDITOR'>;
+  roles: ('ISSUER' | 'INVESTOR' | 'AUDITOR')[];
   status: LegalEntity['status'];
   kycStatus: LegalEntity['kycStatus'];
   issuedAssetCount: number;
@@ -632,9 +993,19 @@ export interface ThirdPartyProvider {
   name: string;
   category: string;
   criticality: ProviderCriticality;
+  lei: string | null;
   country: string | null;
+  contractStart: string | null;
   contractEnd: string | null;
+  subOutsourcing: boolean;
+  subOutsourcingDetails: string | null;
+  primaryContact: string | null;
+  slaAvailabilityPct: number | null;
+  rtoHours: number | null;
+  rpoHours: number | null;
   notifiedAuthority: boolean;
+  notifiedAt: string | null;
+  notes: string | null;
 }
 
 export type ResilienceTestType = 'VULNERABILITY_SCAN' | 'SCENARIO_BASED' | 'TLPT';

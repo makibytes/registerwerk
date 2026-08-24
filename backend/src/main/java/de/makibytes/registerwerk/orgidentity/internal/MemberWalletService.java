@@ -48,6 +48,7 @@ public class MemberWalletService {
     private final EcosystemOnchainBroadcaster broadcaster;
     private final ApplicationEventPublisher eventPublisher;
     private final WalletSignatureVerifier signatureVerifier;
+    private final EcosystemTxGateway txGateway;
     private final SecureRandom secureRandom = new SecureRandom();
 
     MemberWalletService(
@@ -56,13 +57,15 @@ public class MemberWalletService {
             OrgRegistrationRepository registrationRepository,
             EcosystemOnchainBroadcaster broadcaster,
             ApplicationEventPublisher eventPublisher,
-            WalletSignatureVerifier signatureVerifier) {
+            WalletSignatureVerifier signatureVerifier,
+            EcosystemTxGateway txGateway) {
         this.walletRepository = walletRepository;
         this.challengeRepository = challengeRepository;
         this.registrationRepository = registrationRepository;
         this.broadcaster = broadcaster;
         this.eventPublisher = eventPublisher;
         this.signatureVerifier = signatureVerifier;
+        this.txGateway = txGateway;
     }
 
     /** The exact text the wallet owner signs with personal_sign. */
@@ -140,7 +143,7 @@ public class MemberWalletService {
         return saved;
     }
 
-    /** Unbinds a wallet via {@code removeMember}; the row is marked REMOVED immediately. */
+    /** Unbinds a wallet via {@code removeMember}; access is denied while receipt finality is pending. */
     public OrgMemberWallet removeWallet(UUID memberWalletId, UUID expectedEntityId,
                                         UUID actorId, String actorRole) {
         OrgMemberWallet wallet = walletRepository.findById(memberWalletId)
@@ -151,15 +154,39 @@ public class MemberWalletService {
         if (expectedEntityId != null && !registration.getLegalEntityId().equals(expectedEntityId)) {
             throw new EntityNotFoundException("OrgMemberWallet", memberWalletId);
         }
+        return removeWallet(wallet, registration, actorId, actorRole);
+    }
+
+    /** Operator route variant that binds the wallet ID to the org registration in its URL. */
+    public OrgMemberWallet removeWalletFromOrg(UUID orgRegistrationId, UUID memberWalletId,
+                                                UUID actorId, String actorRole) {
+        OrgMemberWallet wallet = walletRepository.findByIdAndOrgRegistrationId(memberWalletId, orgRegistrationId)
+                .orElseThrow(() -> new EntityNotFoundException("OrgMemberWallet", memberWalletId));
+        OrgRegistration registration = registrationRepository.findById(orgRegistrationId)
+                .orElseThrow(() -> new EntityNotFoundException("OrgRegistration", orgRegistrationId));
+        return removeWallet(wallet, registration, actorId, actorRole);
+    }
+
+    private OrgMemberWallet removeWallet(OrgMemberWallet wallet, OrgRegistration registration,
+                                          UUID actorId, String actorRole) {
+        txGateway.requireChain(wallet.getChainConfigId());
         if (wallet.getStatus() == MemberWalletStatus.REMOVED) {
             throw new InvalidStateTransitionException("Wallet binding already removed");
         }
+        if (wallet.getStatus() != MemberWalletStatus.ACTIVE
+                && wallet.getStatus() != MemberWalletStatus.REMOVAL_FAILED) {
+            throw new InvalidStateTransitionException(
+                    "Only an ACTIVE or failed-removal wallet can be removed (status="
+                            + wallet.getStatus() + ")");
+        }
 
-        wallet.setStatus(MemberWalletStatus.REMOVED);
+        wallet.setStatus(MemberWalletStatus.REMOVAL_PENDING);
         wallet.setRemovedAt(Instant.now());
+        wallet.setRemovedTx(null);
+        wallet.setRemovedChainConfigId(null);
+        wallet.setRemovedBlockNumber(null);
+        wallet.setRemovedBlockHash(null);
         OrgMemberWallet saved = walletRepository.save(wallet);
-        // Broadcast follows the commit; a failed removeMember surfaces as drift via the
-        // chain reconciliation job.
         AfterCommit.run(() -> broadcaster.broadcastRemoveMember(saved.getId()));
 
         eventPublisher.publishEvent(new MemberWalletRemovedEvent(saved.getId(), actorId, actorRole, Map.of(

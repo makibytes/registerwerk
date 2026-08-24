@@ -6,7 +6,7 @@ import {
   inject,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Clipboard } from '@angular/cdk/clipboard';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -27,6 +27,15 @@ import {
   PaymentMethodView,
   PaymentRailView,
 } from '../../../core/models';
+
+/** Minimal EIP-1193 provider shape — just enough of `window.ethereum` for account + signing calls. */
+interface Eip1193Provider {
+  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+}
+
+function windowEthereum(): Eip1193Provider | undefined {
+  return (window as unknown as { ethereum?: Eip1193Provider }).ethereum;
+}
 
 /**
  * Guided publication flow: paste + validate the manifest, review the declared
@@ -123,12 +132,13 @@ import {
 
       .rail-name { color: var(--rw-text-secondary); }
     }
+    .table-wrap { overflow-x: auto; }
   `],
   template: `
     <div class="page-container">
       <div class="page-header">
         <h1>Publish {{ listing?.name ?? 'dApp' }}</h1>
-        <button mat-stroked-button routerLink="/publisher">
+        <button type="button" mat-stroked-button routerLink="/publisher">
           <mat-icon>arrow_back</mat-icon>
           My dApps
         </button>
@@ -169,7 +179,7 @@ import {
                   <div class="hash-box">{{ manifestHash }}</div>
                 }
                 <div class="step-actions">
-                  <button mat-raised-button color="primary"
+                  <button type="button" mat-raised-button color="primary"
                           [disabled]="!manifestRaw.trim() || validating || version.status !== 'DRAFT'"
                           (click)="validateManifest()">
                     <mat-icon>rule</mat-icon>
@@ -183,9 +193,15 @@ import {
                   These permissions were parsed from your manifest. Consumers see them (with your
                   rationale) before requesting grants from the registry operator.
                 </p>
-                @if (permissions.length === 0) {
+                @if (permissionsError) {
+                  <p class="error-message" role="alert">
+                    {{ permissionsError }}
+                    <button mat-button type="button" (click)="loadPermissions()">Retry</button>
+                  </p>
+                } @else if (permissions.length === 0) {
                   <p class="hint">No gated permissions declared.</p>
                 } @else {
+                  <div class="table-wrap">
                   <table mat-table [dataSource]="permissions" style="width:100%">
                     <ng-container matColumnDef="permissionCode">
                       <th mat-header-cell *matHeaderCellDef>Permission</th>
@@ -204,6 +220,7 @@ import {
                     <tr mat-header-row *matHeaderRowDef="permissionColumns"></tr>
                     <tr mat-row *matRowDef="let row; columns: permissionColumns"></tr>
                   </table>
+                  </div>
                 }
               </mat-step>
 
@@ -213,9 +230,15 @@ import {
                   array to the manifest. Reference an operator-provided rail by code, or describe a
                   custom method you implement yourself — the operator sees both at review time.
                 </p>
-                @if (paymentMethods.length === 0) {
+                @if (paymentMethodsError) {
+                  <p class="error-message" role="alert">
+                    {{ paymentMethodsError }}
+                    <button mat-button type="button" (click)="loadPaymentMethods()">Retry</button>
+                  </p>
+                } @else if (paymentMethods.length === 0) {
                   <p class="hint">No payment methods declared in the current manifest.</p>
                 } @else {
+                  <div class="table-wrap">
                   <table mat-table [dataSource]="paymentMethods" style="width:100%">
                     <ng-container matColumnDef="method">
                       <th mat-header-cell *matHeaderCellDef>Method</th>
@@ -236,18 +259,32 @@ import {
                     <tr mat-header-row *matHeaderRowDef="paymentColumns"></tr>
                     <tr mat-row *matRowDef="let row; columns: paymentColumns"></tr>
                   </table>
+                  </div>
                 }
 
                 <div class="rail-reference">
                   <p class="rail-reference-title">Rails provided by the registry — copy a code into your manifest</p>
                   @for (rail of availableRails; track rail.code) {
                     <div class="rail-reference-row">
-                      <span class="rail-code" (click)="copyRailCode(rail.code)" matTooltip="Click to copy">{{ rail.code }}</span>
+                      <span
+                        class="rail-code"
+                        role="button"
+                        tabindex="0"
+                        (click)="copyRailCode(rail.code)"
+                        (keydown.enter)="copyRailCode(rail.code)"
+                        (keydown.space)="copyRailCode(rail.code)"
+                        matTooltip="Click to copy"
+                      >{{ rail.code }}</span>
                       <span class="rail-name">{{ rail.displayName }} · {{ rail.railType }} · {{ rail.currency }}</span>
                     </div>
                   }
                   @if (availableRails.length === 0) {
-                    <p class="rail-name">No enabled payment rails yet — ask the registry operator to configure one, or use a custom method.</p>
+                    <p class="rail-name">
+                      {{ railsError || 'No enabled payment rails yet — ask the registry operator to configure one, or use a custom method.' }}
+                    </p>
+                    @if (railsError) {
+                      <button mat-button type="button" (click)="loadPaymentRails()">Retry</button>
+                    }
                   }
                 </div>
               </mat-step>
@@ -263,8 +300,8 @@ import {
                   <input matInput [(ngModel)]="signerWallet" placeholder="0x…" />
                 </mat-form-field>
                 @if (hasBrowserWallet) {
-                  <button mat-stroked-button color="primary"
-                          [disabled]="!manifestValid || !isValidAddress(signerWallet) || signing"
+                  <button type="button" mat-stroked-button color="primary"
+                          [disabled]="manifestLoading || !manifestValid || !isValidAddress(signerWallet) || signing || walletSigning"
                           (click)="signWithBrowserWallet()">
                     <mat-icon>account_balance_wallet</mat-icon>
                     Sign with browser wallet
@@ -275,8 +312,8 @@ import {
                   <textarea matInput rows="2" [(ngModel)]="signature"></textarea>
                 </mat-form-field>
                 <div class="step-actions">
-                  <button mat-raised-button color="primary"
-                          [disabled]="!manifestValid || !signature.trim() || !isValidAddress(signerWallet) || signing"
+                  <button type="button" mat-raised-button color="primary"
+                          [disabled]="manifestLoading || !manifestValid || !signature.trim() || !isValidAddress(signerWallet) || signing || walletSigning"
                           (click)="submitSignature()">
                     <mat-icon>draw</mat-icon>
                     Attach signature
@@ -296,7 +333,7 @@ import {
                   On approval it is anchored onchain and the listing goes live in the catalog.
                 </p>
                 <div class="step-actions">
-                  <button mat-raised-button color="primary"
+                  <button type="button" mat-raised-button color="primary"
                           [disabled]="!manifestValid || !version.signed || version.status !== 'DRAFT' || submitting"
                           (click)="submit()">
                     <mat-icon>send</mat-icon>
@@ -319,7 +356,12 @@ import {
           </mat-card-content>
         </mat-card>
       } @else {
-        <p class="error-message">{{ error || 'Listing not found.' }}</p>
+        <div class="empty-state" role="alert">
+          <p class="error-message">{{ error || 'Listing not found.' }}</p>
+          @if (listingId) {
+            <button mat-stroked-button type="button" (click)="loadListing()">Retry</button>
+          }
+        </div>
       }
     </div>
   `,
@@ -327,7 +369,6 @@ import {
 export class PublishWizardComponent implements OnInit {
   private readonly marketplaceService = inject(MarketplaceService);
   private readonly route = inject(ActivatedRoute);
-  private readonly router = inject(Router);
   private readonly clipboard = inject(Clipboard);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
@@ -344,6 +385,7 @@ export class PublishWizardComponent implements OnInit {
   loading = true;
   error = '';
   manifestRaw = '';
+  manifestLoading = false;
   manifestValid = false;
   manifestHash: string | null = null;
   validationErrors: string[] = [];
@@ -352,22 +394,59 @@ export class PublishWizardComponent implements OnInit {
   signerWallet = '';
   signature = '';
   signing = false;
+  walletSigning = false;
   submitting = false;
+  listingId = '';
+  permissionsError = '';
+  paymentMethodsError = '';
+  railsError = '';
 
   get hasBrowserWallet(): boolean {
-    return typeof (window as any).ethereum !== 'undefined';
+    return typeof windowEthereum() !== 'undefined';
   }
 
   ngOnInit(): void {
+    this.loadPaymentRails();
+
+    this.listingId = this.route.snapshot.paramMap.get('listingId')?.trim() ?? '';
+    if (!this.listingId) {
+      this.error = 'The listing address is incomplete.';
+      this.loading = false;
+      return;
+    }
+    this.loadListing();
+  }
+
+  loadPaymentRails(): void {
+    this.railsError = '';
     this.marketplaceService.paymentRails().subscribe({
       next: (rails) => {
         this.availableRails = rails;
         this.cdr.markForCheck();
       },
+      error: () => {
+        this.availableRails = [];
+        this.railsError = 'Payment rails could not be loaded.';
+        this.cdr.markForCheck();
+      },
     });
+  }
 
-    const listingId = this.route.snapshot.paramMap.get('listingId')!;
-    this.marketplaceService.getListing(listingId).subscribe({
+  loadListing(): void {
+    if (!this.listingId) return;
+    this.loading = true;
+    this.error = '';
+    this.listing = null;
+    this.version = null;
+    this.manifestRaw = '';
+    this.manifestLoading = false;
+    this.manifestValid = false;
+    this.manifestHash = null;
+    this.permissions = [];
+    this.paymentMethods = [];
+    this.permissionsError = '';
+    this.paymentMethodsError = '';
+    this.marketplaceService.getListing(this.listingId).subscribe({
       next: (listing) => {
         this.listing = listing;
         this.loadOrCreateDraftVersion();
@@ -389,8 +468,9 @@ export class PublishWizardComponent implements OnInit {
         );
         if (open) {
           this.version = open;
-          this.manifestValid = open.manifestHash != null;
+          this.manifestValid = false;
           this.manifestHash = open.manifestHash;
+          this.loadManifest();
           this.loadPermissions();
           this.loadPaymentMethods();
           this.loading = false;
@@ -418,30 +498,66 @@ export class PublishWizardComponent implements OnInit {
     });
   }
 
-  private loadPermissions(): void {
+  private loadManifest(): void {
     if (!this.listing || !this.version) return;
-    this.marketplaceService.versionPermissions(this.listing.id, this.version.id).subscribe({
-      next: (permissions) => {
-        this.permissions = permissions;
+    this.manifestLoading = true;
+    this.marketplaceService.manifest(this.listing.id, this.version.id).subscribe({
+      next: ({ manifestRaw }) => {
+        this.manifestRaw = manifestRaw ?? '';
+        this.manifestLoading = false;
+        this.manifestValid = this.version?.manifestHash != null;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.manifestLoading = false;
+        this.error = 'The saved manifest could not be loaded. Reload before editing or signing.';
+        this.manifestValid = false;
         this.cdr.markForCheck();
       },
     });
   }
 
-  private loadPaymentMethods(): void {
+  loadPermissions(): void {
     if (!this.listing || !this.version) return;
+    this.permissionsError = '';
+    this.marketplaceService.versionPermissions(this.listing.id, this.version.id).subscribe({
+      next: (permissions) => {
+        this.permissions = permissions;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.permissions = [];
+        this.permissionsError = 'Declared permissions could not be loaded.';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  loadPaymentMethods(): void {
+    if (!this.listing || !this.version) return;
+    this.paymentMethodsError = '';
     this.marketplaceService.versionPaymentMethods(this.listing.id, this.version.id).subscribe({
       next: (methods) => {
         this.paymentMethods = methods;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.paymentMethods = [];
+        this.paymentMethodsError = 'Payment methods could not be loaded.';
         this.cdr.markForCheck();
       },
     });
   }
 
   copyRailCode(code: string): void {
-    this.clipboard.copy(code);
-    this.snackBar.open(`Copied "${code}" — paste it into a paymentMethods entry as { "rail": "${code}" }.`,
-      'Dismiss', { duration: 4000 });
+    const copied = this.clipboard.copy(code);
+    this.snackBar.open(
+      copied
+        ? `Copied "${code}" — paste it into a paymentMethods entry as { "rail": "${code}" }.`
+        : `Could not copy "${code}".`,
+      'Dismiss',
+      { duration: copied ? 4000 : 6000, panelClass: copied ? undefined : 'snack-error' },
+    );
   }
 
   isValidAddress(address: string): boolean {
@@ -449,7 +565,7 @@ export class PublishWizardComponent implements OnInit {
   }
 
   validateManifest(): void {
-    if (!this.listing || !this.version) return;
+    if (!this.listing || !this.version || this.validating || !this.manifestRaw.trim()) return;
     this.validating = true;
     this.error = '';
 
@@ -475,37 +591,46 @@ export class PublishWizardComponent implements OnInit {
   }
 
   async signWithBrowserWallet(): Promise<void> {
-    if (!this.manifestHash) return;
+    if (!this.manifestHash || this.manifestLoading || !this.manifestValid || this.signing
+        || this.walletSigning || !this.isValidAddress(this.signerWallet)) return;
+    this.walletSigning = true;
     this.error = '';
+    let signed = false;
     try {
-      const ethereum = (window as any).ethereum;
-      const accounts: string[] = await ethereum.request({ method: 'eth_requestAccounts' });
+      const ethereum = windowEthereum();
+      if (!ethereum) {
+        throw new Error('No browser wallet (e.g. MetaMask) detected.');
+      }
+      const accounts = (await ethereum.request({ method: 'eth_requestAccounts' })) as string[];
       const wallet = this.signerWallet.trim().toLowerCase();
       const account = accounts.find((a) => a.toLowerCase() === wallet);
       if (!account) {
-        this.error = `Browser wallet has no account ${wallet}. Switch accounts and retry.`;
-        this.cdr.markForCheck();
-        return;
+        throw new Error(`Browser wallet has no account ${wallet}. Switch accounts and retry.`);
       }
-      this.signature = await ethereum.request({
+      this.signature = (await ethereum.request({
         method: 'personal_sign',
         params: [this.manifestHash, account],
-      });
-      this.cdr.markForCheck();
-      this.submitSignature();
-    } catch (err: any) {
-      this.error = err?.message ?? 'Browser wallet signing failed.';
+      })) as string;
+      signed = true;
+    } catch (err: unknown) {
+      this.error = err instanceof Error ? err.message : 'Browser wallet signing failed.';
+    } finally {
+      this.walletSigning = false;
       this.cdr.markForCheck();
     }
+    if (signed) this.submitSignature();
   }
 
   submitSignature(): void {
-    if (!this.listing || !this.version) return;
+    const signature = this.signature.trim();
+    const signerWallet = this.signerWallet.trim();
+    if (!this.listing || !this.version || this.signing || this.walletSigning || this.manifestLoading || !this.manifestValid
+        || !signature || !this.isValidAddress(signerWallet)) return;
     this.signing = true;
     this.error = '';
 
     this.marketplaceService
-      .sign(this.listing.id, this.version.id, this.signature.trim(), this.signerWallet.trim())
+      .sign(this.listing.id, this.version.id, signature, signerWallet)
       .subscribe({
         next: (version) => {
           this.signing = false;
@@ -521,7 +646,8 @@ export class PublishWizardComponent implements OnInit {
   }
 
   submit(): void {
-    if (!this.listing || !this.version) return;
+    if (!this.listing || !this.version || this.submitting || !this.manifestValid
+        || !this.version.signed || this.version.status !== 'DRAFT') return;
     this.submitting = true;
     this.error = '';
 

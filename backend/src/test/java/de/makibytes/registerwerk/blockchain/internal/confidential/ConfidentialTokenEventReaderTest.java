@@ -22,9 +22,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Unit tests for {@link ConfidentialTokenEventReader} (findings #8/#12, Phase 9) — mirrors the
- * "own small self-contained GraphQL client" testing gap this repo has had since Phase 7's
- * RepoMarketEventReader (never tested either); this reader gets coverage from the start.
+ * Unit tests for {@link ConfidentialTokenEventReader}.
  */
 class ConfidentialTokenEventReaderTest {
 
@@ -104,7 +102,7 @@ class ConfidentialTokenEventReaderTest {
     }
 
     @Test
-    @DisplayName("finding #13: parses a BURN event (query now includes BURN, not just TRANSFER/MINT)")
+    @DisplayName("parses a BURN event (query now includes BURN, not just TRANSFER/MINT)")
     void eventsSince_parsesBurnEvent() {
         mockServer.expect(requestTo(GRAPH_NODE_URL + "/" + SUBGRAPH_NAME))
                 .andRespond(withSuccess("""
@@ -135,7 +133,7 @@ class ConfidentialTokenEventReaderTest {
     }
 
     @Test
-    @DisplayName("finding #12: throws (does not silently return empty) on GraphQL errors in the response body")
+    @DisplayName("throws (does not silently return empty) on GraphQL errors in the response body")
     void eventsSince_throws_onGraphqlErrors() {
         mockServer.expect(requestTo(GRAPH_NODE_URL + "/" + SUBGRAPH_NAME))
                 .andRespond(withSuccess("""
@@ -148,7 +146,7 @@ class ConfidentialTokenEventReaderTest {
     }
 
     @Test
-    @DisplayName("finding #12: throws (does not silently return empty) on an HTTP error")
+    @DisplayName("throws (does not silently return empty) on an HTTP error")
     void eventsSince_throws_onHttpError() {
         mockServer.expect(requestTo(GRAPH_NODE_URL + "/" + SUBGRAPH_NAME))
                 .andRespond(withServerError());
@@ -158,7 +156,7 @@ class ConfidentialTokenEventReaderTest {
     }
 
     @Test
-    @DisplayName("finding #12: throws (does not silently return empty) on malformed JSON")
+    @DisplayName("throws (does not silently return empty) on malformed JSON")
     void eventsSince_throws_onMalformedJson() {
         mockServer.expect(requestTo(GRAPH_NODE_URL + "/" + SUBGRAPH_NAME))
                 .andRespond(withSuccess("{not valid json", MediaType.APPLICATION_JSON));

@@ -1,0 +1,60 @@
+---
+title: Abstraction de compte et transactions sponsorisées
+description: Comptes intelligents ERC-4337 / EIP-7702, gas sponsorisé, clés d'accès (passkeys) et permis sans gas.
+---
+
+# Abstraction de compte et transactions sponsorisées { #account-abstraction-sponsored-transactions }
+
+Registerwerk prend en charge les transactions sponsorisées ERC-4337, les comptes délégués
+EIP-7702, la vérification de wallets ERC-1271 et un compte passkey on-chain. Ces fonctions sont
+indépendantes de l'[interopérabilité DeFi](./defi-interoperability.md).
+
+## Fondation : `WalletSignatureVerifier` { #foundation-walletsignatureverifier }
+
+`WalletSignatureVerifier` (`orgidentity/api/WalletSignatureVerifier.java`, à la base de `orgidentity/internal/MemberWalletService` et `marketplace/internal/ManifestSigningService`) vérifie les signatures **soit** par récupération ECDSA (EOA classiques), **soit** via ERC-1271 `isValidSignature` (wallets à contrat intelligent), selon le code on-chain de l'adresse revendiquée. C'est le prérequis de tout ce qui suit — sans cela, un compte intelligent ne pourrait jamais se lier comme wallet de membre ni signer un manifeste de marketplace.
+
+## EIP-7702 : la rampe d'accès vers le compte intelligent { #eip-7702-the-smart-account-on-ramp }
+
+L'EIP-7702 (actif depuis la mise à niveau Pectra) permet à un EOA existant de déléguer son code à une implémentation de compte intelligent **tout en conservant exactement la même adresse**. C'est la rampe d'accès naturelle pour Registerwerk en particulier, car chaque partie du modèle existant se fonde sur une adresse de wallet fixe :
+
+- `OrgRegistry._orgOf[wallet]` (`contracts/src/ecosystem/OrgRegistry.sol`) — un wallet, un org, par adresse.
+- `IdentityRegistry.registerIdentity(address, ...)` de T-REX — identité/claims enregistrés par adresse.
+- `EwpgCompliance.isWhitelisted(address)` — liste blanche indexée par adresse.
+
+Un client qui fait migrer son EOA existant vers un compte intelligent délégué 7702 n'a besoin d'**aucune migration** de ce qui précède — l'adresse ne change pas, donc l'appartenance à l'org, l'enregistrement d'identité et les entrées de liste blanche restent tous valides. La seule nouvelle exigence est le chemin ERC-1271 de `WalletSignatureVerifier` (déjà en place), puisque le code d'un EOA délégué par 7702 implémente `isValidSignature` comme n'importe quel autre wallet à contrat intelligent — y compris `EwpgPasskeyAccount` ci-dessous, qui est précisément une implémentation de ce type de délégué.
+
+`frontend-customer` centralise l'accès au wallet dans `WalletService` et implémente l'exécution
+EIP-7702/ERC-4337 facultative dans `SponsoredTxService`. Le sponsoring exige
+`environment.bundlerUrl`, une adresse de paymaster et un identifiant de politique résolu.
+L'interface ne crée ni n'exploite d'instances `EwpgPasskeyAccount`.
+
+## `EwpgPaymaster` — transactions sponsorisées { #ewpgpaymaster-sponsored-transactions }
+
+`contracts/src/ecosystem/EwpgPaymaster.sol` est un `IPaymaster` ERC-4337 (contre EntryPoint v0.8, pour la prise en charge native d'EIP-7702) qui sponsorise le gas pour les clients Registerwerk vérifiés :
+
+- **Contrôlé par la conformité selon qui appelle, pas ce qu'il appelle** : `validatePaymasterUserOp` vérifie `PermissionOracle.isActiveMember(userOp.sender)` et `hasClaimTopic(userOp.sender, KYC)` — il ne sponsorise jamais le gas pour un wallet non vérifié. Comme un EOA délégué par 7702 conserve son adresse d'origine, `userOp.sender` *est* l'adresse de wallet de membre existante du client, ce qui permet de lire directement le même oracle que tous les autres contrats de l'écosystème. Analyser le `callData` d'un compte intelligent arbitraire pour restreindre *quel contrat* est appelé dépend de l'implémentation du compte et sort délibérément du périmètre — voir le NatSpec du contrat.
+- **Le sponsoring est délimité par un `policyId` opaque** (encodé dans `paymasterAndData`), financé via `fundSponsorship(policyId)` par quiconque est disposé à sponsoriser (l'opérateur ou la trésorerie d'un émetteur) — à la fois en réservant un budget interne et en déposant dans l'EntryPoint.
+- **Un plafond de dépense par wallet** (`setWalletBudgetCap`) limite la part d'un budget de politique *partagé* qu'un seul wallet peut consommer, en plus du budget global de la politique lui-même.
+- Adossé à l'entité `deployment/api/GasSponsorshipPolicy` (backend) — reprend le modèle existant de `MintControlRule` : une dérogation par déploiement, ou une valeur par défaut au niveau de l'émetteur dont héritent les futurs déploiements de cet émetteur jusqu'à ce qu'ils obtiennent leur propre dérogation (`GasSponsorshipService.resolveEffectivePolicy`, `asset/web/GasSponsorshipController`). Le `policyId` on-chain d'une ligne donnée est `keccak256(id.toString())`. Cette couche backend n'est que de la configuration — elle ne pilote pas encore une tâche de synchronisation on-chain qui pousserait automatiquement les budgets dans le paymaster ; aujourd'hui, un opérateur/émetteur alimente directement `EwpgPaymaster.fundSponsorship`.
+- Interface opérateur : la page de détail d'actif de `frontend-operator` comporte un onglet **Gas Sponsorship** par déploiement (définir/supprimer une dérogation propre au déploiement), et la page de détail client en comporte un pour les émetteurs (définir la valeur par défaut au niveau émetteur dont hériteront les nouveaux déploiements) — tous deux adossés à `core/api/gas-sponsorship.service.ts`, qui affiche la politique actuellement effective et précise s'il s'agit d'une dérogation ou d'une valeur par défaut héritée.
+- Script de déploiement : `contracts/script/DeployLiquidityDapps.s.sol` déploie `EwpgPaymaster` (EntryPoint par défaut `ERC4337Utils.ENTRYPOINT_V08`) aux côtés de `EwpgRepoFacility` — gardé séparé de `DeployExampleDapps.s.sol` car les deux sont en pragma `^0.8.36` et ne peuvent pas partager une unité de compilation avec les imports dépendants d'erc3643 de ce script (épinglés exactement à `0.8.30`).
+- Données de démo : `EcosystemDemoDataSeeder` initialise trois lignes `GasSponsorshipPolicy` — la valeur par défaut propre à l'émetteur de Meridian Capital (sponsor `ISSUER`), la valeur par défaut d'Aurora Finance financée par l'opérateur à la place (sponsor `OPERATOR`, illustrant l'autre type de sponsor), et une dérogation au niveau déploiement sur le déploiement phare Green Bond de Meridian (`OPERATOR`, illustrant la priorité d'une dérogation sur une valeur par défaut).
+- Tests : `contracts/test/ecosystem/EwpgPaymaster.t.sol` (contre un `MockEntryPoint` minimal — voir son NatSpec pour comprendre pourquoi une simulation complète de `handleOps` n'est pas nécessaire pour tester la logique comptable propre du paymaster), `backend/.../unit/GasSponsorshipServiceTest.java`.
+
+## `EwpgPasskeyAccount` — signataires par clé d'accès pour le retail { #ewpgpasskeyaccount-passkey-signers-for-retail }
+
+`contracts/src/ecosystem/EwpgPasskeyAccount.sol` est un compte intelligent ERC-4337 minimal, sécurisé par une clé d'accès WebAuthn/secp256r1 au lieu d'une clé ECDSA gérée par une phrase de récupération (seed phrase), composant trois éléments déjà vendorisés via `contracts/lib/openzeppelin-contracts` (aucune nouvelle dépendance) : `Account` d'OZ (`validateUserOp` ERC-4337), `SignerWebAuthn` (vérification de signature par clé d'accès) et `ERC7821` (exécution par lot minimale). Il implémente également ERC-1271, ce qui lui permet de se lier comme wallet de membre Registerwerk exactement comme n'importe quel autre wallet à contrat intelligent.
+
+Associé à `EwpgPaymaster`, le parcours d'un investisseur particulier depuis l'onboarding jusqu'à sa première souscription ne nécessite ni phrase de récupération ni jeton de gas — authentification biométrique par clé d'accès et exécution sponsorisée. Remarque : `contracts/foundry.toml` active désormais l'optimiseur Solidity (`optimizer = true`, `optimizer_runs = 200`, conformément à la valeur par défaut de la bibliothèque OZ vendorisée) — l'analyse de la signature WebAuthn atteint « stack too deep » sans cela.
+
+Les tests (`contracts/test/ecosystem/EwpgPasskeyAccount.t.sol`) construisent de véritables assertions d'authentification WebAuthn à l'aide des cheatcodes P256 natifs de Foundry (`vm.publicKeyP256`/`vm.signP256`), y compris un exemple travaillé du seul piège non évident : `abi.encode(structValue)` ajoute un mot de décalage supplémentaire de premier niveau pour une struct contenant des champs dynamiques, ce que `WebAuthn.tryDecodeAuth` n'attend pas — encodez plutôt les champs de la struct comme des arguments séparés (voir l'assistant `_sign` du test et son commentaire en ligne).
+
+## Permis sans gas { #gasless-permits }
+
+`EwpgBondDesk.subscribeWithPermit` consomme un `permit` EIP-2612 signé au lieu d'exiger une transaction `approve` préalable distincte — cela divise par deux le nombre de transactions et s'associe naturellement au sponsoring `EwpgPaymaster` (permit + exécution sponsorisée = UX sans jeton de gas). `MockStablecoin` implémente désormais `ERC20Permit` afin que l'exemple/les tests puissent exercer ce parcours de bout en bout (`test_subscribeWithPermit_succeedsWithoutPriorApproval` dans `contracts/test/examples/EwpgBondDesk.t.sol`). Tous les rails de paiement réels ne prennent pas en charge cela : USDC implémente EIP-2612 nativement ; vérifiez la prise en charge d'AllUnity Euro avant de câbler `subscribeWithPermit` en production — le chemin `subscribe` classique reste disponible dans tous les cas.
+
+## Formats de signature { #signature-formats }
+
+La liaison du wallet et la signature des manifestes utilisent `personal_sign`.
+`WalletSignatureVerifier` accepte ce format pour les EOA et les wallets ERC-1271, mais pas les
+signatures de données typées EIP-712.

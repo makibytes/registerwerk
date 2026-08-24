@@ -16,7 +16,7 @@ import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import de.makibytes.registerwerk.erc3643.events.ComplianceModuleAddedEvent;
@@ -30,6 +30,7 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -71,6 +72,7 @@ public class Erc3643LifecycleService {
     private final AssetDeploymentRepository deploymentRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final EvmContractService evmContractService;
+    private final DurableEvmTransactionGateway evmTransactions;
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final BlockchainTransactionService txService;
     private final HolderBlockGate holderBlockGate;
@@ -84,6 +86,7 @@ public class Erc3643LifecycleService {
             AssetDeploymentRepository deploymentRepository,
             ApplicationEventPublisher eventPublisher,
             EvmContractService evmContractService,
+            DurableEvmTransactionGateway evmTransactions,
             BlockchainClientRegistry blockchainClientRegistry,
             BlockchainTransactionService txService,
             HolderBlockGate holderBlockGate) {
@@ -95,6 +98,7 @@ public class Erc3643LifecycleService {
         this.deploymentRepository = deploymentRepository;
         this.eventPublisher = eventPublisher;
         this.evmContractService = evmContractService;
+        this.evmTransactions = evmTransactions;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.txService = txService;
         this.holderBlockGate = holderBlockGate;
@@ -125,8 +129,11 @@ public class Erc3643LifecycleService {
                         suite.getAssetDeploymentId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         org.web3j.protocol.Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-        org.web3j.crypto.Credentials creds = evmContractService.credentials(descriptor);
-        evmContractService.send(web3j, creds, contractAddress, fn);
+        de.makibytes.registerwerk.wallet.api.EvmSigner signer = evmContractService.signer(descriptor);
+        if (dep.getChainConfigId() == null) {
+            throw new IllegalStateException("EVM deployment is missing chainConfigId: " + dep.getId());
+        }
+        evmContractService.send(dep.getChainConfigId(), web3j, signer, contractAddress, fn);
     }
 
     /**
@@ -150,10 +157,10 @@ public class Erc3643LifecycleService {
         AssetDeployment dep = deploymentRepository.findById(suite.getAssetDeploymentId())
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment",
                         suite.getAssetDeploymentId()));
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials(descriptor);
-        String txHash = evmContractService.submit(web3j, creds, contractAddress, fn);
+        if (dep.getChainConfigId() == null) {
+            throw new IllegalStateException("Confirmed EVM deployment is missing chainConfigId: " + dep.getId());
+        }
+        String txHash = evmTransactions.submit(dep.getChainConfigId(), contractAddress, fn, params);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), fn.getName(), actorId, actorRole, params));
 
@@ -172,6 +179,7 @@ public class Erc3643LifecycleService {
     public void addComplianceModule(
             UUID suiteId, String moduleAddress, String moduleType, Map<String, Object> params,
             UUID actorId, String actorRole) {
+        validateComplianceModule(moduleAddress, moduleType, params);
         log.info(
             "Adding compliance module type={} at address={} to suite={}",
             moduleType, moduleAddress, suiteId);
@@ -214,6 +222,54 @@ public class Erc3643LifecycleService {
 
         eventPublisher.publishEvent(new ComplianceModuleAddedEvent(suiteId, actorId, actorRole,
                 Map.of("moduleAddress", moduleAddress, "moduleType", moduleType)));
+    }
+
+    private static void validateComplianceModule(
+            String moduleAddress, String moduleType, Map<String, Object> params) {
+        if (moduleAddress == null || !moduleAddress.matches("^0x[0-9a-fA-F]{40}$")) {
+            throw new IllegalArgumentException("moduleAddress must be a valid EVM address");
+        }
+        if (moduleType == null || moduleType.isBlank()) {
+            throw new IllegalArgumentException("moduleType is required");
+        }
+        if (params == null) {
+            throw new IllegalArgumentException("parameters is required (use an empty object when unused)");
+        }
+        positiveIntParameter(params, "maxInvestors", false);
+        positiveIntParameter(params, "transferCooldown", true);
+        if (params.containsKey("maxBalance")) {
+            try {
+                if (new java.math.BigInteger(params.get("maxBalance").toString()).signum() <= 0) {
+                    throw new IllegalArgumentException("maxBalance must be greater than zero");
+                }
+            } catch (NumberFormatException | NullPointerException ex) {
+                throw new IllegalArgumentException("maxBalance must be a positive integer", ex);
+            }
+        }
+        if (params.containsKey("blockedCountries")) {
+            if (!(params.get("blockedCountries") instanceof List<?> countries)) {
+                throw new IllegalArgumentException("blockedCountries must be an array of numeric country codes");
+            }
+            for (Object country : countries) {
+                if (!(country instanceof Number number)
+                        || number.intValue() < 1 || number.intValue() > 999) {
+                    throw new IllegalArgumentException(
+                            "blockedCountries entries must be ISO 3166 numeric codes from 1 to 999");
+                }
+            }
+        }
+    }
+
+    private static void positiveIntParameter(Map<String, Object> params, String name, boolean allowZero) {
+        if (!params.containsKey(name)) {
+            return;
+        }
+        Object value = params.get(name);
+        if (!(value instanceof Number number)
+                || (allowZero ? number.intValue() < 0 : number.intValue() <= 0)) {
+            throw new IllegalArgumentException(name + (allowZero
+                    ? " must be zero or greater" : " must be greater than zero"));
+        }
     }
 
     /**

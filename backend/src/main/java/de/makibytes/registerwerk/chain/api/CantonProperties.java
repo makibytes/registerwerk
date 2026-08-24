@@ -17,7 +17,8 @@ public class CantonProperties {
     public void setDevnet(NetworkProps devnet) { this.devnet = devnet; }
 
     public static class NetworkProps {
-        /** gRPC Ledger API endpoint, e.g. "participant.example.com:5001". */
+        /** Ledger API endpoint, e.g. {@code grpcs://participant.example.com:5001}; use
+         *  {@code grpc://} only for explicitly plaintext development. */
         private String ledgerApiUrl;
         /** Canton synchronizer/domain alias, e.g. "global-synchronizer". */
         private String synchronizerId;

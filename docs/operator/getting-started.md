@@ -1,117 +1,166 @@
 ---
-id: getting-started
-title: Getting Started (15-Minute Quickstart)
-sidebar_position: 1
+title: What an operator does
+description: The operator's role in full — the decisions that are yours, the portal, and a fifteen-minute local start.
 ---
 
-# Getting Started
+# What an operator does
 
-This guide gets a fully functional eWpG Registry running in 15 minutes using Docker Compose.
+You run the registry. Customers depend on it being correct, available, and staffed by someone who understands what they are approving.
 
-## Prerequisites
+This page is the job. [How Registerwerk is built](architecture.md) is the system; [Serving customers](customers/index.md) is the detail of each process.
 
-- Docker 25+ and Docker Compose v2
-- Java 25 JDK (for local backend development)
-- Node.js 22+ (for frontend development)
-- `forge` CLI (Foundry) for smart contract deployment
+---
 
-## 1 — Clone and configure
+## The role, honestly
+
+Most of the work is **judgement about people and instruments**, not infrastructure. You will spend far more time deciding whether an entity is who it claims to be, and whether an issuance should be admitted, than restarting containers.
+
+The powers that are yours alone all share a property: **each can cause harm that is hard or impossible to reverse.**
+
+| | Why it is yours |
+|---|---|
+| **Admitting an organisation** | Everything downstream assumes this check happened. |
+| **Approving an issuance** | Creates something that becomes a legal obligation held by investors. |
+| **Correcting the register** | Forced transfers and burns under §§24/26 eWpG move other people's property. |
+| **Acting as a customer** | [Impersonation](customers/impersonation.md) puts you inside their portal. |
+
+---
+
+## Your day
+
+### Routine
+
+- **The approval queue.** Entities awaiting KYC review, issuances awaiting approval.
+- **The audit log.** Read it when nothing is wrong, so you know what normal looks like.
+- **Health.** Indexer lag, chain RPC health, screening availability, [audit partition headroom](maintenance/monitoring.md).
+- **Support.** Usually one of three things — see below.
+
+### On a schedule
+
+- **Review `REGISTRY_ADMIN` membership.** Every holder can approve issuances, correct the register, and impersonate any customer.
+- **Check KYC expiries coming up.** Warning a customer a month out prevents an outage they will experience as your fault.
+- **Verify the audit chain**, and keep the evidence. An integrity control nobody exercises is indistinguishable from one that does not work.
+- **Test restores.** A backup nobody has restored is a hypothesis.
+
+### The three-question triage
+
+Before investigating anything exotic, a customer problem is usually:
+
+1. **KYC lapsed** — transfers stop, everything else looks normal.
+2. **Wallet not registered or not admitted** — transfers fail on-chain rather than pending.
+3. **Role missing** — they get a `403` and call it "the page is broken".
+
+A `401` means the token is bad. A `403` means the token is fine and the role is not. That distinction alone resolves a large share of tickets.
+
+---
+
+## The operator portal
+
+At `:4200`. It bypasses the gateway entirely and uses built-in username/password login with local TOTP for step-up — in every configuration, including deployments where customers use Microsoft Entra ID.
+
+| Area | |
+|---|---|
+| **Customers** | Legal entities, their status, their KYC. |
+| **Onboarding** | Create entities, generate invitation tokens. |
+| **Assets** | Every issuance across every customer. |
+| **Users** | Accounts and roles, including [2FA support](customers/two-factor-support.md). |
+| **Compliance** | Sanctions screening cases, KYC review. |
+| **Audit** | The tamper-evident log. |
+| **Organizations / Permissions** | On-chain identity and ecosystem permissions. |
+| **dApp review** | Marketplace submissions. |
+| **Payment rails** | Curating the cash-leg catalogue. |
+| **Wallets / Network nodes** | Custodied wallets, chain and RPC health. |
+
+!!! warning "The portal's navigation is not a security boundary"
+    Operator-portal routes are not role-filtered in the browser. Access is enforced by the **backend**, per request, from your token.
+
+    So a user with only `AUDIT` sees menu entries for things they cannot do, and gets a refusal on opening them. Nothing is exposed — but do not infer from a visible menu item that somebody may use it.
+
+---
+
+## Fifteen minutes to a local registry
 
 ```bash
-git clone https://github.com/your-org/registerwerk.git
-cd registerwerk
+git clone <your-registerwerk-remote> && cd registerwerk
 git submodule update --init --recursive
 cp .env.example .env
+docker compose up --build
 ```
 
-Open `.env` and fill in at minimum:
+!!! danger "Leave `JWT_ISSUER_URI` blank for a local start"
+    Setting it switches the customer portal into OIDC mode, which needs a real Entra tenant, app registrations and Conditional Access. A half-configured issuer URI produces sign-in failures that look like bugs.
+
+    Local mode is the default and the right starting point. Turn Entra on deliberately, following [Entra ID setup](../platform/entra-setup.md).
+
+Then:
+
+| | |
+|---|---|
+| Operator portal | `http://localhost:4200` |
+| Customer portal | `http://localhost:4201` |
+| Backend health | `curl http://localhost:8080/actuator/health` |
+| Through the gateway | `curl http://localhost:8000/api/v1/public/chains` |
+| Documentation | `docker compose --profile docs up` → `http://localhost:8003` |
+
+Sign in with `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` from your `.env`.
+
+### Exercise lending and repo locally
+
+Set `SEED_DEMO_DATA=true` before starting Compose. The stack deploys two real lending markets to its disposable Anvil chain, registers their verified immutable parameters, and seeds a separate bilateral Repo Desk book.
+
+When the browser is on another host (for example `nibbler.local`), also set the address the **browser** can reach:
 
 ```dotenv
-DB_PASSWORD=registerwerk
-JWT_ISSUER_URI=https://login.microsoftonline.com/<tenant>/v2.0
-ETH_SEPOLIA_RPC=https://rpc.sepolia.org
+SEED_DEMO_DATA=true
+ANVIL_HOST_PORT=18545
+ANVIL_PUBLIC_RPC_URL=http://nibbler.local:18545
 ```
 
-Kong runs DB-less (its declarative config is `gateway/kong.yml`), so no separate Kong
-database credentials are needed.
+`ANVIL_HOST_PORT` is only the published host/browser port. Backend and deployment containers
+always connect to `http://anvil:8545` on the Compose network. Using `localhost` or port `18545`
+inside those containers points at the wrong network namespace and results in connection refused.
 
-## 2 — Start infrastructure
+Add that RPC to a disposable browser wallet as chain ID `11155111`. The Anvil mnemonic is the standard public development mnemonic:
 
-```bash
-docker compose up -d
+```text
+test test test test test test test test test test test junk
 ```
 
-## 3 — Verify health
+!!! danger "Demo keys only"
+    This mnemonic and every account derived from it are public. Use a separate browser profile and never send real assets to these addresses. Importing the mnemonic into an existing wallet can replace or mingle with real accounts.
 
-```bash
-# Backend
-curl http://localhost:8080/actuator/health
+The demo maps company users to these derived accounts:
 
-# Kong proxy (customer-API path only — the operator frontend bypasses Kong entirely)
-curl http://localhost:8000/api/v1/public/chains
+| Customer login (password `demo1234!`) | Company | Anvil account |
+|---|---|---|
+| `maria.braun@nordbank-invest.de` | Nordbank Invest | account 1 |
+| `sabine.mueller@rheinische-kapital.de` | Rheinische Kapital | account 2 |
+| `lisa.hoffmann@aurora-finance.de` | Aurora Finance | account 3 |
+| `sandra.richter@fd-fonds.de` | Frankfurt Digital Fonds | account 4 |
+| `ute.koenig@wi-invest.de` | Württemberg Invest | account 5 |
 
-# Kong runs DB-less with no admin GUI. Its admin API is bound to the host's loopback
-# only (127.0.0.1:8001) — reach it via docker exec, never expose it publicly:
-docker compose exec kong kong health
-```
+All five can use the Repo Desk. The first three hold Green Bond collateral; Rheinische, Frankfurt and Württemberg hold Infrastructure Note collateral. The on-chain lending demo is reset/redeployed by the one-shot `demo-onchain-deploy` service, while the Repo Desk starts with three RFQs and two private quotes.
 
-Both frontends are already up too: http://localhost:4200 (operator) and
-http://localhost:4201 (customer) — `docker compose up -d` starts them alongside the backend.
+Kong runs DB-less from `gateway/kong.yml`, so there are no gateway database credentials, and there is no `kong` or `konga` database. Its admin API is bound to loopback — reach it with `docker compose exec kong kong health`, never expose it.
 
-## 4 — Deploy contracts to Sepolia testnet
+For anything beyond a local trial, go to [Prerequisites](installation/prerequisites.md) and read [Environment](configuration/environment.md) properly.
 
-```bash
-cd contracts
-export ETH_SEPOLIA_RPC=https://rpc.sepolia.org
-export DEPLOYER_PRIVATE_KEY=0x<your-key>
-forge script script/DeployTestnet.s.sol --rpc-url $ETH_SEPOLIA_RPC --broadcast
-```
+---
 
-Record every deployed static contract address and its deployment block, including the factories,
-DvP settlement, and any BondDesk, AMM, or RepoVault instances.
+## Before you serve real customers
 
-## 5 — Register the chain in the backend
+- [ ] `DEFAULT_ADMIN_PASSWORD` and `JWT_DEV_SECRET` changed from their defaults.
+- [ ] `JWT_AUDIENCE` set, if Entra is enabled. **Not optional** — without it, a token issued to any other application in your tenant is accepted here as a valid session.
+- [ ] Backups configured **and restored at least once** — including the object store, which is not in the database.
+- [ ] [Monitoring](maintenance/monitoring.md) in place, with audit partition headroom alerting.
+- [ ] More than one `REGISTRY_ADMIN`, held by **different people**, so [four-eyes](../compliance/step-up-mfa.md) controls are real.
+- [ ] A tested [disaster recovery](dr/runbook.md) procedure.
+- [ ] Your KYC and issuance-approval criteria written down, so decisions are consistent and explicable.
 
-```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -d '{
-    "identifier": "ETHEREUM_SEPOLIA",
-    "displayName": "Ethereum Sepolia",
-    "chainType": "EVM",
-    "networkType": "TESTNET",
-    "chainId": 11155111,
-    "rpcUrl": "https://rpc.sepolia.org",
-    "blockExplorerUrl": "https://sepolia.etherscan.io",
-    "graphNodeUrl": "http://graph-node:8000/subgraphs/name",
-    "graphSubgraphName": "ewpg/ethereum-sepolia"
-  }'
-```
+---
 
-## 6 — Start the indexer
+## Where next
 
-Configure all `*_SEPOLIA` variables and explicit instance lists documented in
-[The Graph](indexers/the-graph), then:
-
-```bash
-# graph-node and IPFS must be ready before the deployment command submits anything
-docker compose -f indexer/evm/docker-compose.yml up -d
-SUBGRAPH_VERSION_LABEL=sepolia-20260729-01 ./indexer/evm/deploy-subgraph.sh sepolia
-```
-
-The index is a provisional event-derived projection, not a chain-finality, legal-register,
-settlement, or deployed-code-identity attestation.
-
-## 7 — Open the operator frontend
-
-Already running from step 2 at http://localhost:4200. For hot-reload during frontend
-development instead, stop that container and run it locally:
-
-```bash
-docker compose stop frontend-operator
-cd frontend-operator && npm install && npm start
-open http://localhost:4200
-```
-
-You now have a running registry connected to Ethereum Sepolia. Continue to [Installation](installation/prerequisites) for production setup.
+- [How Registerwerk is built](architecture.md)
+- [Serving customers](customers/index.md)
+- [Troubleshooting](troubleshooting.md)

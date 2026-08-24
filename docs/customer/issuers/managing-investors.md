@@ -1,7 +1,5 @@
 ---
-id: managing-investors
 title: Managing Investors
-sidebar_label: Managing Investors
 ---
 
 # Managing Investors
@@ -28,7 +26,7 @@ ERC-3643 tokens enforce that only whitelisted, KYC-verified investors can receiv
 
 ### Step 1 — Investor provides wallet address
 
-The investor connects their wallet in the customer portal under **Wallets → Connect Wallet** (see [Wallet Setup](../investors/wallet-setup)) and shares the wallet address with you.
+The investor connects their wallet in the customer portal under **Wallets → Connect Wallet** (see [Wallet Setup](../investors/wallet-setup.md)) and shares the wallet address with you.
 
 ### Step 2 — Verify the investor has an ONCHAINID
 
@@ -45,9 +43,9 @@ ERC-3643 tokens require investors to hold valid **claims** on their ONCHAINID �
 
 The registry operator issues these claims after the investor completes the KYC review process. You can see the claim status on the investor detail page.
 
-:::warning
-You cannot whitelist an investor whose ONCHAINID does not have valid KYC/AML claims. Attempting to do so will be rejected by the on-chain identity registry.
-:::
+!!! warning
+    You cannot whitelist an investor whose ONCHAINID does not have valid KYC/AML claims. Attempting to do so will be rejected by the on-chain identity registry.
+
 
 ### Step 4 — Register the wallet in the Identity Registry
 
@@ -72,9 +70,9 @@ To remove an investor's wallet from the whitelist:
 
 The registry submits a transaction removing the wallet from the Identity Registry. The investor will no longer be able to receive tokens, and any future transfer to that wallet will be automatically rejected by the smart contract.
 
-:::note
-Removing an investor from the whitelist does not confiscate their existing token balance. If you need to recover tokens (e.g., due to a court order), contact the registry operator — this requires a forced transfer operation performed by the token agent.
-:::
+!!! note
+    Removing an investor from the whitelist does not confiscate their existing token balance. If you need to recover tokens (e.g., due to a court order), contact the registry operator — this requires a forced transfer operation performed by the token agent.
+
 
 ## Compliance modules
 

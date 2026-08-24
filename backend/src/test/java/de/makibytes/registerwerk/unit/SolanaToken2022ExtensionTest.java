@@ -2,6 +2,9 @@ package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.blockchain.internal.deploy.SolanaTokenService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.SplExtensionSet;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
+import de.makibytes.registerwerk.finality.api.ChainSubmissionExecutor;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.SolanaProperties;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
@@ -20,6 +23,7 @@ import java.util.concurrent.ExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 
 /**
@@ -31,7 +35,7 @@ import static org.mockito.Mockito.lenient;
  * from the async path (not from input validation before the future is created).
  *
  * <p>BOND/CONFIDENTIAL now also require {@link SolanaProperties}' transfer-hook/ElGamal config
- * (finding #12, Phase 10) — the tests below stub real-looking values so the pre-existing
+ *  — the tests below stub real-looking values so the pre-existing
  * "async RPC failure" assertions still hold, and add dedicated cases for the new fail-fast gate
  * itself (missing config throws synchronously, before any future is even created).
  */
@@ -43,6 +47,7 @@ class SolanaToken2022ExtensionTest {
     @Mock private WalletSigner walletSigner;
     @Mock private ChainConfigRepository chainConfigRepository;
     @Mock private SolanaProperties solanaProperties;
+    @Mock private ChainSubmissionExecutor submissions;
 
     @InjectMocks
     private SolanaTokenService service;
@@ -54,6 +59,15 @@ class SolanaToken2022ExtensionTest {
         lenient().when(solanaProperties.getTransferHookProgramId()).thenReturn("HookProgram1111111111111111111111111111111");
         lenient().when(solanaProperties.getConfidentialTransferAuditorElgamalPubkey())
                 .thenReturn("00".repeat(64));
+        ChainConfig chain = new ChainConfig();
+        chain.setId(UUID.randomUUID());
+        chain.setChainType(ChainConfig.ChainType.SOLANA);
+        chain.setNetworkType(ChainConfig.NetworkType.TESTNET);
+        chain.setEnabled(true);
+        lenient().when(chainConfigRepository.findByChainTypeAndEnabledTrue(
+                ChainConfig.ChainType.SOLANA)).thenReturn(java.util.List.of(chain));
+        lenient().when(submissions.execute(any(UUID.class), any()))
+                .thenThrow(new IllegalStateException("no RPC configured for unit test"));
     }
 
     @Test
@@ -61,7 +75,7 @@ class SolanaToken2022ExtensionTest {
     void createSplToken2022_nonePreset_startsAsync() {
         UUID assetId = UUID.randomUUID();
         // Will fail because no real RPC is wired up, but must not throw synchronously
-        CompletableFuture<String> future = service.createSplToken2022(
+        CompletableFuture<TokenDeploymentResult> future = service.createSplToken2022(
                 assetId, de.makibytes.registerwerk.chain.api.Network.TESTNET, "", SplExtensionSet.NONE);
         assertThat(future).isNotNull();
         // The future completes exceptionally due to no Solana wallet configured
@@ -73,7 +87,7 @@ class SolanaToken2022ExtensionTest {
     @DisplayName("createSplToken2022 BOND preset starts an async future when hook config is present")
     void createSplToken2022_bondPreset_startsAsync() {
         UUID assetId = UUID.randomUUID();
-        CompletableFuture<String> future = service.createSplToken2022(
+        CompletableFuture<TokenDeploymentResult> future = service.createSplToken2022(
                 assetId, de.makibytes.registerwerk.chain.api.Network.TESTNET, "", SplExtensionSet.BOND);
         assertThat(future).isNotNull();
         assertThatThrownBy(future::get).isInstanceOf(ExecutionException.class);
@@ -83,7 +97,7 @@ class SolanaToken2022ExtensionTest {
     @DisplayName("createSplToken2022 CONFIDENTIAL preset starts an async future when hook+ElGamal config is present")
     void createSplToken2022_confidentialPreset_startsAsync() {
         UUID assetId = UUID.randomUUID();
-        CompletableFuture<String> future = service.createSplToken2022(
+        CompletableFuture<TokenDeploymentResult> future = service.createSplToken2022(
                 assetId, de.makibytes.registerwerk.chain.api.Network.TESTNET, "", SplExtensionSet.CONFIDENTIAL);
         assertThat(future).isNotNull();
         assertThatThrownBy(future::get).isInstanceOf(ExecutionException.class);
@@ -93,13 +107,13 @@ class SolanaToken2022ExtensionTest {
     @DisplayName("createSplToken2022 no-arg overload delegates to NONE preset")
     void createSplToken2022_noArgOverload_startsAsync() {
         UUID assetId = UUID.randomUUID();
-        CompletableFuture<String> future = service.createSplToken2022(
+        CompletableFuture<TokenDeploymentResult> future = service.createSplToken2022(
                 assetId, de.makibytes.registerwerk.chain.api.Network.TESTNET, "");
         assertThat(future).isNotNull();
         assertThatThrownBy(future::get).isInstanceOf(ExecutionException.class);
     }
 
-    // ── Finding #12, Phase 10: fail-fast config gate ────────────────────────────────────────
+    // ── : fail-fast config gate ────────────────────────────────────────
 
     @Test
     @DisplayName("BOND preset throws synchronously (no future created) when the transfer-hook program is unconfigured")
@@ -129,7 +143,7 @@ class SolanaToken2022ExtensionTest {
         lenient().when(solanaProperties.getTransferHookProgramId()).thenReturn(null);
         lenient().when(solanaProperties.getConfidentialTransferAuditorElgamalPubkey()).thenReturn(null);
         UUID assetId = UUID.randomUUID();
-        CompletableFuture<String> future = service.createSplToken2022(
+        CompletableFuture<TokenDeploymentResult> future = service.createSplToken2022(
                 assetId, de.makibytes.registerwerk.chain.api.Network.TESTNET, "", SplExtensionSet.NONE);
         assertThat(future).isNotNull();
         assertThatThrownBy(future::get).isInstanceOf(ExecutionException.class);

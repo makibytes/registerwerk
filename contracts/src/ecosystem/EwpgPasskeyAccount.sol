@@ -7,6 +7,8 @@ import {SignerWebAuthn} from "@openzeppelin/contracts/utils/cryptography/signers
 import {SignerP256} from "@openzeppelin/contracts/utils/cryptography/signers/SignerP256.sol";
 import {IEntryPoint} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
+import {Execution} from "@openzeppelin/contracts/interfaces/draft-IERC7579.sol";
+import {ERC7579Utils} from "@openzeppelin/contracts/account/utils/draft-ERC7579Utils.sol";
 
 /// @title EwpgPasskeyAccount
 /// @notice Reference minimal ERC-4337 smart account secured by a passkey (WebAuthn/secp256r1)
@@ -33,10 +35,46 @@ import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 ///      `userOp.sender` (this account's address) is what gets checked against
 ///      `PermissionOracle`, independent of which signer scheme the account uses internally.
 contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
+    using ERC7579Utils for bytes;
+
+    bytes32 public constant ROLE_ROUTINE = keccak256("ROUTINE");
+    bytes32 public constant ROLE_ADMIN = keccak256("ADMIN");
+    bytes32 public constant ROLE_RECOVERY = keccak256("RECOVERY");
+
     IEntryPoint private immutable _entryPoint;
+    address public immutable guardian;
+    mapping(address => mapping(bytes4 => bytes32)) public callRole;
+
+    event CallRoleSet(address indexed target, bytes4 indexed selector, bytes32 indexed role);
+    event GuardianExecution(address indexed target, bytes4 indexed selector);
+
+    error GuardianRequired(address target, bytes4 selector);
+    error NotGuardian();
 
     constructor(IEntryPoint entryPoint_, bytes32 qx, bytes32 qy) SignerP256(qx, qy) {
         _entryPoint = entryPoint_;
+        guardian = msg.sender;
+    }
+
+    /// @notice Classifies high-risk calls. The HSM-backed guardian configures policy and is the
+    /// only executor for ADMIN/RECOVERY operations; passkey UserOperations remain routine-only.
+    function setCallRole(address target, bytes4 selector, bytes32 role) external {
+        if (msg.sender != guardian) revert NotGuardian();
+        require(role == ROLE_ROUTINE || role == ROLE_ADMIN || role == ROLE_RECOVERY, "invalid role");
+        callRole[target][selector] = role;
+        emit CallRoleSet(target, selector, role);
+    }
+
+    function guardianExecute(address target, uint256 value, bytes calldata data)
+        external
+        payable
+        returns (bytes memory result)
+    {
+        if (msg.sender != guardian) revert NotGuardian();
+        (bool ok, bytes memory returned) = target.call{value: value}(data);
+        if (!ok) assembly ("memory-safe") { revert(add(returned, 32), mload(returned)) }
+        emit GuardianExecution(target, _selector(data));
+        return returned;
     }
 
     /// @inheritdoc Account
@@ -58,6 +96,20 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
         override
         returns (bool)
     {
-        return caller == address(entryPoint()) || super._erc7821AuthorizedExecutor(caller, mode, executionData);
+        if (caller == address(entryPoint())) {
+            Execution[] calldata executions = executionData.decodeBatch();
+            for (uint256 i = 0; i < executions.length; ++i) {
+                bytes32 required = callRole[executions[i].target][_selector(executions[i].callData)];
+                if (required == ROLE_ADMIN || required == ROLE_RECOVERY) {
+                    revert GuardianRequired(executions[i].target, _selector(executions[i].callData));
+                }
+            }
+            return true;
+        }
+        return super._erc7821AuthorizedExecutor(caller, mode, executionData);
+    }
+
+    function _selector(bytes calldata data) private pure returns (bytes4) {
+        return data.length < 4 ? bytes4(0) : bytes4(data[:4]);
     }
 }

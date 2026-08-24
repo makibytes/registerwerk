@@ -44,7 +44,7 @@ import { VaultNavStrike } from '../../../../core/models';
             </mat-form-field>
           </div>
 
-          <button mat-flat-button class="btn-strike" [disabled]="striking || !navPerShare" (click)="strike()">
+          <button type="button" mat-flat-button class="btn-strike" [disabled]="striking || !navPerShare" (click)="strike()">
             @if (striking) {
               <span class="spinner"></span> Striking…
             } @else {
@@ -122,7 +122,7 @@ import { VaultNavStrike } from '../../../../core/models';
     }
 
     .nav-title {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 1.25rem;
       font-weight: 700;
       color: #e2e8f8;
@@ -167,7 +167,7 @@ import { VaultNavStrike } from '../../../../core/models';
     .history-section { }
 
     .history-title {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: .9375rem;
       font-weight: 700;
       color: #cbd5e1;

@@ -15,14 +15,24 @@ import java.util.UUID;
 @Table(name = "corporate_action")
 public class CorporateAction {
 
+    /** {@code PLEDGE} was retired (never read or written by any code path since this module's
+     *  inception — the real pledge/collateral mechanism lives in the {@code lending} module) —
+     *  see {@code V14__corporate_action_issuer_workflow.sql}'s {@code ck_ca_action_type}. */
     public enum ActionType {
         COUPON, DIVIDEND, SPLIT, REVERSE_SPLIT, CONVERSION,
-        REDEMPTION, PARTIAL_REDEMPTION, PLEDGE, CALL,
+        REDEMPTION, PARTIAL_REDEMPTION, CALL,
         CAPITAL_CALL, INTEREST_PAYMENT
     }
 
+    /** {@code PROPOSED}/{@code REJECTED} are the issuer-proposal pre-states for the
+     *  issuer-initiated types (DIVIDEND, SPLIT, CALL — see {@code CorporateActionProposalValidator}):
+     *  an issuer's proposal starts {@code PROPOSED} and either an operator approves it (→
+     *  {@code ANNOUNCED}, joining the existing pipeline unchanged) or rejects it (→
+     *  {@code REJECTED}, terminal — distinct from {@code CANCELLED}, which means "was live, then
+     *  killed"). System-raised COUPON/REDEMPTION skip {@code PROPOSED} entirely and start at
+     *  {@code ANNOUNCED} exactly as before. */
     public enum Status {
-        ANNOUNCED, RECORD_DATE_SET, COMPUTED, AWAITING_SETTLEMENT, SETTLED, CLOSED, CANCELLED
+        PROPOSED, ANNOUNCED, RECORD_DATE_SET, COMPUTED, AWAITING_SETTLEMENT, SETTLED, CLOSED, CANCELLED, REJECTED
     }
 
     @Id
@@ -85,14 +95,34 @@ public class CorporateAction {
     @Column(name = "settled_at")
     private Instant settledAt;
 
+    /** The actor who created this action — the real proposing issuer for DIVIDEND/SPLIT/CALL, or
+     *  the nil UUID {@code SYSTEM_ACTOR} for the two system-raised types (COUPON/REDEMPTION). */
     @Column(name = "initiated_by", nullable = false)
     private UUID initiatedBy;
 
+    /** The operator's settlement confirmation — repurposed from this module's original
+     *  "2×-operator dual control" design (column names unchanged, meaning narrowed): this is now
+     *  the <em>second</em> of two required parties, after {@link #issuerAttestedBy}/
+     *  {@link #issuerAttestedAt}. {@code confirmSettlementAsOperator} refuses to set these while
+     *  the issuer half is still null. */
     @Column(name = "dual_control_approver_id")
     private UUID dualControlApproverId;
 
     @Column(name = "dual_control_approved_at")
     private Instant dualControlApprovedAt;
+
+    /** The issuer's attestation that the underlying obligation/cash-leg is ready — the first of
+     *  the two required parties before settlement can be confirmed. May instead be an operator's
+     *  audited override ({@code issuerAttestationRef} prefixed {@code "OPERATOR_OVERRIDE: "}) for
+     *  an issuer who never logs in to attest — see {@code CorporateActionService.overrideIssuerAttestation}. */
+    @Column(name = "issuer_attested_by")
+    private UUID issuerAttestedBy;
+
+    @Column(name = "issuer_attested_at")
+    private Instant issuerAttestedAt;
+
+    @Column(name = "issuer_attestation_ref")
+    private String issuerAttestationRef;
 
     @Column(name = "notes")
     private String notes;
@@ -148,6 +178,12 @@ public class CorporateAction {
     public void setDualControlApproverId(UUID v) { this.dualControlApproverId = v; }
     public Instant getDualControlApprovedAt() { return dualControlApprovedAt; }
     public void setDualControlApprovedAt(Instant v) { this.dualControlApprovedAt = v; }
+    public UUID getIssuerAttestedBy() { return issuerAttestedBy; }
+    public void setIssuerAttestedBy(UUID v) { this.issuerAttestedBy = v; }
+    public Instant getIssuerAttestedAt() { return issuerAttestedAt; }
+    public void setIssuerAttestedAt(Instant v) { this.issuerAttestedAt = v; }
+    public String getIssuerAttestationRef() { return issuerAttestationRef; }
+    public void setIssuerAttestationRef(String v) { this.issuerAttestationRef = v; }
     public String getNotes() { return notes; }
     public void setNotes(String v) { this.notes = v; }
     public Instant getCreatedAt() { return createdAt; }

@@ -17,7 +17,9 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { ScrollingModule } from '@angular/cdk/scrolling';
 
+import { PageEvent } from '@angular/material/paginator';
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
 import { OrgIdentityService } from '../../../core/api/org-identity.service';
 import { EntityService } from '../../../core/api/entity.service';
@@ -38,6 +40,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     MatInputModule,
     MatSelectModule,
     MatTooltipModule,
+    ScrollingModule,
     DataTableComponent,
     PageHeaderComponent,
   ],
@@ -46,7 +49,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     <app-page-header
       title="Organizations"
       subtitle="Onchain organizations — every participant wallet belongs to exactly one org per chain">
-      <button mat-raised-button color="primary" (click)="openRegisterDialog()">
+      <button type="button" mat-raised-button color="primary" (click)="openRegisterDialog()">
         <mat-icon>domain_add</mat-icon>
         Register organization
       </button>
@@ -56,13 +59,19 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       [columns]="columns"
       [rows]="orgs"
       [state]="state"
-      filterPlaceholder="Filter by entity, address, chain…"
+      (retry)="loadOrgs()"
+      [showFilter]="false"
       emptyMessage="No organizations registered yet."
-      [actionsTemplate]="rowActions">
+      [actionsTemplate]="rowActions"
+      paginationMode="server"
+      [totalItems]="totalElements"
+      [pageIndex]="pageIndex"
+      [pageSize]="pageSize"
+      (page)="onPage($event)">
     </rw-data-table>
 
     <ng-template #rowActions let-org>
-      <button mat-icon-button color="primary" (click)="openDetail(org)" matTooltip="Open organization">
+      <button type="button" mat-icon-button color="primary" (click)="openDetail(org)" matTooltip="Open organization">
         <mat-icon>chevron_right</mat-icon>
       </button>
     </ng-template>
@@ -76,10 +85,16 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </p>
         <mat-form-field appearance="outline">
           <mat-label>Legal entity</mat-label>
+          <!-- CDK virtual scroll, not @for: this operator serves many customer legal entities
+               (see CLAUDE.md's multi-tenancy note) and the dropdown is fetched unpaginated
+               (size: 200) for selection purposes — virtualizing keeps the panel smooth as that
+               list grows instead of rendering every <mat-option> up front. -->
           <mat-select [(ngModel)]="selectedEntityId">
-            @for (entity of entities; track entity.id) {
-              <mat-option [value]="entity.id">{{ entity.currentName }} ({{ entity.entityNumber }})</mat-option>
-            }
+            <cdk-virtual-scroll-viewport itemSize="48" style="height: 256px;">
+              <mat-option *cdkVirtualFor="let entity of entities" [value]="entity.id">
+                {{ entity.currentName }} ({{ entity.entityNumber }})
+              </mat-option>
+            </cdk-virtual-scroll-viewport>
           </mat-select>
         </mat-form-field>
         <mat-form-field appearance="outline">
@@ -96,8 +111,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!selectedEntityId || !selectedChainId || submitting"
                 (click)="submitRegister()">
           <mat-icon>domain_add</mat-icon>
@@ -120,6 +135,9 @@ export class OrganizationListComponent implements OnInit {
 
   orgs: OrgRegistrationView[] = [];
   state: AsyncSectionStatus = 'pending';
+  pageIndex = 0;
+  pageSize = 20;
+  totalElements = 0;
 
   entities: LegalEntity[] = [];
   chains: ChainHealth[] = [];
@@ -145,9 +163,10 @@ export class OrganizationListComponent implements OnInit {
     this.state = 'pending';
     this.cdr.markForCheck();
 
-    this.orgIdentityService.list({ size: 100 }).subscribe({
+    this.orgIdentityService.list({ page: this.pageIndex, size: this.pageSize }).subscribe({
       next: (page) => {
         this.orgs = page.content;
+        this.totalElements = page.totalElements;
         this.state = 'ready';
         this.cdr.markForCheck();
       },
@@ -156,6 +175,12 @@ export class OrganizationListComponent implements OnInit {
         this.cdr.markForCheck();
       },
     });
+  }
+
+  onPage(event: PageEvent): void {
+    this.pageIndex = event.pageIndex;
+    this.pageSize = event.pageSize;
+    this.loadOrgs();
   }
 
   openRegisterDialog(): void {

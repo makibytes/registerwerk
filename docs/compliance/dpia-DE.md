@@ -1,3 +1,8 @@
+---
+title: DPIA — Germany
+description: Draft Data Protection Impact Assessment for the DE_EWPG jurisdiction — requires DPO and legal sign-off before go-live.
+---
+
 # Datenschutz-Folgenabschätzung (DSGVO Art. 35)
 
 !!! warning "EXTERNAL_REVIEW_REQUIRED"

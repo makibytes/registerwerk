@@ -10,7 +10,7 @@ data DayCount = Act360 | Act365 | ActActIcma | Thirty360 | ThirtyE360
   deriving (Eq, Show)
 
 -- | Coupon payment frequency.
-data PaymentFrequency = Annual | SemiAnnual | Quarterly | Monthly
+data PaymentFrequency = Annual | SemiAnnual | Quarterly | Monthly | Zero
   deriving (Eq, Show)
 
 -- | Call schedule entry — one potential early-call date with a price (as decimal).

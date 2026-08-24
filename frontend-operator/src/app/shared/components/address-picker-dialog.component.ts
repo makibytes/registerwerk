@@ -166,9 +166,9 @@ export interface AddressPickerDialogData {
 
               @if (data.mode === 'ANY') {
                 <div class="filter-chips">
-                  <span class="chip" [class.active]="typeFilter === 'ALL'" (click)="setTypeFilter('ALL')">All</span>
-                  <span class="chip" [class.active]="typeFilter === 'WALLET'" (click)="setTypeFilter('WALLET')">Wallets</span>
-                  <span class="chip" [class.active]="typeFilter === 'CONTRACT'" (click)="setTypeFilter('CONTRACT')">Contracts</span>
+                  <span class="chip" role="button" tabindex="0" [class.active]="typeFilter === 'ALL'" (click)="setTypeFilter('ALL')" (keydown.enter)="setTypeFilter('ALL')" (keydown.space)="setTypeFilter('ALL'); $event.preventDefault()">All</span>
+                  <span class="chip" role="button" tabindex="0" [class.active]="typeFilter === 'WALLET'" (click)="setTypeFilter('WALLET')" (keydown.enter)="setTypeFilter('WALLET')" (keydown.space)="setTypeFilter('WALLET'); $event.preventDefault()">Wallets</span>
+                  <span class="chip" role="button" tabindex="0" [class.active]="typeFilter === 'CONTRACT'" (click)="setTypeFilter('CONTRACT')" (keydown.enter)="setTypeFilter('CONTRACT')" (keydown.space)="setTypeFilter('CONTRACT'); $event.preventDefault()">Contracts</span>
                 </div>
               }
 
@@ -185,7 +185,7 @@ export interface AddressPickerDialogData {
               } @else {
                 <div class="endpoint-list">
                   @for (ep of filteredEndpoints; track ep.id) {
-                    <div class="endpoint-item" (click)="pick(ep.address)" [matTooltip]="ep.address">
+                    <div class="endpoint-item" role="button" tabindex="0" (click)="pick(ep.address)" (keydown.enter)="pick(ep.address)" (keydown.space)="pick(ep.address); $event.preventDefault()" [matTooltip]="ep.address">
                       <span class="type-badge" [class.wallet]="ep.addressType === 'WALLET'" [class.contract]="ep.addressType === 'CONTRACT'">
                         {{ ep.addressType === 'WALLET' ? 'Wallet' : 'Contract' }}
                       </span>
@@ -214,7 +214,7 @@ export interface AddressPickerDialogData {
                   <mat-hint>Enter a custom {{ modeLabel }} address</mat-hint>
                 </mat-form-field>
                 <div style="margin-top:12px">
-                  <button mat-flat-button color="primary" [disabled]="!customAddress.trim()" (click)="pick(customAddress.trim())">
+                  <button type="button" mat-flat-button color="primary" [disabled]="!customAddress.trim()" (click)="pick(customAddress.trim())">
                     Use this address
                   </button>
                 </div>
@@ -226,7 +226,7 @@ export interface AddressPickerDialogData {
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
+      <button type="button" mat-button mat-dialog-close>Cancel</button>
     </mat-dialog-actions>
   `,
 })

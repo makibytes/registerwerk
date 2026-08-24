@@ -138,6 +138,7 @@ interface ManifestImage {
     }
 
     .empty-state { text-align: center; padding: 60px 16px; color: var(--rw-text-secondary); }
+    .table-wrap { overflow-x: auto; }
   `],
   template: `
     <div class="page-container">
@@ -156,7 +157,7 @@ interface ManifestImage {
               </p>
             </div>
           </div>
-          <button mat-stroked-button routerLink="/marketplace">
+          <button type="button" mat-stroked-button routerLink="/marketplace">
             <mat-icon>arrow_back</mat-icon>
             Marketplace
           </button>
@@ -185,6 +186,7 @@ interface ManifestImage {
               @if (d.requiredPermissions.length === 0) {
                 <p class="field-value">This dApp declares no gated permissions.</p>
               } @else {
+                <div class="table-wrap">
                 <table mat-table [dataSource]="d.requiredPermissions" style="width:100%">
                   <ng-container matColumnDef="permissionCode">
                     <th mat-header-cell *matHeaderCellDef>Permission</th>
@@ -203,6 +205,7 @@ interface ManifestImage {
                   <tr mat-header-row *matHeaderRowDef="permissionColumns"></tr>
                   <tr mat-row *matRowDef="let row; columns: permissionColumns"></tr>
                 </table>
+                </div>
               }
             </div>
           </mat-tab>
@@ -232,8 +235,8 @@ interface ManifestImage {
                     @if (method.redemptionAtPar || method.whitePaperUrl) {
                       <p class="payment-card-meta">
                         @if (method.redemptionAtPar) { Redeemable at par at any time. }
-                        @if (method.whitePaperUrl) {
-                          <a [href]="method.whitePaperUrl" target="_blank" rel="noopener">Read the white paper</a>
+                        @if (externalUrl(method.whitePaperUrl); as whitePaperUrl) {
+                          <a [href]="whitePaperUrl" target="_blank" rel="noopener noreferrer">Read the white paper</a>
                         }
                       </p>
                     }
@@ -274,7 +277,7 @@ interface ManifestImage {
 
               <p class="field-label">Verify yourself</p>
               <div class="integrity-box">{{ verificationSnippet }}</div>
-              <button mat-stroked-button style="margin-top:10px" (click)="copyVerification()">
+              <button type="button" mat-stroked-button style="margin-top:10px" (click)="copyVerification()">
                 <mat-icon>content_copy</mat-icon>
                 Copy verification snippet
               </button>
@@ -286,9 +289,9 @@ interface ManifestImage {
 
           <mat-tab label="Docs & Contact">
             <div class="tab-body">
-              @if (d.listing.docsUrl) {
+              @if (externalUrl(d.listing.docsUrl); as docsUrl) {
                 <p class="field-label">Documentation</p>
-                <p class="field-value"><a [href]="d.listing.docsUrl" target="_blank" rel="noopener">{{ d.listing.docsUrl }}</a></p>
+                <p class="field-value"><a [href]="docsUrl" target="_blank" rel="noopener noreferrer">{{ docsUrl }}</a></p>
               }
               @if (d.listing.contactEmail) {
                 <p class="field-label">Contact the publisher</p>
@@ -308,8 +311,12 @@ interface ManifestImage {
         </mat-tab-group>
       } @else {
         <div class="empty-state">
+          <h1 class="sr-only">Marketplace listing details</h1>
           <mat-icon>search_off</mat-icon>
           <p>{{ error || 'dApp not found.' }}</p>
+          @if (error) {
+            <button mat-stroked-button type="button" (click)="load()">Retry</button>
+          }
         </div>
       }
     </div>
@@ -329,10 +336,24 @@ export class MarketplaceDetailComponent implements OnInit {
   error = '';
   description = '';
   images: ManifestImage[] = [];
+  private slug = '';
 
   ngOnInit(): void {
-    const slug = this.route.snapshot.paramMap.get('slug')!;
-    this.marketplaceService.detail(slug).subscribe({
+    this.slug = this.route.snapshot.paramMap.get('slug')?.trim() ?? '';
+    if (!this.slug) {
+      this.error = 'The dApp address is incomplete.';
+      this.loading = false;
+      return;
+    }
+    this.load();
+  }
+
+  load(): void {
+    if (!this.slug) return;
+    this.loading = true;
+    this.error = '';
+    this.detail = null;
+    this.marketplaceService.detail(this.slug).subscribe({
       next: (detail) => {
         this.detail = detail;
         this.parseManifest(detail.manifestRaw);
@@ -376,7 +397,21 @@ export class MarketplaceDetailComponent implements OnInit {
   }
 
   copyVerification(): void {
-    this.clipboard.copy(this.verificationSnippet);
-    this.snackBar.open('Verification snippet copied.', 'Dismiss', { duration: 3000 });
+    const copied = this.clipboard.copy(this.verificationSnippet);
+    this.snackBar.open(
+      copied ? 'Verification snippet copied.' : 'Could not copy the verification snippet.',
+      'Dismiss',
+      { duration: copied ? 3000 : 6000, panelClass: copied ? undefined : 'snack-error' },
+    );
+  }
+
+  externalUrl(value: string | null | undefined): string | null {
+    if (!value) return null;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+    } catch {
+      return null;
+    }
   }
 }

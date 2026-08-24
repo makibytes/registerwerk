@@ -1,5 +1,8 @@
 package de.makibytes.registerwerk.customer.internal;
 
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
+import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.customer.events.EntityCreatedEvent;
 import de.makibytes.registerwerk.customer.events.EntityUpdatedEvent;
 import de.makibytes.registerwerk.customer.events.EntitySuspendedEvent;
@@ -7,17 +10,25 @@ import de.makibytes.registerwerk.customer.events.EntityDissolvedEvent;
 import de.makibytes.registerwerk.customer.events.EntityReactivatedEvent;
 import de.makibytes.registerwerk.customer.events.EntityRenamedEvent;
 import de.makibytes.registerwerk.customer.events.EntityMergedEvent;
+import de.makibytes.registerwerk.customer.events.ClientClassifiedEvent;
+import de.makibytes.registerwerk.customer.events.RelationshipManagerAssignedEvent;
+import de.makibytes.registerwerk.customer.events.SuitabilityAssessmentRecordedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
+import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.customer.api.EntityMergeRecord;
 import de.makibytes.registerwerk.customer.api.EntityMergeRecordRepository;
 import de.makibytes.registerwerk.customer.api.EntityNameHistory;
+import de.makibytes.registerwerk.customer.api.KnowledgeExperienceLevel;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.customer.api.EntityNameHistoryRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.customer.api.RiskTolerance;
+import de.makibytes.registerwerk.customer.api.SuitabilityAssessment;
+import de.makibytes.registerwerk.customer.api.SuitabilityAssessmentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -25,8 +36,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -41,20 +55,26 @@ public class LegalEntityService {
     private final LegalEntityRepository legalEntityRepository;
     private final EntityNameHistoryRepository entityNameHistoryRepository;
     private final EntityMergeRecordRepository entityMergeRecordRepository;
+    private final SuitabilityAssessmentRepository suitabilityAssessmentRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final EntityNumberGenerator entityNumberGenerator;
+    private final AppUserRepository appUserRepository;
 
     public LegalEntityService(
             LegalEntityRepository legalEntityRepository,
             EntityNameHistoryRepository entityNameHistoryRepository,
             EntityMergeRecordRepository entityMergeRecordRepository,
+            SuitabilityAssessmentRepository suitabilityAssessmentRepository,
             ApplicationEventPublisher eventPublisher,
-            EntityNumberGenerator entityNumberGenerator) {
+            EntityNumberGenerator entityNumberGenerator,
+            AppUserRepository appUserRepository) {
         this.legalEntityRepository = legalEntityRepository;
         this.entityNameHistoryRepository = entityNameHistoryRepository;
         this.entityMergeRecordRepository = entityMergeRecordRepository;
+        this.suitabilityAssessmentRepository = suitabilityAssessmentRepository;
         this.eventPublisher = eventPublisher;
         this.entityNumberGenerator = entityNumberGenerator;
+        this.appUserRepository = appUserRepository;
     }
 
     /**
@@ -210,5 +230,81 @@ public class LegalEntityService {
                 "effectiveDate", effectiveDate.toString())));
         log.info("Merged entity: source={} into target={} type={}", sourceEntityId, targetEntityId, mergeType);
         return saved;
+    }
+
+    /**
+     * MiFID II client classification (Annex II) — set by the firm (REGISTRY_ADMIN /
+     * COMPLIANCE_OFFICER at the controller boundary), never self-declared by the client.
+     */
+    public LegalEntity classifyClient(UUID id, ClientCategory category, UUID actorId) {
+        LegalEntity entity = getEntity(id);
+        entity.setClientCategory(category);
+        entity.setClientCategoryClassifiedAt(Instant.now());
+        entity.setClientCategoryClassifiedBy(actorId);
+        LegalEntity saved = legalEntityRepository.save(entity);
+        eventPublisher.publishEvent(new ClientClassifiedEvent(id, actorId, null, category.name()));
+        log.info("Classified entity: id={} category={}", id, category);
+        return saved;
+    }
+
+    /**
+     * Records a new suitability assessment. Immutable/append-only (see
+     * {@link SuitabilityAssessment}'s Javadoc) — a reassessment is a new row, never an edit of
+     * the previous one.
+     */
+    public SuitabilityAssessment recordSuitabilityAssessment(
+            UUID entityId, KnowledgeExperienceLevel knowledgeExperience, RiskTolerance riskTolerance,
+            Integer investmentHorizonYears, boolean financialSituationAdequate, String notes, UUID actorId) {
+        getEntity(entityId); // 404s if the entity doesn't exist
+        SuitabilityAssessment assessment = new SuitabilityAssessment();
+        assessment.setEntityId(entityId);
+        assessment.setKnowledgeExperience(knowledgeExperience);
+        assessment.setRiskTolerance(riskTolerance);
+        assessment.setInvestmentHorizonYears(investmentHorizonYears);
+        assessment.setFinancialSituationAdequate(financialSituationAdequate);
+        assessment.setNotes(notes);
+        assessment.setAssessedBy(actorId);
+        SuitabilityAssessment saved = suitabilityAssessmentRepository.save(assessment);
+        eventPublisher.publishEvent(new SuitabilityAssessmentRecordedEvent(
+                entityId, actorId, null, saved.getId(), knowledgeExperience.name(), riskTolerance.name()));
+        log.info("Recorded suitability assessment: entityId={} id={}", entityId, saved.getId());
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public List<SuitabilityAssessment> listSuitabilityAssessments(UUID entityId) {
+        return suitabilityAssessmentRepository.findByEntityIdOrderByAssessedAtDesc(entityId);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<SuitabilityAssessment> getLatestSuitabilityAssessment(UUID entityId) {
+        return suitabilityAssessmentRepository.findFirstByEntityIdOrderByAssessedAtDesc(entityId);
+    }
+
+    /**
+     * Assigns (or reassigns, or clears with {@code relationshipManagerId=null}) the client-servicing
+     * relationship manager for this entity (F-BLOCKER-15).
+     */
+    public LegalEntity assignRelationshipManager(UUID entityId, UUID relationshipManagerId, UUID actorId) {
+        LegalEntity entity = getEntity(entityId);
+        if (relationshipManagerId != null) {
+            AppUser manager = appUserRepository.findById(relationshipManagerId)
+                    .orElseThrow(() -> new EntityNotFoundException("AppUser", relationshipManagerId));
+            if (!manager.isEnabled() || !manager.getRoles().contains(AppUserRole.RELATIONSHIP_MANAGER)) {
+                throw new IllegalArgumentException(
+                        "Assigned user must be enabled and have the RELATIONSHIP_MANAGER role");
+            }
+        }
+        entity.setAssignedRelationshipManagerId(relationshipManagerId);
+        LegalEntity saved = legalEntityRepository.save(entity);
+        eventPublisher.publishEvent(new RelationshipManagerAssignedEvent(entityId, actorId, null, relationshipManagerId));
+        log.info("Assigned relationship manager: entityId={} rmId={}", entityId, relationshipManagerId);
+        return saved;
+    }
+
+    /** Entities currently assigned to a given relationship manager — the "my clients" list. */
+    @Transactional(readOnly = true)
+    public List<LegalEntity> listAssignedToRelationshipManager(UUID relationshipManagerId) {
+        return legalEntityRepository.findByAssignedRelationshipManagerId(relationshipManagerId);
     }
 }

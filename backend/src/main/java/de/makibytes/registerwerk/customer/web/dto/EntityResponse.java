@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.customer.web.dto;
 
+import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.customer.api.KycStatus;
@@ -20,5 +21,8 @@ public record EntityResponse(
     String registrationNumber,
     KycStatus kycStatus,
     Instant createdAt,
-    String externalId
+    String externalId,
+    ClientCategory clientCategory,
+    Instant clientCategoryClassifiedAt,
+    UUID assignedRelationshipManagerId
 ) {}

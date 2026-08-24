@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -113,7 +113,7 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 9px;
       padding: 11px 14px;
-      font-family: 'Manrope', sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 14px;
       font-weight: 500;
       color: #FFFFFF;
@@ -127,6 +127,7 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
     .entity-list { display: flex; flex-direction: column; gap: 6px; }
 
     .entity-row {
+      width: 100%;
       display: flex;
       align-items: center;
       gap: 14px;
@@ -134,12 +135,20 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
       border-radius: 10px;
       border: 1px solid rgba(255,255,255,0.06);
       background: rgba(255,255,255,0.02);
+      color: inherit;
+      font: inherit;
+      text-align: left;
       cursor: pointer;
       transition: border-color 0.15s ease, background 0.15s ease;
 
       &:hover {
         border-color: rgba(245,158,11,0.3);
         background: rgba(245,158,11,0.06);
+      }
+
+      &:disabled {
+        cursor: wait;
+        opacity: 0.65;
       }
     }
 
@@ -181,6 +190,20 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
       font-size: 13px;
     }
 
+    .retry-btn {
+      display: block;
+      margin: 12px auto 0;
+      border: 1px solid rgba(245,158,11,0.35);
+      border-radius: 7px;
+      padding: 7px 12px;
+      background: rgba(245,158,11,0.08);
+      color: #F59E0B;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
     .spinner-row { display: flex; justify-content: center; align-items: center; gap: 10px; }
     .spinner-text { color: rgba(255,255,255,0.4); font-size: 13px; }
 
@@ -194,7 +217,7 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
         cursor: pointer;
         font-size: 12px;
         color: rgba(255,255,255,0.25);
-        font-family: 'Manrope', sans-serif;
+        font-family: 'Manrope Variable', sans-serif;
 
         &:hover { color: rgba(255,255,255,0.5); }
       }
@@ -219,17 +242,29 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
             [(ngModel)]="searchQuery"
             (ngModelChange)="onSearch()"
             placeholder="Search companies…"
+            aria-label="Search companies"
           />
         </div>
 
         @if (loadingEntities) {
           <div class="loading-row"><mat-spinner diameter="28" /></div>
+        } @else if (loadError) {
+          <div class="empty-msg" role="alert">
+            {{ loadError }}
+            <button class="retry-btn" type="button" (click)="loadEntities()">Retry</button>
+          </div>
         } @else if (entities.length === 0) {
           <div class="empty-msg">No companies found.</div>
         } @else {
           <div class="entity-list">
             @for (entity of entities; track entity.id) {
-              <div class="entity-row" (click)="selectEntity(entity)" [class.disabled]="selecting === entity.id">
+              <button
+                class="entity-row"
+                type="button"
+                (click)="selectEntity(entity)"
+                [disabled]="!!selecting"
+                [attr.aria-label]="'Manage ' + entity.currentName"
+              >
                 <div class="entity-icon"><mat-icon>domain</mat-icon></div>
                 <div>
                   <div class="entity-name">{{ entity.currentName }}</div>
@@ -238,19 +273,19 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
                 @if (selecting === entity.id) {
                   <mat-spinner diameter="18" style="margin-left:auto;" />
                 }
-              </div>
+              </button>
             }
           </div>
         }
 
         <div class="logout-link">
-          <button (click)="logout()">Sign out</button>
+          <button type="button" (click)="logout()">Sign out</button>
         </div>
       </div>
     </div>
   `,
 })
-export class SelectCompanyComponent implements OnInit {
+export class SelectCompanyComponent implements OnInit, OnDestroy {
   private readonly auth = inject(AuthService);
   private readonly adminService = inject(AdminService);
   private readonly router = inject(Router);
@@ -261,7 +296,9 @@ export class SelectCompanyComponent implements OnInit {
   loadingEntities = true;
   selecting: string | null = null;
   searchQuery = '';
+  loadError = '';
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private loadRequestId = 0;
 
   ngOnInit(): void {
     this.loadEntities();
@@ -272,13 +309,23 @@ export class SelectCompanyComponent implements OnInit {
     this.searchTimer = setTimeout(() => this.loadEntities(), 300);
   }
 
+  ngOnDestroy(): void {
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+  }
+
   selectEntity(entity: EntityListItem): void {
     if (this.selecting) return;
     this.selecting = entity.id;
     this.adminService.impersonate(entity.id).subscribe({
       next: (res) => {
-        this.auth.enterImpersonation(res.token, res.entityId, res.entityName);
-        this.router.navigate(['/dashboard']);
+        this.auth.enterImpersonation(res.token, res.entityId, res.entityName).subscribe({
+          next: () => this.router.navigate(['/dashboard']),
+          error: (err) => {
+            this.selecting = null;
+            this.cdr.markForCheck();
+            this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
+          },
+        });
       },
       error: (err) => {
         this.selecting = null;
@@ -292,16 +339,23 @@ export class SelectCompanyComponent implements OnInit {
     this.auth.logout();
   }
 
-  private loadEntities(): void {
+  loadEntities(): void {
+    const requestId = ++this.loadRequestId;
     this.loadingEntities = true;
-    this.adminService.listEntities(this.searchQuery || undefined).subscribe({
+    this.loadError = '';
+    const query = this.searchQuery.trim();
+    this.adminService.listEntities(query || undefined).subscribe({
       next: (page) => {
+        if (requestId !== this.loadRequestId) return;
         this.entities = page.content;
         this.loadingEntities = false;
         this.cdr.markForCheck();
       },
       error: () => {
+        if (requestId !== this.loadRequestId) return;
+        this.entities = [];
         this.loadingEntities = false;
+        this.loadError = 'Companies could not be loaded.';
         this.cdr.markForCheck();
       },
     });

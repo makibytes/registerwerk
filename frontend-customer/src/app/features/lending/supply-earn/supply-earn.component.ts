@@ -17,10 +17,10 @@ import { LendingService } from '../../../core/api/lending.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { erc20Abi, repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
 import { LendingMarket, LendingSupplyPosition } from '../../../core/models';
-import type { Address } from 'viem';
+import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
 
 /**
- * Lender side of the repo/lending facility — deliberately ungated (any stablecoin holder, no
+ * Lender side of the securities-backed lending facility — deliberately ungated (any stablecoin holder, no
  * KYC) per `EwpgRepoMarket`'s own asymmetric design: the fewer barriers to *supplying* capital,
  * the deeper the pool. See `contracts/src/lending/EwpgRepoMarket.sol` NatSpec.
  */
@@ -53,6 +53,19 @@ import type { Address } from 'viem';
 
       @if (loading) {
         <div class="loading-row"><mat-spinner diameter="32"></mat-spinner></div>
+      } @else if (loadError) {
+        <mat-card class="form-card">
+          <mat-card-content role="alert">
+            <p class="error-text">{{ loadError }}</p>
+            <button mat-stroked-button type="button" (click)="load()">Retry</button>
+          </mat-card-content>
+        </mat-card>
+      } @else if (markets.length === 0) {
+        <mat-card class="form-card">
+          <mat-card-content>
+            <p>No active supply markets are available yet.</p>
+          </mat-card-content>
+        </mat-card>
       } @else {
         <mat-card class="form-card">
           <mat-card-content>
@@ -67,18 +80,24 @@ import type { Address } from 'viem';
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Amount</mat-label>
-              <input matInput type="number" [(ngModel)]="amount" />
+              <input matInput type="number" min="0.000001" step="0.000001" [(ngModel)]="amount" />
             </mat-form-field>
 
             @if (actionError) {
-              <p class="error-text">{{ actionError }}</p>
+              <p class="error-text" role="alert">{{ actionError }}</p>
+            }
+            @if (positionsError) {
+              <p class="error-text" role="alert">
+                {{ positionsError }}
+                <button mat-button type="button" (click)="load()">Retry</button>
+              </p>
             }
 
             <div class="action-row">
-              <button mat-flat-button color="primary" [disabled]="acting || !selectedMarketId" (click)="supply()">
+              <button mat-flat-button color="primary" type="button" [disabled]="acting || !selectedMarketId || !isValidAmount()" (click)="supply()">
                 @if (acting === 'supply') { Supplying… } @else { Supply }
               </button>
-              <button mat-stroked-button [disabled]="acting || !selectedMarketId" (click)="withdraw()">
+              <button mat-stroked-button type="button" [disabled]="acting || !selectedMarketId || !isValidAmount() || !!positionsError" (click)="withdraw()">
                 @if (acting === 'withdraw') { Withdrawing… } @else { Withdraw }
               </button>
             </div>
@@ -92,7 +111,7 @@ import type { Address } from 'viem';
               <mat-card class="position-card">
                 <mat-card-content>
                   <div class="position-market">{{ marketLabel(p.marketId) }}</div>
-                  <div class="position-claim">{{ formatUnits(p.currentClaim) }}</div>
+                  <div class="position-claim">{{ formatUnits(p.currentClaim, p.marketId) }}</div>
                   <div class="position-label">Current claim</div>
                 </mat-card-content>
               </mat-card>
@@ -129,19 +148,36 @@ export class SupplyEarnComponent implements OnInit {
   amount = 0;
   acting: 'supply' | 'withdraw' | null = null;
   actionError: string | null = null;
+  loadError = '';
+  positionsError = '';
 
   ngOnInit(): void {
     this.load();
   }
 
-  private load(): void {
+  load(): void {
+    this.loading = true;
+    this.loadError = '';
+    this.positionsError = '';
+    let marketsFailed = false;
+    let positionsFailed = false;
     forkJoin({
-      markets: this.lendingService.listMarkets('ACTIVE').pipe(catchError(() => of<LendingMarket[]>([]))),
-      positions: this.lendingService.supplyPositions().pipe(catchError(() => of<LendingSupplyPosition[]>([]))),
+      markets: this.lendingService.listMarkets('ACTIVE').pipe(catchError(() => {
+        marketsFailed = true;
+        return of<LendingMarket[]>([]);
+      })),
+      positions: this.lendingService.supplyPositions().pipe(catchError(() => {
+        positionsFailed = true;
+        return of<LendingSupplyPosition[]>([]);
+      })),
     }).subscribe(({ markets, positions }) => {
       this.markets = markets;
       this.positions = positions;
-      this.selectedMarketId = markets[0]?.id ?? null;
+      if (marketsFailed) this.loadError = 'Supply markets could not be loaded.';
+      if (positionsFailed) this.positionsError = 'Your existing supply positions could not be loaded.';
+      if (!markets.some((market) => market.id === this.selectedMarketId)) {
+        this.selectedMarketId = markets[0]?.id ?? null;
+      }
       this.loading = false;
       this.cdr.markForCheck();
     });
@@ -152,8 +188,10 @@ export class SupplyEarnComponent implements OnInit {
     return market?.collateralAssetName ?? market?.marketAddress ?? marketId;
   }
 
-  formatUnits(raw: string): string {
-    return (Number(raw) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  formatUnits(raw: string, marketId = this.selectedMarketId): string {
+    const decimals = this.marketDecimals(marketId);
+    return Number(formatTokenUnits(BigInt(raw), decimals))
+      .toLocaleString(undefined, { maximumFractionDigits: decimals });
   }
 
   private shortHash(hash: string): string {
@@ -162,7 +200,7 @@ export class SupplyEarnComponent implements OnInit {
 
   async supply(): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    if (!market) return;
+    if (!market || this.acting || !this.isValidAmount()) return;
     this.acting = 'supply';
     this.actionError = null;
     this.cdr.markForCheck();
@@ -173,7 +211,7 @@ export class SupplyEarnComponent implements OnInit {
       }
       const marketAddress = market.marketAddress as Address;
       const loanToken = market.loanTokenAddress as Address;
-      const amountUnits = BigInt(Math.trunc(this.amount * 1e6));
+      const amountUnits = this.amountUnits(market);
 
       const allowance = await this.wallet.readContract<bigint>({
         address: loanToken,
@@ -210,7 +248,7 @@ export class SupplyEarnComponent implements OnInit {
 
   async withdraw(): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    if (!market) return;
+    if (!market || this.acting || !this.isValidAmount()) return;
     this.acting = 'withdraw';
     this.actionError = null;
     this.cdr.markForCheck();
@@ -219,7 +257,13 @@ export class SupplyEarnComponent implements OnInit {
       if (!this.wallet.isConnected()) {
         await this.wallet.connect();
       }
-      const amountUnits = BigInt(Math.trunc(this.amount * 1e6));
+      const connectedWallet = this.wallet.address()?.toLowerCase();
+      const position = this.positions.find((candidate) =>
+        candidate.marketId === market.id && candidate.walletAddress.toLowerCase() === connectedWallet);
+      const amountUnits = this.amountUnits(market);
+      if (!position || amountUnits > BigInt(position.currentClaim)) {
+        throw new Error('The withdrawal exceeds the connected wallet\'s current claim in this market.');
+      }
       const hash = await this.wallet.writeContract({
         address: market.marketAddress as Address,
         abi: repoMarketAbi,
@@ -235,5 +279,23 @@ export class SupplyEarnComponent implements OnInit {
       this.acting = null;
       this.cdr.markForCheck();
     }
+  }
+
+  isValidAmount(): boolean {
+    const market = this.markets.find((candidate) => candidate.id === this.selectedMarketId);
+    if (!market || !Number.isFinite(this.amount) || this.amount <= 0) return false;
+    try {
+      return this.amountUnits(market) > 0n;
+    } catch {
+      return false;
+    }
+  }
+
+  private marketDecimals(marketId: string | null): number {
+    return this.markets.find((market) => market.id === marketId)?.loanTokenDecimals ?? 6;
+  }
+
+  private amountUnits(market: LendingMarket): bigint {
+    return parseUnits(String(this.amount), market.loanTokenDecimals ?? 6);
   }
 }

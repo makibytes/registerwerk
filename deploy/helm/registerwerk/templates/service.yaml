@@ -1,9 +1,10 @@
+{{- $ctx := dict "context" . "component" "backend" }}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "registerwerk.fullname" . }}
   labels:
-    {{- include "registerwerk.labels" . | nindent 4 }}
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -11,5 +12,10 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+      appProtocol: http
+  {{/* componentSelectorLabels (component: backend), not the bare selectorLabels — otherwise this
+       Service round-robins traffic into every frontend-operator/frontend-customer/zama-relayer
+       pod too, since they all carry app.kubernetes.io/{name,instance} as a subset of their own
+       labels. See _helpers.tpl's comment on registerwerk.componentSelectorLabels. */}}
   selector:
-    {{- include "registerwerk.selectorLabels" . | nindent 4 }}
+    {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 4 }}

@@ -1,11 +1,17 @@
 package de.makibytes.registerwerk.blockchain.api;
 
+import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.DefaultBlockParameterName;
+import org.web3j.protocol.core.methods.response.EthBlock;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
@@ -16,6 +22,145 @@ import org.web3j.utils.Numeric;
 public final class EvmUtils {
 
     private EvmUtils() {}
+
+    /**
+     * Number of blocks mined on top of (and including) the receipt's own block — the standard
+     * "confirmation depth" a reorg-safety policy gates on. Shared by every EVM confirmation path
+     * ({@code BlockchainTransactionService.pollPendingTransactions},
+     * {@code AssetDeploymentService.syncFromChain}) so the depth calculation itself never drifts
+     * between the tx-submission and deployment-confirmation call sites.
+     */
+    public static long confirmations(Web3j web3j, TransactionReceipt receipt) throws IOException {
+        if (receipt.getBlockNumber() == null) {
+            return 0;
+        }
+        BigInteger current = web3j.ethBlockNumber().send().getBlockNumber();
+        return depthOf(current.longValueExact(), receipt.getBlockNumber().longValueExact());
+    }
+
+    /** Blocks mined on top of (and including) {@code blockNumber}, given the chain's current
+     *  head — never negative. Shared arithmetic behind {@link #confirmations} and
+     *  {@link #isFinal}'s {@code DEPTH_BASED} branch, so the two never drift. */
+    private static long depthOf(long headBlockNumber, long blockNumber) {
+        long depth = headBlockNumber - blockNumber + 1;
+        return Math.max(depth, 0);
+    }
+
+    /**
+     * The chain's current {@code finalized} block number, per {@link ChainConfig.FinalityModel#TAG_BASED}.
+     * Empty if the node doesn't support the tag (permissioned chains, some L2s, anvil) or the
+     * call errors — callers must treat that as "not yet known to be final", never as final,
+     * since misreading an unsupported/erroring tag as finality would be worse than an extra poll
+     * cycle of waiting.
+     */
+    public static Optional<Long> finalizedBlockNumber(Web3j web3j) {
+        try {
+            EthBlock response = web3j.ethGetBlockByNumber(DefaultBlockParameterName.FINALIZED, false).send();
+            if (response.hasError() || response.getBlock() == null) {
+                return Optional.empty();
+            }
+            return Optional.of(response.getBlock().getNumber().longValueExact());
+        } catch (IOException | RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * The chain's current {@code safe} block number, per {@link ChainConfig.FinalityModel#TAG_BASED}.
+     * Empty if the node doesn't support the tag (permissioned chains, some L2s, anvil) or the
+     * call errors — callers must treat that as "not yet known to be safe", never as safe, exactly
+     * mirroring {@link #finalizedBlockNumber}'s contract.
+     */
+    public static Optional<Long> safeBlockNumber(Web3j web3j) {
+        try {
+            EthBlock response = web3j.ethGetBlockByNumber(DefaultBlockParameterName.SAFE, false).send();
+            if (response.hasError() || response.getBlock() == null) {
+                return Optional.empty();
+            }
+            return Optional.of(response.getBlock().getNumber().longValueExact());
+        } catch (IOException | RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * The finality level {@code blockNumber} has reached under the chain's configured
+     * {@link ChainConfig.FinalityModel} — the single decision every EVM confirmation gate in
+     * this registry ({@code BlockchainTransactionService.pollPendingTransactions},
+     * {@code AssetDeploymentService.syncFromChain}, {@code GraphNodeSyncService},
+     * {@code OrgEcosystemTxPoller}, {@code OnchainIdentityReceiptListener}) evaluates against —
+     * via {@link de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver}, not by calling
+     * this method with inline duplicated switches — so "what level is this chain at" cannot drift
+     * between call sites.
+     *
+     * <p>Pure: callers fetch only what their model needs (a {@code TAG_BASED} check needs
+     * {@code safeBlockNumber}/{@code finalizedBlockNumber} but not {@code headBlockNumber}, an
+     * {@code INSTANT} check needs neither) via {@link #safeBlockNumber} / {@link #finalizedBlockNumber}
+     * / a live {@code eth_blockNumber} call, and pass the results in — this method makes no RPC
+     * calls itself.
+     *
+     * <p>Chains that don't support the {@code safe}/{@code finalized} tags see no behaviour
+     * change from before this method existed: a null {@code safeBlockNumber}/{@code
+     * finalizedBlockNumber} under {@code TAG_BASED} degrades straight to {@code PROVISIONAL},
+     * and a {@code DEPTH_BASED} chain whose {@code safeConfirmations} equals its {@code
+     * requiredConfirmations} collapses {@code SAFE} into {@code FINALIZED}.
+     *
+     * @param headBlockNumber       current chain head; required only for {@code DEPTH_BASED},
+     *                              null otherwise
+     * @param safeBlockNumber       the node's {@code safe} tag; required only for
+     *                              {@code TAG_BASED} (see {@link #safeBlockNumber}), null
+     *                              otherwise — a null here for a {@code TAG_BASED} chain is
+     *                              treated as "not yet safe", not an error
+     * @param finalizedBlockNumber  the node's {@code finalized} tag; required only for
+     *                              {@code TAG_BASED} (see {@link #finalizedBlockNumber}), null
+     *                              otherwise — a null here for a {@code TAG_BASED} chain is
+     *                              treated as "not yet final", not an error
+     * @param requiredConfirmations FINALIZED-level confirmation depth for {@code DEPTH_BASED},
+     *                              e.g. {@code BlockchainTxProperties#confirmationsFor}
+     * @param safeConfirmations     SAFE-level confirmation depth for {@code DEPTH_BASED}, e.g.
+     *                              {@code BlockchainTxProperties#safeConfirmationsFor}
+     */
+    public static FinalityLevel finalityOf(ChainConfig.FinalityModel model, long blockNumber,
+            Long headBlockNumber, Long safeBlockNumber, Long finalizedBlockNumber,
+            int requiredConfirmations, int safeConfirmations) {
+        return switch (model) {
+            case INSTANT -> FinalityLevel.FINALIZED;
+            case TAG_BASED -> {
+                if (finalizedBlockNumber != null && finalizedBlockNumber >= blockNumber) {
+                    yield FinalityLevel.FINALIZED;
+                }
+                if (safeBlockNumber != null && safeBlockNumber >= blockNumber) {
+                    yield FinalityLevel.SAFE;
+                }
+                yield FinalityLevel.PROVISIONAL;
+            }
+            case DEPTH_BASED -> {
+                if (headBlockNumber == null) {
+                    yield FinalityLevel.PROVISIONAL;
+                }
+                long depth = depthOf(headBlockNumber, blockNumber);
+                if (depth >= requiredConfirmations) {
+                    yield FinalityLevel.FINALIZED;
+                }
+                if (depth >= safeConfirmations) {
+                    yield FinalityLevel.SAFE;
+                }
+                yield FinalityLevel.PROVISIONAL;
+            }
+        };
+    }
+
+    /**
+     * @deprecated superseded by {@link #finalityOf}, which distinguishes SAFE from FINALIZED
+     * instead of collapsing both into a boolean. Kept only for any caller not yet migrated;
+     * behaviourally identical to {@code finalityOf(...) == FinalityLevel.FINALIZED}.
+     */
+    @Deprecated(forRemoval = true)
+    public static boolean isFinal(ChainConfig.FinalityModel model, long blockNumber,
+            Long headBlockNumber, Long finalizedBlockNumber, int requiredConfirmations) {
+        return finalityOf(model, blockNumber, headBlockNumber, null, finalizedBlockNumber,
+                requiredConfirmations, requiredConfirmations) == FinalityLevel.FINALIZED;
+    }
 
     /**
      * Derives the on-chain token symbol for an asset deployment, so every EVM deploy service

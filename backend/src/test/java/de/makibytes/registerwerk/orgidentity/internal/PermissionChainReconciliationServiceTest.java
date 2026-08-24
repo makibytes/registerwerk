@@ -35,7 +35,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("PermissionChainReconciliationService — detection-only drift checks (finding #2)")
+@DisplayName("PermissionChainReconciliationService — detection-only drift checks")
 class PermissionChainReconciliationServiceTest {
 
     @Mock private PermissionGrantRepository grantRepository;
@@ -148,7 +148,7 @@ class PermissionChainReconciliationServiceTest {
     }
 
     @Test
-    @DisplayName("drift gauge resets to 0 on a subsequent clean sweep (repo-wide alerting follow-up)")
+    @DisplayName("drift gauge resets to 0 on a subsequent clean sweep (alerting metrics)")
     void reconcile_gaugeResetsOnCleanSweep() {
         UUID orgRegId = UUID.randomUUID();
         UUID definitionId = UUID.randomUUID();

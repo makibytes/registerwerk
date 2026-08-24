@@ -19,6 +19,7 @@ import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.BondStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,6 +54,7 @@ public class AssetLifecycleService {
     }
 
     /** Submits a DRAFT asset for approval → PENDING_APPROVAL. */
+    @CacheEvict(value = "assets", key = "#assetId")
     public void submit(UUID assetId, UUID actorId) {
         Asset asset = getAndRequireStatus(assetId, AssetStatus.DRAFT);
         asset.setStatus(AssetStatus.PENDING_APPROVAL);
@@ -62,6 +64,7 @@ public class AssetLifecycleService {
     }
 
     /** Approves a PENDING_APPROVAL asset → APPROVED. */
+    @CacheEvict(value = "assets", key = "#assetId")
     public void approve(UUID assetId, UUID actorId) {
         Asset asset = getAndRequireStatus(assetId, AssetStatus.PENDING_APPROVAL);
         asset.setStatus(AssetStatus.APPROVED);
@@ -71,6 +74,7 @@ public class AssetLifecycleService {
     }
 
     /** Rejects a PENDING_APPROVAL asset → back to DRAFT. */
+    @CacheEvict(value = "assets", key = "#assetId")
     public void reject(UUID assetId, String reason, UUID actorId) {
         Asset asset = getAndRequireStatus(assetId, AssetStatus.PENDING_APPROVAL);
         asset.setStatus(AssetStatus.DRAFT);
@@ -88,6 +92,7 @@ public class AssetLifecycleService {
      * equivalent {@code POST /api/v1/assets/{assetId}/deployments} ({@code
      * DeploymentController.deployToChain}) — and is not triggered automatically here.
      */
+    @CacheEvict(value = "assets", key = "#assetId")
     public void issue(UUID assetId, UUID actorId) {
         Asset asset = getAndRequireStatus(assetId, AssetStatus.APPROVED);
         asset.setStatus(AssetStatus.ISSUED);
@@ -97,6 +102,7 @@ public class AssetLifecycleService {
     }
 
     /** Suspends an ISSUED asset → SUSPENDED. */
+    @CacheEvict(value = "assets", key = "#assetId")
     public void suspend(UUID assetId, UUID actorId) {
         Asset asset = getAndRequireStatus(assetId, AssetStatus.ISSUED);
         asset.setStatus(AssetStatus.SUSPENDED);
@@ -110,6 +116,7 @@ public class AssetLifecycleService {
      * suspend, mirroring customer/org entities' own suspend ↔ reactivate. Without this, a
      * mis-clicked suspend is permanent short of a manual DB fix.
      */
+    @CacheEvict(value = "assets", key = "#assetId")
     public void reactivate(UUID assetId, UUID actorId) {
         Asset asset = getAndRequireStatus(assetId, AssetStatus.SUSPENDED);
         asset.setStatus(AssetStatus.ISSUED);
@@ -124,6 +131,7 @@ public class AssetLifecycleService {
      * standards it can automate — this method itself only owns the DB status transition and,
      * for bonds, reconciling {@link BondStatus}.
      */
+    @CacheEvict(value = "assets", key = "#assetId")
     public void redeem(UUID assetId, UUID actorId) {
         Asset asset = assetRepository.findById(assetId)
             .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));

@@ -11,7 +11,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatStepperModule } from '@angular/material/stepper';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { AssetService } from '../../../../core/api/asset.service';
-import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
+import { TokenStandard } from '../../../../core/models';
 
 @Component({
   selector: 'app-vault-setup-wizard',
@@ -36,7 +36,15 @@ import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
           <div class="step-body">
             <h2 class="step-h">Select vault standard</h2>
             <div class="type-cards">
-              <div class="type-card" [class.selected]="vaultType === 'ERC4626'" (click)="vaultType = 'ERC4626'">
+              <div
+                class="type-card"
+                role="button"
+                tabindex="0"
+                [class.selected]="vaultType === 'ERC4626'"
+                (click)="vaultType = 'ERC4626'"
+                (keydown.enter)="vaultType = 'ERC4626'"
+                (keydown.space)="vaultType = 'ERC4626'; $event.preventDefault()"
+              >
                 <div class="type-icon">◈</div>
                 <span class="type-name">ERC-4626</span>
                 <span class="type-desc">Synchronous vault — deposits and redemptions settle instantly at current NAV</span>
@@ -46,7 +54,15 @@ import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
                   <li>eWpG regulatory controls</li>
                 </ul>
               </div>
-              <div class="type-card async" [class.selected]="vaultType === 'ERC7540'" (click)="vaultType = 'ERC7540'">
+              <div
+                class="type-card async"
+                role="button"
+                tabindex="0"
+                [class.selected]="vaultType === 'ERC7540'"
+                (click)="vaultType = 'ERC7540'"
+                (keydown.enter)="vaultType = 'ERC7540'"
+                (keydown.space)="vaultType = 'ERC7540'; $event.preventDefault()"
+              >
                 <div class="type-icon">◇</div>
                 <span class="type-name">ERC-7540 <span class="async-badge">ASYNC</span></span>
                 <span class="type-desc">Request-based vault — investors submit requests; operator fulfills after NAV strike</span>
@@ -58,7 +74,7 @@ import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
               </div>
             </div>
             <div class="step-actions">
-              <button mat-flat-button class="btn-primary" [disabled]="!vaultType" matStepperNext>
+              <button type="button" mat-flat-button class="btn-primary" [disabled]="!vaultType" matStepperNext>
                 Next <mat-icon>arrow_forward</mat-icon>
               </button>
             </div>
@@ -103,8 +119,8 @@ import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
               }
             </form>
             <div class="step-actions">
-              <button mat-stroked-button matStepperPrevious class="btn-back">Back</button>
-              <button mat-flat-button class="btn-primary" [disabled]="form.invalid" matStepperNext>
+              <button type="button" mat-stroked-button matStepperPrevious class="btn-back">Back</button>
+              <button type="button" mat-flat-button class="btn-primary" [disabled]="form.invalid" matStepperNext>
                 Review <mat-icon>arrow_forward</mat-icon>
               </button>
             </div>
@@ -127,8 +143,8 @@ import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
               }
             </div>
             <div class="step-actions">
-              <button mat-stroked-button matStepperPrevious class="btn-back">Back</button>
-              <button mat-flat-button class="btn-deploy" [disabled]="deploying" (click)="deploy()">
+              <button type="button" mat-stroked-button matStepperPrevious class="btn-back">Back</button>
+              <button type="button" mat-flat-button class="btn-deploy" [disabled]="deploying" (click)="deploy()">
                 @if (deploying) {
                   <span class="spinner"></span> Deploying…
                 } @else {
@@ -166,7 +182,7 @@ import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
     }
 
     .vault-title {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 2rem;
       font-weight: 800;
       color: #f0f4ff;
@@ -180,7 +196,7 @@ import { VAULT_STANDARDS, TokenStandard } from '../../../../core/models';
     .step-body { padding: 1.5rem 0; }
 
     .step-h {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 1.125rem;
       font-weight: 700;
       color: #e2e8f8;

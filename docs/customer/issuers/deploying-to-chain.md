@@ -1,7 +1,5 @@
 ---
-id: deploying-to-chain
 title: Deploying to the Blockchain
-sidebar_label: Deploying to Chain
 ---
 
 # Deploying to the Blockchain
@@ -60,12 +58,12 @@ When all contracts are deployed, the issuance moves to **ISSUED** status. You ca
 - **Block explorer link** — verify the contract on Etherscan, Polygonscan, etc.
 - **Deployment transaction** — the transaction that created the token
 
-:::tip
-Share the contract address and explorer link with your investors so they can verify their holdings independently.
-:::
+!!! tip
+    Share the contract address and explorer link with your investors so they can verify their holdings independently.
+
 
 ## Next steps
 
-- [Add investors and whitelist wallets](./managing-investors)
+- [Add investors and whitelist wallets](./managing-investors.md)
 - Set up compliance modules (operators do this automatically for standard ERC-3643 configurations)
 - Announce the issuance to your investors

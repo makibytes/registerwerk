@@ -42,6 +42,7 @@ import de.makibytes.registerwerk.erc3643.web.dto.ComplianceStatusResponse;
 import de.makibytes.registerwerk.erc3643.web.dto.Erc3643SuiteResponse;
 import de.makibytes.registerwerk.erc3643.web.dto.IdentityRegistryEntryResponse;
 import de.makibytes.registerwerk.erc3643.web.dto.RegisterInvestorRequest;
+import de.makibytes.registerwerk.erc3643.web.dto.Erc3643AgentRequests;
 import jakarta.validation.Valid;
 
 /**
@@ -106,15 +107,11 @@ public class Erc3643Controller {
     public ResponseEntity<Void> addComplianceModule(
             @PathVariable UUID assetId,
             @PathVariable UUID deploymentId,
-            @RequestBody Map<String, Object> body,
+            @RequestBody @Valid Erc3643AgentRequests.ComplianceModule body,
             Authentication auth) {
         log.info("POST compliance-module for deploymentId={}", deploymentId);
         UUID suiteId = resolveSuiteId(assetId, deploymentId);
-        String moduleAddress = (String) body.get("moduleAddress");
-        String moduleType = (String) body.get("moduleType");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> parameters = (Map<String, Object>) body.getOrDefault("parameters", Map.of());
-        lifecycleService.addComplianceModule(suiteId, moduleAddress, moduleType, parameters,
+        lifecycleService.addComplianceModule(suiteId, body.moduleAddress(), body.moduleType(), body.parameters(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
@@ -298,11 +295,11 @@ public class Erc3643Controller {
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
     public ResponseEntity<TxSubmissionResponse> forcedTransfer(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body, Authentication auth) {
+            @RequestBody @Valid Erc3643AgentRequests.ForcedTransfer body, Authentication auth) {
         log.info("POST forced-transfer on deploymentId={} by actor={}", deploymentId, actorName(auth));
         UUID suiteId = resolveSuiteId(assetId, deploymentId);
-        UUID txId = lifecycleService.forcedTransfer(suiteId, body.get("from"), body.get("to"),
-                new BigDecimal(body.get("amount")), body.getOrDefault("reason", ""), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        UUID txId = lifecycleService.forcedTransfer(suiteId, body.from(), body.to(),
+                body.amount(), body.reason().trim(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return accepted(txId);
     }
 
@@ -311,11 +308,11 @@ public class Erc3643Controller {
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_APPROVE_OVERRIDE")
     public ResponseEntity<TxSubmissionResponse> forcedApprove(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body, Authentication auth) {
+            @RequestBody @Valid Erc3643AgentRequests.ForcedApprove body, Authentication auth) {
         log.info("POST forced-approve on deploymentId={} by actor={}", deploymentId, actorName(auth));
         UUID suiteId = resolveSuiteId(assetId, deploymentId);
-        UUID txId = lifecycleService.forcedApprove(suiteId, body.get("owner"), body.get("spender"),
-                new BigDecimal(body.get("amount")), body.getOrDefault("reason", ""), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        UUID txId = lifecycleService.forcedApprove(suiteId, body.owner(), body.spender(),
+                body.amount(), body.reason().trim(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return accepted(txId);
     }
 
@@ -323,9 +320,9 @@ public class Erc3643Controller {
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> freezeAddress(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body, Authentication auth) {
+            @RequestBody @Valid Erc3643AgentRequests.Address body, Authentication auth) {
         log.info("POST freeze on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        return accepted(lifecycleService.freezeAddress(resolveSuiteId(assetId, deploymentId), body.get("address"),
+        return accepted(lifecycleService.freezeAddress(resolveSuiteId(assetId, deploymentId), body.address(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
@@ -333,9 +330,9 @@ public class Erc3643Controller {
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> unfreezeAddress(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body, Authentication auth) {
+            @RequestBody @Valid Erc3643AgentRequests.Address body, Authentication auth) {
         log.info("POST unfreeze on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        return accepted(lifecycleService.unfreezeAddress(resolveSuiteId(assetId, deploymentId), body.get("address"),
+        return accepted(lifecycleService.unfreezeAddress(resolveSuiteId(assetId, deploymentId), body.address(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
@@ -382,11 +379,11 @@ public class Erc3643Controller {
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> forceBurn(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
-            @RequestBody Map<String, String> body, Authentication auth) {
+            @RequestBody @Valid Erc3643AgentRequests.ForceBurn body, Authentication auth) {
         log.info("POST force-burn on deploymentId={} by actor={}", deploymentId, actorName(auth));
         UUID suiteId = resolveSuiteId(assetId, deploymentId);
-        UUID txId = lifecycleService.forceBurn(suiteId, body.get("from"),
-                new BigDecimal(body.get("amount")), body.getOrDefault("legalBasis", ""), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        UUID txId = lifecycleService.forceBurn(suiteId, body.from(),
+                body.amount(), body.legalBasis().trim(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return accepted(txId);
     }
 
@@ -395,16 +392,10 @@ public class Erc3643Controller {
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
     public ResponseEntity<TxSubmissionResponse> batchForcedTransfer(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
-            @RequestBody Map<String, Object> body, Authentication auth) {
+            @RequestBody @Valid Erc3643AgentRequests.BatchTransfer body, Authentication auth) {
         log.info("POST batch-forced-transfer on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        @SuppressWarnings("unchecked")
-        List<String> froms = (List<String>) body.get("froms");
-        @SuppressWarnings("unchecked")
-        List<String> tos = (List<String>) body.get("tos");
-        @SuppressWarnings("unchecked")
-        List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
-                .stream().map(BigDecimal::new).toList();
-        return accepted(lifecycleService.batchForcedTransfer(resolveSuiteId(assetId, deploymentId), froms, tos, amounts,
+        return accepted(lifecycleService.batchForcedTransfer(resolveSuiteId(assetId, deploymentId),
+                body.froms(), body.tos(), body.amounts(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
@@ -412,14 +403,9 @@ public class Erc3643Controller {
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> batchMint(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
-            @RequestBody Map<String, Object> body, Authentication auth) {
+            @RequestBody @Valid Erc3643AgentRequests.BatchAmounts body, Authentication auth) {
         log.info("POST batch-mint on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        @SuppressWarnings("unchecked")
-        List<String> addresses = (List<String>) body.get("addresses");
-        @SuppressWarnings("unchecked")
-        List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
-                .stream().map(BigDecimal::new).toList();
-        return accepted(lifecycleService.batchMint(resolveSuiteId(assetId, deploymentId), addresses, amounts,
+        return accepted(lifecycleService.batchMint(resolveSuiteId(assetId, deploymentId), body.addresses(), body.amounts(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
@@ -428,14 +414,9 @@ public class Erc3643Controller {
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> batchBurn(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
-            @RequestBody Map<String, Object> body, Authentication auth) {
+            @RequestBody @Valid Erc3643AgentRequests.BatchAmounts body, Authentication auth) {
         log.info("POST batch-burn on deploymentId={} by actor={}", deploymentId, actorName(auth));
-        @SuppressWarnings("unchecked")
-        List<String> addresses = (List<String>) body.get("addresses");
-        @SuppressWarnings("unchecked")
-        List<BigDecimal> amounts = ((List<String>) body.get("amounts"))
-                .stream().map(BigDecimal::new).toList();
-        return accepted(lifecycleService.batchBurn(resolveSuiteId(assetId, deploymentId), addresses, amounts,
+        return accepted(lifecycleService.batchBurn(resolveSuiteId(assetId, deploymentId), body.addresses(), body.amounts(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 

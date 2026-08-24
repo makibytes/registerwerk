@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.travelrule.internal;
 import tools.jackson.databind.ObjectMapper;
 import de.makibytes.registerwerk.travelrule.api.Ivms101;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleProtocolPort;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -10,6 +11,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -33,10 +35,11 @@ class NotabeneAdapter implements TravelRuleProtocolPort {
     private final ObjectMapper mapper;
     private final TravelRuleProperties.Notabene config;
 
-    NotabeneAdapter(TravelRuleProperties properties, ObjectMapper mapper) {
+    NotabeneAdapter(TravelRuleProperties properties, ObjectMapper mapper,
+                    RestClient.Builder restClientBuilder) {
         this.config = properties.getNotabene();
         this.mapper = mapper;
-        this.rest = RestClient.builder()
+        this.rest = restClientBuilder
                 .baseUrl(config.getBaseUrl())
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + config.getApiKey())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
@@ -85,10 +88,20 @@ class NotabeneAdapter implements TravelRuleProtocolPort {
                     String.valueOf(response.getOrDefault("jurisdictionCountry", "")),
                     String.valueOf(response.getOrDefault("addressUri", ""))
             ));
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw lookupUnavailable(walletAddress, e);
         } catch (Exception e) {
-            log.debug("Notabene VASP lookup for address={} returned no result: {}", walletAddress, e.getMessage());
-            return Optional.empty();
+            throw lookupUnavailable(walletAddress, e);
         }
+    }
+
+    private static ComplianceGateException lookupUnavailable(String walletAddress, Exception cause) {
+        return new ComplianceGateException(
+                "Notabene VASP lookup failed for wallet " + walletAddress
+                        + "; beneficiary type cannot be established safely", cause);
     }
 
     private Map<String, Object> buildTransactionPayload(UUID transferId, Ivms101.TravelRuleMessage msg) {

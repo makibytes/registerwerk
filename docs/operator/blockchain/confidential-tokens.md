@@ -1,8 +1,5 @@
 ---
-id: confidential-tokens
 title: Confidential Tokens (Zama fhEVM)
-sidebar_label: Confidential Tokens
-sidebar_position: 3
 ---
 
 # Confidential Token Setup (Zama fhEVM)

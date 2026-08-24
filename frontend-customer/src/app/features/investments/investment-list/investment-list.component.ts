@@ -1,5 +1,4 @@
 import {
-  AfterViewInit,
   ChangeDetectorRef,
   Component,
   OnInit,
@@ -69,12 +68,18 @@ interface Filters {
 
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
+      } @else if (loadError) {
+        <div class="content-card load-error" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <p>Investments could not be loaded.</p>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
       } @else {
 
         <!-- ── KPI Summary ─────────────────────────────────────────────────── -->
         <div class="kpi-bar">
           <div class="kpi-item">
-            <span class="kpi-value">€ {{ totalNominal | number:'1.0-0' }}</span>
+            <span class="kpi-value">{{ totalNominal | number:'1.0-0' }} {{ totalNominalCurrency ?? '' }}</span>
             <span class="kpi-label">Total Invested</span>
           </div>
           <div class="kpi-divider"></div>
@@ -111,7 +116,7 @@ interface Filters {
                 <app-donut-chart
                   [slices]="standardSlices"
                   centerLabel="Total"
-                  [centerValue]="'€' + totalNominalShort">
+                  [centerValue]="(totalNominalCurrency ? totalNominalCurrency + ' ' : '') + totalNominalShort">
                 </app-donut-chart>
               </mat-card-content>
             </mat-card>
@@ -140,7 +145,7 @@ interface Filters {
                 <mat-icon matPrefix>search</mat-icon>
                 <input matInput [(ngModel)]="filters.search" (ngModelChange)="applyFilters()" placeholder="Asset name or ISIN…">
                 @if (filters.search) {
-                  <button matSuffix mat-icon-button (click)="filters.search=''; applyFilters()">
+                  <button type="button" matSuffix mat-icon-button (click)="filters.search=''; applyFilters()">
                     <mat-icon>close</mat-icon>
                   </button>
                 }
@@ -175,7 +180,7 @@ interface Filters {
                 <input matInput type="date" [(ngModel)]="filters.toDate" (ngModelChange)="applyFilters()">
               </mat-form-field>
 
-              <button mat-stroked-button (click)="resetFilters()" [disabled]="!hasActiveFilters">
+              <button type="button" mat-stroked-button (click)="resetFilters()" [disabled]="!hasActiveFilters">
                 <mat-icon>filter_list_off</mat-icon>
                 Reset
               </button>
@@ -190,7 +195,7 @@ interface Filters {
         </mat-card>
 
         <!-- ── Table ──────────────────────────────────────────────────────── -->
-        <mat-card>
+        <mat-card class="table-card">
           <table mat-table [dataSource]="dataSource" matSort class="mat-elevation-z0">
 
             <ng-container matColumnDef="assetName">
@@ -219,7 +224,7 @@ interface Filters {
             <ng-container matColumnDef="nominalAmount">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>Nominal Amount</th>
               <td mat-cell *matCellDef="let r" class="amount-cell">
-                {{ r.nominalAmount | number:'1.0-2' }}
+                {{ r.nominalAmount | number:'1.0-2' }} {{ r.currency ?? '' }}
               </td>
             </ng-container>
 
@@ -349,18 +354,31 @@ interface Filters {
       cursor: help;
     }
     .empty-row { text-align: center; padding: 32px; color: var(--rw-text-muted); }
+    .table-card { overflow-x: auto; }
+    .table-card table { min-width: 920px; }
+    .load-error { display: grid; justify-items: center; gap: 10px; padding-block: 48px; text-align: center; }
+    .load-error mat-icon { color: var(--rw-text-danger); }
+    .load-error p { margin: 0; color: var(--rw-text-secondary); }
   `],
 })
-export class InvestmentListComponent implements OnInit, AfterViewInit {
+export class InvestmentListComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly investmentService = inject(InvestmentService);
 
-  @ViewChild(MatSort) sort!: MatSort;
-  @ViewChild(MatPaginator) paginator!: MatPaginator;
+  @ViewChild(MatSort)
+  set sort(sort: MatSort | undefined) {
+    if (sort) this.dataSource.sort = sort;
+  }
+
+  @ViewChild(MatPaginator)
+  set paginator(paginator: MatPaginator | undefined) {
+    if (paginator) this.dataSource.paginator = paginator;
+  }
 
   allRecords: InvestmentRecord[] = [];
   dataSource = new MatTableDataSource<InvestmentRecord>();
   loading = true;
+  loadError = false;
 
   filters: Filters = {
     search: '',
@@ -386,6 +404,13 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
 
   get totalNominal(): number {
     return this.allRecords.reduce((s, r) => s + r.nominalAmount, 0);
+  }
+
+  /** Null when holdings span more than one currency (or none is set) — the total is unitless then. */
+  get totalNominalCurrency(): string | null {
+    if (this.allRecords.length === 0) return null;
+    const first = this.allRecords[0].currency;
+    return first !== null && this.allRecords.every(r => r.currency === first) ? first : null;
   }
 
   get totalNominalShort(): string {
@@ -447,6 +472,23 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   ngOnInit(): void {
+    this.dataSource.sortingDataAccessor = (item, column) => {
+      switch (column) {
+        case 'assetName':        return item.assetName ?? '';
+        case 'tokenStandard':    return item.tokenStandard ?? '';
+        case 'nominalAmount':    return item.nominalAmount;
+        case 'acquisitionDate':  return item.acquisitionDate ?? '';
+        case 'whitelisted':      return item.whitelisted ? 1 : 0;
+        case 'assetStatus':      return item.assetStatus ?? '';
+        default:                 return '';
+      }
+    };
+    this.load();
+  }
+
+  load(): void {
+    this.loading = true;
+    this.loadError = false;
     this.investmentService
       .getMyInvestments({ page: 0, size: 200, sort: 'acquisitionDate,desc' })
       .subscribe({
@@ -459,25 +501,10 @@ export class InvestmentListComponent implements OnInit, AfterViewInit {
         },
         error: () => {
           this.loading = false;
+          this.loadError = true;
           this.cdr.detectChanges();
         },
       });
-  }
-
-  ngAfterViewInit(): void {
-    this.dataSource.sort = this.sort;
-    this.dataSource.paginator = this.paginator;
-    this.dataSource.sortingDataAccessor = (item, column) => {
-      switch (column) {
-        case 'assetName':        return item.assetName ?? '';
-        case 'tokenStandard':    return item.tokenStandard ?? '';
-        case 'nominalAmount':    return item.nominalAmount;
-        case 'acquisitionDate':  return item.acquisitionDate ?? '';
-        case 'whitelisted':      return item.whitelisted ? 1 : 0;
-        case 'assetStatus':      return item.assetStatus ?? '';
-        default:                 return '';
-      }
-    };
   }
 
   applyFilters(): void {

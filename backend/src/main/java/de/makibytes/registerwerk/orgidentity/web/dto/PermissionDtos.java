@@ -1,12 +1,13 @@
 package de.makibytes.registerwerk.orgidentity.web.dto;
 
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuer;
-import de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus;
+import de.makibytes.registerwerk.orgidentity.api.TrustedIssuerStatus;
 import de.makibytes.registerwerk.orgidentity.api.PermissionDefinition;
 import de.makibytes.registerwerk.orgidentity.api.PermissionDefinitionStatus;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrant;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantStatus;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantType;
+import de.makibytes.registerwerk.orgidentity.api.RoleRestrictionStatus;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -78,6 +79,8 @@ public final class PermissionDtos {
             PermissionGrantType grantType,
             String roleCode,
             boolean roleRestricted,
+            RoleRestrictionStatus roleRestrictionStatus,
+            Boolean requestedRoleRestricted,
             PermissionGrantStatus status,
             String grantedTx,
             Instant createdAt,
@@ -88,6 +91,7 @@ public final class PermissionDtos {
                     grant.getId(), grant.getPermissionDefinitionId(), permissionCode,
                     grant.getOrgRegistrationId(), entityName,
                     grant.getGrantType(), grant.getRoleCode(), grant.isRoleRestricted(),
+                    grant.getRoleRestrictionStatus(), grant.getRequestedRoleRestricted(),
                     grant.getStatus(), grant.getGrantedTx(), grant.getCreatedAt(), grant.getRevokedAt());
         }
     }
@@ -98,7 +102,7 @@ public final class PermissionDtos {
             String issuerAddress,
             List<Long> claimTopics,
             UUID legalEntityId,
-            MemberWalletStatus status,
+            TrustedIssuerStatus status,
             String addedTx,
             Instant createdAt,
             Instant removedAt) {

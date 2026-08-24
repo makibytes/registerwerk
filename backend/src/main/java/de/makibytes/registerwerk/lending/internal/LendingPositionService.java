@@ -25,7 +25,7 @@ import java.util.UUID;
 
 /**
  * Refreshes and serves the {@link LendingPosition}/{@link LendingSupplyPosition} read-model by
- * reading live on-chain state for every wallet the calling app user has bound (via
+ * reading live on-chain state for every wallet the effective legal entity has bound (via
  * {@code orgidentity.OrgMemberWallet} — the same binding used for org identity/manifest
  * signing) against every {@code ACTIVE} {@link LendingMarket}. Refresh happens synchronously on
  * request rather than via a background poller: this is a reference implementation for a
@@ -66,35 +66,59 @@ public class LendingPositionService {
         this.releaseGate = releaseGate;
     }
 
-    public List<LendingPosition> refreshAndListMyPositions(UUID appUserId) {
+    public List<LendingPosition> refreshAndListMyPositions(UUID legalEntityId) {
         releaseGate.requireReleased();
-        List<OrgMemberWallet> wallets = activeWallets(appUserId);
+        List<OrgMemberWallet> wallets = activeWallets(legalEntityId);
         if (wallets.isEmpty()) return List.of();
 
         List<LendingPosition> results = new ArrayList<>();
         for (LendingMarket market : marketRepository.findByStatus(LendingMarketStatus.ACTIVE)) {
-            marketService.requireOperational(market);
-            String chainIdentifier = marketService.resolveChainIdentifier(market.getChainConfigId());
+            String chainIdentifier;
+            try {
+                marketService.requireOperational(market);
+                chainIdentifier = marketService.resolveChainIdentifier(market.getChainConfigId());
+            } catch (RuntimeException e) {
+                log.warn("Skipping unavailable lending market {} while refreshing positions: {}",
+                        market.getId(), e.getMessage());
+                continue;
+            }
             for (OrgMemberWallet wallet : wallets) {
                 if (!wallet.getChainConfigId().equals(market.getChainConfigId())) continue;
-                refreshPosition(market, chainIdentifier, wallet.getWalletAddress()).ifPresent(results::add);
+                try {
+                    refreshPosition(market, chainIdentifier, wallet.getWalletAddress()).ifPresent(results::add);
+                } catch (RuntimeException e) {
+                    log.warn("Unable to refresh lending position for market {} wallet {}: {}",
+                            market.getId(), wallet.getWalletAddress(), e.getMessage());
+                }
             }
         }
         return results;
     }
 
-    public List<LendingSupplyPosition> refreshAndListMySupplyPositions(UUID appUserId) {
+    public List<LendingSupplyPosition> refreshAndListMySupplyPositions(UUID legalEntityId) {
         releaseGate.requireReleased();
-        List<OrgMemberWallet> wallets = activeWallets(appUserId);
+        List<OrgMemberWallet> wallets = activeWallets(legalEntityId);
         if (wallets.isEmpty()) return List.of();
 
         List<LendingSupplyPosition> results = new ArrayList<>();
         for (LendingMarket market : marketRepository.findByStatus(LendingMarketStatus.ACTIVE)) {
-            marketService.requireOperational(market);
-            String chainIdentifier = marketService.resolveChainIdentifier(market.getChainConfigId());
+            String chainIdentifier;
+            try {
+                marketService.requireOperational(market);
+                chainIdentifier = marketService.resolveChainIdentifier(market.getChainConfigId());
+            } catch (RuntimeException e) {
+                log.warn("Skipping unavailable lending market {} while refreshing supply positions: {}",
+                        market.getId(), e.getMessage());
+                continue;
+            }
             for (OrgMemberWallet wallet : wallets) {
                 if (!wallet.getChainConfigId().equals(market.getChainConfigId())) continue;
-                refreshSupplyPosition(market, chainIdentifier, wallet.getWalletAddress()).ifPresent(results::add);
+                try {
+                    refreshSupplyPosition(market, chainIdentifier, wallet.getWalletAddress()).ifPresent(results::add);
+                } catch (RuntimeException e) {
+                    log.warn("Unable to refresh lending supply position for market {} wallet {}: {}",
+                            market.getId(), wallet.getWalletAddress(), e.getMessage());
+                }
             }
         }
         return results;
@@ -124,8 +148,9 @@ public class LendingPositionService {
                 healthFactor = reading.factor();
                 healthFactorReliable = reading.priceReliable();
             } catch (RuntimeException e) {
-                throw new IllegalStateException(
-                        "Unable to verify lending health factor for market " + market.getId(), e);
+                healthFactorReliable = false;
+                log.warn("Unable to verify lending health factor for market {} wallet {}: {}",
+                        market.getId(), walletAddress, e.getMessage());
             }
         }
 
@@ -185,9 +210,9 @@ public class LendingPositionService {
         return Optional.of(supplyPositionRepository.save(position));
     }
 
-    private List<OrgMemberWallet> activeWallets(UUID appUserId) {
-        if (appUserId == null) return List.of();
-        return memberWalletRepository.findByAppUserId(appUserId).stream()
+    private List<OrgMemberWallet> activeWallets(UUID legalEntityId) {
+        if (legalEntityId == null) return List.of();
+        return memberWalletRepository.findActiveByLegalEntityId(legalEntityId).stream()
                 .filter(w -> w.getStatus() == MemberWalletStatus.ACTIVE)
                 .toList();
     }

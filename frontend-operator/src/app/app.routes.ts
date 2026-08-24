@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard } from './core/auth/auth.guard';
+import { authGuard, roleGuard } from './core/auth/auth.guard';
 import { ShellComponent } from './layout/shell/shell.component';
 
 export const routes: Routes = [
@@ -18,18 +18,33 @@ export const routes: Routes = [
       },
       {
         path: 'customers',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN', 'AUDIT'] },
         loadChildren: () =>
           import('./features/customers/customers.routes').then(
             (m) => m.CUSTOMER_ROUTES
           ),
       },
       {
+        path: 'my-clients',
+        canActivate: [roleGuard],
+        data: { roles: ['RELATIONSHIP_MANAGER'] },
+        loadComponent: () =>
+          import('./features/my-clients/my-clients.component').then(
+            (m) => m.MyClientsComponent
+          ),
+      },
+      {
         path: 'users',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadChildren: () =>
           import('./features/users/users.routes').then((m) => m.USERS_ROUTES),
       },
       {
         path: 'registry',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN', 'AUDIT'] },
         loadComponent: () =>
           import('./features/customers/registry-overview/registry-overview.component').then(
             (m) => m.RegistryOverviewComponent
@@ -37,6 +52,8 @@ export const routes: Routes = [
       },
       {
         path: 'onboarding',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadChildren: () =>
           import('./features/onboarding/onboarding.routes').then(
             (m) => m.ONBOARDING_ROUTES
@@ -44,6 +61,8 @@ export const routes: Routes = [
       },
       {
         path: 'assets',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN', 'AUDIT'] },
         loadChildren: () =>
           import('./features/assets/assets.routes').then(
             (m) => m.ASSET_ROUTES
@@ -51,6 +70,8 @@ export const routes: Routes = [
       },
       {
         path: 'audit',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN', 'AUDIT'] },
         loadComponent: () =>
           import('./features/audit/audit-log.component').then(
             (m) => m.AuditLogComponent
@@ -58,6 +79,8 @@ export const routes: Routes = [
       },
       {
         path: 'compliance',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
         loadChildren: () =>
           import('./features/compliance/compliance.routes').then(
             (m) => m.COMPLIANCE_ROUTES
@@ -65,6 +88,8 @@ export const routes: Routes = [
       },
       {
         path: 'organizations',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadChildren: () =>
           import('./features/organizations/organizations.routes').then(
             (m) => m.ORGANIZATION_ROUTES
@@ -72,6 +97,8 @@ export const routes: Routes = [
       },
       {
         path: 'permissions',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadChildren: () =>
           import('./features/permissions/permissions.routes').then(
             (m) => m.PERMISSION_ROUTES
@@ -79,6 +106,8 @@ export const routes: Routes = [
       },
       {
         path: 'payment-rails',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadChildren: () =>
           import('./features/payment-rails/payment-rails.routes').then(
             (m) => m.PAYMENT_RAIL_ROUTES
@@ -86,6 +115,8 @@ export const routes: Routes = [
       },
       {
         path: 'dapp-review',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadChildren: () =>
           import('./features/dapp-review/dapp-review.routes').then(
             (m) => m.DAPP_REVIEW_ROUTES
@@ -93,13 +124,26 @@ export const routes: Routes = [
       },
       {
         path: 'dapp-catalog',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadComponent: () =>
           import('./features/dapp-catalog/dapp-catalog.component').then(
             (m) => m.DappCatalogComponent
           ),
       },
       {
+        path: 'transactions',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN', 'AUDIT'] },
+        loadComponent: () =>
+          import('./features/transactions/transaction-console.component').then(
+            (m) => m.TransactionConsoleComponent
+          ),
+      },
+      {
         path: 'network-nodes',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadComponent: () =>
           import('./features/network-nodes/network-nodes.component').then(
             (m) => m.NetworkNodesComponent
@@ -107,6 +151,8 @@ export const routes: Routes = [
       },
       {
         path: 'wallets',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadComponent: () =>
           import('./features/wallets/wallets-list.component').then(
             (m) => m.WalletsListComponent
@@ -114,6 +160,8 @@ export const routes: Routes = [
       },
       {
         path: 'wallets/:id',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadComponent: () =>
           import('./features/wallets/wallet-detail.component').then(
             (m) => m.WalletDetailComponent
@@ -121,9 +169,23 @@ export const routes: Routes = [
       },
       {
         path: 'endpoints',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
         loadComponent: () =>
           import('./features/endpoints/endpoints-list.component').then(
             (m) => m.EndpointsListComponent
+          ),
+      },
+      {
+        path: 'indexers',
+        canActivate: [roleGuard],
+        // Matches IndexerAdminController's class-level @PreAuthorize exactly; the reset action
+        // itself is additionally REGISTRY_ADMIN-only, gated in the component and enforced again
+        // server-side.
+        data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        loadComponent: () =>
+          import('./features/indexers/indexers-list.component').then(
+            (m) => m.IndexersListComponent
           ),
       },
     ],

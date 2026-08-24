@@ -148,7 +148,7 @@ class OnboardingServiceTest {
     }
 
     @Test
-    @DisplayName("generateToken refuses to issue a token for a CLOSED or DISSOLVED legal entity (finding #14)")
+    @DisplayName("generateToken refuses to issue a token for a CLOSED or DISSOLVED legal entity")
     void generateToken_refusesForWoundDownEntity() {
         for (EntityStatus status : List.of(EntityStatus.CLOSED, EntityStatus.DISSOLVED)) {
             LegalEntity entity = buildEntity();
@@ -256,7 +256,7 @@ class OnboardingServiceTest {
     }
 
     @Test
-    @DisplayName("completeOnboarding publishes OnboardingCompletedEvent with the newly created admin's user id (finding #8)")
+    @DisplayName("completeOnboarding publishes OnboardingCompletedEvent with the newly created admin's user id")
     void completeOnboarding_publishesEventWithAdminUserId() {
         UUID entityId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
@@ -287,7 +287,7 @@ class OnboardingServiceTest {
     }
 
     @Test
-    @DisplayName("completeOnboarding refuses to reactivate an entity that is not PENDING_ONBOARDING (finding #14)")
+    @DisplayName("completeOnboarding refuses to reactivate an entity that is not PENDING_ONBOARDING")
     void completeOnboarding_refusesWhenEntityNotPendingOnboarding() {
         UUID entityId = UUID.randomUUID();
         String cleartext = "staletoken";
@@ -315,7 +315,7 @@ class OnboardingServiceTest {
     // ── generateToken audit event ─────────────────────────────────────────────
 
     @Test
-    @DisplayName("generateToken publishes OnboardingTokenIssuedEvent (finding #8 — previously dead code)")
+    @DisplayName("generateToken publishes OnboardingTokenIssuedEvent (— previously dead code)")
     void generateToken_publishesTokenIssuedEvent() {
         LegalEntity entity = buildEntity();
         UUID issuedBy = UUID.randomUUID();

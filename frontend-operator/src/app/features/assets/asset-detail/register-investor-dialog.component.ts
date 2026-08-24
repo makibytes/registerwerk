@@ -49,8 +49,8 @@ export interface RegisterInvestorData {
       </form>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
-      <button mat-raised-button color="primary" [disabled]="form.invalid" (click)="submit()">Register</button>
+      <button type="button" mat-button mat-dialog-close>Cancel</button>
+      <button type="button" mat-raised-button color="primary" [disabled]="form.invalid" (click)="submit()">Register</button>
     </mat-dialog-actions>
   `,
 })

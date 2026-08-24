@@ -1,0 +1,10 @@
+out
+cache
+broadcast
+coverage
+lcov.info
+.git
+# Git submodules are not guaranteed to be initialized in a fresh clone and gitlink contents are
+# not part of the Docker context. Dockerfile.demo fetches the dependencies at their
+# repository-pinned commits instead.
+lib

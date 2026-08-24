@@ -1,0 +1,77 @@
+name: Zama Relayer CI
+
+on:
+  push:
+    branches: [main, feat/**, fix/**]
+    paths: [zama-relayer/**, .github/workflows/relayer.yml]
+  pull_request:
+    branches: [main]
+    paths: [zama-relayer/**, .github/workflows/relayer.yml]
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: relayer-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  relayer:
+    name: Lint, Test & Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: zama-relayer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: zama-relayer/package-lock.json
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Build production container
+        run: docker build -t registerwerk-zama-relayer:ci .
+      - name: Scan production container
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          version: v0.73.0
+          scan-type: image
+          image-ref: registerwerk-zama-relayer:ci
+          format: sarif
+          output: trivy-relayer.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-relayer.sarif
+
+  # github/codeql-action was previously used ONLY as a SARIF uploader for the Trivy
+  # image scan above — actual CodeQL static analysis of the TypeScript source never ran.
+  codeql-typescript:
+    name: CodeQL (TypeScript)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          source-root: zama-relayer
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript-relayer"

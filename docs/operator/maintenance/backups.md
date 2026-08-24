@@ -1,14 +1,17 @@
 ---
-id: backups
 title: Backups and Recovery
-sidebar_label: Backups
 ---
 
 # Backups and Recovery
 
 The registry's persistent state lives in two places:
-1. **PostgreSQL** — all registry data (issuances, entities, audit log, KYC, indexer state)
-2. **S3 / object storage** — KYC documents larger than 5 MB
+1. **PostgreSQL** — all registry data (issuances, entities, audit log, KYC document metadata and
+   inline content ≤5 MB, indexer state)
+2. **S3 / object storage** — two separate buckets, both outside the Postgres backup entirely:
+   `S3_BUCKET` (`registerwerk-documents` by default) for KYC documents over the 5 MB inline
+   threshold, and `REGISTERWERK_REPORTING_S3_BUCKET` (`registerwerk-reports` by default) for
+   generated regulatory reports (`regreporting` module). Apply the versioning/replication
+   guidance below to **both**.
 
 Smart contract state lives on the blockchain and is inherently replicated — it does not need to be backed up separately.
 
@@ -16,26 +19,31 @@ Smart contract state lives on the blockchain and is inherently replicated — it
 
 The two deployment paths documented in the repo's `CLAUDE.md` use two different, **non-
 interchangeable** backup mechanisms. Follow whichever section matches how you're actually
-running Registerwerk — previously this page only ever described the Docker Compose path, which
-would mislead an operator running the Helm/Kubernetes deployment (Phase 12, finding #6).
+running Registerwerk.
 
 ### Docker Compose deployment — pg_dump
 
-Add this cron job to your server (or run as a Docker container):
+`docker compose up` runs this automatically — the `postgres-backup` service in the root
+`docker-compose.yml` dumps on startup, then every 24h, gzips to the `pg_backups` named volume,
+and prunes anything older than `BACKUP_RETAIN_DAYS` (default 30). Nothing to install or cron
+separately; it starts with the rest of the stack. Override the retention window in `.env`:
 
 ```bash
-# /etc/cron.d/ewpg-backup
-0 2 * * * root docker exec registerwerk-postgres-1 \
-  pg_dump -U registerwerk registerwerk | gzip \
-  > /backups/postgres/registerwerk-$(date +%Y%m%d-%H%M%S).sql.gz
+# .env
+BACKUP_RETAIN_DAYS=30
 ```
 
-Retain daily backups for 30 days, weekly backups for 12 months:
+List or copy backups out of the named volume:
 
 ```bash
-# Delete daily backups older than 30 days
-find /backups/postgres -name "*.sql.gz" -mtime +30 -delete
+docker compose exec postgres-backup ls -la /backups
+docker cp registerwerk-postgres-backup-1:/backups/registerwerk-20260101-020000.sql.gz .
 ```
+
+The `pg_backups` volume is local to the Docker host — it survives container recreation but not
+host loss, and (unlike the S3-backed Helm path below) has no offsite replication of its own. For
+anything beyond local demo/dev use, mount `/backups` to network storage or copy files out to
+offsite storage on your own schedule; this service does not do that for you.
 
 ### Helm/Kubernetes deployment — WAL-G continuous archiving
 
@@ -59,11 +67,16 @@ reasonable alternatives if you'd rather not run WAL-G directly.
 
 ### Testing backups
 
-Test your backup and restore procedure at least monthly:
+Test your backup and restore procedure at least monthly. `scripts/dr-restore-drill.sh` automates
+this against the Docker Compose path end to end (pg_dump → restore into a disposable container →
+row-count comparison → optionally `--verify-audit-chain`, see
+[the DR runbook](../dr/runbook.md#2b-restore-from-pg_dump-fallback-rpo-last-dump)) — prefer it
+over the manual steps below for anything beyond a one-off spot check:
 
 ```bash
-# Restore a backup to a test database
-gunzip -c /backups/postgres/registerwerk-20250401-020000.sql.gz \
+# Restore a backup (pulled from the postgres-backup service's pg_backups volume) to a test database
+docker cp registerwerk-postgres-backup-1:/backups/registerwerk-20260101-020000.sql.gz .
+gunzip -c registerwerk-20260101-020000.sql.gz \
   | docker exec -i registerwerk-postgres-1 \
   psql -U registerwerk registerwerk_test
 ```
@@ -71,7 +84,7 @@ gunzip -c /backups/postgres/registerwerk-20250401-020000.sql.gz \
 Verify key tables are present and data counts are sensible:
 
 ```sql
-SELECT 'entities' AS tbl, COUNT(*) FROM entity
+SELECT 'legal_entities' AS tbl, COUNT(*) FROM legal_entity
 UNION ALL
 SELECT 'assets', COUNT(*) FROM asset
 UNION ALL
@@ -79,24 +92,36 @@ SELECT 'deployments', COUNT(*) FROM asset_deployment
 UNION ALL
 SELECT 'transfers', COUNT(*) FROM token_transfer
 UNION ALL
-SELECT 'audit_log', COUNT(*) FROM audit_log;
+SELECT 'audit_events', COUNT(*) FROM audit_event;
 ```
 
 ## S3 document backup
 
-Enable S3 versioning and cross-region replication for your KYC document bucket:
+Enable S3 versioning and cross-region replication for **both** document buckets — the KYC
+document bucket (`S3_BUCKET`) and the regulatory-reports bucket
+(`REGISTERWERK_REPORTING_S3_BUCKET`); neither is covered by the Postgres backup paths above, and
+neither ships versioning/replication enabled by default:
 
 ```bash
-# Enable versioning
+# Enable versioning (repeat for each bucket)
 aws s3api put-bucket-versioning \
   --bucket your-kyc-bucket \
   --versioning-configuration Status=Enabled
 
-# Enable cross-region replication (requires destination bucket in another region)
+aws s3api put-bucket-versioning \
+  --bucket your-reports-bucket \
+  --versioning-configuration Status=Enabled
+
+# Enable cross-region replication (requires a destination bucket in another region; repeat for
+# each bucket with its own replication.json)
 aws s3api put-bucket-replication \
   --bucket your-kyc-bucket \
   --replication-configuration file://replication.json
 ```
+
+This repository does not provision these buckets itself (no Terraform/CloudFormation for AWS
+resources) — versioning and replication are the operator's responsibility to configure once, out
+of band, against whatever bucket `S3_BUCKET`/`REGISTERWERK_REPORTING_S3_BUCKET` actually point at.
 
 ## Disaster recovery
 
@@ -110,8 +135,9 @@ docker compose stop backend
 docker exec registerwerk-postgres-1 \
   psql -U registerwerk -c "DROP DATABASE registerwerk; CREATE DATABASE registerwerk;"
 
-# Restore
-gunzip -c /backups/postgres/registerwerk-latest.sql.gz \
+# Restore (pull the dump out of the postgres-backup service's pg_backups volume first)
+docker cp registerwerk-postgres-backup-1:/backups/registerwerk-latest.sql.gz .
+gunzip -c registerwerk-latest.sql.gz \
   | docker exec -i registerwerk-postgres-1 \
   psql -U registerwerk registerwerk
 
@@ -147,17 +173,17 @@ kubectl scale deployment/registerwerk --replicas=<original-replica-count>
 
 `monitoring/alerts/registerwerk.yml` already includes a `BackupStale` rule querying
 `backup_last_success_timestamp`. That metric only exists if something actually pushes it — a
-CronJob is ephemeral and can't be scraped directly, so both backup paths push it to a Prometheus
-Pushgateway on success:
+CronJob (or, on Compose, a long-running loop container) is ephemeral and can't be scraped
+directly, so both backup paths push it to a Prometheus Pushgateway on success, and both require
+the payload to end with a trailing newline — Pushgateway rejects a POST body without one (HTTP
+400), silently, unless you check for it:
 
 - **Helm/Kubernetes (WAL-G)**: set `monitoring.pushgatewayUrl` in `deploy/helm/backup/values.yaml`
   — the CronJob pushes automatically once set (see `templates/backup-cronjob.yaml`).
-- **Docker Compose (pg_dump)**: add the equivalent push to the end of your cron script:
-
-  ```bash
-  curl -s -X POST --data-binary "backup_last_success_timestamp $(date +%s)" \
-    "$PUSHGATEWAY_URL/metrics/job/registerwerk_pg_backup"
-  ```
+- **Docker Compose (pg_dump)**: pushes automatically too — the `postgres-backup` service reads
+  `PUSHGATEWAY_URL` from `.env` (default `http://pushgateway:9091`, the hostname
+  `monitoring/docker-compose.yml`'s `pushgateway` service resolves to on the same
+  `registerwerk_default` network). Nothing to add to a cron script; there is no cron script.
 
 Neither path ships a Pushgateway by default — add one to whichever monitoring stack you're
 running (`monitoring/docker-compose.yml` for Compose, or a cluster-wide one for Kubernetes) if

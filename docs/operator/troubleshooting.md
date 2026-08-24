@@ -1,8 +1,5 @@
 ---
-id: troubleshooting
 title: Troubleshooting
-sidebar_label: Troubleshooting
-sidebar_position: 10
 ---
 
 # Troubleshooting
@@ -73,7 +70,7 @@ This page covers the most common issues encountered when operating the eWpG Regi
    docker compose restart graph-node
    ```
 
-5. If the subgraph is stuck with a fatal error, re-deploy it (see [The Graph](./indexers/the-graph))
+5. If the subgraph is stuck with a fatal error, re-deploy it (see [The Graph](./indexers/the-graph.md))
 
 ### Missing transfer events in registry
 
@@ -92,8 +89,7 @@ This page covers the most common issues encountered when operating the eWpG Regi
    ```
 
 2. If the indexer has caught up and the event is still missing, perform an independently
-   controlled comparison of subgraph events against `eth_getLogs` for the affected range. The
-   planned `verify-consistency` admin endpoint is not implemented.
+   controlled comparison of subgraph events against `eth_getLogs` for the affected range.
 
 3. If a gap is confirmed, re-deploy the subgraph from a block before the missing event
 
@@ -237,9 +233,17 @@ If a migration shows `success = false`, fix the migration SQL and restart. Never
 
 ## Kong returns 401 Unauthorized
 
-1. Verify `JWT_ISSUER_URI` matches what your OIDC provider returns in the `iss` claim
-2. Verify Kong OIDC plugin values (`ENTRA_ISSUER`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_SECRET`) are correct
-3. Decode the JWT at [jwt.io](https://jwt.io) to inspect claims
+Kong does not validate JWTs — a 401 always comes from the **backend**, even on requests
+proxied through Kong. Check, in order:
+
+1. `JWT_ISSUER_URI` matches the `iss` your OIDC provider actually returns
+2. `JWT_AUDIENCE` matches the token's `aud` — a mismatch here is the commonest cause
+3. For an operator token, that `iss` is `registerwerk-local`; local tokens without it are
+   rejected by design, so a hand-crafted token missing `iss` will always 401
+4. Decode the token to inspect its claims
+
+If the token is valid and you are getting **403**, the token is fine and the *role* is not —
+a different problem entirely. See [Roles and permissions](customers/roles.md).
 
 ## Onboarding token expired
 

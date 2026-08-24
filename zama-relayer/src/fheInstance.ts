@@ -1,5 +1,5 @@
 import { createInstance, SepoliaConfig, type FhevmInstance, type FhevmInstanceConfig } from '@zama-fhe/relayer-sdk/node';
-import type { RelayerConfig } from './config';
+import type { RelayerConfig } from './config.js';
 
 /**
  * Lazily creates (and caches) the Zama `FhevmInstance` this whole sidecar wraps.

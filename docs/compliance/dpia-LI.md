@@ -47,7 +47,7 @@
 
 ---
 
-## 4. Reisepass / Datenschutz Travel Rule (TVTG-Anpassung TFR)
+## 4. Datenschutz und Travel Rule (TVTG-Anpassung TFR)
 
 Liechtenstein hat die EU-Transfer of Funds Regulation (TFR, Reg EU 2023/1113) als EWR-Mitglied übernommen. Schwellenwert: EUR 1.000 (TVTG-Anpassung). TravelRuleService ist konfiguriert für LI_TVTG.
 

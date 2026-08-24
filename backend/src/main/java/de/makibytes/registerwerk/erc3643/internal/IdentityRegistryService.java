@@ -1,9 +1,7 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
-import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopic;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopicRepository;
@@ -21,8 +19,6 @@ import org.springframework.stereotype.Service;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.generated.Uint16;
-import org.web3j.crypto.Credentials;
-import org.web3j.protocol.Web3j;
 
 import java.time.Instant;
 import java.util.List;
@@ -45,8 +41,7 @@ public class IdentityRegistryService {
     private final Erc3643ClaimTopicRepository claimTopicRepo;
     private final AssetDeploymentRepository deploymentRepo;
     private final OnChainIdService onChainIdService;
-    private final EvmContractService evmContractService;
-    private final BlockchainClientRegistry blockchainClientRegistry;
+    private final DurableEvmTransactionGateway evmTransactions;
     private final BlockchainTransactionService blockchainTransactionService;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -55,8 +50,7 @@ public class IdentityRegistryService {
                                     Erc3643ClaimTopicRepository claimTopicRepo,
                                     AssetDeploymentRepository deploymentRepo,
                                     OnChainIdService onChainIdService,
-                                    EvmContractService evmContractService,
-                                    BlockchainClientRegistry blockchainClientRegistry,
+                                    DurableEvmTransactionGateway evmTransactions,
                                     BlockchainTransactionService blockchainTransactionService,
                                     ApplicationEventPublisher eventPublisher) {
         this.registryRepo = registryRepo;
@@ -64,28 +58,9 @@ public class IdentityRegistryService {
         this.claimTopicRepo = claimTopicRepo;
         this.deploymentRepo = deploymentRepo;
         this.onChainIdService = onChainIdService;
-        this.evmContractService = evmContractService;
-        this.blockchainClientRegistry = blockchainClientRegistry;
+        this.evmTransactions = evmTransactions;
         this.blockchainTransactionService = blockchainTransactionService;
         this.eventPublisher = eventPublisher;
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private Web3j clientForSuite(Erc3643Suite suite) {
-        AssetDeployment dep = deploymentRepo.findById(suite.getAssetDeploymentId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "AssetDeployment not found for suite " + suite.getId()));
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        return blockchainClientRegistry.getEvmClient(descriptor);
-    }
-
-    private Credentials credentialsForSuite(Erc3643Suite suite) {
-        AssetDeployment dep = deploymentRepo.findById(suite.getAssetDeploymentId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "AssetDeployment not found for suite " + suite.getId()));
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        return evmContractService.credentials(descriptor);
     }
 
     /**
@@ -127,8 +102,6 @@ public class IdentityRegistryService {
                 AssetDeployment deployment = deploymentRepo.findById(suite.getAssetDeploymentId())
                         .orElseThrow(() -> new IllegalStateException(
                                 "AssetDeployment not found for suite " + suite.getId()));
-                Web3j web3j = clientForSuite(suite);
-                Credentials creds = credentialsForSuite(suite);
                 String identityAddr = identity.getIdentityAddress() != null
                         ? identity.getIdentityAddress() : "0x0000000000000000000000000000000000000000";
                 short country = countryCode != null ? countryCode : 0;
@@ -142,8 +115,11 @@ public class IdentityRegistryService {
                         ),
                         java.util.Collections.emptyList()
                 );
-                String txHash = evmContractService.submit(web3j, creds,
-                        suite.getIdentityRegistryAddress(), fn);
+                String txHash = evmTransactions.submit(chainConfigId,
+                        suite.getIdentityRegistryAddress(), fn,
+                        java.util.Map.of(
+                                "walletAddress", walletAddress,
+                                "legalEntityId", legalEntityId.toString()));
                 blockchainTransactionService.record(
                         txHash,
                         fn.getName(),
@@ -164,6 +140,7 @@ public class IdentityRegistryService {
                 entry.setOnchainIdentityId(identity.getId());
                 entry.setCountryCode(countryCode);
                 entry.setRegisteredByTx(txHash);
+                entry.setChainConfigId(chainConfigId);
                 Erc3643IdentityRegistry saved = registryRepo.save(entry);
                 eventPublisher.publishEvent(new InvestorRegisteredEvent(suiteId, actorId, actorRole,
                         java.util.Map.of("walletAddress", walletAddress, "legalEntityId", legalEntityId.toString())));
@@ -179,6 +156,7 @@ public class IdentityRegistryService {
         entry.setWalletAddress(walletAddress.toLowerCase());
         entry.setOnchainIdentityId(identity.getId());
         entry.setCountryCode(countryCode);
+        entry.setChainConfigId(chainConfigId);
         Erc3643IdentityRegistry saved = registryRepo.save(entry);
         eventPublisher.publishEvent(new InvestorRegisteredEvent(suiteId, actorId, actorRole,
                 java.util.Map.of("walletAddress", walletAddress, "legalEntityId", legalEntityId.toString())));
@@ -187,6 +165,20 @@ public class IdentityRegistryService {
 
     /**
      * Removes an investor from the on-chain IdentityRegistry and soft-deletes the DB entry.
+     *
+     * <p>Submits {@code deleteIdentity} non-blocking and tracks it via
+     * {@link BlockchainTransactionService#record} — mirroring {@link #registerInvestor}'s
+     * pattern exactly, rather than the {@code send()}/{@code waitForReceipt()} blocking call
+     * this used before. That older version accepted the transaction as final the moment it was
+     * first mined, with no reorg guard and no async re-verification of any kind: a reorg
+     * un-mining {@code deleteIdentity} would leave the register asserting {@code removedAt} set
+     * while the on-chain IdentityRegistry might still list the investor — a genuine compliance
+     * gap, since {@code removedAt IS NULL} is how {@link Erc3643IdentityRegistryRepository}
+     * decides whether a wallet is still whitelisted. The soft-delete write here remains
+     * optimistic (matching {@link #registerInvestor}'s already-accepted risk profile for the
+     * mirror-image operation) but is now tracked through the same model-aware
+     * {@code BlockchainTransactionService.pollPendingTransactions} every other correction in
+     * this registry uses, instead of being invisible to it entirely.
      *
      * @param actorId   ID of the user removing the investor (for audit)
      * @param actorRole role of the user removing the investor (for audit)
@@ -207,16 +199,39 @@ public class IdentityRegistryService {
         if (suite.getIdentityRegistryAddress() != null
                 && !suite.getIdentityRegistryAddress().startsWith("0x-PENDING")) {
             try {
-                Web3j web3j = clientForSuite(suite);
-                Credentials creds = credentialsForSuite(suite);
+                AssetDeployment deployment = deploymentRepo.findById(suite.getAssetDeploymentId())
+                        .orElseThrow(() -> new IllegalStateException(
+                                "AssetDeployment not found for suite " + suite.getId()));
                 Function fn = new Function(
                         "deleteIdentity",
                         java.util.List.of(new Address(entry.getWalletAddress())),
                         java.util.Collections.emptyList()
                 );
-                evmContractService.send(web3j, creds, suite.getIdentityRegistryAddress(), fn);
+                if (entry.getChainConfigId() == null) {
+                    throw new IllegalStateException(
+                            "Identity registry entry is missing chainConfigId: " + entry.getId());
+                }
+                String txHash = evmTransactions.submit(entry.getChainConfigId(),
+                        suite.getIdentityRegistryAddress(), fn,
+                        java.util.Map.of("walletAddress", entry.getWalletAddress()));
+                blockchainTransactionService.record(
+                        txHash,
+                        fn.getName(),
+                        deployment.getId(),
+                        deployment.getAssetId(),
+                        deployment.getChain().name(),
+                        deployment.getNetwork().name(),
+                        suite.getIdentityRegistryAddress(),
+                        java.util.Map.of("walletAddress", entry.getWalletAddress())
+                );
+                entry.setRemovedByTx(txHash);
+                // Reset in case this entry was previously removed, reorg-reverted back to active by
+                // IdentityRegistryRemovalRevertCompensator, and is now being removed again — without this,
+                // removalConfirmed would still be true from the first removal and
+                // Erc3643IdentityRegistryConfirmationListener would never re-poll this second attempt.
+                entry.setRemovalConfirmed(false);
             } catch (Exception e) {
-                throw new RuntimeException("deleteIdentity on-chain call failed: " + e.getMessage(), e);
+                throw new RuntimeException("deleteIdentity submission failed: " + e.getMessage(), e);
             }
         }
 

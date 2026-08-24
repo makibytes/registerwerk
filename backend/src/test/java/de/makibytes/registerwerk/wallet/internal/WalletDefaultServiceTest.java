@@ -31,8 +31,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link WalletDefaultService} (finding #11, Phase 8) — previously untested,
- * including the actor-identity (finding #3) and dual-control-approver (finding #4) threading
+ * Unit tests for {@link WalletDefaultService}  — previously untested,
+ * including the actor-identity and dual-control-approver threading
  * added to {@code setDefault} this phase.
  */
 @ExtendWith(MockitoExtension.class)
@@ -84,7 +84,7 @@ class WalletDefaultServiceTest {
     }
 
     @Test
-    @DisplayName("setDefault saves the new default and publishes an event carrying the actor and dual-control approver (findings #3, #4)")
+    @DisplayName("setDefault saves the new default and publishes an event carrying the actor and dual-control approver")
     void setDefault_publishesEventWithActorAndApprover() {
         UUID chainId = UUID.randomUUID();
         UUID walletId = UUID.randomUUID();

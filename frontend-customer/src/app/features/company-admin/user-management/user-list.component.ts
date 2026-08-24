@@ -12,7 +12,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatTabsModule } from '@angular/material/tabs';
 import { forkJoin } from 'rxjs';
 import { CompanyService } from '../../../core/api/company.service';
-import { CompanyUser, IdpSettings, LegalEntity, UserRole } from '../../../core/models';
+import { CompanyUser, LegalEntity, UserRole } from '../../../core/models';
 import { InviteUserDialogComponent } from './invite-user-dialog.component';
 import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component';
 import { ExternalIdEditorComponent } from '../../../shared/components/external-id-editor.component';
@@ -57,6 +57,9 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #rla4="routerLinkActive" [active]="rla4.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
         </a>
+        <a mat-tab-link routerLink="/company-admin/beneficial-owners" routerLinkActive #rlaBo="routerLinkActive" [active]="rlaBo.isActive">
+          <mat-icon>diversity_3</mat-icon>&nbsp;Beneficial Owners
+        </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
 
@@ -96,7 +99,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
       <mat-card>
         <mat-card-header>
           <mat-card-title>Users ({{ users.length }})</mat-card-title>
-          <button mat-flat-button color="primary" [disabled]="managedExternally" (click)="openInvite()">
+          <button mat-flat-button color="primary" type="button" [disabled]="managedExternally" (click)="openInvite()">
             <mat-icon>person_add</mat-icon>
             Invite user
           </button>
@@ -105,13 +108,20 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
         <mat-card-content>
           @if (loading) {
             <div class="loading-overlay"><mat-spinner diameter="36"></mat-spinner></div>
+          } @else if (loadError) {
+            <div class="load-error" role="alert">
+              <mat-icon>error_outline</mat-icon>
+              <span>Company users could not be loaded.</span>
+              <button mat-stroked-button type="button" (click)="load()">Retry</button>
+            </div>
           } @else {
+            <div class="table-wrap">
             <table mat-table [dataSource]="users" class="mat-elevation-z0 full-width-table">
               <ng-container matColumnDef="name">
                 <th mat-header-cell *matHeaderCellDef>User</th>
                 <td mat-cell *matCellDef="let user">
                   <div class="user-cell">
-                    <div class="user-avatar">{{ user.name[0] || 'U' }}</div>
+                    <div class="user-avatar">{{ user.name?.[0] || 'U' }}</div>
                     <div>
                       <div class="user-name">{{ user.name }}</div>
                       <div class="user-meta">{{ user.email }}</div>
@@ -158,14 +168,14 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                 <th mat-header-cell *matHeaderCellDef>Actions</th>
                 <td mat-cell *matCellDef="let user">
                   <div class="actions-cell">
-                    <button mat-stroked-button [disabled]="managedExternally" (click)="editRoles(user)">Roles</button>
-                    <button mat-stroked-button [disabled]="managedExternally" (click)="toggleEnabled(user)">
+                    <button mat-stroked-button type="button" [disabled]="managedExternally || busyUsers.has(user.id)" (click)="editRoles(user)">Roles</button>
+                    <button mat-stroked-button type="button" [disabled]="managedExternally || busyUsers.has(user.id)" (click)="toggleEnabled(user)">
                       {{ user.enabled ? 'Disable' : 'Enable' }}
                     </button>
-                    <button mat-stroked-button [disabled]="managedExternally || user.authProvider !== 'LOCAL'" (click)="sendPasswordReset(user)">
+                    <button mat-stroked-button type="button" [disabled]="managedExternally || user.authProvider !== 'LOCAL' || busyUsers.has(user.id)" (click)="sendPasswordReset(user)">
                       Reset password
                     </button>
-                    <button mat-icon-button color="warn" [disabled]="managedExternally" matTooltip="Delete user" (click)="removeUser(user)">
+                    <button mat-icon-button color="warn" type="button" [disabled]="managedExternally || busyUsers.has(user.id)" matTooltip="Delete user" (click)="removeUser(user)">
                       <mat-icon>delete</mat-icon>
                     </button>
                   </div>
@@ -181,6 +191,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                 </td>
               </tr>
             </table>
+            </div>
           }
         </mat-card-content>
       </mat-card>
@@ -322,6 +333,10 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
       padding: 32px;
       color: var(--rw-text-muted);
     }
+    .table-wrap { overflow-x: auto; }
+    .table-wrap table { min-width: 900px; }
+    .load-error { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; padding: 48px 16px; color: var(--rw-text-secondary); }
+    .load-error mat-icon { color: var(--rw-text-danger); }
   `]
 })
 export class UserListComponent implements OnInit {
@@ -334,10 +349,18 @@ export class UserListComponent implements OnInit {
   entity: LegalEntity | null = null;
   managedExternally = false;
   loading = true;
+  loadError = false;
+  readonly busyUsers = new Set<string>();
 
   readonly displayedColumns = ['name', 'roles', 'status', 'lastLogin', 'actions'];
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  load(): void {
+    this.loading = true;
+    this.loadError = false;
     forkJoin({
       entity: this.companyService.getMyEntity(),
       users: this.companyService.getEntityUsers(),
@@ -352,13 +375,14 @@ export class UserListComponent implements OnInit {
       },
       error: () => {
         this.loading = false;
+        this.loadError = true;
         this.cdr.detectChanges();
       }
     });
   }
 
   openInvite(): void {
-    const ref = this.dialog.open(InviteUserDialogComponent, { width: '520px' });
+    const ref = this.dialog.open(InviteUserDialogComponent, { width: '520px', maxWidth: '95vw' });
     ref.afterClosed().subscribe((user: CompanyUser | undefined) => {
       if (!user) return;
       this.users = [...this.users, user];
@@ -370,6 +394,7 @@ export class UserListComponent implements OnInit {
   editRoles(user: CompanyUser): void {
     const ref = this.dialog.open(EditUserRolesDialogComponent, {
       width: '420px',
+      maxWidth: '95vw',
       data: { name: user.name, roles: user.roles },
     });
     ref.afterClosed().subscribe((roles: UserRole[] | undefined) => {
@@ -388,12 +413,15 @@ export class UserListComponent implements OnInit {
   }
 
   toggleEnabled(user: CompanyUser): void {
+    if (this.busyUsers.has(user.id)) return;
+    this.busyUsers.add(user.id);
     const request$ = user.enabled
       ? this.companyService.disableUser(user.id)
       : this.companyService.enableUser(user.id);
 
     request$.subscribe({
       next: (updated) => {
+        this.busyUsers.delete(user.id);
         this.replaceUser(updated);
         this.snackBar.open(
           user.enabled ? `${updated.name} has been disabled.` : `${updated.name} has been re-enabled.`,
@@ -402,6 +430,7 @@ export class UserListComponent implements OnInit {
         );
       },
       error: (err) => {
+        this.busyUsers.delete(user.id);
         this.snackBar.open(err?.error?.message ?? 'Failed to update status.', 'Dismiss', { duration: 4000 });
         this.cdr.detectChanges();
       }
@@ -409,11 +438,15 @@ export class UserListComponent implements OnInit {
   }
 
   sendPasswordReset(user: CompanyUser): void {
+    if (this.busyUsers.has(user.id)) return;
+    this.busyUsers.add(user.id);
     this.companyService.sendPasswordReset(user.id).subscribe({
       next: () => {
+        this.busyUsers.delete(user.id);
         this.snackBar.open(`Password reset link sent to ${user.email}.`, 'OK', { duration: 3000 });
       },
       error: (err) => {
+        this.busyUsers.delete(user.id);
         this.snackBar.open(err?.error?.message ?? 'Failed to send password reset.', 'Dismiss', { duration: 4000 });
         this.cdr.detectChanges();
       }
@@ -421,15 +454,19 @@ export class UserListComponent implements OnInit {
   }
 
   removeUser(user: CompanyUser): void {
+    if (this.busyUsers.has(user.id)) return;
     if (!confirm(`Delete ${user.name} from your organisation?`)) return;
+    this.busyUsers.add(user.id);
 
     this.companyService.removeUser(user.id).subscribe({
       next: () => {
+        this.busyUsers.delete(user.id);
         this.users = this.users.filter(existing => existing.id !== user.id);
         this.snackBar.open(`${user.name} has been removed.`, 'OK', { duration: 3000 });
         this.cdr.detectChanges();
       },
       error: (err) => {
+        this.busyUsers.delete(user.id);
         this.snackBar.open(err?.error?.message ?? 'Failed to remove user.', 'Dismiss', { duration: 4000 });
         this.cdr.detectChanges();
       }

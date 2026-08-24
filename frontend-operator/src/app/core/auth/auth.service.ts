@@ -1,29 +1,30 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { BehaviorSubject, Observable, tap, map } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, map, of, shareReplay, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
-const TOKEN_KEY = 'registerwerk_operator_token';
-
-interface LoginApiResponse {
-  token: string;
-  tokenType: string;
+/**
+ * Claims the backend resolves from the session — the httpOnly `rw_session` cookie itself is
+ * never readable here by design (see SessionCookieService's Javadoc / the login response's).
+ */
+interface SessionProfile {
   userId: string;
   roles: string[];
+  email: string | null;
+  name: string | null;
+  entityId: string | null;
   expiresAt: number;
 }
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly _isAuthenticated$ = new BehaviorSubject<boolean>(
-    this._hasValidToken()
-  );
+  private readonly http = inject(HttpClient);
+  private readonly router = inject(Router);
 
-  constructor(
-    private readonly router: Router,
-    private readonly http: HttpClient
-  ) {}
+  private readonly _isAuthenticated$ = new BehaviorSubject<boolean>(false);
+  private _profile: SessionProfile | null = null;
+  private _initialized$: Observable<boolean> | null = null;
 
   isAuthenticated(): Observable<boolean> {
     return this._isAuthenticated$.asObservable();
@@ -33,74 +34,85 @@ export class AuthService {
     return this._isAuthenticated$.getValue();
   }
 
+  /**
+   * Rehydrates auth state from the session cookie via `GET /auth/session` — the token itself
+   * moved into an httpOnly cookie (no longer readable/decodable client-side), so this is now
+   * the only way to know "am I signed in, and as whom" after a hard page reload. `authGuard`
+   * calls this before the first protected navigation; cached (`shareReplay`) so repeated guard
+   * checks across a session don't refetch.
+   */
+  ensureInitialized(): Observable<boolean> {
+    if (!this._initialized$) {
+      this._initialized$ = this.http.get<SessionProfile>(`${environment.apiUrl}/auth/session`).pipe(
+        tap(profile => {
+          this._profile = profile;
+          this._isAuthenticated$.next(true);
+        }),
+        map(() => true),
+        catchError(() => {
+          this._profile = null;
+          this._isAuthenticated$.next(false);
+          return of(false);
+        }),
+        shareReplay(1),
+      );
+    }
+    return this._initialized$;
+  }
+
   loginWithCredentials(email: string, password: string): Observable<void> {
     return this.http
-      .post<LoginApiResponse>(`${environment.apiUrl}/public/auth/login`, { email, password })
+      .post<SessionProfile>(`${environment.apiUrl}/public/auth/login`, { email, password })
       .pipe(
-        tap(res => {
-          localStorage.setItem(TOKEN_KEY, res.token);
+        tap(profile => {
+          this._profile = profile;
           this._isAuthenticated$.next(true);
+          this._initialized$ = of(true); // short-circuits ensureInitialized() for this session
         }),
         map(() => void 0)
       );
   }
 
   logout(): void {
-    localStorage.removeItem(TOKEN_KEY);
+    this.http.post(`${environment.apiUrl}/public/auth/logout`, {}).subscribe({
+      next: () => this.finishLogout(),
+      error: () => this.finishLogout(), // still drop client-side state if the call itself fails (e.g. offline)
+    });
+  }
+
+  /**
+   * Drops only the browser-side view of the session. Used for a server-reported 401: calling
+   * logout() from the HTTP error interceptor would make another HTTP request through that same
+   * interceptor and can recurse indefinitely when the logout endpoint also returns 401.
+   */
+  clearSession(): void {
+    this._profile = null;
+    this._initialized$ = null;
     this._isAuthenticated$.next(false);
+  }
+
+  private finishLogout(): void {
+    this.clearSession();
     this.router.navigate(['/login']);
   }
 
-  getToken(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-  }
-
   getUserRoles(): string[] {
-    const payload = this._decodeJwtPayload(this.getToken());
-    const roles = payload?.['roles'];
-    return Array.isArray(roles) ? (roles as string[]) : [];
+    return this._profile?.roles ?? [];
   }
 
   getUserEmail(): string | null {
-    const payload = this._decodeJwtPayload(this.getToken());
-    return (payload?.['email'] as string) ?? null;
+    return this._profile?.email ?? null;
   }
 
   getUserName(): string | null {
-    const payload = this._decodeJwtPayload(this.getToken());
-    return (payload?.['name'] as string) ?? null;
+    return this._profile?.name ?? null;
   }
 
   hasRole(role: string): boolean {
     return this.getUserRoles().includes(role);
   }
 
-  private _hasValidToken(): boolean {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) return false;
-    try {
-      const payload = this._parseTokenPayload(token);
-      const now = Math.floor(Date.now() / 1000);
-      return typeof payload?.['exp'] === 'number' && (payload['exp'] as number) > now;
-    } catch {
-      return false;
-    }
-  }
-
-  private _decodeJwtPayload(token: string | null): Record<string, unknown> | null {
-    if (!token) return null;
-    return this._parseTokenPayload(token);
-  }
-
-  private _parseTokenPayload(token: string): Record<string, unknown> | null {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return null;
-      const base64Url = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64Url.padEnd(base64Url.length + ((4 - (base64Url.length % 4)) % 4), '=');
-      return JSON.parse(atob(padded)) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+  getUserId(): string | null {
+    return this._profile?.userId ?? null;
   }
 }

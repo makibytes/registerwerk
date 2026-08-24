@@ -3,6 +3,7 @@ pragma solidity ^0.8.36;
 
 import "forge-std/Test.sol";
 import "../../src/factory/AssetTokenFactory.sol";
+import "../../src/factory/AssetTokenFactoryBootstrap.sol";
 import "../../src/tokens/EwpgERC20.sol";
 import "../../src/tokens/EwpgERC721.sol";
 import "../../src/tokens/EwpgERC1155.sol";
@@ -26,6 +27,9 @@ contract AssetTokenFactoryTest is Test {
 
     function setUp() public {
         factory = new AssetTokenFactory(registryWallet);
+        vm.startPrank(registryWallet);
+        AssetTokenFactoryBootstrap.configure(factory, registryWallet);
+        vm.stopPrank();
         underlying = new MockUnderlyingAsset();
     }
 

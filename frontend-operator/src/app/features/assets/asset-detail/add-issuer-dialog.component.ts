@@ -44,8 +44,8 @@ export interface AddIssuerData {
       </form>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
-      <button mat-raised-button color="primary" [disabled]="form.invalid" (click)="submit()">Add</button>
+      <button type="button" mat-button mat-dialog-close>Cancel</button>
+      <button type="button" mat-raised-button color="primary" [disabled]="form.invalid" (click)="submit()">Add</button>
     </mat-dialog-actions>
   `,
 })

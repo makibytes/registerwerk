@@ -18,8 +18,8 @@ public interface TravelRuleGate {
      *   <li>Beneficiary wallet belongs to a known CASP/VASP → IVMS-101 message is
      *       dispatched, at any amount (TFR Art. 14–16, no de minimis).</li>
      *   <li>Self-hosted beneficiary → originator info is recorded; above EUR 1,000
-     *       (or when the EUR value is unknown) an Art. 14(5) ownership/control
-     *       verification flag is set.</li>
+     *       (or when the EUR value is unknown) execution is blocked until Art. 14(5)
+     *       ownership/control verification has been completed.</li>
      * </ul>
      *
      * @param assetId    the registry asset being transferred

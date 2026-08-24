@@ -9,23 +9,26 @@ import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
-import org.quartz.Job;
-import org.quartz.JobExecutionContext;
-import org.quartz.JobExecutionException;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Quartz job that reads asset_coupon_payment rows with status=SCHEDULED and
- * scheduled_date <= today, creates CorporateAction(type=COUPON) rows and triggers settlement.
+ * Reads asset_coupon_payment rows with status=SCHEDULED and scheduled_date &lt;= today,
+ * creates CorporateAction(type=COUPON) rows and triggers settlement.
+ *
+ * <p>Runs as a ShedLock-protected scheduled job so only one backend instance processes a due
+ * coupon cycle.
  */
 @Component
-public class CouponPaymentJob implements Job {
+public class CouponPaymentJob {
 
     private static final Logger log = LoggerFactory.getLogger(CouponPaymentJob.class);
 
@@ -50,8 +53,12 @@ public class CouponPaymentJob implements Job {
         this.assetRepository = assetRepository;
     }
 
-    @Override
-    public void execute(JobExecutionContext context) throws JobExecutionException {
+    /** Daily at 06:00 UTC — an hour and a half before BondMaturityJob's 06:30 run, so a bond
+     *  reaching maturity the same day as its last coupon has its coupon raised first. */
+    @SchedulerLock(name = "couponPaymentJob", lockAtMostFor = "PT30M")
+    @Scheduled(cron = "0 0 6 * * *")
+    @Transactional
+    public void processDuePayments() {
         LocalDate today = LocalDate.now();
         log.info("CouponPaymentJob: scanning due coupon payments for date={}", today);
 

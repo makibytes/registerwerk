@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -37,12 +37,13 @@ import { CompanyService } from '../api/company.service';
 
           <div class="field-group">
             <label for="name">Full name</label>
-            <input id="name" [(ngModel)]="name" placeholder="Jane Smith" />
+            <input id="name" [(ngModel)]="name" autocomplete="name" placeholder="Jane Smith" />
           </div>
 
           <div class="field-group">
             <label for="password">Password</label>
-            <input id="password" [type]="hidePassword ? 'password' : 'text'" [(ngModel)]="password" />
+            <input id="password" [type]="hidePassword ? 'password' : 'text'" [(ngModel)]="password" minlength="8" maxlength="200" autocomplete="new-password" />
+            <span class="field-hint">At least 8 characters.</span>
           </div>
 
           <button class="ghost-link" type="button" (click)="hidePassword = !hidePassword">
@@ -50,13 +51,13 @@ import { CompanyService } from '../api/company.service';
           </button>
 
           @if (submitError) {
-            <div class="state-box error-box compact">
+            <div class="state-box error-box compact" role="alert">
               <mat-icon>error_outline</mat-icon>
               <span>{{ submitError }}</span>
             </div>
           }
 
-          <button class="primary-btn" [disabled]="submitting || !name || !password" (click)="complete()">
+          <button class="primary-btn" type="button" [disabled]="submitting || !name.trim() || password.length < 8" (click)="complete()">
             @if (submitting) {
               <mat-spinner diameter="18"></mat-spinner>
               Finishing…
@@ -142,6 +143,7 @@ import { CompanyService } from '../api/company.service';
       border-color: rgba(45, 212, 191, 0.55);
       box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.14);
     }
+    .field-hint { color: #94a3b8; font-size: 12px; }
 
     .account-chip, .state-box {
       display: flex;
@@ -205,7 +207,7 @@ import { CompanyService } from '../api/company.service';
     .footer-copy a { color: #5eead4; text-decoration: none; }
   `]
 })
-export class RegisterAccountComponent implements OnInit {
+export class RegisterAccountComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly companyService = inject(CompanyService);
@@ -221,9 +223,15 @@ export class RegisterAccountComponent implements OnInit {
   success = false;
   error = '';
   submitError = '';
+  private redirectTimer: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
     this.token = this.route.snapshot.paramMap.get('token') ?? '';
+    if (!this.token) {
+      this.loading = false;
+      this.error = 'This registration link is invalid or has expired.';
+      return;
+    }
     this.companyService.getRegistrationInfo(this.token).subscribe({
       next: (info) => {
         this.email = info.email;
@@ -240,14 +248,16 @@ export class RegisterAccountComponent implements OnInit {
   }
 
   complete(): void {
+    const name = this.name.trim();
+    if (this.submitting || !name || this.password.length < 8) return;
     this.submitting = true;
     this.submitError = '';
-    this.companyService.completeRegistration(this.token, this.name, this.password).subscribe({
+    this.companyService.completeRegistration(this.token, name, this.password).subscribe({
       next: () => {
         this.submitting = false;
         this.success = true;
         this.cdr.detectChanges();
-        setTimeout(() => this.router.navigate(['/login']), 2000);
+        this.redirectTimer = setTimeout(() => this.router.navigate(['/login']), 2000);
       },
       error: (err) => {
         this.submitting = false;
@@ -255,5 +265,9 @@ export class RegisterAccountComponent implements OnInit {
         this.cdr.detectChanges();
       }
     });
+  }
+
+  ngOnDestroy(): void {
+    if (this.redirectTimer) clearTimeout(this.redirectTimer);
   }
 }

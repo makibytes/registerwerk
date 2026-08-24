@@ -33,6 +33,10 @@ export class WalletService {
     return this.http.post<OperatorWallet>(`${this.base}/import-keystore`, form);
   }
 
+  attachHsm(name: string, keyAlias: string, address: string): Observable<OperatorWallet> {
+    return this.http.post<OperatorWallet>(`${this.base}/attach-hsm`, { name, keyAlias, address });
+  }
+
   exportKeystore(walletId: string, password: string): Observable<Blob> {
     return this.http.post(`${this.base}/${walletId}/export-keystore`, { password }, { responseType: 'blob' });
   }

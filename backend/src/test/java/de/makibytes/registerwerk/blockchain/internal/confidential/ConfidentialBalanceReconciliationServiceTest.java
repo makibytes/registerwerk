@@ -58,7 +58,7 @@ class ConfidentialBalanceReconciliationServiceTest {
 
     private static final UUID ASSET_ID = UUID.randomUUID();
     // ConfidentialERC20.decimals() = 6 — decrypted on-chain amounts are raw base units; register's
-    // nominalAmount is already human-readable. Finding #3, Phase 9: reconcileOne must scale before
+    // nominalAmount is already human-readable. : reconcileOne must scale before
     // comparing, so test mocks must supply realistically-scaled raw values, not bare unit counts.
     private static final BigInteger SCALE = BigInteger.TEN.pow(6);
 
@@ -236,7 +236,7 @@ class ConfidentialBalanceReconciliationServiceTest {
     }
 
     @Test
-    @DisplayName("finding #7: reconcileAll() skips the sweep entirely when the relayer isn't configured")
+    @DisplayName("reconcileAll() skips the sweep entirely when the relayer isn't configured")
     void reconcileAll_skipsWhenRelayerNotConfigured() {
         when(zamaRelayerClient.isConfigured()).thenReturn(false);
 
@@ -246,7 +246,7 @@ class ConfidentialBalanceReconciliationServiceTest {
     }
 
     @Test
-    @DisplayName("finding #7: reconcileAll() reconciles every confidential asset and skips non-confidential ones")
+    @DisplayName("reconcileAll() reconciles every confidential asset and skips non-confidential ones")
     void reconcileAll_reconcilesOnlyConfidentialAssets() {
         when(zamaRelayerClient.isConfigured()).thenReturn(true);
 
@@ -276,7 +276,7 @@ class ConfidentialBalanceReconciliationServiceTest {
     }
 
     @Test
-    @DisplayName("finding #7: reconcileAll() doesn't let one asset's failure abort the sweep")
+    @DisplayName("reconcileAll() doesn't let one asset's failure abort the sweep")
     void reconcileAll_oneAssetFailureDoesNotAbortSweep() {
         when(zamaRelayerClient.isConfigured()).thenReturn(true);
         var confAsset = new AssetLookupPort.AssetInfo(
@@ -301,7 +301,7 @@ class ConfidentialBalanceReconciliationServiceTest {
     }
 
     @Test
-    @DisplayName("gauges reflect mismatch count and last-run timestamp after a run (repo-wide alerting follow-up)")
+    @DisplayName("gauges reflect mismatch count and last-run timestamp after a run (alerting metrics)")
     void reconcile_updatesMismatchAndTimestampGauges() {
         stubConfidentialAsset(TokenStandard.CONF_ERC3643);
         when(zamaRelayerClient.isConfigured()).thenReturn(true);

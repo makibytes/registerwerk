@@ -41,7 +41,7 @@ import { AddressComponent } from '../address.component';
             <ng-container matColumnDef="percentage">
               <th mat-header-cell *matHeaderCellDef>Share %</th>
               <td mat-cell *matCellDef="let holder">
-                {{ (holder.tokenBalance / totalSupply * 100) | number:'1.0-2' }}%
+                {{ holderShare(holder.tokenBalance) | number:'1.0-2' }}%
               </td>
             </ng-container>
 
@@ -183,11 +183,22 @@ import { AddressComponent } from '../address.component';
   `],
 })
 export class HolderTableComponent {
-  @Input() holders: LiveHolder[] = [];
+  private holderRows: LiveHolder[] = [];
+
+  @Input()
+  set holders(value: LiveHolder[]) {
+    this.holderRows = value ?? [];
+    this.totalSupply = this.holderRows.reduce((sum, holder) => sum + holder.tokenBalance, 0);
+  }
+
+  get holders(): LiveHolder[] {
+    return this.holderRows;
+  }
 
   displayedColumns: string[] = ['wallet', 'balance', 'percentage', 'status'];
+  totalSupply = 0;
 
-  get totalSupply(): number {
-    return this.holders.reduce((sum, h) => sum + h.tokenBalance, 0);
+  holderShare(balance: number): number {
+    return this.totalSupply > 0 ? balance / this.totalSupply * 100 : 0;
   }
 }

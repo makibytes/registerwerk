@@ -1,31 +1,41 @@
 package de.makibytes.registerwerk.asset.api;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
+import de.makibytes.registerwerk.customer.api.KnowledgeExperienceLevel;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.deployment.api.EntryType;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "asset")
@@ -94,12 +104,72 @@ public class Asset {
     @Column(name = "termsheet_doc_id")
     private UUID termsheetDocId;
 
+    /**
+     * ISO-4217 currency code (e.g. "EUR"). Distinct from {@code AssetBondTerms.currencyIso},
+     * which only exists for bond-standard assets and is entered separately through the
+     * bond-terms flow — this field applies to every token standard, since even a non-bond
+     * asset (an ERC-1155 fund share, an ERC-3643 equity token) needs a denomination currency
+     * for statements, valuation, and tax reporting to have anything to work from.
+     */
+    @Column(length = 3)
+    private String currency;
+
+    /** Total nominal issuance amount, in {@link #currency}. Null until set by the issuer. */
+    @Column(name = "issue_size", precision = 38, scale = 8)
+    private BigDecimal issueSize;
+
+    /** Minimum tradable/transferable unit, in {@link #currency}. Null until set by the issuer. */
+    @Column(precision = 38, scale = 8)
+    private BigDecimal denomination;
+
+    @Column(name = "issue_date")
+    private LocalDate issueDate;
+
+    /** Null for perpetual/equity-like instruments with no fixed maturity. */
+    @Column(name = "maturity_date")
+    private LocalDate maturityDate;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "public_data", columnDefinition = "jsonb")
     private Map<String, Object> publicData;
 
     @Column(name = "last_holder_sync_time")
     private Instant lastHolderSyncTime;
+
+    /**
+     * MiFID II target market (product governance) — which client categories this asset may be
+     * distributed to. Empty means unrestricted (backward-compatible default: existing assets and
+     * demo data predate this field and must not suddenly become un-subscribable). Checked by
+     * {@link #isEligibleForTargetMarket}, called from both the primary-market subscription flow
+     * and secondary-market trade settlement.
+     */
+    @ElementCollection(targetClass = ClientCategory.class)
+    // AssetResponse includes this collection. AssetService initializes it while its read
+    // transaction is open; batch fetching keeps a paginated asset response from becoming an
+    // N+1 query when the controller maps detached entities with open-in-view disabled.
+    @BatchSize(size = 50)
+    @CollectionTable(name = "asset_target_market_category", joinColumns = @JoinColumn(name = "asset_id"))
+    @Enumerated(EnumType.STRING)
+    @Column(name = "client_category", nullable = false, length = 30)
+    private Set<ClientCategory> targetMarketCategories = new LinkedHashSet<>();
+
+    /** Minimum investor knowledge/experience this asset's target market requires. Null = no
+     *  minimum. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "target_market_min_experience", length = 20)
+    private KnowledgeExperienceLevel targetMarketMinExperience;
+
+    /**
+     * Default per-investor minimum subscription/acquisition amount and maximum total holding
+     * (F-BLOCKER-12) — null means unrestricted. A specific investor's effective limits are these
+     * defaults unless overridden by an {@code InvestorLimit} row for that investor (e.g. a
+     * negotiated cornerstone-investor exception).
+     */
+    @Column(name = "min_investment_amount", precision = 38, scale = 8)
+    private BigDecimal minInvestmentAmount;
+
+    @Column(name = "max_holding_amount", precision = 38, scale = 8)
+    private BigDecimal maxHoldingAmount;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -155,6 +225,21 @@ public class Asset {
     public UUID getTermsheetDocId() { return termsheetDocId; }
     public void setTermsheetDocId(UUID termsheetDocId) { this.termsheetDocId = termsheetDocId; }
 
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
+
+    public BigDecimal getIssueSize() { return issueSize; }
+    public void setIssueSize(BigDecimal issueSize) { this.issueSize = issueSize; }
+
+    public BigDecimal getDenomination() { return denomination; }
+    public void setDenomination(BigDecimal denomination) { this.denomination = denomination; }
+
+    public LocalDate getIssueDate() { return issueDate; }
+    public void setIssueDate(LocalDate issueDate) { this.issueDate = issueDate; }
+
+    public LocalDate getMaturityDate() { return maturityDate; }
+    public void setMaturityDate(LocalDate maturityDate) { this.maturityDate = maturityDate; }
+
     public Map<String, Object> getPublicData() { return publicData; }
     public void setPublicData(Map<String, Object> publicData) { this.publicData = publicData; }
 
@@ -163,4 +248,41 @@ public class Asset {
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+
+    public Set<ClientCategory> getTargetMarketCategories() { return targetMarketCategories; }
+    public void setTargetMarketCategories(Set<ClientCategory> targetMarketCategories) {
+        this.targetMarketCategories = targetMarketCategories != null ? targetMarketCategories : new LinkedHashSet<>();
+    }
+
+    public KnowledgeExperienceLevel getTargetMarketMinExperience() { return targetMarketMinExperience; }
+    public void setTargetMarketMinExperience(KnowledgeExperienceLevel targetMarketMinExperience) {
+        this.targetMarketMinExperience = targetMarketMinExperience;
+    }
+
+    public BigDecimal getMinInvestmentAmount() { return minInvestmentAmount; }
+    public void setMinInvestmentAmount(BigDecimal minInvestmentAmount) { this.minInvestmentAmount = minInvestmentAmount; }
+
+    public BigDecimal getMaxHoldingAmount() { return maxHoldingAmount; }
+    public void setMaxHoldingAmount(BigDecimal maxHoldingAmount) { this.maxHoldingAmount = maxHoldingAmount; }
+
+    /**
+     * True if an investor with the given classification/experience is within this asset's
+     * target market. An unrestricted asset (no categories configured) admits everyone —
+     * existing/demo assets predate this field and must keep working. A restricted asset rejects
+     * an investor with no {@code investorCategory} at all (unclassified), since "not yet
+     * classified" can never satisfy a positive target-market requirement.
+     */
+    public boolean isEligibleForTargetMarket(ClientCategory investorCategory, KnowledgeExperienceLevel investorExperience) {
+        if (!targetMarketCategories.isEmpty()) {
+            if (investorCategory == null || !targetMarketCategories.contains(investorCategory)) {
+                return false;
+            }
+        }
+        if (targetMarketMinExperience != null) {
+            if (investorExperience == null || investorExperience.compareTo(targetMarketMinExperience) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

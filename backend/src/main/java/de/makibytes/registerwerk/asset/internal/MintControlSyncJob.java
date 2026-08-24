@@ -81,6 +81,27 @@ public class MintControlSyncJob {
         log.info("MintControlSyncJob: scan complete");
     }
 
+    /** Runs a bounded refresh for the deployment named by the REST resource. */
+    public void syncDeployment(UUID deploymentId) {
+        AssetDeployment deployment = assetDeploymentRepository.findById(deploymentId)
+                .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException(
+                        "AssetDeployment", deploymentId));
+        if (deployment.getDeploymentStatus() != AssetDeployment.DeploymentStatus.CONFIRMED
+                || deployment.getContractAddress() == null || deployment.getContractAddress().isBlank()) {
+            throw new IllegalStateException("Mint-control sync requires a confirmed deployment with a contract address");
+        }
+        ChainDescriptor descriptor = new ChainDescriptor(deployment.getChain(), deployment.getNetwork());
+        Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
+        try {
+            BigInteger latestBlock = web3j.ethBlockNumber().send().getBlockNumber();
+            String chainKey = descriptor.chain().name() + "_" + descriptor.network().name();
+            BigInteger fromBlock = lastScannedBlock.getOrDefault(chainKey, BigInteger.ZERO);
+            scanDeployment(web3j, deployment, fromBlock, latestBlock);
+        } catch (Exception e) {
+            throw new IllegalStateException("Mint-control sync failed for deployment " + deploymentId, e);
+        }
+    }
+
     private void scanChain(Web3j web3j, String chainKey, ChainDescriptor descriptor) throws Exception {
         BigInteger fromBlock = lastScannedBlock.getOrDefault(chainKey, BigInteger.ZERO);
         List<AssetDeployment> confirmed = assetDeploymentRepository

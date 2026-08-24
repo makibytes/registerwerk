@@ -65,7 +65,8 @@ class StellarTransferSyncServiceTest {
     void setUp() {
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         service = new StellarTransferSyncService(chainConfigRepository, indexerStateRepository,
-                tokenTransferRepository, assetDeploymentRepository, explorerUrlBuilder, restClientBuilder);
+                tokenTransferRepository, assetDeploymentRepository, explorerUrlBuilder, restClientBuilder,
+                io.github.resilience4j.bulkhead.BulkheadRegistry.ofDefaults());
         assetCode = StellarUtils.deriveAssetCode(assetId);
     }
 
@@ -136,7 +137,7 @@ class StellarTransferSyncServiceTest {
     }
 
     @Test
-    @DisplayName("finding #14: occurred_at uses Horizon's real created_at, not processing time")
+    @DisplayName("occurred_at uses Horizon's real created_at, not processing time")
     void syncChain_usesHorizonCreatedAt_notProcessingTime() {
         stubEmptyIndexerState();
         ChainConfig chain = stellarChain();

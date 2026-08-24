@@ -2,7 +2,6 @@
   "extends": "../frontend-shared/tsconfig.base.json",
   "compileOnSave": false,
   "compilerOptions": {
-    "baseUrl": "./",
     "paths": {
       "@registerwerk/ui": ["../frontend-shared/projects/ui/src/public-api.ts"]
     },

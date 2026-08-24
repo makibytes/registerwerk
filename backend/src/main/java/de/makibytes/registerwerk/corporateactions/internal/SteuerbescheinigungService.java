@@ -8,6 +8,10 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryReposi
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
+import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -63,6 +67,7 @@ public class SteuerbescheinigungService {
     private final AssetRepository assetRepository;
     private final LegalEntityRepository entityRepository;
     private final DocumentSigningService signingService;
+    private final FinalityGate finalityGate;
     private final String operatorName;
     private final String operatorTaxId;
 
@@ -71,6 +76,7 @@ public class SteuerbescheinigungService {
                                 AssetRepository assetRepository,
                                 LegalEntityRepository entityRepository,
                                 DocumentSigningService signingService,
+                                FinalityGate finalityGate,
                                 @Value("${registerwerk.operator.name:}") String operatorName,
                                 @Value("${registerwerk.operator.tax-id:}") String operatorTaxId) {
         this.entryRepository = entryRepository;
@@ -78,6 +84,7 @@ public class SteuerbescheinigungService {
         this.assetRepository = assetRepository;
         this.entityRepository = entityRepository;
         this.signingService = signingService;
+        this.finalityGate = finalityGate;
         this.operatorName = operatorName;
         this.operatorTaxId = operatorTaxId;
     }
@@ -131,6 +138,14 @@ public class SteuerbescheinigungService {
 
         Map<UUID, Asset> assetById = assetRepository.findAllById(grossByAsset.keySet()).stream()
                 .collect(Collectors.toMap(Asset::getId, Function.identity()));
+
+        // A tax certificate spans multiple assets, so GatedOperation#TAX_CERTIFICATE_ISSUE is
+        // checked per distinct assetId rather than once for the whole document — there is
+        // nothing meaningful a single call could pass.
+        for (UUID assetId : grossByAsset.keySet()) {
+            TokenStandard standard = assetById.containsKey(assetId) ? assetById.get(assetId).getTokenStandard() : null;
+            finalityGate.require(GatedOperation.TAX_CERTIFICATE_ISSUE, assetId, standard, FinalityLevel.FINALIZED);
+        }
 
         return grossByAsset.entrySet().stream()
                 .map(e -> new IncomeLine(assetById.get(e.getKey()), e.getValue()))

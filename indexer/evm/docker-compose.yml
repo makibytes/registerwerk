@@ -1,5 +1,3 @@
-version: "3.9"
-
 # The Graph — self-hosted graph-node for all EVM chains.
 # One graph-node instance can serve multiple networks simultaneously.
 # Add a new chain: set ETHEREUM_RPC / POLYGON_RPC / etc. and re-deploy the subgraph.

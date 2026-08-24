@@ -32,5 +32,7 @@ public record InvestmentResponse(
     Instant createdAt,
     Instant updatedAt,
     String externalId,
-    Chain chain
+    Chain chain,
+    String currency,
+    BigDecimal denomination
 ) {}

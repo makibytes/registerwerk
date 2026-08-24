@@ -12,4 +12,6 @@ public interface MintControlRuleRepository extends JpaRepository<MintControlRule
     List<MintControlRule> findByAssetDeploymentIdAndActive(UUID deploymentId, boolean active);
 
     Optional<MintControlRule> findByAssetDeploymentIdAndTargetAddress(UUID deploymentId, String targetAddress);
+
+    Optional<MintControlRule> findByIdAndAssetDeploymentId(UUID id, UUID deploymentId);
 }

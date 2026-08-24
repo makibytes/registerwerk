@@ -22,6 +22,9 @@ public interface LegalEntityRepository extends JpaRepository<LegalEntity, UUID> 
 
     Optional<LegalEntity> findByEntityNumber(String entityNumber);
 
+    /** "My clients" — entities currently assigned to a relationship manager (F-BLOCKER-15). */
+    List<LegalEntity> findByAssignedRelationshipManagerId(UUID relationshipManagerId);
+
     /** KYC monitoring: approved entities whose KYC has expired on/before the given date. */
     List<LegalEntity> findByKycStatusAndKycExpiryDateLessThanEqual(KycStatus kycStatus, LocalDate date);
 

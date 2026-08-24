@@ -17,8 +17,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.security.SecureRandom;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -150,16 +148,9 @@ class StellarAssetServiceTest {
         when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STELLAR))
                 .thenReturn(List.of());
 
-        CompletableFuture<StellarAssetService.StellarDeployment> future = stellarAssetService.createStellarAsset(
-                UUID.randomUUID(), Network.TESTNET, "");
-
-        assertThatThrownBy(() -> {
-            try {
-                future.get();
-            } catch (ExecutionException ex) {
-                throw ex.getCause();
-            }
-        }).isInstanceOf(IllegalStateException.class)
+        assertThatThrownBy(() -> stellarAssetService.createStellarAsset(
+                UUID.randomUUID(), Network.TESTNET, ""))
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No enabled Stellar chain config");
     }
 
@@ -173,16 +164,9 @@ class StellarAssetServiceTest {
         when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STELLAR))
                 .thenReturn(List.of(mainnetConfig));
 
-        CompletableFuture<StellarAssetService.StellarDeployment> future = stellarAssetService.createStellarAsset(
-                UUID.randomUUID(), Network.TESTNET, "");
-
-        assertThatThrownBy(() -> {
-            try {
-                future.get();
-            } catch (ExecutionException ex) {
-                throw ex.getCause();
-            }
-        }).isInstanceOf(IllegalStateException.class)
+        assertThatThrownBy(() -> stellarAssetService.createStellarAsset(
+                UUID.randomUUID(), Network.TESTNET, ""))
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No enabled Stellar chain config for TESTNET");
     }
 }

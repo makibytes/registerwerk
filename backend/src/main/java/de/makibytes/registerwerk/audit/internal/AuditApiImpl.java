@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -45,6 +46,14 @@ class AuditApiImpl implements AuditApi {
     }
 
     @Override
+    public Page<AuditEventView> findFiltered(
+            String subjectType, UUID subjectId, String eventType, UUID actorId,
+            Instant from, Instant to, Pageable pageable) {
+        return repository.findFiltered(subjectType, subjectId, eventType, actorId, from, to, pageable)
+                .map(this::toView);
+    }
+
+    @Override
     public Optional<AuditEventView> findById(UUID id) {
         return repository.findById(id).map(this::toView);
     }
@@ -52,6 +61,14 @@ class AuditApiImpl implements AuditApi {
     @Override
     public Page<AuditEventView> findKycOverrideApprovals(String jurisdiction, Instant from, Instant to, Pageable pageable) {
         return repository.findKycOverrideApprovals(jurisdiction, from, to, pageable).map(this::toView);
+    }
+
+    @Override
+    public List<AuditEventView> findForExport(
+            String subjectType, UUID subjectId, String eventType, UUID actorId,
+            Instant from, Instant to, Pageable pageable) {
+        return repository.findForExport(subjectType, subjectId, eventType, actorId, from, to, pageable)
+                .stream().map(this::toView).toList();
     }
 
     @Override
@@ -70,6 +87,11 @@ class AuditApiImpl implements AuditApi {
 
     private AuditEventView toView(AuditEvent e) {
         return new AuditEventView(e.getId(), e.getEventType(), e.getSubjectType(), e.getSubjectId(),
-                e.getActorId(), e.getActorRole(), e.getPayload(), e.getOccurredAt());
+                e.getActorId(), e.getActorRole(), e.getPayload(), e.getOccurredAt(),
+                e.getSequenceNo(), hex(e.getEntryHash()), hex(e.getEntrySig()));
+    }
+
+    private static String hex(byte[] bytes) {
+        return bytes == null ? null : java.util.HexFormat.of().formatHex(bytes);
     }
 }

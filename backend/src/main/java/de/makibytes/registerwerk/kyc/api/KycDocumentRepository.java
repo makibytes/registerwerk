@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface KycDocumentRepository extends JpaRepository<KycDocument, UUID> {
@@ -16,4 +17,6 @@ public interface KycDocumentRepository extends JpaRepository<KycDocument, UUID> 
 
     List<KycDocument> findByLegalEntityIdAndJurisdictionAndDeletedAtIsNull(
         UUID entityId, Jurisdiction jurisdiction);
+
+    Optional<KycDocument> findByIdAndLegalEntityIdAndDeletedAtIsNull(UUID id, UUID entityId);
 }

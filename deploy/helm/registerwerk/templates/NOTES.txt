@@ -20,9 +20,28 @@ failing the install itself.
        --from-literal=MAIL_PASSWORD=... \
        --from-literal=DEFAULT_ADMIN_EMAIL=... \
        --from-literal=DEFAULT_ADMIN_PASSWORD=... \
-       --from-literal=WALLETS_BACKUP_RESTIC_PASSWORD=...
+       --from-literal=WALLETS_BACKUP_RESTIC_PASSWORD=... \
+       --from-literal=CHAINCACHE_JWT_SECRET=...
+{{- if .Values.chaincache.enabled }}
+
+1a. chaincache.enabled is "true" — CHAINCACHE_JWT_SECRET above must match the
+   chaincache.jwt.secret every chaincache workload in {{ .Values.chaincache.namespace }} was
+   installed with (see chaincache/deploy/helm/chaincache's own "shared.jwt" values). Registerwerk
+   does not deploy chaincache itself — it is chart'd and installed independently, once per chain,
+   from that separate chart.
+{{- end }}
 
    See templates/secret.yaml for the full ExternalSecret reference.
+{{- if .Values.zamaRelayer.enabled }}
+
+1b. zamaRelayer.enabled is "true" — also create the "{{ .Values.zamaRelayer.existingSecret }}" Secret.
+   The zama-relayer Deployment and the backend Deployment's REGISTERWERK_ZAMA_RELAYER_API_KEY both
+   read from this same Secret (see templates/secret.yaml's own comment for why they must):
+
+     kubectl create secret generic {{ .Values.zamaRelayer.existingSecret }} -n {{ .Release.Namespace }} \
+       --from-literal=OPERATOR_DECRYPT_PRIVATE_KEY=... \
+       --from-literal=RELAYER_API_KEY=...
+{{- end }}
 
 2. Configure a production KEK provider for the wallet-keystore volume.
    REGISTERWERK_PRODUCTION_MODE is "{{ .Values.env.REGISTERWERK_PRODUCTION_MODE }}" — if true,

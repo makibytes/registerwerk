@@ -1,7 +1,5 @@
 ---
-id: wallet-setup
 title: Wallet Setup
-sidebar_label: Wallet Setup
 ---
 
 # Wallet Setup
@@ -20,9 +18,9 @@ The eWpG Registry supports any self-custody wallet that can produce EIP-712 sign
 | Phantom | Browser extension / mobile | Solana (and EVM) |
 | Rabby | Browser extension | All EVM networks |
 
-:::tip
-For institutional use, hardware wallets (Ledger, Trezor) are strongly recommended. They keep your private key offline and require physical confirmation for every transaction.
-:::
+!!! tip
+    For institutional use, hardware wallets (Ledger, Trezor) are strongly recommended. They keep your private key offline and require physical confirmation for every transaction.
+
 
 ## Connecting a wallet
 
@@ -77,6 +75,6 @@ Solana wallet addresses use a different format (base58) from EVM wallets. The po
 - Back up your seed phrase in a secure, offline location
 - For significant holdings, use a hardware wallet
 
-:::warning
-The registry operator will never ask for your private key or seed phrase. If someone claiming to be from the registry asks for this information, it is a scam — do not comply and report it immediately.
-:::
+!!! warning
+    The registry operator will never ask for your private key or seed phrase. If someone claiming to be from the registry asks for this information, it is a scam — do not comply and report it immediately.
+

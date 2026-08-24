@@ -16,18 +16,33 @@ public final class SecurityUtils {
     private SecurityUtils() {}
 
     public static boolean isAdminOrAudit(Authentication auth) {
+        if (auth == null) return false;
         return auth.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals("ROLE_REGISTRY_ADMIN")
                         || a.getAuthority().equals("ROLE_AUDIT"));
     }
 
+    /** Operator staff (registry-side) vs. customer-side (issuer/investor/trader/etc.) — the split
+     *  {@code indexer.web.TokenTransferMapper} uses to decide technical vs. plain-language finality
+     *  vocabulary. Deliberately excludes {@code ISSUER}: an issuer is a customer role even though
+     *  they manage their own asset, per CLAUDE.md's "two user groups" split. */
+    public static boolean isTechnicalRole(Authentication auth) {
+        if (auth == null) return false;
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_REGISTRY_ADMIN")
+                        || a.getAuthority().equals("ROLE_AUDIT")
+                        || a.getAuthority().equals("ROLE_COMPLIANCE_OFFICER")
+                        || a.getAuthority().equals("ROLE_RELATIONSHIP_MANAGER"));
+    }
+
     /** Returns true when the token was minted by the impersonation flow ({@code imp: true}). */
     public static boolean isImpersonatingAdmin(Authentication auth) {
-        if (!(auth.getPrincipal() instanceof Jwt jwt)) return false;
+        if (auth == null || !(auth.getPrincipal() instanceof Jwt jwt)) return false;
         return Boolean.TRUE.equals(jwt.getClaimAsBoolean("imp"));
     }
 
     public static UUID extractEntityId(Authentication auth) {
+        if (auth == null) return null;
         if (!(auth.getPrincipal() instanceof Jwt jwt)) return null;
         String id = claim(jwt, "entity_id", "entityId");
         if (id == null) return null;
@@ -46,11 +61,13 @@ public final class SecurityUtils {
     }
 
     public static String extractEmail(Authentication auth) {
+        if (auth == null) return null;
         if (!(auth.getPrincipal() instanceof Jwt jwt)) return null;
         return claim(jwt, "email", "preferred_username", "upn");
     }
 
     public static String extractDisplayName(Authentication auth) {
+        if (auth == null) return null;
         if (!(auth.getPrincipal() instanceof Jwt jwt)) return null;
         return claim(jwt, "name", "preferred_username", "email");
     }

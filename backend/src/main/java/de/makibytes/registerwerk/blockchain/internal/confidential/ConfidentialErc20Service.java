@@ -18,7 +18,7 @@ import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
@@ -72,7 +72,7 @@ public class ConfidentialErc20Service {
             String factoryAddress = contractAddressConfig.requireConfidentialFactory(chainId);
 
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
-            Credentials creds = evmContractService.credentials(chain);
+            EvmSigner signer = evmContractService.signer(chain);
 
             byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
 
@@ -83,8 +83,15 @@ public class ConfidentialErc20Service {
                     .map(Address::new)
                     .collect(Collectors.toList());
             if (initialViewers.isEmpty()) {
-                log.warn("No confidential viewers configured for chain={} — deploying assetId={} with no "
-                        + "operator/auditor decrypt access until addViewer is called explicitly.", chainId, assetId);
+                // Fail closed : deploying anyway would create a live register
+                // entry nobody at the operator can ever decrypt — reconciliation, Travel Rule
+                // screening, and regulator disclosure would all be permanently blind to it until
+                // someone notices and calls addViewer, which nothing prompts them to do.
+                throw new IllegalStateException(
+                        "No confidential viewers configured for chain=" + chainId + " (registerwerk.contracts."
+                        + "confidential-operator-viewer." + chainId + " / confidential-auditor-viewer." + chainId
+                        + "). Refusing to deploy assetId=" + assetId
+                        + " with no operator/auditor decrypt access — configure at least one viewer first.");
             }
 
             Function deploy = new Function(
@@ -98,7 +105,8 @@ public class ConfidentialErc20Service {
                     Collections.singletonList(new TypeReference<Address>() {})
             );
 
-            TransactionReceipt receipt = evmContractService.send(web3j, creds, factoryAddress, deploy);
+            TransactionReceipt receipt = evmContractService.send(
+                    evmContractService.chainConfigId(chain), web3j, signer, factoryAddress, deploy);
 
             String tokenAddress = ConfidentialTokenEvents.extractTokenAddress(receipt);
             log.info("Confidential ERC-20 deployed: assetId={} → tokenAddress={} tx={}",

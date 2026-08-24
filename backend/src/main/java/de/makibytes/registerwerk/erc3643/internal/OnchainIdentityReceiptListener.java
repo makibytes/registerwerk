@@ -1,17 +1,22 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
+import de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
+import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
+import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
+import de.makibytes.registerwerk.finality.api.CompensationCategory;
+import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.scheduling.annotation.Scheduled;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.EthGetTransactionReceipt;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
@@ -35,19 +40,27 @@ class OnchainIdentityReceiptListener {
     private final OnchainIdentityRepository identityRepository;
     private final ChainConfigRepository chainConfigRepository;
     private final BlockchainClientRegistry clientRegistry;
+    private final EvmFinalityResolver finalityResolver;
+    private final ChainEffectRecorder chainEffectRecorder;
+    private final IsolatedTransactionExecutor isolatedTransactions;
 
     OnchainIdentityReceiptListener(
             OnchainIdentityRepository identityRepository,
             ChainConfigRepository chainConfigRepository,
-            BlockchainClientRegistry clientRegistry) {
+            BlockchainClientRegistry clientRegistry,
+            EvmFinalityResolver finalityResolver,
+            ChainEffectRecorder chainEffectRecorder,
+            IsolatedTransactionExecutor isolatedTransactions) {
         this.identityRepository = identityRepository;
         this.chainConfigRepository = chainConfigRepository;
         this.clientRegistry = clientRegistry;
+        this.finalityResolver = finalityResolver;
+        this.chainEffectRecorder = chainEffectRecorder;
+        this.isolatedTransactions = isolatedTransactions;
     }
 
     @SchedulerLock(name = "onchainIdentityReceiptListener", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
-    @Scheduled(fixedDelay = 30_000)
-    @Transactional
+    @Scheduled(fixedDelay = 30_000, initialDelay = 25_000)
     public void resolvePendingIdentities() {
         // Indexed prefix query — this poller runs every 30s; a full-table scan
         // with in-memory filtering would grow linearly with the identity count.
@@ -59,7 +72,7 @@ class OnchainIdentityReceiptListener {
 
         for (OnchainIdentity identity : pending) {
             try {
-                resolveIdentity(identity);
+                isolatedTransactions.run(() -> resolveIdentity(identity));
             } catch (Exception e) {
                 log.warn("Failed to resolve pending identity={}: {}", identity.getId(), e.getMessage());
             }
@@ -95,13 +108,31 @@ class OnchainIdentityReceiptListener {
             return;
         }
 
+        // Consult the chain's configured FinalityModel rather than accepting the first mined
+        // receipt: a reorg that un-mines this deployment must not leave the register asserting
+        // an identity address the chain has since abandoned. Stay pending (recheck next tick)
+        // rather than resolve on a shallow/unconfirmed receipt.
+        long blockNumber = receipt.getBlockNumber().longValueExact();
+        boolean isFinal = finalityResolver.levelOf(chainConfig.getIdentifier(), web3j, blockNumber)
+                .atLeast(FinalityLevel.FINALIZED);
+        if (!isFinal) {
+            return;
+        }
+
         String realAddress = extractIdentityAddress(receipt);
         if (realAddress == null) return;
 
         identity.setIdentityAddress(realAddress);
+        identity.setDeployedBlockNumber(blockNumber);
+        identity.setDeployedBlockHash(receipt.getBlockHash());
         identityRepository.save(identity);
         log.info("Resolved ONCHAINID identity={} address={} tx={}",
                 identity.getId(), realAddress, identity.getDeployedByTx());
+
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
+                identity.getChainConfigId(), blockNumber, receipt.getBlockHash(), identity.getDeployedByTx(),
+                "erc3643", OnchainIdentityRevertCompensator.EFFECT_TYPE, "OnchainIdentity", identity.getId(), null,
+                CompensationCategory.INVERSE_FLIP));
     }
 
     private static String extractIdentityAddress(TransactionReceipt receipt) {

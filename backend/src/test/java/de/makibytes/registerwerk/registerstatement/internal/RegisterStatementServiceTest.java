@@ -66,11 +66,13 @@ class RegisterStatementServiceTest {
     private final EmailPort emailPort = mock(EmailPort.class);
     private final DocumentSigningService signingService = mock(DocumentSigningService.class);
     private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+    private final de.makibytes.registerwerk.finality.api.FinalityGate finalityGate =
+            mock(de.makibytes.registerwerk.finality.api.FinalityGate.class);
 
     private RegisterStatementService newService() {
         return new RegisterStatementService(statementRepository, holderRepository, assetRepository,
                 entityRepository, userRepository, blockRepository, bondTermsRepository, documentRepository,
-                jurisdictionConfig, emailPort, signingService, eventPublisher, "Test Registry", "DE");
+                jurisdictionConfig, emailPort, signingService, eventPublisher, finalityGate, "Test Registry", "DE");
     }
 
     private AssetHolder holder(EntryType entryType, boolean consumer) {
@@ -155,6 +157,60 @@ class RegisterStatementServiceTest {
         assertThat(result).isPresent();
         assertThat(result.get().getDeliveryStatus()).isEqualTo(DeliveryStatus.DELIVERED);
         assertThat(result.get().getContentHash()).startsWith("0x");
+    }
+
+    @Test
+    @DisplayName("a chain-derived holder's issuance is gated: FinalityGate.require is called with REGISTER_STATEMENT_ISSUE")
+    void chainDerivedHolder_callsFinalityGate() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+        h.setChainDerived(true);
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        wireSupportingData(h);
+        when(emailPort.sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn(true);
+
+        newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL);
+
+        verify(finalityGate).require(
+                de.makibytes.registerwerk.finality.api.GatedOperation.REGISTER_STATEMENT_ISSUE,
+                h.getAssetId(), null, de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED);
+    }
+
+    @Test
+    @DisplayName("a non-chain-derived (manually maintained) holder's issuance never consults the gate")
+    void nonChainDerivedHolder_neverCallsFinalityGate() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true); // chainDerived defaults to false
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        wireSupportingData(h);
+        when(emailPort.sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn(true);
+
+        newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL);
+
+        verify(finalityGate, never()).require(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a FinalityGate rejection propagates and the statement is never persisted")
+    void financeGateBlocked_propagatesAndSkipsPersistence() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+        h.setChainDerived(true);
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        wireSupportingData(h);
+        org.mockito.Mockito.doThrow(new de.makibytes.registerwerk.finality.api.FinalityNotReachedException(
+                        new de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked(
+                                de.makibytes.registerwerk.finality.api.GatedOperation.REGISTER_STATEMENT_ISSUE,
+                                h.getAssetId(), de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED,
+                                de.makibytes.registerwerk.finality.api.FinalityLevel.SAFE,
+                                de.makibytes.registerwerk.finality.api.FinalityDecision.Blocked.Reason.BELOW_REQUIRED,
+                                "not yet final")))
+                .when(finalityGate).require(any(), any(), any(), any());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL))
+                .isInstanceOf(de.makibytes.registerwerk.finality.api.FinalityNotReachedException.class);
+
+        verify(statementRepository, never()).save(any());
     }
 
     @Test
@@ -330,7 +386,7 @@ class RegisterStatementServiceTest {
     }
 
     @Test
-    @DisplayName("issueForHolder publishes RegisterStatementIssuedEvent (finding #9)")
+    @DisplayName("issueForHolder publishes RegisterStatementIssuedEvent")
     void issueForHolderPublishesAuditEvent() {
         AssetHolder h = holder(EntryType.INDIVIDUAL, true);
         when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
@@ -348,7 +404,7 @@ class RegisterStatementServiceTest {
     }
 
     @Test
-    @DisplayName("renderForDownload publishes RegisterStatementIssuedEvent for a newly logged issuance (finding #9)")
+    @DisplayName("renderForDownload publishes RegisterStatementIssuedEvent for a newly logged issuance")
     void renderForDownloadPublishesAuditEvent() {
         AssetHolder h = holder(EntryType.INDIVIDUAL, false);
         when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
@@ -363,7 +419,7 @@ class RegisterStatementServiceTest {
     }
 
     @Test
-    @DisplayName("statement PDF is PAdES-signed when a signing keystore is configured (finding #9)")
+    @DisplayName("statement PDF is PAdES-signed when a signing keystore is configured")
     void issueForHolderSignsWhenConfigured() {
         AssetHolder h = holder(EntryType.INDIVIDUAL, true);
         when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));

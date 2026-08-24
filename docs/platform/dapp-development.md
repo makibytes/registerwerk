@@ -229,7 +229,7 @@ tests, and a `README`. They are examples rather than approved product templates,
 |---|---|---|
 | **Boardroom Governance** | `boardroom` | The permission-management framework in full: propose/vote/tally gated by permissions + ONCHAINID claims (KYC, Accreditation), and the **role-restriction / org-admin delegation** flow on `boardroom.tally`. |
 | **eWpG Bond Desk** | `bond-desk` | An ERC-3643/T-REX technical example with a configured token payment leg. `subscribe` performs payment transfer and minting in one transaction; `payCoupon`/`redeem` exercise time/idempotency controls. This is not a legally classified bond, verified payment arrangement, or proof of legal settlement. |
-| **eWpG Repo & Lending Facility** | `repo-facility` | A collateralized-lending technical example with an open stablecoin-lender side and contract-gated borrower side. Production use is blocked pending legal characterization, custody/control, liquidation, oracle, insolvency, eligibility, and security approval. Token identity checks alone do not make liquidation compliant. See [DeFi Interoperability](./defi-interoperability.md#ewpgrepofacility--the-primary-exit-liquidity-mechanism). |
+| **eWpG Repo & Lending Facility** | `repo-facility` | A collateralized-lending technical example with an open stablecoin-lender side and contract-gated borrower side. Production use is blocked pending legal characterization, custody/control, liquidation, oracle, insolvency, eligibility, and security approval. Token identity checks alone do not make liquidation compliant. See [DeFi Interoperability](./defi-interoperability.md#ewpgrepofacility-the-primary-exit-liquidity-mechanism). |
 
 | | Path |
 |---|---|

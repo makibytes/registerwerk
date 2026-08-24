@@ -71,7 +71,7 @@ export class WalletService {
     } catch (err: unknown) {
       const message = this.extractMessage(err, 'Wallet connection failed.');
       this._error.set(message);
-      throw new Error(message);
+      throw new Error(message, { cause: err });
     } finally {
       this._connecting.set(false);
     }
@@ -106,7 +106,7 @@ export class WalletService {
         message: params.message,
       } as Parameters<WalletClient['signTypedData']>[0]);
     } catch (err: unknown) {
-      throw new Error(this.extractMessage(err, 'Typed-data signing failed or was rejected.'));
+      throw new Error(this.extractMessage(err, 'Typed-data signing failed or was rejected.'), { cause: err });
     }
   }
 

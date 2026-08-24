@@ -1,12 +1,10 @@
 ---
-id: frontends
 title: Frontend Setup
-sidebar_position: 4
 ---
 
 # Frontend Setup
 
-Both frontends are Angular 21 standalone applications with zoneless change detection.
+Both frontends are Angular 22 standalone applications with native zoneless change detection.
 
 ## Operator frontend (port 4200)
 
@@ -50,7 +48,7 @@ Or use the included Dockerfile in each frontend directory.
 
 ## Zoneless change detection
 
-Both apps use `provideZonelessChangeDetection()` instead of Zone.js. This means:
+Angular 22 runs both apps zoneless by default; no explicit provider is required. This means:
 - No `zone.js` in `polyfills` (the array is empty)
 - Change detection is triggered explicitly by Angular signals and `markForCheck()`
 - Smaller bundle size, better performance

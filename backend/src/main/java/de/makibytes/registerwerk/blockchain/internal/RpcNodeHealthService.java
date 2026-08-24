@@ -57,25 +57,41 @@ public class RpcNodeHealthService {
     private int maxLagBlocks;
 
     private final RpcNodeRepository rpcNodeRepository;
+    private final RpcNodeHealthPersister healthPersister;
     private final Web3jClientFactory web3jClientFactory;
     private final SolanaClientFactory solanaClientFactory;
     private final BlockchainClientRegistry registry;
 
     private final CantonClientProvider cantonClientFactory;
 
+    /**
+     * Consecutive failures past which a node is only re-probed on an exponentially growing
+     * interval. The default seed data ships placeholder endpoints (`.../v3/changeme`) and chains
+     * with no public RPC, so without this a stock demo deployment probes ~10 endpoints that can
+     * never answer, every tick, forever — burning the timeout budget and emitting a WARN each time.
+     */
+    private static final int BACKOFF_AFTER_FAILURES = 3;
+    /** Cap so a node that recovers is picked up again within a bounded time. */
+    private static final int MAX_BACKOFF_TICKS = 32;
+
     /** Cached clients keyed by node ID to avoid creating new connections on every tick. */
     private final Map<UUID, Web3j>              evmHealthClients    = new ConcurrentHashMap<>();
     private final Map<UUID, RpcClient>          solanaHealthClients = new ConcurrentHashMap<>();
     private final Map<UUID, CantonLedgerEndpoint> cantonHealthClients = new ConcurrentHashMap<>();
 
+    /** nodeId → ticks still to skip before the next probe (backoff for persistently dead nodes). */
+    private final Map<UUID, Integer> skipTicks = new ConcurrentHashMap<>();
+
     public RpcNodeHealthService(
             RpcNodeRepository rpcNodeRepository,
+            RpcNodeHealthPersister healthPersister,
             Web3jClientFactory web3jClientFactory,
             SolanaClientFactory solanaClientFactory,
             @Nullable CantonClientProvider cantonClientFactory,
             BlockchainClientRegistry registry,
             MeterRegistry meterRegistry) {
         this.rpcNodeRepository    = rpcNodeRepository;
+        this.healthPersister      = healthPersister;
         this.web3jClientFactory   = web3jClientFactory;
         this.solanaClientFactory  = solanaClientFactory;
         this.cantonClientFactory  = cantonClientFactory;
@@ -83,10 +99,19 @@ public class RpcNodeHealthService {
 
         // Live-queried at scrape time over the real persisted health state — checkAllNodes()
         // already saveAll()s this every ~30s, but nothing ever counted it (repo-wide
-        // alerting-gap follow-up).
+        // alerting gauge).
         Gauge.builder("registerwerk_rpc_nodes_unhealthy_total", rpcNodeRepository, RpcNodeRepository::countByHealthyFalse)
                 .description("Count of RpcNode rows currently marked unhealthy")
                 .register(meterRegistry);
+
+        // One series per RpcNode.NodeKind — how much of the fleet is actually routed through
+        // chaincache vs. direct nodes, the headline number for the whole showcase.
+        for (RpcNode.NodeKind kind : RpcNode.NodeKind.values()) {
+            Gauge.builder("registerwerk_chaincache_nodes_total", rpcNodeRepository, repo -> repo.countByKind(kind))
+                    .description("Count of RpcNode rows by kind (DIRECT_RPC vs CHAINCACHE)")
+                    .tag("kind", kind.name())
+                    .register(meterRegistry);
+        }
     }
 
     // Deliberately NOT @SchedulerLock'd: the tail of this method calls
@@ -121,14 +146,26 @@ public class RpcNodeHealthService {
             }
         }
 
-        // saveAll is transactional — merges the (now detached) modified entities
-        rpcNodeRepository.saveAll(allNodes);
+        // Targeted per-node column update instead of saveAll(allNodes): saveAll() persists every
+        // field of these detached entities, including kind/managementUrl/remoteChainKey/capabilities
+        // as they stood at the top of this method (seconds ago) — clobbering any chaincache
+        // detection write (or admin edit) that landed concurrently. This writer only ever owns the
+        // health-check columns; see RpcNodeRepository.updateHealthFields's javadoc. Delegated to a
+        // separate @Transactional bean — updateHealthFields flushes automatically and needs a live
+        // transaction, and checkAll() itself must stay non-transactional (see
+        // RpcNodeHealthPersister's javadoc for why this can't just be an annotation on this method).
+        healthPersister.persist(allNodes);
 
-        // Purge stale health-check clients for nodes that were removed
+        // Purge stale health-check clients for nodes that were removed. EVM and Solana clients
+        // hold no dedicated resources (see Web3jClientFactory) and are simply dropped; Canton
+        // endpoints own a gRPC channel and must be closed.
         Set<UUID> activeIds = allNodes.stream().map(RpcNode::getId).collect(Collectors.toSet());
         evmHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
         solanaHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
-        cantonHealthClients.keySet().removeIf(id -> !activeIds.contains(id));
+        skipTicks.keySet().removeIf(id -> !activeIds.contains(id));
+        for (UUID staleId : Set.copyOf(cantonHealthClients.keySet())) {
+            if (!activeIds.contains(staleId)) closeQuietly(cantonHealthClients.remove(staleId));
+        }
 
         registry.refreshFromNodes(allNodes);
     }
@@ -139,6 +176,8 @@ public class RpcNodeHealthService {
         Map<UUID, Long> blockNumbers = new HashMap<>();
 
         for (RpcNode node : nodes) {
+            if (skipProbe(node)) continue;
+
             Web3j client = evmHealthClients.computeIfAbsent(node.getId(),
                     id -> web3jClientFactory.createClient(node.getUrl()));
 
@@ -162,13 +201,11 @@ public class RpcNodeHealthService {
                 node.setLatestBlockNumber(bn);
                 node.setLastSuccessAt(checkStart);
                 node.setConsecutiveFailures(0);
+                recordSuccess(node);
 
             } catch (Exception e) {
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
-                log.warn("EVM health check failed for node {} ({}): {}", node.getUrl(),
-                        chain.getIdentifier(), e.getMessage());
-                // Recreate client on failure — connection may be broken
-                evmHealthClients.remove(node.getId());
+                recordFailure(node, chain, e);
             }
             node.setLastCheckedAt(checkStart);
         }
@@ -182,7 +219,7 @@ public class RpcNodeHealthService {
             return;
         }
 
-        long bestBlock = blockNumbers.values().stream().mapToLong(Long::longValue).max().getAsLong();
+        long bestBlock = bestAmongCandidates(nodes, blockNumbers);
 
         for (RpcNode node : nodes) {
             Long nb = blockNumbers.get(node.getId());
@@ -207,6 +244,8 @@ public class RpcNodeHealthService {
         Map<UUID, Long> slots = new HashMap<>();
 
         for (RpcNode node : nodes) {
+            if (skipProbe(node)) continue;
+
             RpcClient client = solanaHealthClients.computeIfAbsent(node.getId(),
                     id -> solanaClientFactory.createClient(node.getUrl()));
 
@@ -222,12 +261,11 @@ public class RpcNodeHealthService {
                 node.setLastSuccessAt(checkStart);
                 node.setConsecutiveFailures(0);
                 node.setSyncing(false);
+                recordSuccess(node);
 
             } catch (RpcException e) {
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
-                log.warn("Solana health check failed for node {} ({}): {}", node.getUrl(),
-                        chain.getIdentifier(), e.getMessage());
-                solanaHealthClients.remove(node.getId());
+                recordFailure(node, chain, e);
             }
             node.setLastCheckedAt(checkStart);
         }
@@ -241,7 +279,7 @@ public class RpcNodeHealthService {
             return;
         }
 
-        long bestSlot = slots.values().stream().mapToLong(Long::longValue).max().getAsLong();
+        long bestSlot = bestAmongCandidates(nodes, slots);
 
         for (RpcNode node : nodes) {
             Long ns = slots.get(node.getId());
@@ -260,6 +298,8 @@ public class RpcNodeHealthService {
 
     private void checkCantonNodes(ChainConfig chain, List<RpcNode> nodes) {
         for (RpcNode node : nodes) {
+            if (skipProbe(node)) continue;
+
             Instant checkStart = Instant.now();
             try {
                 CantonLedgerEndpoint client = cantonHealthClients.computeIfAbsent(node.getId(),
@@ -277,19 +317,107 @@ public class RpcNodeHealthService {
                 node.setSyncing(false);
                 node.setHealthy(true);
                 node.setLagFromBest(0);
+                recordSuccess(node);
 
             } catch (Exception e) {
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
                 node.setHealthy(false);
-                log.warn("Canton health check failed for node {} ({}): {}", node.getUrl(),
-                        chain.getIdentifier(), e.getMessage());
-                cantonHealthClients.remove(node.getId());
+                recordFailure(node, chain, e);
+                // Unlike the EVM/Solana clients, a Canton endpoint owns a gRPC channel with its
+                // own event-loop threads, so it must be closed rather than simply dropped.
+                closeQuietly(cantonHealthClients.remove(node.getId()));
             }
             node.setLastCheckedAt(checkStart);
         }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * The best (highest) block/slot number reported by a node {@code selectBestNodeId} would
+     * actually route to — i.e. the routing candidate set (exclusive-and-enabled nodes if any
+     * exist, else every enabled node), matching {@code BlockchainClientRegistry.selectBestNodeId}'s
+     * own candidate derivation exactly. Computing this against every node on the chain (including
+     * ones outbound traffic would never be routed to — e.g. a real public mainnet node sitting on
+     * the same {@code ChainConfig} as this stack's own local devnet, or a node an operator disabled
+     * or didn't pin) previously made a node's lag look enormous, and therefore permanently
+     * "unhealthy", purely because of a node it will never be compared against for routing.
+     * Falls back to the best value among every node actually probed this tick if the candidate set
+     * itself reported nothing (e.g. every exclusive node happened to fail this one tick) — that's
+     * still a meaningfully-computed lag reference, just not the narrowest possible one, rather than
+     * silently reporting zero data.
+     */
+    private static long bestAmongCandidates(List<RpcNode> nodes, Map<UUID, Long> reported) {
+        Set<UUID> candidateIds = routingCandidateIds(nodes);
+        return reported.entrySet().stream()
+                .filter(e -> candidateIds.contains(e.getKey()))
+                .mapToLong(Map.Entry::getValue)
+                .max()
+                .orElseGet(() -> reported.values().stream().mapToLong(Long::longValue).max().getAsLong());
+    }
+
+    /** Mirrors {@code BlockchainClientRegistry.selectBestNodeId}'s candidate-set derivation:
+     *  exclusive-and-enabled nodes if any exist, else every enabled node. Duplicated rather than
+     *  shared — {@code blockchain.api} and {@code blockchain.internal} are different Modulith
+     *  layers, and this is a three-line pure function, not worth a new cross-module port for. */
+    private static Set<UUID> routingCandidateIds(List<RpcNode> nodes) {
+        List<RpcNode> exclusiveEnabled = nodes.stream().filter(n -> n.isExclusive() && n.isEnabled()).toList();
+        List<RpcNode> candidates = exclusiveEnabled.isEmpty()
+                ? nodes.stream().filter(RpcNode::isEnabled).toList()
+                : exclusiveEnabled;
+        return candidates.stream().map(RpcNode::getId).collect(Collectors.toSet());
+    }
+
+    /**
+     * Whether to skip probing this node on this round — either because it (or its chain) is
+     * disabled, or because it is serving out an exponential backoff after repeated failures.
+     *
+     * <p>Disabled nodes are still handed to {@code refreshFromNodes} by the caller, so routing
+     * semantics are unchanged; they are merely not probed over the network.
+     */
+    private boolean skipProbe(RpcNode node) {
+        if (!node.isEnabled() || !node.getChainConfig().isEnabled()) return true;
+
+        Integer remaining = skipTicks.get(node.getId());
+        if (remaining == null || remaining <= 0) return false;
+        skipTicks.put(node.getId(), remaining - 1);
+        return true;
+    }
+
+    /** Clears any backoff so a recovered node returns to the normal cadence immediately. */
+    private void recordSuccess(RpcNode node) {
+        skipTicks.remove(node.getId());
+    }
+
+    /**
+     * Applies exponential backoff and log throttling after a failed probe. The first
+     * {@link #BACKOFF_AFTER_FAILURES} failures are logged and re-probed normally, so genuine
+     * transient outages stay visible; beyond that a node is probed on a doubling interval and
+     * logged only on the rounds it is actually probed.
+     */
+    private void recordFailure(RpcNode node, ChainConfig chain, Exception e) {
+        int failures = node.getConsecutiveFailures();
+        if (failures <= BACKOFF_AFTER_FAILURES) {
+            log.warn("{} health check failed for node {} ({}): {}", chain.getChainType(),
+                    node.getUrl(), chain.getIdentifier(), e.getMessage());
+            return;
+        }
+        int ticks = Math.min(1 << Math.min(failures - BACKOFF_AFTER_FAILURES, 5), MAX_BACKOFF_TICKS);
+        skipTicks.put(node.getId(), ticks);
+        log.warn("{} health check failed for node {} ({}) — {} consecutive failures, "
+                        + "backing off for {} rounds: {}",
+                chain.getChainType(), node.getUrl(), chain.getIdentifier(), failures, ticks,
+                e.getMessage());
+    }
+
+    private void closeQuietly(@Nullable AutoCloseable client) {
+        if (client == null) return;
+        try {
+            client.close();
+        } catch (Exception e) {
+            log.debug("Failed to close RPC client: {}", e.getMessage());
+        }
+    }
 
     private boolean isStalled(RpcNode node) {
         Instant lastAdvanced = node.getBlockLastAdvancedAt();

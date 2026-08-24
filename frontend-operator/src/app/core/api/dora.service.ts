@@ -4,6 +4,24 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { IctIncident, ResilienceTest, ThirdPartyProvider } from '../models';
 
+export interface ProviderRequest {
+  name: string;
+  category?: string;
+  criticality?: string;
+  lei?: string;
+  country?: string;
+  contractStart?: string;
+  contractEnd?: string;
+  subOutsourcing?: boolean;
+  subOutsourcingDetails?: string;
+  primaryContact?: string;
+  slaAvailabilityPct?: number;
+  rtoHours?: number;
+  rpoHours?: number;
+  notifiedAuthority?: boolean;
+  notes?: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class DoraService {
   private readonly http = inject(HttpClient);
@@ -39,12 +57,34 @@ export class DoraService {
     return this.http.post<IctIncident>(`${this.base}/incidents/${id}/report-to-authority`, body);
   }
 
+  /** DORA Art. 19 major-incident authority-report export — a structured starting point, not the
+   *  certified ESA submission format. See `DoraController.exportIncidentAuthorityReport`. */
+  exportIncidentAuthorityReport(id: string): Observable<Blob> {
+    return this.http.get(`${this.base}/incidents/${id}/authority-report`, { responseType: 'blob' });
+  }
+
   listProviders(): Observable<ThirdPartyProvider[]> {
     return this.http.get<ThirdPartyProvider[]>(`${this.base}/providers`);
   }
 
   listExpiringProviders(): Observable<ThirdPartyProvider[]> {
     return this.http.get<ThirdPartyProvider[]>(`${this.base}/providers/expiring`);
+  }
+
+  /** DORA Art. 28 Register of Information export — a structured starting point, not the
+   *  certified EBA RoI taxonomy submission. See `DoraController.exportProviderRegister`. */
+  exportProviderRegister(): Observable<Blob> {
+    return this.http.get(`${this.base}/providers/register-export`, { responseType: 'blob' });
+  }
+
+  /** Wraps `DoraController.createProvider` — previously the RoI had no write path outside
+   *  `bootstrap.DemoDataSeeder`, so a bank could not enter its own ICT providers. */
+  createProvider(body: ProviderRequest): Observable<ThirdPartyProvider> {
+    return this.http.post<ThirdPartyProvider>(`${this.base}/providers`, body);
+  }
+
+  updateProvider(id: string, body: ProviderRequest): Observable<ThirdPartyProvider> {
+    return this.http.patch<ThirdPartyProvider>(`${this.base}/providers/${id}`, body);
   }
 
   listResilienceTests(): Observable<ResilienceTest[]> {
@@ -68,5 +108,11 @@ export class DoraService {
     reportRef?: string;
   }): Observable<ResilienceTest> {
     return this.http.post<ResilienceTest>(`${this.base}/resilience-tests`, body);
+  }
+
+  /** Wraps `DoraController.updateResilienceTest` — previously a test recorded as
+   *  `FINDINGS_OPEN` could never be closed out to `PASSED` once remediation was done. */
+  updateResilienceTest(id: string, body: { result: string; findings?: string; reportRef?: string }): Observable<ResilienceTest> {
+    return this.http.patch<ResilienceTest>(`${this.base}/resilience-tests/${id}`, body);
   }
 }

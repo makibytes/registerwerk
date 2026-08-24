@@ -1,11 +1,18 @@
 package de.makibytes.registerwerk.bootstrap;
 
+import org.springframework.beans.factory.annotation.Value;
+
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.BondStatus;
+import de.makibytes.registerwerk.deployment.api.DayCountConvention;
 import de.makibytes.registerwerk.deployment.api.GasSponsorshipPolicy;
 import de.makibytes.registerwerk.deployment.api.GasSponsorshipPolicyRepository;
+import de.makibytes.registerwerk.deployment.api.PaymentFrequency;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import de.makibytes.registerwerk.dora.api.IctIncident;
@@ -94,6 +101,17 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
     private final KycDocumentContentRepository kycDocumentContents;
     private final KycJurisdictionApprovalRepository kycJurisdictionApprovals;
     private final HolderBlockRepository holderBlocks;
+    private final AssetBondTermsRepository bondTerms;
+
+    // ── chaincache demo node config ─────────────────────────────────────────
+    // Extracted from what used to be hardcoded literals in syncChaincacheDemoNode() so a second
+    // chaincache workload (see docker-compose.yml's chaincache-base service) is configuration,
+    // not another code path — see this constructor's javadoc.
+    private final String chaincacheDemoChainIdentifier;
+    private final String chaincacheDemoUrl;
+    private final String chaincacheDemoLabel;
+    private final String chaincacheDemoManagementUrl;
+    private final String chaincacheDemoRemoteChainKey;
 
     /** Fixed Base32 TOTP secret shared by every demo-seeded operator user (never used in
      *  production — DefaultAdminSeeder's own admin is never enrolled by this class). Lets a
@@ -124,7 +142,13 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
             KycDocumentRepository kycDocuments,
             KycDocumentContentRepository kycDocumentContents,
             KycJurisdictionApprovalRepository kycJurisdictionApprovals,
-            HolderBlockRepository holderBlocks) {
+            HolderBlockRepository holderBlocks,
+            AssetBondTermsRepository bondTerms,
+            @Value("${registerwerk.chaincache.demo.chain-identifier:ETHEREUM_SEPOLIA}") String chaincacheDemoChainIdentifier,
+            @Value("${registerwerk.chaincache.demo.url:http://chaincache-sepolia:8080/sepolia/rpc}") String chaincacheDemoUrl,
+            @Value("${registerwerk.chaincache.demo.label:chaincache (anvil)}") String chaincacheDemoLabel,
+            @Value("${registerwerk.chaincache.demo.management-url:http://chaincache-sepolia:8080}") String chaincacheDemoManagementUrl,
+            @Value("${registerwerk.chaincache.demo.remote-chain-key:sepolia}") String chaincacheDemoRemoteChainKey) {
         this.entities = entities;
         this.users = users;
         this.assets = assets;
@@ -144,15 +168,38 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         this.kycDocumentContents = kycDocumentContents;
         this.kycJurisdictionApprovals = kycJurisdictionApprovals;
         this.holderBlocks = holderBlocks;
+        this.bondTerms = bondTerms;
+        this.chaincacheDemoChainIdentifier = chaincacheDemoChainIdentifier;
+        this.chaincacheDemoUrl = chaincacheDemoUrl;
+        this.chaincacheDemoLabel = chaincacheDemoLabel;
+        this.chaincacheDemoManagementUrl = chaincacheDemoManagementUrl;
+        this.chaincacheDemoRemoteChainKey = chaincacheDemoRemoteChainKey;
     }
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
         syncPublicNodes();
+        syncChaincacheDemoNode(chaincacheDemoChainIdentifier, chaincacheDemoUrl, chaincacheDemoLabel,
+                chaincacheDemoManagementUrl, chaincacheDemoRemoteChainKey);
+        // The second chaincache workload (docker-compose.yml's chaincache-base service, fronting
+        // real public Base Sepolia RPC providers — TAG_BASED finality, required-provider-agreement
+        // 2) is default-on in the demo per the portfolio plan's explicit decision: a genuine
+        // TAG_BASED comparison next to the local DEPTH_BASED devnet above, not just a second copy
+        // of the same finality model. Unlike the sepolia node, this one is not @Value-overridable —
+        // BASE_SEPOLIA's three direct-RPC nodes below (syncPublicNodes) are hardcoded literals too,
+        // and a second full set of externalized properties for one fixed demo chain would be
+        // over-engineering a seeder that already has no config surface for its other 40+ nodes.
+        syncChaincacheDemoNode("BASE_SEPOLIA", "http://chaincache-base:8080/base/rpc", "chaincache (Base Sepolia)",
+                "http://chaincache-base:8080", "base");
 
         if (entities.findByEntityNumber("DEMO-MC-001").isPresent()) {
-            log.info("Demo business data already present — synced nodes only");
+            if (hasCompleteDemoEntityBaseline()) {
+                reconcileEvmProductCatalog();
+                log.info("Demo business data already present — synced nodes and reconciled EVM product catalog");
+            } else {
+                log.warn("Demo business data is incomplete — synced nodes but skipped additive product reconciliation");
+            }
             return;
         }
 
@@ -309,7 +356,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 ));
 
         AssetDeployment equityDeploy = deployment(equityToken.getId(),
-                Chain.POLYGON, Network.TESTNET,
+                Chain.ETHEREUM, Network.TESTNET,
                 "0x9C3dF55A7cE1b86B5dFe3b3E1c2A4B6D8F0E2A4C",
                 "0x3b9c7d1f5e2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4",
                 daysAgo(120));
@@ -362,6 +409,46 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
                 daysAgo(30));
 
+        Asset uniqueNote = asset("DEMO-NFT-MC-001",
+                "Meridian Unique Asset Notes",
+                "DE000A3H2XR8",
+                meridian.getId(), TokenStandard.ERC721, AssetStatus.ISSUED,
+                Jurisdiction.DE_EWPG, OnchainLevel.SIMPLE,
+                Map.of("assetType", "NOTE", "currency", "EUR", "totalSupply", 5,
+                        "description", "Five individually identifiable asset-backed notes demonstrating ERC-721"));
+        deployment(uniqueNote.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x1111111111111111111111111111111111111111", "0x" + "11".repeat(32), daysAgo(20));
+
+        Asset maturityNote = asset("DEMO-SFT-MC-001",
+                "Meridian Maturity Notes 2030/31",
+                "DE000A3H2XS6",
+                meridian.getId(), TokenStandard.ERC3525, AssetStatus.ISSUED,
+                Jurisdiction.DE_EWPG, OnchainLevel.CONTROL,
+                Map.of("assetType", "BOND", "currency", "EUR", "totalSupply", 750000,
+                        "description", "Semi-fungible positions grouped into maturity slots using ERC-3525"));
+        deployment(maturityNote.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x2222222222222222222222222222222222222222", "0x" + "22".repeat(32), daysAgo(18));
+
+        Asset liquidityFund = asset("DEMO-VAULT-AF-001",
+                "Aurora Registerwerk Liquidity Fund",
+                "DE000A3H9PP1",
+                aurora.getId(), TokenStandard.ERC4626, AssetStatus.ISSUED,
+                Jurisdiction.LU_CSSF, OnchainLevel.SIMPLE,
+                Map.of("assetType", "FUND", "currency", "EUR", "navPerToken", 1.0,
+                        "description", "Synchronous tokenized liquidity fund demonstrating ERC-4626 deposits and redemptions"));
+        deployment(liquidityFund.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x3333333333333333333333333333333333333333", "0x" + "33".repeat(32), daysAgo(15));
+
+        Asset privateCreditFund = asset("DEMO-VAULT-AF-002",
+                "Aurora Private Credit Fund",
+                "DE000A3H9PQ9",
+                aurora.getId(), TokenStandard.ERC7540, AssetStatus.ISSUED,
+                Jurisdiction.LU_CSSF, OnchainLevel.CONTROL,
+                Map.of("assetType", "FUND", "currency", "EUR", "navPerToken", 1.025,
+                        "description", "Asynchronous fund with operator-reviewed request settlement using ERC-7540"));
+        deployment(privateCreditFund.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x4444444444444444444444444444444444444444", "0x" + "44".repeat(32), daysAgo(12));
+
         // Issued semi-fungible bond on Starknet (Cairo ERC-3525 — slot+value)
         Asset starknetBond = asset("DEMO-BOND-MC-003",
                 "Meridian Starknet Note 2026",
@@ -412,7 +499,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 "3b9c7d1f5e2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c",
                 daysAgo(60));
 
-        // Issued fixed-rate bond on Canton (Daml Finance instrument, Daml Token Standard)
+        // Issued fixed-rate bond using Registerwerk's custom Canton Daml lifecycle template.
         Asset cantonBond = asset("DEMO-BOND-MC-004",
                 "Meridian Canton Institutional Bond",
                 "DE000A3H2XQ0",
@@ -428,7 +515,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                         "totalSupply", 4000,
                         "maturityDate", "2033-06-30",
                         "interestRate", 4.2,
-                        "description", "Institutional fixed-rate bond issued via Daml Finance on Canton — synchronized privacy-preserving settlement"
+                        "description", "Institutional fixed-rate bond lifecycle recorded with Registerwerk Daml on Canton — payment integration remains deployment-specific"
                 ));
 
         deployment(cantonBond.getId(),
@@ -436,6 +523,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 "1220a3f5bc99e1d38a7406db4e8c1db7e3a4e2d1c0b9a3f5e7d2c4b6a8e0f1d3",
                 "1220a3f5bc99e1d38a7406db4e8c1db7e3a4e2d1c0b9a3f5e7d2c4b6a8e0f1d3c5",
                 daysAgo(75));
+        seedCantonBondTerms(cantonBond.getId());
 
         // Asset pending approval (in review, no deployment yet)
         Asset infraBond2025 = asset("DEMO-BOND-MC-002",
@@ -457,19 +545,22 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 ));
 
         // Draft asset (early stage, not yet submitted)
-        asset("DEMO-COMM-AF-001",
+        Asset commodityToken = asset("DEMO-COMM-AF-001",
                 "Aurora Commodity Access Token",
                 null,
                 aurora.getId(),
                 TokenStandard.ERC1155,
-                AssetStatus.DRAFT,
+                AssetStatus.ISSUED,
                 Jurisdiction.LI_TVTG,
-                OnchainLevel.NONE,
+                OnchainLevel.SIMPLE,
                 Map.of(
                         "assetType", "COMMODITY",
                         "currency", "EUR",
-                        "description", "Multi-class commodity exposure token — TVTG structuring in progress"
+                        "totalSupply", 1500,
+                        "description", "Multi-class commodity exposure token demonstrating ERC-1155 tranches"
                 ));
+        deployment(commodityToken.getId(), Chain.ETHEREUM, Network.TESTNET,
+                "0x5555555555555555555555555555555555555555", "0x" + "55".repeat(32), daysAgo(10));
 
         // Confidential ERC-20 (showcase of Zama fhEVM)
         Asset confEquity = asset("DEMO-CONF-MC-001",
@@ -494,6 +585,17 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 daysAgo(45));
 
         // ── Holders ──────────────────────────────────────────────────────────
+
+        holder(uniqueNote.getId(), nordbank.getId(),
+                "0x1111111111111111111111111111111111111111", "0x" + "61".repeat(32), bd("1"), daysAgo(19));
+        holder(commodityToken.getId(), rheinische.getId(),
+                "0x2222222222222222222222222222222222222222", "0x" + "62".repeat(32), bd("200"), daysAgo(9));
+        holder(maturityNote.getId(), nordbank.getId(),
+                "0x3333333333333333333333333333333333333333", "0x" + "63".repeat(32), bd("50000"), daysAgo(17));
+        holder(liquidityFund.getId(), aurora.getId(),
+                "0x4444444444444444444444444444444444444444", "0x" + "64".repeat(32), bd("100000"), daysAgo(14));
+        holder(privateCreditFund.getId(), frankfurtDigital.getId(),
+                "0x5555555555555555555555555555555555555555", "0x" + "65".repeat(32), bd("75000"), daysAgo(11));
 
         // Meridian Green Bond holders
         AssetHolder gbNordbank = holder(greenBond.getId(), nordbank.getId(),
@@ -763,9 +865,102 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 "Redteam Cyber GmbH");
 
         log.info("Demo data seeded: 3 operator users (TOTP-enrolled), 7 companies, 14 company users, "
-                + "14 KYC documents + 7 jurisdiction approvals, 10 assets, 1 holder block, "
+                + "14 KYC documents + 7 jurisdiction approvals, 15 assets, 1 holder block, "
                 + "4 active listings, 4 trade executions, 4 indexed transfers, "
                 + "3 gas sponsorship policies, 2 ICT incidents, 2 third-party providers, 2 resilience tests");
+    }
+
+    /** Evolves old demo volumes without requiring operators to discard their database. */
+    private boolean hasCompleteDemoEntityBaseline() {
+        return List.of("DEMO-AF-001", "DEMO-NI-001", "DEMO-RK-001", "DEMO-FD-001").stream()
+                .allMatch(number -> entities.findByEntityNumber(number).isPresent());
+    }
+
+    private void reconcileEvmProductCatalog() {
+        LegalEntity meridian = requireDemoEntity("DEMO-MC-001");
+        LegalEntity aurora = requireDemoEntity("DEMO-AF-001");
+        LegalEntity nordbank = requireDemoEntity("DEMO-NI-001");
+        LegalEntity rheinische = requireDemoEntity("DEMO-RK-001");
+        LegalEntity frankfurt = requireDemoEntity("DEMO-FD-001");
+
+        // Older fixtures placed this row on Polygon. Keep the historical deployment and add
+        // the Ethereum row which the Anvil linker replaces with the live ERC-3643 proxy.
+        Asset equity = assets.findByAssetNumber("DEMO-EQ-MC-001")
+                .orElseThrow(() -> new IllegalStateException("Demo equity asset is missing"));
+        ensureEthereumDeployment(equity, "0x9C3dF55A7cE1b86B5dFe3b3E1c2A4B6D8F0E2A4C", "66");
+
+        Asset uniqueNote = ensureDemoAsset("DEMO-NFT-MC-001", "Meridian Unique Asset Notes",
+                "DE000A3H2XR8", meridian.getId(), TokenStandard.ERC721, Jurisdiction.DE_EWPG,
+                OnchainLevel.SIMPLE, Map.of("assetType", "NOTE", "currency", "EUR", "totalSupply", 5,
+                        "description", "Five individually identifiable asset-backed notes demonstrating ERC-721"));
+        ensureEthereumDeployment(uniqueNote, "0x1111111111111111111111111111111111111111", "11");
+        ensureDemoHolder(uniqueNote, nordbank, "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", "61", "1");
+
+        Asset maturityNote = ensureDemoAsset("DEMO-SFT-MC-001", "Meridian Maturity Notes 2030/31",
+                "DE000A3H2XS6", meridian.getId(), TokenStandard.ERC3525, Jurisdiction.DE_EWPG,
+                OnchainLevel.CONTROL, Map.of("assetType", "BOND", "currency", "EUR", "totalSupply", 750000,
+                        "description", "Semi-fungible positions grouped into maturity slots using ERC-3525"));
+        ensureEthereumDeployment(maturityNote, "0x2222222222222222222222222222222222222222", "22");
+        ensureDemoHolder(maturityNote, nordbank, "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", "63", "50000");
+
+        Asset liquidityFund = ensureDemoAsset("DEMO-VAULT-AF-001", "Aurora Registerwerk Liquidity Fund",
+                "DE000A3H9PP1", aurora.getId(), TokenStandard.ERC4626, Jurisdiction.LU_CSSF,
+                OnchainLevel.SIMPLE, Map.of("assetType", "FUND", "currency", "EUR", "navPerToken", 1.0,
+                        "description", "Synchronous tokenized liquidity fund demonstrating ERC-4626 deposits and redemptions"));
+        ensureEthereumDeployment(liquidityFund, "0x3333333333333333333333333333333333333333", "33");
+        ensureDemoHolder(liquidityFund, aurora, "0x90f79bf6eb2c4f870365e785982e1f101e93b906", "64", "100000");
+
+        Asset privateCredit = ensureDemoAsset("DEMO-VAULT-AF-002", "Aurora Private Credit Fund",
+                "DE000A3H9PQ9", aurora.getId(), TokenStandard.ERC7540, Jurisdiction.LU_CSSF,
+                OnchainLevel.CONTROL, Map.of("assetType", "FUND", "currency", "EUR", "navPerToken", 1.025,
+                        "description", "Asynchronous fund with operator-reviewed request settlement using ERC-7540"));
+        ensureEthereumDeployment(privateCredit, "0x4444444444444444444444444444444444444444", "44");
+        ensureDemoHolder(privateCredit, frankfurt, "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65", "65", "75000");
+
+        Asset commodity = ensureDemoAsset("DEMO-COMM-AF-001", "Aurora Commodity Access Token",
+                null, aurora.getId(), TokenStandard.ERC1155, Jurisdiction.LI_TVTG,
+                OnchainLevel.SIMPLE, Map.of("assetType", "COMMODITY", "currency", "EUR", "totalSupply", 1500,
+                        "description", "Multi-class commodity exposure token demonstrating ERC-1155 tranches"));
+        ensureEthereumDeployment(commodity, "0x5555555555555555555555555555555555555555", "55");
+        ensureDemoHolder(commodity, rheinische, "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc", "62", "200");
+    }
+
+    private LegalEntity requireDemoEntity(String entityNumber) {
+        return entities.findByEntityNumber(entityNumber)
+                .orElseThrow(() -> new IllegalStateException("Demo entity is missing: " + entityNumber));
+    }
+
+    private Asset ensureDemoAsset(String number, String name, String isin, java.util.UUID issuerId,
+                                  TokenStandard standard, Jurisdiction jurisdiction, OnchainLevel level,
+                                  Map<String, Object> publicData) {
+        Asset existing = assets.findByAssetNumber(number).orElse(null);
+        if (existing != null) {
+            if (existing.getStatus() != AssetStatus.ISSUED) {
+                existing.setStatus(AssetStatus.ISSUED);
+                existing.setLastHolderSyncTime(daysAgo(1));
+                assets.save(existing);
+            }
+            return existing;
+        }
+        return asset(number, name, isin, issuerId, standard, AssetStatus.ISSUED,
+                jurisdiction, level, publicData);
+    }
+
+    private void ensureEthereumDeployment(Asset asset, String address, String hashByte) {
+        boolean present = deployments.findByAssetId(asset.getId()).stream()
+                .anyMatch(d -> d.getChain() == Chain.ETHEREUM && d.getNetwork() == Network.TESTNET);
+        if (!present) {
+            deployment(asset.getId(), Chain.ETHEREUM, Network.TESTNET, address,
+                    "0x" + hashByte.repeat(32), daysAgo(1));
+        }
+    }
+
+    private void ensureDemoHolder(Asset asset, LegalEntity investor, String wallet,
+                                  String hashByte, String nominalAmount) {
+        if (!holders.existsActiveByAssetIdAndInvestorId(asset.getId(), investor.getId())) {
+            holder(asset.getId(), investor.getId(), wallet, "0x" + hashByte.repeat(32),
+                    bd(nominalAmount), daysAgo(1));
+        }
     }
 
     private void tokenTransfer(java.util.UUID assetId, java.util.UUID deploymentId,
@@ -915,11 +1110,11 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 // Optimism Sepolia
                 new NodeDef("OPTIMISM_SEPOLIA", "https://sepolia.optimism.io", "OP Labs", true),
                 new NodeDef("OPTIMISM_SEPOLIA", "https://optimism-sepolia.publicnode.com", "PublicNode", true),
-                // Fhenix / Inco
-                new NodeDef("FHENIX_MAINNET", "https://api.fhenix.zone:7747", "Fhenix", true),
-                new NodeDef("FHENIX_HELIUM", "https://api.helium.fhenix.zone:7747", "Fhenix", true),
-                new NodeDef("INCO_MAINNET", "https://mainnet.inco.org", "Inco", true),
-                new NodeDef("INCO_RIVEST", "https://validator.rivest.inco.org", "Inco", true),
+                // Fhenix/Inco endpoints remain visible in the UI but disabled for health checks.
+                new NodeDef("FHENIX_MAINNET", "https://api.fhenix.zone:7747", "Fhenix", false),
+                new NodeDef("FHENIX_HELIUM", "https://api.helium.fhenix.zone:7747", "Fhenix", false),
+                new NodeDef("INCO_MAINNET", "https://mainnet.inco.org", "Inco", false),
+                new NodeDef("INCO_RIVEST", "https://validator.rivest.inco.org", "Inco", false),
                 // Starknet (stub chains — disabled nodes visible in operator UI)
                 new NodeDef("STARKNET_MAINNET", "https://rpc.starknet.lava.build", "Lava", false),
                 new NodeDef("STARKNET_MAINNET", "https://api.cartridge.gg/x/starknet/mainnet", "Cartridge", false),
@@ -995,6 +1190,72 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         if (changed) {
             chainConfigs.save(chain);
         }
+    }
+
+    /**
+     * Seeds the demo stack's chaincache connection: an additional {@code CHAINCACHE}-kind
+     * {@link RpcNode} on the configured chain (this stack's anvil devnet, reached via
+     * chaincache's own configured chain key — see docker-compose.yml's chaincache workload(s)),
+     * alongside the direct-RPC nodes {@link #syncPublicNodes} already seeds for that chain — per
+     * the portfolio plan's product decision that the demo stack runs chaincache default-on, side
+     * by side, so the operator node list shows a real capability comparison out of the box.
+     *
+     * <p>Idempotency key is {@code (chainConfigId, url)} — never {@code kind}, which is mutable
+     * (owned by {@code RpcNodeService#redetectAll}'s auto-detection and can legitimately flip
+     * between DIRECT_RPC and CHAINCACHE on its own, e.g. after a transient probe failure). Keying
+     * on {@code kind} previously meant exactly that kind of blip made this method fail to find
+     * "the" chaincache node on the next boot and seed a second, duplicate row for the same URL —
+     * V16's unique index on {@code (chain_config_id, lower(url))} now also guards against that at
+     * the schema level.
+     *
+     * <p>For that same reason, an <em>existing</em> row found by URL never has its
+     * kind/managementUrl/remoteChainKey touched here, whatever they currently are — those columns
+     * are {@code RpcNodeService}'s to own and reconcile via its own redetection job, not this
+     * seeder's to reassert over. Only a brand-new row gets them pre-set (optimistically, so a
+     * fresh demo stack shows the chaincache showcase node correctly from the moment the backend
+     * comes up, not ~15s later once the first redetect tick runs); reconciling label/enabled on
+     * every run (matching {@link #syncChainNodes}'s own check-and-update idiom) is safe regardless
+     * of kind.
+     */
+    private void syncChaincacheDemoNode(String chainIdentifier, String url, String label,
+            String managementUrl, String remoteChainKey) {
+        chainConfigs.findByIdentifier(chainIdentifier).ifPresent(chain -> {
+            RpcNode node = rpcNodes.findByChainConfig_Identifier(chainIdentifier).stream()
+                    .filter(n -> url.equalsIgnoreCase(n.getUrl()))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        RpcNode fresh = new RpcNode();
+                        fresh.setChainConfig(chain);
+                        fresh.setUrl(url);
+                        fresh.setKind(RpcNode.NodeKind.CHAINCACHE);
+                        fresh.setManagementUrl(managementUrl);
+                        fresh.setRemoteChainKey(remoteChainKey);
+                        return fresh;
+                    });
+
+            boolean changed = node.getId() == null;
+            changed |= setIfChanged(node::getLabel, node::setLabel, label);
+            if (!node.isEnabled()) {
+                node.setEnabled(true);
+                changed = true;
+            }
+            if (changed) {
+                rpcNodes.save(node);
+            }
+            // finalitySource is intentionally left untouched here: it is fully auto-derived by
+            // RpcNodeService#recomputeFinalitySource, never seeder-set — the periodic
+            // RpcNodeService#redetectAll job (15s after boot) picks up this node's CHAINCACHE
+            // kind on its first tick and flips the chain over itself, same as a live admin add.
+        });
+    }
+
+    private static boolean setIfChanged(java.util.function.Supplier<String> getter,
+                                        java.util.function.Consumer<String> setter, String desired) {
+        if (Objects.equals(getter.get(), desired)) {
+            return false;
+        }
+        setter.accept(desired);
+        return true;
     }
 
     private void rpcNode(ChainConfig chain, String url, String label, boolean enabled) {
@@ -1157,6 +1418,33 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         d.setDeployedAt(deployedAt);
         d.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
         return deployments.save(d);
+    }
+
+    /**
+     * Seeds {@link AssetBondTerms} for the Canton institutional bond — before this,
+     * {@code AssetBondTerms} had zero rows anywhere in the demo instance, so an issuer-proposed
+     * CALL (see {@code CorporateActionProposalValidator}) had no bond to attach to and was
+     * untestable end-to-end in the demo stack. {@code callable = true} with a two-entry
+     * {@code callSchedule} lets the demo issuer ({@code heinz.weber@meridian-capital.de}) propose
+     * a CALL by {@code callScheduleIndex} against a real schedule, not just a custom date.
+     */
+    private void seedCantonBondTerms(java.util.UUID assetId) {
+        AssetBondTerms terms = new AssetBondTerms();
+        terms.setAssetId(assetId);
+        terms.setFaceValue(bd("5000"));
+        terms.setCurrencyIso("EUR");
+        terms.setIssueDate(LocalDate.of(2023, 6, 30));
+        terms.setMaturityDate(LocalDate.of(2033, 6, 30));
+        terms.setCouponRate(bd("0.042"));
+        terms.setIssuePrice(BigDecimal.ONE);
+        terms.setDayCount(DayCountConvention.ACT_ACT_ICMA);
+        terms.setPaymentFrequency(PaymentFrequency.ANNUAL);
+        terms.setCallable(true);
+        terms.setCallSchedule(List.of(
+                Map.of("callDate", "2028-06-30", "callPrice", bd("101.00")),
+                Map.of("callDate", "2030-06-30", "callPrice", bd("100.50"))));
+        terms.setBondStatus(BondStatus.ACTIVE);
+        bondTerms.save(terms);
     }
 
     private AssetHolder holder(java.util.UUID assetId, java.util.UUID investorId,

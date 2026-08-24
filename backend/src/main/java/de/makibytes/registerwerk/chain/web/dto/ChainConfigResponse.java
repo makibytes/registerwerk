@@ -13,5 +13,8 @@ public record ChainConfigResponse(
         String networkType,
         Long chainId,
         String blockExplorerUrl,
+        String finalityModel,
+        Integer avgBlockSeconds,
+        String finalitySource,
         boolean enabled
 ) {}

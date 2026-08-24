@@ -1,0 +1,86 @@
+{{- if .Values.frontendCustomer.enabled }}
+{{- $ctx := dict "context" . "component" "frontend-customer" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "registerwerk.componentFullname" $ctx }}
+  labels:
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontendCustomer.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- toYaml .Values.frontendCustomer.podAnnotations | nindent 8 }}
+      labels:
+        {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Same rationale as the operator frontend Deployment: no Kubernetes API calls happen from
+      # this pod, so the default (non-created) ServiceAccount with automountServiceAccountToken
+      # false is sufficient.
+      securityContext:
+        {{- toYaml .Values.frontendCustomer.podSecurityContext | nindent 8 }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{/* Same rationale as the backend Deployment's identical block (see that file's comment):
+           hardcoded because the label selector needs registerwerk.componentSelectorLabels, only
+           computable at template time, not expressible as static values.yaml data. */}}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 14 }}
+      {{- with .Values.frontendCustomer.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      containers:
+        - name: frontend-customer
+          securityContext:
+            {{- toYaml .Values.frontendCustomer.securityContext | nindent 12 }}
+          image: "{{ .Values.frontendCustomer.image.repository }}:{{ .Values.frontendCustomer.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.frontendCustomer.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          {{- with .Values.frontendCustomer.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.frontendCustomer.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.frontendCustomer.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.frontendCustomer.resources | nindent 12 }}
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            # See the operator frontend Deployment's identical comment: readOnlyRootFilesystem
+            # below needs these writable, emptyDir-backed, purely ephemeral.
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: {{ include "registerwerk.componentFullname" $ctx }}-nginx
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+{{- end }}

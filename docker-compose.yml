@@ -1,12 +1,326 @@
 # Named explicitly (rather than left to Compose's directory-name default) so the network
 # monitoring/docker-compose.yml joins as "registerwerk_default" is deterministic regardless
-# of what directory this repo is checked out into (Phase 12, finding #4).
+# of what directory this repo is checked out into .
 name: registerwerk
 
+# Container logs previously had no rotation configured anywhere, so Docker's default json-file
+# driver grew without bound — on a long-lived demo host that eventually fills the disk. Anchored
+# here and merged into every service rather than repeated seven times.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
+  # Software PKCS#11 token for the disposable demo only. The backend uses the same SunPKCS11
+  # adapter in production; only the profile/config/library change for Thales Luna or Utimaco.
+  softhsm:
+    build:
+      context: ./deploy/softhsm
+    image: registerwerk-softhsm-demo:local
+    logging: *default-logging
+    environment:
+      HSM_SO_PIN: ${DEMO_HSM_SO_PIN:-12345678}
+      HSM_USER_PIN: ${DEMO_HSM_USER_PIN:-123456}
+    volumes:
+      - softhsm_tokens:/tokens
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tokens/.ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: "no"
+
+  # ─── Disposable local EVM ─────────────────────────────────────────────────
+  # The demo's lending screens require real contract bytecode and live balances; seeded DB
+  # addresses alone are intentionally rejected by the backend's on-chain verification.
+  # Port 8545 remains private to the Compose network. The host uses 18545 by default so this
+  # disposable node cannot collide with a real node listening on the conventional port.
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:v1.7.1
+    logging: *default-logging
+    entrypoint: ["anvil"]
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--chain-id"
+      - "11155111"
+      - "--state"
+      - "/data/anvil-state.json"
+      # Starts on the default auto-mine-on-tx behavior (instant, one block per transaction) —
+      # `demo-onchain-deploy` needs that: `--block-time` interval mining measurably hangs
+      # `forge script --broadcast` for this stack's multi-hundred-transaction 7-standard deployment
+      # (confirmed live: the tx pool stays empty for many minutes mid-broadcast under interval
+      # mining, vs. completing normally under auto-mine — likely forge's own pre-broadcast
+      # simulation racing a chain whose state keeps advancing out from under it via empty blocks).
+      # `demo-onchain-deploy` switches this to interval mining via `anvil_setIntervalMining` only
+      # *after* deployment succeeds — see that service's command — so the chain still keeps
+      # producing blocks afterward (without which it reads as "stalled" to both Registerwerk's own
+      # stall-threshold health check and chaincache's depth-based finality promoter, and there is
+      # nothing for the SAFE/FINALIZED ladder to promote through), without ever fighting a live
+      # broadcast for it.
+    ports:
+      - "${ANVIL_BIND_ADDR:-0.0.0.0}:${ANVIL_HOST_PORT:-18545}:8545"
+    volumes:
+      - anvil_state:/data
+    healthcheck:
+      # An open TCP socket is insufficient: require a JSON-RPC response from the configured
+      # demo chain. This URL is evaluated inside the Anvil container, hence port 8545.
+      test: ["CMD-SHELL", "test \"$$(cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null)\" = \"11155111\""]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    restart: unless-stopped
+
+  # ─── chaincache (the showcase) ─────────────────────────────────────────────
+  # Part of the default stack (`docker compose up` starts these) — per the portfolio plan's
+  # product decision: chaincache default-on, side-by-side with direct-node chains, so the
+  # operator node list shows a real A/B capability comparison out of the box rather than
+  # something only reachable via an opt-in profile.
+  #
+  # chaincache's own architecture is one Spring Boot WORKLOAD per chain — a deployment with zero
+  # or more than one configured chain refuses to start (see ChainRuntimeRegistry). This stack runs
+  # TWO workloads, sharing one Postgres instance (chain-scoped rows, exactly as the GKE Helm chart
+  # at chaincache/deploy/helm/chaincache shares one Cloud SQL instance across per-chain releases):
+  #   - chaincache-sepolia fronts this stack's own anvil devnet as a CHAINCACHE-kind RpcNode on
+  #     ETHEREUM_SEPOLIA (DemoDataSeeder seeds it) — DEPTH_BASED finality, since anvil has no
+  #     safe/finalized tags of its own.
+  #   - chaincache-base fronts real public Base Sepolia RPC providers — TAG_BASED finality with
+  #     real safe/finalized tags and required-provider-agreement: 2, demonstrating the capability
+  #     an isolated local devnet structurally cannot (real reorgs, cross-provider agreement).
+  # Every other chain stays direct-to-node, untouched. chaincache gets its own dedicated Postgres,
+  # per the single-instance architecture note in CLAUDE.md ("hosts only the registerwerk
+  # database") — it is not a second schema/database bolted onto the shared `postgres` service
+  # above.
+  chaincache-postgres:
+    image: postgres:18.6-alpine
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: chaincache
+      POSTGRES_USER: chaincache
+      POSTGRES_PASSWORD: chaincache
+    volumes:
+      # PostgreSQL 18 stores versioned data below /var/lib/postgresql, not /var/lib/postgresql/data
+      # — and chaincache's own Flyway history was squashed to a single fresh-install baseline with
+      # baseline-on-migrate disabled, so a volume carrying the old V1-V7 history would fail to
+      # validate against it anyway. New volume name (chaincache_pg18, not the old chaincache_pgdata)
+      # deliberately sidesteps both: nothing is deleted, the old volume is just orphaned.
+      - chaincache_pg18:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chaincache -d chaincache"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  chaincache-sepolia:
+    build:
+      context: ../chaincache
+    image: registerwerk-chaincache-demo:local
+    logging: *default-logging
+    depends_on:
+      chaincache-postgres:
+        condition: service_healthy
+      anvil:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
+      SPRING_DATASOURCE_USERNAME: chaincache
+      SPRING_DATASOURCE_PASSWORD: chaincache
+      # This stack's own anvil devnet (chain-id 11155111, impersonating Ethereum Sepolia for the
+      # local demo — see ETH_SEPOLIA_RPC below, still pointed straight at anvil as the untouched
+      # direct-RPC fallback) as this workload's sole upstream node, under the chain key
+      # "sepolia" — registerwerk's RpcNode.remoteChainKey for this connection must match.
+      CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_PROVIDER: anvil
+      CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_HTTP: http://anvil:8545
+      CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_WS: ws://anvil:8545
+      # chaincache's RpcProviderIdentityValidator compares this against eth_chainId's response,
+      # which anvil (like every real EVM node) returns as a 0x-prefixed hex quantity — "0xaa36a7"
+      # for 11155111, Sepolia's chain id.
+      CHAINCACHE_CHAINS_SEPOLIA_RPC_EXPECTED_CHAIN_ID: "0xaa36a7"
+      # anvil has no native safe/finalized tags, so DEPTH_BASED (not TAG_BASED) is the correct
+      # model — confirmation-depth-based promotion, matched by --block-time on the anvil service
+      # above so blocks keep arriving for the ladder to promote through even when idle.
+      CHAINCACHE_CHAINS_SEPOLIA_CHAIN_FINALITY_MODEL: DEPTH_BASED
+      CHAINCACHE_CHAINS_SEPOLIA_CHAIN_SAFE_CONFIRMATIONS: "3"
+      CHAINCACHE_CHAINS_SEPOLIA_CHAIN_FINALIZED_CONFIRMATIONS: "6"
+      # On, matching chaincache's own default posture (chaincache.auth.enabled: true) — the demo
+      # is meant to exercise the reference integration exactly as a production operator would
+      # configure it, not a weakened variant. registerwerk.chaincache.jwt-secret on the backend
+      # service must be set to the same value. RPC/WS traffic stays open
+      # (chaincache.auth.rpc-enabled defaults to false) — only the read APIs
+      # (/api/capabilities, /{chain}/api/**) require this credential.
+      CHAINCACHE_AUTH_ENABLED: "true"
+      CHAINCACHE_JWT_SECRET: ${CHAINCACHE_JWT_SECRET:-registerwerk-chaincache-demo-secret-change-me}
+      # Safe here: monitoring/prometheus.yml scrapes this over the same internal docker network,
+      # never exposed on a published port — the exact same ClusterIP-only trust boundary the Helm
+      # chart's values.yaml comment describes for this same setting.
+      CHAINCACHE_AUTH_PROMETHEUS_PUBLIC: "true"
+      CHAINCACHE_KAFKA_ENABLED: "false"
+      # Replicated-workload posture (also what the Helm chart configures) — exercised locally so
+      # the demo matches production guidance. Postgres-backed cache warmup remains available.
+      CHAINCACHE_CACHE_LOCAL_SNAPSHOT_ENABLED: "false"
+      CHAINCACHE_REQUEST_LOCAL_STATS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:18090:8080"
+    healthcheck:
+      # /readiness (not the bare /health, and not /liveness — see chaincache's own Dockerfile
+      # HEALTHCHECK, which correctly uses /liveness for container-restart purposes) is the
+      # traffic-readiness signal: it additionally reports the rpcNodePool's status, so this
+      # container isn't marked healthy until it can actually answer RPC calls.
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  chaincache-base:
+    build:
+      context: ../chaincache
+    image: registerwerk-chaincache-demo:local
+    logging: *default-logging
+    depends_on:
+      chaincache-postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
+      SPRING_DATASOURCE_USERNAME: chaincache
+      SPRING_DATASOURCE_PASSWORD: chaincache
+      # Two independent real public Base Sepolia providers, under the chain key "base" —
+      # gives this workload an actual TAG_BASED chain with real safe/finalized tags and real
+      # reorgs to demonstrate, plus required-provider-agreement: 2 below (a local anvil devnet can
+      # never show either). Override with your own endpoints via CHAINCACHE_BASE_UPSTREAM_*_HTTP/
+      # WS if these public endpoints are unreachable/rate-limited in your environment.
+      CHAINCACHE_CHAINS_BASE_RPC_NODES_0_PROVIDER: base-sepolia-1
+      CHAINCACHE_CHAINS_BASE_RPC_NODES_0_HTTP: ${CHAINCACHE_BASE_UPSTREAM_1_HTTP:-https://sepolia.base.org}
+      CHAINCACHE_CHAINS_BASE_RPC_NODES_1_PROVIDER: base-sepolia-2
+      CHAINCACHE_CHAINS_BASE_RPC_NODES_1_HTTP: ${CHAINCACHE_BASE_UPSTREAM_2_HTTP:-https://base-sepolia-rpc.publicnode.com}
+      # Base Sepolia's chain id (84532) as the 0x-prefixed hex quantity eth_chainId returns.
+      CHAINCACHE_CHAINS_BASE_RPC_EXPECTED_CHAIN_ID: "0x14a34"
+      CHAINCACHE_CHAINS_BASE_CHAIN_FINALITY_MODEL: TAG_BASED
+      CHAINCACHE_CHAINS_BASE_FINALITY_REQUIRED_PROVIDER_AGREEMENT: "2"
+      CHAINCACHE_AUTH_ENABLED: "true"
+      CHAINCACHE_JWT_SECRET: ${CHAINCACHE_JWT_SECRET:-registerwerk-chaincache-demo-secret-change-me}
+      # Safe here: monitoring/prometheus.yml scrapes this over the same internal docker network,
+      # never exposed on a published port — the exact same ClusterIP-only trust boundary the Helm
+      # chart's values.yaml comment describes for this same setting.
+      CHAINCACHE_AUTH_PROMETHEUS_PUBLIC: "true"
+      CHAINCACHE_KAFKA_ENABLED: "false"
+      CHAINCACHE_CACHE_LOCAL_SNAPSHOT_ENABLED: "false"
+      CHAINCACHE_REQUEST_LOCAL_STATS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:18091:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  demo-onchain-deploy:
+    build:
+      context: ./contracts
+      dockerfile: Dockerfile.demo
+      network: host
+    image: registerwerk-contracts-demo:local
+    logging: *default-logging
+    command:
+      - |
+        set -eu
+        attempts=0
+        until chain_id="$$(cast chain-id --rpc-url http://anvil:8545 2>/dev/null)" \
+          && [ "$$chain_id" = "11155111" ]; do
+          attempts=$$((attempts + 1))
+          if [ "$$attempts" -ge 60 ]; then
+            echo "Anvil did not become ready on the Compose network (expected chain 11155111)" >&2
+            exit 1
+          fi
+          sleep 1
+        done
+        main_ready=false
+        if [ -s /output/demo.env ]; then
+          . /output/demo.env
+          factory_code=""
+          registry_code=""
+          if [ -n "$${ASSET_TOKEN_FACTORY:-}" ] && [ -n "$${DEPLOYMENT_REGISTRY:-}" ]; then
+            factory_code="$$(cast code "$$ASSET_TOKEN_FACTORY" --rpc-url http://anvil:8545 2>/dev/null || true)"
+            registry_code="$$(cast code "$$DEPLOYMENT_REGISTRY" --rpc-url http://anvil:8545 2>/dev/null || true)"
+          fi
+          if [ -n "$$factory_code" ] && [ "$$factory_code" != "0x" ] \
+            && [ -n "$$registry_code" ] && [ "$$registry_code" != "0x" ]; then
+            main_ready=true
+          fi
+        fi
+        if [ "$$main_ready" != true ]; then
+          forge script script/DeployLocalLendingDemo.s.sol:DeployLocalLendingDemo \
+            --rpc-url http://anvil:8545 --broadcast --non-interactive
+        fi
+        . /output/demo.env
+        trex_code=""
+        if [ -n "$${DEMO_ERC3643_TOKEN:-}" ]; then
+          trex_code="$$(cast code "$$DEMO_ERC3643_TOKEN" --rpc-url http://anvil:8545 2>/dev/null || true)"
+        fi
+        if [ -z "$$trex_code" ] || [ "$$trex_code" = "0x" ]; then
+          forge script script/DeployLocalTrexDemo.s.sol:DeployLocalTrexDemo \
+            --rpc-url http://anvil:8545 --broadcast --non-interactive
+          cat /output/trex.env >> /output/demo.env
+          . /output/trex.env
+        fi
+        trex_record="$$(cast call "$$DEPLOYMENT_REGISTRY" \
+          "deployment(bytes32)((address,uint64,uint64,bytes32))" "$$(cast keccak 'ERC-3643')" \
+          --rpc-url http://anvil:8545)"
+        if ! echo "$$trex_record" | grep -qi "$$DEMO_ERC3643_TOKEN"; then
+          cast send "$$DEPLOYMENT_REGISTRY" \
+            "setDeployment(bytes32,address,bytes32)" \
+            "$$(cast keccak 'ERC-3643')" "$$DEMO_ERC3643_TOKEN" "$$(cast keccak 'demo-erc3643')" \
+            --rpc-url http://anvil:8545 \
+            --private-key "$${LOCAL_DEMO_DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}" >/dev/null
+        fi
+        # Deployment is done — switch anvil from auto-mine to interval mining now, not before, so
+        # the whole broadcast above ran against the fast default mode instead of fighting a chain
+        # that keeps advancing empty blocks under it (see the anvil service's own comment on why).
+        # Idempotent: re-running this (e.g. after a backend-only restart, since main_ready/trex_code
+        # above make this script otherwise skip straight to the end) just re-asserts the same mode.
+        # Retried, not a bare call: anvil's own healthcheck (cast chain-id, 3s timeout) can time out
+        # right after the ~91M-gas TREX broadcast above while anvil is still working through that
+        # load, so a single immediate call here can hit the same transient unavailability and take
+        # the whole deploy job down with it — non-fatal on exhaustion since interval mining is a
+        # demo-quality-of-life switch, not a deployment-correctness requirement.
+        mining_attempts=0
+        until cast rpc anvil_setIntervalMining 2 --rpc-url http://anvil:8545 >/dev/null 2>&1; do
+          mining_attempts=$$((mining_attempts + 1))
+          if [ "$$mining_attempts" -ge 10 ]; then
+            echo "WARNING: could not switch anvil to interval mining after $$mining_attempts attempts — leaving it on auto-mine" >&2
+            break
+          fi
+          sleep 3
+        done
+        echo "Registerwerk demo contracts and seven-standard manifest are ready"
+    working_dir: /contracts
+    user: "0:0"
+    environment:
+      HOME: /home/foundry
+      LOCAL_DEMO_OUTPUT: /output/demo.env
+      LOCAL_DEMO_MANIFEST: /output/manifest.json
+      LOCAL_TREX_OUTPUT: /output/trex.env
+    volumes:
+      - lending_demo_addresses:/output
+    depends_on:
+      anvil:
+        condition: service_healthy
+    restart: "no"
+
   # ─── Application Database ──────────────────────────────────────────────────
   postgres:
-    image: postgres:17-alpine
+    # Patch-pinned rather than tracking the floating `17-alpine`. Staying on 17.x is deliberate:
+    # moving to 18 requires a pg_upgrade or dump/restore of the pgdata volume, which is a separate
+    # deliberate migration, not something a `docker compose pull` should ever do implicitly.
+    image: postgres:17.10-alpine
+    logging: *default-logging
     environment:
       POSTGRES_DB: registerwerk
       POSTGRES_USER: ${DB_USER:-registerwerk}
@@ -19,14 +333,83 @@ services:
       - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-registerwerk} -d registerwerk"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 10
+      # Without this, initdb time on a fresh volume burns retries instead of being tolerated.
+      start_period: 30s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          cpus: "1.0"
           memory: 1g
+
+  # ─── PostgreSQL backup ─────────────────────────────────────────────────────
+  # Docker Compose deployment — pg_dump path (docs/operator/maintenance/backups.md). Until now
+  # the only backup mechanism documented for this path was a cron entry the operator had to add
+  # to the HOST outside of Compose entirely — `docker compose up` alone produced zero backups.
+  # This runs the same pg_dump this repo already documents, as a real Compose service: dump on
+  # startup, then daily, retained on a named volume (survives container recreation, not the
+  # same durability as offsite/S3 — see backups.md's own "S3 document backup" section for why
+  # KYC/report buckets need separate off-host replication; this volume is local-Docker-host
+  # only, same as the Helm path's PVC-backed approach before it reaches S3).
+  postgres-backup:
+    image: postgres:17.10-alpine
+    logging: *default-logging
+    environment:
+      PGHOST: postgres
+      PGUSER: ${DB_USER:-registerwerk}
+      PGPASSWORD: ${DB_PASSWORD:-registerwerk}
+      PGDATABASE: registerwerk
+      BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-30}
+      # monitoring/docker-compose.yml's pushgateway service, reachable here because that stack
+      # is deliberately started on this same registerwerk_default network (see its own header
+      # comment) — but that stack is optional, so a failed push below only logs a warning, never
+      # fails the backup itself. monitoring/alerts/registerwerk.yml's BackupStale alert reads
+      # exactly the metric name pushed here.
+      PUSHGATEWAY_URL: ${PUSHGATEWAY_URL:-http://pushgateway:9091}
+    volumes:
+      - pg_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    # $$ throughout: Compose performs its OWN ${...} substitution on every string in this file
+    # (not just `environment:` blocks) before the container ever sees it — a bare $(...) or
+    # ${...} here would be silently resolved (usually to blank, since none of these are real
+    # Compose/.env variables) at `docker compose config`/`up` time instead of by bash inside the
+    # container. See the demo-onchain-deploy service's identical $$-escaping for the same reason.
+    command:
+      - |
+        set -e
+        echo "postgres-backup: daily pg_dump, $${BACKUP_RETAIN_DAYS}d local retention."
+        while true; do
+          STAMP=$$(date -u +%Y%m%d-%H%M%S)
+          FILE="/backups/registerwerk-$${STAMP}.sql.gz"
+          echo "[$$(date -u +%FT%TZ)] Starting pg_dump..."
+          if pg_dump --no-owner --no-privileges | gzip > "$$FILE"; then
+            echo "[$$(date -u +%FT%TZ)] Backup complete: $$FILE ($$(wc -c < "$$FILE") bytes)"
+            find /backups -name '*.sql.gz' -mtime "+$${BACKUP_RETAIN_DAYS}" -delete
+            # Pushgateway rejects a body with no trailing newline (HTTP 400) — --post-data
+            # never adds one, so piping through --post-file=/dev/stdin from a printf that does
+            # is required, not cosmetic; confirmed by hand against a running Pushgateway.
+            printf 'backup_last_success_timestamp %s\n' "$$(date +%s)" \
+              | wget -q -O- --post-file=/dev/stdin \
+                "$${PUSHGATEWAY_URL}/metrics/job/registerwerk_pg_backup" \
+              || echo "WARNING: backup succeeded but pushing the success metric to $${PUSHGATEWAY_URL} failed"
+          else
+            echo "ERROR: pg_dump failed" >&2
+            rm -f "$$FILE"
+          fi
+          sleep 86400
+        done
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
 
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
@@ -34,6 +417,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       network: host
+    logging: *default-logging
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/registerwerk
       DB_USER: ${DB_USER:-registerwerk}
@@ -45,12 +429,33 @@ services:
       # Override to blank/"production" once JWT_ISSUER_URI and a real JWT_DEV_SECRET are set.
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-}
       ENTRA_ENABLED: ${ENTRA_ENABLED:-false}
+      REGISTERWERK_PRODUCTION_MODE: ${REGISTERWERK_PRODUCTION_MODE:-false}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
       JWT_DEV_SECRET: ${JWT_DEV_SECRET:-registerwerk-dev-jwt-secret-change-in-production!!}
+      # Microsoft Entra ID. All blank by default, which is what keeps this a local/demo stack:
+      # ENTRA_ENABLED=false means built-in login, and ENTRA_SUPPORT_ENABLED=false means nothing
+      # here ever reaches out to Microsoft Graph. See docs/platform/entra-setup.md.
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      ENTRA_SPA_CLIENT_ID: ${ENTRA_SPA_CLIENT_ID:-}
+      ENTRA_API_SCOPE: ${ENTRA_API_SCOPE:-}
+      ENTRA_SUPPORT_ENABLED: ${ENTRA_SUPPORT_ENABLED:-false}
+      ENTRA_GRAPH_BASE_URL: ${ENTRA_GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}
+      ENTRA_STEPUP_AUTH_CONTEXT_ID: ${ENTRA_STEPUP_AUTH_CONTEXT_ID:-}
+      ENTRA_AUTHORIZATION_URI: ${ENTRA_AUTHORIZATION_URI:-https://login.microsoftonline.com/common/oauth2/authorize}
+      ENTRA_MFA_SETUP_URL: ${ENTRA_MFA_SETUP_URL:-https://mysignins.microsoft.com/security-info}
+      ENTRA_REQUIRE_2FA_ENROLMENT: ${ENTRA_REQUIRE_2FA_ENROLMENT:-false}
+      # Must match the chaincache service's CHAINCACHE_JWT_SECRET below — a shared secret between
+      # Registerwerk and every chaincache workload it talks to. See ChaincacheTokenFactory.
+      CHAINCACHE_JWT_SECRET: ${CHAINCACHE_JWT_SECRET:-registerwerk-chaincache-demo-secret-change-me}
       ETH_MAINNET_RPC: ${ETH_MAINNET_RPC}
-      ETH_SEPOLIA_RPC: ${ETH_SEPOLIA_RPC}
+      ETH_SEPOLIA_RPC: ${ETH_SEPOLIA_RPC:-http://anvil:8545}
+      LENDING_LOCAL_DEMO_BACKEND_RPC_URL: http://anvil:8545
+      LENDING_LOCAL_DEMO_PUBLIC_RPC_URL: ${ANVIL_PUBLIC_RPC_URL:-http://localhost:18545}
       POLYGON_MAINNET_RPC: ${POLYGON_MAINNET_RPC}
       POLYGON_AMOY_RPC: ${POLYGON_AMOY_RPC}
       BASE_MAINNET_RPC: ${BASE_MAINNET_RPC}
@@ -68,6 +473,11 @@ services:
       # in .env for any real deployment.
       REGISTERWERK_WALLET_MASTER_KEY: ${REGISTERWERK_WALLET_MASTER_KEY:-registerwerk-dev-wallet-master-key-change-in-production}
       REGISTERWERK_WALLET_DIR: /data/wallets
+      REGISTERWERK_HSM_ENABLED: ${REGISTERWERK_HSM_ENABLED:-true}
+      REGISTERWERK_HSM_PROFILE: ${REGISTERWERK_HSM_PROFILE:-SOFTHSM}
+      REGISTERWERK_HSM_PROVIDER_CONFIG: ${REGISTERWERK_HSM_PROVIDER_CONFIG:-/etc/registerwerk/pkcs11.cfg}
+      REGISTERWERK_HSM_PIN: ${REGISTERWERK_HSM_PIN:-${DEMO_HSM_USER_PIN:-123456}}
+      REGISTERWERK_HSM_SIGNATURE_ALGORITHM: ${REGISTERWERK_HSM_SIGNATURE_ALGORITHM:-}
       S3_BUCKET: ${S3_BUCKET:-registerwerk-documents}
       S3_ENDPOINT: ${S3_ENDPOINT}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
@@ -77,14 +487,23 @@ services:
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME}
       MAIL_PASSWORD: ${MAIL_PASSWORD}
+      # The frontends proxy /api/ on their own origin in the production build, but the
+      # browser's Origin header reaches the backend through nginx/Kong. Keep Spring's CORS
+      # allow-list derived from the deployable frontend URLs so a remote demo host (for example
+      # nibbler.local) does not get an "Invalid CORS request" 403 before login credentials are
+      # even evaluated. An explicit list remains available for separate-origin deployments.
+      REGISTERWERK_CORS_ALLOWED_ORIGINS: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:-${OPERATOR_FRONTEND_URL:-http://localhost:4200},${CUSTOMER_FRONTEND_URL:-http://localhost:4201}}
       CUSTOMER_FRONTEND_URL: ${CUSTOMER_FRONTEND_URL:-http://localhost:4201}
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       # Repo/lending ships fail-closed in application.yml; the dev stack opts in so the
       # feature is exercisable locally. Both flags are required (LendingProductionReadinessCheck
       # refuses a partially enabled deployment).
       REGISTERWERK_LENDING_ENABLED: ${REGISTERWERK_LENDING_ENABLED:-true}
       REGISTERWERK_LENDING_RELEASE_APPROVED: ${REGISTERWERK_LENDING_RELEASE_APPROVED:-true}
+      REGISTERWERK_LENDING_LOCAL_DEMO_ADDRESSES_FILE: /demo-onchain/demo.env
+      REGISTERWERK_REPO_DESK_ENABLED: ${REGISTERWERK_REPO_DESK_ENABLED:-true}
+      REGISTERWERK_REPO_DESK_RELEASE_APPROVED: ${REGISTERWERK_REPO_DESK_RELEASE_APPROVED:-true}
       REGISTERWERK_TRADING_ENABLED: ${REGISTERWERK_TRADING_ENABLED:-true}
       REGISTERWERK_TRADING_VENUE_SIMULATED_ENABLED: ${REGISTERWERK_TRADING_VENUE_SIMULATED_ENABLED:-true}
       REGISTERWERK_TRADING_VENUE_ASSETERA_ENABLED: ${REGISTERWERK_TRADING_VENUE_ASSETERA_ENABLED:-true}
@@ -96,6 +515,16 @@ services:
       REGISTERWERK_TRADING_VENUE_TALOS_ENABLED: ${REGISTERWERK_TRADING_VENUE_TALOS_ENABLED:-true}
       REGISTERWERK_TRADING_VENUE_TALOS_BASE_URL: ${REGISTERWERK_TRADING_VENUE_TALOS_BASE_URL:-}
       REGISTERWERK_TRADING_VENUE_TALOS_API_KEY: ${REGISTERWERK_TRADING_VENUE_TALOS_API_KEY:-}
+      REGISTERWERK_TRAVEL_RULE_PROTOCOL: ${REGISTERWERK_TRAVEL_RULE_PROTOCOL:-NOOP}
+      REGISTERWERK_TRAVEL_RULE_NOTABENE_BASE_URL: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_BASE_URL:-https://api.notabene.id}
+      REGISTERWERK_TRAVEL_RULE_NOTABENE_API_KEY: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_API_KEY:-}
+      REGISTERWERK_TRAVEL_RULE_NOTABENE_VASP_DID: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_VASP_DID:-}
+      REGISTERWERK_TRAVEL_RULE_TRP_ENDPOINT: ${REGISTERWERK_TRAVEL_RULE_TRP_ENDPOINT:-}
+      REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL: ${REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL:-https://trp.notabene.id/directory}
+      REGISTERWERK_TRAVEL_RULE_TRP_MTLS_CERT: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_CERT:-}
+      REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY:-}
+      # Shared credential for inbound IVMS-101 delivery. Blank disables the public inbox.
+      REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY: ${REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY:-}
       # Confidential (Zama fhEVM) tokens — the operator-initiated encrypt/decrypt path only;
       # investor/issuer/auditor self-decrypt and investor confidential-transfer encryption happen
       # entirely client-side in the frontends (FheClientService), never through this backend.
@@ -104,20 +533,45 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      demo-onchain-deploy:
+        condition: service_completed_successfully
+      softhsm:
+        condition: service_healthy
+      # service_started, not service_healthy: BlockchainClientRegistry's kind-aware routing (see
+      # blockchain/api/BlockchainClientRegistry) already fails over to the direct anvil node
+      # automatically when chaincache is unhealthy, so blocking the backend's own startup on
+      # chaincache's full health check would only add boot time for no correctness benefit.
+      chaincache-sepolia:
+        condition: service_started
     ports:
       - "${BACKEND_BIND_ADDR:-127.0.0.1}:8080:8080"
     volumes:
       - registerwerk_wallets:/data/wallets
+      - lending_demo_addresses:/demo-onchain:ro
+      - softhsm_tokens:/var/lib/softhsm/tokens
+      - ./deploy/softhsm/sunpkcs11.cfg:/etc/registerwerk/pkcs11.cfg:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/actuator/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 60s
+    # Docker's default `docker stop` timeout is 10s — less than
+    # spring.lifecycle.timeout-per-shutdown-phase's 30s (application.yml), the budget
+    # server.shutdown: graceful actually gives in-flight requests to finish. Without this,
+    # `docker compose stop`/`down`/a rolling recreate could SIGKILL the JVM mid-drain, on any
+    # request that happens to take longer than 10s, defeating graceful shutdown entirely — the
+    # same class of gap the Helm chart already avoids via terminationGracePeriodSeconds. 35s
+    # matches that 30s budget plus a small margin, same reasoning as the Helm chart's own.
+    stop_grace_period: 35s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          # Keep in step with -XX:ActiveProcessorCount in backend/Dockerfile. Without a CPU limit
+          # the JVM sized G1, the JIT and the common ForkJoinPool for every host core, so a leak
+          # or a GC storm could saturate the whole machine.
+          cpus: "2.0"
           memory: 1500m
 
   # ─── Zama Relayer Sidecar ───────────────────────────────────────────────────
@@ -133,6 +587,7 @@ services:
       context: ./zama-relayer
       dockerfile: Dockerfile
       network: host
+    logging: *default-logging
     environment:
       ZAMA_CONFIG_PRESET: ${ZAMA_CONFIG_PRESET:-sepolia}
       CHAIN_ID: ${ZAMA_CHAIN_ID:-11155111}
@@ -149,8 +604,15 @@ services:
       # transaction-signing wallet (registry wallets configured via Operator Portal → Wallets).
       # Its public address must be registered as a viewer (addViewer / deploy-time
       # initialViewers) on any confidential token the operator needs to reconcile.
+      #
+      # : prefer the envelope-encrypted pair below over the plaintext
+      # ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY — produce ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED with
+      # `cd zama-relayer && RELAYER_KEK_MASTER_KEY=<master-key> npm run wrap-operator-key -- <rawKeyHex>`.
+      # The plaintext var still works (logs a startup warning) for local/dev convenience.
       OPERATOR_DECRYPT_PRIVATE_KEY: ${ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY:-}
-      # Finding #6, Phase 9: shared secret every /v1/* caller must present — see auth.ts. Same
+      OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: ${ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED:-}
+      RELAYER_KEK_MASTER_KEY: ${ZAMA_RELAYER_KEK_MASTER_KEY:-}
+      # : shared secret every /v1/* caller must present — see auth.ts. Same
       # value the backend sends above (REGISTERWERK_ZAMA_RELAYER_API_KEY); keep them in sync.
       RELAYER_API_KEY: ${ZAMA_RELAYER_API_KEY:-registerwerk-dev-zama-relayer-key-change-in-production}
       PORT: 3001
@@ -167,6 +629,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "0.5"
           memory: 512m
 
   # ─── Operator Frontend ────────────────────────────────────────────────────
@@ -177,15 +640,25 @@ services:
       network: host
       args:
         BUILD_CONFIG: ${FRONTEND_BUILD_ENV:-production}
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_healthy
     ports:
       - "4200:80"
+    healthcheck:
+      # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
+      # resolves to ::1 first inside the container and the probe is refused.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          cpus: "0.25"
           memory: 128m
 
   # ─── Customer Frontend ─────────────────────────────────────────────────────
@@ -196,15 +669,25 @@ services:
       network: host
       args:
         BUILD_CONFIG: ${FRONTEND_BUILD_ENV:-production}
+    logging: *default-logging
     depends_on:
       kong:
         condition: service_healthy
     ports:
       - "4201:80"
+    healthcheck:
+      # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
+      # resolves to ::1 first inside the container and the probe is refused.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          cpus: "0.25"
           memory: 128m
 
   # ─── API Gateway ────────────────────────────────────────────────────────────
@@ -213,22 +696,60 @@ services:
   # declarative files, which is why this used to route nothing. JWT validation
   # still happens in the Spring backend (see gateway/kong.yml header comment);
   # Kong here only handles caching, rate limiting, CORS, and security headers.
+  # Backs Kong's rate-limiting plugin (policy: redis, gateway/kong.yml) so the per-minute/hour
+  # request throttle is a real limit shared across every Kong worker/replica rather than a
+  # per-node counter (see gateway/kong.yml's own comment on why policy: local silently multiplies
+  # the effective limit). Not exposed to the host — only reachable on the compose network, same
+  # trust boundary as Kong's own admin API. No persistence: rate-limit counters are inherently
+  # ephemeral/self-healing, so a restart just resets the window early, a harmless failure mode.
+  redis:
+    image: redis:7.4-alpine
+    logging: *default-logging
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+
   kong:
-    image: kong:3.8
+    image: kong:3.9.3
+    logging: *default-logging
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_ADMIN_LISTEN: "127.0.0.1:8001"
       KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+      # Read-only status API, reachable on the compose network so Prometheus can scrape
+      # /metrics from the `prometheus` plugin (gateway/kong.yml). The Admin API deliberately
+      # stays on loopback — monitoring/prometheus.yml used to target kong:8001, which Kong
+      # could never answer from another container, so the scrape job was dead by construction.
+      # Not published to the host; only other compose services can reach it.
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_PLUGINS: bundled
+      # Kong defaults nginx_worker_processes to "auto" — one worker per host CPU, so an 8-core
+      # demo host got 8 OpenResty workers (each with its own LuaJIT VM, its own proxy-cache
+      # memory store, and its own rate-limiting counters, which is why `policy: local` in
+      # kong.yml effectively multiplies the configured limit by the worker count). Two is ample
+      # for a single-host demo and makes the rate limit mean roughly what it says.
+      KONG_NGINX_WORKER_PROCESSES: "2"
     volumes:
       - ./gateway/kong.yml:/etc/kong/kong.yml:ro
     depends_on:
       backend:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "8000:8000"
@@ -236,14 +757,30 @@ services:
       # Kong admin port must NOT be exposed publicly. Access via: docker exec or SSH tunnel.
       - "127.0.0.1:8001:8001"
     healthcheck:
-      test: ["CMD", "kong", "health"]
-      interval: 10s
+      # Overrides the healthcheck baked into the kong image, which is `CMD-SHELL kong health`
+      # every 10s. That is the Kong CLI, not a probe: each invocation spawns a full resty/LuaJIT
+      # process, loads the Kong Lua runtime and parses kong.conf just to stat a pidfile — running
+      # forever, plus once per retry during boot.
+      #
+      # The image ships no curl, wget, nc or busybox (verified against kong:3.9.3), but it does
+      # ship bash, so a real HTTP round trip costs exactly one bash: /dev/tcp opens the socket and
+      # `head -c 12` reads just the status line. Kong answers `HTTP/1.1 404` for an unrouted `/`,
+      # which is a perfectly good liveness signal — it proves the proxy port is listening and the
+      # router is loaded. Any HTTP status line passes; a refused connection fails.
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/8000; printf "GET / HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3; head -c 12 <&3 | grep -q "^HTTP/"'
+      interval: 30s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          cpus: "1.0"
           memory: 512m
 
   # ─── Documentation Server ─────────────────────────────────────────────────
@@ -251,23 +788,51 @@ services:
   # Access at http://<host>:8003 once the service is up.
   # Binds to 0.0.0.0 by default so it is reachable on remote hosts.
   # Set DOCS_BIND_ADDR=127.0.0.1 in .env to restrict to loopback only.
+  # Prebuilt static site served by nginx — see docs/Dockerfile for why this is no longer
+  # `mkdocs serve` against a bind mount (short version: livereload polls the whole docs tree
+  # twice a second, forever, and that was the single largest source of idle CPU on the host).
+  #
+  # Consequence of prebuilding: docs changes now need `docker compose --profile docs up --build
+  # docs` to appear. For live authoring, build docs/Dockerfile's `build` stage and run its
+  # MkDocs `serve` command; see CLAUDE.md for the complete command.
   docs:
-    image: squidfunk/mkdocs-material:9.5
-    volumes:
-      - ./mkdocs.yml:/docs/mkdocs.yml:ro
-      - ./docs:/docs/docs:ro
+    # Built rather than pulled: the stock mkdocs-material image has no
+    # mkdocs-static-i18n, which is what makes the site multilingual. Context is the repo root
+    # (not ./docs) because docs/Dockerfile COPYs mkdocs.yml from there and builds the site at
+    # image-build time — no bind mounts here, the running container is plain static nginx.
+    build:
+      context: .
+      dockerfile: docs/Dockerfile
+      network: host
+      args:
+        BACKEND_URL: ${BACKEND_URL:-http://localhost:8080}
+        DOCS_SITE_URL: ${DOCS_SITE_URL:-http://localhost:8003/}
+    image: registerwerk-docs:local
     ports:
-      - "${DOCS_BIND_ADDR:-0.0.0.0}:8003:8000"
-    command: serve --dev-addr=0.0.0.0:8000
+      - "${DOCS_BIND_ADDR:-0.0.0.0}:8003:80"
     profiles: [docs]
-    environment:
-      BACKEND_URL: ${BACKEND_URL:-http://localhost:8080}
+    logging: *default-logging
+    healthcheck:
+      # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
+      # resolves to ::1 first inside the container and the probe is refused.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 256m
+          # Five languages are built and held in memory at once; 256m (enough for
+          # the old English-only site) makes `mkdocs serve` die mid-build.
+          memory: 768m
 
 volumes:
+  anvil_state:
+  chaincache_pg18:
+  lending_demo_addresses:
   pgdata:
+  pg_backups:
   registerwerk_wallets:
+  softhsm_tokens:

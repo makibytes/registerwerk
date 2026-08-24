@@ -8,13 +8,14 @@ import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.trading.web.dto.InvestmentResponse;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -52,7 +53,10 @@ public class InvestmentController {
     public ResponseEntity<PageResponse<InvestmentResponse>> getMyInvestments(
             Pageable pageable,
             Authentication auth) {
-        UUID investorId = extractEntityId(auth);
+        UUID investorId = SecurityUtils.extractEntityId(auth);
+        if (investorId == null) {
+            throw new AccessDeniedException("An investor entity context is required");
+        }
         // A removed holder no longer holds the position and must not appear in the customer's list.
         Page<AssetHolder> page = assetHolderRepository.findActiveByInvestorId(investorId, pageable);
         Map<UUID, Asset> assetCache = loadAssetCache(page.getContent());
@@ -95,7 +99,9 @@ public class InvestmentController {
                 companyExternalReferenceService
                         .findExternalId(authentication, ExternalReferenceSubjectType.ASSET_HOLDER, h.getId())
                         .orElse(null),
-                a != null ? a.getChain() : null
+                a != null ? a.getChain() : null,
+                a != null ? a.getCurrency() : null,
+                a != null ? a.getDenomination() : null
         );
     }
 
@@ -105,15 +111,4 @@ public class InvestmentController {
                 .collect(Collectors.toMap(Asset::getId, a -> a));
     }
 
-    private UUID extractEntityId(Authentication auth) {
-        if (auth != null && auth.getPrincipal() instanceof Jwt jwt) {
-            String entityId = jwt.getClaimAsString("entity_id");
-            if (entityId != null) {
-                try {
-                    return UUID.fromString(entityId);
-                } catch (IllegalArgumentException ignored) { }
-            }
-        }
-        return null;
-    }
 }

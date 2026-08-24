@@ -1,8 +1,5 @@
 ---
-id: kyc-process
 title: KYC Process
-sidebar_label: KYC Process
-sidebar_position: 2
 ---
 
 This page describes the operator workflow for jurisdiction-aware KYC records and checklist decisions. These controls are not yet enforced uniformly across every issuance, deployment, receipt, or transfer path.

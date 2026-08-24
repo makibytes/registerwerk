@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
-import com.daml.ledger.javaapi.data.AllocatePartyResponse;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
@@ -49,11 +48,7 @@ public class CantonPartyAllocator {
     public AllocationResult allocateParty(UUID walletId, ChainConfig chainConfig, String displayName) {
         CantonLedgerClient client = (CantonLedgerClient) registry.getCantonClientByIdentifier(chainConfig.getIdentifier());
 
-        AllocatePartyResponse response = client.partyManagementClient()
-                .allocateParty(displayName, displayName)
-                .blockingGet();
-
-        String partyId = response.getPartyDetails().getParty();
+        String partyId = client.allocateParty(displayName);
         log.info("Allocated Canton party '{}' on {}", partyId, chainConfig.getIdentifier());
 
         // Known limitation, not a pending fix: open-source/Community Canton has no API to mint

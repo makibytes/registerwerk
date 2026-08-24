@@ -31,13 +31,14 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       [columns]="columns"
       [rows]="queue"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by dApp, publisher…"
       emptyMessage="No submissions waiting for review."
       [actionsTemplate]="rowActions">
     </rw-data-table>
 
     <ng-template #rowActions let-item>
-      <button mat-icon-button color="primary" (click)="openReview(item)" matTooltip="Review manifest">
+      <button type="button" mat-icon-button color="primary" (click)="openReview(item)" matTooltip="Review manifest">
         <mat-icon>rate_review</mat-icon>
       </button>
     </ng-template>

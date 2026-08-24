@@ -1,7 +1,10 @@
-FROM node:22-alpine AS builder
+FROM node:24.19.0-alpine AS builder
 WORKDIR /app/frontend-operator
-COPY frontend-operator/package.json ./
-RUN npm install --legacy-peer-deps
+# Lockfile copied alongside package.json so the build can use `npm ci` — `npm install` re-resolved
+# dependency ranges at build time, which meant two builds of the same commit could ship different
+# transitive versions.
+COPY frontend-operator/package.json frontend-operator/package-lock.json ./
+RUN npm ci
 # shared UI library consumed via the "@registerwerk/ui" -> ../frontend-shared path alias
 # in tsconfig.json; must sit next to this app in the build context, not inside it.
 COPY frontend-shared/ /app/frontend-shared/
@@ -10,7 +13,13 @@ COPY frontend-operator/ ./
 ARG BUILD_CONFIG=production
 RUN npm run build -- --configuration=${BUILD_CONFIG}
 
-FROM nginx:alpine
+FROM nginx:1.30.4-alpine
+# nginx defaults worker_processes to "auto" — one per host CPU, so an 8-core demo host ran 8
+# workers here, 8 more in the customer frontend and 8 in Kong. Serving a static SPA needs nowhere
+# near that, and the process list it produced made an unrelated CPU problem look like an nginx one.
+RUN sed -i 's/^worker_processes.*/worker_processes 2;/' /etc/nginx/nginx.conf
 COPY --from=builder /app/frontend-operator/dist/registerwerk-operator/browser /usr/share/nginx/html
 COPY frontend-operator/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+    CMD wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1

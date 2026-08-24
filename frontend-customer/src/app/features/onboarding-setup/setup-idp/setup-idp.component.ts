@@ -55,23 +55,19 @@ import { CompanyService } from '../../../core/api/company.service';
             <mat-icon matSuffix>vpn_key</mat-icon>
           </mat-form-field>
 
-          <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Client Secret</mat-label>
-            <input matInput [type]="hideSecret ? 'password' : 'text'" [(ngModel)]="clientSecret" />
-            <button mat-icon-button matSuffix type="button" (click)="hideSecret = !hideSecret">
-              <mat-icon>{{ hideSecret ? 'visibility_off' : 'visibility' }}</mat-icon>
-            </button>
-          </mat-form-field>
+          <!-- No client secret: federation is established tenant-to-tenant in your identity
+               provider, so Registerwerk never runs an authorization-code flow against it. -->
 
           @if (saveError) {
-            <p class="error-message">{{ saveError }}</p>
+            <p class="error-message" role="alert">{{ saveError }}</p>
           }
         </mat-card-content>
 
         <mat-card-actions align="end">
-          <button mat-button (click)="skip()">Skip</button>
+          <button mat-button type="button" (click)="skip()">Skip</button>
           <button
             mat-raised-button
+            type="button"
             color="primary"
             [disabled]="saving || !issuerUrl || !clientId"
             (click)="save()"
@@ -100,17 +96,22 @@ export class SetupIdpComponent {
 
   issuerUrl = '';
   clientId = '';
-  clientSecret = '';
-  hideSecret = true;
   saving = false;
   saveError = '';
 
   save(): void {
+    if (this.saving) return;
+    const issuerUrl = this.normalizeIssuerUrl(this.issuerUrl);
+    const clientId = this.clientId.trim();
+    if (!issuerUrl || !clientId) {
+      this.saveError = 'Enter a valid HTTP(S) issuer URL and client ID.';
+      return;
+    }
     this.saving = true;
     this.saveError = '';
 
     this.company
-      .saveIdpSettings({ issuerUrl: this.issuerUrl, clientId: this.clientId, clientSecret: this.clientSecret })
+      .saveIdpSettings({ issuerUrl, clientId })
       .subscribe({
         next: () => {
           this.saving = false;
@@ -127,5 +128,17 @@ export class SetupIdpComponent {
 
   skip(): void {
     this.router.navigate(['/dashboard']);
+  }
+
+  private normalizeIssuerUrl(value: string): string | null {
+    try {
+      const url = new URL(value.trim());
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+      url.hash = '';
+      url.search = '';
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      return null;
+    }
   }
 }

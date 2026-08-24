@@ -1,0 +1,26 @@
+{{- if .Values.zamaRelayer.enabled }}
+{{- $ctx := dict "context" . "component" "zama-relayer" }}
+# ClusterIP only, deliberately no Ingress template for this component: confirmed by grepping both
+# frontends' source (frontend-*/src/app/core/fhe/fhe-client.service.ts) — every browser-initiated
+# confidential-token flow talks to Zama's own public relayer (relayer.testnet.zama.org, see the
+# frontend nginx CSP's connect-src) directly from the browser, never through this sidecar. This
+# Service exists purely for the backend's operator/issuer-initiated encrypt/decrypt and
+# reconciliation calls (ConfidentialTokenAdminService, ConfidentialBalanceReconciliationService via
+# HttpZamaRelayerClient) — see templates/zama-relayer-networkpolicy.yaml for the matching ingress
+# restriction to backend pods only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "registerwerk.componentFullname" $ctx }}
+  labels:
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.zamaRelayer.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 4 }}
+{{- end }}

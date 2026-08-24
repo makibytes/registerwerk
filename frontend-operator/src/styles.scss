@@ -4,13 +4,13 @@
 
 $light: mat.define-theme((
   color: (theme-type: light, primary: mat.$azure-palette),
-  typography: (brand-family: 'Manrope', plain-family: 'Manrope'),
+  typography: (brand-family: 'Manrope Variable', plain-family: 'Manrope Variable'),
   density: (scale: 0),
 ));
 
 $dark: mat.define-theme((
   color: (theme-type: dark, primary: mat.$azure-palette),
-  typography: (brand-family: 'Manrope', plain-family: 'Manrope'),
+  typography: (brand-family: 'Manrope Variable', plain-family: 'Manrope Variable'),
   density: (scale: 0),
 ));
 
@@ -51,18 +51,19 @@ html { @include mat.all-component-themes($light); }
   --rw-shadow:     0 2px 6px rgba(13,21,38,0.08), 0 1px 3px rgba(13,21,38,0.05);
   --rw-shadow-md:  0 4px 12px rgba(13,21,38,0.1), 0 2px 4px rgba(13,21,38,0.06);
 
-  // Sidebar — adapts with color-scheme
-  --rw-sidebar-bg:             #FFFFFF;
-  --rw-sidebar-border:         #E2E8F0;
-  --rw-sidebar-fg:             #6B7280;
-  --rw-sidebar-fg-hover:       #111827;
-  --rw-sidebar-fg-active:      #B45309;
-  --rw-sidebar-hover-bg:       rgba(0,0,0,0.04);
-  --rw-sidebar-active-bg:      rgba(245,158,11,0.08);
-  --rw-sidebar-icon:           #9CA3AF;
-  --rw-sidebar-icon-active:    #B45309;
-  --rw-sidebar-brand-bg:       #F9FAFB;
-  --rw-sidebar-brand-name:     #111827;
+  // Sidebar — the dark operator rail is intentionally independent of OS theme.
+  --rw-sidebar-bg:             #07091A;
+  --rw-sidebar-border:         rgba(255,255,255,0.06);
+  --rw-sidebar-fg:             rgba(255,255,255,0.52);
+  --rw-sidebar-fg-hover:       rgba(255,255,255,0.88);
+  --rw-sidebar-fg-active:      #FCD34D;
+  --rw-sidebar-hover-bg:       rgba(255,255,255,0.06);
+  --rw-sidebar-active-bg:      rgba(252,211,77,0.11);
+  --rw-sidebar-icon:           rgba(255,255,255,0.40);
+  --rw-sidebar-icon-hover:     rgba(255,255,255,0.76);
+  --rw-sidebar-icon-active:    #FCD34D;
+  --rw-sidebar-brand-bg:       rgba(255,255,255,0.03);
+  --rw-sidebar-brand-name:     #FFFFFF;
 
   // Accent
   --rw-accent:         #F59E0B;
@@ -129,18 +130,6 @@ html { @include mat.all-component-themes($light); }
     --rw-shadow:     0 2px 6px rgba(0,0,0,0.4);
     --rw-shadow-md:  0 4px 12px rgba(0,0,0,0.45);
 
-    --rw-sidebar-bg:             #07091A;
-    --rw-sidebar-border:         rgba(255,255,255,0.05);
-    --rw-sidebar-fg:             rgba(255,255,255,0.45);
-    --rw-sidebar-fg-hover:       rgba(255,255,255,0.82);
-    --rw-sidebar-fg-active:      #FCD34D;
-    --rw-sidebar-hover-bg:       rgba(255,255,255,0.05);
-    --rw-sidebar-active-bg:      rgba(252,211,77,0.1);
-    --rw-sidebar-icon:           rgba(255,255,255,0.35);
-    --rw-sidebar-icon-active:    #FCD34D;
-    --rw-sidebar-brand-bg:       rgba(255,255,255,0.03);
-    --rw-sidebar-brand-name:     #FFFFFF;
-
     --rw-draft-bg:     rgba(29,78,216,0.15);    --rw-draft-fg:    #93C5FD;
     --rw-pending-bg:   rgba(146,64,14,0.15);    --rw-pending-fg:  #FCD34D;
     --rw-approved-bg:  rgba(6,95,70,0.15);      --rw-approved-fg: #6EE7B7;
@@ -163,14 +152,60 @@ html { @include mat.all-component-themes($light); }
 
 * { box-sizing: border-box; }
 
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 html, body { height: 100%; margin: 0; }
 
 body {
-  font-family: 'Manrope', 'Helvetica Neue', sans-serif;
+  font-family: 'Manrope Variable', 'Helvetica Neue', sans-serif;
   background: var(--rw-bg);
   color: var(--rw-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+// Fontsource supplies the icon font face, while Angular Material expects the
+// Google-compatible ligature class to be present globally.
+.material-icons {
+  display: inline-block;
+  direction: ltr;
+  font-family: 'Material Icons';
+  font-size: 24px;
+  font-style: normal;
+  font-weight: normal;
+  letter-spacing: normal;
+  line-height: 1;
+  text-rendering: optimizeLegibility;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'liga';
+}
+
+:focus-visible {
+  outline: 2px solid var(--rw-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 // ── Layout Utilities ───────────────────────────────────────────────────────────
@@ -191,11 +226,24 @@ body {
 }
 
 .content-card {
+  min-width: 0;
   background: var(--rw-surface);
   border-radius: var(--rw-radius-md);
   padding: 24px;
   border: 1px solid var(--rw-border);
   box-shadow: var(--rw-shadow-xs);
+}
+
+@media (max-width: 640px) {
+  .page-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .content-card {
+    padding: 16px;
+  }
 }
 
 .filter-row {
@@ -386,18 +434,39 @@ code {
   &.status-pending-approval,
   &.status-in-progress,
   &.status-pending,
+  &.status-open,
   &.status-not-started  { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-resolved     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   &.status-suspended,
   &.status-failed,
   &.status-expired      { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
   &.status-dissolved,
-  &.status-redeemed     { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
+  &.status-closed,
+  &.status-redeemed,
+  &.status-transferred-out { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
   &.status-whitelisted  { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   // MiCA counterparty authorization (CASP register)
   &.status-authorized     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   &.status-transitional   { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
   &.status-not-authorized { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
   &.status-not-whitelisted { background: var(--rw-border-subtle); color: var(--rw-text-muted); }
+  // Indexer state (indexer_state.status) — a stuck/erroring indexer needs to read as clearly
+  // wrong at a glance, not blend in with a neutral/pending look.
+  &.status-error        { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
+  &.status-paused        { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  // Token transfer finality (finality.api.FinalityLevel, three-tier since the P3 rename) —
+  // PROVISIONAL reads as pending/unconfirmed, SAFE as "getting there" (a lighter version of the
+  // same pending look — still reorgable, just past the fastest checkpoint), FINALIZED as a
+  // success state, ORPHANED as a clear warning since it means the chain reorged past a transfer
+  // the registry previously recorded. `.status-final` (the old two-tier FINAL name) is kept
+  // alongside `.status-finalized` for any other lingering two-tier consumer — the badge class is
+  // derived directly from whatever string the backend sends (StatusBadgeComponent), and after the
+  // P3 rename every real caller here now sends FINALIZED, not FINAL.
+  &.status-provisional   { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-safe          { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+  &.status-final,
+  &.status-finalized     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-orphaned      { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
 }
 
 // ── Registry overview ──────────────────────────────────────────────────────────
@@ -577,10 +646,14 @@ code {
 }
 
 .registry-page .entity-card {
+  width: 100%;
   padding: 16px;
   border-radius: var(--rw-radius-md);
   border: 1px solid var(--rw-border);
   background: var(--rw-surface);
+  color: var(--rw-text-primary);
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
@@ -672,10 +745,25 @@ code {
   height: 560px;
   border-radius: var(--rw-radius-md);
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   border: 1px solid var(--rw-border);
   background: var(--rw-bg);
   scroll-behavior: smooth;
+}
+
+.registry-page .graph-empty-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--rw-text-secondary);
+  text-align: center;
+
+  mat-icon { color: var(--rw-text-muted); }
+  p { margin: 0; font-size: 13px; }
 }
 
 .registry-page .graph-inner {
@@ -721,6 +809,9 @@ code {
   border-radius: var(--rw-radius);
   border: 1px solid var(--rw-border);
   background: var(--rw-surface);
+  color: var(--rw-text-primary);
+  font: inherit;
+  text-align: left;
   box-shadow: var(--rw-shadow-xs);
   cursor: pointer;
   transition: border-color 150ms ease, box-shadow 150ms ease, opacity 200ms ease, background 150ms ease;
@@ -772,6 +863,21 @@ code {
   border: 1px dashed var(--rw-border);
   color: var(--rw-text-secondary);
   font-size: 13px;
+}
+
+.registry-page .registry-error {
+  gap: 10px;
+  min-height: 220px;
+  padding: 28px;
+  text-align: center;
+}
+
+.registry-page .registry-error mat-icon {
+  color: var(--rw-text-danger);
+}
+
+.registry-page .registry-error p {
+  margin: 0;
 }
 
 // ── Asset panel ───────────────────────────────────────────────────────────────
@@ -1073,10 +1179,226 @@ code {
 
   .registry-page .graph-inner {
     min-height: 620px;
+    min-width: 680px;
   }
 
   .registry-page .hero-stats,
   .registry-page .metric-row {
     grid-template-columns: 1fr;
   }
+
+  .registry-page .hero-card,
+  .registry-page .directory-card,
+  .registry-page .graph-card {
+    padding: 18px;
+  }
+
+  .registry-page .asset-panel-header,
+  .registry-page .asset-rel-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .registry-page .asset-panel-actions,
+  .registry-page .asset-rel-tail {
+    width: 100%;
+  }
+
+  .registry-page .asset-rel-tail {
+    justify-content: space-between;
+  }
+}
+
+// ── network node health indicators ──────────────────────────────────────────
+// Health dot/label, block-lag chip, syncing badge, relative-time text — used by
+// network-nodes.component.ts's node table. Kept global for the same style-budget reason as the
+// chaincache capability comparison section right below.
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+}
+
+.health-dot.healthy   { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+.health-dot.unhealthy { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.3); }
+.health-dot.unknown   { background: var(--rw-text-muted); }
+
+.health-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.health-label.healthy   { color: #22c55e; }
+.health-label.unhealthy { color: #ef4444; }
+.health-label.unknown   { color: var(--rw-text-muted); }
+
+.block-num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--rw-text-secondary);
+}
+
+.lag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lag-chip.ok    { background: rgba(34,197,94,0.12); color: #16a34a; }
+.lag-chip.warn  { background: rgba(245,158,11,0.12); color: #d97706; }
+.lag-chip.crit  { background: rgba(239,68,68,0.12); color: #dc2626; }
+
+.syncing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.syncing-badge mat-icon {
+  font-size: 12px;
+  width: 12px;
+  height: 12px;
+}
+
+.last-seen {
+  font-size: 11px;
+  color: var(--rw-text-muted);
+}
+
+// ── chaincache capability comparison ────────────────────────────────────────
+// Shared by any page showing a chaincache-kind node's advertised capabilities next to a direct
+// node's connection — currently network-nodes.component.ts. Kept global (not per-component
+// styles) both because it's meant to be reused and to stay under Angular's per-component style
+// budget for a table-heavy admin page.
+
+.finality-source-chip, .kind-badge.chaincache {
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+}
+
+.finality-source-chip, .kind-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.kind-badge { margin-top: 3px; }
+.kind-badge mat-icon, .chaincheck-link mat-icon { font-size: 12px; width: 12px; height: 12px; }
+.expand-btn { color: var(--rw-text-muted); }
+.capabilities-row td { background: var(--rw-bg); padding: 0 20px 16px; }
+
+.capabilities-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--rw-surface);
+  border: 1px solid var(--rw-border);
+  border-radius: 8px;
+}
+
+.capability-item .label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--rw-text-muted);
+  margin-bottom: 2px;
+}
+
+.capability-item .value { font-size: 13px; color: var(--rw-text-primary); font-weight: 600; }
+.capability-item .value.yes { color: #16a34a; }
+.capability-item .value.no { color: var(--rw-text-muted); }
+
+.capabilities-empty { padding: 14px 16px; font-size: 12px; color: var(--rw-text-muted); font-style: italic; }
+.capabilities-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.chaincheck-link { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+
+.capability-item.wide { grid-column: 1 / -1; }
+.capability-item .value.mono {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.api-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.api-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace;
+  background: var(--rw-bg);
+  border: 1px solid var(--rw-border);
+  color: var(--rw-text-secondary);
+}
+
+.stream-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.stream-status mat-icon { font-size: 12px; width: 12px; height: 12px; }
+.stream-status.connected { color: #16a34a; }
+.stream-status.disconnected { color: var(--rw-text-muted); }
+
+// ── Cross-view resilience and motion ─────────────────────────────────────────
+
+router-outlet + * {
+  display: block;
+  animation: rw-view-enter 240ms cubic-bezier(.2, .7, .2, 1) both;
+}
+
+@keyframes rw-view-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.content-card,
+.mat-mdc-card-content {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-color: var(--rw-border) transparent;
+}
+
+.interactive-row {
+  cursor: pointer;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.interactive-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--rw-accent);
+  outline-offset: -2px;
+}
+
+@media (max-width: 720px) {
+  .mat-mdc-table { min-width: 640px; }
+  .mat-horizontal-stepper-header-container { overflow-x: auto; }
+  .mat-mdc-dialog-content { max-height: min(68vh, 620px); }
 }

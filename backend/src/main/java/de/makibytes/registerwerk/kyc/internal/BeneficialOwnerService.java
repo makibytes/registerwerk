@@ -122,8 +122,9 @@ public class BeneficialOwnerService {
     }
 
     /** Marks a beneficial-owner link as ceased (ownership/control ended) — soft, never deleted. */
-    public BeneficialOwner ceaseBeneficialOwner(UUID beneficialOwnerId, UUID actorId, String actorRole) {
-        BeneficialOwner beneficialOwner = beneficialOwnerRepository.findById(beneficialOwnerId)
+    public BeneficialOwner ceaseBeneficialOwner(UUID entityId, UUID beneficialOwnerId,
+                                                 UUID actorId, String actorRole) {
+        BeneficialOwner beneficialOwner = beneficialOwnerRepository.findByIdAndEntityId(beneficialOwnerId, entityId)
                 .orElseThrow(() -> new EntityNotFoundException("BeneficialOwner", beneficialOwnerId));
         if (beneficialOwner.getCeasedAt() != null) {
             throw new InvalidStateTransitionException("Beneficial owner link is already ceased");

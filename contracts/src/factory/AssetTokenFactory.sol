@@ -1,24 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.36;
 
-import "../tokens/EwpgERC20.sol";
-import "../tokens/EwpgERC721.sol";
-import "../tokens/EwpgERC1155.sol";
-import "../tokens/EwpgERC3525.sol";
-import "../tokens/EwpgERC4626.sol";
-import "../tokens/EwpgERC7540.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IAssetTokenDeployer} from "./AssetTokenDeployers.sol";
 
 /// @title AssetTokenFactory
-/// @notice CREATE2 factory for deploying eWpG token contracts with deterministic addresses.
-///         Supports ERC-20 (0), ERC-721 (1), ERC-1155 (2), ERC-3525 (3), ERC-4626 (4), ERC-7540 (5).
-///         The registry wallet is embedded at construction time and forwarded to every
-///         deployed token so ownership and compliance authority are consistent.
+/// @notice Small CREATE2 coordinator. Standard-specific creation bytecode lives in separately
+///         deployable modules so this contract remains below EIP-170's runtime-size limit.
 contract AssetTokenFactory {
-    /// @notice The registry wallet forwarded to every deployed token contract.
     address public immutable registryWallet;
+    mapping(uint8 tokenType => IAssetTokenDeployer deployer) public deployers;
 
-    /// @dev Token type constants for readability.
     uint8 public constant TOKEN_TYPE_ERC20 = 0;
     uint8 public constant TOKEN_TYPE_ERC721 = 1;
     uint8 public constant TOKEN_TYPE_ERC1155 = 2;
@@ -26,71 +17,39 @@ contract AssetTokenFactory {
     uint8 public constant TOKEN_TYPE_ERC4626 = 4;
     uint8 public constant TOKEN_TYPE_ERC7540 = 5;
 
-    event TokenDeployed(
-        bytes32 indexed assetId,
-        uint8 indexed tokenType,
-        address indexed tokenAddress
-    );
-
+    event DeployerConfigured(uint8 indexed tokenType, address indexed deployer);
+    event TokenDeployed(bytes32 indexed assetId, uint8 indexed tokenType, address indexed tokenAddress);
     event VaultDeployed(
-        bytes32 indexed assetId,
-        uint8 indexed tokenType,
-        address indexed vaultAddress,
-        address underlyingAsset
+        bytes32 indexed assetId, uint8 indexed tokenType, address indexed vaultAddress, address underlyingAsset
     );
 
-    constructor(address _registryWallet) {
-        require(_registryWallet != address(0), "AssetTokenFactory: zero registry address");
-        registryWallet = _registryWallet;
+    constructor(address registryWallet_) {
+        require(registryWallet_ != address(0), "AssetTokenFactory: zero registry address");
+        registryWallet = registryWallet_;
     }
 
-    /// @notice Deploy a token contract for the given asset using CREATE2.
-    ///         Supports fungible (ERC-20), NFT (ERC-721), multi-token (ERC-1155), and SFT (ERC-3525).
-    ///         For vaults (ERC-4626/7540) use deployVault instead.
-    /// @param tokenType Token standard: 0=ERC20, 1=ERC721, 2=ERC1155, 3=ERC3525.
-    /// @param name Human-readable token name (ignored for ERC-1155).
-    /// @param symbol Token symbol / ticker.
-    /// @param assetId Unique identifier linking this contract to an off-chain asset record.
-    /// @return tokenAddress The address of the newly deployed token contract.
-    function deployToken(
-        uint8 tokenType,
-        string calldata name,
-        string calldata symbol,
-        bytes32 assetId
-    ) external returns (address tokenAddress) {
-        bytes32 salt = keccak256(abi.encode(assetId, tokenType));
+    function configureDeployer(uint8 tokenType, address deployer) external {
+        require(msg.sender == registryWallet, "AssetTokenFactory: only registry");
+        require(tokenType <= TOKEN_TYPE_ERC7540, "AssetTokenFactory: unsupported token type");
+        require(address(deployers[tokenType]) == address(0), "AssetTokenFactory: deployer already configured");
+        require(deployer != address(0) && deployer.code.length > 0, "AssetTokenFactory: invalid deployer");
+        deployers[tokenType] = IAssetTokenDeployer(deployer);
+        emit DeployerConfigured(tokenType, deployer);
+    }
 
-        if (tokenType == TOKEN_TYPE_ERC20) {
-            tokenAddress = address(
-                new EwpgERC20{salt: salt}(name, symbol, registryWallet, assetId)
-            );
-        } else if (tokenType == TOKEN_TYPE_ERC721) {
-            tokenAddress = address(
-                new EwpgERC721{salt: salt}(name, symbol, registryWallet, assetId)
-            );
-        } else if (tokenType == TOKEN_TYPE_ERC1155) {
-            tokenAddress = address(
-                new EwpgERC1155{salt: salt}(symbol, registryWallet, assetId)
-            );
-        } else if (tokenType == TOKEN_TYPE_ERC3525) {
-            tokenAddress = address(
-                new EwpgERC3525{salt: salt}(name, symbol, registryWallet, assetId)
-            );
-        } else {
+    function deployToken(uint8 tokenType, string calldata name, string calldata symbol, bytes32 assetId)
+        external
+        returns (address tokenAddress)
+    {
+        if (tokenType > TOKEN_TYPE_ERC3525) {
             revert(unicode"AssetTokenFactory: unsupported token type — for ERC-4626/7540 use deployVault");
         }
-
+        bytes32 salt = keccak256(abi.encode(assetId, tokenType));
+        IAssetTokenDeployer module = _deployer(tokenType);
+        tokenAddress = module.deploy(name, symbol, assetId, address(0), salt);
         emit TokenDeployed(assetId, tokenType, tokenAddress);
     }
 
-    /// @notice Deploy an ERC-4626 or ERC-7540 vault contract for the given asset using CREATE2.
-    ///         Vault types need an underlying ERC-20 token address, which simple token types do not.
-    /// @param tokenType Vault standard: 4=ERC4626 (sync), 5=ERC7540 (async).
-    /// @param name Vault share token name.
-    /// @param symbol Vault share token symbol.
-    /// @param assetId Unique identifier linking this contract to an off-chain asset record.
-    /// @param underlyingAsset The ERC-20 token that investors deposit (e.g. USDC).
-    /// @return vaultAddress The address of the newly deployed vault contract.
     function deployVault(
         uint8 tokenType,
         string calldata name,
@@ -99,27 +58,15 @@ contract AssetTokenFactory {
         address underlyingAsset
     ) external returns (address vaultAddress) {
         require(underlyingAsset != address(0), "AssetTokenFactory: zero underlying asset");
-        bytes32 salt = keccak256(abi.encode(assetId, tokenType));
-
-        if (tokenType == TOKEN_TYPE_ERC4626) {
-            vaultAddress = address(
-                new EwpgERC4626{salt: salt}(IERC20(underlyingAsset), name, symbol, registryWallet, assetId)
-            );
-        } else if (tokenType == TOKEN_TYPE_ERC7540) {
-            vaultAddress = address(
-                new EwpgERC7540{salt: salt}(IERC20(underlyingAsset), name, symbol, registryWallet, assetId)
-            );
-        } else {
+        if (tokenType < TOKEN_TYPE_ERC4626 || tokenType > TOKEN_TYPE_ERC7540) {
             revert(unicode"AssetTokenFactory: unsupported vault type — use 4 (ERC4626) or 5 (ERC7540)");
         }
-
+        bytes32 salt = keccak256(abi.encode(assetId, tokenType));
+        IAssetTokenDeployer module = _deployer(tokenType);
+        vaultAddress = module.deploy(name, symbol, assetId, underlyingAsset, salt);
         emit VaultDeployed(assetId, tokenType, vaultAddress, underlyingAsset);
     }
 
-    /// @notice Predict the CREATE2 address for a token without deploying it.
-    /// @param underlyingAsset Only used (and required) for vault types (4=ERC4626, 5=ERC7540);
-    ///        pass address(0) for non-vault token types 0-3. Vault constructors take this extra
-    ///        arg, which changes the CREATE2 init-code hash relative to deployToken's types.
     function predictAddress(
         uint8 tokenType,
         string calldata name,
@@ -127,36 +74,17 @@ contract AssetTokenFactory {
         bytes32 assetId,
         address underlyingAsset
     ) external view returns (address) {
-        bytes32 salt = keccak256(abi.encode(assetId, tokenType));
-        bytes32 initCodeHash;
-
-        if (tokenType == TOKEN_TYPE_ERC20) {
-            initCodeHash = keccak256(abi.encodePacked(
-                type(EwpgERC20).creationCode, abi.encode(name, symbol, registryWallet, assetId)));
-        } else if (tokenType == TOKEN_TYPE_ERC721) {
-            initCodeHash = keccak256(abi.encodePacked(
-                type(EwpgERC721).creationCode, abi.encode(name, symbol, registryWallet, assetId)));
-        } else if (tokenType == TOKEN_TYPE_ERC1155) {
-            initCodeHash = keccak256(abi.encodePacked(
-                type(EwpgERC1155).creationCode, abi.encode(symbol, registryWallet, assetId)));
-        } else if (tokenType == TOKEN_TYPE_ERC3525) {
-            initCodeHash = keccak256(abi.encodePacked(
-                type(EwpgERC3525).creationCode, abi.encode(name, symbol, registryWallet, assetId)));
-        } else if (tokenType == TOKEN_TYPE_ERC4626) {
+        if (tokenType > TOKEN_TYPE_ERC7540) revert("AssetTokenFactory: unsupported token type");
+        if (tokenType >= TOKEN_TYPE_ERC4626) {
             require(underlyingAsset != address(0), "AssetTokenFactory: zero underlying asset");
-            initCodeHash = keccak256(abi.encodePacked(
-                type(EwpgERC4626).creationCode,
-                abi.encode(IERC20(underlyingAsset), name, symbol, registryWallet, assetId)));
-        } else if (tokenType == TOKEN_TYPE_ERC7540) {
-            require(underlyingAsset != address(0), "AssetTokenFactory: zero underlying asset");
-            initCodeHash = keccak256(abi.encodePacked(
-                type(EwpgERC7540).creationCode,
-                abi.encode(IERC20(underlyingAsset), name, symbol, registryWallet, assetId)));
-        } else {
-            revert("AssetTokenFactory: unsupported token type");
         }
+        bytes32 salt = keccak256(abi.encode(assetId, tokenType));
+        IAssetTokenDeployer module = _deployer(tokenType);
+        return module.predict(name, symbol, assetId, underlyingAsset, salt);
+    }
 
-        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash)))));
+    function _deployer(uint8 tokenType) private view returns (IAssetTokenDeployer result) {
+        result = deployers[tokenType];
+        require(address(result) != address(0), "AssetTokenFactory: deployer not configured");
     }
 }
-

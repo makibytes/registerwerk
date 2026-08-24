@@ -114,7 +114,7 @@ public class MarketplaceAdminController {
     @RequiresStepUp(requireSecondApprover = true, reason = "dApp marketplace approval")
     public ResponseEntity<VersionResponse> approve(
             @PathVariable UUID versionId,
-            @RequestBody(required = false) ReviewNotesRequest request,
+            @Valid @RequestBody(required = false) ReviewNotesRequest request,
             Authentication auth) {
         DappVersion version = lifecycleService.requireVersion(versionId);
         lifecycleService.approve(version, SecurityUtils.extractUserId(auth), primaryRole(auth),

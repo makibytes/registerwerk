@@ -5,6 +5,9 @@ import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.events.HolderRemovedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
+import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.registertransfer.api.PortfolioMigrationRequest;
 import de.makibytes.registerwerk.registertransfer.api.PortfolioMigrationRequestRepository;
@@ -45,19 +48,22 @@ public class PortfolioMigrationService {
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final HolderBlockGate holderBlockGate;
+    private final FinalityGate finalityGate;
 
     public PortfolioMigrationService(PortfolioMigrationRequestRepository repository,
                                       AssetHolderRepository holderRepository,
                                       AssetRepository assetRepository,
                                       ObjectMapper objectMapper,
                                       ApplicationEventPublisher eventPublisher,
-                                      HolderBlockGate holderBlockGate) {
+                                      HolderBlockGate holderBlockGate,
+                                      FinalityGate finalityGate) {
         this.repository = repository;
         this.holderRepository = holderRepository;
         this.assetRepository = assetRepository;
         this.objectMapper = objectMapper;
         this.eventPublisher = eventPublisher;
         this.holderBlockGate = holderBlockGate;
+        this.finalityGate = finalityGate;
     }
 
     /**
@@ -180,6 +186,13 @@ public class PortfolioMigrationService {
     public PortfolioMigrationRequest complete(UUID migrationId, UUID actorId) {
         PortfolioMigrationRequest migration = load(migrationId);
         require(migration.getStatus() == TransferStatus.HANDED_OVER, "Only a HANDED_OVER migration can be completed");
+
+        // Hard floor, same reasoning as RegisterTransferService.complete()'s REGISTER_TRANSFER_COMPLETE
+        // gate — this is the point of no return for one holding's register entry.
+        assetRepository.findById(migration.getAssetId()).ifPresent(asset ->
+                finalityGate.require(GatedOperation.PORTFOLIO_MIGRATION_COMPLETE, migration.getAssetId(),
+                        asset.getTokenStandard(), FinalityLevel.FINALIZED));
+
         migration.setStatus(TransferStatus.COMPLETED);
         migration.setCompletedAt(Instant.now());
         migration.setUpdatedAt(Instant.now());

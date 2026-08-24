@@ -1,8 +1,5 @@
 ---
-id: the-graph
 title: The Graph (EVM Indexer)
-sidebar_label: The Graph
-sidebar_position: 1
 ---
 
 # The Graph — EVM indexing

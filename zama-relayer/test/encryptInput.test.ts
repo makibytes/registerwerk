@@ -1,11 +1,12 @@
 import request from 'supertest';
-import { loadConfig } from '../src/config';
-import { createServer } from '../src/server';
-import { getFheInstance } from '../src/fheInstance';
+import { describe, expect, it, vi, type MockedFunction } from 'vitest';
+import { loadConfig } from '../src/config.js';
+import { createServer } from '../src/server.js';
+import { getFheInstance } from '../src/fheInstance.js';
 
-jest.mock('../src/fheInstance');
+vi.mock('../src/fheInstance.js');
 
-const mockedGetFheInstance = getFheInstance as jest.MockedFunction<typeof getFheInstance>;
+const mockedGetFheInstance = getFheInstance as MockedFunction<typeof getFheInstance>;
 const API_KEY = 'test-relayer-api-key';
 const AUTH_HEADER = `Bearer ${API_KEY}`;
 
@@ -13,12 +14,12 @@ describe('POST /v1/encrypt-input', () => {
   const config = loadConfig({ RELAYER_API_KEY: API_KEY });
 
   it('encrypts a valid euint64 value and returns hex-encoded handle + proof', async () => {
-    const encrypt = jest.fn().mockResolvedValue({
+    const encrypt = vi.fn().mockResolvedValue({
       handles: [new Uint8Array([0xaa, 0xbb])],
       inputProof: new Uint8Array([0xcc, 0xdd, 0xee]),
     });
-    const add64 = jest.fn().mockReturnThis();
-    const createEncryptedInput = jest.fn().mockReturnValue({ add64, encrypt });
+    const add64 = vi.fn().mockReturnThis();
+    const createEncryptedInput = vi.fn().mockReturnValue({ add64, encrypt });
     mockedGetFheInstance.mockResolvedValue({ createEncryptedInput } as never);
 
     const app = createServer(config);
@@ -72,7 +73,7 @@ describe('POST /v1/encrypt-input', () => {
     expect(res.body.error).toMatch(/relayer unreachable/);
   });
 
-  // ── finding #6, Phase 9: shared-secret auth ──────────────────────────────────────────────
+  // ── Shared-secret auth ────────────────────────────────────────────────
   it('rejects a request with no Authorization header', async () => {
     const app = createServer(config);
     const res = await request(app)

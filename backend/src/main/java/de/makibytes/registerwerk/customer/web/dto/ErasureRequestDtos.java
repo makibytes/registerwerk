@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.customer.api.ErasureRequest;
 
 import java.time.Instant;
 import java.util.UUID;
+import jakarta.validation.constraints.Size;
 
 /** DTOs for the operator-facing DSGVO Art. 17 erasure queue. */
 public final class ErasureRequestDtos {
@@ -29,5 +30,5 @@ public final class ErasureRequestDtos {
     }
 
     /** Operator's resolution note for completing/rejecting a request. */
-    public record ResolveErasureRequest(String note) {}
+    public record ResolveErasureRequest(@Size(max = 2000) String note) {}
 }

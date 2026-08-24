@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface AssetTokenAdminGrantRepository extends JpaRepository<AssetTokenAdminGrant, UUID> {
@@ -26,6 +27,10 @@ public interface AssetTokenAdminGrantRepository extends JpaRepository<AssetToken
     List<AssetTokenAdminGrant> findByAssetIdAndStatus(UUID assetId, AssetTokenAdminGrant.Status status);
 
     List<AssetTokenAdminGrant> findByEntityIdAndAssetIdIsNullAndStatus(UUID entityId, AssetTokenAdminGrant.Status status);
+
+    Optional<AssetTokenAdminGrant> findByIdAndAssetId(UUID id, UUID assetId);
+
+    Optional<AssetTokenAdminGrant> findByIdAndEntityIdAndAssetIdIsNull(UUID id, UUID entityId);
 
     /** All of an entity's grants (asset-scoped and entity-wide) in a given status — used by
      *  {@code CustomerOffboardingAssetListener} to revoke everything on customer exit. */

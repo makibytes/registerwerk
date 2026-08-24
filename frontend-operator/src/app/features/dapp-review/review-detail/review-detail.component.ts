@@ -142,16 +142,16 @@ interface DiffLine {
     <app-page-header
       [title]="detail ? detail.listing.name + ' v' + detail.version.version : 'Review'"
       subtitle="Manifest review — approval requires step-up and a second approver (4-eyes)">
-      <button mat-stroked-button routerLink="/dapp-review">
+      <button type="button" mat-stroked-button routerLink="/dapp-review">
         <mat-icon>arrow_back</mat-icon>
         Queue
       </button>
       @if (detail && (detail.version.status === 'SUBMITTED' || detail.version.status === 'IN_REVIEW')) {
-        <button mat-stroked-button color="warn" (click)="openRejectDialog()">
+        <button type="button" mat-stroked-button color="warn" (click)="openRejectDialog()">
           <mat-icon>block</mat-icon>
           Reject
         </button>
-        <button mat-raised-button color="primary" (click)="approve()">
+        <button type="button" mat-raised-button color="primary" (click)="approve()">
           <mat-icon>task_alt</mat-icon>
           Approve & anchor onchain
         </button>
@@ -258,7 +258,7 @@ interface DiffLine {
                     @if (method.issuerLei) { · LEI {{ method.issuerLei }} }
                     @if (method.redemptionAtPar) { · redeemable at par }
                     @if (method.whitePaperUrl) {
-                      · <a [href]="method.whitePaperUrl" target="_blank" rel="noopener">white paper</a>
+                      · <a [href]="method.whitePaperUrl" target="_blank" rel="noopener noreferrer">white paper</a>
                     }
                   </p>
                 } @else {
@@ -285,8 +285,8 @@ interface DiffLine {
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn" [disabled]="!rejectReason.trim()" (click)="confirmReject()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn" [disabled]="!rejectReason.trim()" (click)="confirmReject()">
           <mat-icon>block</mat-icon>
           Reject
         </button>

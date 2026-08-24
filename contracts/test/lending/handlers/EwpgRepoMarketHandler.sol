@@ -8,7 +8,7 @@ import "../../../src/examples/MockStablecoin.sol";
 
 /// @notice Bounded-random actor driving {EwpgRepoMarket} through its full lifecycle
 ///         (supply/withdraw/pledgeAndBorrow/repay/liquidate/price moves) for
-///         `EwpgRepoMarket.invariant.t.sol` (finding #12, Phase 7).
+///         `EwpgRepoMarket.invariant.t.sol` .
 ///
 /// @dev Borrowers are a small FIXED set pre-authorized (KYC + `repo-facility.borrow`) by the
 ///      invariant test's `setUp()` — replicating the full org-registration dance for

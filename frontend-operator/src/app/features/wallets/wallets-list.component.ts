@@ -17,6 +17,7 @@ import { ImportRawDialogComponent } from './dialogs/import-raw-dialog.component'
 import { ImportKeystoreDialogComponent } from './dialogs/import-keystore-dialog.component';
 import { ExportDialogComponent } from './dialogs/export-dialog.component';
 import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.component';
+import { AttachHsmDialogComponent } from './dialogs/attach-hsm-dialog.component';
 
 @Component({
   selector: 'app-wallets-list',
@@ -31,7 +32,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
     .page-subtitle { font-size: 13px; color: var(--rw-text-secondary); margin: 4px 0 0; }
     .header-actions { display: flex; gap: 8px; }
 
-    .content-card { background: var(--rw-surface); border: 1px solid var(--rw-border); border-radius: 10px; overflow: hidden; }
+    .content-card { background: var(--rw-surface); border: 1px solid var(--rw-border); border-radius: 10px; overflow-x: auto; }
 
     table { width: 100%; border-collapse: collapse; }
     thead th { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--rw-text-muted); padding: 12px 20px; text-align: left; border-bottom: 1px solid var(--rw-border); }
@@ -45,6 +46,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
     .type-chip.evm { background: rgba(98,126,234,.12); color: #627EEA; }
     .type-chip.solana { background: rgba(153,69,255,.12); color: #9945FF; }
     .type-chip.canton { background: rgba(255,107,53,.12); color: #FF6B35; }
+    .custody-chip { display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(16,185,129,.1);color:#047857; }
 
     .default-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .default-chip { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; background: rgba(34,197,94,.1); color: #16a34a; }
@@ -52,6 +54,11 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
     .empty-state { padding: 60px 24px; text-align: center; }
     .empty-state mat-icon { font-size: 40px; width: 40px; height: 40px; color: var(--rw-text-muted); margin-bottom: 12px; }
     .empty-state p { color: var(--rw-text-muted); font-size: 14px; margin: 4px 0; }
+    @media (max-width: 700px) {
+      .page-header { gap: 12px; flex-direction: column; }
+      .header-actions { flex-wrap: wrap; }
+      table { min-width: 820px; }
+    }
   `],
   template: `
     <div class="page-header">
@@ -60,21 +67,33 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
         <p class="page-subtitle">Operator signing wallets — one default per chain for gas fee payments</p>
       </div>
       <div class="header-actions">
-        <button mat-stroked-button [matMenuTriggerFor]="importMenu">
+        <button type="button" mat-stroked-button [matMenuTriggerFor]="importMenu">
           <mat-icon>upload</mat-icon> Import
         </button>
         <mat-menu #importMenu>
-          <button mat-menu-item (click)="openImportRaw()"><mat-icon>key</mat-icon> Raw private key</button>
-          <button mat-menu-item (click)="openImportKeystore()"><mat-icon>lock</mat-icon> Keystore file (JSON)</button>
+          <button type="button" mat-menu-item (click)="openImportRaw()"><mat-icon>key</mat-icon> Raw private key</button>
+          <button type="button" mat-menu-item (click)="openImportKeystore()"><mat-icon>lock</mat-icon> Keystore file (JSON)</button>
         </mat-menu>
-        <button mat-flat-button color="primary" (click)="openGenerate()">
+        <button type="button" mat-flat-button color="primary" (click)="openGenerate()">
           <mat-icon>add</mat-icon> Generate wallet
         </button>
+        <button type="button" mat-stroked-button (click)="openAttachHsm()"><mat-icon>security</mat-icon> Attach HSM key</button>
       </div>
     </div>
 
     <div class="content-card">
-      @if (wallets().length === 0) {
+      @if (loading()) {
+        <div class="empty-state" role="status">
+          <mat-icon>hourglass_top</mat-icon>
+          <p>Loading wallets…</p>
+        </div>
+      } @else if (loadError()) {
+        <div class="empty-state" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <p><strong>Wallets could not be loaded</strong></p>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
+      } @else if (wallets().length === 0) {
         <div class="empty-state">
           <mat-icon>wallet</mat-icon>
           <p><strong>No wallets configured</strong></p>
@@ -87,6 +106,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
               <th>Name</th>
               <th>Type</th>
               <th>Address</th>
+              <th>Custody</th>
               <th>Default for chains</th>
               <th>Created</th>
               <th></th>
@@ -98,6 +118,7 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
                 <td><a class="wallet-name-link" [routerLink]="['/wallets', wallet.id]">{{ wallet.name }}</a></td>
                 <td><span class="type-chip" [class.evm]="wallet.type === 'EVM'" [class.solana]="wallet.type === 'SOLANA'" [class.canton]="wallet.type === 'CANTON'">{{ wallet.type }}</span></td>
                 <td><app-address [address]="wallet.address" /></td>
+                <td><span class="custody-chip"><mat-icon style="font-size:14px;width:14px;height:14px">{{ wallet.custodyType === 'PKCS11' ? 'security' : 'encrypted' }}</mat-icon>{{ wallet.custodyType }}</span></td>
                 <td>
                   <div class="default-chips">
                     @for (chainId of wallet.defaultForChains; track chainId) {
@@ -110,16 +131,15 @@ import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.componen
                 </td>
                 <td style="font-size: 12px; color: var(--rw-text-muted)">{{ wallet.createdAt | date:'mediumDate' }}</td>
                 <td>
-                  <button mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions">
+                  <button type="button" mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions">
                     <mat-icon>more_vert</mat-icon>
                   </button>
                   <mat-menu #actionMenu>
-                    <button mat-menu-item [routerLink]="['/wallets', wallet.id]"><mat-icon>open_in_new</mat-icon> View details</button>
-                    <button mat-menu-item (click)="openSetDefault(wallet)"><mat-icon>star</mat-icon> Set as default</button>
-                    <button mat-menu-item (click)="exportKeystore(wallet)" [disabled]="wallet.type !== 'EVM'"><mat-icon>download</mat-icon> Export keystore</button>
-                    <button mat-menu-item (click)="exportRaw(wallet)"><mat-icon>key</mat-icon> Export raw key…</button>
-                    <button mat-menu-item (click)="rename(wallet)"><mat-icon>edit</mat-icon> Rename</button>
-                    <button mat-menu-item (click)="delete(wallet)" style="color: #ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
+                    <button type="button" mat-menu-item [routerLink]="['/wallets', wallet.id]"><mat-icon>open_in_new</mat-icon> View details</button>
+                    <button type="button" mat-menu-item (click)="openSetDefault(wallet)"><mat-icon>star</mat-icon> Set as default</button>
+                    <button type="button" mat-menu-item (click)="exportKeystore(wallet)" [disabled]="wallet.type !== 'EVM' || wallet.custodyType === 'PKCS11'"><mat-icon>download</mat-icon> Export keystore</button>
+                    <button type="button" mat-menu-item (click)="rename(wallet)"><mat-icon>edit</mat-icon> Rename</button>
+                    <button type="button" mat-menu-item (click)="delete(wallet)" style="color: #ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
                   </mat-menu>
                 </td>
               </tr>
@@ -137,12 +157,28 @@ export class WalletsListComponent implements OnInit {
 
   readonly wallets  = signal<OperatorWallet[]>([]);
   readonly defaults = signal<WalletDefault[]>([]);
+  readonly loading = signal(true);
+  readonly loadError = signal(false);
 
-  ngOnInit() { this.load(); }
+  ngOnInit(): void { this.load(); }
 
-  private load() {
-    this.walletService.listWallets().subscribe(w => this.wallets.set(w));
-    this.walletService.listDefaults().subscribe(d => this.defaults.set(d));
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(false);
+    forkJoin({
+      wallets: this.walletService.listWallets(),
+      defaults: this.walletService.listDefaults(),
+    }).subscribe({
+      next: ({ wallets, defaults }) => {
+        this.wallets.set(wallets);
+        this.defaults.set(defaults);
+        this.loading.set(false);
+      },
+      error: () => {
+        this.loading.set(false);
+        this.loadError.set(true);
+      },
+    });
   }
 
   chainLabel(chainId: string): string {
@@ -180,6 +216,16 @@ export class WalletsListComponent implements OnInit {
     });
   }
 
+  openAttachHsm() {
+    this.dialog.open(AttachHsmDialogComponent, { width: '480px' }).afterClosed().subscribe(r => {
+      if (!r) return;
+      this.walletService.attachHsm(r.name, r.keyAlias, r.address).subscribe({
+        next: () => { this.load(); this.snackBar.open('HSM key verified and attached', 'OK', { duration: 3500 }); },
+        error: e => this.snackBar.open(e.error?.message ?? 'HSM key verification failed', 'OK', { duration: 5000 }),
+      });
+    });
+  }
+
   exportKeystore(wallet: OperatorWallet) {
     this.dialog.open(ExportDialogComponent, { width: '400px', data: { wallet } }).afterClosed().subscribe(r => {
       if (!r) return;
@@ -192,17 +238,6 @@ export class WalletsListComponent implements OnInit {
         },
         error: () => this.snackBar.open('Export failed', 'OK', { duration: 3000 }),
       });
-    });
-  }
-
-  exportRaw(wallet: OperatorWallet) {
-    if (!confirm(`Export raw private key for "${wallet.name}"?\n\nKeep this secret. Anyone with this key controls the wallet.`)) return;
-    this.walletService.exportRaw(wallet.id).subscribe({
-      next: key => {
-        navigator.clipboard.writeText(key).then(() =>
-          this.snackBar.open('Private key copied to clipboard — store it safely!', 'OK', { duration: 6000 }));
-      },
-      error: () => this.snackBar.open('Export failed', 'OK', { duration: 3000 }),
     });
   }
 

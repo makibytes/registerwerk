@@ -20,5 +20,8 @@ public interface BlockchainApi {
 
     Page<BlockchainTransactionView> findAllTransactions(Pageable pageable);
 
+    /** @param status one of {@code PENDING}/{@code SUCCESS}/{@code FAILED}/{@code TIMEOUT}. */
+    Page<BlockchainTransactionView> findTransactionsByStatus(String status, Pageable pageable);
+
     Optional<BlockchainTransactionView> findByTxHash(String txHash);
 }

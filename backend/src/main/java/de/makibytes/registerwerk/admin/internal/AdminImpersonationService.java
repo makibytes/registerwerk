@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
@@ -56,18 +57,27 @@ public class AdminImpersonationService {
             );
         }
 
-        UUID actorId = SecurityUtils.extractUserId(caller);
-        AppUser actor = appUserRepository.findById(actorId)
-            .orElseThrow(() -> new EntityNotFoundException("AppUser", actorId));
-
-        boolean isAdmin = caller.getAuthorities().stream()
+        boolean isAdmin = caller != null && caller.getAuthorities().stream()
             .anyMatch(a -> a.getAuthority().equals("ROLE_REGISTRY_ADMIN"));
         if (!isAdmin) {
             throw new AccessDeniedException("Only REGISTRY_ADMIN users may impersonate");
         }
 
+        UUID actorId = SecurityUtils.extractUserId(caller);
+        if (actorId == null) {
+            throw new AccessDeniedException("Authenticated user identity is invalid");
+        }
+        AppUser actor = appUserRepository.findById(actorId)
+            .orElseThrow(() -> new EntityNotFoundException("AppUser", actorId));
+        if (!actor.isEnabled()) {
+            throw new AccessDeniedException("Disabled users may not impersonate");
+        }
+
         LegalEntity target = legalEntityRepository.findById(targetEntityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", targetEntityId));
+        if (target.getStatus() != EntityStatus.ACTIVE) {
+            throw new AccessDeniedException("Only active legal entities may be impersonated");
+        }
 
         String token = jwtMintingService.mintImpersonationToken(actor, target.getId());
         OffsetDateTime expiresAt = OffsetDateTime.now().plusSeconds(jwtMintingService.getTokenTtlSeconds());

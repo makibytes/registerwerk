@@ -1,6 +1,6 @@
-import { loadConfig } from './config';
-import { createServer } from './server';
-import { getFheInstance } from './fheInstance';
+import { loadConfig } from './config.js';
+import { createServer } from './server.js';
+import { getFheInstance } from './fheInstance.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();

@@ -157,6 +157,11 @@ export interface IssuanceCreateRequest {
   chain: Chain | null;
   network: Network | null;
   tokenStandard: TokenStandard;
+  currency: string | null;
+  issueSize: number | null;
+  denomination: number | null;
+  issueDate: string | null;
+  maturityDate: string | null;
 }
 
 /** Mirrors the backend's `ConfidentialContextResponse`. */

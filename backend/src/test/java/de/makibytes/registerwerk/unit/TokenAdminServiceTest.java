@@ -7,11 +7,14 @@ import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.blockchain.api.ZamaRelayerClient;
 import de.makibytes.registerwerk.blockchain.internal.TokenAdminService;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
+import de.makibytes.registerwerk.wallet.internal.SoftwareEvmSigner;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +22,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.web3j.abi.datatypes.Function;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.ECKeyPair;
 
@@ -39,6 +43,7 @@ class TokenAdminServiceTest {
     @Mock private AssetLookupPort assetLookupPort;
     @Mock private BlockchainClientRegistry clientRegistry;
     @Mock private EvmContractService evmContractService;
+    @Mock private DurableEvmTransactionGateway durableTransactions;
     @Mock private BlockchainTransactionService txService;
     @Mock private de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate;
     @Mock private HolderBlockGate holderBlockGate;
@@ -53,6 +58,7 @@ class TokenAdminServiceTest {
         AssetDeployment dep = new AssetDeployment();
         dep.setId(depId);
         dep.setAssetId(assetId);
+        dep.setChainConfigId(UUID.randomUUID());
         dep.setChain(Chain.ETHEREUM);
         dep.setNetwork(Network.TESTNET);
         dep.setContractAddress("0x" + "a".repeat(40));
@@ -105,8 +111,8 @@ class TokenAdminServiceTest {
     }
 
     @Test
-    @DisplayName("pause on SPL_2022_BOND routes callers to SolanaTokenAdminService (Phase 4)")
-    void pause_rejectsSpl2022BondWithPhase4Message() {
+    @DisplayName("pause on SPL_2022_BOND routes callers to SolanaTokenAdminService")
+    void pause_rejectsSpl2022BondWithClearMessage() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.SPL_2022_BOND);
         assertThatThrownBy(() -> tokenAdminService.pause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN"))
@@ -115,8 +121,8 @@ class TokenAdminServiceTest {
     }
 
     @Test
-    @DisplayName("pause on SPL_2022_CONFIDENTIAL routes callers to SolanaTokenAdminService (Phase 4)")
-    void pause_rejectsSpl2022ConfidentialWithPhase4Message() {
+    @DisplayName("pause on SPL_2022_CONFIDENTIAL routes callers to SolanaTokenAdminService")
+    void pause_rejectsSpl2022ConfidentialWithClearMessage() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.SPL_2022_CONFIDENTIAL);
         assertThatThrownBy(() -> tokenAdminService.pause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN"))
@@ -143,6 +149,7 @@ class TokenAdminServiceTest {
         AssetDeployment dep = new AssetDeployment();
         dep.setId(depId);
         dep.setAssetId(assetId);
+        dep.setChainConfigId(UUID.randomUUID());
         dep.setChain(Chain.ETHEREUM);
         dep.setNetwork(Network.TESTNET);
         dep.setContractAddress("0x" + "b".repeat(40));
@@ -150,10 +157,9 @@ class TokenAdminServiceTest {
         when(deploymentRepository.findById(depId)).thenReturn(Optional.of(dep));
         when(assetLookupPort.findById(assetId)).thenReturn(
                 Optional.of(new AssetLookupPort.AssetInfo(assetId, "ERC-20 Asset", null, TokenStandard.ERC20, null, null, null, "AST-002", null)));
-        when(clientRegistry.getEvmClient(org.mockito.ArgumentMatchers.any())).thenReturn(null);
-        when(evmContractService.credentials(org.mockito.ArgumentMatchers.<de.makibytes.registerwerk.chain.api.ChainDescriptor>any())).thenReturn(null);
-        when(evmContractService.submit(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        when(durableTransactions.submit(org.mockito.ArgumentMatchers.any(UUID.class),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(Function.class),
+                org.mockito.ArgumentMatchers.any()))
                 .thenReturn("0x" + "c".repeat(64));
         when(txService.record(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
@@ -223,14 +229,14 @@ class TokenAdminServiceTest {
     void confidentialForceBurn_encryptsAndSubmits() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
-        Credentials creds = Credentials.create(ECKeyPair.create(BigInteger.TWO));
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
 
         when(zamaRelayerClient.isConfigured()).thenReturn(true);
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
         when(zamaRelayerClient.encryptInput(any(), any(), any())).thenReturn(
                 new ZamaRelayerClient.EncryptedInput("0x" + "aa".repeat(32), "0x" + "bb".repeat(10)));
-        when(clientRegistry.getEvmClient(any())).thenReturn(null);
-        when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "c".repeat(64));
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "c".repeat(64));
         when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
 
         UUID txId = tokenAdminService.confidentialForceBurn(
@@ -270,14 +276,14 @@ class TokenAdminServiceTest {
     void confidentialMint_encryptsAndSubmits() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
-        Credentials creds = Credentials.create(ECKeyPair.create(BigInteger.TWO));
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
 
         when(zamaRelayerClient.isConfigured()).thenReturn(true);
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
         when(zamaRelayerClient.encryptInput(any(), any(), any())).thenReturn(
                 new ZamaRelayerClient.EncryptedInput("0x" + "aa".repeat(32), "0x" + "bb".repeat(10)));
-        when(clientRegistry.getEvmClient(any())).thenReturn(null);
-        when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "d".repeat(64));
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "d".repeat(64));
         when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
 
         UUID txId = tokenAdminService.confidentialMint(
@@ -304,11 +310,8 @@ class TokenAdminServiceTest {
     void confidentialAddViewer_submits() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC20);
-        Credentials creds = Credentials.create(ECKeyPair.create(BigInteger.TWO));
-
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
-        when(clientRegistry.getEvmClient(any())).thenReturn(null);
-        when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "e".repeat(64));
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "e".repeat(64));
         when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
 
         UUID txId = tokenAdminService.confidentialAddViewer(
@@ -333,15 +336,103 @@ class TokenAdminServiceTest {
     void confidentialRemoveViewer_submits() {
         UUID assetId = UUID.randomUUID();
         AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
-        Credentials creds = Credentials.create(ECKeyPair.create(BigInteger.TWO));
-
-        when(evmContractService.credentials(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
-        when(clientRegistry.getEvmClient(any())).thenReturn(null);
-        when(evmContractService.submit(any(), any(), any(), any())).thenReturn("0x" + "f".repeat(64));
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "f".repeat(64));
         when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
 
         UUID txId = tokenAdminService.confidentialRemoveViewer(
                 dep.getId(), "0x" + "4".repeat(40), UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
+    // ── confidentialPause / confidentialUnpause / confidentialSetAddressFrozen ──
+
+    @Test
+    @DisplayName("confidentialPause rejects non-CONF_ERC3643 standards (CONF_ERC20 has no pause concept)")
+    void confidentialPause_rejectsNonConfidentialErc3643Standard() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC20);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialPause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("confidentialPause submits a pause call for CONF_ERC3643")
+    void confidentialPause_submits() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "1".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialPause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
+    @Test
+    @DisplayName("confidentialUnpause rejects non-CONF_ERC3643 standards")
+    void confidentialUnpause_rejectsNonConfidentialErc3643Standard() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.ERC20);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialUnpause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("confidentialUnpause submits an unpause call for CONF_ERC3643")
+    void confidentialUnpause_submits() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "2".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialUnpause(dep.getId(), UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
+    @Test
+    @DisplayName("confidentialSetAddressFrozen rejects non-CONF_ERC3643 standards")
+    void confidentialSetAddressFrozen_rejectsNonConfidentialErc3643Standard() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC20);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialSetAddressFrozen(
+                dep.getId(), "0x" + "5".repeat(40), true, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("confidentialSetAddressFrozen(true) submits a freeze call for CONF_ERC3643")
+    void confidentialSetAddressFrozen_freezes() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "3".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialSetAddressFrozen(
+                dep.getId(), "0x" + "5".repeat(40), true, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
+    @Test
+    @DisplayName("confidentialSetAddressFrozen(false) submits an unfreeze call for CONF_ERC3643")
+    void confidentialSetAddressFrozen_unfreezes() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "6".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialSetAddressFrozen(
+                dep.getId(), "0x" + "5".repeat(40), false, UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(txId).isNotNull();
     }

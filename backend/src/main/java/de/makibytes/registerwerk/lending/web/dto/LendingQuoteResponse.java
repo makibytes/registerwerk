@@ -10,7 +10,10 @@ public record LendingQuoteResponse(
         BigInteger pricePerUnit,
         BigInteger priceUpdatedAt,
         BigInteger maxBorrowAmount,
+        Integer maxLtvBps,
         Integer lltvBps,
         BigInteger utilizationWad,
-        BigInteger borrowRateWad
+        BigInteger borrowRateWad,
+        BigInteger availableLiquidity,
+        boolean oracleReliable
 ) {}

@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,6 +36,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/compliance/casp-register")
 @PreAuthorize("hasAnyRole('REGISTRY_ADMIN','COMPLIANCE_OFFICER')")
+@Validated
 public class CaspRegisterController {
 
     private final CaspRegistryService service;
@@ -74,7 +76,8 @@ public class CaspRegisterController {
      * Best-effort: valid rows are upserted, bad rows are reported per line.
      */
     @PostMapping(value = "/import", consumes = {"text/csv", "text/plain"})
-    public CaspRegisterImportService.ImportResult importCsv(@RequestBody String csv, Authentication auth) {
+    public CaspRegisterImportService.ImportResult importCsv(
+            @RequestBody @Size(max = 5_000_000) String csv, Authentication auth) {
         return importService.importCsv(csv, "CSV import " + LocalDate.now(),
                 SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
     }
@@ -91,16 +94,16 @@ public class CaspRegisterController {
 
     public record CaspAuthorizationRequest(
             @NotBlank @Size(max = 255) String vaspDid,
-            @NotBlank String legalName,
+            @NotBlank @Size(max = 1000) String legalName,
             @Size(max = 20) String lei,
             @Pattern(regexp = "^[A-Z]{2}$", message = "Must be an ISO 3166-1 alpha-2 code")
             String homeMemberState,
             @NotNull CaspAuthorizationStatus status,
-            String authorizationId,
+            @Size(max = 1000) String authorizationId,
             LocalDate validFrom,
             LocalDate validUntil,
-            String source,
-            String notes) {
+            @Size(max = 2000) String source,
+            @Size(max = 10_000) String notes) {
 
         public CaspAuthorizationRequest {
             if (validFrom != null && validUntil != null && validUntil.isBefore(validFrom)) {

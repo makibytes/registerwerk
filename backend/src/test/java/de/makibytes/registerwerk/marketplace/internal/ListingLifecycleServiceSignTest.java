@@ -26,7 +26,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Regression coverage for finding #7 (ecosystem review): {@code sign} previously published no
+ * Regression coverage for (ecosystem review): {@code sign} previously published no
  * audit event at all for the actual trust-establishing moment (binding an EIP-191 signature to
  * the manifest bytes), and {@code putManifest} silently cleared a prior signature on every
  * re-upload with zero trace.

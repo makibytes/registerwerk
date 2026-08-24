@@ -4,6 +4,9 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
+import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.registertransfer.api.InspectionLegalBasis;
 import de.makibytes.registerwerk.registertransfer.api.InspectionStatus;
 import de.makibytes.registerwerk.registertransfer.api.RegisterInspectionRequest;
@@ -47,17 +50,20 @@ public class RegisterInspectionService {
     private final AssetHolderRepository holderRepository;
     private final RegisterExtractRenderer extractRenderer;
     private final ApplicationEventPublisher eventPublisher;
+    private final FinalityGate finalityGate;
 
     public RegisterInspectionService(
             RegisterInspectionRequestRepository requestRepository,
             AssetRepository assetRepository,
             AssetHolderRepository holderRepository,
             RegisterExtractRenderer extractRenderer,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            FinalityGate finalityGate) {
         this.requestRepository = requestRepository;
         this.assetRepository = assetRepository;
         this.holderRepository = holderRepository;
         this.extractRenderer = extractRenderer;
+        this.finalityGate = finalityGate;
         this.eventPublisher = eventPublisher;
     }
 
@@ -142,6 +148,12 @@ public class RegisterInspectionService {
 
         Asset asset = assetRepository.findById(request.getAssetId())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown asset " + request.getAssetId()));
+
+        // Hard floor: a §10 disclosure, once handed to the requester, cannot be un-disclosed —
+        // same reasoning as RegisterTransferService.export()'s REGISTER_EXTRACT_EXPORT gate.
+        finalityGate.require(GatedOperation.REGISTER_INSPECTION_FULFIL, request.getAssetId(),
+                asset.getTokenStandard(), FinalityLevel.FINALIZED);
+
         // §10 disclosure is of the current register; a removed holder is no longer in it.
         List<AssetHolder> holders = holderRepository
                 .findActiveByAssetId(request.getAssetId(), Pageable.unpaged()).getContent();

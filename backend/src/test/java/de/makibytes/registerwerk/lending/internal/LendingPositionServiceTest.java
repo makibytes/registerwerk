@@ -90,7 +90,7 @@ class LendingPositionServiceTest {
     @Test
     @DisplayName("returns no positions when the user has no bound wallets")
     void noWalletsMeansNoPositions() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of());
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of());
 
         var positions = service.refreshAndListMyPositions(appUserId);
 
@@ -100,7 +100,7 @@ class LendingPositionServiceTest {
     @Test
     @DisplayName("caches a new OPEN position for a wallet with live on-chain debt")
     void cachesNewOpenPosition() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(activeWallet()));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
@@ -125,9 +125,9 @@ class LendingPositionServiceTest {
     }
 
     @Test
-    @DisplayName("caches a position with healthFactorReliable=false when the contract flags its own price as stale/unpriced (finding #8)")
+    @DisplayName("caches a position with healthFactorReliable=false when the contract flags its own price as stale/unpriced")
     void cachesUnreliableHealthFactor() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(activeWallet()));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
@@ -150,7 +150,7 @@ class LendingPositionServiceTest {
     @Test
     @DisplayName("flips a previously-OPEN cached position to CLOSED once on-chain debt reaches zero, rather than skipping it")
     void flipsExistingPositionToClosedRatherThanSkippingIt() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(activeWallet()));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
@@ -182,7 +182,7 @@ class LendingPositionServiceTest {
     @Test
     @DisplayName("keeps durable status CLOSED when the subgraph only supplies an unfinalized liquidation hint")
     void doesNotPromoteSubgraphLiquidationHintToDurableStatus() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(activeWallet()));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
@@ -218,7 +218,7 @@ class LendingPositionServiceTest {
     @Test
     @DisplayName("does not query the subgraph for a position that was already closed (only queries at the open->closed transition)")
     void doesNotQuerySubgraphForAlreadyClosedPosition() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(activeWallet()));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
@@ -249,7 +249,7 @@ class LendingPositionServiceTest {
     @Test
     @DisplayName("downgrades legacy LIQUIDATED rows whose canonical provenance was never stored")
     void failsLegacyLiquidatedStatusClosed() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(activeWallet()));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
@@ -281,7 +281,7 @@ class LendingPositionServiceTest {
     void skipsWalletOnDifferentChain() {
         OrgMemberWallet otherChainWallet = activeWallet();
         otherChainWallet.setChainConfigId(UUID.randomUUID());
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(otherChainWallet));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(otherChainWallet));
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(activeMarket()));
 
         var positions = service.refreshAndListMyPositions(appUserId);
@@ -293,7 +293,7 @@ class LendingPositionServiceTest {
     @Test
     @DisplayName("caches a new supply position for a lender with a nonzero live claim")
     void cachesNewSupplyPosition() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(activeWallet()));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
@@ -311,7 +311,7 @@ class LendingPositionServiceTest {
     @Test
     @DisplayName("does not persist a supply position for a wallet that never supplied anything")
     void skipsNeverSuppliedWallet() {
-        when(memberWalletRepository.findByAppUserId(appUserId)).thenReturn(List.of(activeWallet()));
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");

@@ -102,7 +102,7 @@ export interface ApprovalTokenGeneratorDialogData {
             <mat-label>Scoped approval token</mat-label>
             <input matInput [value]="issuedToken" readonly />
           </mat-form-field>
-          <button mat-icon-button matTooltip="Copy" (click)="copy()">
+          <button type="button" mat-icon-button matTooltip="Copy" (click)="copy()">
             <mat-icon>content_copy</mat-icon>
           </button>
         </div>
@@ -117,16 +117,16 @@ export interface ApprovalTokenGeneratorDialogData {
     </mat-dialog-content>
 
     <mat-dialog-actions class="dialog-actions">
-      <button mat-stroked-button (click)="close()">{{ issuedToken ? 'Close' : 'Cancel' }}</button>
+      <button type="button" mat-stroked-button (click)="close()">{{ issuedToken ? 'Close' : 'Cancel' }}</button>
       @if (!issuedToken) {
-        <button mat-raised-button color="primary"
+        <button type="button" mat-raised-button color="primary"
                 (click)="generate()"
                 [disabled]="loading || !totpCode || totpCode.length < 6">
           <mat-icon>{{ loading ? 'hourglass_empty' : 'lock_open' }}</mat-icon>
           {{ loading ? 'Verifying…' : 'Generate token' }}
         </button>
       } @else {
-        <button mat-raised-button color="primary" (click)="useToken()">
+        <button type="button" mat-raised-button color="primary" (click)="useToken()">
           <mat-icon>check</mat-icon>
           Use this token
         </button>

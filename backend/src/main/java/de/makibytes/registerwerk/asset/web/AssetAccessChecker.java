@@ -5,6 +5,8 @@ import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.AssetTokenAdminGrantRepository;
+import de.makibytes.registerwerk.asset.internal.SubscriptionOrder;
+import de.makibytes.registerwerk.asset.internal.SubscriptionOrderRepository;
 import de.makibytes.registerwerk.blockchain.BlockchainApi;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionView;
 import de.makibytes.registerwerk.shared.SecurityUtils;
@@ -24,18 +26,21 @@ public class AssetAccessChecker {
     private final AssetHolderRepository holderRepository;
     private final BlockchainApi blockchainApi;
     private final AssetTokenAdminGrantRepository tokenAdminGrantRepository;
+    private final SubscriptionOrderRepository subscriptionOrderRepository;
 
     public AssetAccessChecker(
             AssetRepository assetRepository,
             AssetDeploymentRepository deploymentRepository,
             AssetHolderRepository holderRepository,
             BlockchainApi blockchainApi,
-            AssetTokenAdminGrantRepository tokenAdminGrantRepository) {
+            AssetTokenAdminGrantRepository tokenAdminGrantRepository,
+            SubscriptionOrderRepository subscriptionOrderRepository) {
         this.assetRepository = assetRepository;
         this.deploymentRepository = deploymentRepository;
         this.holderRepository = holderRepository;
         this.blockchainApi = blockchainApi;
         this.tokenAdminGrantRepository = tokenAdminGrantRepository;
+        this.subscriptionOrderRepository = subscriptionOrderRepository;
     }
 
     public boolean canRead(UUID assetId, Authentication auth) {
@@ -74,6 +79,13 @@ public class AssetAccessChecker {
         UUID assetId = tx.get().assetId();
         if (assetId == null) return false;
         return canRead(assetId, auth);
+    }
+
+    public boolean canActAsIssuerForOrder(UUID orderId, Authentication auth) {
+        if (auth == null || !auth.isAuthenticated()) return false;
+        Optional<SubscriptionOrder> order = subscriptionOrderRepository.findById(orderId);
+        if (order.isEmpty()) return false;
+        return canActAsIssuer(order.get().getAssetId(), auth);
     }
 
     public boolean canReadDeployment(UUID deploymentId, Authentication auth) {

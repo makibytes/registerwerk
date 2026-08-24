@@ -56,8 +56,8 @@ interface ComputedSlice extends DonutSlice {
   styles: [`
     .donut-wrap { display: flex; align-items: center; gap: 20px; }
     .donut-svg { width: 140px; min-width: 140px; height: 140px; }
-    .center-label { font-size: 8px; fill: var(--rw-text-muted); font-family: 'Manrope', sans-serif; }
-    .center-value { font-size: 11px; font-weight: 700; fill: var(--rw-text-primary); font-family: 'Manrope', sans-serif; }
+    .center-label { font-size: 8px; fill: var(--rw-text-muted); font-family: 'Manrope Variable', 'Manrope', sans-serif; }
+    .center-value { font-size: 11px; font-weight: 700; fill: var(--rw-text-primary); font-family: 'Manrope Variable', 'Manrope', sans-serif; }
     .empty-ring { stroke: var(--rw-border); }
     .legend { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
     .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }

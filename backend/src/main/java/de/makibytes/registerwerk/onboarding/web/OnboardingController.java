@@ -45,9 +45,9 @@ public class OnboardingController {
     @PostMapping("/tokens")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<OnboardingTokenResponse> createOnboardingToken(
-            @RequestBody Map<String, String> body,
+            @RequestBody @Valid CreateOnboardingTokenRequest body,
             Authentication auth) {
-        UUID entityId = UUID.fromString(body.get("entityId"));
+        UUID entityId = body.entityId();
         UUID issuedBy = extractActorId(auth);
         String cleartext = onboardingService.generateToken(entityId, issuedBy);
 

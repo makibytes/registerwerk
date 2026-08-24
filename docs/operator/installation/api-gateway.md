@@ -1,7 +1,5 @@
 ---
-id: api-gateway
 title: API Gateway (Kong)
-sidebar_position: 5
 ---
 
 # API Gateway (Kong)
@@ -11,7 +9,7 @@ rate limiting, response caching, and security headers. It does **not** front eit
 — both apps are always opened directly by the browser at their own port (`:4200`, `:4201`) — and
 the **operator frontend bypasses Kong entirely**, even for its own API calls (its nginx forwards
 `/api/` straight to `backend:8080`). JWT validation and entity/role extraction always happen in
-the Spring backend itself, from the token's own claims (`JwtEntityClaimsConverter`) — not via any
+the Spring backend itself, from the token's own claims — not via any
 Kong-injected header, in the OSS setup this repo ships.
 
 ## Starting Kong
@@ -49,8 +47,8 @@ Only bundled Kong OSS plugins are active by default (see `gateway/kong.yml`):
 `openid-connect` (JWT termination at the gateway) is **Kong Enterprise/Konnect-only** and not
 active in this OSS setup — a ready-to-merge snippet lives at `gateway/plugins/oidc-entra.yml` for
 deployments that run Kong Enterprise. Without it, JWT validation and entity/role extraction happen
-entirely in the Spring backend, reading the claims off the token itself
-(`JwtEntityClaimsConverter`) — Kong never injects `X-Entity-Id`/`X-Entity-Roles` headers here.
+entirely in the Spring backend, reading the claims off the token itself — Kong never
+injects `X-Entity-Id`/`X-Entity-Roles` headers here.
 
 ## Kong admin API
 

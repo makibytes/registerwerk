@@ -113,21 +113,24 @@ public class OrgRegistrationService {
         return saved;
     }
 
-    /** Suspends the org onchain and in the mirror. Guarded by step-up + 4-eyes at the controller. */
+    /** Persists a fail-closed suspend intent. SUSPENDED is written only by the receipt poller. */
     public OrgRegistration suspend(UUID registrationId, String reason, UUID actorId, String actorRole) {
         OrgRegistration registration = require(registrationId);
-        if (registration.getStatus() != OrgRegistrationStatus.ACTIVE) {
+        txGateway.requireChain(registration.getChainConfigId());
+        if (registration.getStatus() != OrgRegistrationStatus.ACTIVE
+                && registration.getStatus() != OrgRegistrationStatus.SUSPEND_FAILED) {
             throw new InvalidStateTransitionException(
-                    "Org registration " + registrationId + " is " + registration.getStatus() + ", not ACTIVE");
+                    "Org registration " + registrationId + " is " + registration.getStatus()
+                            + "; only ACTIVE or a failed suspension can be suspended");
         }
 
-        registration.setStatus(OrgRegistrationStatus.SUSPENDED);
+        registration.setStatus(OrgRegistrationStatus.SUSPEND_PENDING);
         registration.setSuspendedAt(Instant.now());
         registration.setSuspendedBy(actorId);
         registration.setSuspensionReason(reason);
+        clearStatusCausality(registration);
+        registration.setStatusRequestedAt(Instant.now());
         OrgRegistration saved = registrationRepository.save(registration);
-        // Broadcast follows the commit; a failed broadcast surfaces as drift via the
-        // chain reconciliation job (suspension has no dedicated tx-hash column).
         AfterCommit.run(() -> broadcaster.broadcastOrgStatus(saved.getId(), reason));
 
         eventPublisher.publishEvent(new OrgSuspendedEvent(saved.getId(), saved.getLegalEntityId(),
@@ -135,24 +138,33 @@ public class OrgRegistrationService {
         return saved;
     }
 
-    /** Reinstates a suspended org onchain and in the mirror. */
+    /** Persists a fail-closed reinstate intent. ACTIVE is written only by the receipt poller. */
     public OrgRegistration reinstate(UUID registrationId, UUID actorId, String actorRole) {
         OrgRegistration registration = require(registrationId);
-        if (registration.getStatus() != OrgRegistrationStatus.SUSPENDED) {
+        txGateway.requireChain(registration.getChainConfigId());
+        if (registration.getStatus() != OrgRegistrationStatus.SUSPENDED
+                && registration.getStatus() != OrgRegistrationStatus.REINSTATE_FAILED) {
             throw new InvalidStateTransitionException(
-                    "Org registration " + registrationId + " is " + registration.getStatus() + ", not SUSPENDED");
+                    "Org registration " + registrationId + " is " + registration.getStatus()
+                            + "; only SUSPENDED or a failed reinstatement can be reinstated");
         }
 
-        registration.setStatus(OrgRegistrationStatus.ACTIVE);
-        registration.setSuspendedAt(null);
-        registration.setSuspendedBy(null);
-        registration.setSuspensionReason(null);
+        registration.setStatus(OrgRegistrationStatus.REINSTATE_PENDING);
+        clearStatusCausality(registration);
+        registration.setStatusRequestedAt(Instant.now());
         OrgRegistration saved = registrationRepository.save(registration);
         AfterCommit.run(() -> broadcaster.broadcastOrgStatus(saved.getId(), null));
 
         eventPublisher.publishEvent(new OrgReinstatedEvent(saved.getId(), saved.getLegalEntityId(),
                 actorId, actorRole, Map.of()));
         return saved;
+    }
+
+    private static void clearStatusCausality(OrgRegistration registration) {
+        registration.setStatusTx(null);
+        registration.setStatusChainConfigId(null);
+        registration.setStatusBlockNumber(null);
+        registration.setStatusBlockHash(null);
     }
 
     public OrgRegistration require(UUID registrationId) {

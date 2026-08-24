@@ -1,0 +1,26 @@
+# Fingerprints for known false positives, reviewed 2026-08-07 when secret scanning was added
+# (.github/workflows/secret-scanning.yml). Each entry below was checked individually — none is
+# a real credential. Add new entries only after the same review; do not bulk-suppress a rule.
+
+# Illustrative "Bearer <token>" in curl examples across the docs (base + 4 translations) —
+# a syntactically valid-looking but non-functional example JWT, not a real credential.
+439fd773f72012e025106446ce755198d5c52c09:docs/customer/authentication.md:curl-auth-header:79
+439fd773f72012e025106446ce755198d5c52c09:docs/operator/api-reference.md:curl-auth-header:37
+b55bd725aec4502d5d729d6d10fed52883100ddc:docs/operator/api-reference.de.md:curl-auth-header:34
+b55bd725aec4502d5d729d6d10fed52883100ddc:docs/operator/api-reference.es.md:curl-auth-header:34
+b55bd725aec4502d5d729d6d10fed52883100ddc:docs/operator/api-reference.fr.md:curl-auth-header:34
+b55bd725aec4502d5d729d6d10fed52883100ddc:docs/operator/api-reference.it.md:curl-auth-header:34
+
+# Deliberately fake test-fixture key (obviously sequential bytes) used to unit-test the KEK
+# wrapping path — never a real key, never leaves this test file.
+3a917deb1beb31fe498fa800ca548b26ee92189b:backend/src/test/java/de/makibytes/registerwerk/wallet/api/WalletStorageTest.java:generic-api-key:237
+99f360130bc362b0b6000de3a1855fcc004fe249:backend/src/test/java/de/makibytes/registerwerk/wallet/api/WalletStorageTest.java:generic-api-key:237
+
+# Anvil/Foundry's well-known, publicly documented default local-devnet private key (account #0
+# of the standard test mnemonic) — used by every Foundry-based test suite, never a real key.
+439fd773f72012e025106446ce755198d5c52c09:backend/src/test/resources/application-test.yml:generic-api-key:29
+
+# Redacted example value ("<secret-key>" placeholder on the line above) — the flagged line
+# itself carries no secret, gitleaks' entropy heuristic just triggered on the adjacent region.
+439fd773f72012e025106446ce755198d5c52c09:.env.example:generic-api-key:33
+802f0d2150f6966f234b7d1e2282c2ea81b0d9f2:.env.example.test:generic-api-key:47

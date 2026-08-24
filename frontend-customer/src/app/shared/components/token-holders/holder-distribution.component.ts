@@ -40,7 +40,7 @@ import { LiveHolder } from './models';
           @for (holder of topHolders; track holder.walletAddress) {
             <div class="bar-row">
               <span class="bar-label" [title]="holder.walletAddress">
-                {{ holder.walletAddress.substring(0, 6) }}...{{ holder.walletAddress.substring(38) }}
+                {{ shortenAddress(holder.walletAddress) }}
               </span>
               <div class="bar-wrapper">
                 <div class="bar" [style.width.%]="(holder.tokenBalance / largestHolderAmount) * 100"></div>
@@ -180,5 +180,9 @@ export class HolderDistributionComponent {
     return [...this.holders]
       .sort((a, b) => b.tokenBalance - a.tokenBalance)
       .slice(0, 5);
+  }
+
+  shortenAddress(address: string): string {
+    return address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
   }
 }

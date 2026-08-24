@@ -1,20 +1,38 @@
 import { HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
-import { AuthService } from '../auth/auth.service';
+import { switchMap } from 'rxjs';
+import { TokenSource } from '../auth/token-source';
 
 /**
- * Attaches the Bearer token to every outgoing HTTP request.
+ * Attaches the bearer token to outgoing requests.
+ *
+ * Two things it deliberately does:
+ *
+ * - **Leaves an explicit `Authorization` header alone.** Step-up calls send a short-lived
+ *   step-up token in place of the session token; overwriting it would silently defeat the
+ *   step-up check. (The operator app's interceptor has always done this; this one did not.)
+ * - **Asks the {@link TokenSource} for a token rather than reading storage.** Under Entra the
+ *   token has to be silently renewed when it nears expiry, which a synchronous read cannot do.
+ * - **Always sends `withCredentials: true`.** Under `CookieTokenSource` the httpOnly
+ *   `rw_session` cookie (and the `XSRF-TOKEN` cookie Angular reads for the CSRF header) only
+ *   attach to same-site-eligible requests that opt in; under Entra this is a harmless no-op
+ *   since the browser has no Registerwerk cookies to send.
  */
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
-  const auth = inject(AuthService);
-  const token = auth.getToken();
-
-  if (token) {
-    const authReq = req.clone({
-      setHeaders: { Authorization: `Bearer ${token}` },
-    });
-    return next(authReq);
+  if (req.headers.has('Authorization')) {
+    return next(req.clone({ withCredentials: true }));
   }
 
-  return next(req);
+  return inject(TokenSource)
+    .acquireToken$()
+    .pipe(
+      switchMap(token =>
+        next(
+          req.clone({
+            withCredentials: true,
+            ...(token ? { setHeaders: { Authorization: `Bearer ${token}` } } : {}),
+          })
+        )
+      )
+    );
 };

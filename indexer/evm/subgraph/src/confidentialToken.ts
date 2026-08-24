@@ -6,7 +6,7 @@ import {
 import { ConfidentialToken, ConfidentialTokenEvent } from '../generated/schema'
 
 /**
- * Lifecycle-event ingestion for confidential (Zama fhEVM) tokens (finding #8, Phase 9) —
+ * Lifecycle-event ingestion for confidential (Zama fhEVM) tokens  —
  * previously no event-log ingestion existed for these contracts at all, so a holder-initiated
  * ConfidentialTransfer was invisible to the backend and could never be evaluated for Travel Rule.
  * `handle` stays an opaque FHE ciphertext handle here — only the backend's registered-viewer

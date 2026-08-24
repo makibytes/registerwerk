@@ -4,13 +4,13 @@ import com.daml.ledger.javaapi.data.*;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.CantonTokenService;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
-import io.reactivex.disposables.Disposable;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -57,8 +57,8 @@ public class CantonTransferSyncService {
 
     private static final int MAX_CONSECUTIVE_ERRORS = 5;
 
-    /** Canton offset used to start from the beginning of the ledger. */
-    private static final LedgerOffset LEDGER_BEGIN = LedgerOffset.LedgerBegin.getInstance();
+    /** Ledger API v2 offsets are monotonically increasing int64 values; zero starts at genesis. */
+    private static final long LEDGER_BEGIN = 0L;
 
     private static final String ZERO_ADDRESS = "0x0";
 
@@ -76,7 +76,8 @@ public class CantonTransferSyncService {
     private final CantonTransferSyncService self;
 
     /** chainConfigId → active stream subscription (for cleanup on shutdown). */
-    private final Map<UUID, Disposable> activeSubscriptions = new ConcurrentHashMap<>();
+    private final Map<UUID, CantonLedgerClient.Subscription> activeSubscriptions =
+            new ConcurrentHashMap<>();
 
     public CantonTransferSyncService(
             BlockchainClientRegistry registry,
@@ -115,7 +116,7 @@ public class CantonTransferSyncService {
 
     @PreDestroy
     public void stopSubscriptions() {
-        activeSubscriptions.values().forEach(Disposable::dispose);
+        activeSubscriptions.values().forEach(CantonLedgerClient.Subscription::close);
         activeSubscriptions.clear();
         log.info("Canton indexer subscriptions stopped.");
     }
@@ -123,19 +124,15 @@ public class CantonTransferSyncService {
     // ── Per-chain subscription ────────────────────────────────────────────────
 
     private void subscribeToChain(ChainConfig chain) {
-        CantonLedgerClient client = registry.getCantonClientByIdentifier(chain.getIdentifier());
+        CantonLedgerClient client = (CantonLedgerClient)
+                registry.getCantonClientByIdentifier(chain.getIdentifier());
 
         IndexerState state = getOrCreateIndexerState(chain);
-        LedgerOffset beginOffset = resolveBeginOffset(state);
-
-        // Filter for Daml Token Standard Holding template events
-        TransactionFilter filter = new FiltersByParty(Map.of()); // empty = all parties visible to admin party
-
-        Disposable sub = client.transactionsClient()
-                .getTransactions(beginOffset, Optional.empty(), filter, true)
-                .subscribe(
-                        tx -> self.handleTransaction(chain, state, tx),
-                        err -> handleStreamError(chain, state, err));
+        long beginOffset = resolveBeginOffset(state);
+        CantonLedgerClient.Subscription sub = client.subscribeTransactions(
+                beginOffset,
+                tx -> self.handleTransaction(chain, state, tx),
+                err -> handleStreamError(chain, state, err));
 
         activeSubscriptions.put(chain.getId(), sub);
         log.info("Canton stream subscription started for chain {}", chain.getIdentifier());
@@ -214,7 +211,7 @@ public class CantonTransferSyncService {
         }
 
         // Advance the cursor
-        state.setLastSyncedSignature(tx.getOffset());
+        state.setLastSyncedSignature(Long.toString(tx.getOffset()));
         state.setLastSyncedAt(Instant.now());
         state.setConsecutiveErrors(0);
         state.setStatus(IndexerState.IndexerStatus.ACTIVE);
@@ -232,6 +229,12 @@ public class CantonTransferSyncService {
         tt.setEventType(eventType);
         tt.setOccurredAt(occurredAt);
         tt.setTxHash(tx.getUpdateId());
+        // a Canton synchronizer commits transactions atomically — once a participant
+        // observes a transaction on the Ledger API stream, that commit is final; there is no
+        // probabilistic-finality/reorg model for a permissioned synchronizer's confirmed offsets
+        // the way there is for EVM/Starknet. FINAL matches the entity default; set explicitly
+        // here for clarity/documentation, mirroring the same reasoning applied to Stellar.
+        tt.setFinalityStatus(FinalityLevel.FINALIZED);
         tokenTransferRepository.save(tt);
         log.debug("Canton transfer recorded: chain={} type={} instrument={} from={} to={} amount={}",
                 chain.getIdentifier(), eventType, instrument, from, to, amount);
@@ -294,10 +297,15 @@ public class CantonTransferSyncService {
                 });
     }
 
-    private LedgerOffset resolveBeginOffset(IndexerState state) {
+    private long resolveBeginOffset(IndexerState state) {
         String lastOffset = state.getLastSyncedSignature();
         if (lastOffset == null || lastOffset.isBlank()) return LEDGER_BEGIN;
-        return new LedgerOffset.Absolute(lastOffset);
+        try {
+            return Long.parseLong(lastOffset);
+        } catch (NumberFormatException invalidLegacyOffset) {
+            throw new IllegalStateException(
+                    "Invalid Canton Ledger API v2 offset: " + lastOffset, invalidLegacyOffset);
+        }
     }
 
     private boolean isHoldingTemplate(Identifier templateId) {

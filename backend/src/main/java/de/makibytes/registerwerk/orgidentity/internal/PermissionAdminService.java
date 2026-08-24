@@ -2,7 +2,7 @@ package de.makibytes.registerwerk.orgidentity.internal;
 
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuer;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuerRepository;
-import de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus;
+import de.makibytes.registerwerk.orgidentity.api.TrustedIssuerStatus;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistration;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationRepository;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationStatus;
@@ -13,6 +13,7 @@ import de.makibytes.registerwerk.orgidentity.api.PermissionGrant;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantRepository;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantStatus;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantType;
+import de.makibytes.registerwerk.orgidentity.api.RoleRestrictionStatus;
 import de.makibytes.registerwerk.orgidentity.events.PermissionDefinitionCreatedEvent;
 import de.makibytes.registerwerk.orgidentity.events.PermissionGrantedEvent;
 import de.makibytes.registerwerk.orgidentity.events.PermissionRevokedEvent;
@@ -106,8 +107,8 @@ public class PermissionAdminService {
         PermissionDefinition definition = requireDefinition(definitionId);
         OrgRegistration org = requireActiveOrg(orgRegistrationId);
 
-        grantRepository.findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndStatus(
-                        definitionId, orgRegistrationId, PermissionGrantType.ORG, PermissionGrantStatus.ACTIVE)
+        grantRepository.findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndStatusIn(
+                        definitionId, orgRegistrationId, PermissionGrantType.ORG, liveGrantStatuses())
                 .ifPresent(existing -> {
                     throw new InvalidStateTransitionException("Org already holds '" + definition.getCode() + "'");
                 });
@@ -168,7 +169,16 @@ public class PermissionAdminService {
             throw new EntityNotFoundException("PermissionGrant", grantId);
         }
         if (grant.getStatus() == PermissionGrantStatus.REVOKED) {
-            throw new InvalidStateTransitionException("Grant already revoked");
+            throw new InvalidStateTransitionException("Grant is already revoked onchain");
+        }
+        if (grant.getStatus() == PermissionGrantStatus.REVOCATION_PENDING) {
+            throw new InvalidStateTransitionException("Grant revocation is already awaiting chain finality");
+        }
+        if (grant.getStatus() != PermissionGrantStatus.ACTIVE
+                && grant.getStatus() != PermissionGrantStatus.REVOCATION_FAILED) {
+            throw new InvalidStateTransitionException(
+                    "Only an ACTIVE or failed-revocation grant can be revoked (status="
+                            + grant.getStatus() + ")");
         }
         PermissionDefinition definition = requireDefinition(grant.getPermissionDefinitionId());
         OrgRegistration org = registrationRepository.findById(grant.getOrgRegistrationId())
@@ -177,7 +187,11 @@ public class PermissionAdminService {
             throw new EntityNotFoundException("PermissionGrant", grantId);
         }
 
-        grant.setStatus(PermissionGrantStatus.REVOKED);
+        grant.setStatus(PermissionGrantStatus.REVOCATION_PENDING);
+        grant.setRevokedTx(null);
+        grant.setRevokedChainConfigId(null);
+        grant.setRevokedBlockNumber(null);
+        grant.setRevokedBlockHash(null);
         grant.setRevokedAt(Instant.now());
         if (dualControlApproverId != null) {
             grant.setDualControlApproverId(dualControlApproverId);
@@ -187,6 +201,7 @@ public class PermissionAdminService {
         AfterCommit.run(() -> broadcaster.broadcastRevoke(saved.getId()));
 
         eventPublisher.publishEvent(new PermissionRevokedEvent(saved.getId(), actorId, actorRole, dualControlApproverId, Map.of(
+                "action", "REVOCATION_REQUESTED",
                 "permission", definition.getCode(),
                 "grantType", grant.getGrantType().name()
         )));
@@ -206,8 +221,8 @@ public class PermissionAdminService {
                         "Your organization does not hold '" + definition.getCode() + "'"));
 
         String normalizedRole = roleCode.trim().toUpperCase();
-        grantRepository.findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndRoleCodeAndStatus(
-                        definitionId, org.getId(), PermissionGrantType.ROLE, normalizedRole, PermissionGrantStatus.ACTIVE)
+        grantRepository.findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndRoleCodeAndStatusIn(
+                        definitionId, org.getId(), PermissionGrantType.ROLE, normalizedRole, liveGrantStatuses())
                 .ifPresent(existing -> {
                     throw new InvalidStateTransitionException(
                             "Role " + normalizedRole + " already carries '" + definition.getCode() + "'");
@@ -241,6 +256,7 @@ public class PermissionAdminService {
         if (org == null) {
             throw new EntityNotFoundException("OrgRegistration", chainConfigId);
         }
+        txGateway.requireChain(chainConfigId);
 
         PermissionGrant orgGrant = grantRepository
                 .findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndStatus(
@@ -248,10 +264,22 @@ public class PermissionAdminService {
                 .orElseThrow(() -> new InvalidStateTransitionException(
                         "Your organization does not hold '" + definition.getCode() + "'"));
 
-        orgGrant.setRoleRestricted(restricted);
+        if (orgGrant.getRoleRestrictionStatus() == RoleRestrictionStatus.CHANGE_PENDING) {
+            throw new InvalidStateTransitionException("Role-restriction change is already awaiting chain finality");
+        }
+        if (orgGrant.getRoleRestrictionStatus() == RoleRestrictionStatus.STABLE
+                && orgGrant.isConfirmedRoleRestricted() == restricted) {
+            throw new InvalidStateTransitionException("Role restriction is already " + restricted);
+        }
+
+        orgGrant.setRequestedRoleRestricted(restricted);
+        orgGrant.setRoleRestrictionStatus(RoleRestrictionStatus.CHANGE_PENDING);
+        orgGrant.setRoleRestrictionTx(null);
+        orgGrant.setRoleRestrictionChainConfigId(null);
+        orgGrant.setRoleRestrictionBlockNumber(null);
+        orgGrant.setRoleRestrictionBlockHash(null);
+        orgGrant.setRoleRestrictionRequestedAt(Instant.now());
         PermissionGrant saved = grantRepository.save(orgGrant);
-        // Broadcast follows the commit; a failed setRoleRestricted surfaces as drift
-        // via the chain reconciliation job.
         AfterCommit.run(() -> broadcaster.broadcastRoleRestriction(saved.getId()));
 
         eventPublisher.publishEvent(new PermissionRoleRestrictionChangedEvent(saved.getId(), actorId, actorRole,
@@ -270,13 +298,17 @@ public class PermissionAdminService {
         }
 
         txGateway.requireChain(chainConfigId); // fail fast on an unknown chain
+        trustedIssuerRepository.findLiveIssuer(chainConfigId, issuerAddress).ifPresent(existing -> {
+            throw new InvalidStateTransitionException(
+                    "Issuer " + issuerAddress + " is already active or has an unresolved lifecycle");
+        });
 
         EcosystemTrustedIssuer issuer = new EcosystemTrustedIssuer();
         issuer.setChainConfigId(chainConfigId);
         issuer.setIssuerAddress(issuerAddress.toLowerCase());
         issuer.setClaimTopics(claimTopics);
         issuer.setLegalEntityId(legalEntityId);
-        issuer.setStatus(MemberWalletStatus.PENDING);
+        issuer.setStatus(TrustedIssuerStatus.PENDING);
         issuer.setDualControlApproverId(dualControlApproverId);
         issuer.setDualControlApprovedAt(dualControlApproverId != null ? Instant.now() : null);
         EcosystemTrustedIssuer saved = trustedIssuerRepository.save(issuer);
@@ -292,11 +324,23 @@ public class PermissionAdminService {
                                                       UUID dualControlApproverId) {
         EcosystemTrustedIssuer issuer = trustedIssuerRepository.findById(issuerId)
                 .orElseThrow(() -> new EntityNotFoundException("EcosystemTrustedIssuer", issuerId));
-        if (issuer.getStatus() == MemberWalletStatus.REMOVED) {
-            throw new InvalidStateTransitionException("Issuer already removed");
+        if (issuer.getStatus() == TrustedIssuerStatus.REMOVED) {
+            throw new InvalidStateTransitionException("Issuer is already removed onchain");
+        }
+        if (issuer.getStatus() == TrustedIssuerStatus.REMOVAL_PENDING) {
+            throw new InvalidStateTransitionException("Issuer removal is already awaiting chain finality");
+        }
+        if (issuer.getStatus() != TrustedIssuerStatus.ACTIVE
+                && issuer.getStatus() != TrustedIssuerStatus.REMOVAL_FAILED) {
+            throw new InvalidStateTransitionException(
+                    "Only an ACTIVE or failed-removal issuer can be removed (status="
+                            + issuer.getStatus() + ")");
         }
 
-        issuer.setStatus(MemberWalletStatus.REMOVED);
+        issuer.setStatus(TrustedIssuerStatus.REMOVAL_PENDING);
+        issuer.setRemovedTx(null);
+        issuer.setRemovedBlockNumber(null);
+        issuer.setRemovedBlockHash(null);
         issuer.setRemovedAt(Instant.now());
         if (dualControlApproverId != null) {
             issuer.setDualControlApproverId(dualControlApproverId);
@@ -306,7 +350,7 @@ public class PermissionAdminService {
         AfterCommit.run(() -> broadcaster.broadcastRemoveIssuer(saved.getId()));
 
         eventPublisher.publishEvent(new TrustedIssuerChangedEvent(saved.getId(), actorId, actorRole, dualControlApproverId, Map.of(
-                "action", "REMOVED", "issuer", saved.getIssuerAddress()
+                "action", "REMOVAL_REQUESTED", "issuer", saved.getIssuerAddress()
         )));
         return saved;
     }
@@ -316,6 +360,12 @@ public class PermissionAdminService {
     public PermissionDefinition requireDefinition(UUID definitionId) {
         return definitionRepository.findById(definitionId)
                 .orElseThrow(() -> new EntityNotFoundException("PermissionDefinition", definitionId));
+    }
+
+    /** States whose grant may still exist onchain and therefore cannot be duplicated. */
+    private static List<PermissionGrantStatus> liveGrantStatuses() {
+        return List.of(PermissionGrantStatus.PENDING, PermissionGrantStatus.ACTIVE,
+                PermissionGrantStatus.REVOCATION_PENDING, PermissionGrantStatus.REVOCATION_FAILED);
     }
 
     private OrgRegistration requireActiveOrg(UUID orgRegistrationId) {

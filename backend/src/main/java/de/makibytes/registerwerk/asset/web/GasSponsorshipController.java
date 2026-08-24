@@ -31,6 +31,7 @@ public class GasSponsorshipController {
 
     /** Creates (or replaces) the sponsorship policy for one specific asset deployment. */
     @PostMapping("/assets/{assetId}/deployments/{depId}/gas-sponsorship")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') and @deploymentAccessChecker.belongsToAsset(#depId, #assetId)")
     public ResponseEntity<GasSponsorshipPolicyResponse> createForDeployment(
             @PathVariable UUID assetId,
             @PathVariable UUID depId,
@@ -71,6 +72,7 @@ public class GasSponsorshipController {
 
     /** Resolves the policy that actually applies to a deployment (override, then issuer default). */
     @GetMapping("/assets/{assetId}/deployments/{depId}/gas-sponsorship")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') and @deploymentAccessChecker.belongsToAsset(#depId, #assetId)")
     public ResponseEntity<GasSponsorshipPolicyResponse> getEffectivePolicy(
             @PathVariable UUID assetId,
             @PathVariable UUID depId) {

@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
 import de.makibytes.registerwerk.kyc.api.S3DocumentStorageAdapter;
 import de.makibytes.registerwerk.kyc.events.DocumentDeletedEvent;
 import de.makibytes.registerwerk.kyc.events.DocumentUploadedEvent;
+import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +31,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("DocumentService unit tests")
@@ -143,10 +145,34 @@ class DocumentServiceTest {
         when(kycDocumentContentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         KycDocument result = documentService.storeDocument(
-            entityId, content, "small.txt", "text/plain",
+            entityId, content, "small.bin", "application/octet-stream",
             KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(result.getContentHash()).isEqualTo(expectedHash);
+    }
+
+    @Test
+    void storeDocument_sanitizesFileName() {
+        when(kycDocumentRepository.save(any())).thenAnswer(inv -> {
+            KycDocument document = inv.getArgument(0);
+            document.setId(UUID.randomUUID());
+            return document;
+        });
+
+        KycDocument result = documentService.storeDocument(
+                UUID.randomUUID(), new byte[] {1}, "../secret\r\n.pdf", "application/pdf",
+                KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(result.getFileName()).isEqualTo("secret.pdf");
+    }
+
+    @Test
+    void storeDocument_rejectsMimeTypesForbiddenBySchema() {
+        assertThatThrownBy(() -> documentService.storeDocument(
+                UUID.randomUUID(), new byte[] {1}, "payload.html", "text/html",
+                KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unsupported KYC document MIME type");
     }
 
     // ── retrieveContent ───────────────────────────────────────────────────────
@@ -162,10 +188,11 @@ class DocumentServiceTest {
         contentEntity.setId(docId);
         contentEntity.setContent(expected);
 
-        when(kycDocumentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(kycDocumentRepository.findByIdAndLegalEntityIdAndDeletedAtIsNull(docId, doc.getLegalEntityId()))
+                .thenReturn(Optional.of(doc));
         when(kycDocumentContentRepository.findById(docId)).thenReturn(Optional.of(contentEntity));
 
-        byte[] result = documentService.retrieveContent(docId);
+        byte[] result = documentService.retrieveContent(doc.getLegalEntityId(), docId);
 
         assertThat(result).isEqualTo(expected);
         verify(s3DocumentStorageAdapter, never()).download(any());
@@ -179,14 +206,26 @@ class DocumentServiceTest {
         byte[] s3Content = "s3 bytes".getBytes(StandardCharsets.UTF_8);
 
         KycDocument doc = savedDocWith(docId, s3Key);
-        when(kycDocumentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(kycDocumentRepository.findByIdAndLegalEntityIdAndDeletedAtIsNull(docId, doc.getLegalEntityId()))
+                .thenReturn(Optional.of(doc));
         when(s3DocumentStorageAdapter.download(s3Key)).thenReturn(s3Content);
 
-        byte[] result = documentService.retrieveContent(docId);
+        byte[] result = documentService.retrieveContent(doc.getLegalEntityId(), docId);
 
         assertThat(result).isEqualTo(s3Content);
         verify(s3DocumentStorageAdapter).download(s3Key);
         verify(kycDocumentContentRepository, never()).findById(any());
+    }
+
+    @Test
+    void retrieveContent_doesNotReturnDocumentFromAnotherEntity() {
+        UUID entityId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+        when(kycDocumentRepository.findByIdAndLegalEntityIdAndDeletedAtIsNull(documentId, entityId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> documentService.retrieveContent(entityId, documentId))
+                .isInstanceOf(EntityNotFoundException.class);
     }
 
     // ── softDeleteDocument ────────────────────────────────────────────────────
@@ -197,17 +236,18 @@ class DocumentServiceTest {
         UUID docId = UUID.randomUUID();
         KycDocument doc = savedDocWith(docId, "inline");
 
-        when(kycDocumentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(kycDocumentRepository.findByIdAndLegalEntityIdAndDeletedAtIsNull(docId, doc.getLegalEntityId()))
+                .thenReturn(Optional.of(doc));
         when(kycDocumentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        documentService.softDeleteDocument(docId, UUID.randomUUID(), "REGISTRY_ADMIN");
+        documentService.softDeleteDocument(doc.getLegalEntityId(), docId, UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(doc.getDeletedAt()).isNotNull();
         assertThat(doc.isDeleted()).isTrue();
         verify(kycDocumentRepository).save(doc);
     }
 
-    // ── audit events (finding #11a) ───────────────────────────────────────────
+    // ── audit events (a) ───────────────────────────────────────────
 
     @Test
     @DisplayName("storeDocument publishes a DocumentUploadedEvent")
@@ -221,7 +261,7 @@ class DocumentServiceTest {
         });
         when(kycDocumentContentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        documentService.storeDocument(entityId, "hi".getBytes(StandardCharsets.UTF_8), "a.txt", "text/plain",
+        documentService.storeDocument(entityId, "hi".getBytes(StandardCharsets.UTF_8), "a.bin", "application/octet-stream",
                 KycDocument.DocumentType.OTHER, uploadedBy, "COMPANY_ADMIN");
 
         ArgumentCaptor<DocumentUploadedEvent> captor = ArgumentCaptor.forClass(DocumentUploadedEvent.class);
@@ -236,10 +276,11 @@ class DocumentServiceTest {
         UUID docId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
         KycDocument doc = savedDocWith(docId, "inline");
-        when(kycDocumentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(kycDocumentRepository.findByIdAndLegalEntityIdAndDeletedAtIsNull(docId, doc.getLegalEntityId()))
+                .thenReturn(Optional.of(doc));
         when(kycDocumentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        documentService.softDeleteDocument(docId, actorId, "REGISTRY_ADMIN");
+        documentService.softDeleteDocument(doc.getLegalEntityId(), docId, actorId, "REGISTRY_ADMIN");
 
         ArgumentCaptor<DocumentDeletedEvent> captor = ArgumentCaptor.forClass(DocumentDeletedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());

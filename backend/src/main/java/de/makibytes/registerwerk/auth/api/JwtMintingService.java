@@ -19,6 +19,14 @@ import java.util.List;
 @Service
 public class JwtMintingService {
 
+    /**
+     * The {@code iss} stamped on every locally minted token (session, impersonation, step-up).
+     * The HS256 decoder pins to it, so possession of {@code JWT_DEV_SECRET} alone is not enough
+     * to forge a token this API will accept — it must also claim to come from here. Changing
+     * this value invalidates every token currently in circulation.
+     */
+    public static final String LOCAL_ISSUER = "registerwerk-local";
+
     private final NimbusJwtEncoder encoder;
     private final long tokenTtlSeconds;
 
@@ -33,6 +41,7 @@ public class JwtMintingService {
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         List<String> roles = user.getRoles().stream().map(Enum::name).toList();
         JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
+            .issuer(LOCAL_ISSUER)
             .subject(user.getId().toString())
             .claim("roles", roles)
             .issuedAt(now)
@@ -62,6 +71,7 @@ public class JwtMintingService {
         Instant now = Instant.now();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         JwtClaimsSet claims = JwtClaimsSet.builder()
+            .issuer(LOCAL_ISSUER)
             .subject(actor.getId().toString())
             .claim("roles", List.of("COMPANY_ADMIN", "ISSUER", "INVESTOR", "TRADER"))
             .claim("email", actor.getEmail())

@@ -80,9 +80,15 @@ public class AuthService {
             token,
             user.getId(),
             user.getRoles().stream().map(Enum::name).toList(),
+            user.getEmail(),
+            user.getFullName(),
+            user.getLegalEntityId(),
             props.getTokenTtlSeconds()
         );
     }
 
-    public record LoginResult(String token, UUID userId, List<String> roles, long ttlSeconds) {}
+    public record LoginResult(
+        String token, UUID userId, List<String> roles,
+        String email, String name, UUID entityId, long ttlSeconds
+    ) {}
 }

@@ -5,6 +5,28 @@ spring:
     virtual:
       enabled: true
 
+  task:
+    # With virtual threads on, Boot backs @Scheduled and @Async with SimpleAsyncTaskExecutor,
+    # which is UNBOUNDED by default — every job gets its own thread and nothing queues. Most of
+    # these jobs are blocking RPC calls against external chains, so an unbounded fan-out lets a
+    # single slow endpoint pull an arbitrary number of concurrent outbound requests. The caps
+    # below are deliberately generous (they only bite under pathological fan-out) but finite.
+    scheduling:
+      simple:
+        concurrency-limit: 16
+      shutdown:
+        # Let in-flight scheduled persistence work finish during a graceful application stop.
+        await-termination: true
+        await-termination-period: 30s
+    execution:
+      simple:
+        concurrency-limit: 64
+      shutdown:
+        # Modulith event listeners carry audit/compliance side effects.  Abruptly cancelling
+        # them at shutdown creates avoidable replay work and can leave external calls half-done.
+        await-termination: true
+        await-termination-period: 30s
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/registerwerk}
     username: ${DB_USER:registerwerk}
@@ -13,13 +35,23 @@ spring:
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
+      # Fail fast rather than hang indefinitely if the pool is exhausted.
+      connection-timeout: 30000
+      # Recycle connections well under any reasonable DB-side/LB idle-connection kill timeout,
+      # so the pool retires connections on its own terms instead of handing out ones the
+      # network has silently already dropped.
+      max-lifetime: 1800000
+      # Bound how long a connection-liveness check itself may take.
+      validation-timeout: 5000
+      # Log (not kill) a connection held for longer than this — surfaces leaked/forgotten
+      # connections (e.g. a missing close() on a manual JDBC path) well before pool exhaustion.
+      leak-detection-threshold: 60000
 
   jpa:
     hibernate:
       ddl-auto: validate
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           lob:
             non_contextual_creation: true
@@ -54,11 +86,28 @@ spring:
     caffeine:
       spec: maximumSize=1000,expireAfterWrite=30s
 
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 200
+
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
+
   thymeleaf:
     # Notification services resolve templates relative to the templates root, e.g. "email/welcome".
     prefix: classpath:/templates/
     suffix: .html
     mode: HTML
+
+  lifecycle:
+    # Mirrors the 30s already used for scheduled-task/async shutdown (see spring.task.* above) —
+    # one consistent grace period for the whole graceful-shutdown story (server.shutdown: graceful
+    # below), not two different ones.
+    timeout-per-shutdown-phase: 30s
 
 server:
   port: 8080
@@ -66,6 +115,11 @@ server:
     enabled: true
   error:
     include-message: never
+  # Lets an in-flight request finish before the JVM stops, instead of the connector cutting it
+  # off mid-response — matters for rolling Kubernetes deployments, which send SIGTERM
+  # to a pod that may still be serving traffic. Bounded by spring.lifecycle's shutdown timeout
+  # below so a stuck request can't block shutdown forever.
+  shutdown: graceful
 
 management:
   endpoints:
@@ -75,9 +129,37 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      # Explicit rather than relying on Spring Boot's Kubernetes-environment auto-detection
+      # (activates automatically inside any real pod via KUBERNETES_SERVICE_HOST, but silently
+      # does NOT activate under Docker Compose or a local run) — the Helm chart's
+      # livenessProbe/readinessProbe already point at these paths, so making the setting explicit
+      # keeps every deployment path consistent instead of depending on implicit detection.
+      probes:
+        enabled: true
+      group:
+        # readinessState alone only reflects "SmartLifecycle says I'm ready" — it says nothing
+        # about whether this instance can actually serve a request right now. Including db here
+        # means a pod that lost its database connection stops receiving traffic instead of
+        # accepting requests it cannot fulfill.
+        readiness:
+          include: readinessState,db
+        liveness:
+          include: livenessState
   health:
     mail:
       enabled: false
+  metrics:
+    distribution:
+      # RED metrics: without a histogram, http.server.requests only exposes a count +
+      # sum, so p95/p99 latency cannot be computed in Prometheus at all — Grafana/alerting would
+      # have throughput and error-rate but no real latency signal.
+      percentiles-histogram:
+        http.server.requests: true
+        registerwerk.scheduled.job: true
+      percentiles:
+        http.server.requests: 0.5, 0.95, 0.99
+      slo:
+        http.server.requests: 100ms, 250ms, 500ms, 1s, 2s
   tracing:
     sampling:
       probability: ${OTEL_SAMPLING_PROBABILITY:0.1}
@@ -104,6 +186,39 @@ springdoc:
     enabled: ${SWAGGER_ENABLED:false}
 
 registerwerk:
+  cors:
+    # WebConfig.addCorsMappings now sets allowCredentials(true) so the httpOnly rw_session
+    # cookie (SessionCookieService) is actually sent on the operator portal's cross-origin
+    # dev-mode calls (environment.ts points straight at the backend, bypassing Kong — see its
+    # comment) — Spring rejects "*" combined with credentials at startup, so this can no longer
+    # default to a wildcard. Matches gateway/kong.yml's cors plugin origins (the customer app's
+    # path); override with a comma-separated list for any other deployment.
+    #
+    # Both the localhost and 127.0.0.1 spelling are listed for each port: a browser's Origin
+    # header is whatever hostname the address bar actually used, and "localhost" vs "127.0.0.1"
+    # are different origins to CORS even though they reach the same machine. Missing either one
+    # here previously broke the whole demo stack with a bare "Invalid CORS request" 403 on login
+    # for anyone who happened to open the frontend via the other spelling.
+    allowed-origins: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4201,http://127.0.0.1:4200,http://127.0.0.1:4201}
+  chaincache:
+    # HS256 signing key for the short-lived bearer token ChaincacheTokenFactory mints to
+    # authenticate against a chaincache instance's read APIs (GET /api/capabilities, the durable
+    # event WebSocket) — chaincache's own default is chaincache.auth.enabled: true, so without
+    # this every probe 401s and every chaincache node silently demotes to DIRECT_RPC. Blank means
+    # no credential is presented (fine against a chaincache instance running with
+    # chaincache.auth.enabled: false). Deliberately a SEPARATE secret from JWT_DEV_SECRET — never
+    # share a signing key across two products.
+    jwt-secret: ${CHAINCACHE_JWT_SECRET:}
+    # Stable logical consumer group across pod recreation (see
+    # blockchain.internal.ChaincacheDurableStreamManager). Chaincache fences this identity with a
+    # database-backed lease, so one Registerwerk replica consumes while siblings remain warm
+    # standbys; using HOSTNAME here silently created a brand-new cursor after every pod rollout.
+    instance-id: ${REGISTERWERK_CHAINCACHE_CONSUMER_GROUP:registerwerk}
+    stream:
+      # A TCP-open socket is not a usable durable stream until every subscribe response arrives;
+      # likewise, an event is not safely resumable until chaincache confirms its cursor ACK.
+      subscribe-response-timeout-ms: ${CHAINCACHE_SUBSCRIBE_RESPONSE_TIMEOUT_MS:10000}
+      ack-response-timeout-ms: ${CHAINCACHE_ACK_RESPONSE_TIMEOUT_MS:10000}
   chains:
     ethereum:
       mainnet:
@@ -145,8 +260,7 @@ registerwerk:
         rpc-url: ${SOLANA_MAINNET_RPC:https://api.mainnet-beta.solana.com}
       testnet:
         rpc-url: ${SOLANA_DEVNET_RPC:https://api.devnet.solana.com}
-      # SPL Token-2022 BOND/CONFIDENTIAL presets refuse to deploy until both are set (finding #12,
-      # Phase 10) — see SolanaTokenService.createSplToken2022's fail-fast gate.
+      # SPL Token-2022 BOND/CONFIDENTIAL presets refuse to deploy until both are set.
       transfer-hook-program-id: ${SOLANA_TRANSFER_HOOK_PROGRAM_ID:}
       confidential-transfer-auditor-elgamal-pubkey: ${SOLANA_CONFIDENTIAL_AUDITOR_ELGAMAL_PUBKEY:}
     canton:
@@ -184,9 +298,18 @@ registerwerk:
   wallet:
     master-key: ${REGISTERWERK_WALLET_MASTER_KEY:}
     storage-dir: ${REGISTERWERK_WALLET_DIR:/data/wallets}
+    storage-backend: ${REGISTERWERK_WALLET_STORAGE_BACKEND:FILESYSTEM}
     kek-provider: ${REGISTERWERK_WALLET_KEK_PROVIDER:}
     kms:
       key-id: ${REGISTERWERK_WALLET_KMS_KEY_ID:}
+    hsm:
+      # One PKCS#11 token/session per Registerwerk instance. The SunPKCS11 file selects the
+      # actual vendor library and slot. Profiles keep vendor quirks behind an adapter.
+      enabled: ${REGISTERWERK_HSM_ENABLED:false}
+      profile: ${REGISTERWERK_HSM_PROFILE:SOFTHSM}
+      provider-config: ${REGISTERWERK_HSM_PROVIDER_CONFIG:}
+      pin: ${REGISTERWERK_HSM_PIN:}
+      signature-algorithm: ${REGISTERWERK_HSM_SIGNATURE_ALGORITHM:}
   contracts:
     # AssetTokenFactory address per chain identifier (populated after `forge script Deploy`)
     asset-token-factory:
@@ -233,8 +356,7 @@ registerwerk:
     # EwpgConfidentialFactory (Zama fhEVM) — gated to Chain.ETHEREUM/Chain.BASE
     # (AssetDeploymentService.FHEVM_CHAINS); Fhenix/Inco are separate, non-Zama FHE stacks and are
     # NOT valid confidential-deployment targets (see docs/blockchains/confidential-evm.md). These
-    # keys previously (wrongly) targeted fhenix-*/inco-* — dead config since the deployment gate
-    # only ever asks for ethereum-*/base-* identifiers.
+    # available only for ethereum-*/base-* identifiers.
     confidential-factory:
       ethereum-mainnet: ${CONFIDENTIAL_FACTORY_ETH_MAINNET:}
       ethereum-testnet: ${CONFIDENTIAL_FACTORY_ETH_TESTNET:}
@@ -359,6 +481,35 @@ registerwerk:
     default-admin:
       email: ${DEFAULT_ADMIN_EMAIL:}
       password: ${DEFAULT_ADMIN_PASSWORD:}
+    # Expected audience of incoming Entra access tokens. Without it, a token issued to any
+    # other app in the same tenant validates against this API.
+    audience: ${JWT_AUDIENCE:}
+    step-up:
+      entra:
+        # Conditional Access authentication context (c1–c99) required for step-up-protected
+        # actions when ENTRA_ENABLED=true. No default on purpose: guessing "c1" could mean
+        # protecting forced transfers with a context that was never published to the app.
+        auth-context-id: ${ENTRA_STEPUP_AUTH_CONTEXT_ID:}
+        authorization-uri: ${ENTRA_AUTHORIZATION_URI:https://login.microsoftonline.com/common/oauth2/authorize}
+        # Per-action overrides keyed on @RequiresStepUp#reason(). Several reasons are free text
+        # with spaces, so quote those keys. Left unset here — an explicit `{}` binds as an empty
+        # string rather than an empty map. Example:
+        #   reason-overrides:
+        #     FORCE_BURN_EWG26: c2
+        #     "Payment rail creation": c1
+  entra:
+    tenant-id: ${ENTRA_TENANT_ID:}
+    client-id: ${ENTRA_CLIENT_ID:}
+    spa-client-id: ${ENTRA_SPA_CLIENT_ID:}
+    client-secret: ${ENTRA_CLIENT_SECRET:}
+    api-scope: ${ENTRA_API_SCOPE:}
+    graph-base-url: ${ENTRA_GRAPH_BASE_URL:https://graph.microsoft.com/v1.0}
+    authority-base-url: ${ENTRA_AUTHORITY_BASE_URL:https://login.microsoftonline.com}
+    # Master switch for every Microsoft Graph call (2FA status page + operator support console).
+    # Independent of registerwerk.auth.entra-enabled, which only decides how users sign in.
+    support-enabled: ${ENTRA_SUPPORT_ENABLED:false}
+    mfa-setup-url: ${ENTRA_MFA_SETUP_URL:https://mysignins.microsoft.com/security-info}
+    require-two-factor-enrolment: ${ENTRA_REQUIRE_2FA_ENROLMENT:false}
   seed-demo-data: ${SEED_DEMO_DATA:false}
   blockchain:
     tx:
@@ -381,11 +532,19 @@ registerwerk:
     check-interval-ms: ${REGISTERWERK_DRIFT_CHECK_INTERVAL_MS:900000}
     batch-size: ${REGISTERWERK_DRIFT_BATCH_SIZE:500}
   lending:
+    local-demo-backend-rpc-url: ${LENDING_LOCAL_DEMO_BACKEND_RPC_URL:http://anvil:8545}
+    local-demo-public-rpc-url: ${LENDING_LOCAL_DEMO_PUBLIC_RPC_URL:http://localhost:18545}
     # Fail closed until legal, custody, oracle, liquidation, and operating controls have
     # completed release review. Both flags are required; enabling only one refuses startup
     # or endpoint/service access.
     enabled: ${REGISTERWERK_LENDING_ENABLED:false}
     release-approved: ${REGISTERWERK_LENDING_RELEASE_APPROVED:false}
+    # Optional output of contracts/script/DeployLocalLendingDemo.s.sol. Only the demo seeder
+    # reads it; production deployments leave it blank.
+    local-demo-addresses-file: ${REGISTERWERK_LENDING_LOCAL_DEMO_ADDRESSES_FILE:}
+  repo-desk:
+    enabled: ${REGISTERWERK_REPO_DESK_ENABLED:false}
+    release-approved: ${REGISTERWERK_REPO_DESK_RELEASE_APPROVED:false}
   trading:
     enabled: ${REGISTERWERK_TRADING_ENABLED:true}
     venues:
@@ -405,6 +564,8 @@ registerwerk:
         api-key: ${REGISTERWERK_TRADING_VENUE_TALOS_API_KEY:}
   travel-rule:
     protocol: ${REGISTERWERK_TRAVEL_RULE_PROTOCOL:NOOP}
+    # Credential for inbound IVMS-101 delivery. Blank disables the public inbox (fail closed).
+    inbox-api-key: ${REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY:}
     # Art. 14(5) TFR: ownership verification threshold for self-hosted addresses.
     # NOTE: this is NOT a messaging threshold — TFR has no de minimis for CASP-to-CASP transfers.
     self-hosted-verification-threshold-eur: ${REGISTERWERK_TRAVEL_RULE_SELF_HOSTED_VERIFICATION_THRESHOLD_EUR:1000}
@@ -416,6 +577,7 @@ registerwerk:
       vasp-did: ${REGISTERWERK_TRAVEL_RULE_NOTABENE_VASP_DID:}
     trp:
       endpoint: ${REGISTERWERK_TRAVEL_RULE_TRP_ENDPOINT:}
+      # PEM certificate + unencrypted PKCS#8 PEM private key. Invalid/partial mTLS config fails startup.
       mtls-cert-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_CERT:}
       mtls-key-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY:}
       directory-url: ${REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL:https://trp.notabene.id/directory}

@@ -41,11 +41,13 @@ import { ExternalReferenceSubjectType } from '../../core/models';
           [(ngModel)]="draftValue"
           [placeholder]="placeholder"
           [disabled]="saving"
+          maxlength="255"
         />
       </mat-form-field>
 
       <button
         mat-icon-button
+        type="button"
         color="primary"
         [disabled]="saving || !subjectId"
         matTooltip="Save external ID"
@@ -60,6 +62,7 @@ import { ExternalReferenceSubjectType } from '../../core/models';
 
       <button
         mat-icon-button
+        type="button"
         [disabled]="saving || !hasValue"
         matTooltip="Clear external ID"
         (click)="clear()"
@@ -69,7 +72,7 @@ import { ExternalReferenceSubjectType } from '../../core/models';
     </div>
 
     @if (errorMessage) {
-      <div class="error-text">{{ errorMessage }}</div>
+      <div class="error-text" role="alert">{{ errorMessage }}</div>
     }
   `,
   styles: [`
@@ -119,6 +122,7 @@ export class ExternalIdEditorComponent implements OnChanges {
   }
 
   save(): void {
+    if (this.saving || !this.subjectId) return;
     const externalId = this.draftValue.trim();
     if (!externalId) {
       this.clear();
@@ -144,6 +148,7 @@ export class ExternalIdEditorComponent implements OnChanges {
   }
 
   clear(): void {
+    if (this.saving || !this.subjectId) return;
     if (!this.value && !this.draftValue.trim()) {
       this.draftValue = '';
       return;

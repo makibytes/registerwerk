@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
-/** Verifies Phase 5 finding #10: no monitor existed for submissions stuck without a real ack. */
+/** Verifies : no monitor existed for submissions stuck without a real ack. */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("RegReportStalenessMonitor unit tests")
 class RegReportStalenessMonitorTest {
@@ -61,7 +61,7 @@ class RegReportStalenessMonitorTest {
     }
 
     @Test
-    @DisplayName("stale-submissions gauge reflects a live count (repo-wide alerting follow-up)")
+    @DisplayName("stale-submissions gauge reflects a live count (alerting metrics)")
     void staleSubmissionsGauge_reflectsLiveCount() {
         when(jdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.eq(Long.class), any(Instant.class)))

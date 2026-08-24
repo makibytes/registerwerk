@@ -1,7 +1,5 @@
 ---
-id: backend
 title: Backend Setup
-sidebar_position: 3
 ---
 
 # Backend Setup
@@ -53,3 +51,11 @@ Full OpenAPI JSON:
 ```
 http://localhost:8080/v3/api-docs
 ```
+
+## Kubernetes / GKE
+
+The Helm chart supports either its PostgreSQL subchart or a Cloud SQL Auth Proxy native sidecar,
+never both. The latter requires Kubernetes 1.29+, Workload Identity Federation, and a service
+account with `roles/cloudsql.client`. It can also render Google Managed Prometheus `PodMonitoring`.
+See `deploy/helm/registerwerk/README.md` in the source repository for exact values, security
+context, rollout, probe, and validation behavior.

@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.chain.internal.RpcNodeService;
 import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeCreateRequest;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeResponse;
+import de.makibytes.registerwerk.chain.web.dto.RpcNodeUpdateRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -37,7 +38,9 @@ public class RpcNodeController {
         return ResponseEntity.ok(nodes);
     }
 
-    /** Adds a new RPC node to the given chain. */
+    /** Adds a new RPC node to the given chain. Whether this becomes a chaincache connection is
+     *  auto-detected from {@code url} alone — there is no {@code kind} field to set; see
+     *  {@code RpcNodeService#addNode}. */
     @PostMapping
     public ResponseEntity<RpcNodeResponse> addNode(
             @PathVariable UUID chainId,
@@ -46,17 +49,39 @@ public class RpcNodeController {
         return ResponseEntity.status(HttpStatus.CREATED).body(rpcNodeService.toResponse(node));
     }
 
+    /** Updates an existing node's URL/label — re-detected on every update, same as add. */
+    @PutMapping("/{nodeId}")
+    public ResponseEntity<RpcNodeResponse> updateNode(
+            @PathVariable UUID chainId,
+            @PathVariable UUID nodeId,
+            @RequestBody @Valid RpcNodeUpdateRequest request) {
+        RpcNode node = rpcNodeService.updateNode(chainId, nodeId, request.url(), request.label());
+        return ResponseEntity.ok(rpcNodeService.toResponse(node));
+    }
+
+    /** Re-runs chaincache detection for one node on demand, in both directions (promotes a
+     *  {@code DIRECT_RPC} node whose URL now answers as chaincache; falls a {@code CHAINCACHE}
+     *  node back to {@code DIRECT_RPC} if chaincache no longer serves it) — a manual trigger for
+     *  the periodic background job {@code RpcNodeService#redetectAll} already runs on every
+     *  enabled node. */
+    @PostMapping("/{nodeId}/redetect")
+    public ResponseEntity<RpcNodeResponse> redetect(
+            @PathVariable UUID chainId, @PathVariable UUID nodeId) {
+        RpcNode node = rpcNodeService.redetect(chainId, nodeId);
+        return ResponseEntity.ok(rpcNodeService.toResponse(node));
+    }
+
     /** Manually enables (un-stops) a node. */
     @PostMapping("/{nodeId}/enable")
     public ResponseEntity<Void> enable(@PathVariable UUID chainId, @PathVariable UUID nodeId) {
-        rpcNodeService.enable(nodeId);
+        rpcNodeService.enable(chainId, nodeId);
         return ResponseEntity.noContent().build();
     }
 
     /** Manually stops (disables) a node. Traffic is routed away from it. */
     @PostMapping("/{nodeId}/disable")
     public ResponseEntity<Void> disable(@PathVariable UUID chainId, @PathVariable UUID nodeId) {
-        rpcNodeService.disable(nodeId);
+        rpcNodeService.disable(chainId, nodeId);
         return ResponseEntity.noContent().build();
     }
 
@@ -66,14 +91,14 @@ public class RpcNodeController {
             @PathVariable UUID chainId,
             @PathVariable UUID nodeId,
             @RequestParam boolean value) {
-        rpcNodeService.setExclusive(nodeId, value);
+        rpcNodeService.setExclusive(chainId, nodeId, value);
         return ResponseEntity.noContent().build();
     }
 
     /** Removes a node permanently. */
     @DeleteMapping("/{nodeId}")
     public ResponseEntity<Void> delete(@PathVariable UUID chainId, @PathVariable UUID nodeId) {
-        rpcNodeService.delete(nodeId);
+        rpcNodeService.delete(chainId, nodeId);
         return ResponseEntity.noContent().build();
     }
 }

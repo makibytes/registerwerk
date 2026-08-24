@@ -22,6 +22,12 @@ spring:
     port: 3025
 
 registerwerk:
+  screening:
+    open-sanctions:
+      # Keep the production adapter bean (and therefore fail-closed gate semantics) active, but
+      # never let integration tests contact a public compliance provider. Connection refusal on
+      # loopback is immediate and is recorded as the expected ERROR screening result.
+      base-url: http://127.0.0.1:1
   auth:
     dev-secret: "registerwerk-test-jwt-secret-not-for-production!!"
     step-up:

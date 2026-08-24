@@ -16,4 +16,8 @@ public class ComplianceGateException extends IllegalStateException {
     public ComplianceGateException(String message) {
         super(message);
     }
+
+    public ComplianceGateException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }

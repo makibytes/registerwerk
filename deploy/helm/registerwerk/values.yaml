@@ -6,7 +6,7 @@ image:
   # .github/workflows/container.yml only ever publishes :<git-sha> and :latest — it never
   # publishes a tag matching Chart.yaml's appVersion (no release has been cut yet), so
   # defaulting here to .Chart.AppVersion made a fresh `helm install` ImagePullBackOff
-  # (Phase 12, finding #3). `latest` is the one tag CI guarantees exists after every push
+  # . `latest` is the one tag CI guarantees exists after every push
   # to main. Pin to a specific `:<sha>` (or a real release tag, once one is cut) for any
   # deployment that needs reproducibility — `latest` is a safe-to-try-it default, not a
   # production recommendation.
@@ -20,6 +20,8 @@ serviceAccount:
   create: true
   annotations: {}
   name: ""
+  # Keep false unless a workload feature needs Kubernetes/GCP workload identity.
+  automountServiceAccountToken: false
 
 podAnnotations:
   prometheus.io/scrape: "true"
@@ -30,12 +32,25 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
   fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   allowPrivilegeEscalation: false
   capabilities:
     drop: [ALL]
-  readOnlyRootFilesystem: false  # wallets dir needs write
+  readOnlyRootFilesystem: true
+
+rollout:
+  minReadySeconds: 10
+  maxUnavailable: 0
+  maxSurge: 1
+
+monitoring:
+  # Requires the monitoring.googleapis.com PodMonitoring CRD installed by Managed Service for
+  # Prometheus. The generic prometheus.io annotations above remain available on other clusters.
+  googleManagedPrometheus: false
+  interval: 30s
 
 service:
   type: ClusterIP
@@ -81,37 +96,59 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 2
 
-# Spreads replicas across nodes to back the HA story implied by replicaCount/autoscaling and
-# podDisruptionBudget above. Previously templates/deployment.yaml never referenced
-# .Values.affinity at all — this rendered as inert configuration that looked load-bearing but
-# had zero effect; all replicas could land on the same node with nothing to stop it
-# (Phase 12, finding #13).
-affinity:
-  podAntiAffinity:
-    requiredDuringSchedulingIgnoredDuringExecution:
-      - labelSelector:
-          matchLabels:
-            app.kubernetes.io/name: registerwerk
-        topologyKey: kubernetes.io/hostname
+# Even-spread-across-nodes for HA (backing the story implied by replicaCount/autoscaling and
+# podDisruptionBudget above) is now a topologySpreadConstraints block hardcoded directly in
+# templates/deployment.yaml because the label selector needs release-specific values computed at
+# template time.
+# Empty by default; set this if you want to layer on additional affinity rules (e.g. node
+# selection) alongside the chart's own topology spread.
+affinity: {}
 
 env:
   REGISTERWERK_PRODUCTION_MODE: "true"
   SWAGGER_ENABLED: "false"
   OTEL_SAMPLING_PROBABILITY: "0.10"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4318/v1/traces"
+  # Wallet keystores live in Postgres (wallet_keystore_blob, V3 migration) rather than on a
+  # shared filesystem volume — see wallets.persistence below for why that matters here.
+  REGISTERWERK_WALLET_STORAGE_BACKEND: "POSTGRES"
 
+# Previously this chart shipped replicaCount: 3 + autoscaling (min 3) + REQUIRED pod
+# anti-affinity (one replica per node, see affinity: below) while ALSO mounting a single
+# ReadWriteOnce PVC into every pod — three mutually exclusive constraints. RWO binds to one
+# node; anti-affinity forbids two replicas sharing a node; so replicas 2 and 3 hung forever on
+# FailedAttachVolume and podDisruptionBudget.minAvailable could never be satisfied. Moving
+# wallet storage to Postgres (env.REGISTERWERK_WALLET_STORAGE_BACKEND above) removes the need
+# for this volume entirely, so persistence defaults to disabled and the deployment no longer
+# mounts it. Only re-enable this if you deliberately switch storage-backend back to
+# FILESYSTEM — and if you do, you MUST also drop replicaCount to 1 (or relax the anti-affinity
+# in affinity: below), or the exact same deadlock recurs.
 wallets:
   persistence:
-    enabled: true
+    enabled: false
     storageClass: ""
     size: 5Gi
     accessMode: ReadWriteOnce
+
+# JVM/JPA/Modulith startup (see application.yml's own boot log — cold start is a few
+# seconds locally, longer on constrained CPU requests) previously had to fit inside
+# livenessProbe's initialDelaySeconds (60s) with no separate allowance, so bumping periodSeconds
+# on a slower node risked the liveness probe killing a pod that was simply still starting, not
+# actually stuck. A dedicated startupProbe owns that window instead — liveness/readiness only
+# start once it succeeds — and can be given a much longer total budget (up to ~5 minutes here)
+# without weakening how quickly liveness reacts to a genuinely hung instance afterward.
+startupProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  failureThreshold: 30
 
 livenessProbe:
   httpGet:
     path: /actuator/health/liveness
     port: 8080
-  initialDelaySeconds: 60
   periodSeconds: 10
   failureThreshold: 3
 
@@ -119,9 +156,24 @@ readinessProbe:
   httpGet:
     path: /actuator/health/readiness
     port: 8080
-  initialDelaySeconds: 30
   periodSeconds: 5
   failureThreshold: 3
+
+# SIGTERM today would land on a pod potentially still receiving newly-routed traffic —
+# kube-proxy/endpoint removal and SIGTERM delivery are not ordered relative to each other, so a
+# short sleep here lets the Service stop sending new requests before the container actually
+# starts shutting down. Paired with server.shutdown: graceful + spring.lifecycle.
+# timeout-per-shutdown-phase: 30s (application.yml), so terminationGracePeriodSeconds below must
+# cover preStop's sleep *plus* that 30s, with headroom.
+lifecycle:
+  preStop:
+    exec:
+      command: ["sh", "-c", "sleep 10"]
+
+# preStop sleep (10s) + graceful-shutdown budget (30s) + margin. Kubernetes SIGKILLs the
+# container if it hasn't exited by the time this elapses, which would defeat the whole point of
+# graceful shutdown.
+terminationGracePeriodSeconds: 60
 
 postgresql:
   enabled: true
@@ -129,6 +181,12 @@ postgresql:
     database: registerwerk
     username: registerwerk
     existingSecret: registerwerk-postgres-secret
+    # Matches the Bitnami postgresql subchart's own default (values.yaml:
+    # auth.secretKeys.userPasswordKey) — spelled out here, rather than left to that subchart's
+    # internal default, so templates/deployment.yaml's DB_PASSWORD secretKeyRef (which reads
+    # this same key from the same existingSecret) stays correct if you ever override it.
+    secretKeys:
+      userPasswordKey: password
   primary:
     persistence:
       enabled: true
@@ -138,6 +196,27 @@ postgresql:
         memory: 1Gi
         cpu: 500m
 
+# Optional production database path for GKE. Disable postgresql.enabled when this is enabled.
+# The proxy uses Application Default Credentials; with Workload Identity Federation for GKE,
+# annotate serviceAccount.annotations with iam.gke.io/gcp-service-account and set
+# serviceAccount.automountServiceAccountToken=true.
+cloudSqlProxy:
+  enabled: false
+  image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.0
+  instanceConnectionName: ""
+  privateIp: false
+  autoIamAuthn: false
+  database: registerwerk
+  username: registerwerk
+  secretName: registerwerk-postgres-secret
+  passwordKey: password
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
 kong:
   enabled: true
   # The chart's own default (true) runs Kong as a Kubernetes Ingress Controller instead of a
@@ -146,7 +225,7 @@ kong:
   # block, gated on `not .Values.ingressController.enabled`). Registerwerk uses Kong purely
   # as a declarative API gateway (matching the Docker Compose usage), not as a k8s Ingress
   # controller — without this explicit override, dblessConfig.configMap below would render
-  # with no error but never actually take effect (Phase 12, finding #8).
+  # with no error but never actually take effect .
   ingressController:
     enabled: false
   proxy:
@@ -157,16 +236,63 @@ kong:
   # Wires the same hardened declarative config (files/kong.yml, a copy of gateway/kong.yml)
   # into the k8s Kong subchart — previously nothing set this, so Kong ran its own stock
   # defaults in the Helm/k8s path with none of the admin-API scoping, header-stripping, or
-  # rate-limiting verified in the Docker Compose path (Phase 12, finding #8). Name must match
+  # rate-limiting verified in the Docker Compose path . Name must match
   # templates/kong-configmap.yaml's fixed "registerwerk-kong-config" — subchart values.yaml
   # entries aren't Go-templated, so this can't be computed per-release; update both together
   # if you ever need more than one registerwerk release in the same namespace.
   dblessConfig:
     configMap: "registerwerk-kong-config"
+  # Same prometheus.io/* pod-annotation convention as the backend's podAnnotations above
+  # (this Kong subchart version's status listener "cannot be exposed through a service or
+  # ingress" per its own values.yaml comment, so a ServiceMonitor has no Service to bind to —
+  # pod-annotation scraping is the working mechanism here, and it's what monitoring/prometheus.yml
+  # already assumes for the Compose path's :8100/metrics). Requires the `prometheus` plugin in
+  # files/kong.yml, which previously only existed in gateway/kong.yml.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8100"
+    prometheus.io/path: /metrics
+
+# ─── chaincache (independent product — installed separately, once per chain) ────────────────
+# This chart does NOT deploy chaincache; chaincache/deploy/helm/chaincache is a separate chart
+# with its own release cycle, installed once per chain workload (e.g. "chaincache-ethereum",
+# "chaincache-base"), typically sharing one Cloud SQL/Postgres instance and one Kafka cluster
+# across those releases — see that chart's own README. This block only carries what Registerwerk
+# needs on its own side to reach it:
+#   - the CHAINCACHE_JWT_SECRET key in the registerwerk-secrets Secret (templates/secret.yaml,
+#     NOTES.txt) must be set to the same value every chaincache workload's chaincache.jwt.secret
+#     was installed with — see ChaincacheTokenFactory.
+#   - when networkPolicy.enabled, this namespace/selector/port drive an egress rule admitting
+#     traffic to it (templates/networkpolicy.yaml) — chaincache is a separate namespace this
+#     chart has no other reason to know about.
+# Registerwerk itself discovers which URL fronts which chain the same way in every environment:
+# an operator adds it as an RpcNode (Chain Config screen) and RpcNodeService auto-detects it —
+# there is nothing here that seeds or hardcodes a chain->URL mapping.
+chaincache:
+  enabled: false
+  namespace: chaincache
+  podSelector:
+    app.kubernetes.io/name: chaincache
+  # chaincache's own Helm chart's Service exposes port 80 (containerPort 8080 internally) — see
+  # chaincache/deploy/helm/chaincache/templates/service.yaml.
+  port: 80
 
 networkPolicy:
   enabled: true
-  # Backend only reachable from Kong and monitoring
+  # templates/ingress.yaml routes external traffic directly to this chart's backend Service,
+  # not through Kong — but this policy previously only admitted pods labeled
+  # app.kubernetes.io/name: kong or prometheus. The ingress controller's pods match neither,
+  # so every request arriving via the Ingress resource was silently dropped at the network
+  # layer with ingress.enabled=true (ledger finding: "network policy does not admit the
+  # ingress-controller path"). templates/networkpolicy.yaml appends a rule admitting
+  # ingressControllerNamespace + ingressControllerPodSelector automatically whenever
+  # ingress.enabled is true — defaults below match the standard ingress-nginx Helm chart's own
+  # namespace/labels; override both if your cluster's ingress controller differs.
+  ingressControllerNamespace: ingress-nginx
+  ingressControllerPodSelector:
+    app.kubernetes.io/name: ingress-nginx
+  # Backend only reachable from Kong and monitoring (see ingress controller rule appended
+  # automatically in templates/networkpolicy.yaml, above)
   ingress:
     - from:
         - podSelector:
@@ -178,3 +304,271 @@ networkPolicy:
       ports:
         - protocol: TCP
           port: 8080
+
+# backs Kong's rate-limiting plugin (policy: redis, files/kong.yml) so the
+# per-minute/hour request throttle is a real fleet-wide limit shared across every Kong replica —
+# see the Chart.yaml dependency comment. Deliberately minimal: no persistence (rate-limit
+# counters are inherently ephemeral/self-healing — a restart just resets the window early, which
+# is a harmless direction to fail in), no auth (only reachable from inside the cluster network,
+# same trust boundary as Kong's own admin API).
+redis:
+  enabled: true
+  # Fixed (not release-name-derived): files/kong.yml's redis config block is a static file
+  # (.Files.Get, not tpl'd — see kong-configmap.yaml's own comment on the same constraint for
+  # dblessConfig.configMap) and must agree with this subchart's real Service name by literal
+  # string, same "one registerwerk release per namespace" assumption already made there.
+  fullnameOverride: registerwerk-redis
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+# ─── Operator Frontend ──────────────────────────────────────────────────────
+# gives the Helm chart the same deployment coverage docker-compose.yml already has for
+# frontend-operator (docker-compose.yml lines ~367-394) — previously this chart deployed only the
+# backend, so a Helm-based install had no way to actually serve either UI. Angular is baked at
+# image-build time (frontend-operator/Dockerfile's `ARG BUILD_CONFIG` + `ng build --configuration`
+# — there is no runtime env substitution for the app itself, unlike the backend's env-var config),
+# so nothing here can reconfigure the compiled bundle; the only genuinely runtime-configurable
+# piece is where its nginx proxies /api/, handled via templates/frontend-operator-configmap.yaml
+# (see that file and files/frontend-operator-nginx.conf.tpl for why).
+frontendOperator:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: ghcr.io/makibytes/registerwerk/frontend-operator
+    pullPolicy: IfNotPresent
+    # Same reasoning as the backend's image.tag above: CI only ever publishes :<git-sha> and
+    # :latest today, so defaulting to .Chart.AppVersion would ImagePullBackOff on a fresh install.
+    tag: "latest"
+  service:
+    type: ClusterIP
+    port: 80
+  # Separate host from the backend API's (values.yaml ingress.hosts, "api.registerwerk.example.com")
+  # — this is the operator admin portal's own origin, matching CLAUDE.md's ":4200" role in the
+  # Compose path. Both this Ingress and the backend's proxy client-supplied requests to the same
+  # cluster, just at different hostnames/paths, same as the two nginx :80 listeners in Compose.
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    certManagerClusterIssuer: ""
+    hosts:
+      - host: app.registerwerk.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: registerwerk-frontend-operator-tls
+        hosts: [app.registerwerk.example.com]
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  # nginx:1.30.4-alpine's master process binds :80 (a privileged port, <1024) before ever reading
+  # the `user` directive that drops worker processes to non-root — without NET_BIND_SERVICE, a
+  # non-root runAsUser here makes that bind(2) fail with EACCES and the pod crash-loops before
+  # serving a single request. 101 is the nginx image's own built-in "nginx" uid/gid (`id nginx`
+  # inside nginx:1.30.4-alpine), used instead of an arbitrary uid so ownership of files already
+  # baked into the image (/usr/share/nginx/html) lines up without also having to chown at build time.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    fsGroup: 101
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+      add: [NET_BIND_SERVICE]
+    # Safe here (unlike the backend's readOnlyRootFilesystem: false) because the only writes nginx
+    # ever needs — its cache/pid paths — are covered by the two emptyDir volumes
+    # templates/frontend-operator-deployment.yaml mounts over /var/cache/nginx and /var/run; there
+    # is no Spring /tmp or wallet-keystore equivalent here, this container serves static files.
+    readOnlyRootFilesystem: true
+  podAnnotations: {}
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 80
+    periodSeconds: 10
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /healthz
+      port: 80
+    periodSeconds: 5
+    failureThreshold: 3
+  lifecycle: {}
+  terminationGracePeriodSeconds: 30
+
+# ─── Customer Frontend ──────────────────────────────────────────────────────
+# Same rationale as frontendOperator above; the one behavioral difference is where nginx proxies
+# /api/ — Kong's proxy Service, not the backend directly (CLAUDE.md: "Customer frontend's API
+# calls go through Kong") — see files/frontend-customer-nginx.conf.tpl.
+frontendCustomer:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: ghcr.io/makibytes/registerwerk/frontend-customer
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  service:
+    type: ClusterIP
+    port: 80
+  # Matches CLAUDE.md's ":4201" role in the Compose path — a distinct hostname from both the
+  # backend API ingress and the operator frontend's, so all three can be routed independently by
+  # the same ingress controller.
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    certManagerClusterIssuer: ""
+    hosts:
+      - host: portal.registerwerk.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: registerwerk-frontend-customer-tls
+        hosts: [portal.registerwerk.example.com]
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  # See frontendOperator.podSecurityContext/securityContext above for the full rationale — the
+  # customer frontend image is built from the identical nginx:1.30.4-alpine base with the same
+  # `worker_processes 2` patch, so the same NET_BIND_SERVICE / uid 101 / read-only-root reasoning
+  # applies unchanged.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    fsGroup: 101
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+      add: [NET_BIND_SERVICE]
+    readOnlyRootFilesystem: true
+  podAnnotations: {}
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 80
+    periodSeconds: 10
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /healthz
+      port: 80
+    periodSeconds: 5
+    failureThreshold: 3
+  lifecycle: {}
+  terminationGracePeriodSeconds: 30
+
+# ─── Zama Relayer Sidecar ───────────────────────────────────────────────────
+# docker-compose.yml gates this behind `profiles: [confidential]` — opt-in even in the local/demo
+# stack, because OPERATOR_DECRYPT_PRIVATE_KEY has to be registered as a viewer on whatever
+# confidential token it's meant to reconcile, which most environments (and most `helm install`s of
+# this chart) will not have set up. enabled: false mirrors that same opt-in default here; nothing
+# below renders (see the {{- if .Values.zamaRelayer.enabled }} guards throughout
+# templates/zama-relayer-*.yaml and the two env vars this adds to the backend Deployment) until a
+# cluster operator deliberately turns this on, and only the operator/issuer-initiated encrypt-input
+# and balance-reconciliation paths depend on it — investor/issuer self-service confidential flows
+# run entirely client-side against Zama's own public relayer and need nothing from this chart (see
+# templates/zama-relayer-service.yaml's own comment for how that was confirmed).
+zamaRelayer:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/makibytes/registerwerk/zama-relayer
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  service:
+    port: 3001
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # node:24.19.0-alpine's runtime stage already runs as `USER node` (uid/gid 1000) at the
+  # Dockerfile level — unlike the two nginx-based frontends above, nothing here binds a privileged
+  # port (PORT defaults to 3001), so no NET_BIND_SERVICE capability is needed and runAsNonRoot only
+  # has to agree with the image's own default user.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    # No writes found anywhere under zama-relayer/src (grepped for fs./writeFile/mkdir) — safe to
+    # lock down. The one /tmp emptyDir templates/zama-relayer-deployment.yaml mounts when this is
+    # true is defensive headroom for whatever Node/npm/its dependencies might want to scratch-write
+    # at runtime, not a known requirement.
+    readOnlyRootFilesystem: true
+  podAnnotations: {}
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 3001
+    periodSeconds: 15
+    failureThreshold: 6
+    # Mirrors docker-compose.yml's own healthcheck start_period (20s) — the Zama SDK does
+    # meaningful setup work (viem client, coprocessor/gateway config validation) before /health
+    # can answer, and the container has no separate startupProbe budget the way the backend does.
+    initialDelaySeconds: 20
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 3001
+    periodSeconds: 10
+    failureThreshold: 3
+    initialDelaySeconds: 20
+  terminationGracePeriodSeconds: 30
+  # Every key here is docker-compose.yml's own zama-relayer environment block (lines ~330-350)
+  # minus the two genuine secrets (OPERATOR_DECRYPT_PRIVATE_KEY, RELAYER_API_KEY — see
+  # existingSecret below and templates/zama-relayer-deployment.yaml) and PORT (set unconditionally
+  # from zamaRelayer.service.port above, not duplicated here). All blank by default, same as
+  # Compose's own `${VAR:-}` fallbacks — a cluster operator turning zamaRelayer.enabled on must
+  # also fill these in, same values ETH_SEPOLIA_RPC/ZAMA_* would get in a real .env.
+  env:
+    ZAMA_CONFIG_PRESET: "sepolia"
+    CHAIN_ID: "11155111"
+    SEPOLIA_NETWORK_RPC_URL: ""
+    NETWORK_RPC_URL: ""
+    RELAYER_URL: ""
+    GATEWAY_CHAIN_ID: ""
+    ACL_CONTRACT_ADDRESS: ""
+    KMS_CONTRACT_ADDRESS: ""
+    INPUT_VERIFIER_CONTRACT_ADDRESS: ""
+    VERIFYING_CONTRACT_ADDRESS_DECRYPTION: ""
+    VERIFYING_CONTRACT_ADDRESS_INPUT_VERIFICATION: ""
+  # Must contain both OPERATOR_DECRYPT_PRIVATE_KEY and RELAYER_API_KEY — see
+  # templates/secret.yaml for the exact `kubectl create secret` command and
+  # templates/zama-relayer-deployment.yaml for how each key is consumed. Never point this at
+  # registerwerk-secrets (the backend's own Secret): RELAYER_API_KEY is read from THIS Secret by
+  # both this Deployment and (as REGISTERWERK_ZAMA_RELAYER_API_KEY) the backend Deployment, so
+  # keeping it in a Secret scoped to this component, not mixed into the backend's, is what makes
+  # "rotate the relayer's credentials" a one-Secret change instead of a two-Secret one that can
+  # drift.
+  existingSecret: registerwerk-zama-relayer-secret

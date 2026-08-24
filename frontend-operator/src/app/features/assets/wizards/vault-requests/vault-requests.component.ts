@@ -21,7 +21,7 @@ import { VaultRequest } from '../../../../core/models';
         <h3 class="req-title">Pending requests</h3>
         <div class="req-controls">
           <span class="req-count">{{ pending.length }} pending</span>
-          <button mat-stroked-button class="btn-refresh" (click)="load()">
+          <button type="button" mat-stroked-button class="btn-refresh" (click)="load()">
             <mat-icon>refresh</mat-icon>
           </button>
         </div>
@@ -78,11 +78,11 @@ import { VaultRequest } from '../../../../core/models';
               <span class="right dimmed small">{{ req.requestedAt | date:'dd MMM HH:mm' }}</span>
 
               <div class="row-actions">
-                <button mat-icon-button class="btn-fulfill" [disabled]="fulfilling.has(req.id)"
+                <button type="button" mat-icon-button class="btn-fulfill" [disabled]="fulfilling.has(req.id)"
                   (click)="fulfill(req)" title="Fulfill">
                   <mat-icon>check_circle_outline</mat-icon>
                 </button>
-                <button mat-icon-button class="btn-cancel" [disabled]="fulfilling.has(req.id)"
+                <button type="button" mat-icon-button class="btn-cancel" [disabled]="fulfilling.has(req.id)"
                   (click)="cancel(req)" title="Cancel">
                   <mat-icon>cancel</mat-icon>
                 </button>
@@ -94,7 +94,7 @@ import { VaultRequest } from '../../../../core/models';
         @if (selected.size > 0) {
           <div class="bulk-bar">
             <span class="bulk-count">{{ selected.size }} selected</span>
-            <button mat-flat-button class="btn-bulk-fulfill" [disabled]="fulfilling.size > 0" (click)="fulfillSelected()">
+            <button type="button" mat-flat-button class="btn-bulk-fulfill" [disabled]="fulfilling.size > 0" (click)="fulfillSelected()">
               <mat-icon>done_all</mat-icon>
               Fulfill {{ selected.size }} request{{ selected.size > 1 ? 's' : '' }}
             </button>
@@ -133,7 +133,7 @@ import { VaultRequest } from '../../../../core/models';
     }
 
     .req-title {
-      font-family: Manrope, sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       font-size: 1rem;
       font-weight: 700;
       color: #e2e8f8;

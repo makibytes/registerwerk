@@ -8,10 +8,14 @@ import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
+import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadConfig;
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,12 +57,26 @@ public class StellarTransferSyncService {
     static final int MAX_CONSECUTIVE_ERRORS = 10;
     static final int PAGE_LIMIT = 200;
 
+    /**
+     * bounds the per-issuer-account fan-out below — same reasoning as
+     * {@code StarknetTransferSyncService.FAN_OUT_BULKHEAD_CONFIG}: a waiting (not fail-fast)
+     * bulkhead, because Stellar's cursor is shared across every watched account on the chain
+     * (see {@code sharedCursor} below) and advances once regardless of which individual accounts'
+     * fetches completed — silently skipping one would lose its transfers in this tick's range,
+     * not merely delay them.
+     */
+    private static final BulkheadConfig FAN_OUT_BULKHEAD_CONFIG = BulkheadConfig.custom()
+            .maxConcurrentCalls(8)
+            .maxWaitDuration(Duration.ofSeconds(25))
+            .build();
+
     private final ChainConfigRepository chainConfigRepository;
     private final IndexerStateRepository indexerStateRepository;
     private final TokenTransferRepository tokenTransferRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final ExplorerUrlBuilder explorerUrlBuilder;
     private final RestClient restClient;
+    private final Bulkhead fanOutBulkhead;
 
     public StellarTransferSyncService(
             ChainConfigRepository chainConfigRepository,
@@ -65,19 +84,21 @@ public class StellarTransferSyncService {
             TokenTransferRepository tokenTransferRepository,
             AssetDeploymentRepository assetDeploymentRepository,
             ExplorerUrlBuilder explorerUrlBuilder,
-            RestClient.Builder restClientBuilder) {
+            RestClient.Builder restClientBuilder,
+            BulkheadRegistry bulkheadRegistry) {
         this.chainConfigRepository = chainConfigRepository;
         this.indexerStateRepository = indexerStateRepository;
         this.tokenTransferRepository = tokenTransferRepository;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.explorerUrlBuilder = explorerUrlBuilder;
         this.restClient = restClientBuilder.build();
+        this.fanOutBulkhead = bulkheadRegistry.bulkhead("stellar-transfer-fanout", FAN_OUT_BULKHEAD_CONFIG);
     }
 
     // ── Scheduling ────────────────────────────────────────────────────────────
 
     @SchedulerLock(name = "stellarTransferSync", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 30_000, initialDelay = 75_000)
     public void syncAllStellarChains() {
         try {
             List<ChainConfig> chains = chainConfigRepository
@@ -137,7 +158,8 @@ public class StellarTransferSyncService {
             // since Hibernate's persistence context isn't safe to share across threads.
             List<AccountFetch> fetches = deployments.stream()
                     .map(d -> new AccountFetch(d, d.getContractAddress(), StellarUtils.deriveAssetCode(d.getAssetId()),
-                            CompletableFuture.supplyAsync(() -> fetchPayments(chain.getRpcUrl(), d.getContractAddress(), sharedCursor))))
+                            CompletableFuture.supplyAsync(() -> fanOutBulkhead.executeSupplier(
+                                    () -> fetchPayments(chain.getRpcUrl(), d.getContractAddress(), sharedCursor)))))
                     .toList();
             CompletableFuture.allOf(fetches.stream().map(AccountFetch::future).toArray(CompletableFuture[]::new)).join();
 
@@ -268,6 +290,13 @@ public class StellarTransferSyncService {
                 "pagingToken", String.valueOf(payment.get("paging_token")),
                 "type", String.valueOf(payment.get("type"))
         ));
+        // Stellar Consensus Protocol has no probabilistic finality — a ledger either
+        // closes with 2/3+ validator quorum agreement or it does not close at all, and Horizon's
+        // /payments endpoint only ever returns operations from ledgers that have already closed.
+        // There is no equivalent of an EVM/Starknet "provisional, might still be reorged" state
+        // to represent here, so every row is FINAL on write (matches the entity default; set
+        // explicitly for clarity/documentation).
+        transfer.setFinalityStatus(FinalityLevel.FINALIZED);
         return transfer;
     }
 

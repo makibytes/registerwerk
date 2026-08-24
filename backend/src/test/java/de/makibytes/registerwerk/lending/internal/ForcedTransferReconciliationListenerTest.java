@@ -24,8 +24,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for the forced-transfer/force-burn -> lending-market desync detector (finding #11,
- * Phase 7).
+ * Unit tests for the forced-transfer/force-burn to lending-market desync detector.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ForcedTransferReconciliationListener unit tests")

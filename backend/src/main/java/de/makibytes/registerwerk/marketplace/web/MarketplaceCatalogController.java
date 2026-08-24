@@ -18,7 +18,10 @@ import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 import java.util.List;
 import java.util.UUID;
@@ -34,6 +37,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/marketplace/catalog")
+@Validated
 public class MarketplaceCatalogController {
 
     private final DappListingRepository listingRepository;
@@ -62,8 +66,8 @@ public class MarketplaceCatalogController {
     public ResponseEntity<PageResponse<CatalogCard>> browse(
             @RequestParam(required = false) String query,
             @RequestParam(required = false) String category,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(200) int size) {
         var result = listingRepository.searchCatalog(
                 emptyToNull(query), emptyToNull(category), PageRequest.of(page, size));
         return ResponseEntity.ok(PageResponse.of(result.map(this::toCard)));

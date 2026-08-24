@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Observable } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -54,11 +55,11 @@ import { AssetSlot } from '../../../../core/models';
               <span [class.paused]="s.paused">{{ s.paused ? 'PAUSED' : 'ACTIVE' }}</span>
               <span class="actions">
                 @if (s.paused) {
-                  <button mat-stroked-button (click)="unpause(s)" [disabled]="busy">Unpause</button>
+                  <button type="button" mat-stroked-button (click)="unpause(s)" [disabled]="busy">Unpause</button>
                 } @else {
-                  <button mat-stroked-button (click)="pause(s)" [disabled]="busy">Pause</button>
+                  <button type="button" mat-stroked-button (click)="pause(s)" [disabled]="busy">Pause</button>
                 }
-                <button mat-stroked-button (click)="mintTarget = mintTarget === s.slotId ? null : s.slotId">
+                <button type="button" mat-stroked-button (click)="mintTarget = mintTarget === s.slotId ? null : s.slotId">
                   Mint…
                 </button>
               </span>
@@ -73,7 +74,7 @@ import { AssetSlot } from '../../../../core/models';
                   <mat-label>Value</mat-label>
                   <input matInput type="number" [(ngModel)]="mintForm.value" min="1" />
                 </mat-form-field>
-                <button mat-flat-button class="btn-accent"
+                <button type="button" mat-flat-button class="btn-accent"
                         [disabled]="busy || !mintForm.toAddress || !mintForm.value"
                         (click)="mint(s)">
                   <mat-icon>token</mat-icon> Mint into slot
@@ -99,7 +100,7 @@ import { AssetSlot } from '../../../../core/models';
           <mat-label>Supply cap (optional)</mat-label>
           <input matInput type="number" [(ngModel)]="createForm.supplyCap" min="1" />
         </mat-form-field>
-        <button mat-flat-button class="btn-accent"
+        <button type="button" mat-flat-button class="btn-accent"
                 [disabled]="busy || !createForm.slotId"
                 (click)="createSlot()">
           <mat-icon>add</mat-icon> Create
@@ -122,11 +123,11 @@ import { AssetSlot } from '../../../../core/models';
           <mat-label>Reason / legal basis</mat-label>
           <input matInput [(ngModel)]="tokenOps.reason" placeholder="e.g. AWG §17 sanctions order ref…" />
         </mat-form-field>
-        <button mat-stroked-button [disabled]="busy || !tokenOps.tokenId || !tokenOps.reason"
+        <button type="button" mat-stroked-button [disabled]="busy || !tokenOps.tokenId || !tokenOps.reason"
                 (click)="freeze()">
           <mat-icon>lock</mat-icon> Freeze
         </button>
-        <button mat-stroked-button [disabled]="busy || !tokenOps.tokenId" (click)="unfreeze()">
+        <button type="button" mat-stroked-button [disabled]="busy || !tokenOps.tokenId" (click)="unfreeze()">
           <mat-icon>lock_open</mat-icon> Unfreeze
         </button>
       </div>
@@ -147,7 +148,7 @@ import { AssetSlot } from '../../../../core/models';
           <mat-label>Legal basis</mat-label>
           <input matInput [(ngModel)]="forcedForm.legalBasis" />
         </mat-form-field>
-        <button mat-flat-button color="warn"
+        <button type="button" mat-flat-button color="warn"
                 [disabled]="busy || !forcedForm.tokenId || !forcedForm.toTokenId || !forcedForm.value || !forcedForm.legalBasis"
                 (click)="forcedTransfer()">
           <mat-icon>gavel</mat-icon> Forced transfer
@@ -279,7 +280,7 @@ export class SlotAdminComponent implements OnInit {
     });
   }
 
-  private run(obs: { subscribe: Function }, successMsg: string, onSuccess?: () => void): void {
+  private run(obs: Observable<unknown>, successMsg: string, onSuccess?: () => void): void {
     this.busy = true;
     this.cdr.markForCheck();
     obs.subscribe({

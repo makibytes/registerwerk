@@ -69,6 +69,6 @@ public class AssetTokenAdminGrantController {
         UUID revokedBy = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN");
         return ResponseEntity.ok(
-                service.revoke(grantId, revokedBy, actorRole, req.reason(), dualControlApproverId));
+                service.revokeForAsset(assetId, grantId, revokedBy, actorRole, req.reason(), dualControlApproverId));
     }
 }

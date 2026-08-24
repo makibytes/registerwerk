@@ -131,9 +131,13 @@ public class ClaimIssuanceService {
             .orElseThrow(() -> new EntityNotFoundException(
                 "OnchainIdentity for entity " + legalEntityId + " on chain", chainConfigId));
 
-        deploymentService.issueKycClaim(identity.getId(), topic, expiresAt);
+        // Throws if the identity isn't deployed yet — nothing is persisted below unless the tx was
+        // actually submitted. The claim starts confirmed=false: Erc3643ClaimConfirmationListener
+        // flips it once addClaim reaches FINALIZED, and getActiveClaims won't count it until then.
+        String txHash = deploymentService.issueKycClaim(identity.getId(), topic, expiresAt);
 
         OnchainClaim claim = buildClaimRecord(identity, chainConfigId, topic, topicLabel, expiresAt);
+        claim.setTxHash(txHash);
         OnchainClaim saved = claimRepository.save(claim);
 
         eventPublisher.publishEvent(new ClaimIssuedEvent(saved.getId(), actorId, actorRole, java.util.Map.of()));
@@ -151,27 +155,44 @@ public class ClaimIssuanceService {
      * @param actorId   ID of the user revoking the claim (for audit)
      * @param actorRole role of the user revoking the claim (for audit)
      */
-    public void revokeClaim(UUID claimId, UUID actorId, String actorRole) {
+    public void revokeClaim(UUID identityId, UUID claimId, UUID actorId, String actorRole) {
         log.info("Revoking claim={}", claimId);
 
-        OnchainClaim claim = claimRepository.findById(claimId)
+        OnchainClaim claim = claimRepository.findByIdAndOnchainIdentityId(claimId, identityId)
             .orElseThrow(() -> new EntityNotFoundException("OnchainClaim", claimId));
 
         if (claim.getRevokedAt() != null) {
             log.warn("Claim={} is already revoked at {}. Skipping.", claimId, claim.getRevokedAt());
             return;
         }
+        if (claim.getRevocationTxHash() != null) {
+            log.warn("Claim={} already has a revocation tx={} awaiting confirmation. Skipping.",
+                    claimId, claim.getRevocationTxHash());
+            return;
+        }
 
-        deploymentService.revokeKycClaim(claimId);
+        // revokedAt remains chain-derived and is therefore only set after final confirmation.
+        // revocationTxHash is the fail-closed intent marker: getActiveClaims excludes the claim as
+        // soon as removeClaim is submitted, including while a reorged transaction awaits a new
+        // canonical verdict. Only a confirmed failed receipt clears that marker.
+        String txHash = deploymentService.revokeKycClaim(claimId);
 
-        claim.setRevokedAt(Instant.now());
+        claim.setRevocationTxHash(txHash);
         claimRepository.save(claim);
 
         eventPublisher.publishEvent(new ClaimRevokedEvent(claimId, actorId, actorRole, java.util.Map.of()));
     }
 
     /**
-     * Returns all non-revoked, non-expired claims for a legal entity on a specific chain.
+     * Returns all confirmed, non-revoked, non-expired claims for a legal entity on a specific
+     * chain whose revocation has not been submitted.
+     *
+     * <p>A non-null {@link OnchainClaim#getRevocationTxHash()} excludes the claim immediately.
+     * Revocation is a compliance-narrowing operation, so the safe state while its receipt is
+     * pending — or while the same transaction is pending again after a reorg — is inactive. The
+     * confirmation listener clears that intent marker only after a confirmed failed receipt,
+     * which restores the claim without conflating submitted intent with chain-derived
+     * {@link OnchainClaim#getRevokedAt()} state.
      *
      * @param legalEntityId ID of the legal entity
      * @param chainConfigId ID of the chain configuration
@@ -186,7 +207,9 @@ public class ClaimIssuanceService {
 
         Instant now = Instant.now();
         return claimRepository.findByOnchainIdentityId(identity.getId()).stream()
+            .filter(OnchainClaim::isConfirmed)
             .filter(c -> c.getRevokedAt() == null)
+            .filter(c -> c.getRevocationTxHash() == null)
             .filter(c -> c.getExpiresAt() == null || c.getExpiresAt().isAfter(now))
             .toList();
     }

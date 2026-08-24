@@ -4,8 +4,8 @@
 -- (EURIBOR, SONIA, etc.). The registryAdmin exercises FixRate on each rate-fixing date.
 --
 -- As with 'Registerwerk.Bond.FixedBond', this template tracks lifecycle status only —
--- the cash leg is settled by the backend against the Canton Token Standard, a
--- runtime-only dependency of this participant (see daml.yaml).
+-- cash/holding leg is outside this template and needs a deployment-specific adapter
+-- and reconciliation before the backend state is treated as payment proof.
 module Registerwerk.Bond.FloatingBond where
 
 import Registerwerk.Bond.Types
@@ -36,7 +36,8 @@ template FloatingRateBond with
         assertMsg "Bond is not ACTIVE — rate cannot be fixed" (status == "ACTIVE")
         create this with latestFixedRate = Some rate
 
-    -- | Pay the coupon for the current period using the previously fixed rate.
+    -- | Record coupon authorization for the current period using the fixed rate.
+    -- This choice does not transfer cash or holdings.
     choice PayCoupon : ContractId FloatingRateBond with
           paymentDate   : Date
           amountPerUnit : Decimal

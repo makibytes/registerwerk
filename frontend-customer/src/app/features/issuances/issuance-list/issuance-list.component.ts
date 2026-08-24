@@ -1,5 +1,4 @@
 import {
-  AfterViewInit,
   ChangeDetectorRef,
   Component,
   OnInit,
@@ -73,6 +72,12 @@ interface IssuanceFilters {
 
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="48"></mat-spinner></div>
+      } @else if (loadError) {
+        <div class="content-card load-error" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <p>Issuances could not be loaded.</p>
+          <button mat-stroked-button type="button" (click)="load()">Retry</button>
+        </div>
       } @else {
 
         <!-- ── KPI bar ────────────────────────────────────────────────────── -->
@@ -144,7 +149,7 @@ interface IssuanceFilters {
                 <mat-icon matPrefix>search</mat-icon>
                 <input matInput [(ngModel)]="filters.search" (ngModelChange)="applyFilters()" placeholder="Name or ISIN…">
                 @if (filters.search) {
-                  <button matSuffix mat-icon-button (click)="filters.search=''; applyFilters()">
+                  <button type="button" matSuffix mat-icon-button (click)="filters.search=''; applyFilters()">
                     <mat-icon>close</mat-icon>
                   </button>
                 }
@@ -180,7 +185,7 @@ interface IssuanceFilters {
                 <input matInput type="date" [(ngModel)]="filters.toDate" (ngModelChange)="applyFilters()">
               </mat-form-field>
 
-              <button mat-stroked-button (click)="resetFilters()" [disabled]="!hasActiveFilters">
+              <button type="button" mat-stroked-button (click)="resetFilters()" [disabled]="!hasActiveFilters">
                 <mat-icon>filter_list_off</mat-icon>
                 Reset
               </button>
@@ -195,7 +200,7 @@ interface IssuanceFilters {
         </mat-card>
 
         <!-- ── Table ──────────────────────────────────────────────────────── -->
-        <mat-card>
+        <mat-card class="table-card">
           <table mat-table [dataSource]="dataSource" matSort class="mat-elevation-z0">
 
             <ng-container matColumnDef="assetNumber">
@@ -338,18 +343,31 @@ interface IssuanceFilters {
       border-radius: var(--rw-radius-sm);
     }
     .empty-row { text-align: center; padding: 32px; color: var(--rw-text-muted); }
+    .table-card { overflow-x: auto; }
+    .table-card table { min-width: 760px; }
+    .load-error { display: grid; justify-items: center; gap: 10px; padding-block: 48px; text-align: center; }
+    .load-error mat-icon { color: var(--rw-text-danger); }
+    .load-error p { margin: 0; color: var(--rw-text-secondary); }
   `],
 })
-export class IssuanceListComponent implements OnInit, AfterViewInit {
+export class IssuanceListComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly issuanceService = inject(IssuanceService);
 
-  @ViewChild(MatSort) sort!: MatSort;
-  @ViewChild(MatPaginator) paginator!: MatPaginator;
+  @ViewChild(MatSort)
+  set sort(sort: MatSort | undefined) {
+    if (sort) this.dataSource.sort = sort;
+  }
+
+  @ViewChild(MatPaginator)
+  set paginator(paginator: MatPaginator | undefined) {
+    if (paginator) this.dataSource.paginator = paginator;
+  }
 
   allIssuances: Asset[] = [];
   dataSource = new MatTableDataSource<Asset>();
   loading = true;
+  loadError = false;
 
   filters: IssuanceFilters = {
     search: '',
@@ -437,24 +455,6 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   ngOnInit(): void {
-    this.issuanceService.getIssuances({ page: 0, size: 200, sort: 'createdAt,desc' }).subscribe({
-      next: (res) => {
-        this.allIssuances = res.content;
-        this.dataSource.data = res.content;
-        this.dataSource.filterPredicate = this.buildFilterPredicate();
-        this.loading = false;
-        this.cdr.detectChanges();
-      },
-      error: () => {
-        this.loading = false;
-        this.cdr.detectChanges();
-      },
-    });
-  }
-
-  ngAfterViewInit(): void {
-    this.dataSource.sort = this.sort;
-    this.dataSource.paginator = this.paginator;
     this.dataSource.sortingDataAccessor = (item, column) => {
       switch (column) {
         case 'assetNumber':   return item.assetNumber;
@@ -466,6 +466,26 @@ export class IssuanceListComponent implements OnInit, AfterViewInit {
         default:              return '';
       }
     };
+    this.load();
+  }
+
+  load(): void {
+    this.loading = true;
+    this.loadError = false;
+    this.issuanceService.getIssuances({ page: 0, size: 200, sort: 'createdAt,desc' }).subscribe({
+      next: (res) => {
+        this.allIssuances = res.content;
+        this.dataSource.data = res.content;
+        this.dataSource.filterPredicate = this.buildFilterPredicate();
+        this.loading = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.loading = false;
+        this.loadError = true;
+        this.cdr.detectChanges();
+      },
+    });
   }
 
   applyFilters(): void {

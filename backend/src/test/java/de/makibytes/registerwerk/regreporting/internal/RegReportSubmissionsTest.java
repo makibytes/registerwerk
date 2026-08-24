@@ -19,7 +19,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 
 /**
- * Verifies the Phase 5 finding #6 fix: regulatory report submissions previously had no audit
+ * Verifies the  fix: regulatory report submissions previously had no audit
  * trail and left document_hash/generated_by unpopulated. RegReportSubmissions is the single
  * chokepoint every reporting service funnels through, so these tests cover all of them.
  */

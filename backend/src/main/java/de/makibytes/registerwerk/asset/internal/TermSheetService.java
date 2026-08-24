@@ -17,6 +17,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -59,6 +61,7 @@ public class TermSheetService {
     private final S3DocumentStorageAdapter s3DocumentStorageAdapter;
     private final TermSheetOnChainFetchService onChainFetchService;
     private final ApplicationEventPublisher eventPublisher;
+    private final de.makibytes.registerwerk.asset.api.AssetRepository assetRepository;
 
     public TermSheetService(
             AssetDocumentRepository assetDocumentRepository,
@@ -66,13 +69,15 @@ public class TermSheetService {
             AssetDeploymentRepository assetDeploymentRepository,
             S3DocumentStorageAdapter s3DocumentStorageAdapter,
             TermSheetOnChainFetchService onChainFetchService,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            de.makibytes.registerwerk.asset.api.AssetRepository assetRepository) {
         this.assetDocumentRepository = assetDocumentRepository;
         this.assetDocumentContentRepository = assetDocumentContentRepository;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.s3DocumentStorageAdapter = s3DocumentStorageAdapter;
         this.onChainFetchService = onChainFetchService;
         this.eventPublisher = eventPublisher;
+        this.assetRepository = assetRepository;
     }
 
     /**
@@ -95,17 +100,23 @@ public class TermSheetService {
             AssetDocumentType type,
             UUID uploadedBy) {
 
+        assetRepository.findById(assetId)
+                .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
+        if (content == null || content.length == 0) {
+            throw new IllegalArgumentException("Document content must not be empty");
+        }
         if (!SUPPORTED_MIME_TYPES.contains(mimeType)) {
             throw new IllegalArgumentException("Unsupported MIME type: " + mimeType
                 + ". Supported: " + SUPPORTED_MIME_TYPES);
         }
 
+        String safeFileName = safeFileName(fileName);
         AssetDocument doc = new AssetDocument();
         doc.setAssetId(assetId);
         doc.setDocumentType(type);
         doc.setSource(AssetDocumentSource.UPLOAD);
         doc.setMimeType(mimeType);
-        doc.setFileName(fileName);
+        doc.setFileName(safeFileName);
         doc.setContentHash(sha256Hex(content));
         doc.setSizeBytes((long) content.length);
         doc.setUploadedBy(uploadedBy);
@@ -123,11 +134,11 @@ public class TermSheetService {
             auditDocument("TERM_SHEET_UPLOADED", saved, uploadedBy);
             return saved;
         } else {
-            String s3Key = "termsheets/" + assetId + "/" + UUID.randomUUID() + "/" + fileName;
+            String s3Key = "termsheets/" + assetId + "/" + UUID.randomUUID() + "/" + safeFileName;
             doc.setStorageRef(s3Key);
             AssetDocument saved = assetDocumentRepository.save(doc);
 
-            s3DocumentStorageAdapter.upload(s3Key, content, mimeType);
+            uploadS3(s3Key, content, mimeType);
 
             log.info("Stored asset document in S3: id={}, key={}", saved.getId(), s3Key);
             auditDocument("TERM_SHEET_UPLOADED", saved, uploadedBy);
@@ -152,6 +163,12 @@ public class TermSheetService {
             .orElseThrow(() -> new EntityNotFoundException("AssetDocument", docId));
     }
 
+    @Transactional(readOnly = true)
+    public AssetDocument getDocument(UUID assetId, UUID docId) {
+        return assetDocumentRepository.findByIdAndAssetIdAndDeletedAtIsNull(docId, assetId)
+                .orElseThrow(() -> new EntityNotFoundException("AssetDocument", docId));
+    }
+
     /**
      * Returns the raw content bytes for a document.
      * Fetches from inline storage or S3 transparently.
@@ -161,6 +178,16 @@ public class TermSheetService {
     @Transactional(readOnly = true)
     public byte[] getDocumentContent(UUID docId) {
         AssetDocument doc = getDocument(docId);
+        return getDocumentContent(doc);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] getDocumentContent(UUID assetId, UUID docId) {
+        return getDocumentContent(getDocument(assetId, docId));
+    }
+
+    private byte[] getDocumentContent(AssetDocument doc) {
+        UUID docId = doc.getId();
         if (doc.getStorageRef() == null) {
             throw new IllegalStateException(
                 "Document content not yet fetched from on-chain URI. Trigger /sync-from-chain first.");
@@ -176,8 +203,8 @@ public class TermSheetService {
     /**
      * Soft-deletes a document.
      */
-    public void softDeleteDocument(UUID docId, UUID actorId) {
-        AssetDocument doc = getDocument(docId);
+    public void softDeleteDocument(UUID assetId, UUID docId, UUID actorId) {
+        AssetDocument doc = getDocument(assetId, docId);
         doc.setDeletedAt(Instant.now());
         assetDocumentRepository.save(doc);
         log.info("Soft-deleted asset document: id={}, by={}", docId, actorId);
@@ -191,8 +218,8 @@ public class TermSheetService {
      * @param deploymentId ID of the {@link de.makibytes.registerwerk.domain.asset.AssetDeployment}
      * @return the created or updated {@link AssetDocument}
      */
-    public AssetDocument syncFromChain(UUID deploymentId) {
-        var deployment = assetDeploymentRepository.findById(deploymentId)
+    public AssetDocument syncFromChain(UUID assetId, UUID deploymentId) {
+        var deployment = assetDeploymentRepository.findByIdAndAssetId(deploymentId, assetId)
             .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
 
         AssetDocument doc = onChainFetchService.fetch(deployment, this);
@@ -231,5 +258,45 @@ public class TermSheetService {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 not available", e);
         }
+    }
+
+    static String safeFileName(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return "document";
+        }
+        String normalized = fileName.replace('\\', '/')
+                .replace("\0", "")
+                .replace("\r", "")
+                .replace("\n", "");
+        int lastSlash = normalized.lastIndexOf('/');
+        String name = (lastSlash >= 0 ? normalized.substring(lastSlash + 1) : normalized).trim();
+        if (name.isBlank()) {
+            return "document";
+        }
+        return name.length() <= 500 ? name : name.substring(0, 500);
+    }
+
+    private void registerS3RollbackCleanup(String s3Key) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_ROLLED_BACK) {
+                    try {
+                        s3DocumentStorageAdapter.delete(s3Key);
+                    } catch (RuntimeException cleanupFailure) {
+                        log.error("Could not remove orphaned S3 term sheet after transaction rollback: key={}",
+                                s3Key, cleanupFailure);
+                    }
+                }
+            }
+        });
+    }
+
+    void uploadS3(String s3Key, byte[] content, String mimeType) {
+        registerS3RollbackCleanup(s3Key);
+        s3DocumentStorageAdapter.upload(s3Key, content, mimeType);
     }
 }

@@ -33,12 +33,28 @@ public class AssetDeployment {
     @Column(name = "deployed_at")
     private Instant deployedAt;
 
-    @Column(name = "deployed_by_tx", length = 66)
+    /** EVM/Stellar hash, Solana signature (up to 88 base58 chars), or Canton update ID. */
+    @Column(name = "deployed_by_tx", length = 128)
     private String deployedByTx;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "deployment_status", nullable = false, length = 10)
     private DeploymentStatus deploymentStatus = DeploymentStatus.PENDING;
+
+    /** EVM deployment transaction receipt block hash. */
+    @Column(name = "block_hash", length = 66)
+    private String blockHash;
+
+    @Column(name = "block_number")
+    private Long blockNumber;
+
+    /** FK to {@code chain_config} — lets the reorg-retraction sweep
+     *  ({@code finality.internal.BlockFinalityServiceImpl#recordRetraction}) find affected rows by
+     *  (chainConfigId, blockNumber). Also retained for Solana deployments, where blockNumber is
+     *  the finalized slot. Legacy rows may still be null until the identity backfill can resolve
+     *  them unambiguously. */
+    @Column(name = "chain_config_id")
+    private UUID chainConfigId;
 
     // ── Getters & Setters ──────────────────────────────────────────────────
 
@@ -65,4 +81,13 @@ public class AssetDeployment {
 
     public DeploymentStatus getDeploymentStatus() { return deploymentStatus; }
     public void setDeploymentStatus(DeploymentStatus deploymentStatus) { this.deploymentStatus = deploymentStatus; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
+
+    public Long getBlockNumber() { return blockNumber; }
+    public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
+
+    public UUID getChainConfigId() { return chainConfigId; }
+    public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
 }

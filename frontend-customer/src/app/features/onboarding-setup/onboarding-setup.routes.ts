@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '../../core/auth/auth.guard';
+import { roleGuard } from '../../core/auth/role.guard';
 
 export const ONBOARDING_SETUP_ROUTES: Routes = [
   {
@@ -12,12 +13,12 @@ export const ONBOARDING_SETUP_ROUTES: Routes = [
   },
   {
     path: 'setup-users',
-    canActivate: [authGuard],
+    canActivate: [authGuard, roleGuard(['COMPANY_ADMIN', 'REGISTRY_ADMIN'])],
     loadComponent: () => import('./setup-users/setup-users.component').then(m => m.SetupUsersComponent)
   },
   {
     path: 'setup-idp',
-    canActivate: [authGuard],
+    canActivate: [authGuard, roleGuard(['COMPANY_ADMIN', 'REGISTRY_ADMIN'])],
     loadComponent: () => import('./setup-idp/setup-idp.component').then(m => m.SetupIdpComponent)
   },
 ];

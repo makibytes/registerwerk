@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.web.dto.ChainConfigCreateRequest;
 import de.makibytes.registerwerk.chain.web.dto.ChainConfigResponse;
 import de.makibytes.registerwerk.chain.web.dto.ChainHealthResponse;
+import de.makibytes.registerwerk.chain.web.dto.ChainConfigUpdateRequest;
 import de.makibytes.registerwerk.chain.web.ChainConfigMapper;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -75,9 +76,18 @@ public class ChainConfigController {
     @PatchMapping("/{id}")
     public ResponseEntity<ChainConfigResponse> updateChain(
             @PathVariable UUID id,
-            @RequestBody ChainConfigCreateRequest request) {
-        // Map the incoming request fields onto a patch entity; null-valued fields will be ignored.
+            @RequestBody @Valid ChainConfigUpdateRequest request) {
+        // Map the incoming request fields onto a patch entity; null-valued fields will be
+        // ignored. finalityModel is explicitly nulled out first because ChainConfig's own field
+        // initializer defaults it to DEPTH_BASED — left as-is, "not supplied in this request"
+        // would be indistinguishable from "explicitly set to DEPTH_BASED" and every unrelated
+        // PATCH (e.g. just displayName) would silently reset an existing TAG_BASED/INSTANT chain
+        // back to DEPTH_BASED. finalitySource has no request field at all — it is fully
+        // auto-derived (see ChainConfig.FinalitySource's javadoc) and is simply left at whatever
+        // ChainConfig's own field initializer sets, which ChainConfigService.update ignores
+        // entirely since it only ever copies non-null patch fields onto the existing entity.
         ChainConfig patch = new ChainConfig();
+        patch.setFinalityModel(null);
         patch.setDisplayName(request.displayName());
         patch.setRpcUrl(request.rpcUrl());
         patch.setWsUrl(request.wsUrl());
@@ -85,6 +95,10 @@ public class ChainConfigController {
         patch.setGraphNodeUrl(request.graphNodeUrl());
         patch.setGraphSubgraphName(request.graphSubgraphName());
         patch.setChainId(request.chainId());
+        patch.setAvgBlockSeconds(request.avgBlockSeconds());
+        if (request.finalityModel() != null) {
+            patch.setFinalityModel(ChainConfig.FinalityModel.valueOf(request.finalityModel().toUpperCase()));
+        }
 
         ChainConfig updated = chainConfigService.update(id, patch);
         return ResponseEntity.ok(chainConfigMapper.toResponse(updated));
@@ -111,7 +125,7 @@ public class ChainConfigController {
     @PostMapping("/refresh")
     public ResponseEntity<Void> refreshClients() {
         chainConfigService.refreshBlockchainClients();
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 
     /**

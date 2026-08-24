@@ -1,11 +1,12 @@
 import request from 'supertest';
-import { loadConfig } from '../src/config';
-import { createServer } from '../src/server';
-import { getFheInstance } from '../src/fheInstance';
+import { describe, expect, it, vi, type MockedFunction } from 'vitest';
+import { loadConfig } from '../src/config.js';
+import { createServer } from '../src/server.js';
+import { getFheInstance } from '../src/fheInstance.js';
 
-jest.mock('../src/fheInstance');
+vi.mock('../src/fheInstance.js');
 
-const mockedGetFheInstance = getFheInstance as jest.MockedFunction<typeof getFheInstance>;
+const mockedGetFheInstance = getFheInstance as MockedFunction<typeof getFheInstance>;
 const API_KEY = 'test-relayer-api-key';
 const AUTH_HEADER = `Bearer ${API_KEY}`;
 
@@ -13,7 +14,7 @@ describe('POST /v1/public-decrypt', () => {
   const config = loadConfig({ RELAYER_API_KEY: API_KEY });
 
   it('decrypts a publicly-disclosed handle', async () => {
-    const publicDecrypt = jest.fn().mockResolvedValue({
+    const publicDecrypt = vi.fn().mockResolvedValue({
       clearValues: { '0xhandle': 123456n },
       abiEncodedClearValues: '0x',
       decryptionProof: '0x',
@@ -35,7 +36,7 @@ describe('POST /v1/public-decrypt', () => {
   });
 
   it('surfaces a non-bigint result as an error rather than guessing', async () => {
-    const publicDecrypt = jest.fn().mockResolvedValue({
+    const publicDecrypt = vi.fn().mockResolvedValue({
       clearValues: { '0xhandle': true },
       abiEncodedClearValues: '0x',
       decryptionProof: '0x',
@@ -55,7 +56,7 @@ describe('POST /v1/public-decrypt', () => {
     expect(res.body.error).toMatch(/KMS down/);
   });
 
-  // ── finding #6, Phase 9: shared-secret auth ──────────────────────────────────────────────
+  // ── Shared-secret auth ────────────────────────────────────────────────
   it('rejects a request with no Authorization header', async () => {
     const app = createServer(config);
     const res = await request(app).post('/v1/public-decrypt').send({ ciphertextHandle: '0xhandle' });

@@ -1,11 +1,13 @@
 ---
 title: Module Architecture
-description: Spring Modulith bounded context architecture — 29 modules, dependency constraints, and design patterns.
+description: Spring Modulith bounded context architecture — 34 modules, dependency constraints, and design patterns.
 ---
 
 # Module Architecture
 
-The Registerwerk backend is a **modulith**: a single deployable JAR internally structured as 29 Spring Modulith bounded contexts (`@ApplicationModule`-annotated top-level packages). Each module owns its database tables, its domain entities, and its business logic. Cross-module communication happens exclusively through **domain events** (via the Spring Modulith transactional outbox). Two further top-level packages, `bootstrap` (demo-data seeders) and `infrastructure` (cross-cutting `@Configuration` classes), are plain support code, not bounded contexts.
+The Registerwerk backend is a **modulith**: a single deployable JAR internally structured as 34 Spring Modulith modules — every top-level package under `de.makibytes.registerwerk` carries `@ApplicationModule`. Each owns its database tables, its domain entities, and its business logic. Cross-module communication happens exclusively through **domain events** (via the Spring Modulith transactional outbox).
+
+Most are bounded contexts in the domain sense. Three are not, and are annotated anyway so that Modulith enforces their boundaries too: `shared` (cross-cutting types), `bootstrap` (demo-data seeders) and `infrastructure` (cross-cutting `@Configuration`).
 
 ---
 

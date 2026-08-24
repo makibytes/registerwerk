@@ -47,8 +47,8 @@ The prototype does not currently implement:
 - correction, cancellation, nil-report, duplicate, and late-report handling.
 
 The same prototype population is currently emitted under multiple jurisdiction labels. A
-`crossBorderIndicator`, complete CRS-partner treatment, and the reportable-user/entity fields
-previously described in this documentation are not implemented.
+`crossBorderIndicator`, complete CRS-partner treatment, and the required reportable-user/entity
+fields are not implemented.
 
 ## Target data — not currently implemented
 

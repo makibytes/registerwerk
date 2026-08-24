@@ -1,6 +1,7 @@
 import {
   ChangeDetectorRef,
   Component,
+  DestroyRef,
   ElementRef,
   OnInit,
   ViewChild,
@@ -17,6 +18,7 @@ import { MatInputModule } from '@angular/material/input';
 import { RegistryOverviewService } from '../../../core/api/registry-overview.service';
 import { RegistryEntityNode, RegistryOverview } from '../../../core/models';
 import { StatusBadgeComponent } from '@registerwerk/ui';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
 
@@ -67,6 +69,7 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
               type="button"
               class="toggle-pill"
               [class.active]="roleFilter() === option.value"
+              [attr.aria-pressed]="roleFilter() === option.value"
               (click)="roleFilter.set(option.value)"
             >
               <mat-icon>{{ option.icon }}</mat-icon>
@@ -86,6 +89,12 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
           <div class="loading-orbit"></div>
           <p>Mapping the registry graph…</p>
         </section>
+      } @else if (loadError()) {
+        <section class="empty-note registry-error" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <p>We could not load the registry relationship map.</p>
+          <button mat-stroked-button type="button" (click)="reload()">Retry</button>
+        </section>
       } @else if (overview()) {
         <section class="content-grid">
           <!-- Directory -->
@@ -100,9 +109,11 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
 
             <div class="entity-stack" #entityStack>
               @for (entity of filteredEntities(); track entity.id) {
-                <article
+                <button
+                  type="button"
                   class="entity-card"
                   [class.selected]="selectedEntityId() === entity.id"
+                  [attr.aria-pressed]="selectedEntityId() === entity.id"
                   [attr.data-id]="entity.id"
                   (click)="selectEntity(entity.id)"
                 >
@@ -137,7 +148,7 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
                       <span class="metric-value">{{ entity.linkedInvestorCount + entity.linkedIssuerCount }}</span>
                     </div>
                   </div>
-                </article>
+                </button>
               } @empty {
                 <div class="empty-note">No entities match the current filter.</div>
               }
@@ -155,25 +166,33 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
             </div>
 
             <div class="graph-surface" #graphSurface>
-              <div class="graph-inner">
+              @if (visibleRelationships().length === 0) {
+                <div class="graph-empty-state">
+                  <mat-icon>link_off</mat-icon>
+                  <p>No relationships match the current filter.</p>
+                </div>
+              } @else {
+              <div class="graph-inner" [style.min-height.px]="graphHeight()">
                 <div class="lane lane-left">
                   <span class="lane-label">Issuers</span>
                   @for (entity of issuerLane(); track entity.id; let i = $index) {
-                    <div
+                    <button
+                      type="button"
                       class="graph-node issuer"
                       [class.selected]="selectedEntityId() === entity.id"
-                      [class.dimmed]="selectedEntityId() !== null && selectedEntityId() !== entity.id"
-                      [style.top.%]="nodeTop(i, issuerLane().length)"
+                      [class.dimmed]="isUnrelated(entity.id)"
+                      [attr.aria-pressed]="selectedEntityId() === entity.id"
+                      [style.top.px]="graphNodeY(i, issuerLane().length)"
                       [attr.data-id]="entity.id"
                       (click)="selectEntity(entity.id)"
                     >
                       <span class="graph-node-name">{{ entity.currentName }}</span>
                       <span class="graph-node-meta">{{ entity.issuedAssetCount }} assets</span>
-                    </div>
+                    </button>
                   }
                 </div>
 
-                <svg class="graph-lines" viewBox="0 0 1000 760" preserveAspectRatio="none" aria-hidden="true">
+                <svg class="graph-lines" [attr.viewBox]="graphViewBox()" preserveAspectRatio="none" aria-hidden="true">
                   @for (link of graphLines(); track link.id) {
                     <path
                       [attr.d]="link.path"
@@ -189,20 +208,23 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
                 <div class="lane lane-right">
                   <span class="lane-label">Investors</span>
                   @for (entity of investorLane(); track entity.id; let i = $index) {
-                    <div
+                    <button
+                      type="button"
                       class="graph-node investor"
                       [class.selected]="selectedEntityId() === entity.id"
-                      [class.dimmed]="selectedEntityId() !== null && selectedEntityId() !== entity.id"
-                      [style.top.%]="nodeTop(i, investorLane().length)"
+                      [class.dimmed]="isUnrelated(entity.id)"
+                      [attr.aria-pressed]="selectedEntityId() === entity.id"
+                      [style.top.px]="graphNodeY(i, investorLane().length)"
                       [attr.data-id]="entity.id"
                       (click)="selectEntity(entity.id)"
                     >
                       <span class="graph-node-name">{{ entity.currentName }}</span>
                       <span class="graph-node-meta">{{ entity.investmentCount }} holdings</span>
-                    </div>
+                    </button>
                   }
                 </div>
               </div>
+              }
             </div>
 
             <!-- Asset panel -->
@@ -225,7 +247,7 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
                       }
                       <app-status-badge [status]="entity.kycStatus" />
                     </div>
-                    <button class="panel-close-btn" (click)="selectedEntityId.set(null)" title="Deselect entity">
+                    <button class="panel-close-btn" type="button" (click)="selectedEntityId.set(null)" aria-label="Deselect entity">
                       <mat-icon>close</mat-icon>
                     </button>
                   </div>
@@ -256,7 +278,8 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
                               <span
                                 class="whitelist-dot"
                                 [class.whitelisted]="rel.whitelisted"
-                                [title]="rel.whitelisted ? 'Whitelisted' : 'Pending review'"
+                                role="img"
+                                [attr.aria-label]="rel.whitelisted ? 'Whitelisted' : 'Pending review'"
                               ></span>
                             </div>
                           </div>
@@ -289,7 +312,8 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
                               <span
                                 class="whitelist-dot"
                                 [class.whitelisted]="rel.whitelisted"
-                                [title]="rel.whitelisted ? 'Whitelisted' : 'Pending review'"
+                                role="img"
+                                [attr.aria-label]="rel.whitelisted ? 'Whitelisted' : 'Pending review'"
                               ></span>
                             </div>
                           </div>
@@ -322,14 +346,21 @@ type RoleFilter = 'ALL' | 'ISSUER' | 'INVESTOR' | 'DUAL';
   styles: [],
 })
 export class RegistryOverviewComponent implements OnInit {
+  private static readonly GRAPH_VERTICAL_MARGIN = 80;
+  private static readonly GRAPH_NODE_SPACING = 104;
+  private static readonly GRAPH_MIN_HEIGHT = 560;
+
   @ViewChild('graphSurface') private readonly graphSurfaceEl?: ElementRef<HTMLDivElement>;
   @ViewChild('entityStack') private readonly entityStackEl?: ElementRef<HTMLDivElement>;
 
   private readonly registryOverviewService = inject(RegistryOverviewService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly destroyRef = inject(DestroyRef);
+  private scrollTimer: number | undefined;
 
   readonly overview = signal<RegistryOverview | null>(null);
   readonly loading = signal(true);
+  readonly loadError = signal(false);
   readonly roleFilter = signal<RoleFilter>('ALL');
   readonly searchText = signal('');
   readonly selectedEntityId = signal<string | null>(null);
@@ -349,13 +380,13 @@ export class RegistryOverviewComponent implements OnInit {
 
   readonly selectedIssuances = computed(() =>
     this.selectedEntityId()
-      ? (this.overview()?.relationships.filter(r => r.issuerId === this.selectedEntityId()) ?? [])
+      ? this.visibleRelationships().filter(r => r.issuerId === this.selectedEntityId())
       : []
   );
 
   readonly selectedInvestments = computed(() =>
     this.selectedEntityId()
-      ? (this.overview()?.relationships.filter(r => r.investorId === this.selectedEntityId()) ?? [])
+      ? this.visibleRelationships().filter(r => r.investorId === this.selectedEntityId())
       : []
   );
 
@@ -399,6 +430,15 @@ export class RegistryOverviewComponent implements OnInit {
     this.uniqueEntitiesForRelationships('investorId').filter(e => e.roles.includes('INVESTOR'))
   ));
 
+  readonly graphHeight = computed(() => {
+    const nodeCount = Math.max(this.issuerLane().length, this.investorLane().length);
+    return Math.max(
+      RegistryOverviewComponent.GRAPH_MIN_HEIGHT,
+      RegistryOverviewComponent.GRAPH_VERTICAL_MARGIN * 2
+        + Math.max(0, nodeCount - 1) * RegistryOverviewComponent.GRAPH_NODE_SPACING,
+    );
+  });
+
   readonly graphLines = computed(() => {
     const issuers = this.issuerLane();
     const investors = this.investorLane();
@@ -409,18 +449,16 @@ export class RegistryOverviewComponent implements OnInit {
     return this.visibleRelationships()
       .filter(link => issuerIndex.has(link.issuerId) && investorIndex.has(link.investorId))
       .map(link => {
-        const issuerY = this.nodeSvgY(issuerIndex.get(link.issuerId)!, issuers.length);
-        const investorY = this.nodeSvgY(investorIndex.get(link.investorId)!, investors.length);
+        const issuerY = this.graphNodeY(issuerIndex.get(link.issuerId)!, issuers.length);
+        const investorY = this.graphNodeY(investorIndex.get(link.investorId)!, investors.length);
         const baseStroke = Math.min(8, Math.max(2, link.nominalAmount / 500_000));
         const isConnected = !selectedId || link.issuerId === selectedId || link.investorId === selectedId;
-        const color = isConnected && selectedId
-          ? (link.whitelisted ? 'rgba(16, 185, 129, 0.9)' : 'rgba(245, 158, 11, 0.9)')
-          : (link.whitelisted ? 'rgba(16, 185, 129, 0.54)' : 'rgba(245, 158, 11, 0.54)');
+        const color = link.whitelisted ? 'var(--rw-text-success)' : 'var(--rw-accent)';
         const opacity = selectedId ? (isConnected ? 1 : 0.12) : (link.whitelisted ? 0.9 : 0.6);
 
         return {
           id: `${link.assetId}:${link.investorId}`,
-          path: `M 286 ${issuerY} C 420 ${issuerY}, 580 ${investorY}, 714 ${investorY}`,
+          path: `M 322 ${issuerY} C 445 ${issuerY}, 555 ${investorY}, 678 ${investorY}`,
           strokeWidth: selectedId && isConnected ? baseStroke * 1.5 : baseStroke,
           color,
           opacity,
@@ -428,15 +466,29 @@ export class RegistryOverviewComponent implements OnInit {
       });
   });
 
+  constructor() {
+    this.destroyRef.onDestroy(() => {
+      if (this.scrollTimer !== undefined) window.clearTimeout(this.scrollTimer);
+    });
+  }
+
   ngOnInit(): void {
-    this.registryOverviewService.getOverview().subscribe({
+    this.reload();
+  }
+
+  reload(): void {
+    this.loading.set(true);
+    this.loadError.set(false);
+    this.registryOverviewService.getOverview().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (overview) => {
         this.overview.set(overview);
         this.loading.set(false);
         this.cdr.markForCheck();
       },
       error: () => {
+        this.overview.set(null);
         this.loading.set(false);
+        this.loadError.set(true);
         this.cdr.markForCheck();
       },
     });
@@ -446,9 +498,11 @@ export class RegistryOverviewComponent implements OnInit {
     const same = this.selectedEntityId() === entityId;
     this.selectedEntityId.set(same ? null : entityId);
     if (!same) {
-      setTimeout(() => {
+      if (this.scrollTimer !== undefined) window.clearTimeout(this.scrollTimer);
+      this.scrollTimer = window.setTimeout(() => {
         this.centerEntityInGraph(entityId);
         this.scrollDirectoryToEntity(entityId);
+        this.scrollTimer = undefined;
       }, 60);
     }
   }
@@ -469,14 +523,26 @@ export class RegistryOverviewComponent implements OnInit {
     return this.overview()?.entities.find(e => e.id === entityId)?.currentName ?? entityId;
   }
 
-  nodeTop(index: number, total: number): number {
-    if (total <= 1) return 50;
-    return 12 + (index * 76) / Math.max(1, total - 1);
+  graphNodeY(index: number, total: number): number {
+    const height = this.graphHeight();
+    if (total <= 1) return height / 2;
+    const availableHeight = height - RegistryOverviewComponent.GRAPH_VERTICAL_MARGIN * 2;
+    return RegistryOverviewComponent.GRAPH_VERTICAL_MARGIN
+      + index * availableHeight / (total - 1);
   }
 
-  private nodeSvgY(index: number, total: number): number {
-    if (total <= 1) return 380;
-    return 90 + (index * 560) / Math.max(1, total - 1);
+  graphViewBox(): string {
+    return `0 0 1000 ${this.graphHeight()}`;
+  }
+
+  isUnrelated(entityId: string): boolean {
+    const selectedId = this.selectedEntityId();
+    return selectedId !== null
+      && entityId !== selectedId
+      && !this.visibleRelationships().some(link =>
+        (link.issuerId === selectedId && link.investorId === entityId)
+        || (link.investorId === selectedId && link.issuerId === entityId)
+      );
   }
 
   private matchesRole(entity: RegistryEntityNode, filter: RoleFilter): boolean {

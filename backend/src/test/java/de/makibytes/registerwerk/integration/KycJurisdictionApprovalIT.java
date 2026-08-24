@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.integration;
 
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
+
 import de.makibytes.registerwerk.audit.internal.AuditEvent;
 import de.makibytes.registerwerk.audit.internal.AuditEventRepository;
 import de.makibytes.registerwerk.auth.api.AppUser;
@@ -28,6 +30,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -54,6 +57,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
 @DisplayName("KYC jurisdiction approval integration tests")
 class KycJurisdictionApprovalIT {
@@ -105,7 +109,33 @@ class KycJurisdictionApprovalIT {
             EntityResponse.class
         );
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        return response.getBody().id();
+        UUID entityId = response.getBody().id();
+        awaitInitialScreening(entityId);
+        return entityId;
+    }
+
+    /**
+     * Entity onboarding publishes screening asynchronously.  Wait for that run before seeding
+     * any follow-up result so a late ERROR cannot nondeterministically become the latest result
+     * after the fixture's CLEAR row.
+     */
+    private void awaitInitialScreening(UUID entityId) {
+        Instant deadline = Instant.now().plusSeconds(5);
+        while (Instant.now().isBefore(deadline)) {
+            boolean completed = screeningRunRepository.findByEntityIdOrderByStartedAtDesc(entityId).stream()
+                .anyMatch(run -> "OPEN_SANCTIONS".equals(run.getProvider())
+                    && run.getStatus() != ScreeningStatus.PENDING);
+            if (completed) {
+                return;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for initial screening", e);
+            }
+        }
+        throw new AssertionError("Initial screening did not complete for entity " + entityId);
     }
 
     private HttpHeaders authHeaders(String... roles) {
@@ -132,7 +162,7 @@ class KycJurisdictionApprovalIT {
         headers.setBearerAuth(signedJwt("00000000-0000-0000-0000-000000000001", true, roles));
         // Every call site in this file hits the same jurisdiction-approve endpoint
         // (@RequiresStepUp(reason = "KYC_JURISDICTION_APPROVE")) — the dual-control token
-        // must carry a matching stepup_scope claim (finding #10, Phase 8).
+        // must carry a matching stepup_scope claim .
         headers.set("X-Dual-Control-Token", dualControlToken("KYC_JURISDICTION_APPROVE"));
         return headers;
     }
@@ -148,7 +178,7 @@ class KycJurisdictionApprovalIT {
         return signedJwt(sub, stepUp, null, roles);
     }
 
-    /** @param scope embedded as the {@code stepup_scope} claim when non-null (finding #10, Phase 8). */
+    /** @param scope embedded as the {@code stepup_scope} claim when non-null . */
     private String signedJwtWithScope(String sub, String scope, String... roles) {
         return signedJwt(sub, true, scope, roles);
     }
@@ -160,6 +190,9 @@ class KycJurisdictionApprovalIT {
             long exp = iat + 3600;
             String rolesJson = String.join(",", java.util.Arrays.stream(roles).map(r -> "\"" + r + "\"").toList());
             String payload = base64Url("{"
+                // The HS256 decoder is pinned to this issuer, so knowing the signing secret is
+                // not on its own enough to mint an accepted token.
+                + "\"iss\":\"" + JwtMintingService.LOCAL_ISSUER + "\","
                 + "\"sub\":\"" + sub + "\","
                 + "\"roles\":[" + rolesJson + "],"
                 + (stepUp ? "\"acr\":\"stepup\"," : "")
@@ -216,7 +249,9 @@ class KycJurisdictionApprovalIT {
         ScreeningRun run = new ScreeningRun();
         run.setEntityId(entityId);
         run.setTriggerType(ScreeningTrigger.ENTITY_ONBOARDING);
-        run.setProvider("TEST");
+        // The gate evaluates the latest result of every configured provider.  A clearance
+        // under an arbitrary fixture-only name must not mask an OPEN_SANCTIONS failure.
+        run.setProvider("OPEN_SANCTIONS");
         run.setStatus(ScreeningStatus.CLEAR);
         run.setStartedAt(Instant.now());
         run.setCompletedAt(Instant.now());
@@ -234,7 +269,7 @@ class KycJurisdictionApprovalIT {
     }
 
     @Test
-    @DisplayName("Jurisdiction approval is blocked when no sanctions screening exists (fail closed)")
+    @DisplayName("Jurisdiction approval is blocked when no successful sanctions screening exists (fail closed)")
     void approvalBlockedWithoutScreening() {
         UUID entityId = createEntityAndGetId("Unscreened Entity GmbH");
         addMandatoryDeEwpgDocs(entityId);

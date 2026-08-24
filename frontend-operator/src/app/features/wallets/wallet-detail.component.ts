@@ -5,6 +5,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { WalletService } from '../../core/api/wallet.service';
 import { OperatorWallet, WalletBalance } from '../../core/models';
 
@@ -13,14 +14,14 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
   standalone: true,
   imports: [
     CommonModule, RouterLink, MatIconModule, MatButtonModule,
-    MatProgressSpinnerModule, MatTooltipModule,
+    MatProgressSpinnerModule, MatTooltipModule, MatSnackBarModule,
   ],
   styles: [`
     .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
     .page-header h1 { font-size: 21px; font-weight: 700; color: var(--rw-text-primary); letter-spacing: -0.4px; margin: 0; }
     .back-btn { color: var(--rw-text-secondary); }
 
-    .content-card { background: var(--rw-surface); border: 1px solid var(--rw-border); border-radius: 10px; overflow: hidden; margin-bottom: 20px; }
+    .content-card { background: var(--rw-surface); border: 1px solid var(--rw-border); border-radius: 10px; overflow-x: auto; margin-bottom: 20px; }
     .card-header { padding: 16px 20px; border-bottom: 1px solid var(--rw-border); display: flex; align-items: center; gap: 8px; }
     .card-header h2 { font-size: 13px; font-weight: 600; color: var(--rw-text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 0; }
     .card-body { padding: 20px; }
@@ -59,10 +60,16 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
     .network-tag.testnet { background: rgba(245,158,11,.1); color: #d97706; }
 
     .loading-overlay { padding: 48px; text-align: center; color: var(--rw-text-muted); }
+    .load-error { display: grid; justify-items: center; gap: 10px; color: var(--rw-text-danger); }
+    @media (max-width: 620px) {
+      .wallet-meta { grid-template-columns: 1fr; }
+      .card-body { padding: 16px; }
+      table { min-width: 560px; }
+    }
   `],
   template: `
     <div class="page-header">
-      <button mat-icon-button class="back-btn" routerLink="/wallets">
+      <button type="button" mat-icon-button class="back-btn" routerLink="/wallets" aria-label="Back to wallets">
         <mat-icon>arrow_back</mat-icon>
       </button>
       @if (wallet()) {
@@ -77,6 +84,12 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
     @if (loading()) {
       <div class="loading-overlay">
         <mat-spinner diameter="36" />
+      </div>
+    } @else if (loadError()) {
+      <div class="loading-overlay load-error" role="alert">
+        <mat-icon>error_outline</mat-icon>
+        <span>Wallet details could not be loaded.</span>
+        <button mat-stroked-button type="button" (click)="loadWallet()">Retry</button>
       </div>
     } @else if (wallet()) {
       <!-- Wallet info card -->
@@ -105,11 +118,18 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
               <span class="meta-label">Default for</span>
               <span class="meta-value">{{ wallet()!.defaultForChains.length }} chain(s)</span>
             </div>
+            <div class="meta-item">
+              <span class="meta-label">Custody</span>
+              <span class="meta-value">{{ wallet()!.custodyType === 'PKCS11' ? 'PKCS#11 HSM (non-exportable)' : 'Encrypted software keystore' }}</span>
+            </div>
+            @if (wallet()!.keyReference) {
+              <div class="meta-item"><span class="meta-label">Key reference</span><span class="meta-value">{{ wallet()!.keyReference }}</span></div>
+            }
           </div>
 
           <div class="address-box">
             <span class="address-text">{{ wallet()!.address }}</span>
-            <button mat-icon-button class="copy-btn" (click)="copyAddress()" matTooltip="Copy address">
+            <button type="button" mat-icon-button class="copy-btn" (click)="copyAddress()" matTooltip="Copy address" aria-label="Copy wallet address">
               <mat-icon>content_copy</mat-icon>
             </button>
           </div>
@@ -129,6 +149,12 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
               <mat-spinner diameter="20" />
               Fetching balances from connected nodes…
             </div>
+          </div>
+        } @else if (balancesError()) {
+          <div class="loading-overlay load-error" role="alert">
+            <mat-icon>cloud_off</mat-icon>
+            <span>Balances could not be loaded.</span>
+            <button mat-stroked-button type="button" (click)="loadBalances()">Retry</button>
           </div>
         } @else if (balances().length === 0) {
           <div class="loading-overlay">
@@ -179,27 +205,72 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
 export class WalletDetailComponent implements OnInit {
   private readonly route         = inject(ActivatedRoute);
   private readonly walletService = inject(WalletService);
+  private readonly snackBar = inject(MatSnackBar);
+
+  private walletId = '';
 
   readonly wallet          = signal<OperatorWallet | null>(null);
   readonly balances        = signal<WalletBalance[]>([]);
   readonly loading         = signal(true);
   readonly balancesLoading = signal(true);
+  readonly loadError = signal(false);
+  readonly balancesError = signal(false);
 
-  ngOnInit() {
-    const id = this.route.snapshot.paramMap.get('id')!;
-    this.walletService.getById(id).subscribe({
-      next: w => { this.wallet.set(w); this.loading.set(false); },
-      error: () => this.loading.set(false),
-    });
-    this.walletService.getBalances(id).subscribe({
-      next: b => { this.balances.set(b); this.balancesLoading.set(false); },
-      error: () => this.balancesLoading.set(false),
+  ngOnInit(): void {
+    this.walletId = this.route.snapshot.paramMap.get('id') ?? '';
+    this.loadWallet();
+    this.loadBalances();
+  }
+
+  loadWallet(): void {
+    if (!this.walletId) {
+      this.loading.set(false);
+      this.loadError.set(true);
+      return;
+    }
+    this.loading.set(true);
+    this.loadError.set(false);
+    this.walletService.getById(this.walletId).subscribe({
+      next: (wallet) => {
+        this.wallet.set(wallet);
+        this.loading.set(false);
+      },
+      error: () => {
+        this.wallet.set(null);
+        this.loading.set(false);
+        this.loadError.set(true);
+      },
     });
   }
 
-  copyAddress() {
+  loadBalances(): void {
+    if (!this.walletId) {
+      this.balancesLoading.set(false);
+      this.balancesError.set(true);
+      return;
+    }
+    this.balancesLoading.set(true);
+    this.balancesError.set(false);
+    this.walletService.getBalances(this.walletId).subscribe({
+      next: (balances) => {
+        this.balances.set(balances);
+        this.balancesLoading.set(false);
+      },
+      error: () => {
+        this.balances.set([]);
+        this.balancesLoading.set(false);
+        this.balancesError.set(true);
+      },
+    });
+  }
+
+  copyAddress(): void {
     const addr = this.wallet()?.address;
-    if (addr) navigator.clipboard.writeText(addr);
+    if (!addr) return;
+    navigator.clipboard.writeText(addr).then(
+      () => this.snackBar.open('Address copied', 'OK', { duration: 2000 }),
+      () => this.snackBar.open('Could not copy the address', 'OK', { duration: 4000 }),
+    );
   }
 
   isMainnet(b: WalletBalance): boolean {

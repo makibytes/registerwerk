@@ -35,7 +35,7 @@ dataSources:
         - event: VaultDeployed(indexed bytes32,indexed uint8,indexed address,address)
           handler: handleVaultDeployed
 
-  # EwpgRepoMarketFactory (finding #7, Phase 7) — a separate factory from AssetTokenFactory
+  # EwpgRepoMarketFactory  — a separate factory from AssetTokenFactory
   # above (repo/lending markets are not securities-token deployments), same auto-registration
   # pattern: MarketCreated spawns a new EwpgRepoMarket dynamic data source.
   - kind: ethereum
@@ -59,7 +59,7 @@ dataSources:
         - event: MarketCreated(indexed address,indexed address,indexed address,uint256,address)
           handler: handleMarketCreated
 
-  # ── Payment-leg contracts (finding #6, Phase 8) ────────────────────────────
+  # ── Payment-leg contracts  ────────────────────────────
   # These contracts are not all discoverable via an on-chain factory. The renderer expands the
   # EwpgBondDesk, StablecoinAmm and EwpgRepoVault prototypes for every explicitly configured
   # address/start-block pair and fails closed when the operator neither lists instances nor says
@@ -187,7 +187,7 @@ dataSources:
         - event: Transfer(indexed address,indexed address,uint256)
           handler: handleTransfer
 
-  # EwpgConfidentialFactory (finding #8, Phase 9) — a separate factory from AssetTokenFactory,
+  # EwpgConfidentialFactory  — a separate factory from AssetTokenFactory,
   # same auto-registration pattern: ConfidentialTokenDeployed spawns a new ConfidentialERC20
   # dynamic data source (shared by both CONFIDENTIAL_ERC20 and CONFIDENTIAL_ERC3643 — the latter
   # inherits the former and emits identical Transfer/Mint/Burn events).
@@ -428,7 +428,7 @@ templates:
           handler: handleAddressUnfrozen
 
   # ── EwpgRepoMarket (isolated repo/lending market) ────────────────────────────
-  # finding #7, Phase 7 — instantiated by EwpgRepoMarketFactory.handleMarketCreated, not by
+  #  — instantiated by EwpgRepoMarketFactory.handleMarketCreated, not by
   # AssetTokenFactory (this is not a securities-token deployment).
   - kind: ethereum
     name: EwpgRepoMarket
@@ -461,7 +461,7 @@ templates:
         - event: CollateralReconciled(indexed address,uint256,uint256)
           handler: handleCollateralReconciled
 
-  # ── Confidential (Zama fhEVM) token (finding #8, Phase 9) ────────────────────
+  # ── Confidential (Zama fhEVM) token  ────────────────────
   # Instantiated by EwpgConfidentialFactory.handleConfidentialTokenDeployed for each newly
   # deployed CONFIDENTIAL_ERC20 or CONFIDENTIAL_ERC3643 instance — both share this one template
   # since ConfidentialERC3643 inherits ConfidentialERC20's Transfer/Mint/Burn events unchanged.

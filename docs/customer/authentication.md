@@ -1,102 +1,143 @@
 ---
-id: authentication
-title: Authentication
-sidebar_label: Authentication
+title: Signing in
+description: How you sign in, what two-factor authentication does, and what to do when you cannot get in.
 ---
 
-# Authentication
+# Signing in
 
-The eWpG Registry uses OpenID Connect (OIDC) for authentication. All access is federated — there are no registry-specific passwords to manage.
+How you sign in depends on how your registry operator has configured the platform. There are two modes, and they behave differently enough that it is worth knowing which one you are in.
 
-## Login options
+**The quickest way to tell:** if the sign-in page shows an email and password box, you are in local mode. If it shows a **Sign in with Microsoft** button, you are in Entra mode.
 
-### Microsoft Entra ID (default)
+---
 
-The registry operator pre-configures Microsoft Entra ID (formerly Azure Active Directory) as the default identity provider. This is used for:
+## The two modes
 
-- Registry operator staff
-- Customer organizations that have not configured their own IdP
+=== "Local mode — the default"
 
-To log in:
+    You sign in with an email address and a password held by the registry itself.
 
-1. Navigate to the customer portal at `https://portal.registerwerk.example.com`
-2. Click **Sign in with Microsoft**
-3. Enter your corporate Microsoft account email address
-4. Complete MFA if your organization requires it
-5. You are redirected back to the portal
+    **No second factor at sign-in.** This is the default configuration and what you get from a standard `docker compose up`. It is intended for local, demo and evaluation deployments.
 
-:::note
-Your Microsoft account must belong to the same tenant that the registry operator has whitelisted. If you see an "Account not recognized" error, contact your registry operator.
-:::
+    Your password can be reset through the normal reset-password flow.
 
-### Self-managed identity provider
+=== "Entra mode — production"
 
-Organizations that completed IdP configuration during [onboarding](./onboarding) are redirected automatically to their own identity provider. The login experience depends on your IdP (e.g., Keycloak login page, Okta, Ping Identity).
+    You sign in with **Microsoft Entra ID**, using your organisation's Microsoft account, and **two-factor authentication is required**.
 
-The registry supports any OIDC-compliant identity provider that can issue JWTs with the following standard claims:
+    The registry never sees your password. Microsoft authenticates you and issues a token; the registry validates it.
 
-| Claim | Description |
-|-------|-------------|
-| `sub` | Unique user identifier (stable across sessions) |
-| `email` | User email address |
-| `name` | Display name |
-| `groups` or `roles` | Used to map registry roles (optional) |
+!!! info "Operator staff always use built-in login"
+    Even in Entra mode, registry operator staff sign in with a username and password and use a local authenticator app for sensitive actions.
 
-### Role mapping
+    Only the **customer** portal moves to Entra. If you have read that Entra is the default for everybody including operator staff, that was wrong — it has never been how the platform behaves.
 
-If your IdP includes a `roles` or `groups` claim, the registry can map IdP groups to registry roles automatically. Contact the registry operator to configure the mapping. For example:
+---
 
-```json
-{
-  "sub": "abc123",
-  "email": "alice@example.com",
-  "roles": ["issuer-admin", "company-admin"]
-}
-```
+## Two-factor authentication
 
-## API access with JWT tokens
+Applies in Entra mode.
 
-If you need to call the REST API directly (e.g., from an integration script), you must obtain a JWT access token from your identity provider and include it in the `Authorization` header.
+Two-factor authentication is **required** for the customer portal in production. It is enforced by Microsoft Conditional Access during sign-in, **not by the portal** — if you have not registered a second factor, Microsoft prompts you before you can continue. You never reach Registerwerk unenrolled.
 
-### Obtaining a token (client credentials flow)
+The **Security** page (user menu → Security) shows your status and walks you through setup.
 
-For machine-to-machine integrations, use the client credentials grant:
+!!! note "Why the registry cannot give you a setup QR code"
+    Microsoft owns the credential. Its API provides no way to create an authenticator or TOTP method — the secret is never disclosed to anybody, including the registry.
 
-```bash
-curl -X POST https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials" \
-  -d "client_id={your-client-id}" \
-  -d "client_secret={your-client-secret}" \
-  -d "scope=api://registerwerk/.default"
-```
+    So the code you scan is shown on **Microsoft's own security-info page**. The QR code on our Security page is simply a **link to that page**, so you can move from your desktop to the phone that will hold the authenticator.
 
-### Using the token
+    This is a constraint of Entra, not a missing feature. No software can do it differently.
 
-Include the token in every API request:
+**To set up Microsoft Authenticator:**
 
-```bash
-curl https://api.registerwerk.example.com/api/v1/issuances \
-  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIs..."
-```
+1. Install **Microsoft Authenticator** on your phone.
+2. Open **Security** in the portal and scan the QR code, or select **Set up now**.
+3. Add a sign-in method on Microsoft's page and follow its instructions.
+4. Return to the portal and select **I've finished** — the page re-checks and confirms.
 
-Tokens are valid for 1 hour by default. Your integration should handle token refresh automatically.
+### Lost or replaced your phone
 
-:::warning
-Never embed access tokens in frontend code or commit them to version control. Use environment variables or a secrets manager.
-:::
+Contact the registry operator. After verifying your identity out of band they will remove your old methods, **sign out your existing sessions**, and issue a **Temporary Access Pass** — a short-lived, usually single-use code letting you sign in once to register a new method.
 
-## Session management
+Use it promptly; it typically expires within the hour.
 
-- Portal sessions last 8 hours by default
-- Idle sessions time out after 2 hours of inactivity
-- All sessions are terminated immediately on password change or IdP-side logout
+!!! warning "If your organisation runs its own Entra tenant, the operator cannot help"
+    Your users are in *your* directory, not theirs. They cannot reset your authentication methods and the support console will refuse to try.
 
-## Troubleshooting login issues
+    Contact your own IT helpdesk.
 
-| Error | Likely cause | Solution |
-|-------|-------------|----------|
-| "Account not recognized" | User not in whitelisted tenant | Contact registry operator |
-| "Access denied" | Missing role assignment | Ask your company admin to assign a role |
-| "Token expired" | Session timed out | Log in again |
-| Redirect loop | Misconfigured redirect URI | Contact registry operator |
+---
+
+## If your organisation uses its own identity provider
+
+Organisations that configured an identity provider during [onboarding](onboarding.md) sign in through their **own Microsoft Entra tenant**.
+
+Access is established **tenant-to-tenant** in Entra, using B2B collaboration and cross-tenant access settings. The registry never runs an authorisation-code flow against your tenant and therefore **never asks for a client secret** — only your issuer URL and client id, for identification.
+
+With this model:
+
+- Your administrators control which authentication methods are available and how strong they are.
+- Multi-factor authentication performed in your tenant is accepted here **only if the registry operator has configured inbound MFA trust**. That is the operator's decision, not yours — a customer vouching for their own MFA would be a way to lower the bar applied to their own users.
+- **The registry operator cannot reset your users' second factors.** Your helpdesk does.
+
+---
+
+## Where your permissions come from
+
+!!! danger "Your identity provider does not decide what you can do"
+    This surprises administrators, and getting it wrong has real consequences.
+
+    Entra answers *who is this person*. **Registerwerk answers what they may do**, from its own user record. Entra app roles are consulted only once, when your account is first created, to pick a sensible default.
+
+    So: **removing somebody's app role in Entra does not remove their Registerwerk permissions.** An administrator who does that and assumes access is revoked will be wrong.
+
+    To change what somebody can do, change it in Registerwerk — your [company administrator](workspaces/company-admin.md) does this. To stop them signing in at all, disable the account in Entra.
+
+---
+
+## Sessions
+
+Sessions last **8 hours** by default, after which you sign in again.
+
+In Entra mode your organisation's Conditional Access policies may require you to re-authenticate sooner, and sensitive actions can demand fresh proof of identity regardless of how long your session has left. That is [step-up authentication](../compliance/step-up-mfa.md), and it is working as intended rather than a session problem.
+
+---
+
+## Calling the API directly
+
+For integrations, obtain a token and send it as `Authorization: Bearer <token>`.
+
+In **Entra mode**, get the token from Entra using your own app registration and the scope your operator gives you. In **local mode**, `POST /api/v1/public/auth/login` returns one.
+
+!!! warning "Never put a token in frontend code or a repository"
+    Use environment variables or a secrets manager. A leaked token is a session as you, for its remaining life.
+
+[:octicons-arrow-right-24: API overview](../platform/api.md)
+
+---
+
+## When you cannot get in
+
+| What you see | Usually means | Do |
+|---|---|---|
+| **Account not recognised** | Your Microsoft account is not in a tenant the operator has admitted | Contact the operator |
+| **Access denied** after signing in | You signed in fine; you lack a role | Ask your company administrator |
+| **A prompt to register security info** | Two-factor not yet set up | Follow it — it is required |
+| **Token expired** | Session ended | Sign in again |
+| **Redirect loop** | Misconfiguration on the operator's side | Contact the operator — this is not something you can fix |
+| **Everything looks fine but nothing works** | Your organisation's [KYC](kyc.md) may have lapsed | Check the KYC page |
+
+!!! tip "The difference between 401 and 403 is worth knowing"
+    If you are reporting a problem, saying which you got will save everybody time.
+
+    **401** — your token is not accepted. A sign-in problem.
+    **403** — your token is fine, your permissions are not. A role problem, and your company administrator can probably fix it without involving the operator.
+
+---
+
+## Where next
+
+- [Getting your account](onboarding.md)
+- [Company administrator](workspaces/company-admin.md) — managing users and IdP settings
+- [Step-up MFA](../compliance/step-up-mfa.md) — why some actions ask again

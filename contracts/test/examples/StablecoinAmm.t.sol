@@ -12,7 +12,7 @@ import "../../src/ecosystem/RegisterwerkGated.sol";
 import "../ecosystem/mocks/MockOnchainId.sol";
 
 /// @notice Constant-product AMM reserved for stablecoin-only pairs. Gated through
-///         {RegisterwerkGated} like every other reference dApp (finding #7, Phase 8) — org
+///         {RegisterwerkGated} like every other reference dApp  — org
 ///         membership and permission, not a claim topic, since neither pool leg is a
 ///         security (see the contract-level NatSpec on {StablecoinAmm}).
 contract StablecoinAmmTest is Test {

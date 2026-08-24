@@ -10,6 +10,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -19,7 +20,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Guards against the Helm chart's own liveness/readiness probes failing (Phase 12, finding #2):
+ * Guards against the Helm chart's own liveness/readiness probes failing :
  * kubelet calls /actuator/health/liveness and /actuator/health/readiness with no JWT, so an
  * exact-path-only matcher on /actuator/health denies them, making every pod crash-loop in a real
  * cluster. Boots with the REAL security chain (no TestSecurityConfig) to exercise this for real.
@@ -27,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
 @DisplayName("Actuator endpoint security")
 class ActuatorSecurityIT {

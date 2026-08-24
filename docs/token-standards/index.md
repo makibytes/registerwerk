@@ -20,10 +20,10 @@ Registerwerk contains implementations, integrations, or placeholders for token s
 | [ERC-3643](erc3643.md) | EVM | Fungible + identity | Regulated securities, permissioned | CONF_ERC3643 | Implementation present; readiness unverified |
 | [ERC-4626](erc4626.md) | EVM | Vault (sync) | Money-market funds, daily NAV | — | Implementation present; economic model/readiness unverified |
 | [ERC-7540](erc7540.md) | EVM | Vault (async) | Institutional funds, T+1/T+2 | — | Implementation present; economic model/readiness unverified |
-| [DAML BOND FIXED](canton-daml.md) | Canton | Bond | Fixed-rate bonds on private ledger | — | Optional implementation (`-Pcanton`); readiness unverified |
-| [DAML BOND FLOATING](canton-daml.md) | Canton | Bond | Floating-rate bonds | — | Optional implementation (`-Pcanton`); readiness unverified |
-| [DAML BOND ZERO](canton-daml.md) | Canton | Bond | Zero-coupon bonds | — | Optional implementation (`-Pcanton`); readiness unverified |
-| [CANTON_TOKEN](canton-daml.md) | Canton | Generic | DAML-based digital asset | — | Optional implementation (`-Pcanton`); readiness unverified |
+| [DAML BOND FIXED](canton-daml.md) | Canton | Bond | Fixed-rate bond lifecycle | — | Custom Daml template; profile-verified, live conformance required |
+| [DAML BOND FLOATING](canton-daml.md) | Canton | Bond | Floating-rate bond lifecycle | — | Custom Daml template; profile-verified, live conformance required |
+| [DAML BOND ZERO](canton-daml.md) | Canton | Bond | Zero-coupon bond lifecycle | — | Custom Daml template; profile-verified, live conformance required |
+| [CANTON_TOKEN](canton-daml.md) | Canton | Generic | CIP-0056 asset | — | Reserved; deliberately not deployable until a registry-specific adapter exists |
 | [SPL](../blockchains/solana.md) | Solana | Fungible | Solana-native tokens | — | Integration present; readiness unverified |
 | [SPL_2022](spl-2022.md) | Solana | Fungible + ext. | Extended Solana tokens | — | Integration present; readiness unverified |
 | [SPL_2022_BOND](spl-2022.md) | Solana | Fungible + interest | Interest-bearing bonds on Solana | — | Integration present; readiness unverified |

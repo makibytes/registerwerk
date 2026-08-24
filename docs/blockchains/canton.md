@@ -1,99 +1,89 @@
 ---
-title: Canton / DAML Ledger
-description: Canton private ledger and DAML Finance integration for regulated bond instruments.
+title: Canton / Daml Ledger
+description: Current Canton Ledger API and custom Daml bond integration, including its production limits.
 ---
 
-# Canton / DAML Ledger
+# Canton / Daml Ledger
 
-Canton is a **privacy-first distributed ledger** developed by Digital Asset. Unlike public blockchains, Canton implements **per-sub-transaction privacy**: each participant only sees the contracts they are a party to. This makes Canton attractive for institutional instruments where positions should not be visible to other market participants.
+Canton provides privacy by synchronizing only the Daml sub-transactions a participant is entitled
+to see. Registerwerk's optional `-Pcanton` build integrates with a participant's Ledger API v2 over
+gRPC. This repository includes custom Registerwerk bond-lifecycle templates; it does not embed Daml
+Finance, and it does not yet provide a production `CANTON_TOKEN`/CIP-0056 workflow adapter.
 
----
+## What is implemented
 
-## Canton architecture concepts
+| Area | Current implementation |
+|---|---|
+| Connection | Ledger API v2 command, state, update, and party-management services |
+| Bond contracts | Custom `FixedRateBond`, `FloatingRateBond`, and `ZeroCouponBond` templates |
+| Lifecycle | Create, coupon authorization, rate fixing, redemption, early call, suspend/resume |
+| Contract identity | Deployment stores the committed Daml contract ID; the update ID is retained as transaction evidence |
+| Indexing | Resumable Ledger API update stream and durable offset for CIP-0056 `Holding` create/archive events |
+| Finality | A committed Ledger API update is recorded as `FINALIZED`; there is no EVM-style confirmation window |
 
-| Concept | Canton | Registerwerk mapping |
-|---|---|---|
-| **Ledger** | The Canton distributed ledger | One Canton Network participant node per operator |
-| **Party** | A unique cryptographic identity on the ledger | `LegalEntity.cantonPartyId` |
-| **Contract** | A DAML contract instance | One per bond or asset position |
-| **Choice** | An action that can be exercised on a contract | Corporate action (coupon, redemption) |
-| **Synchroniser** | The consensus component | Canton Network global synchroniser |
-| **Ledger API** | gRPC API to interact with Canton | `CantonLedgerEndpoint` |
-
----
-
-## DAML Finance bond types
-
-See [DAML Finance Bonds](../token-standards/canton-daml.md) for the full treatment of bond term configuration and coupon payments.
-
----
+The bond choices record lifecycle authorization on ledger. They do not themselves move a cash leg
+or distribute holder balances. Corporate-action `SETTLED` therefore relies on the issuer/operator
+attestation workflow plus the committed lifecycle choice; a production deployment must connect and
+reconcile its actual payment/holding workflow before treating that state as independent proof of
+cash settlement.
 
 ## Connection configuration
 
-The `CantonLedgerEndpoint` connects to a Canton participant node via its **Ledger API** (gRPC):
+Use an explicit scheme. `grpcs://` (or `https://`) enables TLS; `grpc://` is explicit plaintext for
+local development. A legacy scheme-less value is accepted as plaintext with a warning and should
+not be used in production.
 
 ```yaml
 registerwerk:
   canton:
     mainnet:
-      ledgerApiUrl: "participant.example.com:5001"
-      synchronizerId: "global-synchronizer"
-      applicationId: "registerwerk"
-      authToken: "${CANTON_MAINNET_TOKEN}"  # JWT for participant auth
+      ledger-api-url: "grpcs://participant.example.com:5001"
+      synchronizer-id: "global-synchronizer"
+      application-id: "registerwerk"
+      auth-token: "${CANTON_MAINNET_TOKEN}"
     devnet:
-      ledgerApiUrl: "localhost:5001"
-      synchronizerId: "dev-synchronizer"
+      ledger-api-url: "grpc://localhost:5001"
+      synchronizer-id: "dev-synchronizer"
+      application-id: "registerwerk"
 ```
 
-For the Canton Network (public Canton): obtain a participant node from the Canton Network operator, register your application, and supply the Ledger API URL.
+Only host and optional port are accepted: user-info, paths, query strings, and fragments are
+rejected. A bearer token containing CR/LF is rejected before gRPC metadata is built. `grpcs://`
+defaults to port 443 and `grpc://` to 5001 when the port is omitted.
 
-For development: a local Canton sandbox is available via `docker compose -f indexer/canton/docker-compose.yml up`.
+## Parties and privacy
 
----
+`CantonPartyAllocator.allocateParty(walletId, chainConfig, displayName)` calls the Ledger API admin
+service and stores the returned party ID as the Canton `OperatorWallet.address`, with its local
+wallet context in the configured wallet store. It does not write a `LegalEntity.cantonPartyId`
+field—no such field exists.
 
-## Party allocation
+Community Canton does not mint a party-specific token through this path. Locally hosted parties use
+the participant channel's configured bearer credential; imported wallets may carry externally
+supplied party context. In the current bond deployment encoder, `registryAdmin`, `issuer`, and
+`regulatorObserver` are all populated from the one deployment owner party. That preserves template
+validity for development but does not establish real three-party segregation. A production adapter
+must obtain and pass distinct parties before relying on the template's privacy/approval roles.
 
-Before a customer can participate in Canton-based instruments, they must be allocated a **Canton Party**. This is handled by `CantonPartyAllocator.allocate(entityId)`:
-
-1. Calls the Ledger API `PartyManagementService.allocateParty()`
-2. Stores the returned party identifier in `LegalEntity.cantonPartyId`
-3. The party identifier is used in all DAML contract references for that entity
-
-Parties are immutable once allocated; a party can never be re-used for a different entity.
-
----
-
-## Privacy model
-
-Canton's privacy is enforced at the ledger level:
-
-- **Issuer** sees: all contracts for their instruments
-- **Investor** sees: only their own position contracts
-- **Registry operator** sees: all contracts (as the DAML observer role)
-- **Other investors**: cannot see other investors' positions
-
-This is native privacy without encryption — the ledger infrastructure ensures that contract data is only transmitted to parties who are stakeholders in that contract.
-
----
-
-## The `-Pcanton` Maven profile
-
-Because the DAML SDK and associated JARs are large and not on Maven Central, Canton support is gated behind the `-Pcanton` profile:
+## Build and compatibility
 
 ```bash
-./mvnw verify -Pcanton          # includes Canton
-./mvnw verify                   # Canton disabled, stub injected
+cd backend
+./mvnw verify -Pcanton
 ```
 
-In the absence of `-Pcanton`, `CantonBondDisabledStub` is used. API calls to Canton-based instruments return `503 Service Unavailable` with a message explaining that Canton support requires the `-Pcanton` profile and a running participant node.
+The profile compiles against Daml/Canton 3.5.2 Ledger API v2 bindings and the custom DAR targets
+Daml-LF 2.1. Package-name addressing (`#registerwerk-canton`) is used instead of a package hash.
+Without the profile, `CantonBondDisabledStub` fails bond operations explicitly. The profile build
+and unit tests verify Java/protobuf compatibility, but a live participant conformance test is still
+required for each target Canton release and synchronizer policy.
 
----
+## Indexer boundary
 
-## Indexer
-
-The Canton indexer uses the **Transaction Service** of the Ledger API to stream all committed transactions. It processes:
-- Bond issuance contracts → creates `AssetHolder` records
-- Coupon payment events → creates `token_transfer` records of type `COUPON`
-- Transfer events → updates `AssetHolder.nominalAmount`
-
-Canton indexer liveness is monitored by `IndexerMonitorService`, same as the EVM and Solana indexers.
+`CantonTransferSyncService` resumes from the numeric Ledger API offset stored in
+`indexer_state.last_synced_signature`. It mirrors open CIP-0056 Holdings so an archive can recover
+the consumed owner/instrument/amount, then classifies same-transaction archive/create pairs as
+transfers and unmatched events as burns/mints. This indexer is for token-standard Holdings; it is
+not a bond-coupon cash-settlement indexer. Since `CANTON_TOKEN` deployment is deliberately disabled
+until a registry-specific CIP-0056 adapter exists, treat this stream as adapter infrastructure, not
+as an end-to-end generic-token claim.

@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import java.util.Collections;
@@ -45,20 +45,17 @@ public class WhitelistService {
 
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final AssetHolderRepository assetHolderRepository;
-    private final BlockchainClientRegistry blockchainClientRegistry;
-    private final EvmContractService evmContractService;
+    private final DurableEvmTransactionGateway durableTransactions;
     private final BlockchainTransactionService txService;
 
     public WhitelistService(
             AssetDeploymentRepository assetDeploymentRepository,
             AssetHolderRepository assetHolderRepository,
-            BlockchainClientRegistry blockchainClientRegistry,
-            EvmContractService evmContractService,
+            DurableEvmTransactionGateway durableTransactions,
             BlockchainTransactionService txService) {
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.assetHolderRepository = assetHolderRepository;
-        this.blockchainClientRegistry = blockchainClientRegistry;
-        this.evmContractService = evmContractService;
+        this.durableTransactions = durableTransactions;
         this.txService = txService;
     }
 
@@ -128,10 +125,6 @@ public class WhitelistService {
     private void callWhitelistFunction(AssetDeployment deployment, String walletAddress,
                                        String functionName) {
         try {
-            ChainDescriptor descriptor = new ChainDescriptor(deployment.getChain(), deployment.getNetwork());
-            Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-            Credentials creds = evmContractService.credentials(descriptor);
-
             Function fn = new Function(
                     functionName,
                     List.of(new Address(walletAddress)),
@@ -141,7 +134,12 @@ public class WhitelistService {
             // Fire-and-track: submit() returns the tx hash immediately;
             // BlockchainTransactionService polls for the receipt asynchronously, instead of this
             // call blocking the HTTP thread for up to two minutes like send() did.
-            String txHash = evmContractService.submit(web3j, creds, deployment.getContractAddress(), fn);
+            if (deployment.getChainConfigId() == null) {
+                throw new IllegalStateException(
+                        "Confirmed EVM deployment is missing chainConfigId: " + deployment.getId());
+            }
+            String txHash = durableTransactions.submit(deployment.getChainConfigId(),
+                    deployment.getContractAddress(), fn, Map.of("walletAddress", walletAddress));
             txService.record(txHash, functionName, deployment.getId(), deployment.getAssetId(),
                     deployment.getChain().name(), deployment.getNetwork().name(),
                     deployment.getContractAddress(), Map.of("walletAddress", walletAddress));

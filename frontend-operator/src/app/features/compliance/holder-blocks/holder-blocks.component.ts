@@ -23,6 +23,7 @@ import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerw
 import { HolderBlockService } from '../../../core/api/holder-block.service';
 import { HolderBlock, BlockType } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
+import { AuthService } from '../../../core/auth/auth.service';
 
 @Component({
   selector: 'app-holder-blocks',
@@ -40,28 +41,30 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     DataTableComponent,
     PageHeaderComponent,
   ],
-  styles: [``],
   template: `
     <app-page-header
       title="Holder Blocks (Sperrvermerk)"
       subtitle="§16 eWpG — Legal blocks on holder wallets. All creates and lifts require step-up authentication and dual control.">
-      <button mat-raised-button color="warn" (click)="openCreateDialog()">
-        <mat-icon>lock</mat-icon>
-        Create Block
-      </button>
+      @if (canManage) {
+        <button type="button" mat-raised-button color="warn" (click)="openCreateDialog()">
+          <mat-icon>lock</mat-icon>
+          Create Block
+        </button>
+      }
     </app-page-header>
 
     <rw-data-table
       [columns]="columns"
       [rows]="blocks"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by wallet, entity, type…"
       emptyMessage="No active holder blocks."
-      [actionsTemplate]="rowActions">
+      [actionsTemplate]="canManage ? rowActions : undefined">
     </rw-data-table>
 
     <ng-template #rowActions let-block>
-      <button mat-stroked-button color="warn"
+      <button type="button" mat-stroked-button color="warn"
               (click)="liftBlock(block)"
               matTooltip="Lift block — requires step-up + dual control">
         <mat-icon>lock_open</mat-icon>
@@ -112,8 +115,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn"
                 (click)="submitCreate()"
                 [disabled]="!createForm.walletAddress || !createForm.blockType || !createForm.legalBasis">
           <mat-icon>lock</mat-icon>
@@ -130,6 +133,9 @@ export class HolderBlocksComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly auth = inject(AuthService);
+
+  readonly canManage = this.auth.hasRole('REGISTRY_ADMIN');
 
   blocks: HolderBlock[] = [];
   state: AsyncSectionStatus = 'pending';

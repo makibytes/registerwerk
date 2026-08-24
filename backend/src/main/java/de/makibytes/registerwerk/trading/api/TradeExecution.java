@@ -87,7 +87,7 @@ public class TradeExecution {
     private PaymentOption paymentOption;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "settlement_status", nullable = false, length = 20)
+    @Column(name = "settlement_status", nullable = false, length = 30)
     private SettlementStatus settlementStatus = SettlementStatus.SETTLED;
 
     @Enumerated(EnumType.STRING)
@@ -119,6 +119,19 @@ public class TradeExecution {
      */
     @Column(name = "payment_reference", length = 255)
     private String paymentReference;
+
+    /** Set when the buyer declares payment (status moves to AWAITING_SELLER_CONFIRMATION) —
+     *  the clock the seller-confirmation timeout is measured against. */
+    @Column(name = "payment_declared_at")
+    private Instant paymentDeclaredAt;
+
+    public Instant getPaymentDeclaredAt() {
+        return paymentDeclaredAt;
+    }
+
+    public void setPaymentDeclaredAt(Instant paymentDeclaredAt) {
+        this.paymentDeclaredAt = paymentDeclaredAt;
+    }
 
     public UUID getId() {
         return id;

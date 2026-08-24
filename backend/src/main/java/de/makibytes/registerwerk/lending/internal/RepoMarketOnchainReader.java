@@ -100,6 +100,50 @@ class RepoMarketOnchainReader {
         return callUint256(chainIdentifier, marketAddress, "reserveFactorBps", Collections.emptyList());
     }
 
+    /** Reads and validates all immutable values used by backend quotes and market discovery. */
+    MarketParameters marketParameters(String chainIdentifier, String marketAddress) {
+        if (!hasContractCode(chainIdentifier, marketAddress)) {
+            throw new IllegalArgumentException("No contract is deployed at market address " + marketAddress);
+        }
+        String loanToken = callAddress(chainIdentifier, marketAddress, "loanToken");
+        String collateralToken = callAddress(chainIdentifier, marketAddress, "collateralToken");
+        String priceOracle = callAddress(chainIdentifier, marketAddress, "priceOracle");
+        int loanTokenDecimals = callUint256(chainIdentifier, loanToken, "decimals", Collections.emptyList())
+                .intValueExact();
+        if (loanTokenDecimals < 0 || loanTokenDecimals > 36) {
+            throw new IllegalArgumentException("Loan token decimals must be between 0 and 36");
+        }
+        return new MarketParameters(
+                loanToken,
+                collateralToken,
+                priceOracle,
+                callUint256(chainIdentifier, marketAddress, "maxLtvBps", Collections.emptyList()).intValueExact(),
+                callUint256(chainIdentifier, marketAddress, "lltvBps", Collections.emptyList()).intValueExact(),
+                callUint256(chainIdentifier, marketAddress, "liquidationBonusBps", Collections.emptyList()).intValueExact(),
+                callUint256(chainIdentifier, marketAddress, "baseRateWad", Collections.emptyList()),
+                callUint256(chainIdentifier, marketAddress, "slopeWad", Collections.emptyList()),
+                callUint256(chainIdentifier, marketAddress, "maxPriceAgeSeconds", Collections.emptyList()),
+                callUint256(chainIdentifier, marketAddress, "liquidationGracePeriodSeconds", Collections.emptyList()),
+                loanTokenDecimals);
+    }
+
+    record MarketParameters(
+            String loanTokenAddress,
+            String collateralTokenAddress,
+            String priceOracleAddress,
+            int maxLtvBps,
+            int lltvBps,
+            int liquidationBonusBps,
+            BigInteger baseRateWad,
+            BigInteger slopeWad,
+            BigInteger maxPriceAgeSeconds,
+            BigInteger liquidationGracePeriodSeconds,
+            int loanTokenDecimals) {}
+
+    BigInteger availableLiquidity(String chainIdentifier, String marketAddress, String loanTokenAddress) {
+        return callUint256(chainIdentifier, loanTokenAddress, "balanceOf", List.of(new Address(marketAddress)));
+    }
+
     /**
      * {@code EwpgRepoMarket.borrowPaused() returns (bool)} — the on-chain emergency-pause flag
      * (see {@code EwpgRepoMarket.setBorrowPaused}). Primitive {@code boolean}, not {@code Boolean}:
@@ -131,6 +175,28 @@ class RepoMarketOnchainReader {
     }
 
     record PriceMark(BigInteger pricePerUnit, BigInteger updatedAt) {}
+
+    private boolean hasContractCode(String chainIdentifier, String contractAddress) {
+        try {
+            var response = clientRegistry.getEvmClientByIdentifier(chainIdentifier)
+                    .ethGetCode(contractAddress, DefaultBlockParameterName.LATEST).send();
+            String code = response.getCode();
+            return code != null && !code.equals("0x") && !code.equals("0x0");
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read bytecode at " + contractAddress, e);
+        }
+    }
+
+    private String callAddress(String chainIdentifier, String contractAddress, String functionName) {
+        Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainIdentifier);
+        Function fn = new Function(functionName, Collections.emptyList(),
+                List.of(new TypeReference<Address>() {}));
+        List<Type> decoded = call(web3j, contractAddress, fn);
+        if (decoded.isEmpty()) {
+            throw new IllegalStateException("Empty response calling " + functionName + " on " + contractAddress);
+        }
+        return decoded.get(0).getValue().toString();
+    }
 
     private BigInteger callUint256(String chainIdentifier, String contractAddress, String functionName,
                                     List<Type> inputs) {

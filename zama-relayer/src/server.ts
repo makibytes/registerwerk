@@ -1,9 +1,9 @@
 import express, { type Express, type Request, type Response } from 'express';
-import type { RelayerConfig } from './config';
-import { requireApiKey } from './auth';
-import { encryptInputRouter } from './routes/encryptInput';
-import { operatorDecryptRouter } from './routes/operatorDecrypt';
-import { publicDecryptRouter } from './routes/publicDecrypt';
+import type { RelayerConfig } from './config.js';
+import { requireApiKey } from './auth.js';
+import { encryptInputRouter } from './routes/encryptInput.js';
+import { operatorDecryptRouter } from './routes/operatorDecrypt.js';
+import { publicDecryptRouter } from './routes/publicDecrypt.js';
 
 /**
  * Builds the Express app without starting it — kept separate from `index.ts`'s `listen()` call
@@ -19,7 +19,7 @@ export function createServer(config: RelayerConfig): Express {
     res.json({ status: 'ok', chainId: config.chainId, preset: config.preset });
   });
 
-  // Every /v1/* route requires the shared-secret bearer token (finding #6, Phase 9) — see
+  // Every /v1/* route requires the shared-secret bearer token  — see
   // requireApiKey's doc comment for why this sits here rather than relying on the backend's own
   // RBAC as the only gate.
   app.use('/v1', requireApiKey(config.apiKey));

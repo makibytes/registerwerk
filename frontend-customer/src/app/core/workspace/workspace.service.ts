@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { AuthService } from '../auth/auth.service';
-import { environment } from '../../../environments/environment';
+import { PlatformCapabilitiesService } from '../feature/platform-capabilities';
 
 export type WorkspaceKey = 'INVESTOR' | 'TRADER' | 'ISSUER';
 
@@ -8,6 +8,8 @@ export interface WorkspaceNavLink {
   label: string;
   route: string;
   icon: string;
+  roles?: readonly string[];
+  feature?: 'lending' | 'repoDesk';
 }
 
 export interface WorkspaceDef {
@@ -29,10 +31,9 @@ const WORKSPACES: Record<WorkspaceKey, WorkspaceDef> = {
     icon: 'candlestick_chart',
     links: [
       { label: 'Dashboard', route: '/dashboard', icon: 'grid_view' },
-      ...(environment.lendingEnabled
-        ? [{ label: 'Liquidity', route: '/lending', icon: 'water_drop' }]
-        : []),
-      { label: 'Trading Desk', route: '/trading', icon: 'candlestick_chart' },
+      { label: 'Securities-backed Lending', route: '/lending', icon: 'water_drop', feature: 'lending' },
+      { label: 'Repo Desk', route: '/repo-desk', icon: 'swap_horiz', roles: ['TRADER', 'REGISTRY_ADMIN'], feature: 'repoDesk' },
+      { label: 'Trading Desk', route: '/trading', icon: 'candlestick_chart', roles: ['TRADER', 'REGISTRY_ADMIN'] },
       { label: 'My Positions', route: '/positions', icon: 'account_balance_wallet' },
       { label: 'Marketplace', route: '/marketplace', icon: 'storefront' },
     ],
@@ -44,7 +45,8 @@ const WORKSPACES: Record<WorkspaceKey, WorkspaceDef> = {
     links: [
       { label: 'Dashboard', route: '/dashboard', icon: 'grid_view' },
       { label: 'My Positions', route: '/positions', icon: 'account_balance_wallet' },
-      { label: 'Investments', route: '/investments', icon: 'savings' },
+      { label: 'Investments', route: '/investments', icon: 'savings', roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
+      { label: 'My Orders', route: '/investments/orders', icon: 'receipt_long', roles: ['INVESTOR', 'REGISTRY_ADMIN'] },
       { label: 'Marketplace', route: '/marketplace', icon: 'storefront' },
     ],
   },
@@ -54,9 +56,9 @@ const WORKSPACES: Record<WorkspaceKey, WorkspaceDef> = {
     icon: 'description',
     links: [
       { label: 'Dashboard', route: '/dashboard', icon: 'grid_view' },
-      { label: 'Issuances', route: '/issuances', icon: 'description' },
-      { label: 'My dApps', route: '/publisher', icon: 'widgets' },
-      { label: 'Company Admin', route: '/company-admin', icon: 'manage_accounts' },
+      { label: 'Issuances', route: '/issuances', icon: 'description', roles: ['ISSUER', 'REGISTRY_ADMIN'] },
+      { label: 'My dApps', route: '/publisher', icon: 'widgets', roles: ['DAPP_PUBLISHER', 'COMPANY_ADMIN', 'REGISTRY_ADMIN'] },
+      { label: 'Company Admin', route: '/company-admin', icon: 'manage_accounts', roles: ['COMPANY_ADMIN', 'REGISTRY_ADMIN'] },
       { label: 'Marketplace', route: '/marketplace', icon: 'storefront' },
     ],
   },
@@ -79,6 +81,7 @@ const ELIGIBILITY: Record<WorkspaceKey, string[]> = {
 @Injectable({ providedIn: 'root' })
 export class WorkspaceService {
   private readonly auth = inject(AuthService);
+  private readonly capabilities = inject(PlatformCapabilitiesService);
 
   private readonly _current = signal<WorkspaceKey | null>(null);
   readonly current = this._current.asReadonly();
@@ -87,19 +90,20 @@ export class WorkspaceService {
   eligibleWorkspaces(): WorkspaceDef[] {
     return DEFAULT_PRIORITY
       .filter((key) => ELIGIBILITY[key].some((role) => this.auth.hasRole(role)))
-      .map((key) => WORKSPACES[key]);
+      .map((key) => this.withAccessibleLinks(WORKSPACES[key]));
   }
 
   /** The active workspace definition, initializing from storage or the eligible default. */
   activeWorkspace(): WorkspaceDef {
     const key = this.resolveActiveKey();
-    return WORKSPACES[key];
+    return this.withAccessibleLinks(WORKSPACES[key]);
   }
 
   setWorkspace(key: WorkspaceKey): void {
+    if (!this.isEligible(key)) return;
     this._current.set(key);
     try {
-      localStorage.setItem(STORAGE_KEY, key);
+      window.localStorage.setItem(STORAGE_KEY, key);
     } catch {
       // Storage can be unavailable (private browsing, quota) — the in-memory signal still works
       // for the rest of this session, it just won't be remembered on next login.
@@ -126,9 +130,25 @@ export class WorkspaceService {
     return ELIGIBILITY[key].some((role) => this.auth.hasRole(role));
   }
 
+  private withAccessibleLinks(workspace: WorkspaceDef): WorkspaceDef {
+    return {
+      ...workspace,
+      links: workspace.links.filter(link =>
+        this.featureEnabled(link)
+          && (!link.roles || link.roles.some(role => this.auth.hasRole(role)))
+      ),
+    };
+  }
+
+  private featureEnabled(link: WorkspaceNavLink): boolean {
+    if (link.feature === 'lending') return this.capabilities.lendingEnabled();
+    if (link.feature === 'repoDesk') return this.capabilities.repoDeskEnabled();
+    return true;
+  }
+
   private readStored(): WorkspaceKey | null {
     try {
-      const value = localStorage.getItem(STORAGE_KEY);
+      const value = window.localStorage.getItem(STORAGE_KEY);
       return value === 'INVESTOR' || value === 'TRADER' || value === 'ISSUER' ? value : null;
     } catch {
       return null;

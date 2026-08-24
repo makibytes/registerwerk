@@ -77,6 +77,9 @@ class LendingMarketServiceTest {
         when(marketRepository.existsByChainConfigIdAndMarketAddressIgnoreCase(chainConfigId, marketAddress))
                 .thenReturn(false);
         ChainConfig chainConfig = new ChainConfig();
+        chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
+        chainConfig.setChainType(ChainConfig.ChainType.EVM);
+        chainConfig.setEnabled(true);
         when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
 
         UUID assetId = UUID.randomUUID();
@@ -84,6 +87,7 @@ class LendingMarketServiceTest {
         asset.setJurisdiction(Jurisdiction.DE_EWPG);
         asset.setName("Green Bond 2030");
         when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(onchainReader.marketParameters("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(parameters());
 
         var complianceMetadata = new JurisdictionRequirementConfig.ComplianceMetadata(
                 List.of("OPEN_SANCTIONS"), "BaFin", "https://bafin.example/dora", false, false,
@@ -93,13 +97,10 @@ class LendingMarketServiceTest {
         when(jurisdictionConfig.getProfile(Jurisdiction.DE_EWPG)).thenReturn(profile);
 
         var view = service.registerMarket(
-                chainConfigId, marketAddress, null, assetId,
-                "0x2222222222222222222222222222222222222b", "0x3333333333333333333333333333333333333c",
-                "aueur", 8000, 500, BigInteger.valueOf(20_000_000_000_000_000L),
-                BigInteger.valueOf(180_000_000_000_000_000L), "0x4444444444444444444444444444444444444d",
-                actorId, "REGISTRY_ADMIN");
+                chainConfigId, marketAddress, null, assetId, "aueur", actorId, "REGISTRY_ADMIN");
 
         assertThat(view.market().getMarketAddress()).isEqualTo(marketAddress);
+        assertThat(view.market().getMaxLtvBps()).isEqualTo(7000);
         assertThat(view.jurisdiction()).isEqualTo(Jurisdiction.DE_EWPG);
         assertThat(view.collateralAssetName()).isEqualTo("Green Bond 2030");
         assertThat(view.micarApplicable()).isFalse();
@@ -119,27 +120,27 @@ class LendingMarketServiceTest {
                 .thenReturn(true);
 
         assertThatThrownBy(() -> service.registerMarket(
-                chainConfigId, marketAddress, null, null, "0xcollateral", "0xloan", null,
-                8000, 500, BigInteger.ZERO, BigInteger.ZERO, "0xoracle", actorId, "REGISTRY_ADMIN"))
+                chainConfigId, marketAddress, null, UUID.randomUUID(), null, actorId, "REGISTRY_ADMIN"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("already registered");
     }
 
     @Test
-    @DisplayName("a market with no linked collateral asset resolves to a null jurisdiction, not an error")
-    void marketWithoutLinkedAssetHasNullJurisdiction() {
+    @DisplayName("rejects a market whose collateral asset is not registered")
+    void rejectsUnknownCollateralAsset() {
         when(marketRepository.existsByChainConfigIdAndMarketAddressIgnoreCase(chainConfigId, marketAddress))
                 .thenReturn(false);
-        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(new ChainConfig()));
+        ChainConfig chain = new ChainConfig();
+        chain.setChainType(ChainConfig.ChainType.EVM);
+        chain.setEnabled(true);
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chain));
+        UUID missingAsset = UUID.randomUUID();
+        when(assetRepository.findById(missingAsset)).thenReturn(Optional.empty());
 
-        var view = service.registerMarket(
-                chainConfigId, marketAddress, null, null, "0xcollateral", "0xloan", null,
-                8000, 500, BigInteger.ZERO, BigInteger.ZERO, "0xoracle", actorId, "REGISTRY_ADMIN");
-
-        assertThat(view.jurisdiction()).isNull();
-        assertThat(view.collateralAssetName()).isNull();
-        assertThat(view.micarApplicable()).isNull();
-        assertThat(view.defiInteropModel()).isNull();
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, missingAsset, null, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Asset");
     }
 
     @Test
@@ -163,16 +164,19 @@ class LendingMarketServiceTest {
     }
 
     @Test
-    @DisplayName("quote computes max-borrow from live oracle price and the market's LLTV")
-    void quoteComputesMaxBorrowFromLivePriceAndLltv() {
+    @DisplayName("quote computes max-borrow from live oracle price and the lower origination LTV")
+    void quoteComputesMaxBorrowFromLivePriceAndMaxLtv() {
         UUID marketId = UUID.randomUUID();
         LendingMarket market = new LendingMarket();
         market.setId(marketId);
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
         market.setCollateralTokenAddress("0xcollateral");
+        market.setLoanTokenAddress("0xloan");
         market.setPriceOracleAddress("0xoracle");
+        market.setMaxLtvBps(7000);
         market.setLltvBps(8000);
+        market.setMaxPriceAgeSeconds(BigInteger.valueOf(3600));
         market.setStatus(LendingMarketStatus.ACTIVE);
         when(marketRepository.findById(marketId)).thenReturn(Optional.of(market));
 
@@ -181,15 +185,65 @@ class LendingMarketServiceTest {
         when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
 
         when(onchainReader.price("ETHEREUM_SEPOLIA", "0xoracle", "0xcollateral"))
-                .thenReturn(new RepoMarketOnchainReader.PriceMark(BigInteger.valueOf(100_000_000L), BigInteger.valueOf(1_700_000_000L)));
+                .thenReturn(new RepoMarketOnchainReader.PriceMark(
+                        BigInteger.valueOf(100_000_000L), BigInteger.valueOf(java.time.Instant.now().getEpochSecond())));
         when(onchainReader.utilization("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(BigInteger.valueOf(500_000_000_000_000_000L));
         when(onchainReader.borrowRate("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(BigInteger.valueOf(110_000_000_000_000_000L));
+        when(onchainReader.availableLiquidity("ETHEREUM_SEPOLIA", marketAddress, "0xloan"))
+                .thenReturn(BigInteger.valueOf(20_000_000_000L));
 
         var quote = service.quote(marketId, BigInteger.valueOf(100));
 
-        // 100 units * 100e6 price = 10_000e6 collateral value; 80% LLTV = 8_000e6 max borrow.
-        assertThat(quote.maxBorrowAmount()).isEqualTo(BigInteger.valueOf(8_000_000_000L));
+        // 100 units * 100e6 price = 10_000e6 collateral value; 70% origination cap = 7_000e6.
+        assertThat(quote.maxBorrowAmount()).isEqualTo(BigInteger.valueOf(7_000_000_000L));
         assertThat(quote.pricePerUnit()).isEqualTo(BigInteger.valueOf(100_000_000L));
+        assertThat(quote.oracleReliable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("quote never advertises more than the market can actually lend")
+    void quoteIsCappedAtAvailableLiquidity() {
+        UUID marketId = UUID.randomUUID();
+        LendingMarket market = new LendingMarket();
+        market.setId(marketId);
+        market.setChainConfigId(chainConfigId);
+        market.setMarketAddress(marketAddress);
+        market.setCollateralTokenAddress("0xcollateral");
+        market.setLoanTokenAddress("0xloan");
+        market.setPriceOracleAddress("0xoracle");
+        market.setMaxLtvBps(7000);
+        market.setLltvBps(8000);
+        market.setMaxPriceAgeSeconds(BigInteger.ZERO);
+        market.setStatus(LendingMarketStatus.ACTIVE);
+        when(marketRepository.findById(marketId)).thenReturn(Optional.of(market));
+
+        ChainConfig chainConfig = new ChainConfig();
+        chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
+        when(onchainReader.price("ETHEREUM_SEPOLIA", "0xoracle", "0xcollateral"))
+                .thenReturn(new RepoMarketOnchainReader.PriceMark(
+                        BigInteger.valueOf(100_000_000L), BigInteger.valueOf(1)));
+        when(onchainReader.utilization("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(BigInteger.ZERO);
+        when(onchainReader.borrowRate("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(BigInteger.ZERO);
+        when(onchainReader.availableLiquidity("ETHEREUM_SEPOLIA", marketAddress, "0xloan"))
+                .thenReturn(BigInteger.valueOf(2_000_000_000L));
+
+        var quote = service.quote(marketId, BigInteger.valueOf(100));
+
+        assertThat(quote.maxBorrowAmount()).isEqualTo(BigInteger.valueOf(2_000_000_000L));
+        assertThat(quote.availableLiquidity()).isEqualTo(BigInteger.valueOf(2_000_000_000L));
+        assertThat(quote.oracleReliable()).isTrue();
+    }
+
+    private RepoMarketOnchainReader.MarketParameters parameters() {
+        return new RepoMarketOnchainReader.MarketParameters(
+                "0x3333333333333333333333333333333333333333",
+                "0x2222222222222222222222222222222222222222",
+                "0x4444444444444444444444444444444444444444",
+                7000, 8000, 500,
+                BigInteger.valueOf(20_000_000_000_000_000L),
+                BigInteger.valueOf(180_000_000_000_000_000L),
+                BigInteger.valueOf(3600), BigInteger.valueOf(7200), 6);
     }
 
     @Test

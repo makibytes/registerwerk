@@ -122,9 +122,9 @@ public class HolderService {
      * §19 statement and audit trail reflect it.
      */
     public AssetHolder updateSingleEntryAttributes(
-            UUID holderId, Boolean isConsumer, String thirdPartyRights,
+            UUID assetId, UUID holderId, Boolean isConsumer, String thirdPartyRights,
             String disposalRestrictions, String legalCapacityNote, UUID actorId, String actorRole) {
-        AssetHolder holder = assetHolderRepository.findById(holderId)
+        AssetHolder holder = assetHolderRepository.findByIdAndAssetId(holderId, assetId)
             .orElseThrow(() -> new EntityNotFoundException("AssetHolder", holderId));
         if (holder.getEntryType() != de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL) {
             throw new IllegalArgumentException(
@@ -170,8 +170,8 @@ public class HolderService {
      * table but are excluded from compliance-facing reads (see
      * {@code AssetHolderRepository.findActive*}).
      */
-    public void removeHolder(UUID holderId, UUID actorId, String actorRole) {
-        AssetHolder holder = assetHolderRepository.findById(holderId)
+    public void removeHolder(UUID assetId, UUID holderId, UUID actorId, String actorRole) {
+        AssetHolder holder = assetHolderRepository.findByIdAndAssetId(holderId, assetId)
             .orElseThrow(() -> new EntityNotFoundException("AssetHolder", holderId));
         holder.setRemovedAt(Instant.now());
         assetHolderRepository.save(holder);
@@ -186,8 +186,8 @@ public class HolderService {
     }
 
     @Transactional(readOnly = true)
-    public AssetHolder getHolder(UUID holderId) {
-        return assetHolderRepository.findById(holderId)
+    public AssetHolder getHolder(UUID assetId, UUID holderId) {
+        return assetHolderRepository.findByIdAndAssetId(holderId, assetId)
             .orElseThrow(() -> new EntityNotFoundException("AssetHolder", holderId));
     }
 

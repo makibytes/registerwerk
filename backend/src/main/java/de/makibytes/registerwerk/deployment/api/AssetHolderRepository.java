@@ -25,6 +25,8 @@ public interface AssetHolderRepository extends JpaRepository<AssetHolder, UUID> 
 
     Optional<AssetHolder> findByAssetIdAndWalletAddress(UUID assetId, String walletAddress);
 
+    Optional<AssetHolder> findByIdAndAssetId(UUID id, UUID assetId);
+
     // ── Active-only variants (excludes soft-deleted rows, AssetHolder.removedAt) ──────────
     //
     // A removed holder must disappear from compliance/customer-facing listings (register

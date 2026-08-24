@@ -10,23 +10,7 @@ import {
   custom,
 } from 'viem';
 
-/**
- * Thin EIP-1193 wallet layer built on viem — the piece `docs/platform/account-abstraction.md`
- * flags as "not yet built": before this, `frontend-customer` had exactly one
- * `window.ethereum.request(...)` call site (`company-admin/org-identity`), duplicated ad hoc
- * wherever a component needed a signature. Every wallet interaction in the app — org-identity
- * binding, the repo/lending borrow stepper, supply/withdraw — now goes through this single
- * service instead.
- *
- * Scope: this covers the plain injected-EOA path (MetaMask, Rabby, any EIP-1193 provider),
- * which is what a trader uses today. The EIP-7702 smart-account upgrade + ERC-4337 sponsored
- * transactions live in {@link SponsoredTxService} as a separate, optional layer on top — see
- * that service for why it's scoped differently (it needs a configured bundler endpoint, a real
- * external dependency this environment doesn't ship by default). Passkey/`EwpgPasskeyAccount`
- * support is intentionally not implemented here: correctly encoding a WebAuthn assertion into
- * the signature format `SignerWebAuthn` expects is substantial, standalone work — see the
- * "Roadmap" section of the borrow stepper's UI copy rather than a faked implementation.
- */
+/** Shared viem layer for browser-wallet connection, signing, and direct transactions. */
 @Injectable({ providedIn: 'root' })
 export class WalletService {
   private readonly _address = signal<Address | null>(null);
@@ -75,7 +59,7 @@ export class WalletService {
     } catch (err: unknown) {
       const message = this.extractMessage(err, 'Wallet connection failed.');
       this._error.set(message);
-      throw new Error(message);
+      throw new Error(message, { cause: err });
     } finally {
       this._connecting.set(false);
     }
@@ -95,7 +79,7 @@ export class WalletService {
     try {
       return await client.signMessage({ account, message });
     } catch (err: unknown) {
-      throw new Error(this.extractMessage(err, 'Signing failed or was rejected.'));
+      throw new Error(this.extractMessage(err, 'Signing failed or was rejected.'), { cause: err });
     }
   }
 
@@ -123,7 +107,7 @@ export class WalletService {
         message: params.message,
       } as Parameters<WalletClient['signTypedData']>[0]);
     } catch (err: unknown) {
-      throw new Error(this.extractMessage(err, 'Typed-data signing failed or was rejected.'));
+      throw new Error(this.extractMessage(err, 'Typed-data signing failed or was rejected.'), { cause: err });
     }
   }
 
@@ -157,7 +141,7 @@ export class WalletService {
       >[0]);
       return await walletClient.writeContract(request as Parameters<WalletClient['writeContract']>[0]);
     } catch (err: unknown) {
-      throw new Error(this.extractMessage(err, 'Transaction failed or was rejected.'));
+      throw new Error(this.extractMessage(err, 'Transaction failed or was rejected.'), { cause: err });
     }
   }
 

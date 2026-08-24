@@ -44,25 +44,26 @@ const RAIL_TYPE_LABELS: Record<string, string> = {
       [columns]="columns"
       [rows]="rails"
       [state]="state"
+      (retry)="load()"
       filterPlaceholder="Filter by code or name…"
       emptyMessage="No payment rails configured yet."
       [actionsTemplate]="actions">
-      <button tableToolbar mat-raised-button color="primary" (click)="openCreateDialog()">
+      <button type="button" tableToolbar mat-raised-button color="primary" (click)="openCreateDialog()">
         <mat-icon>add</mat-icon>
         Add payment rail
       </button>
     </rw-data-table>
 
     <ng-template #actions let-rail>
-      <button mat-icon-button color="primary" (click)="openEditDialog(rail)" matTooltip="Edit (step-up)">
+      <button type="button" mat-icon-button color="primary" (click)="openEditDialog(rail)" matTooltip="Edit (step-up)">
         <mat-icon>edit</mat-icon>
       </button>
       @if (rail.enabled) {
-        <button mat-icon-button color="warn" (click)="disable(rail)" matTooltip="Disable (step-up)">
+        <button type="button" mat-icon-button color="warn" (click)="disable(rail)" matTooltip="Disable (step-up)">
           <mat-icon>toggle_off</mat-icon>
         </button>
       } @else {
-        <button mat-icon-button color="primary" (click)="enable(rail)" matTooltip="Enable (step-up)">
+        <button type="button" mat-icon-button color="primary" (click)="enable(rail)" matTooltip="Enable (step-up)">
           <mat-icon>toggle_on</mat-icon>
         </button>
       }

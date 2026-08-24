@@ -6,13 +6,14 @@ import de.makibytes.registerwerk.trading.api.TradingAssetType;
 import de.makibytes.registerwerk.trading.api.TradingVenueCode;
 import de.makibytes.registerwerk.trading.web.dto.*;
 import de.makibytes.registerwerk.shared.api.PageResponse;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.trading.internal.TradingService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -114,6 +115,30 @@ public class TradingController {
         return ResponseEntity.ok(tradingService.listHistory(extractEntityId(authentication)));
     }
 
+    @GetMapping("/history/{executionId}/confirmation")
+    public ResponseEntity<byte[]> downloadConfirmation(@PathVariable UUID executionId, Authentication authentication) {
+        return tradingService.renderConfirmation(extractEntityId(authentication), executionId)
+                .map(pdf -> ResponseEntity.ok()
+                        .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                                "attachment; filename=\"trade-confirmation-" + executionId + ".pdf\"")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_PDF)
+                        .body(pdf))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/history/{executionId}/confirmation/iso20022")
+    public ResponseEntity<byte[]> downloadIso20022Confirmation(@PathVariable UUID executionId, Authentication authentication) {
+        return tradingService.renderIso20022Confirmation(extractEntityId(authentication), executionId)
+                .map(xml -> ResponseEntity.ok()
+                        .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                                "attachment; filename=\"trade-confirmation-" + executionId + ".xml\"")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_XML)
+                        .body(xml))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /** Buyer declares payment on a PENDING trade — does NOT credit the register; moves it to
+     *  AWAITING_SELLER_CONFIRMATION and waits for the seller to confirm via {@link #confirmPayment}. */
     @PostMapping("/history/{executionId}/settle")
     public ResponseEntity<TradeExecutionResponse> settle(
             @PathVariable UUID executionId,
@@ -124,6 +149,30 @@ public class TradingController {
                 extractActorId(authentication),
                 executionId,
                 request.paymentReference()));
+    }
+
+    /** Seller confirms receipt of the buyer's declared payment — the register is credited here. */
+    @PostMapping("/history/{executionId}/confirm-payment")
+    public ResponseEntity<TradeExecutionResponse> confirmPayment(
+            @PathVariable UUID executionId,
+            Authentication authentication) {
+        return ResponseEntity.ok(tradingService.confirmPaymentReceived(
+                extractEntityId(authentication),
+                extractActorId(authentication),
+                executionId));
+    }
+
+    /** Seller disputes the buyer's declared payment (claims it was never received). */
+    @PostMapping("/history/{executionId}/dispute-payment")
+    public ResponseEntity<TradeExecutionResponse> disputePayment(
+            @PathVariable UUID executionId,
+            @RequestBody @Valid DisputeTradeRequest request,
+            Authentication authentication) {
+        return ResponseEntity.ok(tradingService.disputePayment(
+                extractEntityId(authentication),
+                extractActorId(authentication),
+                executionId,
+                request.reason()));
     }
 
     @PostMapping("/history/{executionId}/cancel")
@@ -139,26 +188,14 @@ public class TradingController {
     }
 
     private UUID extractEntityId(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof Jwt jwt) {
-            String entityId = jwt.getClaimAsString("entity_id");
-            if (entityId == null) {
-                entityId = jwt.getClaimAsString("entityId");
-            }
-            if (entityId != null) {
-                return UUID.fromString(entityId);
-            }
+        UUID entityId = SecurityUtils.extractEntityId(authentication);
+        if (entityId == null) {
+            throw new AccessDeniedException("Authenticated entity context is required for trading");
         }
-        throw new IllegalArgumentException("Authenticated entity context is required for trading");
+        return entityId;
     }
 
     private UUID extractActorId(Authentication authentication) {
-        if (authentication == null) {
-            return null;
-        }
-        try {
-            return UUID.fromString(authentication.getName());
-        } catch (IllegalArgumentException ignored) {
-            return null;
-        }
+        return SecurityUtils.extractUserId(authentication);
     }
 }

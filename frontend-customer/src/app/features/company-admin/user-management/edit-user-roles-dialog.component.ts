@@ -32,8 +32,8 @@ interface EditUserRolesDialogData {
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
-      <button mat-flat-button color="primary" [disabled]="roles.length === 0" (click)="save()">Save</button>
+      <button mat-button type="button" mat-dialog-close>Cancel</button>
+      <button mat-flat-button color="primary" type="button" [disabled]="roles.length === 0" (click)="save()">Save</button>
     </mat-dialog-actions>
   `,
   styles: [`
@@ -61,6 +61,6 @@ export class EditUserRolesDialogComponent {
   ];
 
   save(): void {
-    this.dialogRef.close(this.roles);
+    this.dialogRef.close([...new Set(this.roles)]);
   }
 }

@@ -53,6 +53,30 @@ public class VaultRequest {
     @Column(name = "nav_at_fulfill", precision = 38, scale = 18)
     private BigDecimal navAtFulfill;
 
+    /** Set when a {@code cancelDepositRequest}/{@code cancelRedeemRequest} tx is submitted;
+     *  mirrors {@link #fulfilledTx} for the cancel path. The two are mutually exclusive per row —
+     *  a request can only ever be fulfilled or cancelled once. */
+    @Column(name = "cancelled_tx", length = 80)
+    private String cancelledTx;
+
+    /** FK to {@code chain_config} — set only once {@link #confirmed} is true. */
+    @Column(name = "chain_config_id")
+    private UUID chainConfigId;
+
+    @Column(name = "block_number")
+    private Long blockNumber;
+
+    /** Exact block occurrence which produced the current resolution. */
+    @Column(name = "block_hash", length = 128)
+    private String blockHash;
+
+    /** True once {@link VaultConfirmationListener} has confirmed whichever tx ({@link
+     *  #fulfilledTx} or {@link #cancelledTx}) was submitted and applied the corresponding status
+     *  transition. {@link #requestStatus} deliberately stays {@code PENDING} until then — see
+     *  that field's usage in {@code Erc7540AdminService} for why. */
+    @Column(name = "confirmed", nullable = false)
+    private boolean confirmed = false;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -91,4 +115,19 @@ public class VaultRequest {
 
     public BigDecimal getNavAtFulfill() { return navAtFulfill; }
     public void setNavAtFulfill(BigDecimal navAtFulfill) { this.navAtFulfill = navAtFulfill; }
+
+    public String getCancelledTx() { return cancelledTx; }
+    public void setCancelledTx(String cancelledTx) { this.cancelledTx = cancelledTx; }
+
+    public UUID getChainConfigId() { return chainConfigId; }
+    public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
+
+    public Long getBlockNumber() { return blockNumber; }
+    public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
+
+    public boolean isConfirmed() { return confirmed; }
+    public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }
 }

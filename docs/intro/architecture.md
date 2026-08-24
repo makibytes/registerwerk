@@ -16,8 +16,8 @@ graph TB
     U["Browser"]
 
     subgraph Frontends
-        FO["Operator Frontend<br/>Angular 21 · :4200"]
-        FC["Customer Frontend<br/>Angular 21 · :4201"]
+        FO["Operator Frontend<br/>Angular 22 · :4200"]
+        FC["Customer Frontend<br/>Angular 22 · :4201"]
     end
 
     subgraph Gateway
@@ -66,7 +66,7 @@ Both frontends are always opened **directly** by the browser at their own port �
 
 The **operator frontend** connects its API calls directly (nginx proxy → `backend:8080`). It uses a built-in HS256 JWT login (`POST /api/v1/public/auth/login`) and never passes through Kong. This keeps the operator portal functional even when Kong is down.
 
-The **customer frontend**'s API calls go through Kong, which adds rate limiting, response caching, and security headers in front of the backend. JWT validation itself always happens in the Spring backend (`JwtEntityClaimsConverter` reads `roles`/entity claims straight off the token) — Kong's OSS build here does not validate JWTs or inject entity headers. An `openid-connect` plugin exists as an optional, Enterprise/Konnect-only add-on (`gateway/plugins/oidc-entra.yml`) for deployments that want JWT termination at the gateway too.
+The **customer frontend**'s API calls go through Kong, which adds rate limiting, response caching, and security headers in front of the backend. JWT validation itself always happens in the Spring backend (`SecurityConfig` reads the `roles` claim straight off the token, and `SecurityUtils.extractEntityId` the entity claim) — Kong's OSS build here does not validate JWTs or inject entity headers. An `openid-connect` plugin exists as an optional, Enterprise/Konnect-only add-on (`gateway/plugins/oidc-entra.yml`) for deployments that want JWT termination at the gateway too.
 
 ---
 
@@ -99,7 +99,7 @@ sequenceDiagram
 
 ## Spring Modulith — bounded contexts
 
-The backend is organised into modules, each representing a single domain responsibility. Modules communicate through [Spring Modulith events](platform/modules.md) (transactional outbox), never through direct inter-module service calls into `internal/` packages.
+The backend is organised into 34 modules, each representing a single domain responsibility — every top-level package under `de.makibytes.registerwerk` carries `@ApplicationModule`. Modules communicate through [Spring Modulith events](../platform/modules.md) (transactional outbox), never through direct inter-module service calls into `internal/` packages.
 
 | Module | Responsibility |
 |---|---|
@@ -130,6 +130,13 @@ The backend is organised into modules, each representing a single domain respons
 | `orgidentity` | Onchain org identity (wallet↔org binding), permission delegation |
 | `marketplace` | dApp marketplace: manifest review, step-up + 4-eyes approval, onchain anchoring |
 | `payment` | Operator-curated payment rail catalog with disclosure and attestation fields for the DvP cash leg; no independent MiCAR verification |
+| `entra` | Microsoft Graph adapter: 2FA status, operator support console, temporary access passes |
+| `lending` | Isolated collateralised lending markets, health factors, liquidation |
+| `registerstatement` | §19(2) eWpG register statements — generation and retention |
+| `registertransfer` | Register-side transfers, including §24 forced transfers |
+| `support` | Operator support tooling |
+| `bootstrap` | Startup wiring, demo-data seeding, production-readiness checks |
+| `infrastructure` | Cross-cutting web, persistence and client configuration |
 
 See [Module Architecture](../platform/modules.md) for the full dependency graph and design rationale.
 

@@ -15,11 +15,12 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.crypto.Credentials;
+import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -67,8 +68,8 @@ public class TokenAdminService implements TokenAdminPort {
 
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetLookupPort assetLookupPort;
-    private final BlockchainClientRegistry clientRegistry;
     private final EvmContractService evmContractService;
+    private final de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions;
     private final BlockchainTransactionService txService;
     private final TravelRuleGate travelRuleGate;
     private final HolderBlockGate holderBlockGate;
@@ -78,8 +79,8 @@ public class TokenAdminService implements TokenAdminPort {
     public TokenAdminService(
             AssetDeploymentRepository deploymentRepository,
             AssetLookupPort assetLookupPort,
-            BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
+            de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions,
             BlockchainTransactionService txService,
             TravelRuleGate travelRuleGate,
             HolderBlockGate holderBlockGate,
@@ -87,8 +88,8 @@ public class TokenAdminService implements TokenAdminPort {
             ZamaRelayerClient zamaRelayerClient) {
         this.deploymentRepository = deploymentRepository;
         this.assetLookupPort = assetLookupPort;
-        this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
+        this.durableTransactions = durableTransactions;
         this.txService = txService;
         this.travelRuleGate = travelRuleGate;
         this.holderBlockGate = holderBlockGate;
@@ -300,8 +301,8 @@ public class TokenAdminService implements TokenAdminPort {
                     + "(registerwerk.zama.relayer-url) to encrypt the burn amount.");
         }
         requireNotBlocked(from);
-        String operatorAddress = evmContractService.credentials(
-                new ChainDescriptor(dep.getChain(), dep.getNetwork())).getAddress();
+        String operatorAddress = evmContractService.signer(
+                new ChainDescriptor(dep.getChain(), dep.getNetwork())).address();
         ZamaRelayerClient.EncryptedInput encrypted =
                 zamaRelayerClient.encryptInput(dep.getContractAddress(), operatorAddress, amount);
 
@@ -343,8 +344,8 @@ public class TokenAdminService implements TokenAdminPort {
                     + "(registerwerk.zama.relayer-url) to encrypt the mint amount.");
         }
         requireNotBlocked(toAddress);
-        String operatorAddress = evmContractService.credentials(
-                new ChainDescriptor(dep.getChain(), dep.getNetwork())).getAddress();
+        String operatorAddress = evmContractService.signer(
+                new ChainDescriptor(dep.getChain(), dep.getNetwork())).address();
         ZamaRelayerClient.EncryptedInput encrypted =
                 zamaRelayerClient.encryptInput(dep.getContractAddress(), operatorAddress, amount);
 
@@ -399,6 +400,60 @@ public class TokenAdminService implements TokenAdminPort {
                 .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));
         if (asset.tokenStandard() != TokenStandard.CONF_ERC20 && asset.tokenStandard() != TokenStandard.CONF_ERC3643) {
             throw new IllegalArgumentException("This operation is only available for confidential token standards");
+        }
+        return asset;
+    }
+
+    // ── Confidential ERC-3643 pause / freeze  ───────────
+    //
+    // ConfidentialERC3643.sol implements pause()/unpause()/setAddressFrozen(address,bool) — the
+    // eWpG §24/MiCAR Art. 36,84 corrective-action machinery every OTHER T-REX-family token
+    // already exposes here — but confidential deployments were previously routed to neither this
+    // class's plaintext pause()/freezeAddress() (requireEvmToken() explicitly rejects
+    // CONF_ERC3643, redirecting it to Erc3643LifecycleService) nor Erc3643LifecycleService
+    // (which requires an Erc3643Suite row that confidential deployments — deployed via
+    // EwpgConfidentialFactory, not EwpgTREXFactory — never have), leaving them operationally
+    // unreachable from either admin surface. Unlike confidentialForceBurn/confidentialMint,
+    // these three functions take no encrypted arguments, so no relayer round-trip is needed.
+
+    public UUID confidentialPause(UUID deploymentId, UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialPause on deployment={}", deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
+        Function fn = new Function("pause", Collections.emptyList(), Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialPause", Map.of(), actorId, actorRole);
+    }
+
+    public UUID confidentialUnpause(UUID deploymentId, UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialUnpause on deployment={}", deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
+        Function fn = new Function("unpause", Collections.emptyList(), Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialUnpause", Map.of(), actorId, actorRole);
+    }
+
+    /**
+     * ConfidentialERC3643.setAddressFrozen(address,bool) toggles freeze state via a single
+     * function (unlike the plaintext freezeAddress/unfreezeAddress pair), so one method covers
+     * both directions.
+     */
+    public UUID confidentialSetAddressFrozen(UUID deploymentId, String walletAddress, boolean frozen,
+                                             UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialSetAddressFrozen={} frozen={} on deployment={}",
+                walletAddress, frozen, deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
+        Function fn = new Function("setAddressFrozen",
+                Arrays.asList(new Address(walletAddress), new Bool(frozen)), Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialSetAddressFrozen",
+                Map.of("address", walletAddress, "frozen", frozen), actorId, actorRole);
+    }
+
+    private AssetLookupPort.AssetInfo requireConfidentialErc3643Token(AssetDeployment dep) {
+        AssetLookupPort.AssetInfo asset = assetLookupPort.findById(dep.getAssetId())
+                .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));
+        if (asset.tokenStandard() != TokenStandard.CONF_ERC3643) {
+            throw new IllegalArgumentException("This operation is only available for confidential ERC-3643 tokens");
         }
         return asset;
     }
@@ -476,11 +531,11 @@ public class TokenAdminService implements TokenAdminPort {
         }
         if (standard == TokenStandard.SPL || standard == TokenStandard.SPL_2022) {
             throw new UnsupportedOperationException(
-                    "SPL token admin controls go through SolanaTokenAdminService (Phase-4 implementation).");
+                    "SPL token admin controls go through SolanaTokenAdminService (implementation).");
         }
         if (standard == TokenStandard.SPL_2022_BOND || standard == TokenStandard.SPL_2022_CONFIDENTIAL) {
             throw new UnsupportedOperationException(
-                    "Token-2022 extension-preset admin operations go through SolanaTokenAdminService (Phase-4 implementation).");
+                    "Token-2022 extension-preset admin operations go through SolanaTokenAdminService (implementation).");
         }
         if (standard == TokenStandard.ERC3525 || standard == TokenStandard.STARKNET_ERC3525) {
             throw new IllegalArgumentException(
@@ -496,7 +551,7 @@ public class TokenAdminService implements TokenAdminPort {
         if (standard == TokenStandard.DAML_BOND_FIXED || standard == TokenStandard.DAML_BOND_FLOATING
                 || standard == TokenStandard.DAML_BOND_ZERO) {
             throw new IllegalArgumentException(
-                    "DAML Finance bond admin operations (coupon payment, rate fixing, redemption, early call) " +
+                    "Registerwerk Daml bond lifecycle operations (coupon authorization, rate fixing, redemption, early call) " +
                     "go through CantonBondOperations (/api/v1/deployments/{id}/coupon-payment etc.).");
         }
         if (dep.getContractAddress() == null || dep.getContractAddress().startsWith("0x-PENDING")) {
@@ -512,15 +567,21 @@ public class TokenAdminService implements TokenAdminPort {
      */
     private UUID submitAdmin(AssetDeployment dep, AssetLookupPort.AssetInfo asset, Function fn, String methodName,
                               Map<String, Object> params, UUID actorId, String actorRole) {
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        Credentials creds = evmContractService.credentials(descriptor);
-        String txHash = evmContractService.submit(web3j, creds, dep.getContractAddress(), fn);
+        String txHash = durableTransactions.submit(
+                requireChainConfigId(dep), dep.getContractAddress(), fn, params);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 
         return txService.record(txHash, methodName, dep.getId(), asset.id(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
+    }
+
+    private UUID requireChainConfigId(AssetDeployment deployment) {
+        if (deployment.getChainConfigId() == null) {
+            throw new IllegalStateException(
+                    "Confirmed EVM deployment is missing chainConfigId: " + deployment.getId());
+        }
+        return deployment.getChainConfigId();
     }
 
     private static String forcedTransferMethodName(TokenStandard standard) {

@@ -27,6 +27,13 @@ public interface EntityMapper {
     @Mapping(target = "idpIssuerUrl", ignore = true)
     @Mapping(target = "idpClientId", ignore = true)
     @Mapping(target = "idpClientSecret", ignore = true)
+    @Mapping(target = "idpTenantId", ignore = true)
+    @Mapping(target = "idpMfaTrusted", ignore = true)
+    @Mapping(target = "identityModel", ignore = true)
+    @Mapping(target = "clientCategory", ignore = true)
+    @Mapping(target = "clientCategoryClassifiedAt", ignore = true)
+    @Mapping(target = "clientCategoryClassifiedBy", ignore = true)
+    @Mapping(target = "assignedRelationshipManagerId", ignore = true)
     LegalEntity toEntity(EntityCreateRequest request);
 
     /**

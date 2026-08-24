@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
 import de.makibytes.registerwerk.blockchain.api.CantonBondOperations;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.chain.api.Network;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.stereotype.Service;
@@ -18,15 +19,15 @@ import java.util.concurrent.CompletableFuture;
 @ConditionalOnMissingClass("de.makibytes.registerwerk.blockchain.api.CantonBondService")
 class CantonBondDisabledStub implements CantonBondOperations {
 
-    private static CompletableFuture<String> disabled() {
+    private static <T> CompletableFuture<T> disabled() {
         return CompletableFuture.failedFuture(
                 new UnsupportedOperationException(
                         "Canton bond operations are not enabled. Rebuild with -Pcanton to activate Canton support."));
     }
 
-    @Override public CompletableFuture<String> createFixedBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
-    @Override public CompletableFuture<String> createFloatingBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
-    @Override public CompletableFuture<String> createZeroBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
+    @Override public CompletableFuture<TokenDeploymentResult> createFixedBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
+    @Override public CompletableFuture<TokenDeploymentResult> createFloatingBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
+    @Override public CompletableFuture<TokenDeploymentResult> createZeroBond(UUID a, Network n, String p, BondCreationTerms t, UUID actorId, String actorRole) { return disabled(); }
     @Override public CompletableFuture<String> payCoupon(UUID dep, Instant date, BigDecimal amt, UUID actor) { return disabled(); }
     @Override public CompletableFuture<String> fixFloatingRate(UUID dep, BigDecimal rate, Instant date, UUID actor) { return disabled(); }
     @Override public CompletableFuture<String> redeem(UUID dep, Instant date, UUID actor) { return disabled(); }

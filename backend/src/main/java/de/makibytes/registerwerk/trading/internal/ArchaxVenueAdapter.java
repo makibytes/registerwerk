@@ -29,9 +29,9 @@ class ArchaxVenueAdapter implements TradingVenueAdapter {
     private final RestClient rest;
     private final TradingVenueMetadata meta;
 
-    ArchaxVenueAdapter(TradingProperties properties) {
+    ArchaxVenueAdapter(TradingProperties properties, RestClient.Builder restClientBuilder) {
         TradingProperties.VenueProperties cfg = properties.venue(TradingVenueCode.ARCHAX);
-        this.rest = RestClient.builder()
+        this.rest = restClientBuilder
                 .baseUrl(cfg.getBaseUrl())
                 .defaultHeader("X-API-Key", cfg.getApiKey() != null ? cfg.getApiKey() : "")
                 .build();

@@ -44,8 +44,14 @@ import { CompanyService } from '../../../core/api/company.service';
         <a mat-tab-link routerLink="/company-admin/idp" routerLinkActive #rla2="routerLinkActive" [active]="rla2.isActive">
           <mat-icon>vpn_key</mat-icon>&nbsp;IdP Settings
         </a>
+        <a mat-tab-link routerLink="/company-admin/external-ids" routerLinkActive #rla3="routerLinkActive" [active]="rla3.isActive">
+          <mat-icon>tag</mat-icon>&nbsp;External IDs
+        </a>
         <a mat-tab-link routerLink="/company-admin/org-identity" routerLinkActive #rla4="routerLinkActive" [active]="rla4.isActive">
           <mat-icon>fingerprint</mat-icon>&nbsp;Organization
+        </a>
+        <a mat-tab-link routerLink="/company-admin/beneficial-owners" routerLinkActive #rlaBo="routerLinkActive" [active]="rlaBo.isActive">
+          <mat-icon>diversity_3</mat-icon>&nbsp;Beneficial Owners
         </a>
       </nav>
       <mat-tab-nav-panel #tabPanel></mat-tab-nav-panel>
@@ -62,6 +68,12 @@ import { CompanyService } from '../../../core/api/company.service';
         <mat-card-content>
           @if (loadingSettings) {
             <div class="loading-overlay"><mat-spinner diameter="36"></mat-spinner></div>
+          } @else if (loadError) {
+            <div class="load-error" role="alert">
+              <mat-icon>error_outline</mat-icon>
+              <span>Identity-provider settings could not be loaded.</span>
+              <button mat-stroked-button type="button" (click)="load()">Retry</button>
+            </div>
           } @else {
             <p class="info-text">
               Connect an OIDC-compliant Identity Provider. Once configured, users from
@@ -91,33 +103,36 @@ import { CompanyService } from '../../../core/api/company.service';
               <mat-icon matSuffix>fingerprint</mat-icon>
             </mat-form-field>
 
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Client Secret</mat-label>
-              <input
-                matInput
-                [type]="hideSecret ? 'password' : 'text'"
-                [(ngModel)]="clientSecret"
-                placeholder="{{ hasExistingSecret ? '(unchanged)' : 'Enter secret' }}"
-              />
-              <button mat-icon-button matSuffix type="button" (click)="hideSecret = !hideSecret">
-                <mat-icon>{{ hideSecret ? 'visibility_off' : 'visibility' }}</mat-icon>
-              </button>
-              @if (hasExistingSecret) {
-                <mat-hint>Leave blank to keep the existing secret</mat-hint>
-              }
-            </mat-form-field>
+            <!-- Federation is established tenant-to-tenant in your identity provider, so
+                 Registerwerk never needs a client secret from you. These two read-only rows
+                 show what the registry operator has configured for your organisation. -->
+            <div class="readonly-row">
+              <span class="readonly-label">Identity model</span>
+              <span class="readonly-value">{{ identityModelLabel }}</span>
+            </div>
+            <div class="readonly-row">
+              <span class="readonly-label">Inbound MFA trust</span>
+              <span class="readonly-value">
+                {{ idpMfaTrusted ? 'Configured' : 'Not configured' }}
+              </span>
+            </div>
+            <p class="readonly-note">
+              These are set by the registry operator. Contact them to change how your users sign
+              in or whether multi-factor authentication performed in your own tenant is accepted.
+            </p>
 
             @if (saveError) {
-              <p class="error-message">{{ saveError }}</p>
+              <p class="error-message" role="alert">{{ saveError }}</p>
             }
           }
         </mat-card-content>
 
-        @if (!loadingSettings) {
+        @if (!loadingSettings && !loadError) {
           <mat-card-actions align="end">
-            <button mat-button (click)="reset()">Reset</button>
+            <button mat-button type="button" (click)="reset()">Reset</button>
             <button
               mat-raised-button
+              type="button"
               color="primary"
               [disabled]="saving || !issuerUrl || !clientId"
               (click)="save()"
@@ -139,7 +154,28 @@ import { CompanyService } from '../../../core/api/company.service';
     .settings-card { margin-top: 16px; }
     .info-text { font-size: 14px; color: var(--rw-text-secondary); margin: 0 0 24px; }
     .full-width { width: 100%; margin-bottom: 16px; }
+
+    .readonly-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--rw-border, #E5E7EB);
+      font-size: 14px;
+    }
+
+    .readonly-label { color: var(--rw-text-muted, #6B7280); }
+    .readonly-value { font-weight: 600; text-align: right; }
+
+    .readonly-note {
+      margin: 14px 0 8px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--rw-text-muted, #6B7280);
+    }
     .error-message { color: var(--rw-text-danger); font-size: 13px; }
+    .load-error { display: grid; justify-items: center; gap: 10px; padding: 40px 16px; color: var(--rw-text-secondary); text-align: center; }
+    .load-error mat-icon { color: var(--rw-text-danger); }
     .managed-banner {
       margin: 0 0 16px;
       padding: 12px 14px;
@@ -158,12 +194,12 @@ export class IdpSettingsComponent implements OnInit {
 
   issuerUrl = '';
   clientId  = '';
-  clientSecret = '';
-  hideSecret = true;
-  hasExistingSecret = false;
   lifecycleManagedExternally = false;
+  identityModel = 'WORKFORCE_GUEST';
+  idpMfaTrusted = false;
 
   loadingSettings = true;
+  loadError = false;
   saving = false;
   saveError = '';
 
@@ -172,36 +208,51 @@ export class IdpSettingsComponent implements OnInit {
   private origClientId  = '';
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  load(): void {
+    this.loadingSettings = true;
+    this.loadError = false;
     this.companyService.getIdpSettings().subscribe({
       next: (s) => {
         this.issuerUrl  = s.issuerUrl;
         this.clientId   = s.clientId;
         this.origIssuerUrl = s.issuerUrl;
         this.origClientId  = s.clientId;
-        this.hasExistingSecret = s.hasClientSecret;
+        this.identityModel = s.identityModel;
+        this.idpMfaTrusted = s.idpMfaTrusted;
         this.lifecycleManagedExternally = s.lifecycleManagedExternally;
         this.loadingSettings = false;
         this.cdr.markForCheck();
       },
-      error: () => { this.loadingSettings = false; this.cdr.markForCheck(); },
+      error: () => {
+        this.loadingSettings = false;
+        this.loadError = true;
+        this.cdr.markForCheck();
+      },
     });
   }
 
   save(): void {
+    if (this.saving) return;
+    const issuerUrl = this.normalizeIssuerUrl(this.issuerUrl);
+    const clientId = this.clientId.trim();
+    if (!issuerUrl || !clientId) {
+      this.saveError = 'Enter a valid HTTP(S) issuer URL and client ID.';
+      return;
+    }
     this.saving = true;
     this.saveError = '';
 
     this.companyService
       .saveIdpSettings({
-        issuerUrl:    this.issuerUrl,
-        clientId:     this.clientId,
-        clientSecret: this.clientSecret,
+        issuerUrl,
+        clientId,
       })
       .subscribe({
         next: () => {
           this.saving = false;
-          this.hasExistingSecret = true;
-          this.clientSecret = '';
           this.cdr.markForCheck();
           this.snackBar.open('IdP settings saved.', 'OK', { duration: 3000 });
         },
@@ -214,9 +265,33 @@ export class IdpSettingsComponent implements OnInit {
   }
 
   reset(): void {
-    this.issuerUrl    = this.origIssuerUrl;
-    this.clientId     = this.origClientId;
-    this.clientSecret = '';
-    this.saveError    = '';
+    this.issuerUrl = this.origIssuerUrl;
+    this.clientId  = this.origClientId;
+    this.saveError = '';
+  }
+
+  get identityModelLabel(): string {
+    switch (this.identityModel) {
+      case 'FEDERATED':
+        return 'Federated — your own Microsoft Entra tenant';
+      case 'WORKFORCE_GUEST':
+        return 'Guest accounts in the registry operator’s tenant';
+      case 'WORKFORCE_MEMBER':
+        return 'Member accounts in the registry operator’s tenant';
+      default:
+        return 'Local accounts';
+    }
+  }
+
+  private normalizeIssuerUrl(value: string): string | null {
+    try {
+      const url = new URL(value.trim());
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+      url.hash = '';
+      url.search = '';
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      return null;
+    }
   }
 }

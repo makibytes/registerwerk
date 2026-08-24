@@ -70,7 +70,8 @@ class ChainDriftDetectionJob {
     }
 
     @SchedulerLock(name = "chainDriftDetection", lockAtMostFor = "PT10M")
-    @Scheduled(fixedDelayString = "${registerwerk.drift.check-interval-ms:900000}")
+    @Scheduled(fixedDelayString = "${registerwerk.drift.check-interval-ms:900000}",
+               initialDelayString = "${registerwerk.drift.initial-delay-ms:95000}")
     public void checkDrift() {
         int driftCount = 0;
         int scanned = 0;
@@ -124,7 +125,8 @@ class ChainDriftDetectionJob {
                      -- holder rows may store EIP-55 checksummed ones, so a case-sensitive join
                      -- there would silently report zero drift for every holder. Solana (base58)
                      -- and Stellar (StrKey) addresses are compared exactly.
-                     WHERE (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
+                     WHERE tt.finality_status <> 'ORPHANED'
+                       AND (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
 ) THEN LOWER(tt.contract_address) ELSE tt.contract_address END)
                          = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
 ) THEN LOWER(ad.contract_address) ELSE ad.contract_address END)
@@ -204,10 +206,17 @@ class ChainDriftDetectionJob {
             // One OPEN event per (deployment, wallet): refresh if present, insert otherwise.
             // The recorded on-chain balance is the reconstruction after netting out pending
             // off-chain settlement, so (db_balance − onchain_balance) equals the flagged delta.
+            // NOTE: the space after "AND" below is a required `\s` escape, not a stray edit —
+            // Java text blocks strip trailing whitespace from every line, so a plain trailing
+            // space here is silently dropped and "AND" glues directly onto walletMatchSql
+            // (e.g. "ANDLOWER(...)"), which Postgres rejects outright as invalid syntax. That
+            // exact bug shipped for a time: every refresh attempt threw, was swallowed by the
+            // catch below, and no OPEN drift event was ever actually refreshed or logged past
+            // its first detection — confirmed by reproducing the literal concatenated SQL string.
             int refreshed = jdbc.update("""
                 UPDATE chain_drift_event
                 SET db_balance = ?, onchain_balance = ?, severity = ?, detected_at = now()
-                WHERE deployment_id = ? AND """ + walletMatchSql + """
+                WHERE deployment_id = ? AND\s""" + walletMatchSql + """
                  AND status = 'OPEN'
                 """, dbBalance, effectiveIndexed, severity, deploymentId, wallet);
             if (refreshed == 0) {

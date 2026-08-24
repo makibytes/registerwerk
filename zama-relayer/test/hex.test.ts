@@ -1,4 +1,5 @@
-import { toHex, fromHex } from '../src/hex';
+import { describe, expect, it } from 'vitest';
+import { toHex, fromHex } from '../src/hex.js';
 
 describe('hex round-trip', () => {
   it('converts bytes to 0x hex and back', () => {

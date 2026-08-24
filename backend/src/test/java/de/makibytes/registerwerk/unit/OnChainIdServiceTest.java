@@ -3,7 +3,9 @@ package de.makibytes.registerwerk.unit;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.erc3643.api.OnchainClaim;
 import de.makibytes.registerwerk.erc3643.api.OnchainClaimRepository;
@@ -25,6 +27,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,12 +42,36 @@ class OnChainIdServiceTest {
     @Mock private Erc3643DeploymentService deploymentService;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private EvmContractService evmContractService;
+    @Mock private DurableEvmTransactionGateway evmTransactions;
     @Mock private BlockchainClientRegistry blockchainClientRegistry;
     @Mock private ContractAddressConfig contractAddressConfig;
     @Mock private BlockchainTransactionService blockchainTransactionService;
 
     @InjectMocks
     private OnChainIdService service;
+
+    @Test
+    @DisplayName("missing IdFactory fails closed and does not persist an unresolvable identity")
+    void getOrCreate_missingFactoryDoesNotPersistPlaceholder() {
+        UUID legalEntityId = UUID.randomUUID();
+        UUID chainConfigId = UUID.randomUUID();
+        ChainConfig chain = new ChainConfig();
+        chain.setId(chainConfigId);
+        chain.setIdentifier("ETHEREUM_SEPOLIA");
+        when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
+                .thenReturn(Optional.empty());
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chain));
+        when(contractAddressConfig.requireIdFactory("ETHEREUM_SEPOLIA"))
+                .thenThrow(new IllegalStateException("missing IdFactory"));
+
+        assertThatThrownBy(() -> service.getOrCreate(
+                legalEntityId, chainConfigId, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("deployIdentityProxy submission failed")
+                .hasRootCauseMessage("missing IdFactory");
+
+        verify(identityRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
 
     private OnchainClaim claim(long topic, Instant expiresAt, Instant revokedAt) {
         OnchainClaim c = new OnchainClaim();

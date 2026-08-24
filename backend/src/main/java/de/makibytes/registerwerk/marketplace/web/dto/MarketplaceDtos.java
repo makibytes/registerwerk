@@ -106,6 +106,9 @@ public final class MarketplaceDtos {
 
     public record ManifestValidationResponse(boolean valid, List<String> errors, String manifestHash) {}
 
+    /** Exact manifest bytes for an owner resuming an existing publication draft. */
+    public record ManifestContentResponse(String manifestRaw) {}
+
     public record ReviewQueueItem(
             UUID versionId,
             UUID listingId,

@@ -1,7 +1,5 @@
 ---
-id: upgrades
 title: Upgrading the Registry
-sidebar_label: Upgrades
 ---
 
 # Upgrading the Registry
@@ -18,9 +16,9 @@ git pull origin main
 git submodule update --recursive
 ```
 
-### 2. Review the changelog
+### 2. Review the release
 
-Check `CHANGELOG.md` for breaking changes, database migration notes, and configuration changes before proceeding.
+Review the commits and deployment configuration changes between the currently deployed tag and the target tag before proceeding.
 
 ### 3. Build the new backend image
 
@@ -49,9 +47,9 @@ docker compose logs -f backend | grep -E "Started|ERROR"
 curl http://localhost:8080/actuator/health
 ```
 
-:::warning
-Database migrations run automatically on startup. If a migration fails, the backend will not start. Check logs for the specific migration error. Never manually modify the Flyway history table.
-:::
+!!! warning
+    Database migrations run automatically on startup. If a migration fails, the backend will not start. Check logs for the specific migration error. Never manually modify the Flyway history table.
+
 
 ### 5. Verify
 
@@ -80,19 +78,26 @@ Frontends are stateless — upgrades are zero-downtime.
 
 ## Smart contract upgrades
 
-:::warning
-Smart contract upgrades are the most sensitive operations. All contracts go through a testnet deployment and audit before any mainnet upgrade. Never upgrade mainnet contracts without completing testnet validation first.
-:::
+!!! warning
+    Smart contract upgrades are the most sensitive operations. All contracts go through a testnet deployment and audit before any mainnet upgrade. Never upgrade mainnet contracts without completing testnet validation first.
+
 
 ### Upgradeable vs. non-upgradeable contracts
 
 | Contract | Upgradeable | Upgrade path |
 |----------|------------|-------------|
 | `AssetTokenFactory` | No (CREATE2 factory) | Deploy new factory, update backend config |
+| `RegisterwerkDeploymentRegistry` | Yes (UUPS proxy) | Multisig-authorized implementation upgrade |
 | `EwpgTREXFactory` | No | Deploy new factory |
 | `IdentityRegistryStorage` | Yes (UUPS proxy) | Upgrade proxy implementation |
 | `ModularCompliance` | Yes (UUPS proxy) | Upgrade proxy implementation |
 | Token contracts (per issuance) | No | Cannot be upgraded after deployment |
+
+Registerwerk applies proxies selectively. The address catalogue is upgradeable because it is a
+coordination service; ordinary issued products remain immutable. ERC-3643 keeps the audited T-REX
+proxy model. Before any UUPS upgrade, archive `forge inspect <Contract> storage-layout` output,
+compare it with the candidate implementation, run the upgrade/storage-preservation tests, and
+record the implementation bytecode hash in the change ticket.
 
 ### Upgrading a UUPS proxy contract
 
@@ -134,7 +139,7 @@ docker tag ghcr.io/ewpg/registerwerk-backend:previous \
 docker compose up -d backend
 ```
 
-Database migrations cannot be automatically rolled back. If a migration needs to be reverted, use the `DOWN` migration scripts in `backend/src/main/resources/db/migration/` (present for all migrations from V10 onwards).
+Flyway migrations in this repository have no automatic down scripts. If a release changes the schema, restore the pre-upgrade database backup together with the previous application image, or deploy a reviewed forward-fix migration.
 
 ## Kong upgrade
 

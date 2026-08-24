@@ -7,7 +7,7 @@ import { StablecoinAmmEvent } from '../generated/schema'
 import { Address } from '@graphprotocol/graph-ts'
 
 /**
- * Lifecycle-event ingestion for StablecoinAmm (finding #6, Phase 8) — previously this
+ * Lifecycle-event ingestion for StablecoinAmm  — previously this
  * contract's swaps and liquidity moves were invisible to the backend, unlike
  * backend-initiated forceTransfer paths which go through Travel Rule evaluation and the
  * audit trail. One pool per stablecoin pair is deployed ad hoc (no on-chain factory spawns

@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { authGuard } from './core/auth/auth.guard';
 import { roleGuard } from './core/auth/role.guard';
 import { lendingFeatureGuard } from './core/feature/lending-feature.guard';
+import { repoDeskFeatureGuard } from './core/feature/repo-desk-feature.guard';
 import { ShellComponent } from './layout/shell/shell.component';
 
 export const routes: Routes = [
@@ -44,6 +45,12 @@ export const routes: Routes = [
         loadChildren: () => import('./features/lending/lending.routes').then(m => m.LENDING_ROUTES)
       },
       {
+        path: 'repo-desk',
+        canMatch: [repoDeskFeatureGuard],
+        canActivate: [roleGuard(['TRADER', 'REGISTRY_ADMIN'])],
+        loadComponent: () => import('./features/repo-desk/repo-desk.component').then(m => m.RepoDeskComponent)
+      },
+      {
         path: 'issuances',
         canActivate: [roleGuard(['ISSUER', 'REGISTRY_ADMIN'])],
         loadChildren: () => import('./features/issuances/issuances.routes').then(m => m.ISSUANCE_ROUTES)
@@ -69,7 +76,7 @@ export const routes: Routes = [
       },
       {
         path: 'company-admin',
-        canActivate: [roleGuard(['COMPANY_ADMIN'])],
+        canActivate: [roleGuard(['COMPANY_ADMIN', 'REGISTRY_ADMIN'])],
         loadChildren: () => import('./features/company-admin/company-admin.routes').then(m => m.COMPANY_ADMIN_ROUTES)
       },
       {
@@ -79,6 +86,22 @@ export const routes: Routes = [
       {
         path: 'endpoints',
         loadComponent: () => import('./features/endpoints/endpoints-list.component').then(m => m.EndpointsListComponent)
+      },
+      {
+        path: 'security',
+        loadComponent: () => import('./features/security/security.component').then(m => m.SecurityComponent)
+      },
+      {
+        path: 'webhooks',
+        loadComponent: () => import('./features/webhooks/webhooks.component').then(m => m.WebhooksComponent)
+      },
+      {
+        path: 'support',
+        loadComponent: () => import('./features/support/support-list.component').then(m => m.SupportListComponent)
+      },
+      {
+        path: 'support/:id',
+        loadComponent: () => import('./features/support/support-detail.component').then(m => m.SupportDetailComponent)
       }
     ]
   },

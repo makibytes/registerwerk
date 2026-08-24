@@ -1,0 +1,213 @@
+/* ============================================================================
+   Language switcher — flag-based, for the Material header's alternate selector.
+
+   Flags are inline SVG data URIs so there are no extra requests, nothing to
+   404, and no dependency on the reader's platform having flag emoji (Windows
+   ships none, which is why emoji flags are not used here).
+
+   The current language's flag is driven off <html lang="…">, which Material
+   sets per built language — so the trigger always shows where you are without
+   any JavaScript.
+   ============================================================================ */
+
+:root {
+  --rw-flag-en: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 30'%3E%3CclipPath id='t'%3E%3Cpath d='M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z'/%3E%3C/clipPath%3E%3Crect width='60' height='30' fill='%23012169'/%3E%3Cpath d='M0,0 L60,30 M60,0 L0,30' stroke='%23fff' stroke-width='6'/%3E%3Cpath d='M0,0 L60,30 M60,0 L0,30' clip-path='url(%23t)' stroke='%23C8102E' stroke-width='4'/%3E%3Cpath d='M30,0 v30 M0,15 h60' stroke='%23fff' stroke-width='10'/%3E%3Cpath d='M30,0 v30 M0,15 h60' stroke='%23C8102E' stroke-width='6'/%3E%3C/svg%3E");
+  --rw-flag-de: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 3'%3E%3Crect width='5' height='3' fill='%23000'/%3E%3Crect y='1' width='5' height='2' fill='%23DD0000'/%3E%3Crect y='2' width='5' height='1' fill='%23FFCE00'/%3E%3C/svg%3E");
+  --rw-flag-fr: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'%3E%3Crect width='3' height='2' fill='%23fff'/%3E%3Crect width='1' height='2' fill='%23002395'/%3E%3Crect x='2' width='1' height='2' fill='%23ED2939'/%3E%3C/svg%3E");
+  --rw-flag-it: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'%3E%3Crect width='3' height='2' fill='%23F4F5F0'/%3E%3Crect width='1' height='2' fill='%23008C45'/%3E%3Crect x='2' width='1' height='2' fill='%23CD212A'/%3E%3C/svg%3E");
+  --rw-flag-es: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'%3E%3Crect width='3' height='2' fill='%23AA151B'/%3E%3Crect y='0.5' width='3' height='1' fill='%23F1BF00'/%3E%3C/svg%3E");
+
+  --rw-flag-w: 1.25rem;
+  --rw-flag-h: 0.9rem;
+}
+
+/* ---------------------------------------------------------------- trigger */
+
+/* Replace Material's globe glyph with the flag of the language in use. */
+.md-header__option .md-select > button.md-header__button {
+  position: relative;
+  width: auto;
+  min-width: 3.4rem;
+  height: 1.9rem;
+  padding: 0 0.5rem;
+  margin: 0 0.2rem;
+  border-radius: 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  opacity: 1;
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.md-header__option .md-select > button.md-header__button svg {
+  display: none;                       /* the globe */
+}
+
+.md-header__option .md-select > button.md-header__button::before {
+  content: "";
+  width: var(--rw-flag-w);
+  height: var(--rw-flag-h);
+  flex: 0 0 auto;
+  border-radius: 0.15rem;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 18%), 0 1px 2px rgb(0 0 0 / 22%);
+}
+
+/* Chevron, so it reads as a menu rather than a decorative badge. */
+.md-header__option .md-select > button.md-header__button::after {
+  content: "";
+  width: 0.36rem;
+  height: 0.36rem;
+  border-right: 1.6px solid currentcolor;
+  border-bottom: 1.6px solid currentcolor;
+  transform: rotate(45deg) translate(-0.08rem, -0.08rem);
+  opacity: 0.75;
+  transition: transform 200ms ease;
+}
+
+.md-header__option .md-select > button.md-header__button:hover {
+  background-color: rgb(255 255 255 / 14%);
+}
+
+.md-header__option .md-select:hover > button.md-header__button::after,
+.md-header__option .md-select:focus-within > button.md-header__button::after {
+  transform: rotate(225deg) translate(-0.14rem, -0.14rem);
+}
+
+html[lang|="en"] .md-header__option .md-select > button::before { background-image: var(--rw-flag-en); }
+html[lang|="de"] .md-header__option .md-select > button::before { background-image: var(--rw-flag-de); }
+html[lang|="fr"] .md-header__option .md-select > button::before { background-image: var(--rw-flag-fr); }
+html[lang|="it"] .md-header__option .md-select > button::before { background-image: var(--rw-flag-it); }
+html[lang|="es"] .md-header__option .md-select > button::before { background-image: var(--rw-flag-es); }
+
+/* --------------------------------------------------------------- dropdown */
+
+.md-header__option .md-select__inner {
+  margin-top: 0.3rem;
+  border-radius: 0.7rem;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 6%),
+    0 10px 30px -6px rgb(0 0 0 / 28%),
+    0 2px 8px -2px rgb(0 0 0 / 18%);
+  overflow: hidden;
+  transform: translateY(-0.3rem);
+}
+
+.md-header__option .md-select__list {
+  max-height: none;
+  padding: 0.3rem;
+  border-radius: 0.7rem;
+  overflow: visible;
+}
+
+.md-header__option .md-select__item {
+  line-height: 1;
+}
+
+.md-header__option .md-select__link {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.md-header__option .md-select__link::before {
+  content: "";
+  width: var(--rw-flag-w);
+  height: var(--rw-flag-h);
+  flex: 0 0 auto;
+  border-radius: 0.15rem;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 14%);
+}
+
+.md-header__option .md-select__link[hreflang|="en"]::before { background-image: var(--rw-flag-en); }
+.md-header__option .md-select__link[hreflang|="de"]::before { background-image: var(--rw-flag-de); }
+.md-header__option .md-select__link[hreflang|="fr"]::before { background-image: var(--rw-flag-fr); }
+.md-header__option .md-select__link[hreflang|="it"]::before { background-image: var(--rw-flag-it); }
+.md-header__option .md-select__link[hreflang|="es"]::before { background-image: var(--rw-flag-es); }
+
+.md-header__option .md-select__link:hover,
+.md-header__option .md-select__link:focus-visible {
+  background-color: var(--md-accent-fg-color--transparent);
+  color: var(--md-accent-fg-color);
+  opacity: 1;
+}
+
+/* The language you are already reading: marked, and not a pointless click. */
+html[lang|="en"] .md-select__link[hreflang|="en"],
+html[lang|="de"] .md-select__link[hreflang|="de"],
+html[lang|="fr"] .md-select__link[hreflang|="fr"],
+html[lang|="it"] .md-select__link[hreflang|="it"],
+html[lang|="es"] .md-select__link[hreflang|="es"] {
+  font-weight: 700;
+  background-color: color-mix(in srgb, var(--md-default-fg-color) 7%, transparent);
+  cursor: default;
+}
+
+html[lang|="en"] .md-select__link[hreflang|="en"]::after,
+html[lang|="de"] .md-select__link[hreflang|="de"]::after,
+html[lang|="fr"] .md-select__link[hreflang|="fr"]::after,
+html[lang|="it"] .md-select__link[hreflang|="it"]::after,
+html[lang|="es"] .md-select__link[hreflang|="es"]::after {
+  content: "";
+  margin-left: auto;
+  width: 0.3rem;
+  height: 0.55rem;
+  border-right: 2px solid var(--md-accent-fg-color);
+  border-bottom: 2px solid var(--md-accent-fg-color);
+  transform: rotate(45deg) translate(-0.05rem, -0.05rem);
+}
+
+/* --------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .md-header__option .md-select > button.md-header__button,
+  .md-header__option .md-select > button.md-header__button::after,
+  .md-header__option .md-select__link {
+    transition: none;
+  }
+}
+
+/* --------------------------------------------------- narrow viewports */
+
+@media screen and (max-width: 76.1875em) {
+  .md-header__option .md-select > button.md-header__button {
+    min-width: 0;
+    padding: 0 0.35rem;
+  }
+}
+
+/* ------------------------------------------- translation-status callout */
+
+/* Used by the note at the top of partially translated sections. */
+.md-typeset .rw-lang-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0 0 1.2em;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--md-default-fg-color) 12%, transparent);
+  background: color-mix(in srgb, var(--md-default-fg-color) 4%, transparent);
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .rw-lang-note::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.1rem;
+  background-color: currentcolor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12.87 15.07l-2.54-2.51.03-.03A17.5 17.5 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04M18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12m-2.62 7l1.62-4.33L19.12 17h-3.24z'/%3E%3C/svg%3E") center / contain no-repeat;
+}

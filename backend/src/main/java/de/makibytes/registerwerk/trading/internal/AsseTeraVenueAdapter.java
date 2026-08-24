@@ -29,9 +29,9 @@ class AsseTeraVenueAdapter implements TradingVenueAdapter {
     private final RestClient rest;
     private final TradingVenueMetadata meta;
 
-    AsseTeraVenueAdapter(TradingProperties properties) {
+    AsseTeraVenueAdapter(TradingProperties properties, RestClient.Builder restClientBuilder) {
         TradingProperties.VenueProperties cfg = properties.venue(TradingVenueCode.ASSETERA);
-        this.rest = RestClient.builder()
+        this.rest = restClientBuilder
                 .baseUrl(cfg.getBaseUrl())
                 .defaultHeader("Authorization", "Bearer " + cfg.getApiKey())
                 .build();

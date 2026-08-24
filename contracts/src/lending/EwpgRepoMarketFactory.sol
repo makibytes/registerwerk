@@ -15,7 +15,7 @@ import "./oracle/IRepoOracle.sol";
 ///         `Ewpg*Factory` in this codebase, e.g. `AssetTokenFactory`) rather than made fully
 ///         permissionless like Morpho Blue itself, since a market's {collateralToken} here is
 ///         always a restricted ERC-3643 security, not an arbitrary ERC-20 — creating one is
-///         also the trigger for the operator's own follow-up compliance step (flagging the
+///         also triggers the operator's compliance step (flagging the
 ///         market as a nominee pool on the token's compliance module).
 contract EwpgRepoMarketFactory is RegisterwerkGated {
     bytes32 public constant CREATE_MARKET = keccak256("repo-markets.create-market");
