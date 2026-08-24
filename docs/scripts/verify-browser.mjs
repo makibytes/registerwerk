@@ -7,9 +7,22 @@ const browser = await chromium.launch();
 const page = await browser.newPage();
 const pageErrors = [];
 
-page.on('pageerror', (error) => pageErrors.push(error.message));
+// Transient network errors (e.g. ERR_NETWORK_CHANGED) are infrastructure noise in CI
+// environments and do not indicate a problem with the docs content or JavaScript runtime.
+const TRANSIENT_NETWORK_ERRORS = ['ERR_NETWORK_CHANGED', 'ERR_INTERNET_DISCONNECTED'];
+
+page.on('pageerror', (error) => {
+  if (!TRANSIENT_NETWORK_ERRORS.some((pattern) => error.message.includes(pattern))) {
+    pageErrors.push(error.message);
+  }
+});
 page.on('console', (message) => {
-  if (message.type() === 'error') pageErrors.push(message.text());
+  if (
+    message.type() === 'error' &&
+    !TRANSIENT_NETWORK_ERRORS.some((pattern) => message.text().includes(pattern))
+  ) {
+    pageErrors.push(message.text());
+  }
 });
 
 try {
