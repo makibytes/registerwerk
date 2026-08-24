@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -79,15 +80,17 @@ class HolderDataServiceTest {
     }
 
     @Test
-    @DisplayName("mint + transfer chain nets out to per-wallet balances and creates holders")
+    @DisplayName("mint + transfer chain nets out to balances of pre-registered holders")
     void aggregatesBalancesFromTransfers() {
         Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
         givenTransfers(
                 transfer("0x0000000000000000000000000000000000000000", "0xAAA1", "1000", t0),
                 transfer("0xAAA1", "0xBBB2", "300", t0.plusSeconds(60)),
                 transfer("0xBBB2", "0x0000000000000000000000000000000000000000", "100", t0.plusSeconds(120)));
+        AssetHolder aaa = holder("0xAAA1", "0");
+        AssetHolder bbb = holder("0xBBB2", "0");
         when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of()));
+                .thenReturn(new PageImpl<>(List.of(aaa, bbb)));
         when(assetHolderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.syncHoldersFromBlockchain(assetId);
@@ -141,25 +144,18 @@ class HolderDataServiceTest {
     }
 
     @Test
-    @DisplayName("a newly created on-chain holder publishes HolderBalanceSyncedEvent(newlyCreated=true)")
-    void newHolderPublishesCreatedEvent() {
+    @DisplayName("an unmapped transfer wallet fails closed before writing an invalid holder")
+    void unmappedWalletFailsClosed() {
         Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
         givenTransfers(transfer("0x0000000000000000000000000000000000000000", "0xAAA1", "1000", t0));
         when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
-        UUID savedId = UUID.randomUUID();
-        when(assetHolderRepository.save(any())).thenAnswer(inv -> {
-            AssetHolder h = inv.getArgument(0);
-            org.springframework.test.util.ReflectionTestUtils.setField(h, "id", savedId);
-            return h;
-        });
-
-        service.syncHoldersFromBlockchain(assetId);
-
-        ArgumentCaptor<HolderBalanceSyncedEvent> captor = ArgumentCaptor.forClass(HolderBalanceSyncedEvent.class);
-        verify(eventPublisher).publishEvent(captor.capture());
-        assertThat(captor.getValue().holderId()).isEqualTo(savedId);
-        assertThat(captor.getValue().newlyCreated()).isTrue();
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no registered holder identity")
+                .hasMessageContaining("0xaaa1");
+        verify(assetHolderRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -201,7 +197,7 @@ class HolderDataServiceTest {
                 transfer("0x0000000000000000000000000000000000000000", "0xAAA1", "500", t0,
                         FinalityLevel.FINALIZED));
         when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of()));
+                .thenReturn(new PageImpl<>(List.of(holder("0xAAA1", "0"))));
         when(assetHolderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.syncHoldersFromBlockchain(assetId);
@@ -213,6 +209,16 @@ class HolderDataServiceTest {
         // FINAL from ORPHANED/PROVISIONAL and is exactly what caused the bug.
         verify(tokenTransferRepository, never())
                 .findByDeploymentIdOrderByOccurredAtDesc(any(), any());
+    }
+
+    private AssetHolder holder(String wallet, String amount) {
+        AssetHolder holder = new AssetHolder();
+        org.springframework.test.util.ReflectionTestUtils.setField(holder, "id", UUID.randomUUID());
+        holder.setAssetId(assetId);
+        holder.setInvestorId(UUID.randomUUID());
+        holder.setWalletAddress(wallet);
+        holder.setNominalAmount(new BigDecimal(amount));
+        return holder;
     }
 
     @Test

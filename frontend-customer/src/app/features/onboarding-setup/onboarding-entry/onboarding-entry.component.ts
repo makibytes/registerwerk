@@ -28,7 +28,7 @@ import { MatInputModule } from '@angular/material/input';
           <div class="header-icon-wrap">
             <mat-icon class="header-icon">how_to_reg</mat-icon>
           </div>
-          <mat-card-title>Account Setup</mat-card-title>
+          <h1 mat-card-title>Account Setup</h1>
           <mat-card-subtitle>Registerwerk Customer Portal</mat-card-subtitle>
         </mat-card-header>
 

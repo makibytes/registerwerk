@@ -149,7 +149,7 @@ interface IssuanceFilters {
                 <mat-icon matPrefix>search</mat-icon>
                 <input matInput [(ngModel)]="filters.search" (ngModelChange)="applyFilters()" placeholder="Name or ISIN…">
                 @if (filters.search) {
-                  <button matSuffix mat-icon-button (click)="filters.search=''; applyFilters()">
+                  <button type="button" matSuffix mat-icon-button (click)="filters.search=''; applyFilters()">
                     <mat-icon>close</mat-icon>
                   </button>
                 }
@@ -185,7 +185,7 @@ interface IssuanceFilters {
                 <input matInput type="date" [(ngModel)]="filters.toDate" (ngModelChange)="applyFilters()">
               </mat-form-field>
 
-              <button mat-stroked-button (click)="resetFilters()" [disabled]="!hasActiveFilters">
+              <button type="button" mat-stroked-button (click)="resetFilters()" [disabled]="!hasActiveFilters">
                 <mat-icon>filter_list_off</mat-icon>
                 Reset
               </button>

@@ -328,7 +328,7 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
             <span>Auto-refreshes every 30s</span>
           </div>
         }
-        <button mat-stroked-button class="add-chain-btn" (click)="openAddChain()">
+        <button type="button" mat-stroked-button class="add-chain-btn" (click)="openAddChain()">
           <mat-icon style="font-size: 16px; width: 16px; height: 16px; margin-right: 4px">add</mat-icon>
           Add chain
         </button>
@@ -370,10 +370,10 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
             <span class="finality-source-chip" [matTooltip]="finalitySourceTooltip(chain)">
               {{ chainConfigOf(chain)?.finalitySource === 'CHAINCACHE' ? 'via chaincache' : 'self-probed' }}
             </span>
-            <button mat-icon-button class="settings-btn" matTooltip="Chain settings" (click)="openEditChain(chain)">
+            <button type="button" mat-icon-button class="settings-btn" matTooltip="Chain settings" (click)="openEditChain(chain)">
               <mat-icon style="font-size: 18px">tune</mat-icon>
             </button>
-            <button mat-stroked-button class="add-node-btn" (click)="openAddNode(chain)">
+            <button type="button" mat-stroked-button class="add-node-btn" (click)="openAddNode(chain)">
               <mat-icon style="font-size: 14px; width: 14px; height: 14px; margin-right: 4px">add</mat-icon>
               Add node
             </button>
@@ -427,7 +427,7 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                       @if (node.kind === 'CHAINCACHE') {
                         <div class="kind-badge chaincache">
                           <mat-icon>bolt</mat-icon> chaincache
-                          <button mat-icon-button class="expand-btn" style="width: 20px; height: 20px; line-height: 20px"
+                          <button type="button" mat-icon-button class="expand-btn" style="width: 20px; height: 20px; line-height: 20px"
                                   [matTooltip]="isExpanded(node.id) ? 'Hide capabilities' : 'Show capabilities'"
                                   (click)="toggleExpanded(node.id)">
                             <mat-icon style="font-size: 16px; width: 16px; height: 16px">
@@ -478,25 +478,25 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                           (change)="toggleEnabled(chain, node, $event.checked)">
                         </mat-slide-toggle>
 
-                        <button class="exclusive-btn" [class.active]="node.exclusive"
+                        <button type="button" class="exclusive-btn" [class.active]="node.exclusive"
                                 [matTooltip]="node.exclusive ? 'Clear exclusive (resume normal routing)' : 'Set exclusive (only use this node)'"
                                 (click)="toggleExclusive(chain, node)">
                           <mat-icon>push_pin</mat-icon>
                           {{ node.exclusive ? 'Pinned' : 'Pin' }}
                         </button>
 
-                        <button mat-icon-button matTooltip="Edit node"
+                        <button type="button" mat-icon-button matTooltip="Edit node"
                                 (click)="openEditNode(chain, node)">
                           <mat-icon style="font-size: 18px">edit</mat-icon>
                         </button>
 
-                        <button mat-icon-button
+                        <button type="button" mat-icon-button
                                 [matTooltip]="node.kind === 'CHAINCACHE' ? 'Re-check capabilities' : 'Re-check whether this is a chaincache connection'"
                                 (click)="redetect(chain, node)">
                           <mat-icon style="font-size: 18px">sync</mat-icon>
                         </button>
 
-                        <button mat-icon-button class="delete-btn"
+                        <button type="button" mat-icon-button class="delete-btn"
                                 matTooltip="Remove this node"
                                 (click)="deleteNode(chain, node)">
                           <mat-icon style="font-size: 18px">delete_outline</mat-icon>
@@ -627,7 +627,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.chainService.listChains().subscribe({
       next: configs => this.chainConfigs.set(configs),
-      error: () => {}, // finality-source chip just shows nothing if this fails; not fatal
+      error: () => this.chainConfigs.set([]), // finality-source chip just shows nothing if this fails; not fatal
     });
 
     this.pollSub = merge(timer(0, 30_000), this.refreshTrigger).pipe(

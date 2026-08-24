@@ -12,7 +12,7 @@ public interface PermissionGrantRepository extends JpaRepository<PermissionGrant
 
     List<PermissionGrant> findByStatus(PermissionGrantStatus status);
 
-    List<PermissionGrant> findByStatusAndRevokedTxIsNull(PermissionGrantStatus status);
+    List<PermissionGrant> findByRoleRestrictionStatus(RoleRestrictionStatus status);
 
     List<PermissionGrant> findByPermissionDefinitionIdOrderByCreatedAtDesc(UUID permissionDefinitionId);
 
@@ -21,7 +21,15 @@ public interface PermissionGrantRepository extends JpaRepository<PermissionGrant
     Optional<PermissionGrant> findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndStatus(
             UUID permissionDefinitionId, UUID orgRegistrationId, PermissionGrantType grantType, PermissionGrantStatus status);
 
+    Optional<PermissionGrant> findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndStatusIn(
+            UUID permissionDefinitionId, UUID orgRegistrationId, PermissionGrantType grantType,
+            List<PermissionGrantStatus> statuses);
+
     Optional<PermissionGrant> findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndRoleCodeAndStatus(
             UUID permissionDefinitionId, UUID orgRegistrationId, PermissionGrantType grantType, String roleCode,
             PermissionGrantStatus status);
+
+    Optional<PermissionGrant> findByPermissionDefinitionIdAndOrgRegistrationIdAndGrantTypeAndRoleCodeAndStatusIn(
+            UUID permissionDefinitionId, UUID orgRegistrationId, PermissionGrantType grantType, String roleCode,
+            List<PermissionGrantStatus> statuses);
 }

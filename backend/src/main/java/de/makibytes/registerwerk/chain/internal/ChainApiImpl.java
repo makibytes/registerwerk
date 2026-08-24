@@ -37,10 +37,9 @@ class ChainApiImpl implements ChainApi {
 
     @Override
     public List<ChainConfig> findByChain(Chain chain, Network network) {
-        String identifier = chain.name() + "_" + network.name();
-        return repository.findByIdentifier(identifier)
-                .map(java.util.List::of)
-                .orElse(java.util.List.of());
+        return repository.findByIdentifierStartingWith(chain.name() + "_").stream()
+                .filter(config -> config.getNetworkType().name().equals(network.name()))
+                .toList();
     }
 
     @Override

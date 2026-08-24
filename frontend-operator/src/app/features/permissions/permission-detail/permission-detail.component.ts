@@ -77,11 +77,11 @@ import {
     <app-page-header
       [title]="definition?.name ?? 'Permission'"
       subtitle="Organizations granted this permission — enforcement composed by the PermissionOracle">
-      <button mat-stroked-button routerLink="/permissions">
+      <button type="button" mat-stroked-button routerLink="/permissions">
         <mat-icon>arrow_back</mat-icon>
         All permissions
       </button>
-      <button mat-raised-button color="primary" (click)="openGrantDialog()">
+      <button type="button" mat-raised-button color="primary" (click)="openGrantDialog()">
         <mat-icon>add_task</mat-icon>
         Grant to organization
       </button>
@@ -109,7 +109,7 @@ import {
 
     <ng-template #grantActions let-grant>
       @if (grant.status === 'ACTIVE' || grant.status === 'PENDING') {
-        <button mat-icon-button color="warn" (click)="revoke(grant)"
+        <button type="button" mat-icon-button color="warn" (click)="revoke(grant)"
                 matTooltip="Revoke (step-up)">
           <mat-icon>remove_done</mat-icon>
         </button>
@@ -136,8 +136,8 @@ import {
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!selectedOrgId" (click)="submitGrant()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" [disabled]="!selectedOrgId" (click)="submitGrant()">
           <mat-icon>add_task</mat-icon>
           Grant
         </button>
@@ -183,6 +183,10 @@ export class PermissionDetailComponent implements OnInit {
     this.permissionService.list().subscribe({
       next: (permissions) => {
         this.definition = permissions.find((p) => p.id === this.definitionId) ?? null;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.definition = null;
         this.cdr.markForCheck();
       },
     });

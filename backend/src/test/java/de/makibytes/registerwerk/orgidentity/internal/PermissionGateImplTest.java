@@ -6,6 +6,8 @@ import de.makibytes.registerwerk.orgidentity.api.OrgRegistration;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationRepository;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationStatus;
+import de.makibytes.registerwerk.finality.api.ChainQuarantinePort;
+import de.makibytes.registerwerk.finality.api.ReorgObservation;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -33,6 +36,9 @@ class PermissionGateImplTest {
 
     @Mock
     private OrgMemberWalletRepository walletRepository;
+
+    @Mock
+    private ChainQuarantinePort chainQuarantine;
 
     @InjectMocks
     private PermissionGateImpl gate;
@@ -113,5 +119,17 @@ class PermissionGateImplTest {
         when(registrationRepository.findByLegalEntityIdAndChainConfigId(entityId, chainId))
                 .thenReturn(Optional.empty());
         assertThat(gate.isOrgActive(entityId, chainId)).isFalse();
+    }
+
+    @Test
+    @DisplayName("active chain quarantine denies both org and wallet authorization")
+    void quarantinedChainFailsClosed() {
+        when(chainQuarantine.findActive(chainId)).thenReturn(Optional.of(
+                new ChainQuarantinePort.ActiveChainQuarantine(chainId, "reorg-1",
+                        ReorgObservation.ReorgSeverity.FINALITY_VIOLATION,
+                        Instant.now(), Instant.now())));
+
+        assertThat(gate.isOrgActive(entityId, chainId)).isFalse();
+        assertThat(gate.entityForWallet(wallet, chainId)).isEmpty();
     }
 }

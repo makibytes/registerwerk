@@ -24,12 +24,14 @@ public class AssetDeploymentCompletionWriter {
     private static final Logger log = LoggerFactory.getLogger(AssetDeploymentCompletionWriter.class);
 
     /**
-     * Chains where {@code TokenDeploymentResult.contractAddress()} being non-null already proves
-     * the deployment succeeded and is final — safe to mark CONFIRMED the instant we see it.
-     * Currently just Stellar: {@code StellarAssetService.createStellarAsset} only completes its
+     * Chains whose deployment future completes only after the protocol has committed the write —
+     * safe to mark CONFIRMED the instant we see it. Stellar's
+     * {@code StellarAssetService.createStellarAsset} only completes its
      * future after Horizon's synchronous {@code submitTransaction} call returns success, and
      * Horizon blocks until the ledger actually closes (see {@code StellarTransferSyncService}
-     * class javadoc) — so a non-null address there already reflects a closed ledger.
+     * class javadoc). Canton operations use Ledger API {@code submitAndWaitForTransaction}, which
+     * returns an update ID only for a committed transaction. Canton has no contract address in
+     * the EVM sense, so finality must not depend on {@code contractAddress()} being non-null.
      *
      * <p>Every other chain that can reach this branch is excluded on purpose:
      * <ul>
@@ -43,13 +45,11 @@ public class AssetDeploymentCompletionWriter {
      * </ul>
      * Both of those defer to {@code AssetDeploymentService#pollPendingDeploymentConfirmations},
      * which applies the same confirmation-depth (EVM) / L1-acceptance (Starknet) policy as
-     * token-transfer finality. Solana and Canton currently return {@code TokenDeploymentResult
-     * .txOnly(...)} (no address at submission time at all — see {@code TokenDeploymentPortImpl}),
-     * so they never reach the contractAddress-present branch below regardless of this set; those
-     * two chains' deployments are not auto-confirmed because they require chain-specific
-     * confirmation readers rather than a confirmation-depth policy.
+     * token-transfer finality. Solana returns its locally generated mint address immediately but
+     * remains PENDING until the signature reaches protocol-native {@code finalized} commitment.
      */
-    private static final Set<Chain> IMMEDIATE_CONFIRM_CHAINS = EnumSet.of(Chain.STELLAR);
+    private static final Set<Chain> IMMEDIATE_CONFIRM_CHAINS =
+            EnumSet.of(Chain.STELLAR, Chain.CANTON);
 
     private final AssetDeploymentRepository repository;
     private final ApplicationEventPublisher events;
@@ -85,12 +85,7 @@ public class AssetDeploymentCompletionWriter {
             deployment.setDeployedByTx(result.txHash());
             if (result.contractAddress() != null && !result.contractAddress().isBlank()) {
                 deployment.setContractAddress(result.contractAddress());
-                if (IMMEDIATE_CONFIRM_CHAINS.contains(deployment.getChain())) {
-                    deployment.setDeployedAt(Instant.now());
-                    deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
-                    events.publishEvent(new DeploymentConfirmedEvent(
-                            deploymentId, actorId, null, result.contractAddress(), result.txHash()));
-                } else {
+                if (!IMMEDIATE_CONFIRM_CHAINS.contains(deployment.getChain())) {
                     // Address known (receipt seen / UDC-precomputed), but that alone does not
                     // prove finality for this chain (see IMMEDIATE_CONFIRM_CHAINS javadoc) —
                     // stays PENDING with the address visible; AssetDeploymentService's scheduled
@@ -100,6 +95,12 @@ public class AssetDeploymentCompletionWriter {
                                     + "chain-read confirmation before CONFIRMED; staying PENDING.",
                             deploymentId, deployment.getChain(), result.contractAddress());
                 }
+            }
+            if (IMMEDIATE_CONFIRM_CHAINS.contains(deployment.getChain())) {
+                deployment.setDeployedAt(Instant.now());
+                deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+                events.publishEvent(new DeploymentConfirmedEvent(
+                        deploymentId, actorId, null, result.contractAddress(), result.txHash()));
             }
             repository.save(deployment);
         }, () -> log.warn("Deployment disappeared before submission could be recorded: id={}", deploymentId));

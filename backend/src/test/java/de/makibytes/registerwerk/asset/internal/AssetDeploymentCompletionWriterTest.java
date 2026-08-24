@@ -50,6 +50,24 @@ class AssetDeploymentCompletionWriterTest {
     }
 
     @Test
+    void cantonSubmitAndWait_updateIdWithoutContractAddress_confirmsImmediately() {
+        UUID id = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(id);
+        deployment.setChain(Chain.CANTON);
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        when(repository.findById(id)).thenReturn(Optional.of(deployment));
+        AssetDeploymentCompletionWriter writer = new AssetDeploymentCompletionWriter(repository, events);
+
+        writer.markSubmitted(id, UUID.randomUUID(), TokenDeploymentResult.txOnly("canton-update-id"));
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        assertThat(deployment.getDeployedAt()).isNotNull();
+        verify(repository).save(deployment);
+        verify(events).publishEvent(any(DeploymentConfirmedEvent.class));
+    }
+
+    @Test
     void evmSubmission_receiptSeenButOnlyOneConfirmation_staysPendingAwaitingDepthPoll() {
         // EVM's contractAddress is resolved from the deployed-address event log,
         // which only proves a receipt exists — one confirmation, not the configured depth.

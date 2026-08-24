@@ -47,7 +47,7 @@ import { AuthService } from '../../../core/auth/auth.service';
       title="Access Reviews"
       subtitle="Periodic entitlement recertification — every enabled account's roles, attested by a second reviewer">
       @if (canStartCampaign) {
-        <button mat-raised-button color="primary" (click)="openStartDialog()">
+        <button type="button" mat-raised-button color="primary" (click)="openStartDialog()">
           <mat-icon>playlist_add_check</mat-icon>
           Start Campaign
         </button>
@@ -64,7 +64,7 @@ import { AuthService } from '../../../core/auth/auth.service';
     </rw-data-table>
 
     <ng-template #campaignActions let-campaign>
-      <button mat-icon-button (click)="openCampaign(campaign)" matTooltip="Open campaign">
+      <button type="button" mat-icon-button (click)="openCampaign(campaign)" matTooltip="Open campaign">
         <mat-icon>chevron_right</mat-icon>
       </button>
     </ng-template>
@@ -87,8 +87,8 @@ import { AuthService } from '../../../core/auth/auth.service';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!campaignName.trim()" (click)="submitStart()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" [disabled]="!campaignName.trim()" (click)="submitStart()">
           <mat-icon>playlist_add_check</mat-icon>
           Start
         </button>

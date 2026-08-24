@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementRequestedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.chain.api.Chain;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,9 @@ class CorporateActionSettlementListenerTest {
 
         AssetDeployment deployment = new AssetDeployment();
         ReflectionTestUtils.setField(deployment, "id", deploymentId);
+        deployment.setChain(Chain.CANTON);
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        deployment.setContractAddress("00canton-contract-id");
         when(assetDeploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment));
         when(corporateActionRepository.findTokenStandardByCorpAction(corporateActionId)).thenReturn("DAML_BOND_FIXED");
     }
@@ -89,16 +93,14 @@ class CorporateActionSettlementListenerTest {
     }
 
     @Test
-    @DisplayName("PARTIAL_REDEMPTION also routes to redeem, not payCoupon (not yet issuer-creatable, but documents routing if raised)")
-    void partialRedemption_routesToRedeem() {
+    @DisplayName("PARTIAL_REDEMPTION never exercises terminal Redeem and stays awaiting manual settlement")
+    void partialRedemption_doesNotArchiveTheWholeBond() {
         actionOfType(CorporateAction.ActionType.PARTIAL_REDEMPTION);
-        when(cantonBondOperations.redeem(eq(deploymentId), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture("tx-redeem-2"));
 
         listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
                 corporateActionId, assetId, CorporateAction.ActionType.PARTIAL_REDEMPTION));
 
-        verify(cantonBondOperations, timeout(1000)).redeem(eq(deploymentId), any(), any());
+        verify(cantonBondOperations, never()).redeem(any(), any(), any());
         verify(cantonBondOperations, never()).payCoupon(any(), any(), any(), any());
     }
 
@@ -118,18 +120,15 @@ class CorporateActionSettlementListenerTest {
     }
 
     @Test
-    @DisplayName("DIVIDEND routes to payCoupon just like COUPON/INTEREST_PAYMENT")
-    void dividend_routesToPayCoupon() {
+    @DisplayName("DIVIDEND is not silently reinterpreted as a bond coupon")
+    void dividend_doesNotRouteToPayCoupon() {
         actionOfType(CorporateAction.ActionType.DIVIDEND);
-        when(cantonBondOperations.payCoupon(eq(deploymentId), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture("tx-dividend-1"));
 
         listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
                 corporateActionId, assetId, CorporateAction.ActionType.DIVIDEND));
 
-        verify(cantonBondOperations, timeout(1000)).payCoupon(eq(deploymentId), any(), any(), any());
+        verify(cantonBondOperations, never()).payCoupon(any(), any(), any(), any());
         verify(cantonBondOperations, never()).redeem(any(), any(), any());
-        verify(settlementWriter, timeout(1000)).markSettled(corporateActionId, "tx-dividend-1");
     }
 
     @Test
@@ -169,5 +168,29 @@ class CorporateActionSettlementListenerTest {
                 corporateActionId, assetId, CorporateAction.ActionType.REDEMPTION));
 
         verify(cantonBondOperations, never()).redeem(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an unrelated EVM deployment is never selected for a Canton exercise")
+    void selectsOnlyConfirmedCantonDeployment() {
+        actionOfType(CorporateAction.ActionType.REDEMPTION);
+        AssetDeployment evm = new AssetDeployment();
+        ReflectionTestUtils.setField(evm, "id", UUID.randomUUID());
+        evm.setChain(Chain.ETHEREUM);
+        evm.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        evm.setContractAddress("0x0000000000000000000000000000000000000001");
+        AssetDeployment canton = new AssetDeployment();
+        ReflectionTestUtils.setField(canton, "id", deploymentId);
+        canton.setChain(Chain.CANTON);
+        canton.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        canton.setContractAddress("00canton-contract-id");
+        when(assetDeploymentRepository.findByAssetId(assetId)).thenReturn(List.of(evm, canton));
+        when(cantonBondOperations.redeem(eq(deploymentId), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture("tx-redeem"));
+
+        listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
+                corporateActionId, assetId, CorporateAction.ActionType.REDEMPTION));
+
+        verify(cantonBondOperations, timeout(1000)).redeem(eq(deploymentId), any(), any());
     }
 }

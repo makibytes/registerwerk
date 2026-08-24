@@ -47,22 +47,19 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
 
     private final AssetDeploymentRepository deploymentRepository;
     private final VaultRequestRepository vaultRequestRepository;
-    private final BlockchainClientRegistry clientRegistry;
-    private final EvmContractService evmContractService;
+    private final de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions;
     private final BlockchainTransactionService txService;
     private final ApplicationEventPublisher eventPublisher;
 
     public Erc7540AdminService(
             AssetDeploymentRepository deploymentRepository,
             VaultRequestRepository vaultRequestRepository,
-            BlockchainClientRegistry clientRegistry,
-            EvmContractService evmContractService,
+            de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions,
             BlockchainTransactionService txService,
             ApplicationEventPublisher eventPublisher) {
         this.deploymentRepository = deploymentRepository;
         this.vaultRequestRepository = vaultRequestRepository;
-        this.clientRegistry = clientRegistry;
-        this.evmContractService = evmContractService;
+        this.durableTransactions = durableTransactions;
         this.txService = txService;
         this.eventPublisher = eventPublisher;
     }
@@ -210,10 +207,11 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
      */
     private SubmittedTx submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
                            UUID actorId, String actorRole) {
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        EvmSigner signer = evmContractService.signer(descriptor);
-        String txHash = evmContractService.submit(web3j, signer, dep.getContractAddress(), fn);
+        if (dep.getChainConfigId() == null) {
+            throw new IllegalStateException("Confirmed EVM deployment is missing chainConfigId: " + dep.getId());
+        }
+        String txHash = durableTransactions.submit(
+                dep.getChainConfigId(), dep.getContractAddress(), fn, params);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 

@@ -1,9 +1,7 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
-import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopic;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopicRepository;
@@ -21,8 +19,6 @@ import org.springframework.stereotype.Service;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.generated.Uint16;
-import de.makibytes.registerwerk.wallet.api.EvmSigner;
-import org.web3j.protocol.Web3j;
 
 import java.time.Instant;
 import java.util.List;
@@ -45,8 +41,7 @@ public class IdentityRegistryService {
     private final Erc3643ClaimTopicRepository claimTopicRepo;
     private final AssetDeploymentRepository deploymentRepo;
     private final OnChainIdService onChainIdService;
-    private final EvmContractService evmContractService;
-    private final BlockchainClientRegistry blockchainClientRegistry;
+    private final DurableEvmTransactionGateway evmTransactions;
     private final BlockchainTransactionService blockchainTransactionService;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -55,8 +50,7 @@ public class IdentityRegistryService {
                                     Erc3643ClaimTopicRepository claimTopicRepo,
                                     AssetDeploymentRepository deploymentRepo,
                                     OnChainIdService onChainIdService,
-                                    EvmContractService evmContractService,
-                                    BlockchainClientRegistry blockchainClientRegistry,
+                                    DurableEvmTransactionGateway evmTransactions,
                                     BlockchainTransactionService blockchainTransactionService,
                                     ApplicationEventPublisher eventPublisher) {
         this.registryRepo = registryRepo;
@@ -64,28 +58,9 @@ public class IdentityRegistryService {
         this.claimTopicRepo = claimTopicRepo;
         this.deploymentRepo = deploymentRepo;
         this.onChainIdService = onChainIdService;
-        this.evmContractService = evmContractService;
-        this.blockchainClientRegistry = blockchainClientRegistry;
+        this.evmTransactions = evmTransactions;
         this.blockchainTransactionService = blockchainTransactionService;
         this.eventPublisher = eventPublisher;
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private Web3j clientForSuite(Erc3643Suite suite) {
-        AssetDeployment dep = deploymentRepo.findById(suite.getAssetDeploymentId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "AssetDeployment not found for suite " + suite.getId()));
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        return blockchainClientRegistry.getEvmClient(descriptor);
-    }
-
-    private EvmSigner signerForSuite(Erc3643Suite suite) {
-        AssetDeployment dep = deploymentRepo.findById(suite.getAssetDeploymentId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "AssetDeployment not found for suite " + suite.getId()));
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        return evmContractService.signer(descriptor);
     }
 
     /**
@@ -127,8 +102,6 @@ public class IdentityRegistryService {
                 AssetDeployment deployment = deploymentRepo.findById(suite.getAssetDeploymentId())
                         .orElseThrow(() -> new IllegalStateException(
                                 "AssetDeployment not found for suite " + suite.getId()));
-                Web3j web3j = clientForSuite(suite);
-                EvmSigner signer = signerForSuite(suite);
                 String identityAddr = identity.getIdentityAddress() != null
                         ? identity.getIdentityAddress() : "0x0000000000000000000000000000000000000000";
                 short country = countryCode != null ? countryCode : 0;
@@ -142,8 +115,11 @@ public class IdentityRegistryService {
                         ),
                         java.util.Collections.emptyList()
                 );
-                String txHash = evmContractService.submit(web3j, signer,
-                        suite.getIdentityRegistryAddress(), fn);
+                String txHash = evmTransactions.submit(chainConfigId,
+                        suite.getIdentityRegistryAddress(), fn,
+                        java.util.Map.of(
+                                "walletAddress", walletAddress,
+                                "legalEntityId", legalEntityId.toString()));
                 blockchainTransactionService.record(
                         txHash,
                         fn.getName(),
@@ -226,14 +202,18 @@ public class IdentityRegistryService {
                 AssetDeployment deployment = deploymentRepo.findById(suite.getAssetDeploymentId())
                         .orElseThrow(() -> new IllegalStateException(
                                 "AssetDeployment not found for suite " + suite.getId()));
-                Web3j web3j = clientForSuite(suite);
-                EvmSigner signer = signerForSuite(suite);
                 Function fn = new Function(
                         "deleteIdentity",
                         java.util.List.of(new Address(entry.getWalletAddress())),
                         java.util.Collections.emptyList()
                 );
-                String txHash = evmContractService.submit(web3j, signer, suite.getIdentityRegistryAddress(), fn);
+                if (entry.getChainConfigId() == null) {
+                    throw new IllegalStateException(
+                            "Identity registry entry is missing chainConfigId: " + entry.getId());
+                }
+                String txHash = evmTransactions.submit(entry.getChainConfigId(),
+                        suite.getIdentityRegistryAddress(), fn,
+                        java.util.Map.of("walletAddress", entry.getWalletAddress()));
                 blockchainTransactionService.record(
                         txHash,
                         fn.getName(),

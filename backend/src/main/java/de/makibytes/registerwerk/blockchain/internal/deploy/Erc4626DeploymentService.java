@@ -102,7 +102,8 @@ public class Erc4626DeploymentService {
                     Collections.singletonList(new TypeReference<Address>() {})
             );
 
-            TransactionReceipt receipt = evmContractService.send(web3j, signer, factoryAddress, deployVault);
+            TransactionReceipt receipt = evmContractService.send(
+                    evmContractService.chainConfigId(chain), web3j, signer, factoryAddress, deployVault);
             String vaultAddress = EvmUtils.extractIndexedAddress(receipt, VAULT_DEPLOYED_TOPIC, 3)
                     .orElseThrow(() -> new RuntimeException(
                             "VaultDeployed event not found in receipt: " + receipt.getTransactionHash()));

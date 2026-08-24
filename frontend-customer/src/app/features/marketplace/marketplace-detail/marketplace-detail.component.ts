@@ -157,7 +157,7 @@ interface ManifestImage {
               </p>
             </div>
           </div>
-          <button mat-stroked-button routerLink="/marketplace">
+          <button type="button" mat-stroked-button routerLink="/marketplace">
             <mat-icon>arrow_back</mat-icon>
             Marketplace
           </button>
@@ -277,7 +277,7 @@ interface ManifestImage {
 
               <p class="field-label">Verify yourself</p>
               <div class="integrity-box">{{ verificationSnippet }}</div>
-              <button mat-stroked-button style="margin-top:10px" (click)="copyVerification()">
+              <button type="button" mat-stroked-button style="margin-top:10px" (click)="copyVerification()">
                 <mat-icon>content_copy</mat-icon>
                 Copy verification snippet
               </button>
@@ -311,6 +311,7 @@ interface ManifestImage {
         </mat-tab-group>
       } @else {
         <div class="empty-state">
+          <h1 class="sr-only">Marketplace listing details</h1>
           <mat-icon>search_off</mat-icon>
           <p>{{ error || 'dApp not found.' }}</p>
           @if (error) {

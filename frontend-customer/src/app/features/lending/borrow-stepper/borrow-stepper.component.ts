@@ -49,6 +49,11 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
         My Positions
       </a>
 
+      <header class="borrow-header">
+        <h1>Borrow against this position</h1>
+        <p>Review eligibility, choose terms, and confirm the collateral transaction.</p>
+      </header>
+
       <app-lending-compliance-banner [market]="market" />
 
       @if (loading) {
@@ -219,6 +224,9 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
     </div>
   `,
   styles: [`
+    .borrow-header { margin: 18px 0 22px; }
+    .borrow-header h1 { margin: 0; font-size: 24px; letter-spacing: -0.5px; }
+    .borrow-header p { margin: 6px 0 0; color: var(--rw-text-secondary); font-size: 13px; }
     .loading-row { display: flex; justify-content: center; padding: 48px 0; }
     .section-card mat-card-content { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px !important; text-align: center; }
     .warn-icon { font-size: 32px; width: 32px; height: 32px; color: var(--rw-text-secondary); }

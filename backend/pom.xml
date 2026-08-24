@@ -23,7 +23,7 @@
     <spring-modulith.version>2.1.0</spring-modulith.version>
     <web3j.version>6.0.0</web3j.version>
     <solanaj.version>1.28.0</solanaj.version>
-    <daml-bindings.version>3.5.3</daml-bindings.version>
+    <daml-bindings.version>3.5.10</daml-bindings.version>
     <grpc.version>1.82.0</grpc.version>
     <mapstruct.version>1.6.3</mapstruct.version>
     <springdoc.version>3.1.0</springdoc.version>
@@ -435,6 +435,9 @@
             <exclude>**/CantonPartyAllocator.java</exclude>
             <exclude>**/CantonTransferSyncService.java</exclude>
           </excludes>
+          <testExcludes>
+            <testExclude>**/CantonProfile*.java</testExclude>
+          </testExcludes>
         </configuration>
       </plugin>
 

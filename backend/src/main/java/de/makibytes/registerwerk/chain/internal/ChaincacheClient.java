@@ -55,6 +55,7 @@ class ChaincacheClient {
      *  fields on chaincache's side degrade to null here rather than break the probe). */
     record ChainCapabilitiesProbe(
             String chainKey,
+            String durabilityDomainId,
             String finalityModel,
             Long safeConfirmations,
             Long finalizedConfirmations,
@@ -70,9 +71,9 @@ class ChaincacheClient {
          *  {@link #fetchNodeCounts}) — a separate call from {@code GET /api/capabilities}, so this
          *  probe is built in two stages rather than one. */
         ChainCapabilitiesProbe withNodeCounts(ChainSummaryProbe summary) {
-            return new ChainCapabilitiesProbe(chainKey, finalityModel, safeConfirmations, finalizedConfirmations,
-                    configuredApis, debugApiConfiguredOnAnyNode, addressTraceCapability, durableStreamAvailable,
-                    kafkaRelayEnabled, summary == null ? null : summary.configuredNodeCount(),
+            return new ChainCapabilitiesProbe(chainKey, durabilityDomainId, finalityModel, safeConfirmations,
+                    finalizedConfirmations, configuredApis, debugApiConfiguredOnAnyNode, addressTraceCapability,
+                    durableStreamAvailable, kafkaRelayEnabled, summary == null ? null : summary.configuredNodeCount(),
                     summary == null ? null : summary.availableNodeCount());
         }
     }

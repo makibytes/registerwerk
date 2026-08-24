@@ -2,17 +2,17 @@
 --
 -- This template tracks the on-ledger lifecycle status of a fixed-rate bond
 -- (assetId link, registryAdmin party, regulator observer, coupon terms). It does
--- **not** move cash: the actual coupon/redemption/call payment leg is orchestrated
--- by the Registerwerk backend against the Canton Token Standard (CIP-0056), which
--- is a runtime-only dependency of this participant (see daml.yaml) — not composed
--- into these choices. Exercising a lifecycle choice here is the on-ledger record
+-- **not** move cash or CIP-0056 holdings. The current Registerwerk backend requires
+-- issuer/operator attestation before it submits these choices, but a production
+-- payment/holding adapter and reconciliation remain deployment responsibilities.
+-- Exercising a lifecycle choice here is the on-ledger record
 -- of registry authorization for that payment, kept separately auditable from the
 -- backend's own `corporate_action` / `audit_event` tables.
 --
 -- Lifecycle:
 --   1. Registry creates a FixedRateBond instrument via Create choice.
 --   2. On each pay date, the backend computes the coupon and the registry
---      exercises PayCoupon to authorize/record its settlement.
+--      exercises PayCoupon to authorize/record the lifecycle event.
 --   3. At maturity, registry exercises Redeem.
 --   4. If callable, registry exercises EarlyCall on a date/price from callSchedule.
 module Registerwerk.Bond.FixedBond where
@@ -34,7 +34,7 @@ template FixedRateBond with
 
     ensure terms.assetId == assetId
 
-    -- | Record a coupon payment settlement. Emits an event for the off-chain indexer.
+    -- | Record coupon authorization. This choice does not transfer cash or holdings.
     choice PayCoupon : ContractId FixedRateBond with
           paymentDate   : Date
           amountPerUnit : Decimal

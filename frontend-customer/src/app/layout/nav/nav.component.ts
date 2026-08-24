@@ -65,14 +65,14 @@ const { operatorUrl } = environment;
       <div class="divider-v"></div>
 
       @if (eligibleWorkspaces.length > 1) {
-        <button class="workspace-switch" mat-button [matMenuTriggerFor]="workspaceMenu">
+        <button type="button" class="workspace-switch" mat-button [matMenuTriggerFor]="workspaceMenu">
           <mat-icon>{{ activeWorkspace.icon }}</mat-icon>
           <span>{{ activeWorkspace.label }}</span>
           <mat-icon class="chevron">expand_more</mat-icon>
         </button>
         <mat-menu #workspaceMenu="matMenu">
           @for (ws of eligibleWorkspaces; track ws.key) {
-            <button mat-menu-item (click)="switchWorkspace(ws.key)" [class.active-item]="ws.key === activeWorkspace.key">
+            <button type="button" mat-menu-item (click)="switchWorkspace(ws.key)" [class.active-item]="ws.key === activeWorkspace.key">
               <mat-icon>{{ ws.icon }}</mat-icon>
               <span>{{ ws.label }}</span>
             </button>
@@ -126,7 +126,7 @@ const { operatorUrl } = environment;
         <span class="env-badge">Test</span>
       }
 
-      <button class="user-btn" mat-button [matMenuTriggerFor]="userMenu" aria-label="User menu">
+      <button type="button" class="user-btn" mat-button [matMenuTriggerFor]="userMenu" aria-label="User menu">
         <div class="avatar">{{ (userName || userEmail || 'U')[0].toUpperCase() }}</div>
         <span class="user-label">{{ userName || userEmail || 'User' }}</span>
         <mat-icon class="chevron">expand_more</mat-icon>
@@ -141,22 +141,22 @@ const { operatorUrl } = environment;
           </div>
         </div>
         <mat-divider></mat-divider>
-        <button mat-menu-item routerLink="/security">
+        <button type="button" mat-menu-item routerLink="/security">
           <mat-icon>shield</mat-icon>
           <span>Security</span>
           @if (twoFactorMissing) {
             <span class="menu-alert-dot" aria-label="Two-factor authentication is not set up"></span>
           }
         </button>
-        <button mat-menu-item routerLink="/support">
+        <button type="button" mat-menu-item routerLink="/support">
           <mat-icon>support_agent</mat-icon>
           <span>Support</span>
         </button>
-        <button mat-menu-item routerLink="/webhooks">
+        <button type="button" mat-menu-item routerLink="/webhooks">
           <mat-icon>webhook</mat-icon>
           <span>Webhooks</span>
         </button>
-        <button mat-menu-item (click)="logout()">
+        <button type="button" mat-menu-item (click)="logout()">
           <mat-icon>logout</mat-icon>
           <span>Sign out</span>
         </button>

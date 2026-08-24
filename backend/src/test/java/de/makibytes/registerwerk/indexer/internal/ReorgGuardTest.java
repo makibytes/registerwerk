@@ -162,6 +162,9 @@ class ReorgGuardTest {
         verify(chainEffectRecorder, times(2)).recordAndCompensate(captor.capture());
         assertThat(captor.getAllValues()).extracting(ChainEffectDescriptor::entityId)
                 .containsExactlyInAnyOrder(assetA, assetB);
+        assertThat(captor.getAllValues()).extracting(ChainEffectDescriptor::correlationId)
+                .doesNotContainNull()
+                .containsOnly(captor.getAllValues().getFirst().correlationId());
     }
 
     @Test
@@ -186,12 +189,19 @@ class ReorgGuardTest {
         when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of(10L));
         when(blockFinalityPort.findBlocksWithUnresolvedEffects(chainConfigId)).thenReturn(List.of());
         when(tokenTransferRepository.existsFinalizedAtOrAfter(chainConfigId, 10L)).thenReturn(true);
-        when(tokenTransferRepository.markOrphanedFromBlock(chainConfigId, 10L)).thenReturn(1);
-        when(tokenTransferRepository.findDistinctAssetIdsAtOrAfter(chainConfigId, 10L)).thenReturn(List.of());
+        when(tokenTransferRepository.findDistinctBlockHashesAt(chainConfigId, 10L))
+                .thenReturn(List.of("0xold"));
+        when(blockFinalityFeed.quarantineUnverifiableFinalizedRetraction(
+                chainConfigId, 10L, List.of("0xold"), "0xnew")).thenReturn(true);
 
         ReorgGuard.VerifyResult result = guard.reverifyUnsettledWindow(chainConfigId,
-                blockNumber -> new ReorgGuard.ProbeOutcome(ReorgGuard.ProbeResult.ORPHANED, null));
+                blockNumber -> new ReorgGuard.ProbeOutcome(ReorgGuard.ProbeResult.ORPHANED, "0xnew"));
 
         assertThat(result.reorgDetected()).isTrue();
+        assertThat(result.orphaned()).isZero();
+        verify(tokenTransferRepository, never()).markOrphanedFromBlock(any(), anyLong());
+        verify(chainEffectRecorder, never()).recordAndCompensate(any());
+        verify(blockFinalityFeed, never()).recordRetraction(
+                any(), anyLong(), any(), org.mockito.ArgumentMatchers.anyInt());
     }
 }

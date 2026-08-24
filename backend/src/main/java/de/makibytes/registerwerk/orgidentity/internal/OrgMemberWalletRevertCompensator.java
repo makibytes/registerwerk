@@ -41,16 +41,33 @@ class OrgMemberWalletRevertCompensator implements ChainEffectCompensator {
         if (wallet == null) {
             return new CompensationOutcome.NotApplicable("OrgMemberWallet " + id + " no longer exists");
         }
-        if (wallet.getStatus() != MemberWalletStatus.ACTIVE) {
+        boolean pendingRemovalIntent = wallet.getStatus() == MemberWalletStatus.REMOVAL_PENDING
+                && wallet.getRemovedAt() != null
+                && wallet.getRemovedChainConfigId() == null
+                && wallet.getRemovedBlockNumber() == null
+                && wallet.getRemovedBlockHash() == null;
+        if (wallet.getStatus() != MemberWalletStatus.ACTIVE && !pendingRemovalIntent) {
             return new CompensationOutcome.NotApplicable(
-                    "OrgMemberWallet " + id + " is no longer ACTIVE (status=" + wallet.getStatus() + ")");
+                    "OrgMemberWallet " + id + " is neither ACTIVE nor awaiting removal (status="
+                            + wallet.getStatus() + ")");
+        }
+        if (!ChainEffectCausality.matches(effect, wallet.getChainConfigId(), wallet.getBoundTx(),
+                wallet.getBoundBlockNumber(), wallet.getBoundBlockHash())) {
+            return new CompensationOutcome.NotApplicable(
+                    "OrgMemberWallet " + id + " is owned by a different confirmation incarnation");
         }
 
-        log.error("OrgMemberWallet id={} was ACTIVE but its confirming block was retracted by a reorg "
-                        + "— reverting to PENDING for re-verification.", id);
-        wallet.setStatus(MemberWalletStatus.PENDING);
+        log.error("OrgMemberWallet id={} binding confirmation was retracted by a reorg (status={}) "
+                        + "— clearing binding provenance while preserving any fail-closed removal intent.",
+                id, wallet.getStatus());
+        if (!pendingRemovalIntent) {
+            wallet.setStatus(MemberWalletStatus.PENDING);
+        }
+        wallet.setBoundBlockNumber(null);
+        wallet.setBoundBlockHash(null);
         repository.save(wallet);
 
-        return new CompensationOutcome.Compensated("Reverted OrgMemberWallet " + id + " to PENDING after retraction");
+        return new CompensationOutcome.Compensated(
+                "Cleared OrgMemberWallet " + id + " binding confirmation after retraction");
     }
 }

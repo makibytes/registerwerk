@@ -56,11 +56,12 @@ import { Asset } from '../../../core/models';
   `],
   template: `
     <div class="back-row">
-      <button mat-button (click)="cancel()">
+      <button type="button" mat-button (click)="cancel()">
         <mat-icon>arrow_back</mat-icon>
         Back to Asset
       </button>
     </div>
+    <h1 class="sr-only">Edit asset</h1>
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>

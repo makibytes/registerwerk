@@ -43,7 +43,7 @@ class ChainEffect {
     @Column(name = "log_index")
     private Integer logIndex;
 
-    @Column(name = "source_event_key", nullable = false, length = 300)
+    @Column(name = "source_event_key", nullable = false, length = 512)
     private String sourceEventKey;
 
     @Column(name = "module_name", nullable = false, length = 40)
@@ -98,6 +98,12 @@ class ChainEffect {
 
     @Column(name = "recorded_at", nullable = false)
     private Instant recordedAt = Instant.now();
+
+    /** Database-assigned insertion order. Unlike {@code recordedAt}, this remains distinct when
+     * several effects are journalled in one PostgreSQL transaction (where CURRENT_TIMESTAMP is
+     * deliberately stable), so saga compensation can always run in true reverse write order. */
+    @Column(name = "journal_sequence", nullable = false, insertable = false, updatable = false)
+    private long journalSequence;
 
     /** When this row was last claimed into {@code COMPENSATING} — lets
      *  {@code ChainEffectRepository#claimForCompensation} reclaim a row whose compensator crashed
@@ -184,6 +190,8 @@ class ChainEffect {
 
     Instant getRecordedAt() { return recordedAt; }
     void setRecordedAt(Instant recordedAt) { this.recordedAt = recordedAt; }
+
+    long getJournalSequence() { return journalSequence; }
 
     Instant getClaimedAt() { return claimedAt; }
     void setClaimedAt(Instant claimedAt) { this.claimedAt = claimedAt; }

@@ -33,7 +33,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
     <div class="ca-shell">
       <div class="ca-header">
         <h3 class="ca-title">Corporate actions</h3>
-        <button mat-stroked-button (click)="load()">
+        <button type="button" mat-stroked-button (click)="load()">
           <mat-icon>refresh</mat-icon> Refresh
         </button>
       </div>
@@ -67,12 +67,12 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <span class="dimmed">{{ progressLabel(a) }}</span>
               <div class="row-actions">
                 @if (a.status === 'PROPOSED') {
-                  <button mat-stroked-button color="primary" [disabled]="busy.has(a.id)"
+                  <button type="button" mat-stroked-button color="primary" [disabled]="busy.has(a.id)"
                           matTooltip="Approve — joins the register pipeline as ANNOUNCED"
                           (click)="approveProposal(a)">
                     <mat-icon>check_circle</mat-icon> Approve
                   </button>
-                  <button mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
+                  <button type="button" mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
                           matTooltip="Reject — terminal, the issuer must submit a fresh proposal"
                           (click)="rejectProposal(a)">
                     <mat-icon>cancel</mat-icon> Reject
@@ -80,35 +80,35 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
                 }
                 @if (isPreSettlement(a)) {
                   @if (!a.issuerAttestedAt) {
-                    <button mat-stroked-button [disabled]="busy.has(a.id)"
+                    <button type="button" mat-stroked-button [disabled]="busy.has(a.id)"
                             matTooltip="Audited escape hatch for an issuer who never logs in to attest"
                             (click)="overrideAttestation(a)">
                       <mat-icon>person_off</mat-icon> Override attestation
                     </button>
                   } @else if (!a.dualControlApproverId) {
-                    <button mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
+                    <button type="button" mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
                             matTooltip="Requires step-up authentication"
                             (click)="confirmSettlement(a)">
                       <mat-icon>gavel</mat-icon> Confirm settlement
                     </button>
                   }
-                  <button mat-icon-button matTooltip="Cancel this corporate action" [disabled]="busy.has(a.id)"
+                  <button type="button" mat-icon-button matTooltip="Cancel this corporate action" [disabled]="busy.has(a.id)"
                           (click)="cancel(a)">
                     <mat-icon>block</mat-icon>
                   </button>
                 }
                 @if (a.status === 'AWAITING_SETTLEMENT') {
-                  <button mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
+                  <button type="button" mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
                           matTooltip="Manual settlement fallback — requires step-up auth + a second approver (Vieraugenprinzip)"
                           (click)="markSettled(a)">
                     <mat-icon>edit_note</mat-icon> Mark settled
                   </button>
                 }
                 @if (a.status === 'SETTLED' || a.status === 'CLOSED') {
-                  <button mat-icon-button matTooltip="Download confirmation (PDF)" (click)="downloadConfirmation(a)">
+                  <button type="button" mat-icon-button matTooltip="Download confirmation (PDF)" (click)="downloadConfirmation(a)">
                     <mat-icon>picture_as_pdf</mat-icon>
                   </button>
-                  <button mat-icon-button matTooltip="Download ISO 20022-shaped confirmation (XML)"
+                  <button type="button" mat-icon-button matTooltip="Download ISO 20022-shaped confirmation (XML)"
                           (click)="downloadIso20022Confirmation(a)">
                     <mat-icon>code</mat-icon>
                   </button>

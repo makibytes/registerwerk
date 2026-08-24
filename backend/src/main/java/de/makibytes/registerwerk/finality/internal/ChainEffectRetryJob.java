@@ -5,7 +5,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Automatically re-attempts {@code COMPENSATION_FAILED} rows below {@link #MAX_AUTO_RETRY_ATTEMPTS}
@@ -27,23 +26,24 @@ class ChainEffectRetryJob {
     private static final Logger log = LoggerFactory.getLogger(ChainEffectRetryJob.class);
 
     private final ChainEffectRepository repository;
-    private final CompensationDispatcher dispatcher;
+    private final ChainEffectRetryExecutor retryExecutor;
 
-    ChainEffectRetryJob(ChainEffectRepository repository, CompensationDispatcher dispatcher) {
+    ChainEffectRetryJob(ChainEffectRepository repository, ChainEffectRetryExecutor retryExecutor) {
         this.repository = repository;
-        this.dispatcher = dispatcher;
+        this.retryExecutor = retryExecutor;
     }
 
     @SchedulerLock(name = "chainEffectRetryJob", lockAtMostFor = "PT2M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay = 300_000, initialDelay = 90_000)
-    @Transactional
     void retryFailed() {
-        for (ChainEffect row : repository.findByStatusAndAttemptCountLessThanOrderByRecordedAtAsc(
+        // Deliberately no transaction around the batch. Every call below enters an independent
+        // REQUIRES_NEW transaction, so a rollback-only failure cannot erase earlier successes.
+        for (java.util.UUID chainEffectId : repository.findRetryableIds(
                 ChainEffect.Status.COMPENSATION_FAILED, MAX_AUTO_RETRY_ATTEMPTS)) {
             try {
-                dispatcher.compensate(row.getId());
+                retryExecutor.retry(chainEffectId);
             } catch (Exception e) {
-                log.warn("ChainEffectRetryJob: retry of chain_effect={} threw: {}", row.getId(), e.getMessage());
+                log.warn("ChainEffectRetryJob: retry of chain_effect={} threw: {}", chainEffectId, e.getMessage());
             }
         }
     }

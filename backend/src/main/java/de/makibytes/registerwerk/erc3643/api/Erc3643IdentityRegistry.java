@@ -11,8 +11,10 @@ import java.util.UUID;
  * <p>The on-chain IdentityRegistry stores the canonical mapping; this table allows
  * the backend to answer "is wallet X registered for token Y?" without an RPC call.</p>
  *
- * <p>Soft-deleted via {@code removedAt}: a non-null value means the investor was removed
- * from the on-chain IdentityRegistry (via {@code deleteIdentity()}).</p>
+ * <p>Fail-closed via {@code removedAt}: a non-null value means a {@code deleteIdentity()}
+ * removal is pending or confirmed, so the investor must not be treated as registered. A reorg
+ * clears only the removal confirmation provenance; only a confirmed failed removal receipt
+ * reactivates the entry.</p>
  */
 @Entity
 @Table(name = "erc3643_identity_registry",
@@ -43,7 +45,8 @@ public class Erc3643IdentityRegistry {
     @Column(name = "registered_by_tx", length = 66)
     private String registeredByTx;
 
-    /** Non-null when the investor has been removed from the on-chain IdentityRegistry. */
+    /** Non-null while removal is pending or confirmed; null only while the mirror may safely
+     *  treat the investor as active. */
     @Column(name = "removed_at")
     private Instant removedAt;
 
@@ -63,9 +66,22 @@ public class Erc3643IdentityRegistry {
     @Column(name = "registration_confirmed", nullable = false)
     private boolean registrationConfirmed = false;
 
-    /** Same as {@link #registrationConfirmed}, for {@code removed_by_tx}. */
+    @Column(name = "registration_block_number")
+    private Long registrationBlockNumber;
+
+    @Column(name = "registration_block_hash", length = 128)
+    private String registrationBlockHash;
+
+    /** True once {@code removed_by_tx} has a final canonical outcome. A reorg resets this to false
+     *  while retaining {@link #removedAt} so the unresolved removal stays fail-closed. */
     @Column(name = "removal_confirmed", nullable = false)
     private boolean removalConfirmed = false;
+
+    @Column(name = "removal_block_number")
+    private Long removalBlockNumber;
+
+    @Column(name = "removal_block_hash", length = 128)
+    private String removalBlockHash;
 
     public UUID getId() { return id; }
     public UUID getSuiteId() { return suiteId; }
@@ -92,6 +108,18 @@ public class Erc3643IdentityRegistry {
     public boolean isRegistrationConfirmed() { return registrationConfirmed; }
     public void setRegistrationConfirmed(boolean registrationConfirmed) { this.registrationConfirmed = registrationConfirmed; }
 
+    public Long getRegistrationBlockNumber() { return registrationBlockNumber; }
+    public void setRegistrationBlockNumber(Long registrationBlockNumber) { this.registrationBlockNumber = registrationBlockNumber; }
+
+    public String getRegistrationBlockHash() { return registrationBlockHash; }
+    public void setRegistrationBlockHash(String registrationBlockHash) { this.registrationBlockHash = registrationBlockHash; }
+
     public boolean isRemovalConfirmed() { return removalConfirmed; }
     public void setRemovalConfirmed(boolean removalConfirmed) { this.removalConfirmed = removalConfirmed; }
+
+    public Long getRemovalBlockNumber() { return removalBlockNumber; }
+    public void setRemovalBlockNumber(Long removalBlockNumber) { this.removalBlockNumber = removalBlockNumber; }
+
+    public String getRemovalBlockHash() { return removalBlockHash; }
+    public void setRemovalBlockHash(String removalBlockHash) { this.removalBlockHash = removalBlockHash; }
 }

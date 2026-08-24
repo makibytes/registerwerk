@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.blockchain.internal.deploy;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.PublicKey;
@@ -12,14 +13,15 @@ import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.SolanaProperties;
+import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.finality.api.ChainSubmissionExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.Network;
 
 /**
@@ -64,15 +66,18 @@ public class SolanaTokenService {
     private final WalletSigner             walletSigner;
     private final ChainConfigRepository    chainConfigRepository;
     private final SolanaProperties         solanaProperties;
+    private final ChainSubmissionExecutor submissions;
 
     public SolanaTokenService(BlockchainClientRegistry blockchainClientRegistry,
                                WalletSigner walletSigner,
                                ChainConfigRepository chainConfigRepository,
-                               SolanaProperties solanaProperties) {
+                               SolanaProperties solanaProperties,
+                               ChainSubmissionExecutor submissions) {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.walletSigner             = walletSigner;
         this.chainConfigRepository    = chainConfigRepository;
         this.solanaProperties         = solanaProperties;
+        this.submissions              = submissions;
     }
 
     /** Fails fast with a clear message when a required SPL Token-2022 extension config value is
@@ -99,9 +104,10 @@ public class SolanaTokenService {
      * @param assetId      ID of the asset being tokenised (attached as memo)
      * @param network      MAINNET or TESTNET (DEVNET)
      * @param ownerAddress base58 public key of the mint authority
-     * @return future resolving to the transaction signature
+     * @return future resolving to the transaction signature and the newly generated mint address
      */
-    public CompletableFuture<String> createSplToken(UUID assetId, Network network, String ownerAddress) {
+    public CompletableFuture<TokenDeploymentResult> createSplToken(
+            UUID assetId, Network network, String ownerAddress) {
         return createSplToken(assetId, network, ownerAddress, TOKEN_PROGRAM_ID, "SPL");
     }
 
@@ -112,7 +118,8 @@ public class SolanaTokenService {
      * extension set empty. Use {@link #createSplToken2022(UUID, Network, String, SplExtensionSet)}
      * to create a mint with security-grade extensions.
      */
-    public CompletableFuture<String> createSplToken2022(UUID assetId, Network network, String ownerAddress) {
+    public CompletableFuture<TokenDeploymentResult> createSplToken2022(
+            UUID assetId, Network network, String ownerAddress) {
         return createSplToken2022(assetId, network, ownerAddress, SplExtensionSet.NONE);
     }
 
@@ -139,9 +146,9 @@ public class SolanaTokenService {
      * @param network      MAINNET or TESTNET
      * @param ownerAddress base58 mint authority public key
      * @param extensions   which extension preset to initialize
-     * @return future resolving to the transaction signature
+     * @return future resolving to the transaction signature and the newly generated mint address
      */
-    public CompletableFuture<String> createSplToken2022(
+    public CompletableFuture<TokenDeploymentResult> createSplToken2022(
             UUID assetId, Network network, String ownerAddress, SplExtensionSet extensions) {
         log.info("Creating SPL Token-2022 mint: assetId={} network={} extensions={}", assetId, network, extensions);
 
@@ -157,11 +164,11 @@ public class SolanaTokenService {
                     "registerwerk.chains.solana.confidential-transfer-auditor-elgamal-pubkey");
         }
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainDescriptor descriptor = new ChainDescriptor(Chain.SOLANA, network);
-            RpcClient client = blockchainClientRegistry.getSolanaClient(descriptor);
+        return submitOnChain(network, chainConfig -> {
+            RpcClient client = blockchainClientRegistry
+                    .getSolanaClientByIdentifier(chainConfig.getIdentifier());
 
-            Account payer = loadPayerAccount();
+            Account payer = loadPayerAccount(chainConfig);
             Account mintAccount = new Account();
 
             try {
@@ -229,7 +236,8 @@ public class SolanaTokenService {
                 String signature = client.getApi().sendTransaction(tx, java.util.List.of(payer, mintAccount), recentBlockhash);
                 log.info("SPL Token-2022 mint created: assetId={} extensions={} mintAddress={} sig={}",
                         assetId, extensions, mintAccount.getPublicKey().toBase58(), signature);
-                return signature;
+                return new TokenDeploymentResult(
+                        signature, mintAccount.getPublicKey().toBase58());
 
             } catch (RpcException e) {
                 throw new RuntimeException("SPL Token-2022 creation failed for assetId=" + assetId
@@ -238,16 +246,16 @@ public class SolanaTokenService {
         });
     }
 
-    private CompletableFuture<String> createSplToken(
+    private CompletableFuture<TokenDeploymentResult> createSplToken(
             UUID assetId, Network network, String ownerAddress, String programId, String tokenFamily) {
         log.info("Creating SPL token mint: assetId={}, network={}, mintAuthority={}", assetId, network,
                 ownerAddress);
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainDescriptor descriptor = new ChainDescriptor(Chain.SOLANA, network);
-            RpcClient client = blockchainClientRegistry.getSolanaClient(descriptor);
+        return submitOnChain(network, chainConfig -> {
+            RpcClient client = blockchainClientRegistry
+                    .getSolanaClientByIdentifier(chainConfig.getIdentifier());
 
-            Account payer = loadPayerAccount();
+            Account payer = loadPayerAccount(chainConfig);
             Account mintAccount = new Account(); // fresh keypair for the new mint
 
             try {
@@ -302,7 +310,8 @@ public class SolanaTokenService {
                 );
                 log.info("{} token mint created: assetId={} mintAddress={} signature={}",
                         tokenFamily, assetId, mintAccount.getPublicKey().toBase58(), signature);
-                return signature;
+                return new TokenDeploymentResult(
+                        signature, mintAccount.getPublicKey().toBase58());
 
             } catch (RpcException e) {
                 throw new RuntimeException(tokenFamily + " token creation failed for assetId=" + assetId
@@ -331,10 +340,10 @@ public class SolanaTokenService {
             String tokenAccountAddress, String mintAddress, Network network) {
         log.info("ADMIN freeze SPL token account={} mint={} network={}", tokenAccountAddress, mintAddress, network);
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainDescriptor descriptor = new ChainDescriptor(Chain.SOLANA, network);
-            RpcClient client = blockchainClientRegistry.getSolanaClient(descriptor);
-            Account payer = loadPayerAccount(); // freeze authority
+        return submitOnChain(network, chainConfig -> {
+            RpcClient client = blockchainClientRegistry
+                    .getSolanaClientByIdentifier(chainConfig.getIdentifier());
+            Account payer = loadPayerAccount(chainConfig); // freeze authority
 
             try {
                 Transaction tx = new Transaction();
@@ -373,10 +382,10 @@ public class SolanaTokenService {
             String tokenAccountAddress, String mintAddress, Network network) {
         log.info("ADMIN thaw SPL token account={} mint={} network={}", tokenAccountAddress, mintAddress, network);
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainDescriptor descriptor = new ChainDescriptor(Chain.SOLANA, network);
-            RpcClient client = blockchainClientRegistry.getSolanaClient(descriptor);
-            Account payer = loadPayerAccount(); // freeze authority
+        return submitOnChain(network, chainConfig -> {
+            RpcClient client = blockchainClientRegistry
+                    .getSolanaClientByIdentifier(chainConfig.getIdentifier());
+            Account payer = loadPayerAccount(chainConfig); // freeze authority
 
             try {
                 Transaction tx = new Transaction();
@@ -403,14 +412,20 @@ public class SolanaTokenService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private Account loadPayerAccount() {
-        // Resolve the Solana default wallet from any configured Solana chain
-        return chainConfigRepository.findByChainTypeAndEnabledTrue(
-                de.makibytes.registerwerk.chain.api.ChainConfig.ChainType.SOLANA).stream()
+    private <T> CompletableFuture<T> submitOnChain(
+            Network network, Function<ChainConfig, T> submission) {
+        ChainConfig chainConfig = chainConfigRepository
+                .findByChainTypeAndEnabledTrue(ChainConfig.ChainType.SOLANA).stream()
+                .filter(c -> c.getNetworkType().name().equals(network.name()))
                 .findFirst()
-                .map(c -> walletSigner.solanaAccountForChain(c.getId()))
                 .orElseThrow(() -> new IllegalStateException(
-                        "No Solana wallet default configured. Add a Solana wallet via the Operator Portal → Wallets."));
+                        "No enabled Solana " + network + " chain configuration."));
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                chainConfig.getId(), () -> submission.apply(chainConfig)));
+    }
+
+    private Account loadPayerAccount(ChainConfig chainConfig) {
+        return walletSigner.solanaAccountForChain(chainConfig.getId());
     }
 
     // ── Token-2022 extension-init instruction builders ────────────────────────

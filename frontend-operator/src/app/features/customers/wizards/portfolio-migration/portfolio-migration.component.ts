@@ -33,7 +33,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
             token-admin tooling — this only records the handover.
           </p>
         </div>
-        <button mat-raised-button color="primary" (click)="openInitiateDialog()">
+        <button type="button" mat-raised-button color="primary" (click)="openInitiateDialog()">
           <mat-icon>move_up</mat-icon>
           Initiate Migration
         </button>
@@ -67,32 +67,32 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <span class="dimmed">{{ m.initiatedAt | date:'dd MMM yyyy' }}</span>
               <div class="row-actions">
                 @if (m.status === 'INITIATED' && !m.destinationWalletAddress) {
-                  <button mat-stroked-button (click)="openDestinationDialog(m)">
+                  <button type="button" mat-stroked-button (click)="openDestinationDialog(m)">
                     <mat-icon>edit_location</mat-icon>
                     Set Destination
                   </button>
                 }
                 @if (m.status === 'INITIATED' && m.destinationWalletAddress) {
-                  <button mat-stroked-button [disabled]="exporting.has(m.id)" (click)="exportPackage(m)">
+                  <button type="button" mat-stroked-button [disabled]="exporting.has(m.id)" (click)="exportPackage(m)">
                     <mat-icon>download</mat-icon>
                     {{ exporting.has(m.id) ? 'Exporting…' : 'Export' }}
                   </button>
                 }
                 @if (m.status === 'EXPORTED') {
-                  <button mat-stroked-button color="warn" matTooltip="Requires step-up + a second approver"
+                  <button type="button" mat-stroked-button color="warn" matTooltip="Requires step-up + a second approver"
                           (click)="openTransferDialog(m)">
                     <mat-icon>link</mat-icon>
                     Record Transfer
                   </button>
                 }
                 @if (m.status === 'HANDED_OVER') {
-                  <button mat-stroked-button color="primary" (click)="complete(m)">
+                  <button type="button" mat-stroked-button color="primary" (click)="complete(m)">
                     <mat-icon>task_alt</mat-icon>
                     Complete
                   </button>
                 }
                 @if (m.status !== 'COMPLETED' && m.status !== 'CANCELLED') {
-                  <button mat-icon-button color="warn" matTooltip="Cancel" (click)="openCancelDialog(m)">
+                  <button type="button" mat-icon-button color="warn" matTooltip="Cancel" (click)="openCancelDialog(m)">
                     <mat-icon>block</mat-icon>
                   </button>
                 }
@@ -116,8 +116,8 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!initiateForm.holderId.trim() || !initiateForm.reason.trim()"
                 (click)="submitInitiate()">
           Initiate
@@ -142,8 +142,8 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!destinationForm.destinationWalletAddress.trim()"
                 (click)="submitDestination()">
           Save
@@ -164,8 +164,8 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn" [disabled]="!transferTxHash.trim()" (click)="submitTransfer()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn" [disabled]="!transferTxHash.trim()" (click)="submitTransfer()">
           Continue to step-up
         </button>
       </mat-dialog-actions>
@@ -180,8 +180,8 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Back</button>
-        <button mat-raised-button color="warn" [disabled]="!cancelReason.trim()" (click)="submitCancel()">
+        <button type="button" mat-stroked-button mat-dialog-close>Back</button>
+        <button type="button" mat-raised-button color="warn" [disabled]="!cancelReason.trim()" (click)="submitCancel()">
           Cancel Migration
         </button>
       </mat-dialog-actions>

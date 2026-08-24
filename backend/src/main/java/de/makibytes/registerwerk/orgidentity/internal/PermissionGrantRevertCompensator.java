@@ -41,16 +41,34 @@ class PermissionGrantRevertCompensator implements ChainEffectCompensator {
         if (grant == null) {
             return new CompensationOutcome.NotApplicable("PermissionGrant " + id + " no longer exists");
         }
-        if (grant.getStatus() != PermissionGrantStatus.ACTIVE) {
+        boolean pendingRevocationIntent = grant.getStatus() == PermissionGrantStatus.REVOCATION_PENDING
+                && grant.getRevokedAt() != null
+                && grant.getRevokedChainConfigId() == null
+                && grant.getRevokedBlockNumber() == null
+                && grant.getRevokedBlockHash() == null;
+        if (grant.getStatus() != PermissionGrantStatus.ACTIVE && !pendingRevocationIntent) {
             return new CompensationOutcome.NotApplicable(
-                    "PermissionGrant " + id + " is no longer ACTIVE (status=" + grant.getStatus() + ")");
+                    "PermissionGrant " + id + " is neither ACTIVE nor awaiting revocation (status="
+                            + grant.getStatus() + ")");
+        }
+        if (!ChainEffectCausality.matches(effect, grant.getGrantedChainConfigId(), grant.getGrantedTx(),
+                grant.getGrantedBlockNumber(), grant.getGrantedBlockHash())) {
+            return new CompensationOutcome.NotApplicable(
+                    "PermissionGrant " + id + " is owned by a different confirmation incarnation");
         }
 
-        log.error("PermissionGrant id={} was ACTIVE but its confirming block was retracted by a reorg "
-                        + "— reverting to PENDING for re-verification.", id);
-        grant.setStatus(PermissionGrantStatus.PENDING);
+        log.error("PermissionGrant id={} grant confirmation was retracted by a reorg (status={}) "
+                        + "— clearing grant provenance while preserving any fail-closed revocation intent.",
+                id, grant.getStatus());
+        if (!pendingRevocationIntent) {
+            grant.setStatus(PermissionGrantStatus.PENDING);
+        }
+        grant.setGrantedChainConfigId(null);
+        grant.setGrantedBlockNumber(null);
+        grant.setGrantedBlockHash(null);
         repository.save(grant);
 
-        return new CompensationOutcome.Compensated("Reverted PermissionGrant " + id + " to PENDING after retraction");
+        return new CompensationOutcome.Compensated(
+                "Cleared PermissionGrant " + id + " grant confirmation after retraction");
     }
 }

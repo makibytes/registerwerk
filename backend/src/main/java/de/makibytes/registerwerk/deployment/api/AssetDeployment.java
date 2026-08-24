@@ -33,7 +33,8 @@ public class AssetDeployment {
     @Column(name = "deployed_at")
     private Instant deployedAt;
 
-    @Column(name = "deployed_by_tx", length = 66)
+    /** EVM/Stellar hash, Solana signature (up to 88 base58 chars), or Canton update ID. */
+    @Column(name = "deployed_by_tx", length = 128)
     private String deployedByTx;
 
     @Enumerated(EnumType.STRING)
@@ -49,9 +50,9 @@ public class AssetDeployment {
 
     /** FK to {@code chain_config} — lets the reorg-retraction sweep
      *  ({@code finality.internal.BlockFinalityServiceImpl#recordRetraction}) find affected rows by
-     *  (chainConfigId, blockNumber). Set only on the EVM confirmation path (the only path that also
-     *  records {@link #blockNumber}); null for Starknet/Stellar/Solana/Canton deployments and rows
-     *  written before this column existed. */
+     *  (chainConfigId, blockNumber). Also retained for Solana deployments, where blockNumber is
+     *  the finalized slot. Legacy rows may still be null until the identity backfill can resolve
+     *  them unambiguously. */
     @Column(name = "chain_config_id")
     private UUID chainConfigId;
 

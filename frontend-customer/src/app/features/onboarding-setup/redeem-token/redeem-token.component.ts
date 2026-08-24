@@ -33,7 +33,7 @@ import { OnboardingTokenInfo } from '../../../core/models';
       <mat-card class="onboarding-card">
         <mat-card-header>
           <mat-icon mat-card-avatar class="header-icon">how_to_reg</mat-icon>
-          <mat-card-title>Account Setup</mat-card-title>
+          <h1 mat-card-title>Account Setup</h1>
           <mat-card-subtitle>Registerwerk Onboarding</mat-card-subtitle>
         </mat-card-header>
 

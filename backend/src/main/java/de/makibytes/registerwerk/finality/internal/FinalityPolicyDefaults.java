@@ -16,9 +16,9 @@ final class FinalityPolicyDefaults {
     /**
      * Every {@link GatedOperation} that emits a document or export leaving the system boundary —
      * these clamp to {@link FinalityLevel#FINALIZED} regardless of profile or override, and are
-     * the mechanism that keeps compensation's IRREVERSIBLE category empty (see
-     * {@code CompensationCategory}'s javadoc): the boundary-crossing action simply never becomes
-     * eligible to run until its source block is trusted not to be reorged away.
+     * the primary risk control before a boundary-crossing action runs. FINALIZED is a configured
+     * trust guarantee, not a mathematical impossibility: a typed FINALITY_VIOLATION still
+     * quarantines the chain and requires correction/escalation for outputs that already escaped.
      */
     private static final Set<GatedOperation> HARD_FLOOR = Set.of(
             GatedOperation.REGISTER_STATEMENT_ISSUE,

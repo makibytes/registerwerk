@@ -40,6 +40,7 @@ class MarketplaceTxPollerTest {
     @Mock private MarketplaceTxGateway txGateway;
     @Mock private MarketplaceOnchainAnchorService anchorService;
     @Mock private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
+    @Mock private de.makibytes.registerwerk.shared.IsolatedTransactionExecutor isolatedTransactions;
 
     private MarketplaceTxPoller poller;
 
@@ -48,7 +49,12 @@ class MarketplaceTxPollerTest {
 
     @BeforeEach
     void setUp() {
-        poller = new MarketplaceTxPoller(versionRepository, listingRepository, txGateway, anchorService, chainEffectRecorder);
+        poller = new MarketplaceTxPoller(versionRepository, listingRepository, txGateway, anchorService,
+                chainEffectRecorder, isolatedTransactions);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.getArgument(0, de.makibytes.registerwerk.shared.IsolatedTransactionExecutor.Work.class).run();
+            return null;
+        }).when(isolatedTransactions).run(any());
     }
 
     private DappVersion approvedVersion(String txHash) {
@@ -107,16 +113,36 @@ class MarketplaceTxPollerTest {
         poller.resolveApprovedVersions();
 
         assertThat(version.getStatus()).isEqualTo(DappVersionStatus.PUBLISHED);
+        assertThat(version.getAnchorChainConfigId()).isEqualTo(chainConfigId);
+        assertThat(version.getAnchorBlockNumber()).isEqualTo(100L);
+        assertThat(version.getAnchorBlockHash()).isEqualTo("0xblock100");
         assertThat(previouslyPublished.getStatus()).isEqualTo(DappVersionStatus.SUPERSEDED);
         verify(listingRepository).save(argThatStatus(DappListingStatus.PUBLISHED));
 
         org.mockito.ArgumentCaptor<de.makibytes.registerwerk.finality.api.ChainEffectDescriptor> captor =
                 org.mockito.ArgumentCaptor.forClass(de.makibytes.registerwerk.finality.api.ChainEffectDescriptor.class);
-        verify(chainEffectRecorder).record(captor.capture());
+        verify(chainEffectRecorder).recordFinalized(captor.capture());
         assertThat(captor.getValue().effectType()).isEqualTo("DAPP_VERSION_PUBLISHED");
         assertThat(captor.getValue().chainConfigId()).isEqualTo(chainConfigId);
         assertThat(captor.getValue().blockNumber()).isEqualTo(100L);
         assertThat(captor.getValue().entityId()).isEqualTo(version.getId());
+    }
+
+    @Test
+    void confirmedSuccessWithoutBlockProvenanceFailsClosed() {
+        DappVersion version = approvedVersion("0xtx1");
+        when(versionRepository.findByStatus(DappVersionStatus.APPROVED)).thenReturn(List.of(version));
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing()));
+        when(txGateway.isConfirmedFailure("0xtx1")).thenReturn(false);
+        when(txGateway.isConfirmedSuccess("0xtx1")).thenReturn(true);
+        when(txGateway.confirmedLocation("0xtx1")).thenReturn(Optional.empty());
+
+        poller.resolveApprovedVersions();
+
+        assertThat(version.getStatus()).isEqualTo(DappVersionStatus.APPROVED);
+        verify(versionRepository, never()).save(any());
+        verify(listingRepository, never()).save(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test

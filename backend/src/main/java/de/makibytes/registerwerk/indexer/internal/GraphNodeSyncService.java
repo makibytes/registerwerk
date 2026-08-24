@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
+import de.makibytes.registerwerk.finality.api.BlockIdentity;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
@@ -46,8 +47,10 @@ import java.util.Optional;
  *
  * <p><strong>Reorg safety:</strong> every tick first reads the Graph Node's current
  * {@code _meta} head. Newly-fetched transfers are written PROVISIONAL or FINAL depending on
- * whether they already clear {@link BlockchainTxProperties#confirmationsFor}; PROVISIONAL rows
- * get a {@code block_hash} recorded via a time-travel {@code _meta(block:{number})} query. After
+ * whether they already clear {@link BlockchainTxProperties#confirmationsFor}; every row gets its
+ * exact {@code block_hash} recorded via a time-travel {@code _meta(block:{number})} query. This
+ * includes rows first observed as SAFE or FINALIZED: finality is a confidence level, not a stable
+ * block identity, and an exact typed reorg must still be able to retract such an occurrence. After
  * writing the page, {@link ReorgGuard} re-verifies every still-PROVISIONAL block for this chain
  * (not just the ones just written) by re-fetching its current canonical hash and comparing
  * against what was recorded; a mismatch marks everything from the fork point onward ORPHANED
@@ -199,16 +202,26 @@ public class GraphNodeSyncService {
                 }
 
                 for (GraphTransfer gt : page) {
-                    boolean duplicate = tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(
-                            chain.getId(), gt.transactionHash(), (int) gt.logIndex());
-                    if (duplicate) {
-                        continue;
-                    }
-
                     TokenTransfer transfer = mapToEntity(chain, gt, deploymentsByAddress,
                             effectiveHead, required, safeRequired, safeBlockNumber, finalizedBlockNumber, hashCache);
-                    tokenTransferRepository.save(transfer);
-                    totalSaved++;
+
+                    Optional<TokenTransfer> exactOccurrence = tokenTransferRepository
+                            .findByChainConfigIdAndTxHashAndLogIndexAndBlockHashAndOccurredAt(
+                                    chain.getId(), transfer.getTxHash(), (int) gt.logIndex(),
+                                    transfer.getBlockHash(), transfer.getOccurredAt());
+                    if (exactOccurrence.isEmpty()) {
+                        // A replacement block may contain the same transaction/log identity as
+                        // the orphan. Its different block hash makes it a distinct occurrence.
+                        tokenTransferRepository.save(transfer);
+                        totalSaved++;
+                    } else if (exactOccurrence.get().getFinalityStatus() == FinalityLevel.ORPHANED) {
+                        // A -> B -> A: the exact A occurrence is canonical again. Re-arm the
+                        // existing audit row for a fresh tenure and reset confidence from the
+                        // current observation; never inherit A's pre-reorg finality level.
+                        reactivateOccurrence(exactOccurrence.get(), transfer);
+                        tokenTransferRepository.save(exactOccurrence.get());
+                        totalSaved++;
+                    }
 
                     if (gt.blockNumber() > highestBlock) {
                         highestBlock = gt.blockNumber();
@@ -326,10 +339,10 @@ public class GraphNodeSyncService {
         if (observation.isEmpty()) {
             return ProbeOutcome.unknown();
         }
-        String freshHash = observation.get().blockHash();
+        String freshHash = BlockIdentity.normalize(observation.get().blockHash());
 
         List<String> stored = tokenTransferRepository.findDistinctBlockHashesAt(chain.getId(), blockNumber);
-        if (!stored.isEmpty() && stored.stream().noneMatch(freshHash::equals)) {
+        if (!stored.isEmpty() && stored.stream().map(BlockIdentity::normalize).noneMatch(freshHash::equals)) {
             return new ProbeOutcome(ProbeResult.ORPHANED, freshHash);
         }
         if (stored.isEmpty()) {
@@ -343,12 +356,9 @@ public class GraphNodeSyncService {
     private ProbeOutcome probeEvmBlock(ChainConfig chain, long blockNumber, long headBlock, int required,
             int safeRequired, Long safeBlockNumber, Long finalizedBlockNumber, Map<Long, String> hashCache) {
         String freshHash = fetchAndCacheHash(chain, blockNumber, hashCache);
-        if (freshHash == null) {
-            return ProbeOutcome.unknown();
-        }
 
         List<String> stored = tokenTransferRepository.findDistinctBlockHashesAt(chain.getId(), blockNumber);
-        if (!stored.isEmpty() && stored.stream().noneMatch(freshHash::equals)) {
+        if (!stored.isEmpty() && stored.stream().map(BlockIdentity::normalize).noneMatch(freshHash::equals)) {
             return new ProbeOutcome(ProbeResult.ORPHANED, freshHash);
         }
         if (stored.isEmpty()) {
@@ -410,7 +420,13 @@ public class GraphNodeSyncService {
         String hash = graphNodeClient.fetchMeta(chain, blockNumber)
                 .filter(m -> !m.hasIndexingErrors())
                 .map(BlockMeta::blockHash)
+                .map(BlockIdentity::normalize)
                 .orElse(null);
+        if (hash == null) {
+            throw new IllegalStateException("Graph Node did not provide a trustworthy block hash for chain="
+                    + chain.getIdentifier() + ", block=" + blockNumber
+                    + "; refusing to persist a transfer without exact reorg provenance");
+        }
         hashCache.put(blockNumber, hash);
         return hash;
     }
@@ -445,18 +461,20 @@ public class GraphNodeSyncService {
         t.setEventType(resolveEventType(gt.eventType(), gt.from(), gt.to()));
         t.setExplorerTxUrl(explorerUrlBuilder.buildTxUrl(chain, gt.transactionHash()));
 
-        // Finality classification. No head available this tick -> conservatively
-        // PROVISIONAL with no hash (the next tick's reorg pass, once the head is available again,
-        // will fetch a hash and either promote it or leave it PROVISIONAL as appropriate).
+        // Identity and confidence are independent. Even an occurrence first observed SAFE or
+        // FINALIZED needs its exact hash so a later typed reorg can select precisely the orphaned
+        // incarnation rather than guessing by height (or silently laundering it on a later
+        // canonical-hash backfill).
+        t.setBlockHash(fetchAndCacheHash(chain, gt.blockNumber(), hashCache));
+
+        // Finality classification. No head available this tick -> conservatively PROVISIONAL;
+        // the exact occurrence hash above remains mandatory regardless of classification.
         if (headBlock == null) {
             t.setFinalityStatus(FinalityLevel.PROVISIONAL);
         } else {
             FinalityLevel level = EvmUtils.finalityOf(chain.getFinalityModel(), gt.blockNumber(), headBlock,
                     safeBlockNumber, finalizedBlockNumber, required, safeRequired);
             t.setFinalityStatus(level);
-            if (level == FinalityLevel.PROVISIONAL) {
-                t.setBlockHash(fetchAndCacheHash(chain, gt.blockNumber(), hashCache));
-            }
         }
 
         if (gt.tokenId() != null && !gt.tokenId().isBlank()) {
@@ -483,6 +501,26 @@ public class GraphNodeSyncService {
         ));
 
         return t;
+    }
+
+    private static void reactivateOccurrence(TokenTransfer existing, TokenTransfer observed) {
+        // A transiently incomplete deployment lookup must not erase an association established
+        // during an earlier tenure of this exact immutable occurrence.
+        if (observed.getAssetId() != null) {
+            existing.setAssetId(observed.getAssetId());
+        }
+        if (observed.getDeploymentId() != null) {
+            existing.setDeploymentId(observed.getDeploymentId());
+        }
+        existing.setContractAddress(observed.getContractAddress());
+        existing.setFromAddress(observed.getFromAddress());
+        existing.setToAddress(observed.getToAddress());
+        existing.setTokenId(observed.getTokenId());
+        existing.setAmount(observed.getAmount());
+        existing.setEventType(observed.getEventType());
+        existing.setExplorerTxUrl(observed.getExplorerTxUrl());
+        existing.setRawData(observed.getRawData());
+        existing.setFinalityStatus(observed.getFinalityStatus());
     }
 
     private TokenTransfer.EventType resolveEventType(String raw, String from, String to) {

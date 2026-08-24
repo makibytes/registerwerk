@@ -171,12 +171,12 @@ import { AuthService } from '../../../core/auth/auth.service';
           <ng-container matColumnDef="actions">
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let row">
-              <button mat-icon-button color="primary" (click)="$event.stopPropagation(); viewAsset(row)"
+              <button type="button" mat-icon-button color="primary" (click)="$event.stopPropagation(); viewAsset(row)"
                       [attr.aria-label]="'View ' + row.name" matTooltip="View">
                 <mat-icon>open_in_new</mat-icon>
               </button>
               @if (canEdit) {
-                <button mat-icon-button (click)="$event.stopPropagation(); editAsset(row)"
+                <button type="button" mat-icon-button (click)="$event.stopPropagation(); editAsset(row)"
                         [attr.aria-label]="'Edit ' + row.name" matTooltip="Edit">
                   <mat-icon>edit</mat-icon>
                 </button>
@@ -185,7 +185,10 @@ import { AuthService } from '../../../core/auth/auth.service';
           </ng-container>
 
           <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-          <tr mat-row *matRowDef="let row; columns: displayedColumns;" style="cursor:pointer" (click)="viewAsset(row)"></tr>
+          <tr mat-row *matRowDef="let row; columns: displayedColumns;" class="interactive-row"
+              tabindex="0" [attr.aria-label]="'Open asset ' + row.name"
+              (click)="viewAsset(row)" (keydown.enter)="viewAsset(row)"
+              (keydown.space)="viewAsset(row); $event.preventDefault()"></tr>
         </table>
         </div>
 

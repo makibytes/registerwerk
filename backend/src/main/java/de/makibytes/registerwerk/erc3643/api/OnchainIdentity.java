@@ -38,6 +38,12 @@ public class OnchainIdentity {
     @Column(name = "deployed_by_tx", length = 66)
     private String deployedByTx;
 
+    @Column(name = "deployed_block_number")
+    private Long deployedBlockNumber;
+
+    @Column(name = "deployed_block_hash", length = 128)
+    private String deployedBlockHash;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -57,4 +63,10 @@ public class OnchainIdentity {
 
     public String getDeployedByTx() { return deployedByTx; }
     public void setDeployedByTx(String deployedByTx) { this.deployedByTx = deployedByTx; }
+
+    public Long getDeployedBlockNumber() { return deployedBlockNumber; }
+    public void setDeployedBlockNumber(Long deployedBlockNumber) { this.deployedBlockNumber = deployedBlockNumber; }
+
+    public String getDeployedBlockHash() { return deployedBlockHash; }
+    public void setDeployedBlockHash(String deployedBlockHash) { this.deployedBlockHash = deployedBlockHash; }
 }

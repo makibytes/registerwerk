@@ -58,7 +58,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     </rw-data-table>
 
     <ng-template #rowActions let-t>
-      <button mat-icon-button color="primary" (click)="open(t)" matTooltip="Open ticket">
+      <button type="button" mat-icon-button color="primary" (click)="open(t)" matTooltip="Open ticket">
         <mat-icon>open_in_new</mat-icon>
       </button>
     </ng-template>

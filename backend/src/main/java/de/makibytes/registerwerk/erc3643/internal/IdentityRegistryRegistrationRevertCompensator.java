@@ -51,16 +51,32 @@ class IdentityRegistryRegistrationRevertCompensator implements ChainEffectCompen
         if (entry == null) {
             return new CompensationOutcome.NotApplicable("Erc3643IdentityRegistry " + id + " no longer exists");
         }
-        if (!entry.isActive()) {
+        if (!ChainEffectCausality.matches(effect, entry.getChainConfigId(), entry.getRegisteredByTx(),
+                entry.getRegistrationBlockNumber(), entry.getRegistrationBlockHash())) {
             return new CompensationOutcome.NotApplicable(
-                    "Erc3643IdentityRegistry " + id + " is already removed (removedAt=" + entry.getRemovedAt() + ")");
+                    "Erc3643IdentityRegistry " + id + " is owned by a different registration incarnation");
+        }
+        boolean pendingRemovalIntent = !entry.isActive()
+                && entry.getRemovedByTx() != null
+                && !entry.isRemovalConfirmed()
+                && entry.getRemovalBlockNumber() == null
+                && entry.getRemovalBlockHash() == null;
+        if (!entry.isActive() && !pendingRemovalIntent) {
+            return new CompensationOutcome.NotApplicable(
+                    "Erc3643IdentityRegistry " + id + " is independently removed (removedAt="
+                            + entry.getRemovedAt() + ")");
         }
 
         log.error("Erc3643IdentityRegistry id={} wallet={} was registered but its confirming block was "
                         + "retracted by a reorg — the investor was never "
                         + "actually registered on-chain; soft-removing this entry.",
                 id, entry.getWalletAddress());
-        entry.setRemovedAt(Instant.now());
+        if (entry.getRemovedAt() == null) {
+            entry.setRemovedAt(Instant.now());
+        }
+        entry.setRegistrationConfirmed(false);
+        entry.setRegistrationBlockNumber(null);
+        entry.setRegistrationBlockHash(null);
         repository.save(entry);
 
         return new CompensationOutcome.Compensated("Soft-removed Erc3643IdentityRegistry " + id + " after retraction");

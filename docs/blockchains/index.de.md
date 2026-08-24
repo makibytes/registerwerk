@@ -16,7 +16,7 @@ Registerwerk unterstützt acht Blockchain-Typen über Mainnet- und Testnet-Netze
 | [Ethereum & EVM](evm.md) | ERC-20/721/1155/3525/3643/4626/7540 | Web3j | Ethereum, Polygon, Base, Arbitrum, Avalanche, Optimism | Implementierung vorhanden; Produktionsreife ungeprüft |
 | [Vertrauliches EVM](confidential-evm.md) | CONF_ERC20, CONF_ERC3643 | Web3j + Zama SDK | Fhenix, Inco | Implementierung vorhanden; Produktionsreife ungeprüft |
 | [Solana](solana.md) | SPL, SPL_2022, SPL_2022_BOND, SPL_2022_CONFIDENTIAL | Solanaj | mainnet-beta, devnet | Integration vorhanden; Produktionsreife ungeprüft |
-| [Canton / DAML](canton.md) | DAML_BOND_*, CANTON_TOKEN | DAML-Java-Client | Canton Network, devnet | Optionale Implementierung (`-Pcanton`); Produktionsreife ungeprüft |
+| [Canton / Daml](canton.md) | DAML_BOND_*; CANTON_TOKEN reserviert | Ledger-API-v2-Java-Client | Canton Network, devnet | Benutzerdefinierter Bond-Lebenszyklus profilgeprüft; Live-/Zahlungskonformität erforderlich |
 | [StarkNet](starknet-stellar.md) | STARKNET_ERC20, STARKNET_ERC3525 | Eigenes Starknet4j | mainnet, sepolia | ⚠️ Platzhalter |
 | [Stellar](starknet-stellar.md) | STELLAR_ASSET | Horizon Java SDK | mainnet, testnet | ⚠️ Platzhalter |
 

@@ -31,20 +31,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
+import de.makibytes.registerwerk.finality.api.ChainSubmissionExecutor;
 
 /**
- * Handles token lifecycle operations on Canton via the Daml Token Standard (CIP-0056).
- *
- * <p>All operations are delegated to the Canton participant's Ledger API (gRPC).
- * The Daml Token Standard package is assumed to be pre-loaded on the participant
- * (it is deployed on the public Canton Network by default).
+ * Reserved adapter surface for a future registry-specific Canton Token Standard (CIP-0056)
+ * implementation. Every public operation currently fails through
+ * {@link #requireRegistrySpecificAdapter()} before constructing or submitting a command.
  *
  * <p>Method signatures mirror {@link SolanaTokenService} so {@link
  * de.makibytes.registerwerk.application.asset.AssetDeploymentService} can route
  * symmetrically. All methods return {@link CompletableFuture}&lt;String&gt; carrying
  * the Ledger API update ID (analogous to an EVM tx hash or Solana signature).
  *
- * <h3>Daml Token Standard concepts mapped to Registerwerk operations</h3>
+ * <h3>Provisional operation mapping (not executable)</h3>
  * <ul>
  *   <li>{@code createInstrument} → allocates a new {@code Instrument} contract</li>
  *   <li>{@code issue} → exercises {@code Issue} choice (mint to recipient holding)</li>
@@ -64,25 +64,33 @@ public class CantonTokenService implements CantonTokenOperations {
      * Package ID of the Daml Token Standard on Canton Network.
      * Override via canton token-standard package ID lookup at runtime if package hash changes.
      */
-    static final String TOKEN_STANDARD_PACKAGE = "lfdt-token-standard";
+    public static final String TOKEN_STANDARD_PACKAGE = "#splice-api-token-holding-v1";
+
+    private static final String UNSUPPORTED_MESSAGE =
+            "CANTON_TOKEN requires a registry-specific CIP-0056 implementation and off-ledger "
+                    + "workflow adapter. CIP-0056 does not provide a universal InstrumentFactory "
+                    + "or issuer-admin Issue/ForceTransfer/Pause choices.";
 
     private final BlockchainClientRegistry registry;
     private final ChainConfigRepository chainConfigRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final WalletSigner walletSigner;
+    private final ChainSubmissionExecutor submissions;
 
     public CantonTokenService(
             BlockchainClientRegistry registry,
             ChainConfigRepository chainConfigRepository,
             AssetDeploymentRepository assetDeploymentRepository,
             ApplicationEventPublisher eventPublisher,
-            WalletSigner walletSigner) {
+            WalletSigner walletSigner,
+            ChainSubmissionExecutor submissions) {
         this.registry                 = registry;
         this.chainConfigRepository    = chainConfigRepository;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.eventPublisher            = eventPublisher;
         this.walletSigner              = walletSigner;
+        this.submissions               = submissions;
     }
 
     // ── Instrument creation (= token deployment) ──────────────────────────────
@@ -99,9 +107,11 @@ public class CantonTokenService implements CantonTokenOperations {
     public CompletableFuture<String> createInstrument(
             UUID assetId, Network network, String issuerPartyId, int decimals, UUID actorId, String actorRole) {
 
-        return CompletableFuture.supplyAsync(() -> {
-            CantonLedgerClient client = resolveClient(network);
-            String identifier = resolveIdentifier(network);
+        requireRegistrySpecificAdapter();
+
+        return submitOnNetwork(network, chain -> {
+            CantonLedgerClient client = (CantonLedgerClient)
+                    registry.getCantonClientByIdentifier(chain.getIdentifier());
 
             // Build InstrumentFactory.Create command using Daml Token Standard template.
             // The instrument is created under the issuer's party authority.
@@ -143,8 +153,8 @@ public class CantonTokenService implements CantonTokenOperations {
      */
     public CompletableFuture<String> issue(UUID deploymentId, String recipientPartyId, BigDecimal amount,
                                             UUID actorId, String actorRole) {
-        return CompletableFuture.supplyAsync(() -> {
-            AssetDeployment deployment = loadDeployment(deploymentId);
+        requireRegistrySpecificAdapter();
+        return submitOnDeployment(deploymentId, deployment -> {
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
             CantonContext ctx           = resolveContext(deployment);
 
@@ -179,8 +189,9 @@ public class CantonTokenService implements CantonTokenOperations {
             UUID deploymentId, String holdingContractId,
             String fromParty, String toParty, BigDecimal amount, UUID actorId, String actorRole) {
 
-        return CompletableFuture.supplyAsync(() -> {
-            AssetDeployment deployment = loadDeployment(deploymentId);
+        requireRegistrySpecificAdapter();
+
+        return submitOnDeployment(deploymentId, deployment -> {
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
             CantonContext ctx           = resolveContext(deployment);
 
@@ -215,8 +226,9 @@ public class CantonTokenService implements CantonTokenOperations {
             UUID deploymentId, String holdingContractId,
             String toParty, BigDecimal amount, String reason, UUID actorId, String actorRole) {
 
-        return CompletableFuture.supplyAsync(() -> {
-            AssetDeployment deployment = loadDeployment(deploymentId);
+        requireRegistrySpecificAdapter();
+
+        return submitOnDeployment(deploymentId, deployment -> {
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
             CantonContext ctx           = resolveContext(deployment);
 
@@ -253,8 +265,8 @@ public class CantonTokenService implements CantonTokenOperations {
      */
     public CompletableFuture<String> freezeHolding(UUID deploymentId, String holdingContractId,
                                                     UUID actorId, String actorRole) {
-        return CompletableFuture.supplyAsync(() -> {
-            AssetDeployment deployment = loadDeployment(deploymentId);
+        requireRegistrySpecificAdapter();
+        return submitOnDeployment(deploymentId, deployment -> {
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
             CantonContext ctx           = resolveContext(deployment);
 
@@ -282,8 +294,8 @@ public class CantonTokenService implements CantonTokenOperations {
      */
     public CompletableFuture<String> unfreezeHolding(UUID deploymentId, String holdingContractId,
                                                        UUID actorId, String actorRole) {
-        return CompletableFuture.supplyAsync(() -> {
-            AssetDeployment deployment = loadDeployment(deploymentId);
+        requireRegistrySpecificAdapter();
+        return submitOnDeployment(deploymentId, deployment -> {
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
             CantonContext ctx           = resolveContext(deployment);
 
@@ -312,8 +324,8 @@ public class CantonTokenService implements CantonTokenOperations {
      */
     public CompletableFuture<String> burn(UUID deploymentId, String holdingContractId, BigDecimal amount,
                                            UUID actorId, String actorRole) {
-        return CompletableFuture.supplyAsync(() -> {
-            AssetDeployment deployment = loadDeployment(deploymentId);
+        requireRegistrySpecificAdapter();
+        return submitOnDeployment(deploymentId, deployment -> {
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
             CantonContext ctx           = resolveContext(deployment);
 
@@ -341,8 +353,8 @@ public class CantonTokenService implements CantonTokenOperations {
      * Pauses the instrument — all transfers on this instrument are blocked.
      */
     public CompletableFuture<String> pauseInstrument(UUID deploymentId, UUID actorId, String actorRole) {
-        return CompletableFuture.supplyAsync(() -> {
-            AssetDeployment deployment = loadDeployment(deploymentId);
+        requireRegistrySpecificAdapter();
+        return submitOnDeployment(deploymentId, deployment -> {
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
             CantonContext ctx           = resolveContext(deployment);
 
@@ -365,8 +377,8 @@ public class CantonTokenService implements CantonTokenOperations {
      * Resumes a paused instrument.
      */
     public CompletableFuture<String> unpauseInstrument(UUID deploymentId, UUID actorId, String actorRole) {
-        return CompletableFuture.supplyAsync(() -> {
-            AssetDeployment deployment = loadDeployment(deploymentId);
+        requireRegistrySpecificAdapter();
+        return submitOnDeployment(deploymentId, deployment -> {
             CantonLedgerClient client  = resolveClientForDeployment(deployment);
             CantonContext ctx           = resolveContext(deployment);
 
@@ -387,9 +399,8 @@ public class CantonTokenService implements CantonTokenOperations {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private CantonLedgerClient resolveClient(Network network) {
-        String identifier = "CANTON_" + (network == Network.MAINNET ? "MAINNET" : "DEVNET");
-        return (CantonLedgerClient) registry.getCantonClientByIdentifier(identifier);
+    private static void requireRegistrySpecificAdapter() {
+        throw new UnsupportedOperationException(UNSUPPORTED_MESSAGE);
     }
 
     private String resolveIdentifier(Network network) {
@@ -397,21 +408,54 @@ public class CantonTokenService implements CantonTokenOperations {
     }
 
     private CantonLedgerClient resolveClientForDeployment(AssetDeployment deployment) {
-        return resolveClient(deployment.getNetwork());
+        ChainConfig chain = requireDeploymentChain(deployment);
+        return (CantonLedgerClient) registry.getCantonClientByIdentifier(chain.getIdentifier());
     }
 
     private CantonContext resolveContext(AssetDeployment deployment) {
         // Load the party ID + JWT from the chain_config-linked default wallet via WalletSigner —
         // the same default-wallet mechanism every other chain (EVM, Solana) uses.
-        String identifier = resolveIdentifier(deployment.getNetwork());
-        ChainConfig chainConfig = chainConfigRepository.findByIdentifier(identifier)
-                .orElseThrow(() -> new EntityNotFoundException("ChainConfig", "identifier", identifier));
+        ChainConfig chainConfig = requireDeploymentChain(deployment);
         return walletSigner.cantonContextForChain(chainConfig.getId());
     }
 
     private AssetDeployment loadDeployment(UUID deploymentId) {
         return assetDeploymentRepository.findById(deploymentId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+    }
+
+    private <T> CompletableFuture<T> submitOnNetwork(
+            Network network, Function<ChainConfig, T> submission) {
+        ChainConfig chain = requireChainConfig(network);
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                chain.getId(), () -> submission.apply(chain)));
+    }
+
+    private <T> CompletableFuture<T> submitOnDeployment(
+            UUID deploymentId, Function<AssetDeployment, T> submission) {
+        AssetDeployment deployment = loadDeployment(deploymentId);
+        ChainConfig chain = requireDeploymentChain(deployment);
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                chain.getId(), () -> submission.apply(deployment)));
+    }
+
+    private ChainConfig requireChainConfig(Network network) {
+        String identifier = resolveIdentifier(network);
+        return chainConfigRepository.findByIdentifier(identifier)
+                .filter(ChainConfig::isEnabled)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Enabled ChainConfig", "identifier", identifier));
+    }
+
+    private ChainConfig requireDeploymentChain(AssetDeployment deployment) {
+        if (deployment.getChainConfigId() == null) {
+            throw new IllegalStateException(
+                    "Canton deployment is missing chainConfigId: " + deployment.getId());
+        }
+        return chainConfigRepository.findById(deployment.getChainConfigId())
+                .filter(ChainConfig::isEnabled)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Enabled ChainConfig", deployment.getChainConfigId()));
     }
 
     private static com.daml.ledger.javaapi.data.DamlRecord.Field field(

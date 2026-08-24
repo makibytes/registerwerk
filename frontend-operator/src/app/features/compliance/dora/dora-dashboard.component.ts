@@ -65,7 +65,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     <app-page-header
       title="DORA ICT Resilience"
       subtitle="Digital Operational Resilience Act — Art. 17 Incidents · Art. 28 Third-Party Providers">
-      <button mat-raised-button color="primary" (click)="openReportDialog()">
+      <button type="button" mat-raised-button color="primary" (click)="openReportDialog()">
         <mat-icon>warning_amber</mat-icon>
         Report Incident
       </button>
@@ -87,17 +87,17 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
           </rw-data-table>
 
           <ng-template #incidentActions let-inc>
-            <button mat-icon-button (click)="openUpdateStatusDialog(inc)"
+            <button type="button" mat-icon-button (click)="openUpdateStatusDialog(inc)"
                     matTooltip="Update status / add root cause">
               <mat-icon>edit</mat-icon>
             </button>
             @if (inc.status !== 'REPORTED_TO_AUTHORITY' && inc.status !== 'CLOSED') {
-              <button mat-icon-button (click)="openReportToAuthorityDialog(inc)"
+              <button type="button" mat-icon-button (click)="openReportToAuthorityDialog(inc)"
                       matTooltip="Report to BaFin / authority">
                 <mat-icon>send</mat-icon>
               </button>
             }
-            <button mat-icon-button (click)="exportIncidentAuthorityReport(inc)"
+            <button type="button" mat-icon-button (click)="exportIncidentAuthorityReport(inc)"
                     matTooltip="Download Art. 19 authority-report export (CSV)">
               <mat-icon>description</mat-icon>
             </button>
@@ -109,12 +109,12 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       <mat-tab label="Third-Party Providers">
         <div class="tab-content">
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
-            <button mat-stroked-button (click)="exportProviderRegister()"
+            <button type="button" mat-stroked-button (click)="exportProviderRegister()"
                     matTooltip="Download Art. 28 Register of Information export (CSV)">
               <mat-icon>download</mat-icon>
               Export Register
             </button>
-            <button mat-raised-button color="primary" (click)="openProviderDialog()">
+            <button type="button" mat-raised-button color="primary" (click)="openProviderDialog()">
               <mat-icon>add_business</mat-icon>
               Register Provider
             </button>
@@ -130,7 +130,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
           </rw-data-table>
 
           <ng-template #providerActions let-p>
-            <button mat-icon-button (click)="openProviderDialog(p)" matTooltip="Edit provider">
+            <button type="button" mat-icon-button (click)="openProviderDialog(p)" matTooltip="Edit provider">
               <mat-icon>edit</mat-icon>
             </button>
           </ng-template>
@@ -150,7 +150,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-            <button mat-raised-button color="primary" (click)="openRecordTestDialog()">
+            <button type="button" mat-raised-button color="primary" (click)="openRecordTestDialog()">
               <mat-icon>fact_check</mat-icon>
               Record Test Result
             </button>
@@ -167,7 +167,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
 
           <ng-template #testActions let-t>
             @if (t.result === 'FINDINGS_OPEN') {
-              <button mat-icon-button (click)="openUpdateTestDialog(t)" matTooltip="Close out findings">
+              <button type="button" mat-icon-button (click)="openUpdateTestDialog(t)" matTooltip="Close out findings">
                 <mat-icon>fact_check</mat-icon>
               </button>
             }
@@ -209,8 +209,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </div>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn"
                 (click)="submitReport()"
                 [disabled]="!incidentForm.title || !incidentForm.category || !incidentForm.severity">
           <mat-icon>warning_amber</mat-icon>
@@ -241,8 +241,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 (click)="submitStatusUpdate()"
                 [disabled]="!statusForm.status">
           <mat-icon>save</mat-icon>
@@ -271,8 +271,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </div>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 (click)="submitReportToAuthority()"
                 [disabled]="!authorityForm.authorityRef">
           <mat-icon>send</mat-icon>
@@ -337,8 +337,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 (click)="submitRecordTest()"
                 [disabled]="!testForm.testType || !testForm.result || !testForm.scope || !testForm.performedAt">
           <mat-icon>save</mat-icon>
@@ -429,8 +429,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" (click)="submitProvider()" [disabled]="!providerForm.name.trim()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" (click)="submitProvider()" [disabled]="!providerForm.name.trim()">
           <mat-icon>save</mat-icon>
           Save
         </button>
@@ -459,8 +459,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" (click)="submitUpdateTest()" [disabled]="!updateTestForm.result">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" (click)="submitUpdateTest()" [disabled]="!updateTestForm.result">
           <mat-icon>save</mat-icon>
           Save
         </button>

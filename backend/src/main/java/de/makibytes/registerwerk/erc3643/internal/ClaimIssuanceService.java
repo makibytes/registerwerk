@@ -171,9 +171,10 @@ public class ClaimIssuanceService {
             return;
         }
 
-        // Same "submitted, not yet confirmed" reasoning as issueClaim — revokedAt stays null until
-        // Erc3643ClaimConfirmationListener confirms removeClaim, so the claim keeps counting for
-        // compliance until the revocation is actually final.
+        // revokedAt remains chain-derived and is therefore only set after final confirmation.
+        // revocationTxHash is the fail-closed intent marker: getActiveClaims excludes the claim as
+        // soon as removeClaim is submitted, including while a reorged transaction awaits a new
+        // canonical verdict. Only a confirmed failed receipt clears that marker.
         String txHash = deploymentService.revokeKycClaim(claimId);
 
         claim.setRevocationTxHash(txHash);
@@ -183,7 +184,15 @@ public class ClaimIssuanceService {
     }
 
     /**
-     * Returns all non-revoked, non-expired claims for a legal entity on a specific chain.
+     * Returns all confirmed, non-revoked, non-expired claims for a legal entity on a specific
+     * chain whose revocation has not been submitted.
+     *
+     * <p>A non-null {@link OnchainClaim#getRevocationTxHash()} excludes the claim immediately.
+     * Revocation is a compliance-narrowing operation, so the safe state while its receipt is
+     * pending — or while the same transaction is pending again after a reorg — is inactive. The
+     * confirmation listener clears that intent marker only after a confirmed failed receipt,
+     * which restores the claim without conflating submitted intent with chain-derived
+     * {@link OnchainClaim#getRevokedAt()} state.
      *
      * @param legalEntityId ID of the legal entity
      * @param chainConfigId ID of the chain configuration
@@ -200,6 +209,7 @@ public class ClaimIssuanceService {
         return claimRepository.findByOnchainIdentityId(identity.getId()).stream()
             .filter(OnchainClaim::isConfirmed)
             .filter(c -> c.getRevokedAt() == null)
+            .filter(c -> c.getRevocationTxHash() == null)
             .filter(c -> c.getExpiresAt() == null || c.getExpiresAt().isAfter(now))
             .toList();
     }

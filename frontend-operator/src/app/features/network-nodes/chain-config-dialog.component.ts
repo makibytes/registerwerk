@@ -129,8 +129,8 @@ import { ChainConfigCreateRequest, ChainConfigUpdateRequest } from '../../core/a
     </mat-dialog-content>
     <mat-dialog-actions style="padding: 0 24px 20px">
       <div class="actions">
-        <button mat-button mat-dialog-close>Cancel</button>
-        <button mat-flat-button color="primary" [disabled]="!canSubmit()" (click)="submit()">
+        <button type="button" mat-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-flat-button color="primary" [disabled]="!canSubmit()" (click)="submit()">
           {{ isEdit ? 'Save' : 'Create Chain' }}
         </button>
       </div>

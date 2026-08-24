@@ -44,7 +44,7 @@ class ChaincacheClientTest {
         mockServer.expect(requestTo(MANAGEMENT_URL + "/api/capabilities"))
                 .andRespond(withSuccess("""
                         [
-                          {"chainKey":"anvil","finalityModel":"INSTANT","safeConfirmations":0,
+                          {"chainKey":"anvil","durabilityDomainId":"postgres:shared-db","finalityModel":"INSTANT","safeConfirmations":0,
                            "finalizedConfirmations":0,"configuredApis":["eth","debug"],
                            "debugApiConfiguredOnAnyNode":true,"addressTraceCapability":{"attempted":true,"lastSuccessful":true,"lastAttemptAt":"2026-08-21T22:00:00Z"},
                            "durableStreamAvailable":true,"kafkaRelayEnabled":false},
@@ -65,6 +65,7 @@ class ChaincacheClientTest {
 
         assertThat(result).isPresent();
         assertThat(result.get().chainKey()).isEqualTo("anvil");
+        assertThat(result.get().durabilityDomainId()).isEqualTo("postgres:shared-db");
         assertThat(result.get().finalityModel()).isEqualTo("INSTANT");
         assertThat(result.get().durableStreamAvailable()).isTrue();
         assertThat(result.get().addressTraceCapability().attempted()).isTrue();

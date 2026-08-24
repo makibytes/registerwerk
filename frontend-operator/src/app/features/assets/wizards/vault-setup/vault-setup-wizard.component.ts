@@ -74,7 +74,7 @@ import { TokenStandard } from '../../../../core/models';
               </div>
             </div>
             <div class="step-actions">
-              <button mat-flat-button class="btn-primary" [disabled]="!vaultType" matStepperNext>
+              <button type="button" mat-flat-button class="btn-primary" [disabled]="!vaultType" matStepperNext>
                 Next <mat-icon>arrow_forward</mat-icon>
               </button>
             </div>
@@ -119,8 +119,8 @@ import { TokenStandard } from '../../../../core/models';
               }
             </form>
             <div class="step-actions">
-              <button mat-stroked-button matStepperPrevious class="btn-back">Back</button>
-              <button mat-flat-button class="btn-primary" [disabled]="form.invalid" matStepperNext>
+              <button type="button" mat-stroked-button matStepperPrevious class="btn-back">Back</button>
+              <button type="button" mat-flat-button class="btn-primary" [disabled]="form.invalid" matStepperNext>
                 Review <mat-icon>arrow_forward</mat-icon>
               </button>
             </div>
@@ -143,8 +143,8 @@ import { TokenStandard } from '../../../../core/models';
               }
             </div>
             <div class="step-actions">
-              <button mat-stroked-button matStepperPrevious class="btn-back">Back</button>
-              <button mat-flat-button class="btn-deploy" [disabled]="deploying" (click)="deploy()">
+              <button type="button" mat-stroked-button matStepperPrevious class="btn-back">Back</button>
+              <button type="button" mat-flat-button class="btn-deploy" [disabled]="deploying" (click)="deploy()">
                 @if (deploying) {
                   <span class="spinner"></span> Deploying…
                 } @else {

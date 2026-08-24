@@ -43,12 +43,12 @@ import { AuthService } from '../../../core/auth/auth.service';
         <mat-label>Entity ID</mat-label>
         <input matInput [(ngModel)]="entityId" placeholder="UUID" (keyup.enter)="load()" />
       </mat-form-field>
-      <button mat-stroked-button (click)="load()" [disabled]="!entityId">
+      <button type="button" mat-stroked-button (click)="load()" [disabled]="!entityId">
         <mat-icon>search</mat-icon>
         Load
       </button>
       @if (canManage) {
-        <button mat-raised-button color="warn" (click)="openCreateDialog()" [disabled]="!entityId">
+        <button type="button" mat-raised-button color="warn" (click)="openCreateDialog()" [disabled]="!entityId">
           <mat-icon>admin_panel_settings</mat-icon>
           Grant entity-wide permission
         </button>
@@ -68,7 +68,7 @@ import { AuthService } from '../../../core/auth/auth.service';
     }
 
     <ng-template #rowActions let-grant>
-      <button mat-stroked-button color="warn"
+      <button type="button" mat-stroked-button color="warn"
               (click)="revoke(grant)"
               matTooltip="Revoke — requires step-up auth + a second approver">
         <mat-icon>block</mat-icon>
@@ -102,8 +102,8 @@ import { AuthService } from '../../../core/auth/auth.service';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn"
                 (click)="submitCreate()"
                 [disabled]="!form.walletAddress || !form.chainConfigId || !form.legalBasis">
           <mat-icon>admin_panel_settings</mat-icon>

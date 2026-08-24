@@ -1,8 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.blockchain.api.WhitelistService;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
@@ -17,8 +16,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.web3j.abi.datatypes.Function;
-import de.makibytes.registerwerk.wallet.api.EvmSigner;
-import org.web3j.protocol.Web3j;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -42,11 +39,8 @@ class WhitelistServiceTest {
 
     @Mock private AssetDeploymentRepository assetDeploymentRepository;
     @Mock private AssetHolderRepository assetHolderRepository;
-    @Mock private BlockchainClientRegistry blockchainClientRegistry;
-    @Mock private EvmContractService evmContractService;
+    @Mock private DurableEvmTransactionGateway evmTransactions;
     @Mock private BlockchainTransactionService txService;
-    @Mock private Web3j web3j;
-    @Mock private EvmSigner credentials;
 
     private WhitelistService service;
 
@@ -57,14 +51,14 @@ class WhitelistServiceTest {
     @BeforeEach
     void setUp() {
         service = new WhitelistService(
-                assetDeploymentRepository, assetHolderRepository, blockchainClientRegistry,
-                evmContractService, txService);
+                assetDeploymentRepository, assetHolderRepository, evmTransactions, txService);
     }
 
     private AssetDeployment deployment() {
         AssetDeployment dep = new AssetDeployment();
         dep.setId(DEPLOYMENT_ID);
         dep.setAssetId(ASSET_ID);
+        dep.setChainConfigId(UUID.randomUUID());
         dep.setChain(Chain.ETHEREUM);
         dep.setNetwork(Network.TESTNET);
         dep.setContractAddress("0xdeployed");
@@ -76,18 +70,16 @@ class WhitelistServiceTest {
     void whitelist_usesSubmitNotSend() {
         AssetDeployment dep = deployment();
         when(assetDeploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
-        when(blockchainClientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
-                .thenReturn(credentials);
-        when(evmContractService.submit(eq(web3j), eq(credentials), eq("0xdeployed"), any(Function.class)))
+        when(evmTransactions.submit(eq(dep.getChainConfigId()), eq("0xdeployed"),
+                any(Function.class), any()))
                 .thenReturn("0xtxhash");
         when(assetHolderRepository.findActiveByAssetIdAndWalletAddress(eq(ASSET_ID), anyString()))
                 .thenReturn(Optional.empty());
 
         service.whitelist(DEPLOYMENT_ID, WALLET);
 
-        verify(evmContractService, never()).send(any(), any(), anyString(), any(Function.class));
-        verify(evmContractService).submit(eq(web3j), eq(credentials), eq("0xdeployed"), any(Function.class));
+        verify(evmTransactions).submit(eq(dep.getChainConfigId()), eq("0xdeployed"),
+                any(Function.class), any());
         verify(txService).record(eq("0xtxhash"), eq("whitelist"), eq(DEPLOYMENT_ID), eq(ASSET_ID),
                 anyString(), anyString(), eq("0xdeployed"), any());
     }
@@ -97,10 +89,8 @@ class WhitelistServiceTest {
     void whitelist_updatesHolderRecord() {
         AssetDeployment dep = deployment();
         when(assetDeploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
-        when(blockchainClientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
-                .thenReturn(credentials);
-        when(evmContractService.submit(any(), any(), anyString(), any(Function.class))).thenReturn("0xtxhash");
+        when(evmTransactions.submit(any(), anyString(), any(Function.class), any()))
+                .thenReturn("0xtxhash");
 
         AssetHolder holder = new AssetHolder();
         when(assetHolderRepository.findActiveByAssetIdAndWalletAddress(eq(ASSET_ID), anyString()))

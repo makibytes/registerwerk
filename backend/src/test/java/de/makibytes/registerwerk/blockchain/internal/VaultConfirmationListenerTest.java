@@ -42,6 +42,7 @@ class VaultConfirmationListenerTest {
     @Mock private AssetVaultStateRepository vaultStateRepository;
     @Mock private BlockchainTransactionService blockchainTransactionService;
     @Mock private ChainEffectRecorder chainEffectRecorder;
+    @Mock private de.makibytes.registerwerk.shared.IsolatedTransactionExecutor isolatedTransactions;
 
     private VaultConfirmationListener listener;
     private final UUID chainConfigId = UUID.randomUUID();
@@ -51,7 +52,11 @@ class VaultConfirmationListenerTest {
     void setUp() {
         listener = new VaultConfirmationListener(
                 navStrikeRepository, vaultRequestRepository, vaultStateRepository,
-                blockchainTransactionService, chainEffectRecorder);
+                blockchainTransactionService, chainEffectRecorder, isolatedTransactions);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.getArgument(0, de.makibytes.registerwerk.shared.IsolatedTransactionExecutor.Work.class).run();
+            return null;
+        }).when(isolatedTransactions).run(any());
         when(vaultRequestRepository.findByFulfilledTxIsNotNullAndConfirmedFalse()).thenReturn(List.of());
         when(vaultRequestRepository.findByCancelledTxIsNotNullAndConfirmedFalse()).thenReturn(List.of());
         when(vaultStateRepository.findByDepositCapTxHashIsNotNull()).thenReturn(List.of());
@@ -78,19 +83,21 @@ class VaultConfirmationListenerTest {
         when(blockchainTransactionService.confirmedLocation("0xstriketx"))
                 .thenReturn(Optional.of(new BlockchainTransactionService.ConfirmedTxLocation(chainConfigId, 100L, "0xblock100")));
         when(navStrikeRepository.findByAssetIdOrderByEffectiveAtDesc(assetId)).thenReturn(List.of(strike));
-        when(vaultStateRepository.findById(assetId)).thenReturn(Optional.empty());
+        when(vaultStateRepository.findByAssetIdForUpdate(assetId)).thenReturn(Optional.empty());
 
         listener.resolvePending();
 
         assertThat(strike.isConfirmed()).isTrue();
+        assertThat(strike.getBlockHash()).isEqualTo("0xblock100");
         verify(navStrikeRepository).save(strike);
         ArgumentCaptor<AssetVaultState> stateCaptor = ArgumentCaptor.forClass(AssetVaultState.class);
         verify(vaultStateRepository).save(stateCaptor.capture());
         assertThat(stateCaptor.getValue().getLatestNavPerShare()).isEqualByComparingTo(strike.getNavPerShare());
         assertThat(stateCaptor.getValue().getLatestNavStrikeAt()).isEqualTo(strike.getEffectiveAt());
+        assertThat(stateCaptor.getValue().getLatestNavStrikeId()).isEqualTo(strike.getId());
 
         ArgumentCaptor<ChainEffectDescriptor> effectCaptor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
-        verify(chainEffectRecorder).record(effectCaptor.capture());
+        verify(chainEffectRecorder).recordFinalized(effectCaptor.capture());
         assertThat(effectCaptor.getValue().effectType()).isEqualTo("VAULT_NAV_STRIKE_CONFIRMED");
         assertThat(effectCaptor.getValue().entityId()).isEqualTo(strike.getId());
     }
@@ -101,6 +108,9 @@ class VaultConfirmationListenerTest {
         VaultNavStrike olderStrike = strike(UUID.randomUUID(), 1L, "0xolder");
         VaultNavStrike newerConfirmed = strike(UUID.randomUUID(), 2L, "0xnewer");
         newerConfirmed.setConfirmed(true);
+        newerConfirmed.setChainConfigId(chainConfigId);
+        newerConfirmed.setBlockNumber(101L);
+        newerConfirmed.setBlockHash("0xblock101");
         when(navStrikeRepository.findByTxHashIsNotNullAndConfirmedFalse()).thenReturn(List.of(olderStrike));
         when(blockchainTransactionService.isConfirmedFailure("0xolder")).thenReturn(false);
         when(blockchainTransactionService.confirmedLocation("0xolder"))
@@ -113,7 +123,7 @@ class VaultConfirmationListenerTest {
         assertThat(olderStrike.isConfirmed()).isTrue();
         verify(navStrikeRepository).save(olderStrike);
         verify(vaultStateRepository, never()).save(any());
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test
@@ -128,7 +138,7 @@ class VaultConfirmationListenerTest {
         assertThat(strike.isConfirmed()).isTrue();
         verify(navStrikeRepository).save(strike);
         verify(vaultStateRepository, never()).save(any());
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     private VaultRequest request(UUID id) {
@@ -156,9 +166,10 @@ class VaultConfirmationListenerTest {
         assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.FULFILLED);
         assertThat(request.getFulfilledAt()).isNotNull();
         assertThat(request.isConfirmed()).isTrue();
+        assertThat(request.getBlockHash()).isEqualTo("0xblock300");
         verify(vaultRequestRepository).save(request);
         ArgumentCaptor<ChainEffectDescriptor> effectCaptor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
-        verify(chainEffectRecorder).record(effectCaptor.capture());
+        verify(chainEffectRecorder).recordFinalized(effectCaptor.capture());
         assertThat(effectCaptor.getValue().effectType()).isEqualTo("VAULT_REQUEST_RESOLVED");
     }
 
@@ -177,7 +188,7 @@ class VaultConfirmationListenerTest {
         assertThat(request.getNavAtFulfill()).isNull();
         assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
         verify(vaultRequestRepository).save(request);
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test
@@ -194,15 +205,22 @@ class VaultConfirmationListenerTest {
 
         assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.CANCELLED);
         assertThat(request.isConfirmed()).isTrue();
+        assertThat(request.getBlockHash()).isEqualTo("0xblock400");
         verify(vaultRequestRepository).save(request);
-        verify(chainEffectRecorder).record(any());
+        verify(chainEffectRecorder).recordFinalized(any());
     }
 
     @Test
-    @DisplayName("a confirmed deposit-cap tx applies pendingDepositCap without journalling (no compensator for it)")
-    void confirmedDepositCap_appliesWithoutJournalling() {
+    @DisplayName("a confirmed deposit-cap tx applies pendingDepositCap and journals its pre-image")
+    void confirmedDepositCap_appliesAndJournals() {
         AssetVaultState state = new AssetVaultState();
         state.setAssetId(assetId);
+        state.setDepositCap(BigInteger.valueOf(100_000L));
+        UUID previousChainConfigId = UUID.randomUUID();
+        state.setDepositCapChainConfigId(previousChainConfigId);
+        state.setDepositCapBlockNumber(400L);
+        state.setDepositCapBlockHash("0xblock400");
+        state.setDepositCapConfirmedTxHash("0xprevious-cap-tx");
         state.setPendingDepositCap(BigInteger.valueOf(500_000L));
         state.setDepositCapTxHash("0xcaptx");
         when(vaultStateRepository.findByDepositCapTxHashIsNotNull()).thenReturn(List.of(state));
@@ -215,8 +233,19 @@ class VaultConfirmationListenerTest {
         assertThat(state.getDepositCap()).isEqualByComparingTo(BigInteger.valueOf(500_000L));
         assertThat(state.getPendingDepositCap()).isNull();
         assertThat(state.getDepositCapTxHash()).isNull();
+        assertThat(state.getDepositCapBlockHash()).isEqualTo("0xblock500");
+        assertThat(state.getDepositCapConfirmedTxHash()).isEqualTo("0xcaptx");
         verify(vaultStateRepository).save(state);
-        verify(chainEffectRecorder, never()).record(any());
+        ArgumentCaptor<ChainEffectDescriptor> effectCaptor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
+        verify(chainEffectRecorder).recordFinalized(effectCaptor.capture());
+        assertThat(effectCaptor.getValue().effectType()).isEqualTo("VAULT_DEPOSIT_CAP_CONFIRMED");
+        assertThat(effectCaptor.getValue().beforeState()).containsEntry("depositCap", "100000");
+        assertThat(effectCaptor.getValue().beforeState())
+                .containsEntry("chainConfigId", previousChainConfigId.toString())
+                .containsEntry("blockNumber", 400L)
+                .containsEntry("blockHash", "0xblock400")
+                .containsEntry("txHash", "0xprevious-cap-tx");
+        assertThat(effectCaptor.getValue().afterState()).containsEntry("depositCap", "500000");
     }
 
     @Test

@@ -69,7 +69,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
   `],
   template: `
     <div class="page-header">
-      <button mat-icon-button class="back-btn" routerLink="/wallets" aria-label="Back to wallets">
+      <button type="button" mat-icon-button class="back-btn" routerLink="/wallets" aria-label="Back to wallets">
         <mat-icon>arrow_back</mat-icon>
       </button>
       @if (wallet()) {
@@ -129,7 +129,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
 
           <div class="address-box">
             <span class="address-text">{{ wallet()!.address }}</span>
-            <button mat-icon-button class="copy-btn" (click)="copyAddress()" matTooltip="Copy address" aria-label="Copy wallet address">
+            <button type="button" mat-icon-button class="copy-btn" (click)="copyAddress()" matTooltip="Copy address" aria-label="Copy wallet address">
               <mat-icon>content_copy</mat-icon>
             </button>
           </div>

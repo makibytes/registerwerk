@@ -21,8 +21,8 @@ template ZeroCouponBond with
 
     ensure terms.assetId == assetId
 
-    -- | Redeem at maturity — authorizes the backend to pay face value to holders
-    -- via the Canton Token Standard (see 'Registerwerk.Bond.FixedBond' module docs).
+    -- | Record redemption authorization at maturity. The payment/holding leg is
+    -- outside this template (see 'Registerwerk.Bond.FixedBond' module docs).
     choice Redeem : ()
         with redemptionDate : Date
         controller registryAdmin

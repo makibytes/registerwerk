@@ -49,6 +49,7 @@ class OnchainIdentityReceiptListenerTest {
     @Mock private ChainConfigRepository chainConfigRepository;
     @Mock private BlockchainClientRegistry clientRegistry;
     @Mock private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
+    @Mock private de.makibytes.registerwerk.shared.IsolatedTransactionExecutor isolatedTransactions;
 
     private BlockchainTxProperties txProperties;
     private OnchainIdentityReceiptListener listener;
@@ -61,7 +62,12 @@ class OnchainIdentityReceiptListenerTest {
         txProperties.setDefaultConfirmations(12);
         EvmFinalityResolver finalityResolver = new EvmFinalityResolver(chainConfigRepository, txProperties);
         listener = new OnchainIdentityReceiptListener(
-                identityRepository, chainConfigRepository, clientRegistry, finalityResolver, chainEffectRecorder);
+                identityRepository, chainConfigRepository, clientRegistry, finalityResolver,
+                chainEffectRecorder, isolatedTransactions);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.getArgument(0, de.makibytes.registerwerk.shared.IsolatedTransactionExecutor.Work.class).run();
+            return null;
+        }).when(isolatedTransactions).run(any());
     }
 
     private ChainConfig chain(ChainConfig.FinalityModel model) {
@@ -93,6 +99,7 @@ class OnchainIdentityReceiptListenerTest {
         TransactionReceipt r = new TransactionReceipt();
         r.setStatus(status);
         r.setBlockNumber(Numeric.encodeQuantity(BigInteger.valueOf(blockNumber)));
+        r.setBlockHash("0xblock" + blockNumber);
         r.setContractAddress("0xrealaddress");
         return r;
     }
@@ -132,6 +139,8 @@ class OnchainIdentityReceiptListenerTest {
         listener.resolvePendingIdentities();
 
         assertThat(identity.getIdentityAddress()).isEqualTo("0xrealaddress");
+        assertThat(identity.getDeployedBlockNumber()).isEqualTo(100L);
+        assertThat(identity.getDeployedBlockHash()).isEqualTo("0xblock100");
         verify(identityRepository).save(identity);
     }
 

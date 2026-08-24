@@ -93,7 +93,7 @@ import { AuthService } from '../../../core/auth/auth.service';
               <mat-label>Tax year</mat-label>
               <input matInput type="number" [(ngModel)]="dac8Year" [min]="2020" [max]="currentYear" />
             </mat-form-field>
-            <button mat-raised-button color="primary"
+            <button type="button" mat-raised-button color="primary"
                     (click)="generateDac8()"
                     [disabled]="generatingDac8">
               <mat-icon>description</mat-icon>
@@ -118,7 +118,7 @@ import { AuthService } from '../../../core/auth/auth.service';
               <mat-label>Reporting date</mat-label>
               <input matInput type="date" [(ngModel)]="mifirDate" />
             </mat-form-field>
-            <button mat-raised-button color="primary"
+            <button type="button" mat-raised-button color="primary"
                     (click)="generateMifir()"
                     [disabled]="generatingMifir">
               <mat-icon>bar_chart</mat-icon>

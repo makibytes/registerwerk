@@ -40,7 +40,7 @@ import { Asset, InvestorLimit } from '../../../../core/models';
             <mat-label>Maximum holding</mat-label>
             <input matInput type="number" min="0" [(ngModel)]="defaultsForm.maxHoldingAmount">
           </mat-form-field>
-          <button mat-raised-button color="primary" [disabled]="savingDefaults" (click)="saveDefaults()">
+          <button type="button" mat-raised-button color="primary" [disabled]="savingDefaults" (click)="saveDefaults()">
             {{ savingDefaults ? 'Saving…' : 'Save defaults' }}
           </button>
         </div>
@@ -51,7 +51,7 @@ import { Asset, InvestorLimit } from '../../../../core/models';
 
       <div class="il-header" style="margin-top:2rem">
         <h3 class="il-title">Per-investor overrides</h3>
-        <button mat-stroked-button (click)="openLimitDialog()">
+        <button type="button" mat-stroked-button (click)="openLimitDialog()">
           <mat-icon>add</mat-icon> Add override
         </button>
       </div>
@@ -79,10 +79,10 @@ import { Asset, InvestorLimit } from '../../../../core/models';
               <span>{{ l.maxHoldingOverride !== null ? (l.maxHoldingOverride | number) : '—' }}</span>
               <span>{{ l.lockupUntil ? (l.lockupUntil | date:'dd MMM yyyy') : '—' }}</span>
               <div class="row-actions">
-                <button mat-icon-button matTooltip="Edit" (click)="openLimitDialog(l)">
+                <button type="button" mat-icon-button matTooltip="Edit" (click)="openLimitDialog(l)">
                   <mat-icon>edit</mat-icon>
                 </button>
-                <button mat-icon-button color="warn" matTooltip="Remove" (click)="removeLimit(l)">
+                <button type="button" mat-icon-button color="warn" matTooltip="Remove" (click)="removeLimit(l)">
                   <mat-icon>delete</mat-icon>
                 </button>
               </div>
@@ -113,8 +113,8 @@ import { Asset, InvestorLimit } from '../../../../core/models';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!limitForm.investorEntityId.trim()" (click)="submitLimit()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" [disabled]="!limitForm.investorEntityId.trim()" (click)="submitLimit()">
           Save
         </button>
       </mat-dialog-actions>

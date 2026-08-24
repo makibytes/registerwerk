@@ -138,7 +138,7 @@ function windowEthereum(): Eip1193Provider | undefined {
     <div class="page-container">
       <div class="page-header">
         <h1>Publish {{ listing?.name ?? 'dApp' }}</h1>
-        <button mat-stroked-button routerLink="/publisher">
+        <button type="button" mat-stroked-button routerLink="/publisher">
           <mat-icon>arrow_back</mat-icon>
           My dApps
         </button>
@@ -179,7 +179,7 @@ function windowEthereum(): Eip1193Provider | undefined {
                   <div class="hash-box">{{ manifestHash }}</div>
                 }
                 <div class="step-actions">
-                  <button mat-raised-button color="primary"
+                  <button type="button" mat-raised-button color="primary"
                           [disabled]="!manifestRaw.trim() || validating || version.status !== 'DRAFT'"
                           (click)="validateManifest()">
                     <mat-icon>rule</mat-icon>
@@ -300,7 +300,7 @@ function windowEthereum(): Eip1193Provider | undefined {
                   <input matInput [(ngModel)]="signerWallet" placeholder="0x…" />
                 </mat-form-field>
                 @if (hasBrowserWallet) {
-                  <button mat-stroked-button color="primary"
+                  <button type="button" mat-stroked-button color="primary"
                           [disabled]="manifestLoading || !manifestValid || !isValidAddress(signerWallet) || signing || walletSigning"
                           (click)="signWithBrowserWallet()">
                     <mat-icon>account_balance_wallet</mat-icon>
@@ -312,7 +312,7 @@ function windowEthereum(): Eip1193Provider | undefined {
                   <textarea matInput rows="2" [(ngModel)]="signature"></textarea>
                 </mat-form-field>
                 <div class="step-actions">
-                  <button mat-raised-button color="primary"
+                  <button type="button" mat-raised-button color="primary"
                           [disabled]="manifestLoading || !manifestValid || !signature.trim() || !isValidAddress(signerWallet) || signing || walletSigning"
                           (click)="submitSignature()">
                     <mat-icon>draw</mat-icon>
@@ -333,7 +333,7 @@ function windowEthereum(): Eip1193Provider | undefined {
                   On approval it is anchored onchain and the listing goes live in the catalog.
                 </p>
                 <div class="step-actions">
-                  <button mat-raised-button color="primary"
+                  <button type="button" mat-raised-button color="primary"
                           [disabled]="!manifestValid || !version.signed || version.status !== 'DRAFT' || submitting"
                           (click)="submit()">
                     <mat-icon>send</mat-icon>

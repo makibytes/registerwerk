@@ -58,6 +58,9 @@ public class OnchainClaim {
     @Column(name = "block_number")
     private Long blockNumber;
 
+    @Column(name = "block_hash", length = 128)
+    private String blockHash;
+
     /** True once {@link de.makibytes.registerwerk.erc3643.internal.Erc3643ClaimConfirmationListener}
      *  has confirmed {@link #txHash} SUCCESS. {@code getActiveClaims} only counts claims where this
      *  is {@code true} — a freshly-submitted claim does not unblock compliance checks until its
@@ -66,12 +69,22 @@ public class OnchainClaim {
     @Column(name = "confirmed", nullable = false)
     private boolean confirmed = false;
 
-    /** Transaction hash of an in-flight {@code removeClaim} call. Non-null while a revocation is
-     *  submitted but not yet confirmed; {@link #revokedAt} is only set once
-     *  {@code Erc3643ClaimConfirmationListener} confirms this tx — mirrors the same
-     *  submit-then-confirm shape as {@link #txHash}/{@link #confirmed} for issuance. */
+    /** Transaction hash of a submitted {@code removeClaim} call. Non-null is also the fail-closed
+     *  revocation-intent marker, so the claim is excluded from active compliance claims before
+     *  finality and after a confirming block is retracted. {@link #revokedAt} is only set once
+     *  {@code Erc3643ClaimConfirmationListener} confirms this tx; only a confirmed failed receipt
+     *  clears the hash and restores the claim. */
     @Column(name = "revocation_tx_hash", length = 80)
     private String revocationTxHash;
+
+    @Column(name = "revocation_chain_config_id")
+    private UUID revocationChainConfigId;
+
+    @Column(name = "revocation_block_number")
+    private Long revocationBlockNumber;
+
+    @Column(name = "revocation_block_hash", length = 128)
+    private String revocationBlockHash;
 
     /**
      * Hex-encoded ABI-encoded claim data bytes (topic + issuer + data payload).
@@ -125,11 +138,23 @@ public class OnchainClaim {
     public Long getBlockNumber() { return blockNumber; }
     public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
 
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
+
     public boolean isConfirmed() { return confirmed; }
     public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }
 
     public String getRevocationTxHash() { return revocationTxHash; }
     public void setRevocationTxHash(String revocationTxHash) { this.revocationTxHash = revocationTxHash; }
+
+    public UUID getRevocationChainConfigId() { return revocationChainConfigId; }
+    public void setRevocationChainConfigId(UUID revocationChainConfigId) { this.revocationChainConfigId = revocationChainConfigId; }
+
+    public Long getRevocationBlockNumber() { return revocationBlockNumber; }
+    public void setRevocationBlockNumber(Long revocationBlockNumber) { this.revocationBlockNumber = revocationBlockNumber; }
+
+    public String getRevocationBlockHash() { return revocationBlockHash; }
+    public void setRevocationBlockHash(String revocationBlockHash) { this.revocationBlockHash = revocationBlockHash; }
 
     public String getClaimData() { return claimData; }
     public void setClaimData(String claimData) { this.claimData = claimData; }

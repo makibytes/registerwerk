@@ -37,11 +37,17 @@ public class OrgRegistration {
     private Short countryCode;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 20)
+    @Column(name = "status", nullable = false, length = 24)
     private OrgRegistrationStatus status = OrgRegistrationStatus.PENDING;
 
     @Column(name = "registered_tx", length = 66)
     private String registeredTx;
+
+    @Column(name = "confirmed_block_number")
+    private Long confirmedBlockNumber;
+
+    @Column(name = "confirmed_block_hash", length = 128)
+    private String confirmedBlockHash;
 
     @Column(name = "suspended_at")
     private Instant suspendedAt;
@@ -51,6 +57,22 @@ public class OrgRegistration {
 
     @Column(name = "suspension_reason")
     private String suspensionReason;
+
+    /** Exact causal token of the latest suspend/reinstate receipt (success or failure). */
+    @Column(name = "status_tx", length = 66)
+    private String statusTx;
+
+    @Column(name = "status_chain_config_id")
+    private UUID statusChainConfigId;
+
+    @Column(name = "status_block_number")
+    private Long statusBlockNumber;
+
+    @Column(name = "status_block_hash", length = 128)
+    private String statusBlockHash;
+
+    @Column(name = "status_requested_at")
+    private Instant statusRequestedAt;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
@@ -78,6 +100,12 @@ public class OrgRegistration {
     public String getRegisteredTx() { return registeredTx; }
     public void setRegisteredTx(String registeredTx) { this.registeredTx = registeredTx; }
 
+    public Long getConfirmedBlockNumber() { return confirmedBlockNumber; }
+    public void setConfirmedBlockNumber(Long confirmedBlockNumber) { this.confirmedBlockNumber = confirmedBlockNumber; }
+
+    public String getConfirmedBlockHash() { return confirmedBlockHash; }
+    public void setConfirmedBlockHash(String confirmedBlockHash) { this.confirmedBlockHash = confirmedBlockHash; }
+
     public Instant getSuspendedAt() { return suspendedAt; }
     public void setSuspendedAt(Instant suspendedAt) { this.suspendedAt = suspendedAt; }
 
@@ -86,6 +114,21 @@ public class OrgRegistration {
 
     public String getSuspensionReason() { return suspensionReason; }
     public void setSuspensionReason(String suspensionReason) { this.suspensionReason = suspensionReason; }
+
+    public String getStatusTx() { return statusTx; }
+    public void setStatusTx(String statusTx) { this.statusTx = statusTx; }
+
+    public UUID getStatusChainConfigId() { return statusChainConfigId; }
+    public void setStatusChainConfigId(UUID statusChainConfigId) { this.statusChainConfigId = statusChainConfigId; }
+
+    public Long getStatusBlockNumber() { return statusBlockNumber; }
+    public void setStatusBlockNumber(Long statusBlockNumber) { this.statusBlockNumber = statusBlockNumber; }
+
+    public String getStatusBlockHash() { return statusBlockHash; }
+    public void setStatusBlockHash(String statusBlockHash) { this.statusBlockHash = statusBlockHash; }
+
+    public Instant getStatusRequestedAt() { return statusRequestedAt; }
+    public void setStatusRequestedAt(Instant statusRequestedAt) { this.statusRequestedAt = statusRequestedAt; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

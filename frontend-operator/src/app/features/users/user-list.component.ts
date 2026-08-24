@@ -183,7 +183,7 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
   template: `
     <div class="page-header">
       <h1>Users</h1>
-      <button mat-raised-button color="primary" (click)="openInvite()">
+      <button type="button" mat-raised-button color="primary" (click)="openInvite()">
         <mat-icon>person_add</mat-icon>
         Invite user
       </button>
@@ -297,7 +297,7 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let u">
               <div class="actions-cell">
-                <button mat-icon-button [matMenuTriggerFor]="userMenu" [matMenuTriggerData]="{ user: u }" matTooltip="Actions">
+                <button type="button" mat-icon-button [matMenuTriggerFor]="userMenu" [matMenuTriggerData]="{ user: u }" matTooltip="Actions">
                   <mat-icon>more_vert</mat-icon>
                 </button>
               </div>
@@ -306,24 +306,24 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
 
           <mat-menu #userMenu="matMenu">
             <ng-template matMenuContent let-u="user">
-              <button mat-menu-item (click)="editRoles(u)">
+              <button type="button" mat-menu-item (click)="editRoles(u)">
                 <mat-icon>manage_accounts</mat-icon>
                 Edit roles
               </button>
-              <button mat-menu-item (click)="toggleEnabled(u)">
+              <button type="button" mat-menu-item (click)="toggleEnabled(u)">
                 <mat-icon>{{ u.enabled ? 'block' : 'check_circle' }}</mat-icon>
                 {{ u.enabled ? 'Disable' : 'Enable' }}
               </button>
-              <button mat-menu-item [disabled]="u.authProvider !== 'LOCAL'" (click)="sendPasswordReset(u)">
+              <button type="button" mat-menu-item [disabled]="u.authProvider !== 'LOCAL'" (click)="sendPasswordReset(u)">
                 <mat-icon>lock_reset</mat-icon>
                 Reset password
               </button>
-              <button mat-menu-item [disabled]="u.authProvider !== 'ENTRA'" (click)="manage2fa(u)">
+              <button type="button" mat-menu-item [disabled]="u.authProvider !== 'ENTRA'" (click)="manage2fa(u)">
                 <mat-icon>security</mat-icon>
                 Manage 2FA
               </button>
               <mat-divider />
-              <button mat-menu-item class="menu-delete" (click)="deleteUser(u)">
+              <button type="button" mat-menu-item class="menu-delete" (click)="deleteUser(u)">
                 <mat-icon>delete</mat-icon>
                 Delete
               </button>

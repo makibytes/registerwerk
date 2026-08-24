@@ -68,8 +68,8 @@ public class TokenAdminService implements TokenAdminPort {
 
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetLookupPort assetLookupPort;
-    private final BlockchainClientRegistry clientRegistry;
     private final EvmContractService evmContractService;
+    private final de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions;
     private final BlockchainTransactionService txService;
     private final TravelRuleGate travelRuleGate;
     private final HolderBlockGate holderBlockGate;
@@ -79,8 +79,8 @@ public class TokenAdminService implements TokenAdminPort {
     public TokenAdminService(
             AssetDeploymentRepository deploymentRepository,
             AssetLookupPort assetLookupPort,
-            BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
+            de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions,
             BlockchainTransactionService txService,
             TravelRuleGate travelRuleGate,
             HolderBlockGate holderBlockGate,
@@ -88,8 +88,8 @@ public class TokenAdminService implements TokenAdminPort {
             ZamaRelayerClient zamaRelayerClient) {
         this.deploymentRepository = deploymentRepository;
         this.assetLookupPort = assetLookupPort;
-        this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
+        this.durableTransactions = durableTransactions;
         this.txService = txService;
         this.travelRuleGate = travelRuleGate;
         this.holderBlockGate = holderBlockGate;
@@ -551,7 +551,7 @@ public class TokenAdminService implements TokenAdminPort {
         if (standard == TokenStandard.DAML_BOND_FIXED || standard == TokenStandard.DAML_BOND_FLOATING
                 || standard == TokenStandard.DAML_BOND_ZERO) {
             throw new IllegalArgumentException(
-                    "DAML Finance bond admin operations (coupon payment, rate fixing, redemption, early call) " +
+                    "Registerwerk Daml bond lifecycle operations (coupon authorization, rate fixing, redemption, early call) " +
                     "go through CantonBondOperations (/api/v1/deployments/{id}/coupon-payment etc.).");
         }
         if (dep.getContractAddress() == null || dep.getContractAddress().startsWith("0x-PENDING")) {
@@ -567,15 +567,21 @@ public class TokenAdminService implements TokenAdminPort {
      */
     private UUID submitAdmin(AssetDeployment dep, AssetLookupPort.AssetInfo asset, Function fn, String methodName,
                               Map<String, Object> params, UUID actorId, String actorRole) {
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        EvmSigner signer = evmContractService.signer(descriptor);
-        String txHash = evmContractService.submit(web3j, signer, dep.getContractAddress(), fn);
+        String txHash = durableTransactions.submit(
+                requireChainConfigId(dep), dep.getContractAddress(), fn, params);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 
         return txService.record(txHash, methodName, dep.getId(), asset.id(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);
+    }
+
+    private UUID requireChainConfigId(AssetDeployment deployment) {
+        if (deployment.getChainConfigId() == null) {
+            throw new IllegalStateException(
+                    "Confirmed EVM deployment is missing chainConfigId: " + deployment.getId());
+        }
+        return deployment.getChainConfigId();
     }
 
     private static String forcedTransferMethodName(TokenStandard standard) {

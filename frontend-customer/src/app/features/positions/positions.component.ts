@@ -67,7 +67,7 @@ interface PositionRow {
   template: `
     <div class="page-container">
       <app-page-header title="My Positions" subtitle="Every holding across trading, investment, and collateral in one place.">
-        <button mat-stroked-button [disabled]="downloadingStatement" (click)="downloadStatement()">
+        <button type="button" mat-stroked-button [disabled]="downloadingStatement" (click)="downloadStatement()">
           <mat-icon>picture_as_pdf</mat-icon>
           @if (downloadingStatement) { Preparing… } @else { Download Depotauszug }
         </button>
@@ -76,7 +76,7 @@ interface PositionRow {
             <mat-option [value]="y">{{ y }}</mat-option>
           }
         </mat-select>
-        <button mat-stroked-button [disabled]="downloadingTaxCertificate" (click)="downloadTaxCertificate()">
+        <button type="button" mat-stroked-button [disabled]="downloadingTaxCertificate" (click)="downloadTaxCertificate()">
           <mat-icon>receipt_long</mat-icon>
           @if (downloadingTaxCertificate) { Preparing… } @else { Download Tax Certificate }
         </button>

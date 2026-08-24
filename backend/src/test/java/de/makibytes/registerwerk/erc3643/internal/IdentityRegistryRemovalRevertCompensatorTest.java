@@ -17,8 +17,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,6 +28,7 @@ class IdentityRegistryRemovalRevertCompensatorTest {
 
     private IdentityRegistryRemovalRevertCompensator compensator;
     private final UUID id = UUID.randomUUID();
+    private final UUID chainConfigId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -37,7 +36,7 @@ class IdentityRegistryRemovalRevertCompensatorTest {
     }
 
     private ChainEffectRecord effect() {
-        return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
+        return new ChainEffectRecord(UUID.randomUUID(), chainConfigId, 100L, "0xhash", "0xtxhash", null,
                 "erc3643", "ERC3643_IDENTITY_REMOVED", "Erc3643IdentityRegistry", id, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
@@ -49,29 +48,68 @@ class IdentityRegistryRemovalRevertCompensatorTest {
     }
 
     @Test
-    void compensateRestoresRemovedEntryToActive() {
+    void compensateReturnsRemovalToPendingWithoutReactivatingEntry() {
         Erc3643IdentityRegistry entry = new Erc3643IdentityRegistry();
         entry.setWalletAddress("0xwallet");
-        entry.setRemovedAt(Instant.now());
+        Instant removalIntentRecordedAt = Instant.parse("2026-08-23T10:15:30Z");
+        entry.setRemovedAt(removalIntentRecordedAt);
+        entry.setChainConfigId(chainConfigId);
+        entry.setRemovedByTx("0xtxhash");
+        entry.setRemovalConfirmed(true);
+        entry.setRemovalBlockNumber(100L);
+        entry.setRemovalBlockHash("0xhash");
         when(repository.findById(id)).thenReturn(Optional.of(entry));
 
         CompensationOutcome outcome = compensator.compensate(effect());
 
         verify(repository).save(entry);
-        assertThat(entry.getRemovedAt()).isNull();
-        assertThat(entry.isActive()).isTrue();
+        assertThat(entry.getRemovedAt()).isEqualTo(removalIntentRecordedAt);
+        assertThat(entry.isActive()).isFalse();
+        assertThat(entry.getRemovedByTx()).isEqualTo("0xtxhash");
+        assertThat(entry.isRemovalConfirmed()).isFalse();
+        assertThat(entry.getRemovalBlockNumber()).isNull();
+        assertThat(entry.getRemovalBlockHash()).isNull();
         assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
     }
 
     @Test
-    void alreadyActiveEntryIsNotApplicable() {
+    void compensationRestoresFailClosedIntentWhenRemovedAtWasMissing() {
         Erc3643IdentityRegistry entry = new Erc3643IdentityRegistry();
+        entry.setChainConfigId(chainConfigId);
+        entry.setRemovedByTx("0xtxhash");
+        entry.setRemovalConfirmed(true);
+        entry.setRemovalBlockNumber(100L);
+        entry.setRemovalBlockHash("0xhash");
         when(repository.findById(id)).thenReturn(Optional.of(entry));
 
         CompensationOutcome outcome = compensator.compensate(effect());
 
-        verify(repository, never()).save(any());
+        verify(repository).save(entry);
+        assertThat(entry.getRemovedAt()).isNotNull();
+        assertThat(entry.isActive()).isFalse();
+        assertThat(entry.isRemovalConfirmed()).isFalse();
+        assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
+    }
+
+    @Test
+    void staleRemovalIncarnationCannotChangeCurrentPendingIntent() {
+        Erc3643IdentityRegistry entry = new Erc3643IdentityRegistry();
+        Instant removalIntentRecordedAt = Instant.parse("2026-08-23T10:15:30Z");
+        entry.setRemovedAt(removalIntentRecordedAt);
+        entry.setChainConfigId(chainConfigId);
+        entry.setRemovedByTx("0xnewtx");
+        entry.setRemovalConfirmed(true);
+        entry.setRemovalBlockNumber(101L);
+        entry.setRemovalBlockHash("0xnewhash");
+        when(repository.findById(id)).thenReturn(Optional.of(entry));
+
+        CompensationOutcome outcome = compensator.compensate(effect());
+
         assertThat(outcome).isInstanceOf(CompensationOutcome.NotApplicable.class);
+        assertThat(entry.getRemovedAt()).isEqualTo(removalIntentRecordedAt);
+        assertThat(entry.isRemovalConfirmed()).isTrue();
+        assertThat(entry.getRemovalBlockHash()).isEqualTo("0xnewhash");
+        verify(repository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
     }
 
     @Test

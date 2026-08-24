@@ -211,11 +211,12 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
   `],
   template: `
     <div class="back-row">
-      <button mat-button (click)="goBack()">
+      <button type="button" mat-button (click)="goBack()">
         <mat-icon>arrow_back</mat-icon>
         Back to Assets
       </button>
     </div>
+    <h1 class="sr-only">Asset details</h1>
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
@@ -239,21 +240,21 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         <div class="asset-actions">
           @if (canMutate) {
           @if (asset.status === 'PENDING_APPROVAL') {
-            <button mat-raised-button color="primary" (click)="approve()">Approve</button>
+            <button type="button" mat-raised-button color="primary" (click)="approve()">Approve</button>
           }
           @if (asset.status === 'APPROVED') {
-            <button mat-raised-button color="primary" (click)="issue()">Issue</button>
+            <button type="button" mat-raised-button color="primary" (click)="issue()">Issue</button>
           }
           @if (asset.status === 'ISSUED') {
-            <button mat-stroked-button color="warn" (click)="suspend()">Suspend</button>
+            <button type="button" mat-stroked-button color="warn" (click)="suspend()">Suspend</button>
           }
           @if (asset.status === 'SUSPENDED') {
-            <button mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
+            <button type="button" mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
           }
           @if (asset.status !== 'REDEEMED') {
-            <button mat-stroked-button color="warn" (click)="redeem()">Redeem</button>
+            <button type="button" mat-stroked-button color="warn" (click)="redeem()">Redeem</button>
           }
-          <button mat-stroked-button (click)="edit()">
+          <button type="button" mat-stroked-button (click)="edit()">
             <mat-icon>edit</mat-icon>
             Edit
           </button>
@@ -415,7 +416,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         <mat-tab label="Holders">
           <div class="tab-content">
             <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-              <button mat-stroked-button (click)="exportHolderRegister()">
+              <button type="button" mat-stroked-button (click)="exportHolderRegister()">
                 <mat-icon>download</mat-icon>
                 Export Register (CSV)
               </button>
@@ -478,13 +479,13 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                   accept=".pdf,.html,.htm,.txt,.md,.json,.xml,.docx"
                   style="display:none"
                   (change)="onTermSheetFileSelected($event)" />
-                <button mat-stroked-button (click)="tsFileInput.click()" [disabled]="tsUploading">
+                <button type="button" mat-stroked-button (click)="tsFileInput.click()" [disabled]="tsUploading">
                   <mat-icon>upload_file</mat-icon>
                   @if (tsUploading) { Uploading… } @else { Upload }
                 </button>
               </label>
               @if (deployments.length > 0 && deployments[0].deploymentStatus === 'CONFIRMED') {
-                <button mat-stroked-button (click)="syncTermSheetFromChain()" [disabled]="tsSyncing">
+                <button type="button" mat-stroked-button (click)="syncTermSheetFromChain()" [disabled]="tsSyncing">
                   <mat-icon>cloud_download</mat-icon>
                   @if (tsSyncing) { Syncing… } @else { Sync from Chain }
                 </button>
@@ -539,12 +540,12 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let d">
                     @if (d.contentAvailable) {
-                      <button mat-icon-button matTooltip="Download" (click)="downloadTermSheet(d)">
+                      <button type="button" mat-icon-button matTooltip="Download" (click)="downloadTermSheet(d)">
                         <mat-icon>download</mat-icon>
                       </button>
                     }
                     @if (canMutate) {
-                      <button mat-icon-button matTooltip="Delete" color="warn" (click)="deleteTermSheet(d)">
+                      <button type="button" mat-icon-button matTooltip="Delete" color="warn" (click)="deleteTermSheet(d)">
                         <mat-icon>delete_outline</mat-icon>
                       </button>
                     }
@@ -608,7 +609,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                   <input matInput type="number" [(ngModel)]="mintAmount" min="1" />
                 </mat-form-field>
                 <div>
-                  <button mat-raised-button color="primary" (click)="mintTokens()" [disabled]="!primaryDeploymentId || !mintAddress || !mintAmount">
+                  <button type="button" mat-raised-button color="primary" (click)="mintTokens()" [disabled]="!primaryDeploymentId || !mintAddress || !mintAmount">
                     <mat-icon>add_circle</mat-icon>
                     Mint
                   </button>
@@ -632,7 +633,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                   <input matInput type="number" [(ngModel)]="burnAmount" min="1" />
                 </mat-form-field>
                 <div>
-                  <button mat-raised-button color="warn" (click)="burnTokens()" [disabled]="!primaryDeploymentId || !burnAddress || !burnAmount">
+                  <button type="button" mat-raised-button color="warn" (click)="burnTokens()" [disabled]="!primaryDeploymentId || !burnAddress || !burnAmount">
                     <mat-icon>remove_circle</mat-icon>
                     Burn
                   </button>
@@ -644,7 +645,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
               <!-- Mint Control Rules -->
               <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 12px">
                 <h3 style="font-size:16px;font-weight:500;margin:0">Allowance &amp; Auto-Approval Rules</h3>
-                <button mat-stroked-button (click)="openAddRuleDialog()">
+                <button type="button" mat-stroked-button (click)="openAddRuleDialog()">
                   <mat-icon>add</mat-icon> Add Rule
                 </button>
               </div>
@@ -671,7 +672,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                   <ng-container matColumnDef="actions">
                     <th mat-header-cell *matHeaderCellDef></th>
                     <td mat-cell *matCellDef="let r">
-                      <button mat-icon-button color="warn" [matTooltip]="'Deactivate rule'" (click)="deleteRule(r)">
+                      <button type="button" mat-icon-button color="warn" [matTooltip]="'Deactivate rule'" (click)="deleteRule(r)">
                         <mat-icon>delete</mat-icon>
                       </button>
                     </td>
@@ -732,12 +733,12 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                     <input matInput type="number" min="0" step="0.01" [(ngModel)]="gasMonthlyCapEth" />
                   </mat-form-field>
                   <div style="display:flex;gap:8px">
-                    <button mat-raised-button color="primary" (click)="saveGasSponsorshipOverride()">
+                    <button type="button" mat-raised-button color="primary" (click)="saveGasSponsorshipOverride()">
                       <mat-icon>save</mat-icon>
                       Save override
                     </button>
                     @if (effectiveGasPolicy?.assetDeploymentId) {
-                      <button mat-stroked-button color="warn" (click)="deactivateGasSponsorshipOverride()">
+                      <button type="button" mat-stroked-button color="warn" (click)="deactivateGasSponsorshipOverride()">
                         <mat-icon>remove_circle_outline</mat-icon>
                         Remove override
                       </button>
@@ -821,7 +822,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <strong>Registered Investors</strong>
                 @if (canMutate) {
-                <button mat-raised-button color="primary" (click)="openRegisterInvestorDialog()">
+                <button type="button" mat-raised-button color="primary" (click)="openRegisterInvestorDialog()">
                   <mat-icon>person_add</mat-icon> Register Investor
                 </button>
                 }
@@ -844,7 +845,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                     <th mat-header-cell *matHeaderCellDef></th>
                     <td mat-cell *matCellDef="let e">
                       @if (canMutate) {
-                      <button mat-icon-button color="warn" (click)="removeInvestor(e)" [matTooltip]="'Remove from IdentityRegistry'">
+                      <button type="button" mat-icon-button color="warn" (click)="removeInvestor(e)" [matTooltip]="'Remove from IdentityRegistry'">
                         <mat-icon>person_remove</mat-icon>
                       </button>
                       }
@@ -907,10 +908,10 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
               <div style="display:flex;flex-direction:column;gap:16px;max-width:480px">
                 <!-- Pause / Unpause -->
                 <div style="display:flex;gap:8px">
-                  <button mat-stroked-button color="warn" (click)="pauseToken()">
+                  <button type="button" mat-stroked-button color="warn" (click)="pauseToken()">
                     <mat-icon>pause_circle</mat-icon> Pause All Transfers
                   </button>
-                  <button mat-stroked-button color="primary" (click)="unpauseToken()">
+                  <button type="button" mat-stroked-button color="primary" (click)="unpauseToken()">
                     <mat-icon>play_circle</mat-icon> Unpause Transfers
                   </button>
                 </div>
@@ -925,8 +926,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                         <mat-icon style="font-size:18px">contacts</mat-icon>
                       </button>
                     </mat-form-field>
-                    <button mat-stroked-button color="warn" [disabled]="!freezeAddress" (click)="freezeAddr()" style="height:56px">Freeze</button>
-                    <button mat-stroked-button color="primary" [disabled]="!freezeAddress" (click)="unfreezeAddr()" style="height:56px">Unfreeze</button>
+                    <button type="button" mat-stroked-button color="warn" [disabled]="!freezeAddress" (click)="freezeAddr()" style="height:56px">Freeze</button>
+                    <button type="button" mat-stroked-button color="primary" [disabled]="!freezeAddress" (click)="unfreezeAddr()" style="height:56px">Unfreeze</button>
                   </div>
                 </div>
                 <!-- Forced Transfer -->
@@ -961,7 +962,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                     </mat-form-field>
                   </div>
                   <div>
-                    <button mat-raised-button color="warn"
+                    <button type="button" mat-raised-button color="warn"
                             [disabled]="!forceFrom || !forceTo || !forceAmount"
                             (click)="executeForceTransfer()">
                       <mat-icon>swap_horiz</mat-icon> Execute Forced Transfer
@@ -990,7 +991,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                     <input matInput [(ngModel)]="forceBurnLegalBasis" placeholder="eWpG §26" />
                   </mat-form-field>
                   <div>
-                    <button mat-raised-button color="warn"
+                    <button type="button" mat-raised-button color="warn"
                             [disabled]="!forceBurnFrom || !forceBurnAmount"
                             (click)="executeForceBurn()">
                       <mat-icon>local_fire_department</mat-icon> Force Burn
@@ -1015,7 +1016,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <strong>Trusted Claim Issuers</strong>
                 @if (canMutate) {
-                <button mat-raised-button color="primary" (click)="openAddIssuerDialog()">
+                <button type="button" mat-raised-button color="primary" (click)="openAddIssuerDialog()">
                   <mat-icon>add</mat-icon> Add Issuer
                 </button>
                 }
@@ -1027,7 +1028,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                   <ng-container matColumnDef="address"><th mat-header-cell *matHeaderCellDef>Issuer Address</th><td mat-cell *matCellDef="let i"><app-address [address]="i.issuerAddress" /></td></ng-container>
                   <ng-container matColumnDef="topics"><th mat-header-cell *matHeaderCellDef>Claim Topics</th><td mat-cell *matCellDef="let i">{{ i.claimTopics.join(', ') }}</td></ng-container>
                   <ng-container matColumnDef="added"><th mat-header-cell *matHeaderCellDef>Added</th><td mat-cell *matCellDef="let i">{{ i.addedAt | date:'mediumDate' }}</td></ng-container>
-                  <ng-container matColumnDef="actions"><th mat-header-cell *matHeaderCellDef></th><td mat-cell *matCellDef="let i">@if (canMutate) { <button mat-icon-button color="warn" (click)="removeIssuer(i)"><mat-icon>delete</mat-icon></button> }</td></ng-container>
+                  <ng-container matColumnDef="actions"><th mat-header-cell *matHeaderCellDef></th><td mat-cell *matCellDef="let i">@if (canMutate) { <button type="button" mat-icon-button color="warn" (click)="removeIssuer(i)"><mat-icon>delete</mat-icon></button> }</td></ng-container>
                   <tr mat-header-row *matHeaderRowDef="issuerColumns"></tr>
                   <tr mat-row *matRowDef="let row; columns: issuerColumns;"></tr>
                 </table>
@@ -1044,7 +1045,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <strong>Required Claim Topics</strong>
                 @if (canMutate) {
-                <button mat-raised-button color="primary" (click)="openAddClaimTopicDialog()">
+                <button type="button" mat-raised-button color="primary" (click)="openAddClaimTopicDialog()">
                   <mat-icon>add</mat-icon> Add Topic
                 </button>
                 }
@@ -1070,7 +1071,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             <div class="tab-content">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <strong>Blockchain Transactions</strong>
-                <button mat-stroked-button (click)="loadTxHistory()">
+                <button type="button" mat-stroked-button (click)="loadTxHistory()">
                   <mat-icon>refresh</mat-icon> Refresh
                 </button>
               </div>

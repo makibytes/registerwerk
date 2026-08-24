@@ -1,6 +1,8 @@
 package de.makibytes.registerwerk.blockchain.api;
 
 import de.makibytes.registerwerk.blockchain.internal.NonceCoordinator;
+import de.makibytes.registerwerk.finality.api.ChainQuarantinePort;
+import de.makibytes.registerwerk.finality.api.ChainQuarantinedException;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,6 +15,7 @@ import org.web3j.abi.datatypes.Function;
 import org.web3j.crypto.RawTransaction;
 import org.web3j.crypto.transaction.type.Transaction1559;
 import org.web3j.crypto.transaction.type.TransactionType;
+import org.web3j.crypto.Hash;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.Request;
 import org.web3j.protocol.core.Response;
@@ -22,11 +25,14 @@ import org.web3j.protocol.core.methods.response.EthFeeHistory;
 import org.web3j.protocol.core.methods.response.EthGasPrice;
 import org.web3j.protocol.core.methods.response.EthMaxPriorityFeePerGas;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
+import org.web3j.utils.Numeric;
 
 import java.math.BigInteger;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -65,10 +71,14 @@ class EvmContractServiceTest {
     @Mock
     private EvmSigner signer;
 
+    @Mock
+    private ChainQuarantinePort chainQuarantine;
+
     private EvmContractService service;
 
     private static final String CONTRACT = "0x" + "cc".repeat(20);
     private static final String FROM = "0x" + "aa".repeat(20);
+    private static final UUID CHAIN_CONFIG_ID = UUID.randomUUID();
 
     private void stubCommon() throws Exception {
         when(signer.address()).thenReturn(FROM);
@@ -123,10 +133,11 @@ class EvmContractServiceTest {
         doReturn(requestReturning(estimateResponse)).when(web3j).ethEstimateGas(any());
 
         Function function = new Function("pause", List.of(), List.of());
-        service = new EvmContractService(null, null, null, nonceCoordinator);
-        String txHash = service.submit(web3j, signer, CONTRACT, function);
+        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+        String txHash = service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT, function);
 
         assertThat(txHash).isEqualTo("0xtxhash");
+        verify(chainQuarantine).requireSubmissionAllowed(CHAIN_CONFIG_ID);
 
         ArgumentCaptor<RawTransaction> txCaptor = ArgumentCaptor.forClass(RawTransaction.class);
         verify(signer).signTransaction(txCaptor.capture(), eq(11155111L));
@@ -158,11 +169,13 @@ class EvmContractServiceTest {
         gasPriceResponse.setResult(toHex(10_000_000_000L)); // 10 gwei
         doReturn(requestReturning(gasPriceResponse)).when(web3j).ethGasPrice();
 
-        service = new EvmContractService(null, null, null, nonceCoordinator);
+        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
         BigInteger callerSuppliedGasLimit = BigInteger.valueOf(321_000L);
-        String txHash = service.submit(web3j, signer, CONTRACT, "0xdeadbeef", callerSuppliedGasLimit);
+        String txHash = service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT,
+                "0xdeadbeef", callerSuppliedGasLimit);
 
         assertThat(txHash).isEqualTo("0xtxhash");
+        verify(chainQuarantine).requireSubmissionAllowed(CHAIN_CONFIG_ID);
 
         ArgumentCaptor<RawTransaction> txCaptor = ArgumentCaptor.forClass(RawTransaction.class);
         verify(signer).signTransaction(txCaptor.capture(), eq(11155111L));
@@ -172,6 +185,68 @@ class EvmContractServiceTest {
         assertThat(built.getGasLimit()).isEqualTo(callerSuppliedGasLimit);
         // 10 gwei * 1.2 (gasPrice()'s own existing 20% tip heuristic) = 12 gwei.
         assertThat(built.getGasPrice()).isEqualTo(BigInteger.valueOf(12_000_000_000L));
+    }
+
+    @Test
+    @DisplayName("durable preparation reserves/signs exact bytes without broadcasting them")
+    void prepareDurableReturnsDeterministicHashWithoutRpcBroadcast() throws Exception {
+        when(signer.address()).thenReturn(FROM);
+        doReturn(requestReturning(chainIdResponse(11155111L))).when(web3j).ethChainId();
+        when(nonceCoordinator.withReservedNonce(anyLong(), any(), any(), any())).thenAnswer(inv -> {
+            NonceCoordinator.NonceCallback<?> callback = inv.getArgument(3);
+            return callback.withNonce(BigInteger.valueOf(9));
+        });
+        byte[] signed = new byte[]{1, 2, 3};
+        when(signer.signTransaction(any(RawTransaction.class), anyLong())).thenReturn(signed);
+        doReturn(requestThrowing(new RuntimeException("fee history unavailable")))
+                .when(web3j).ethFeeHistory(eq(1), any(), any());
+        doReturn(requestThrowing(new RuntimeException("estimate unavailable")))
+                .when(web3j).ethEstimateGas(any());
+        EthGasPrice gasPriceResponse = new EthGasPrice();
+        gasPriceResponse.setResult(toHex(10_000_000_000L));
+        doReturn(requestReturning(gasPriceResponse)).when(web3j).ethGasPrice();
+        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+
+        var prepared = service.prepareDurable(CHAIN_CONFIG_ID, web3j, signer, CONTRACT,
+                new Function("pause", List.of(), List.of()));
+
+        assertThat(prepared.nonce()).isEqualTo(BigInteger.valueOf(9));
+        assertThat(prepared.signedPayload()).isEqualTo(Numeric.toHexString(signed));
+        assertThat(prepared.txHash()).isEqualTo(Numeric.toHexString(Hash.sha3(signed)));
+        verify(chainQuarantine).requireSubmissionAllowed(CHAIN_CONFIG_ID);
+        verify(web3j, org.mockito.Mockito.never()).ethSendRawTransaction(any());
+    }
+
+    @Test
+    @DisplayName("the chain quarantine guard runs before nonce lookup, signing, or broadcast")
+    void quarantinedChainCannotEnterTheSubmissionCriticalSection() {
+        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+        org.mockito.Mockito.doThrow(new ChainQuarantinedException(CHAIN_CONFIG_ID))
+                .when(chainQuarantine).requireSubmissionAllowed(CHAIN_CONFIG_ID);
+
+        assertThatThrownBy(() -> service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT,
+                new Function("pause", List.of(), List.of())))
+                .isInstanceOf(ChainQuarantinedException.class);
+
+        verify(web3j, org.mockito.Mockito.never()).ethChainId();
+        verify(signer, org.mockito.Mockito.never()).signTransaction(any(), anyLong());
+        verify(web3j, org.mockito.Mockito.never()).ethSendRawTransaction(any());
+    }
+
+    @Test
+    @DisplayName("synchronous receipt-waiting calls are guarded before any provider access")
+    void quarantinedChainCannotEnterSynchronousSend() {
+        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+        org.mockito.Mockito.doThrow(new ChainQuarantinedException(CHAIN_CONFIG_ID))
+                .when(chainQuarantine).requireSubmissionAllowed(CHAIN_CONFIG_ID);
+
+        assertThatThrownBy(() -> service.send(CHAIN_CONFIG_ID, web3j, signer, CONTRACT,
+                new Function("deployToken", List.of(), List.of())))
+                .isInstanceOf(ChainQuarantinedException.class);
+
+        verify(web3j, org.mockito.Mockito.never()).ethChainId();
+        verify(signer, org.mockito.Mockito.never()).signTransaction(any(), anyLong());
+        verify(web3j, org.mockito.Mockito.never()).ethSendRawTransaction(any());
     }
 
     @SuppressWarnings("unchecked")

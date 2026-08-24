@@ -48,11 +48,29 @@ public class OrgMemberWallet {
     @Column(name = "bound_tx", length = 66)
     private String boundTx;
 
+    @Column(name = "bound_block_number")
+    private Long boundBlockNumber;
+
+    @Column(name = "bound_block_hash", length = 128)
+    private String boundBlockHash;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
     @Column(name = "removed_at")
     private Instant removedAt;
+
+    @Column(name = "removed_tx", length = 66)
+    private String removedTx;
+
+    @Column(name = "removed_chain_config_id")
+    private UUID removedChainConfigId;
+
+    @Column(name = "removed_block_number")
+    private Long removedBlockNumber;
+
+    @Column(name = "removed_block_hash", length = 128)
+    private String removedBlockHash;
 
     // ── Getters & Setters ──────────────────────────────────────────────────
 
@@ -83,9 +101,27 @@ public class OrgMemberWallet {
     public String getBoundTx() { return boundTx; }
     public void setBoundTx(String boundTx) { this.boundTx = boundTx; }
 
+    public Long getBoundBlockNumber() { return boundBlockNumber; }
+    public void setBoundBlockNumber(Long boundBlockNumber) { this.boundBlockNumber = boundBlockNumber; }
+
+    public String getBoundBlockHash() { return boundBlockHash; }
+    public void setBoundBlockHash(String boundBlockHash) { this.boundBlockHash = boundBlockHash; }
+
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
     public Instant getRemovedAt() { return removedAt; }
     public void setRemovedAt(Instant removedAt) { this.removedAt = removedAt; }
+
+    public String getRemovedTx() { return removedTx; }
+    public void setRemovedTx(String removedTx) { this.removedTx = removedTx; }
+
+    public UUID getRemovedChainConfigId() { return removedChainConfigId; }
+    public void setRemovedChainConfigId(UUID removedChainConfigId) { this.removedChainConfigId = removedChainConfigId; }
+
+    public Long getRemovedBlockNumber() { return removedBlockNumber; }
+    public void setRemovedBlockNumber(Long removedBlockNumber) { this.removedBlockNumber = removedBlockNumber; }
+
+    public String getRemovedBlockHash() { return removedBlockHash; }
+    public void setRemovedBlockHash(String removedBlockHash) { this.removedBlockHash = removedBlockHash; }
 }

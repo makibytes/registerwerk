@@ -335,6 +335,7 @@ public class RpcNodeService {
 
     private static Map<String, Object> toMap(ChaincacheClient.ChainCapabilitiesProbe probe) {
         Map<String, Object> map = new LinkedHashMap<>();
+        map.put("durabilityDomainId", probe.durabilityDomainId());
         map.put("finalityModel", probe.finalityModel());
         map.put("safeConfirmations", probe.safeConfirmations());
         map.put("finalizedConfirmations", probe.finalizedConfirmations());

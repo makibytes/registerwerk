@@ -1,8 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -19,8 +18,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.datatypes.Function;
-import de.makibytes.registerwerk.wallet.api.EvmSigner;
-import org.web3j.protocol.Web3j;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -40,12 +37,9 @@ class Erc7540AdminServiceTest {
 
     @Mock AssetDeploymentRepository deploymentRepository;
     @Mock VaultRequestRepository requestRepository;
-    @Mock BlockchainClientRegistry clientRegistry;
-    @Mock EvmContractService evmContractService;
+    @Mock DurableEvmTransactionGateway evmTransactions;
     @Mock BlockchainTransactionService txService;
     @Mock ApplicationEventPublisher events;
-    @Mock Web3j web3j;
-    @Mock EvmSigner credentials;
 
     private Erc7540AdminService service;
     private AssetDeployment deployment;
@@ -53,12 +47,13 @@ class Erc7540AdminServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new Erc7540AdminService(deploymentRepository, requestRepository, clientRegistry,
-                evmContractService, txService, events);
+        service = new Erc7540AdminService(deploymentRepository, requestRepository,
+                evmTransactions, txService, events);
         deploymentId = UUID.randomUUID();
         deployment = new AssetDeployment();
         deployment.setId(deploymentId);
         deployment.setAssetId(UUID.randomUUID());
+        deployment.setChainConfigId(UUID.randomUUID());
         deployment.setChain(Chain.ETHEREUM);
         deployment.setNetwork(Network.TESTNET);
         deployment.setContractAddress("0x0000000000000000000000000000000000000001");
@@ -71,10 +66,8 @@ class Erc7540AdminServiceTest {
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
         when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
                 .thenReturn(Optional.of(request));
-        when(clientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
-                .thenReturn(credentials);
-        when(evmContractService.submit(eq(web3j), eq(credentials), eq(deployment.getContractAddress()), any(Function.class)))
+        when(evmTransactions.submit(eq(deployment.getChainConfigId()),
+                eq(deployment.getContractAddress()), any(Function.class), any()))
                 .thenReturn("0xtx");
         when(txService.record(eq("0xtx"), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(UUID.randomUUID());
@@ -83,8 +76,8 @@ class Erc7540AdminServiceTest {
                 UUID.randomUUID(), "REGISTRY_ADMIN");
 
         ArgumentCaptor<Function> function = ArgumentCaptor.forClass(Function.class);
-        verify(evmContractService).submit(eq(web3j), eq(credentials),
-                eq(deployment.getContractAddress()), function.capture());
+        verify(evmTransactions).submit(eq(deployment.getChainConfigId()),
+                eq(deployment.getContractAddress()), function.capture(), any());
         assertThat(function.getValue().getName()).isEqualTo("fulfillRedeemRequest");
         // submit() returns before any receipt exists — status must stay PENDING until
         // VaultConfirmationListener confirms fulfilledTx (see VaultConfirmationListenerTest).
@@ -107,7 +100,7 @@ class Erc7540AdminServiceTest {
                 deploymentId, requestId, UUID.randomUUID(), "REGISTRY_ADMIN"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("already FULFILLED");
-        verify(evmContractService, never()).submit(any(), any(), any(), any(Function.class));
+        verify(evmTransactions, never()).submit(any(), any(), any(Function.class), any());
     }
 
     @Test
@@ -126,7 +119,7 @@ class Erc7540AdminServiceTest {
                 deploymentId, requestId, new BigDecimal("1.0"), UUID.randomUUID(), "REGISTRY_ADMIN"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("awaiting confirmation");
-        verify(evmContractService, never()).submit(any(), any(), any(), any(Function.class));
+        verify(evmTransactions, never()).submit(any(), any(), any(Function.class), any());
     }
 
     @Test
@@ -136,10 +129,8 @@ class Erc7540AdminServiceTest {
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
         when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
                 .thenReturn(Optional.of(request));
-        when(clientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
-                .thenReturn(credentials);
-        when(evmContractService.submit(eq(web3j), eq(credentials), eq(deployment.getContractAddress()), any(Function.class)))
+        when(evmTransactions.submit(eq(deployment.getChainConfigId()),
+                eq(deployment.getContractAddress()), any(Function.class), any()))
                 .thenReturn("0xcanceltx");
         when(txService.record(eq("0xcanceltx"), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(UUID.randomUUID());

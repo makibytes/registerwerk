@@ -37,7 +37,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <textarea matInput rows="8" [(ngModel)]="mintCsv" placeholder="0xabc...,1000&#10;0xdef...,2500"></textarea>
             </mat-form-field>
             <div class="preview">{{ parseAddressAmount(mintCsv).length }} row(s) parsed</div>
-            <button mat-raised-button color="primary"
+            <button type="button" mat-raised-button color="primary"
                     [disabled]="parseAddressAmount(mintCsv).length === 0"
                     (click)="submitBatchMint()">
               <mat-icon>add_circle</mat-icon>
@@ -58,7 +58,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <input matInput [(ngModel)]="transferLegalBasis" placeholder="e.g. BaFin Bescheid Az. 2025-001" />
             </mat-form-field>
             <div class="preview">{{ parseFromToAmount(transferCsv).length }} row(s) parsed</div>
-            <button mat-raised-button color="warn"
+            <button type="button" mat-raised-button color="warn"
                     [disabled]="parseFromToAmount(transferCsv).length === 0"
                     (click)="submitBatchForcedTransfer()">
               <mat-icon>gavel</mat-icon>
@@ -75,7 +75,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <textarea matInput rows="8" [(ngModel)]="burnCsv" placeholder="0xabc...,1000"></textarea>
             </mat-form-field>
             <div class="preview">{{ parseAddressAmount(burnCsv).length }} row(s) parsed</div>
-            <button mat-raised-button color="warn"
+            <button type="button" mat-raised-button color="warn"
                     [disabled]="parseAddressAmount(burnCsv).length === 0"
                     (click)="submitBatchBurn()">
               <mat-icon>local_fire_department</mat-icon>

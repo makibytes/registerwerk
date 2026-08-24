@@ -71,7 +71,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               </span>
             </div>
 
-            <button mat-raised-button color="accent" class="full-width" 
+            <button type="button" mat-raised-button color="accent" class="full-width"
               (click)="submitMint()"
               [disabled]="busy || !isValidMintForm()">
               <mat-icon>add_circle</mat-icon>
@@ -111,7 +111,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <span class="preview-label">This action is irreversible</span>
             </div>
 
-            <button mat-raised-button color="warn" class="full-width"
+            <button type="button" mat-raised-button color="warn" class="full-width"
               (click)="submitBurn()"
               [disabled]="busy || !isValidBurnForm()">
               <mat-icon>delete_forever</mat-icon>
@@ -178,7 +178,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               </span>
             </div>
 
-            <button mat-raised-button color="primary" class="full-width"
+            <button type="button" mat-raised-button color="primary" class="full-width"
               (click)="submitForceTransfer()"
               [disabled]="busy || !isValidForceTransferForm()">
               <mat-icon>swap_horiz</mat-icon>
@@ -245,7 +245,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               </span>
             </div>
 
-            <button mat-raised-button color="primary" class="full-width"
+            <button type="button" mat-raised-button color="primary" class="full-width"
               (click)="submitForceApprove()"
               [disabled]="busy || !isValidForceApproveForm()">
               <mat-icon>verified</mat-icon>

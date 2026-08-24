@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
+import de.makibytes.registerwerk.finality.api.ChainSubmissionExecutor;
 
 /**
  * Creates and manages Cairo ERC-20 token deployments on Starknet.
@@ -162,6 +164,7 @@ public class StarknetTokenService {
     private final String erc20ClassHash;
     private final String erc3525ClassHash;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final ChainSubmissionExecutor submissions;
 
     public StarknetTokenService(
             ChainConfigRepository chainConfigRepository,
@@ -173,13 +176,15 @@ public class StarknetTokenService {
             @org.springframework.beans.factory.annotation.Value(
                     "${registerwerk.chains.starknet.erc3525-class-hash:" + DEFAULT_ERC3525_CLASS_HASH + "}")
             String erc3525ClassHash,
-            org.springframework.context.ApplicationEventPublisher eventPublisher) {
+            org.springframework.context.ApplicationEventPublisher eventPublisher,
+            ChainSubmissionExecutor submissions) {
         this.chainConfigRepository = chainConfigRepository;
         this.walletSigner = walletSigner;
         this.objectMapper = objectMapper;
         this.erc20ClassHash = erc20ClassHash;
         this.erc3525ClassHash = erc3525ClassHash;
         this.eventPublisher = eventPublisher;
+        this.submissions = submissions;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
@@ -213,8 +218,7 @@ public class StarknetTokenService {
     public CompletableFuture<StarknetDeployment> createCairoErc20(UUID assetId, Network network, String ownerAddress) {
         log.info("Creating Cairo ERC-20: assetId={}, network={}", assetId, network);
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainConfig chain = resolveChainConfig(network);
+        return submitOnChain(network, chain -> {
             String rpcUrl = chain.getRpcUrl();
 
             byte[] privateKeyBytes = walletSigner.rawPrivateKeyBytesForChain(chain.getId());
@@ -266,8 +270,7 @@ public class StarknetTokenService {
     public CompletableFuture<StarknetDeployment> createCairoErc3525(UUID assetId, Network network, String ownerAddress) {
         log.info("Creating Cairo ERC-3525 (SFT): assetId={}, network={}", assetId, network);
 
-        return CompletableFuture.supplyAsync(() -> {
-            ChainConfig chain = resolveChainConfig(network);
+        return submitOnChain(network, chain -> {
             String rpcUrl = chain.getRpcUrl();
 
             byte[] privateKeyBytes = walletSigner.rawPrivateKeyBytesForChain(chain.getId());
@@ -375,8 +378,7 @@ public class StarknetTokenService {
      */
     CompletableFuture<String> invokeContract(
             Network network, String contractAddress, String entryPointName, List<BigInteger> args) {
-        return CompletableFuture.supplyAsync(() -> {
-            ChainConfig chain = resolveChainConfig(network);
+        return submitOnChain(network, chain -> {
             String rpcUrl = chain.getRpcUrl();
 
             byte[] privateKeyBytes = walletSigner.rawPrivateKeyBytesForChain(chain.getId());
@@ -409,6 +411,13 @@ public class StarknetTokenService {
 
             return submitInvokeV3(rpcUrl, accountAddress, calldata, nonce, sig);
         });
+    }
+
+    private <T> CompletableFuture<T> submitOnChain(
+            Network network, Function<ChainConfig, T> submission) {
+        ChainConfig chain = resolveChainConfig(network);
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                chain.getId(), () -> submission.apply(chain)));
     }
 
     // ── RPC helpers ───────────────────────────────────────────────────────────

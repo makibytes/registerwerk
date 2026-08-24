@@ -60,12 +60,12 @@ type ResolveMode = 'complete' | 'reject';
     </rw-data-table>
 
     <ng-template #rowActions let-req>
-      <button mat-icon-button color="primary"
+      <button type="button" mat-icon-button color="primary"
               (click)="openResolveDialog(req, 'complete')"
               matTooltip="Mark as completed">
         <mat-icon>check_circle</mat-icon>
       </button>
-      <button mat-icon-button color="warn"
+      <button type="button" mat-icon-button color="warn"
               (click)="openResolveDialog(req, 'reject')"
               matTooltip="Reject (e.g. statutory retention applies)">
         <mat-icon>block</mat-icon>
@@ -92,8 +92,8 @@ type ResolveMode = 'complete' | 'reject';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button [color]="resolveMode === 'complete' ? 'primary' : 'warn'"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button [color]="resolveMode === 'complete' ? 'primary' : 'warn'"
                 [disabled]="!resolutionNote.trim()"
                 (click)="submitResolve()">
           <mat-icon>{{ resolveMode === 'complete' ? 'check_circle' : 'block' }}</mat-icon>

@@ -44,7 +44,7 @@ import { VaultNavStrike } from '../../../../core/models';
             </mat-form-field>
           </div>
 
-          <button mat-flat-button class="btn-strike" [disabled]="striking || !navPerShare" (click)="strike()">
+          <button type="button" mat-flat-button class="btn-strike" [disabled]="striking || !navPerShare" (click)="strike()">
             @if (striking) {
               <span class="spinner"></span> Striking…
             } @else {

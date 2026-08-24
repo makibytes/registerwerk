@@ -31,6 +31,7 @@ class AssetDeploymentRevertCompensatorTest {
     private AssetDeploymentRevertCompensator compensator;
 
     private final UUID deploymentId = UUID.randomUUID();
+    private final UUID chainConfigId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -38,7 +39,11 @@ class AssetDeploymentRevertCompensatorTest {
     }
 
     private ChainEffectRecord effect() {
-        return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
+        return effect("0xblock100");
+    }
+
+    private ChainEffectRecord effect(String blockHash) {
+        return new ChainEffectRecord(UUID.randomUUID(), chainConfigId, 100L, blockHash, "0xtxhash", null,
                 "asset", "DEPLOYMENT_CONFIRMED", "AssetDeployment", deploymentId, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
@@ -57,6 +62,8 @@ class AssetDeploymentRevertCompensatorTest {
         deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
         deployment.setBlockNumber(100L);
         deployment.setBlockHash("0xblock100");
+        deployment.setChainConfigId(chainConfigId);
+        deployment.setDeployedByTx("0xtxhash");
         deployment.setDeployedAt(Instant.now());
         deployment.setContractAddress("0xdeterministic");
         when(repository.findById(deploymentId)).thenReturn(Optional.of(deployment));
@@ -70,6 +77,44 @@ class AssetDeploymentRevertCompensatorTest {
         assertThat(deployment.getDeployedAt()).isNull();
         assertThat(deployment.getContractAddress()).isEqualTo("0xdeterministic");
         assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
+    }
+
+    @Test
+    @DisplayName("a stale same-height incarnation cannot undo a newer canonical confirmation")
+    void staleSameHeightIncarnationIsNotApplicable() {
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        deployment.setChainConfigId(chainConfigId);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setBlockNumber(100L);
+        deployment.setBlockHash("0xNEW");
+        when(repository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+
+        CompensationOutcome outcome = compensator.compensate(effect("0xOLD"));
+
+        verify(repository, never()).save(any());
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        assertThat(outcome).isInstanceOf(CompensationOutcome.NotApplicable.class);
+    }
+
+    @Test
+    @DisplayName("A to B to A does not let the stale B compensation undo the current A incarnation")
+    void aToBToAStaleMiddleCompensationIsNotApplicable() {
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        deployment.setChainConfigId(chainConfigId);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setBlockNumber(100L);
+        deployment.setBlockHash("0xA");
+        when(repository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+
+        assertThat(compensator.compensate(effect("0xB")))
+                .isInstanceOf(CompensationOutcome.NotApplicable.class);
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+
+        assertThat(compensator.compensate(effect("0xA")))
+                .isInstanceOf(CompensationOutcome.Compensated.class);
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
     }
 
     @Test

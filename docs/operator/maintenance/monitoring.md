@@ -31,6 +31,11 @@ This starts:
 | `GET /actuator/health/readiness` | `readinessState` + `db` (Postgres reachable) — used by the readiness probe. A DB outage now correctly takes a pod out of Service rotation instead of it reporting ready and failing every request |
 | `GET /actuator/prometheus` | Prometheus metrics scrape (unauthenticated — see `SecurityConfig`) |
 
+The Helm chart can express this scrape as either generic `prometheus.io/*` pod annotations or a
+Google Managed Service for Prometheus `PodMonitoring` (`monitoring.googleManagedPrometheus=true`).
+Because the metrics endpoint is unauthenticated, keep it cluster-internal and do not route
+`/actuator/**` through the public ingress.
+
 `management.endpoint.health.probes.enabled: true` (application.yml) makes these groups active on
 every deployment path, not only inside a real Kubernetes pod (Spring Boot otherwise only
 auto-activates them via `KUBERNETES_SERVICE_HOST` detection). The Helm chart also runs a

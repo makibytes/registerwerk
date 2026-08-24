@@ -45,7 +45,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     <app-page-header
       title="Sanctions &amp; PEP Screening Queue"
       subtitle="GwG §10 · MiCAR Art. 60 · AMLD6 — Unresolved screening hits requiring review">
-      <button mat-raised-button color="primary" (click)="openRunScreeningDialog()">
+      <button type="button" mat-raised-button color="primary" (click)="openRunScreeningDialog()">
         <mat-icon>search</mat-icon>
         Run Screening
       </button>
@@ -62,7 +62,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     </rw-data-table>
 
     <ng-template #rowActions let-hit>
-      <button mat-icon-button color="primary"
+      <button type="button" mat-icon-button color="primary"
               (click)="viewRun(hit)"
               matTooltip="View run & hits">
         <mat-icon>open_in_new</mat-icon>
@@ -113,8 +113,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         }
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" (click)="submitScreening()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" (click)="submitScreening()">
           <mat-icon>search</mat-icon>
           Run
         </button>

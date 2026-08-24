@@ -29,7 +29,7 @@ type DecisionMode = 'allocate' | 'reject';
     <div class="so-shell">
       <div class="so-header">
         <h3 class="so-title">Subscription orders</h3>
-        <button mat-stroked-button (click)="load()">
+        <button type="button" mat-stroked-button (click)="load()">
           <mat-icon>refresh</mat-icon> Refresh
         </button>
       </div>
@@ -61,10 +61,10 @@ type DecisionMode = 'allocate' | 'reject';
               <span class="status-badge" [class]="o.status.toLowerCase()">{{ o.status }}</span>
               <div class="row-actions">
                 @if (o.status === 'SUBMITTED') {
-                  <button mat-icon-button color="primary" matTooltip="Allocate" (click)="openDecisionDialog(o, 'allocate')">
+                  <button type="button" mat-icon-button color="primary" matTooltip="Allocate" (click)="openDecisionDialog(o, 'allocate')">
                     <mat-icon>check_circle</mat-icon>
                   </button>
-                  <button mat-icon-button color="warn" matTooltip="Reject" (click)="openDecisionDialog(o, 'reject')">
+                  <button type="button" mat-icon-button color="warn" matTooltip="Reject" (click)="openDecisionDialog(o, 'reject')">
                     <mat-icon>cancel</mat-icon>
                   </button>
                 }
@@ -98,8 +98,8 @@ type DecisionMode = 'allocate' | 'reject';
         }
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button [color]="decisionMode === 'allocate' ? 'primary' : 'warn'"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button [color]="decisionMode === 'allocate' ? 'primary' : 'warn'"
                 [disabled]="decisionMode === 'allocate' ? !allocatedAmount || allocatedAmount <= 0 : !rejectionReason.trim()"
                 (click)="submitDecision()">
           {{ decisionMode === 'allocate' ? 'Allocate' : 'Reject' }}

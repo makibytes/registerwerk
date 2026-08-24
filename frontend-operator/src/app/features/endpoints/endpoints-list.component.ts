@@ -52,16 +52,16 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
         <h1>Endpoints</h1>
         <p class="page-subtitle">Named address-book entries for wallets and contracts</p>
       </div>
-      <button mat-flat-button color="primary" (click)="openCreate()">
+      <button type="button" mat-flat-button color="primary" (click)="openCreate()">
         <mat-icon>add</mat-icon> New endpoint
       </button>
     </div>
 
     <div class="filter-row">
       <span class="filter-label">Type</span>
-      <button class="filter-chip" [class.active]="typeFilter() === null" (click)="typeFilter.set(null)">All</button>
-      <button class="filter-chip" [class.active]="typeFilter() === 'WALLET'" (click)="typeFilter.set('WALLET')">Wallets</button>
-      <button class="filter-chip" [class.active]="typeFilter() === 'CONTRACT'" (click)="typeFilter.set('CONTRACT')">Contracts</button>
+      <button type="button" class="filter-chip" [class.active]="typeFilter() === null" (click)="typeFilter.set(null)">All</button>
+      <button type="button" class="filter-chip" [class.active]="typeFilter() === 'WALLET'" (click)="typeFilter.set('WALLET')">Wallets</button>
+      <button type="button" class="filter-chip" [class.active]="typeFilter() === 'CONTRACT'" (click)="typeFilter.set('CONTRACT')">Contracts</button>
     </div>
 
     <div class="content-card">
@@ -109,10 +109,10 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
                 </td>
                 <td class="notes-cell" [title]="ep.notes || ''">{{ ep.notes || '' }}</td>
                 <td>
-                  <button mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions"><mat-icon>more_vert</mat-icon></button>
+                  <button type="button" mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions"><mat-icon>more_vert</mat-icon></button>
                   <mat-menu #actionMenu>
-                    <button mat-menu-item (click)="openEdit(ep)"><mat-icon>edit</mat-icon> Edit</button>
-                    <button mat-menu-item (click)="confirmDelete(ep)" style="color:#ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
+                    <button type="button" mat-menu-item (click)="openEdit(ep)"><mat-icon>edit</mat-icon> Edit</button>
+                    <button type="button" mat-menu-item (click)="confirmDelete(ep)" style="color:#ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
                   </mat-menu>
                 </td>
               </tr>

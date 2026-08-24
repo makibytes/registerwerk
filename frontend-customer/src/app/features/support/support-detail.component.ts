@@ -62,13 +62,14 @@ import { SupportTicket, SupportTicketMessage } from '../../core/models';
         <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
       } @else if (loadError) {
         <div class="error-state" role="alert">
+          <h1 class="sr-only">Support ticket details</h1>
           <mat-icon>error_outline</mat-icon>
           <span>This support ticket could not be loaded.</span>
           <button mat-stroked-button type="button" (click)="load()">Retry</button>
         </div>
       } @else if (ticket) {
         <div class="ticket-header">
-          <h2>{{ ticket.subject }}</h2>
+          <h1>{{ ticket.subject }}</h1>
           <div class="ticket-meta">
             <app-status-badge [status]="ticket.status" />
             <span>{{ ticket.category.replace('_',' ') }}</span>

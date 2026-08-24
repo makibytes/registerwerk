@@ -67,17 +67,17 @@ import { AttachHsmDialogComponent } from './dialogs/attach-hsm-dialog.component'
         <p class="page-subtitle">Operator signing wallets — one default per chain for gas fee payments</p>
       </div>
       <div class="header-actions">
-        <button mat-stroked-button [matMenuTriggerFor]="importMenu">
+        <button type="button" mat-stroked-button [matMenuTriggerFor]="importMenu">
           <mat-icon>upload</mat-icon> Import
         </button>
         <mat-menu #importMenu>
-          <button mat-menu-item (click)="openImportRaw()"><mat-icon>key</mat-icon> Raw private key</button>
-          <button mat-menu-item (click)="openImportKeystore()"><mat-icon>lock</mat-icon> Keystore file (JSON)</button>
+          <button type="button" mat-menu-item (click)="openImportRaw()"><mat-icon>key</mat-icon> Raw private key</button>
+          <button type="button" mat-menu-item (click)="openImportKeystore()"><mat-icon>lock</mat-icon> Keystore file (JSON)</button>
         </mat-menu>
-        <button mat-flat-button color="primary" (click)="openGenerate()">
+        <button type="button" mat-flat-button color="primary" (click)="openGenerate()">
           <mat-icon>add</mat-icon> Generate wallet
         </button>
-        <button mat-stroked-button (click)="openAttachHsm()"><mat-icon>security</mat-icon> Attach HSM key</button>
+        <button type="button" mat-stroked-button (click)="openAttachHsm()"><mat-icon>security</mat-icon> Attach HSM key</button>
       </div>
     </div>
 
@@ -131,15 +131,15 @@ import { AttachHsmDialogComponent } from './dialogs/attach-hsm-dialog.component'
                 </td>
                 <td style="font-size: 12px; color: var(--rw-text-muted)">{{ wallet.createdAt | date:'mediumDate' }}</td>
                 <td>
-                  <button mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions">
+                  <button type="button" mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions">
                     <mat-icon>more_vert</mat-icon>
                   </button>
                   <mat-menu #actionMenu>
-                    <button mat-menu-item [routerLink]="['/wallets', wallet.id]"><mat-icon>open_in_new</mat-icon> View details</button>
-                    <button mat-menu-item (click)="openSetDefault(wallet)"><mat-icon>star</mat-icon> Set as default</button>
-                    <button mat-menu-item (click)="exportKeystore(wallet)" [disabled]="wallet.type !== 'EVM' || wallet.custodyType === 'PKCS11'"><mat-icon>download</mat-icon> Export keystore</button>
-                    <button mat-menu-item (click)="rename(wallet)"><mat-icon>edit</mat-icon> Rename</button>
-                    <button mat-menu-item (click)="delete(wallet)" style="color: #ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
+                    <button type="button" mat-menu-item [routerLink]="['/wallets', wallet.id]"><mat-icon>open_in_new</mat-icon> View details</button>
+                    <button type="button" mat-menu-item (click)="openSetDefault(wallet)"><mat-icon>star</mat-icon> Set as default</button>
+                    <button type="button" mat-menu-item (click)="exportKeystore(wallet)" [disabled]="wallet.type !== 'EVM' || wallet.custodyType === 'PKCS11'"><mat-icon>download</mat-icon> Export keystore</button>
+                    <button type="button" mat-menu-item (click)="rename(wallet)"><mat-icon>edit</mat-icon> Rename</button>
+                    <button type="button" mat-menu-item (click)="delete(wallet)" style="color: #ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
                   </mat-menu>
                 </td>
               </tr>

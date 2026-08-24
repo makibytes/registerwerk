@@ -444,13 +444,13 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
               </p>
 
               @if (!walletService.isConnected()) {
-                <button mat-stroked-button color="primary" (click)="connectWallet()" [disabled]="connecting">
+                <button type="button" mat-stroked-button color="primary" (click)="connectWallet()" [disabled]="connecting">
                   <mat-icon>account_balance_wallet</mat-icon>
                   {{ connecting ? 'Connecting…' : 'Connect Wallet' }}
                 </button>
               } @else {
                 <div class="confidential-reveal-row">
-                  <button mat-flat-button color="primary" (click)="revealMyBalance()" [disabled]="revealing || deploymentsSection.data.length === 0">
+                  <button type="button" mat-flat-button color="primary" (click)="revealMyBalance()" [disabled]="revealing || deploymentsSection.data.length === 0">
                     <mat-icon>visibility</mat-icon>
                     {{ revealing ? 'Decrypting…' : 'Reveal My Balance' }}
                   </button>
@@ -474,7 +474,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                     <mat-label>Amount</mat-label>
                     <input matInput type="number" [(ngModel)]="transferAmount" min="1" step="1" />
                   </mat-form-field>
-                  <button mat-flat-button color="primary"
+                  <button type="button" mat-flat-button color="primary"
                           (click)="submitConfidentialTransfer()"
                           [disabled]="transferring || !isValidWalletAddress(transferTo) || !isValidTransferAmount() || deploymentsSection.data.length === 0">
                     <mat-icon>send</mat-icon>
@@ -628,7 +628,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                   <ng-container matColumnDef="entitlement">
                     <th mat-header-cell *matHeaderCellDef>Amount / unit</th>
                     <td mat-cell *matCellDef="let a">
-                      {{ a.amountPerUnit != null ? (a.amountPerUnit | number:'1.0-8') + ' ' + (a.currency ?? '') : '—' }}
+                      {{ a.amountPerUnit !== null && a.amountPerUnit !== undefined ? (a.amountPerUnit | number:'1.0-8') + ' ' + (a.currency ?? '') : '—' }}
                     </td>
                   </ng-container>
                   <ng-container matColumnDef="progress">
@@ -639,10 +639,10 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                     <th mat-header-cell *matHeaderCellDef></th>
                     <td mat-cell *matCellDef="let a">
                       @if (a.status === 'SETTLED' || a.status === 'CLOSED') {
-                        <button mat-icon-button matTooltip="Download confirmation (PDF)" (click)="downloadCorporateActionConfirmation(a)">
+                        <button type="button" mat-icon-button matTooltip="Download confirmation (PDF)" (click)="downloadCorporateActionConfirmation(a)">
                           <mat-icon>picture_as_pdf</mat-icon>
                         </button>
-                        <button mat-icon-button matTooltip="Download ISO 20022-shaped confirmation (XML)"
+                        <button type="button" mat-icon-button matTooltip="Download ISO 20022-shaped confirmation (XML)"
                                 (click)="downloadCorporateActionIso20022Confirmation(a)">
                           <mat-icon>code</mat-icon>
                         </button>
@@ -665,6 +665,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
       } @else {
         <mat-card>
           <mat-card-content class="load-error" role="alert">
+            <h1 class="sr-only">Investment details</h1>
             <mat-icon>cloud_off</mat-icon>
             <p>{{ loadError || 'Investment not found.' }}</p>
             @if (holderId) {

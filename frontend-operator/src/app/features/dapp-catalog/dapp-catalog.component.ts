@@ -51,13 +51,13 @@ import {
 
     <ng-template #rowActions let-listing>
       @if (listing.status === 'PUBLISHED') {
-        <button mat-icon-button (click)="deprecate(listing)"
+        <button type="button" mat-icon-button (click)="deprecate(listing)"
                 matTooltip="Deprecate — stays visible, flagged as outdated (step-up)">
           <mat-icon>history_toggle_off</mat-icon>
         </button>
       }
       @if (listing.status === 'PUBLISHED' || listing.status === 'DEPRECATED') {
-        <button mat-icon-button color="warn" (click)="delist(listing)"
+        <button type="button" mat-icon-button color="warn" (click)="delist(listing)"
                 matTooltip="Delist — removed from catalog, suspended onchain (step-up)">
           <mat-icon>visibility_off</mat-icon>
         </button>

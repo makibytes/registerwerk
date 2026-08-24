@@ -68,7 +68,7 @@ import { AuthService } from '../../../core/auth/auth.service';
 
     <ng-template #rowActions let-event>
       @if (event.status === 'OPEN' && canResolve) {
-        <button mat-stroked-button color="primary" (click)="openResolveDialog(event)">
+        <button type="button" mat-stroked-button color="primary" (click)="openResolveDialog(event)">
           <mat-icon>task_alt</mat-icon>
           Resolve
         </button>
@@ -98,8 +98,8 @@ import { AuthService } from '../../../core/auth/auth.service';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!resolutionNotes.trim()" (click)="submitResolve()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" [disabled]="!resolutionNotes.trim()" (click)="submitResolve()">
           <mat-icon>task_alt</mat-icon>
           Resolve
         </button>

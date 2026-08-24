@@ -95,7 +95,36 @@ public class BlockchainTransactionService {
 
         String actorName = resolveActorName();
         String actorRole = resolveActorRole();
+        UUID chainConfigId = null;
+        if (chain != null && network != null) {
+            chainConfigId = chainConfigRepository.findByIdentifier(chain + "_" + network)
+                    .map(de.makibytes.registerwerk.chain.api.ChainConfig::getId).orElse(null);
+        }
+        return createPending(txHash, methodName, deploymentId, assetId, chainConfigId,
+                chain, network, contractAddress, params, actorName, actorRole);
+    }
 
+    /**
+     * Records a durable signed-outbox transaction only after its exact bytes are known to the
+     * RPC node. The original actor is explicit because scheduled retries no longer run in that
+     * actor's security context. Re-entry is idempotent for the outbox's immutable tx hash.
+     */
+    @Transactional
+    public UUID recordPrepared(String txHash, String methodName, UUID chainConfigId,
+            String chain, String network, String contractAddress, Map<String, Object> params,
+            String actorName, String actorRole) {
+        Optional<BlockchainTransaction> existing = repository.findByTxHash(txHash);
+        if (existing.isPresent()) {
+            return existing.get().getId();
+        }
+        return createPending(txHash, methodName, null, null, chainConfigId,
+                chain, network, contractAddress, params, actorName, actorRole);
+    }
+
+    private UUID createPending(String txHash, String methodName,
+            UUID deploymentId, UUID assetId, UUID chainConfigId,
+            String chain, String network, String contractAddress,
+            Map<String, Object> params, String actorName, String actorRole) {
         BlockchainTransaction tx = new BlockchainTransaction();
         tx.setTxHash(txHash);
         tx.setStatus(BlockchainTransaction.Status.PENDING);
@@ -108,10 +137,7 @@ public class BlockchainTransactionService {
         tx.setParams(params);
         tx.setActorName(actorName);
         tx.setActorRole(actorRole);
-        if (chain != null && network != null) {
-            chainConfigRepository.findByIdentifier(chain + "_" + network)
-                    .ifPresent(cc -> tx.setChainConfigId(cc.getId()));
-        }
+        tx.setChainConfigId(chainConfigId);
 
         BlockchainTransaction saved = repository.save(tx);
         log.info("Recorded blockchain tx={} method={} actor={}", txHash, methodName, actorName);
@@ -185,14 +211,15 @@ public class BlockchainTransactionService {
      *  handed to callers that need it to journal a {@code ChainEffectDescriptor} for a confirmed
      *  action that isn't itself a tracked entity with its own block-number column (e.g.
      *  {@code Erc3643IdentityRegistryConfirmationListener}). Empty if not tracked, not SUCCESS
-     *  yet, or the chain/network pair never resolved to a {@code chainConfigId}. */
+     *  yet, or complete chain/block provenance is unavailable. */
     public record ConfirmedTxLocation(java.util.UUID chainConfigId, long blockNumber, String blockHash) {}
 
     @Transactional(readOnly = true)
     public Optional<ConfirmedTxLocation> confirmedLocation(String txHash) {
         return repository.findByTxHash(txHash)
                 .filter(tx -> tx.getStatus() == BlockchainTransaction.Status.SUCCESS
-                        && tx.getChainConfigId() != null && tx.getBlockNumber() != null)
+                        && tx.getChainConfigId() != null && tx.getBlockNumber() != null
+                        && tx.getBlockHash() != null && !tx.getBlockHash().isBlank())
                 .map(tx -> new ConfirmedTxLocation(tx.getChainConfigId(), tx.getBlockNumber(), tx.getBlockHash()));
     }
 

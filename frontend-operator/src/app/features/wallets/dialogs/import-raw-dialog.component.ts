@@ -62,8 +62,8 @@ import { MatIconModule } from '@angular/material/icon';
     </mat-dialog-content>
     <mat-dialog-actions style="padding: 0 24px 20px">
       <div class="actions">
-        <button mat-button mat-dialog-close>Cancel</button>
-        <button mat-flat-button color="primary" [disabled]="!name.trim() || (type !== 'CANTON' && !privateKey.trim()) || (type === 'CANTON' && !partyId.trim())" (click)="submit()">Import</button>
+        <button type="button" mat-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-flat-button color="primary" [disabled]="!name.trim() || (type !== 'CANTON' && !privateKey.trim()) || (type === 'CANTON' && !partyId.trim())" (click)="submit()">Import</button>
       </div>
     </mat-dialog-actions>
   `,

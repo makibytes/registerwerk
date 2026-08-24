@@ -16,7 +16,7 @@ Registerwerk prend en charge huit types de blockchains, sur réseaux principaux 
 | [Ethereum et EVM](evm.md) | ERC-20/721/1155/3525/3643/4626/7540 | Web3j | Ethereum, Polygon, Base, Arbitrum, Avalanche, Optimism | Implémentation présente ; maturité pour la production non vérifiée |
 | [EVM confidentielle](confidential-evm.md) | CONF_ERC20, CONF_ERC3643 | Web3j + SDK Zama | Fhenix, Inco | Implémentation présente ; maturité pour la production non vérifiée |
 | [Solana](solana.md) | SPL, SPL_2022, SPL_2022_BOND, SPL_2022_CONFIDENTIAL | Solanaj | mainnet-beta, devnet | Intégration présente ; maturité pour la production non vérifiée |
-| [Canton / DAML](canton.md) | DAML_BOND_*, CANTON_TOKEN | Client Java DAML | Canton Network, devnet | Implémentation optionnelle (`-Pcanton`) ; maturité pour la production non vérifiée |
+| [Canton / Daml](canton.md) | DAML_BOND_* ; CANTON_TOKEN réservé | Client Java Ledger API v2 | Canton Network, devnet | Cycle de vie obligataire vérifié par profil ; conformité réelle et paiement requis |
 | [StarkNet](starknet-stellar.md) | STARKNET_ERC20, STARKNET_ERC3525 | Starknet4j maison | mainnet, sepolia | ⚠️ Espace réservé |
 | [Stellar](starknet-stellar.md) | STELLAR_ASSET | SDK Java Horizon | mainnet, testnet | ⚠️ Espace réservé |
 

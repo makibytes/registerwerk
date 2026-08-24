@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.deployment.api.AssetVaultState;
 import de.makibytes.registerwerk.deployment.api.AssetVaultStateRepository;
 import de.makibytes.registerwerk.deployment.api.VaultNavStrike;
 import de.makibytes.registerwerk.deployment.api.VaultNavStrikeRepository;
+import de.makibytes.registerwerk.finality.api.BlockIdentity;
 import de.makibytes.registerwerk.finality.api.ChainEffectCompensator;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecord;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
@@ -23,9 +24,9 @@ import java.util.UUID;
  * than restoring from a {@code beforeState} snapshot — {@link VaultNavStrike} history rows are
  * never deleted, so the prior value is always re-derivable from still-current rows.
  *
- * <p>The {@link VaultNavStrike} row itself is left untouched (its {@code confirmed} flag stays
- * {@code true} — it genuinely was mined and confirmed at some point; only the fact that it was the
- * asset's <i>current</i> NAV is what a reorg past FINALIZED can invalidate).
+ * <p>The {@link VaultNavStrike} confirmation is reset as well. Keeping an orphaned strike marked
+ * confirmed would prevent the listener from ever re-verifying it and could make it a candidate
+ * for a later NAV restoration merely because it once appeared on a discarded branch.
  *
  * <p>Talks to {@link AssetVaultStateRepository}/{@link VaultNavStrikeRepository} directly, never
  * {@code VaultConfirmationListener} or {@code Erc4626AdminService} (both would introduce the
@@ -57,20 +58,45 @@ class VaultNavStrikeRevertCompensator implements ChainEffectCompensator {
     @Override
     public CompensationOutcome compensate(ChainEffectRecord effect) {
         UUID id = effect.entityId();
-        VaultNavStrike strike = navStrikeRepository.findById(id).orElse(null);
+        VaultNavStrike strike = navStrikeRepository.findByIdForUpdate(id).orElse(null);
         if (strike == null) {
             return new CompensationOutcome.NotApplicable("VaultNavStrike " + id + " no longer exists");
         }
-        AssetVaultState state = vaultStateRepository.findById(strike.getAssetId()).orElse(null);
-        if (state == null || state.getLatestNavStrikeAt() == null
-                || !state.getLatestNavStrikeAt().equals(strike.getEffectiveAt())) {
-            return new CompensationOutcome.NotApplicable("AssetVaultState for asset=" + strike.getAssetId()
-                    + " no longer reflects VaultNavStrike " + id + " (already superseded or missing)");
+        if (!effect.chainConfigId().equals(strike.getChainConfigId())
+                || !BlockIdentity.sameIncarnation(
+                        strike.getBlockNumber(), strike.getBlockHash(), effect.blockNumber(), effect.blockHash())
+                || !BlockIdentity.sameHash(effect.txHash(), strike.getTxHash())) {
+            return new CompensationOutcome.NotApplicable(
+                    "VaultNavStrike " + id + " now belongs to a different block occurrence");
         }
-
-        VaultNavStrike previous = navStrikeRepository.findByAssetIdOrderByEffectiveAtDesc(strike.getAssetId())
+        AssetVaultState state = vaultStateRepository.findByAssetIdForUpdate(strike.getAssetId()).orElse(null);
+        var confirmedStrikes = navStrikeRepository.findByAssetIdOrderByEffectiveAtDesc(strike.getAssetId())
                 .stream()
                 .filter(VaultNavStrike::isConfirmed)
+                .filter(s -> s.getChainConfigId() != null && s.getBlockNumber() != null && s.getBlockHash() != null)
+                .toList();
+        boolean ownsProjection = state != null && id.equals(state.getLatestNavStrikeId());
+        long highestConfirmedStrikeId = confirmedStrikes.stream()
+                .mapToLong(VaultNavStrike::getStrikeId)
+                .max()
+                .orElse(strike.getStrikeId());
+        if (ownsProjection && highestConfirmedStrikeId != strike.getStrikeId()) {
+            return new CompensationOutcome.Failed(
+                    "Vault NAV projection owner is not the highest confirmed strike", null);
+        }
+
+        strike.setConfirmed(false);
+        strike.setChainConfigId(null);
+        strike.setBlockNumber(null);
+        strike.setBlockHash(null);
+        navStrikeRepository.save(strike);
+
+        if (!ownsProjection) {
+            return new CompensationOutcome.Compensated("Retracted VaultNavStrike " + id
+                    + " was already superseded; its newer projection was left untouched");
+        }
+
+        VaultNavStrike previous = confirmedStrikes.stream()
                 .filter(s -> !s.getId().equals(strike.getId()))
                 .filter(s -> s.getStrikeId() < strike.getStrikeId())
                 .max(Comparator.comparingLong(VaultNavStrike::getStrikeId))
@@ -85,10 +111,12 @@ class VaultNavStrikeRevertCompensator implements ChainEffectCompensator {
         if (previous != null) {
             state.setLatestNavPerShare(previous.getNavPerShare());
             state.setLatestNavStrikeAt(previous.getEffectiveAt());
+            state.setLatestNavStrikeId(previous.getId());
             state.setLatestNavReportHash(previous.getReportHash());
         } else {
             state.setLatestNavPerShare(null);
             state.setLatestNavStrikeAt(null);
+            state.setLatestNavStrikeId(null);
             state.setLatestNavReportHash(null);
         }
         vaultStateRepository.save(state);

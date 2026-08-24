@@ -29,6 +29,7 @@ class BlockchainTxRevertCompensatorTest {
     private BlockchainTxRevertCompensator compensator;
 
     private final UUID txId = UUID.randomUUID();
+    private final UUID chainConfigId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -36,7 +37,7 @@ class BlockchainTxRevertCompensatorTest {
     }
 
     private ChainEffectRecord effect() {
-        return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
+        return new ChainEffectRecord(UUID.randomUUID(), chainConfigId, 100L, "0xblock100", "0xtxhash", null,
                 "blockchain", "TX_COMPLETED", "BlockchainTransaction", txId, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
@@ -53,6 +54,8 @@ class BlockchainTxRevertCompensatorTest {
     void compensateRevertsSuccessTransaction() {
         BlockchainTransaction tx = new BlockchainTransaction();
         tx.setStatus(BlockchainTransaction.Status.SUCCESS);
+        tx.setChainConfigId(chainConfigId);
+        tx.setTxHash("0xtxhash");
         tx.setBlockNumber(100L);
         tx.setBlockHash("0xblock100");
         tx.setGasUsed(21_000L);
@@ -68,6 +71,44 @@ class BlockchainTxRevertCompensatorTest {
         assertThat(tx.getGasUsed()).isNull();
         assertThat(tx.getCompletedAt()).isNull();
         assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
+    }
+
+    @Test
+    void mixedCaseEvmTransactionIdentityStillMatchesNormalizedJournalIdentity() {
+        BlockchainTransaction tx = new BlockchainTransaction();
+        tx.setStatus(BlockchainTransaction.Status.SUCCESS);
+        tx.setChainConfigId(chainConfigId);
+        tx.setTxHash("0xABCDEF");
+        tx.setBlockNumber(100L);
+        tx.setBlockHash("0xabcdef00");
+        when(repository.findById(txId)).thenReturn(Optional.of(tx));
+        ChainEffectRecord normalizedEffect = new ChainEffectRecord(
+                UUID.randomUUID(), chainConfigId, 100L, "0xabcdef00", "0xabcdef", null,
+                "blockchain", "TX_COMPLETED", "BlockchainTransaction", txId, null,
+                CompensationCategory.INVERSE_FLIP, null, null, null, null,
+                "COMPENSATING", 1, Instant.now());
+
+        CompensationOutcome outcome = compensator.compensate(normalizedEffect);
+
+        assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
+        verify(repository).save(tx);
+    }
+
+    @Test
+    void staleEffectCannotRevertTransactionReminedInReplacementBlock() {
+        BlockchainTransaction tx = new BlockchainTransaction();
+        tx.setStatus(BlockchainTransaction.Status.SUCCESS);
+        tx.setChainConfigId(chainConfigId);
+        tx.setTxHash("0xtxhash");
+        tx.setBlockNumber(100L);
+        tx.setBlockHash("0xreplacement");
+        when(repository.findById(txId)).thenReturn(Optional.of(tx));
+
+        CompensationOutcome outcome = compensator.compensate(effect());
+
+        verify(repository, never()).save(any());
+        assertThat(outcome).isInstanceOf(CompensationOutcome.NotApplicable.class);
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.SUCCESS);
     }
 
     @Test

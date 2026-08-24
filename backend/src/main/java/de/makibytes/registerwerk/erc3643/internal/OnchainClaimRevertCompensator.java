@@ -59,6 +59,11 @@ class OnchainClaimRevertCompensator implements ChainEffectCompensator {
             return new CompensationOutcome.NotApplicable(
                     "OnchainClaim " + id + " is already unconfirmed (already reverted, or never confirmed)");
         }
+        if (!ChainEffectCausality.matches(effect, claim.getChainConfigId(), claim.getTxHash(),
+                claim.getBlockNumber(), claim.getBlockHash())) {
+            return new CompensationOutcome.NotApplicable(
+                    "OnchainClaim " + id + " is owned by a different issuance incarnation");
+        }
 
         log.error("OnchainClaim id={} topic={} was confirmed but its confirming block was retracted by a "
                         + "reorg — the claim was never actually added on-chain; "
@@ -67,6 +72,7 @@ class OnchainClaimRevertCompensator implements ChainEffectCompensator {
         claim.setConfirmed(false);
         claim.setChainConfigId(null);
         claim.setBlockNumber(null);
+        claim.setBlockHash(null);
         claimRepository.save(claim);
 
         return new CompensationOutcome.Compensated("Reverted OnchainClaim " + id + " to unconfirmed after retraction");

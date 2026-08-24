@@ -18,7 +18,8 @@ public sealed interface FinalityDecision {
      *               Reason#BELOW_REQUIRED} because it means the underlying on-chain event is gone,
      *               not merely still confirming; {@link Reason#UNRESOLVED_COMPENSATION} is distinct
      *               again because it blocks regardless of {@code requiredLevel}/{@code
-     *               currentLevel} — a UI renders these three very differently ("did not go
+         *               currentLevel}; {@link Reason#CHAIN_QUARANTINED} is a chain-wide safety
+         *               freeze after a finality violation or unresolved ancestry — a UI renders these very differently ("did not go
      *               through" vs. "being confirmed, available in ~Ns" vs. "blocked pending operator
      *               review")
      * @param explanation a technical-vocabulary message (PROVISIONAL/SAFE/FINALIZED/ORPHANED) —
@@ -33,6 +34,6 @@ public sealed interface FinalityDecision {
          *  failed or was escalated as irreversible and no admin has acknowledged it yet — see
          *  {@code FinalityGateImpl}'s javadoc. Every operation on the asset is blocked until
          *  acknowledged, not just the ones whose required level isn't yet reached. */
-        public enum Reason { BELOW_REQUIRED, ORPHANED, UNRESOLVED_COMPENSATION }
+        public enum Reason { BELOW_REQUIRED, ORPHANED, UNRESOLVED_COMPENSATION, CHAIN_QUARANTINED }
     }
 }

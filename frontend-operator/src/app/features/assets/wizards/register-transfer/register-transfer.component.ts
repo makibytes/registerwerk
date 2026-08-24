@@ -29,7 +29,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
     <div class="rt-shell">
       <div class="rt-header">
         <h3 class="rt-title">Register transfer to successor operator (§§21/22 eWpG)</h3>
-        <button mat-raised-button color="primary" (click)="openInitiateDialog()">
+        <button type="button" mat-raised-button color="primary" (click)="openInitiateDialog()">
           <mat-icon>swap_horiz</mat-icon>
           Initiate Transfer
         </button>
@@ -63,27 +63,27 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <span class="dimmed">{{ t.initiatedAt | date:'dd MMM yyyy' }}</span>
               <div class="row-actions">
                 @if (t.status === 'INITIATED') {
-                  <button mat-stroked-button [disabled]="exporting.has(t.id)" (click)="exportPackage(t)">
+                  <button type="button" mat-stroked-button [disabled]="exporting.has(t.id)" (click)="exportPackage(t)">
                     <mat-icon>download</mat-icon>
                     {{ exporting.has(t.id) ? 'Exporting…' : 'Export' }}
                   </button>
                 }
                 @if (t.status === 'EXPORTED') {
-                  <button mat-stroked-button color="warn" matTooltip="Requires step-up + a second approver"
+                  <button type="button" mat-stroked-button color="warn" matTooltip="Requires step-up + a second approver"
                           (click)="openHandoverDialog(t)">
                     <mat-icon>link</mat-icon>
                     Record Handover
                   </button>
                 }
                 @if (t.status === 'HANDED_OVER') {
-                  <button mat-stroked-button color="primary" matTooltip="Requires step-up + a second approver"
+                  <button type="button" mat-stroked-button color="primary" matTooltip="Requires step-up + a second approver"
                           (click)="complete(t)">
                     <mat-icon>task_alt</mat-icon>
                     Complete
                   </button>
                 }
                 @if (t.status !== 'COMPLETED' && t.status !== 'CANCELLED') {
-                  <button mat-icon-button color="warn" matTooltip="Cancel" (click)="openCancelDialog(t)">
+                  <button type="button" mat-icon-button color="warn" matTooltip="Cancel" (click)="openCancelDialog(t)">
                     <mat-icon>block</mat-icon>
                   </button>
                 }
@@ -115,8 +115,8 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!initiateForm.successorName.trim() || !initiateForm.reason.trim()"
                 (click)="submitInitiate()">
           Initiate
@@ -137,8 +137,8 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn" [disabled]="!handoverTxHash.trim()" (click)="submitHandover()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn" [disabled]="!handoverTxHash.trim()" (click)="submitHandover()">
           Continue to step-up
         </button>
       </mat-dialog-actions>
@@ -153,8 +153,8 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Back</button>
-        <button mat-raised-button color="warn" [disabled]="!cancelReason.trim()" (click)="submitCancel()">
+        <button type="button" mat-stroked-button mat-dialog-close>Back</button>
+        <button type="button" mat-raised-button color="warn" [disabled]="!cancelReason.trim()" (click)="submitCancel()">
           Cancel Transfer
         </button>
       </mat-dialog-actions>

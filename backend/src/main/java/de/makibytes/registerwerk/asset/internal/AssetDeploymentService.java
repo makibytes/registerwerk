@@ -11,6 +11,7 @@ import de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver;
 import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentPort;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
+import de.makibytes.registerwerk.blockchain.api.SolanaFinalityReader;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
@@ -20,6 +21,8 @@ import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.AfterCommit;
+import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.chain.api.Chain;
@@ -57,10 +60,6 @@ public class AssetDeploymentService {
 
     private static final Logger log = LoggerFactory.getLogger(AssetDeploymentService.class);
     private static final EnumSet<Chain> TRACKING_ONLY_CHAINS = EnumSet.noneOf(Chain.class);
-    /** Non-EVM chains with no automated confirmation path (see syncFromChain). STARKNET is
-     *  handled separately via {@link #syncStarknetDeployment} — not a member of this set. */
-    private static final EnumSet<Chain> NON_EVM_CHAINS =
-            EnumSet.of(Chain.SOLANA, Chain.CANTON, Chain.STELLAR);
     /**
      * Chains where Zama's fhEVM coprocessor is (or will be) actually deployed — Ethereum and
      * Base today, per Zama's own "fhEVM Coprocessor: Run FHE smart contracts on Ethereum, Base,
@@ -85,6 +84,8 @@ public class AssetDeploymentService {
     private final EvmFinalityResolver finalityResolver;
     private final RestClient restClient;
     private final ChainEffectRecorder chainEffectRecorder;
+    private final WalletSigner walletSigner;
+    private final SolanaFinalityReader solanaFinalityReader;
 
     public AssetDeploymentService(
             AssetDeploymentRepository assetDeploymentRepository,
@@ -99,7 +100,9 @@ public class AssetDeploymentService {
             ChainConfigRepository chainConfigRepository,
             EvmFinalityResolver finalityResolver,
             RestClient.Builder restClientBuilder,
-            ChainEffectRecorder chainEffectRecorder) {
+            ChainEffectRecorder chainEffectRecorder,
+            WalletSigner walletSigner,
+            SolanaFinalityReader solanaFinalityReader) {
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
@@ -113,6 +116,8 @@ public class AssetDeploymentService {
         this.finalityResolver = finalityResolver;
         this.restClient = restClientBuilder.build();
         this.chainEffectRecorder = chainEffectRecorder;
+        this.walletSigner = walletSigner;
+        this.solanaFinalityReader = solanaFinalityReader;
     }
 
     /**
@@ -124,38 +129,81 @@ public class AssetDeploymentService {
             .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
         TokenStandard standard = asset.getTokenStandard();
         validateDeploymentSupport(chain, standard);
+        ChainConfig chainConfig = resolveEnabledChainConfig(chain, network);
+        String ownerAddress = walletSigner.chainAddressForWallet(chainConfig.getId());
+        if (ownerAddress == null || ownerAddress.isBlank()) {
+            throw new IllegalStateException(
+                    "Default wallet has no chain address for " + chainConfig.getIdentifier());
+        }
 
         AssetDeployment deployment = new AssetDeployment();
         deployment.setAssetId(assetId);
         deployment.setChain(chain);
         deployment.setNetwork(network);
+        deployment.setChainConfigId(chainConfig.getId());
         deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
         AssetDeployment saved = assetDeploymentRepository.save(deployment);
 
-        ChainDescriptor descriptor = new ChainDescriptor(chain, network);
-
-        // Determine correct deployment service based on token standard
-        CompletableFuture<TokenDeploymentResult> txFuture = switch (standard) {
-            case ERC3643 -> erc3643DeploymentPort.deployStandard(assetId, descriptor, "owner-placeholder");
-            case CONF_ERC3643 -> erc3643DeploymentPort.deployConfidential(assetId, descriptor, "owner-placeholder")
-                    .thenApply(TokenDeploymentResult::txOnly);
-            default -> tokenDeploymentPort.deploy(assetId, standard, chain, network, "owner-placeholder");
-        };
-
         UUID deploymentId = saved.getId();
-        txFuture.whenComplete((result, ex) -> {
-            if (ex != null) {
-                log.error("Deployment failed for deploymentId={}", deploymentId, ex);
-                completionWriter.markFailed(deploymentId, actorId, ex);
-            } else {
-                log.info("Deployment tx sent: deploymentId={}, txHash={}, contractAddress={}",
-                        deploymentId, result.txHash(), result.contractAddress());
-                completionWriter.markSubmitted(deploymentId, actorId, result);
-            }
-        });
+        ChainDescriptor descriptor = new ChainDescriptor(chain, network);
+        // Never let an irreversible chain write race ahead of the PENDING deployment row. In a
+        // real request this callback runs only after the surrounding transaction commits;
+        // outside a transaction (plain unit tests / deliberate programmatic use) it runs now.
+        AfterCommit.run(() -> startDeployment(
+                deploymentId, assetId, standard, chain, network, descriptor,
+                ownerAddress, actorId));
 
         eventPublisher.publishEvent(new AssetDeploymentInitiatedEvent(saved.getId(), actorId, null, chain.name() + "/" + network.name()));
         return saved;
+    }
+
+    private void startDeployment(
+            UUID deploymentId,
+            UUID assetId,
+            TokenStandard standard,
+            Chain chain,
+            Network network,
+            ChainDescriptor descriptor,
+            String ownerAddress,
+            UUID actorId) {
+        try {
+            CompletableFuture<TokenDeploymentResult> txFuture = switch (standard) {
+                case ERC3643 -> erc3643DeploymentPort.deployStandard(
+                        assetId, descriptor, ownerAddress);
+                case CONF_ERC3643 -> erc3643DeploymentPort.deployConfidential(
+                                assetId, descriptor, ownerAddress)
+                        .thenApply(TokenDeploymentResult::txOnly);
+                default -> tokenDeploymentPort.deploy(
+                        assetId, standard, chain, network, ownerAddress);
+            };
+            txFuture.whenComplete((result, failure) -> {
+                if (failure != null) {
+                    log.error("Deployment failed for deploymentId={}", deploymentId, failure);
+                    completionWriter.markFailed(deploymentId, actorId, failure);
+                    return;
+                }
+                log.info("Deployment tx sent: deploymentId={}, txHash={}, contractAddress={}",
+                        deploymentId, result.txHash(), result.contractAddress());
+                completionWriter.markSubmitted(deploymentId, actorId, result);
+            });
+        } catch (RuntimeException failure) {
+            log.error("Deployment failed before async submission for deploymentId={}",
+                    deploymentId, failure);
+            completionWriter.markFailed(deploymentId, actorId, failure);
+        }
+    }
+
+    private ChainConfig resolveEnabledChainConfig(Chain chain, Network network) {
+        List<ChainConfig> matches = chainConfigRepository
+                .findByIdentifierStartingWith(chain.name() + "_").stream()
+                .filter(ChainConfig::isEnabled)
+                .filter(config -> config.getNetworkType().name().equals(network.name()))
+                .toList();
+        if (matches.size() != 1) {
+            throw new IllegalStateException("Expected exactly one enabled " + chain + "/" + network
+                    + " chain configuration, found " + matches.size());
+        }
+        return matches.getFirst();
     }
 
     private void validateDeploymentSupport(Chain chain, TokenStandard standard) {
@@ -168,6 +216,40 @@ public class AssetDeploymentService {
                     "Confidential token deployment is not supported on " + chain
                             + ". Use an fhEVM-compatible chain instead.");
         }
+        boolean supported = switch (chain) {
+            case SOLANA -> EnumSet.of(
+                    TokenStandard.SPL,
+                    TokenStandard.SPL_2022,
+                    TokenStandard.SPL_2022_BOND,
+                    TokenStandard.SPL_2022_CONFIDENTIAL).contains(standard);
+            case STARKNET -> EnumSet.of(
+                    TokenStandard.STARKNET_ERC20,
+                    TokenStandard.STARKNET_ERC3525).contains(standard);
+            case STELLAR -> standard == TokenStandard.STELLAR_ASSET;
+            case CANTON -> EnumSet.of(
+                    TokenStandard.DAML_BOND_FIXED,
+                    TokenStandard.DAML_BOND_FLOATING,
+                    TokenStandard.DAML_BOND_ZERO).contains(standard);
+            default -> EnumSet.of(
+                    TokenStandard.ERC20,
+                    TokenStandard.ERC721,
+                    TokenStandard.ERC1155,
+                    TokenStandard.ERC3525,
+                    TokenStandard.ERC4626,
+                    TokenStandard.ERC7540,
+                    TokenStandard.ERC3643,
+                    TokenStandard.CONF_ERC20,
+                    TokenStandard.CONF_ERC3643).contains(standard);
+        };
+        if (!supported) {
+            throw new UnsupportedOperationException(
+                    displayName(chain) + " does not support token standard " + standard);
+        }
+    }
+
+    private static String displayName(Chain chain) {
+        String name = chain.name().toLowerCase(java.util.Locale.ROOT);
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
     }
 
     private boolean isConfidentialStandard(TokenStandard standard) {
@@ -190,22 +272,6 @@ public class AssetDeploymentService {
     @Transactional(readOnly = true)
     public List<AssetDeployment> listDeployments(UUID assetId) {
         return assetDeploymentRepository.findByAssetId(assetId);
-    }
-
-    /**
-     * Marks a deployment as CONFIRMED with the given contract address and tx hash.
-     */
-    public void confirmDeployment(UUID deploymentId, String contractAddress, String txHash) {
-        AssetDeployment deployment = assetDeploymentRepository.findById(deploymentId)
-            .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
-        deployment.setContractAddress(contractAddress);
-        deployment.setDeployedByTx(txHash);
-        deployment.setDeployedAt(Instant.now());
-        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
-        assetDeploymentRepository.save(deployment);
-        log.info("Confirmed deployment: id={}, contract={}", deploymentId, contractAddress);
-        eventPublisher.publishEvent(new DeploymentConfirmedEvent(
-                deploymentId, null, null, contractAddress, txHash));
     }
 
     /**
@@ -282,21 +348,41 @@ public class AssetDeploymentService {
             syncStarknetDeployment(deployment);
             return;
         }
-        if (NON_EVM_CHAINS.contains(deployChain)) {
-            // Solana/Canton/Stellar have no chain-read confirmation path here at all — a
-            // pre-existing gap (see AssetDeploymentCompletionWriter's IMMEDIATE_CONFIRM_CHAINS
-            // javadoc) that documents but does not close; it needs its own per-chain
-            // finality design, not merely this EVM/Starknet confirmation-depth policy.
-            log.debug("syncFromChain: chain {} has no automated confirmation path yet", deployChain);
+        if (deployChain == Chain.SOLANA) {
+            syncSolanaDeployment(deployment);
+            return;
+        }
+        if (deployChain == Chain.CANTON || deployChain == Chain.STELLAR) {
+            // These submission adapters return only after a committed Canton transaction / closed
+            // Stellar ledger. This branch repairs legacy PENDING rows created before the
+            // completion writer understood their final-on-write semantics.
+            deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+            deployment.setDeployedAt(Instant.now());
+            assetDeploymentRepository.save(deployment);
+            eventPublisher.publishEvent(new DeploymentConfirmedEvent(
+                    deploymentId, null, null, deployment.getContractAddress(), txHash));
             return;
         }
 
+        ChainConfig confirmedChain = resolveDeploymentChainConfig(deployment);
+        if (confirmedChain == null) {
+            log.error("syncFromChain: deploymentId={} has no unambiguous enabled chain_config; "
+                    + "refusing chain access without a durable identity", deploymentId);
+            return;
+        }
+        Web3j web3j;
+        Optional<TransactionReceipt> receiptOpt;
         try {
-            ChainDescriptor descriptor = new ChainDescriptor(deployment.getChain(), deployment.getNetwork());
-            Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-
-            Optional<TransactionReceipt> receiptOpt =
-                    web3j.ethGetTransactionReceipt(txHash).send().getTransactionReceipt();
+            web3j = blockchainClientRegistry.getEvmClientByIdentifier(confirmedChain.getIdentifier());
+            receiptOpt = web3j.ethGetTransactionReceipt(txHash).send().getTransactionReceipt();
+        } catch (Exception e) {
+            // RPC availability is retryable and occurs before any local state transition.  Do
+            // not extend this catch across the mutation/journal boundary below: swallowing a
+            // journal failure would commit CONFIRMED without a compensating chain_effect.
+            log.error("syncFromChain: error fetching receipt for deploymentId={}: {}",
+                    deploymentId, e.getMessage(), e);
+            return;
+        }
 
             if (receiptOpt.isEmpty()) {
                 log.info("syncFromChain: tx={} not yet mined for deploymentId={}", txHash, deploymentId);
@@ -343,9 +429,16 @@ public class AssetDeploymentService {
 
             Long newBlockNumber = receipt.getBlockNumber() != null
                     ? receipt.getBlockNumber().longValueExact() : null;
-            String identifier = deployChain.name() + "_" + deployment.getNetwork().name();
-            boolean isFinal = newBlockNumber != null
-                    && finalityResolver.levelOf(identifier, web3j, newBlockNumber).atLeast(FinalityLevel.FINALIZED);
+            boolean isFinal;
+            try {
+                isFinal = newBlockNumber != null
+                        && finalityResolver.levelOf(confirmedChain, web3j, newBlockNumber)
+                                .atLeast(FinalityLevel.FINALIZED);
+            } catch (Exception e) {
+                log.error("syncFromChain: error resolving finality for deploymentId={}: {}",
+                        deploymentId, e.getMessage(), e);
+                return;
+            }
             if (!isFinal) {
                 log.debug("syncFromChain: deploymentId={} mined at block {} but not yet final "
                                 + "— waiting", deploymentId, newBlockNumber);
@@ -357,7 +450,11 @@ public class AssetDeploymentService {
                 }
                 return;
             }
-
+            if (newBlockHash == null || newBlockHash.isBlank()) {
+                log.error("syncFromChain: deploymentId={} is final but receipt has no block hash; "
+                        + "refusing to confirm without compensable provenance", deploymentId);
+                return;
+            }
             String contractAddress = deployment.getContractAddress();
             if (contractAddress == null || contractAddress.isBlank()) {
                 contractAddress = extractDeployedAddress(receipt, asset(deployment).getTokenStandard()).orElse(null);
@@ -367,7 +464,7 @@ public class AssetDeploymentService {
             deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
             deployment.setBlockHash(newBlockHash);
             deployment.setBlockNumber(newBlockNumber);
-            chainConfigRepository.findByIdentifier(identifier).ifPresent(cc -> deployment.setChainConfigId(cc.getId()));
+            deployment.setChainConfigId(confirmedChain.getId());
             if (contractAddress != null) {
                 deployment.setContractAddress(contractAddress);
             } else {
@@ -376,31 +473,93 @@ public class AssetDeploymentService {
                         asset(deployment).getTokenStandard());
             }
             assetDeploymentRepository.save(deployment);
-            log.info("syncFromChain: confirmed deploymentId={} contractAddress={}", deploymentId, contractAddress);
+            recordDeploymentConfirmedEffect(deployment, newBlockNumber, newBlockHash, txHash);
             eventPublisher.publishEvent(new DeploymentConfirmedEvent(
                     deploymentId, null, null, contractAddress, txHash));
-            recordDeploymentConfirmedEffect(deployment, newBlockNumber, newBlockHash, txHash);
-        } catch (Exception e) {
-            log.error("syncFromChain: error fetching receipt for deploymentId={}: {}",
-                    deploymentId, e.getMessage(), e);
+            log.info("syncFromChain: confirmed deploymentId={} contractAddress={}", deploymentId, contractAddress);
+    }
+
+    /** Resolves the exact chain row persisted with the deployment; legacy rows are accepted only
+     * when chain/network identify exactly one enabled configuration. */
+    private ChainConfig resolveDeploymentChainConfig(AssetDeployment deployment) {
+        if (deployment.getChainConfigId() != null) {
+            return chainConfigRepository.findById(deployment.getChainConfigId())
+                    .filter(ChainConfig::isEnabled)
+                    .orElse(null);
         }
+        List<ChainConfig> matches = chainConfigRepository
+                .findByIdentifierStartingWith(deployment.getChain().name() + "_").stream()
+                .filter(ChainConfig::isEnabled)
+                .filter(chain -> chain.getNetworkType().name().equals(deployment.getNetwork().name()))
+                .toList();
+        return matches.size() == 1 ? matches.getFirst() : null;
     }
 
     /**
-     * Journals a {@code DEPLOYMENT_CONFIRMED} chain effect (INVERSE_FLIP) so a reorg deep enough to
-     * retract this deployment's already-FINALIZED block reverts the register's CONFIRMED claim
-     * instead of asserting a deployment the chain no longer agrees happened — see
+     * Confirms an SPL mint only at Solana's protocol-native finalized commitment. The locally
+     * generated mint address is persisted at submission time, but is not evidence that the
+     * create-account transaction landed. Exact slot/block-hash provenance is journalled for the
+     * shared compensation machinery before the deployment is exposed as CONFIRMED.
+     */
+    private void syncSolanaDeployment(AssetDeployment deployment) {
+        UUID deploymentId = deployment.getId();
+        if (deployment.getChainConfigId() == null) {
+            log.error("syncFromChain: Solana deploymentId={} has no chainConfigId; refusing "
+                    + "confirmation without durable chain identity", deploymentId);
+            return;
+        }
+        SolanaFinalityReader.Result result;
+        try {
+            result = solanaFinalityReader.read(
+                    deployment.getChainConfigId(), deployment.getDeployedByTx());
+        } catch (Exception e) {
+            log.error("syncFromChain: error checking Solana signature for deploymentId={}: {}",
+                    deploymentId, e.getMessage(), e);
+            return;
+        }
+        if (result.state() == SolanaFinalityReader.State.PENDING) {
+            return;
+        }
+        if (result.state() == SolanaFinalityReader.State.FAILED) {
+            deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.FAILED);
+            assetDeploymentRepository.save(deployment);
+            eventPublisher.publishEvent(new DeploymentFailedEvent(
+                    deploymentId, null, null,
+                    "Solana transaction failed: " + result.failure()));
+            return;
+        }
+        if (result.slot() == null || result.blockHash() == null || result.blockHash().isBlank()) {
+            throw new IllegalStateException("Finalized Solana result lacks slot/block hash");
+        }
+
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        deployment.setDeployedAt(Instant.now());
+        deployment.setBlockNumber(result.slot());
+        deployment.setBlockHash(result.blockHash());
+        assetDeploymentRepository.save(deployment);
+        recordDeploymentConfirmedEffect(
+                deployment, result.slot(), result.blockHash(), deployment.getDeployedByTx());
+        eventPublisher.publishEvent(new DeploymentConfirmedEvent(
+                deploymentId, null, null,
+                deployment.getContractAddress(), deployment.getDeployedByTx()));
+    }
+
+    /**
+     * Journals a {@code DEPLOYMENT_CONFIRMED} chain effect (INVERSE_FLIP) so an automatically
+     * compensable routine retraction can revert the register's CONFIRMED claim, while a typed
+     * finality violation retains exact effect provenance behind the chain quarantine — see
      * {@code AssetDeploymentRevertCompensator}, the compensator that undoes it. Only ever called
      * from the EVM confirmation branch above, since that is the only path that also resolves
-     * {@code chainConfigId}/{@code blockNumber}; silently skipped (not an error) when the chain
-     * identifier didn't resolve to a known {@code ChainConfig} — a disclosed gap matching
-     * {@code BlockchainTransactionCompletionWriter}'s equivalent {@code TX_COMPLETED} journalling.
+     * {@code chainConfigId}/{@code blockNumber}. The confirmation path refuses to enter its
+     * terminal state unless all provenance is available, so reaching this method without it is a
+     * programming error rather than a reason to silently lose compensation coverage. Solana's
+     * finalized-signature path also calls this method with its slot as {@code blockNumber}.
      */
     private void recordDeploymentConfirmedEffect(AssetDeployment deployment, Long blockNumber, String blockHash, String txHash) {
         if (deployment.getChainConfigId() == null || blockNumber == null) {
-            return;
+            throw new IllegalStateException("Cannot confirm deployment without chainConfigId and blockNumber");
         }
-        chainEffectRecorder.record(ChainEffectDescriptor.of(
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
                 deployment.getChainConfigId(), blockNumber, blockHash, txHash,
                 "asset", AssetDeploymentRevertCompensator.EFFECT_TYPE, "AssetDeployment", deployment.getId(),
                 deployment.getAssetId(), CompensationCategory.INVERSE_FLIP));

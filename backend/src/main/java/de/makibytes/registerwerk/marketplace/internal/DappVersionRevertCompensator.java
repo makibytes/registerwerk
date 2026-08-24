@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.marketplace.internal;
 
+import de.makibytes.registerwerk.finality.api.BlockIdentity;
 import de.makibytes.registerwerk.finality.api.ChainEffectCompensator;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecord;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
@@ -66,10 +67,21 @@ class DappVersionRevertCompensator implements ChainEffectCompensator {
             return new CompensationOutcome.NotApplicable(
                     "DappVersion " + versionId + " is no longer PUBLISHED (status=" + version.getStatus() + ")");
         }
+        if (!effect.chainConfigId().equals(version.getAnchorChainConfigId())
+                || !BlockIdentity.sameIncarnation(
+                        version.getAnchorBlockNumber(), version.getAnchorBlockHash(),
+                        effect.blockNumber(), effect.blockHash())
+                || !BlockIdentity.sameHash(effect.txHash(), version.getOnchainTx())) {
+            return new CompensationOutcome.NotApplicable(
+                    "DappVersion " + versionId + " now belongs to a different anchor occurrence");
+        }
 
         log.error("DappVersion id={} was PUBLISHED but its anchoring block was retracted by a reorg "
                         + "— reverting to APPROVED for re-anchoring.", versionId);
         version.setStatus(DappVersionStatus.APPROVED);
+        version.setAnchorChainConfigId(null);
+        version.setAnchorBlockNumber(null);
+        version.setAnchorBlockHash(null);
         versionRepository.save(version);
 
         DappListing listing = listingRepository.findById(version.getListingId()).orElse(null);

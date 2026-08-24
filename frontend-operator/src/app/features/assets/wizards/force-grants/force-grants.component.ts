@@ -39,7 +39,7 @@ import { TokenAdminGrant } from '../../../../core/models';
             Nobody has this by default — not even the issuer.
           </p>
         </div>
-        <button mat-raised-button color="warn" (click)="openCreateDialog()">
+        <button type="button" mat-raised-button color="warn" (click)="openCreateDialog()">
           <mat-icon>admin_panel_settings</mat-icon>
           Grant permission
         </button>
@@ -70,7 +70,7 @@ import { TokenAdminGrant } from '../../../../core/models';
               <span>{{ g.legalBasis }}</span>
               <span class="dimmed">{{ g.expiresAt ? (g.expiresAt | date:'dd MMM yyyy') : 'No expiry' }}</span>
               <div class="row-actions">
-                <button mat-stroked-button color="warn" [disabled]="revoking.has(g.id)"
+                <button type="button" mat-stroked-button color="warn" [disabled]="revoking.has(g.id)"
                         matTooltip="Revoke — requires step-up auth + a second approver"
                         (click)="revoke(g)">
                   <mat-icon>block</mat-icon>
@@ -113,8 +113,8 @@ import { TokenAdminGrant } from '../../../../core/models';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn"
                 (click)="submitCreate()"
                 [disabled]="!form.entityId || !form.walletAddress || !form.legalBasis">
           <mat-icon>admin_panel_settings</mat-icon>

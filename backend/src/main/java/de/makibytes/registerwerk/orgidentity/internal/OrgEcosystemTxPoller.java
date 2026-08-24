@@ -7,6 +7,8 @@ import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.erc3643.Erc3643Api;
 import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
+import de.makibytes.registerwerk.finality.api.ChainQuarantinePort;
+import de.makibytes.registerwerk.finality.api.ChainQuarantinedException;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuer;
@@ -20,13 +22,20 @@ import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationStatus;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrant;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantRepository;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantStatus;
+import de.makibytes.registerwerk.orgidentity.api.RoleRestrictionStatus;
+import de.makibytes.registerwerk.orgidentity.api.TrustedIssuerStatus;
+import de.makibytes.registerwerk.orgidentity.events.OrgChainTransitionFinalizedEvent;
 import de.makibytes.registerwerk.shared.AfterCommit;
+import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
@@ -70,6 +79,9 @@ class OrgEcosystemTxPoller {
     private final EcosystemOnchainBroadcaster broadcaster;
     private final EvmFinalityResolver finalityResolver;
     private final ChainEffectRecorder chainEffectRecorder;
+    private final ApplicationEventPublisher eventPublisher;
+    private final ChainQuarantinePort chainQuarantine;
+    private final TransactionTemplate rowTransactions;
 
     OrgEcosystemTxPoller(
             OrgRegistrationRepository registrationRepository,
@@ -81,7 +93,10 @@ class OrgEcosystemTxPoller {
             Erc3643Api erc3643Api,
             EcosystemOnchainBroadcaster broadcaster,
             EvmFinalityResolver finalityResolver,
-            ChainEffectRecorder chainEffectRecorder) {
+            ChainEffectRecorder chainEffectRecorder,
+            ApplicationEventPublisher eventPublisher,
+            ChainQuarantinePort chainQuarantine,
+            PlatformTransactionManager transactionManager) {
         this.registrationRepository = registrationRepository;
         this.walletRepository = walletRepository;
         this.grantRepository = grantRepository;
@@ -92,51 +107,53 @@ class OrgEcosystemTxPoller {
         this.broadcaster = broadcaster;
         this.finalityResolver = finalityResolver;
         this.chainEffectRecorder = chainEffectRecorder;
+        this.eventPublisher = eventPublisher;
+        this.chainQuarantine = chainQuarantine;
+        this.rowTransactions = new TransactionTemplate(transactionManager);
+        this.rowTransactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     @SchedulerLock(name = "orgEcosystemTxPoller", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
     @Scheduled(fixedDelay = 30_000, initialDelay = 45_000)
-    @Transactional
     public void resolvePending() {
         for (OrgRegistration registration : registrationRepository.findByStatus(OrgRegistrationStatus.PENDING)) {
-            try {
-                resolveRegistration(registration);
-            } catch (Exception e) {
-                log.warn("Failed to resolve pending org registration={}: {}", registration.getId(), e.getMessage());
-            }
+            resolveSafely("pending org registration", registration.getId(),
+                    () -> resolveRegistration(registration));
         }
         for (OrgMemberWallet wallet : walletRepository.findByStatus(MemberWalletStatus.PENDING)) {
-            try {
-                resolveWallet(wallet);
-            } catch (Exception e) {
-                log.warn("Failed to resolve pending member wallet={}: {}", wallet.getId(), e.getMessage());
-            }
+            resolveSafely("pending member wallet", wallet.getId(), () -> resolveWallet(wallet));
         }
         for (PermissionGrant grant : grantRepository.findByStatus(PermissionGrantStatus.PENDING)) {
-            try {
-                resolveGrant(grant);
-            } catch (Exception e) {
-                log.warn("Failed to resolve pending permission grant={}: {}", grant.getId(), e.getMessage());
-            }
+            resolveSafely("pending permission grant", grant.getId(), () -> resolveGrant(grant));
         }
-        for (EcosystemTrustedIssuer issuer : trustedIssuerRepository.findByStatus(MemberWalletStatus.PENDING)) {
-            try {
-                resolveIssuer(issuer);
-            } catch (Exception e) {
-                log.warn("Failed to resolve pending trusted issuer={}: {}", issuer.getId(), e.getMessage());
-            }
+        for (EcosystemTrustedIssuer issuer : trustedIssuerRepository.findByStatus(TrustedIssuerStatus.PENDING)) {
+            resolveSafely("pending trusted issuer", issuer.getId(), () -> resolveIssuer(issuer));
         }
-        for (PermissionGrant grant : grantRepository
-                .findByStatusAndRevokedTxIsNull(PermissionGrantStatus.REVOKED)) {
-            if (retryDue(grant.getRevokedAt())) {
-                AfterCommit.run(() -> broadcaster.broadcastRevoke(grant.getId()));
-            }
+        for (PermissionGrant grant : grantRepository.findByStatus(PermissionGrantStatus.REVOCATION_PENDING)) {
+            resolveSafely("permission revocation", grant.getId(), () -> resolveGrantRevocation(grant));
         }
-        for (EcosystemTrustedIssuer issuer : trustedIssuerRepository
-                .findByStatusAndRemovedTxIsNull(MemberWalletStatus.REMOVED)) {
-            if (retryDue(issuer.getRemovedAt())) {
-                AfterCommit.run(() -> broadcaster.broadcastRemoveIssuer(issuer.getId()));
-            }
+        for (EcosystemTrustedIssuer issuer : trustedIssuerRepository.findByStatus(TrustedIssuerStatus.REMOVAL_PENDING)) {
+            resolveSafely("trusted issuer removal", issuer.getId(), () -> resolveIssuerRemoval(issuer));
+        }
+        for (OrgRegistration registration : registrationRepository.findByStatus(OrgRegistrationStatus.SUSPEND_PENDING)) {
+            resolveSafely("org suspension", registration.getId(), () -> resolveOrgStatus(registration));
+        }
+        for (OrgRegistration registration : registrationRepository.findByStatus(OrgRegistrationStatus.REINSTATE_PENDING)) {
+            resolveSafely("org reinstatement", registration.getId(), () -> resolveOrgStatus(registration));
+        }
+        for (OrgMemberWallet wallet : walletRepository.findByStatus(MemberWalletStatus.REMOVAL_PENDING)) {
+            resolveSafely("member removal", wallet.getId(), () -> resolveWalletRemoval(wallet));
+        }
+        for (PermissionGrant grant : grantRepository.findByRoleRestrictionStatus(RoleRestrictionStatus.CHANGE_PENDING)) {
+            resolveSafely("role restriction", grant.getId(), () -> resolveRoleRestriction(grant));
+        }
+    }
+
+    private void resolveSafely(String action, UUID id, Runnable resolver) {
+        try {
+            rowTransactions.executeWithoutResult(status -> resolver.run());
+        } catch (Exception e) {
+            log.warn("Failed to resolve {}={}: {}", action, id, e.getMessage());
         }
     }
 
@@ -153,6 +170,9 @@ class OrgEcosystemTxPoller {
         switch (verdict.verdict()) {
             case SUCCESS -> {
                 grant.setStatus(PermissionGrantStatus.ACTIVE);
+                grant.setGrantedChainConfigId(org.getChainConfigId());
+                grant.setGrantedBlockNumber(verdict.blockNumber());
+                grant.setGrantedBlockHash(verdict.blockHash());
                 grantRepository.save(grant);
                 recordEffect(org.getChainConfigId(), verdict, grant.getGrantedTx(),
                         PermissionGrantRevertCompensator.EFFECT_TYPE, "PermissionGrant", grant.getId());
@@ -175,17 +195,189 @@ class OrgEcosystemTxPoller {
         VerdictResult verdict = resolveVerdict(issuer.getChainConfigId(), issuer.getAddedTx());
         switch (verdict.verdict()) {
             case SUCCESS -> {
-                issuer.setStatus(MemberWalletStatus.ACTIVE);
+                issuer.setStatus(TrustedIssuerStatus.ACTIVE);
+                issuer.setAddedBlockNumber(verdict.blockNumber());
+                issuer.setAddedBlockHash(verdict.blockHash());
                 trustedIssuerRepository.save(issuer);
                 recordEffect(issuer.getChainConfigId(), verdict, issuer.getAddedTx(),
                         EcosystemTrustedIssuerRevertCompensator.EFFECT_TYPE, "EcosystemTrustedIssuer", issuer.getId());
             }
             case FAILED -> {
-                issuer.setStatus(MemberWalletStatus.FAILED);
+                issuer.setStatus(TrustedIssuerStatus.FAILED);
                 trustedIssuerRepository.save(issuer);
             }
             case PENDING -> { /* not yet mined, or mined but not yet final — recheck next tick */ }
         }
+    }
+
+    private void resolveGrantRevocation(PermissionGrant grant) {
+        if (grant.getRevokedTx() == null) {
+            if (retryDue(grant.getRevokedAt())) {
+                AfterCommit.run(() -> broadcaster.broadcastRevoke(grant.getId()));
+            }
+            return;
+        }
+        OrgRegistration org = registrationRepository.findById(grant.getOrgRegistrationId()).orElse(null);
+        if (org == null) return;
+        VerdictResult verdict = resolveVerdict(org.getChainConfigId(), grant.getRevokedTx());
+        switch (verdict.verdict()) {
+            case SUCCESS -> {
+                grant.setStatus(PermissionGrantStatus.REVOKED);
+                grant.setRevokedChainConfigId(org.getChainConfigId());
+                grant.setRevokedBlockNumber(verdict.blockNumber());
+                grant.setRevokedBlockHash(verdict.blockHash());
+                grantRepository.save(grant);
+                recordEffect(org.getChainConfigId(), verdict, grant.getRevokedTx(),
+                        PermissionRevocationRevertCompensator.EFFECT_TYPE,
+                        "PermissionGrant", grant.getId());
+            }
+            case FAILED -> {
+                grant.setStatus(PermissionGrantStatus.REVOCATION_FAILED);
+                grant.setRevokedChainConfigId(null);
+                grant.setRevokedBlockNumber(null);
+                grant.setRevokedBlockHash(null);
+                grantRepository.save(grant);
+            }
+            case PENDING -> { /* not yet mined or finalized */ }
+        }
+    }
+
+    private void resolveIssuerRemoval(EcosystemTrustedIssuer issuer) {
+        if (issuer.getRemovedTx() == null) {
+            if (retryDue(issuer.getRemovedAt())) {
+                AfterCommit.run(() -> broadcaster.broadcastRemoveIssuer(issuer.getId()));
+            }
+            return;
+        }
+        VerdictResult verdict = resolveVerdict(issuer.getChainConfigId(), issuer.getRemovedTx());
+        switch (verdict.verdict()) {
+            case SUCCESS -> {
+                issuer.setStatus(TrustedIssuerStatus.REMOVED);
+                issuer.setRemovedBlockNumber(verdict.blockNumber());
+                issuer.setRemovedBlockHash(verdict.blockHash());
+                trustedIssuerRepository.save(issuer);
+                recordEffect(issuer.getChainConfigId(), verdict, issuer.getRemovedTx(),
+                        TrustedIssuerRemovalRevertCompensator.EFFECT_TYPE,
+                        "EcosystemTrustedIssuer", issuer.getId());
+            }
+            case FAILED -> {
+                issuer.setStatus(TrustedIssuerStatus.REMOVAL_FAILED);
+                issuer.setRemovedBlockNumber(null);
+                issuer.setRemovedBlockHash(null);
+                trustedIssuerRepository.save(issuer);
+            }
+            case PENDING -> { /* not yet mined or finalized */ }
+        }
+    }
+
+    private void resolveOrgStatus(OrgRegistration registration) {
+        boolean suspending = registration.getStatus() == OrgRegistrationStatus.SUSPEND_PENDING;
+        if (!suspending && registration.getStatus() != OrgRegistrationStatus.REINSTATE_PENDING) return;
+        if (registration.getStatusTx() == null) {
+            if (retryDue(registration.getStatusRequestedAt())) {
+                AfterCommit.run(() -> broadcaster.broadcastOrgStatus(
+                        registration.getId(), registration.getSuspensionReason()));
+            }
+            return;
+        }
+        VerdictResult verdict = resolveVerdict(registration.getChainConfigId(), registration.getStatusTx());
+        if (verdict.verdict() == TxVerdict.PENDING) return;
+
+        registration.setStatusChainConfigId(registration.getChainConfigId());
+        registration.setStatusBlockNumber(verdict.blockNumber());
+        registration.setStatusBlockHash(verdict.blockHash());
+        if (verdict.verdict() == TxVerdict.SUCCESS) {
+            registration.setStatus(suspending
+                    ? OrgRegistrationStatus.SUSPENDED : OrgRegistrationStatus.ACTIVE);
+            if (!suspending) {
+                registration.setSuspendedAt(null);
+                registration.setSuspendedBy(null);
+                registration.setSuspensionReason(null);
+            }
+            registrationRepository.save(registration);
+            recordEffect(registration.getChainConfigId(), verdict, registration.getStatusTx(),
+                    suspending ? OrgSuspensionRevertCompensator.EFFECT_TYPE
+                            : OrgReinstatementRevertCompensator.EFFECT_TYPE,
+                    "OrgRegistration", registration.getId());
+        } else {
+            registration.setStatus(suspending
+                    ? OrgRegistrationStatus.SUSPEND_FAILED : OrgRegistrationStatus.REINSTATE_FAILED);
+            registrationRepository.save(registration);
+        }
+        publishFinalized(registration.getId(), "OrgRegistration",
+                suspending ? "SUSPEND" : "REINSTATE", verdict, registration.getStatusTx());
+    }
+
+    private void resolveWalletRemoval(OrgMemberWallet wallet) {
+        if (wallet.getRemovedTx() == null) {
+            if (retryDue(wallet.getRemovedAt())) {
+                AfterCommit.run(() -> broadcaster.broadcastRemoveMember(wallet.getId()));
+            }
+            return;
+        }
+        VerdictResult verdict = resolveVerdict(wallet.getChainConfigId(), wallet.getRemovedTx());
+        if (verdict.verdict() == TxVerdict.PENDING) return;
+
+        wallet.setRemovedChainConfigId(wallet.getChainConfigId());
+        wallet.setRemovedBlockNumber(verdict.blockNumber());
+        wallet.setRemovedBlockHash(verdict.blockHash());
+        if (verdict.verdict() == TxVerdict.SUCCESS) {
+            wallet.setStatus(MemberWalletStatus.REMOVED);
+            walletRepository.save(wallet);
+            recordEffect(wallet.getChainConfigId(), verdict, wallet.getRemovedTx(),
+                    MemberWalletRemovalRevertCompensator.EFFECT_TYPE,
+                    "OrgMemberWallet", wallet.getId());
+        } else {
+            wallet.setStatus(MemberWalletStatus.REMOVAL_FAILED);
+            walletRepository.save(wallet);
+        }
+        publishFinalized(wallet.getId(), "OrgMemberWallet", "REMOVE_MEMBER", verdict, wallet.getRemovedTx());
+    }
+
+    private void resolveRoleRestriction(PermissionGrant grant) {
+        if (grant.getRequestedRoleRestricted() == null) {
+            throw new IllegalStateException("Pending role restriction has no desired value");
+        }
+        if (grant.getRoleRestrictionTx() == null) {
+            if (retryDue(grant.getRoleRestrictionRequestedAt())) {
+                AfterCommit.run(() -> broadcaster.broadcastRoleRestriction(grant.getId()));
+            }
+            return;
+        }
+        OrgRegistration org = registrationRepository.findById(grant.getOrgRegistrationId()).orElse(null);
+        if (org == null) return;
+        VerdictResult verdict = resolveVerdict(org.getChainConfigId(), grant.getRoleRestrictionTx());
+        if (verdict.verdict() == TxVerdict.PENDING) return;
+
+        grant.setRoleRestrictionChainConfigId(org.getChainConfigId());
+        grant.setRoleRestrictionBlockNumber(verdict.blockNumber());
+        grant.setRoleRestrictionBlockHash(verdict.blockHash());
+        if (verdict.verdict() == TxVerdict.SUCCESS) {
+            boolean before = grant.isConfirmedRoleRestricted();
+            boolean confirmed = grant.getRequestedRoleRestricted();
+            grant.setRoleRestricted(confirmed);
+            grant.setRoleRestrictionStatus(RoleRestrictionStatus.STABLE);
+            grant.setRequestedRoleRestricted(null);
+            grantRepository.save(grant);
+            chainEffectRecorder.recordFinalized(new ChainEffectDescriptor(
+                    org.getChainConfigId(), verdict.blockNumber(), verdict.blockHash(),
+                    grant.getRoleRestrictionTx(), null, "orgidentity",
+                    RoleRestrictionRevertCompensator.EFFECT_TYPE, "PermissionGrant", grant.getId(), null,
+                    CompensationCategory.INVERSE_FLIP, java.util.Map.of("roleRestricted", before),
+                    java.util.Map.of("roleRestricted", confirmed), null, null));
+        } else {
+            grant.setRoleRestrictionStatus(RoleRestrictionStatus.CHANGE_FAILED);
+            grantRepository.save(grant);
+        }
+        publishFinalized(grant.getId(), "PermissionGrant", "SET_ROLE_RESTRICTED",
+                verdict, grant.getRoleRestrictionTx());
+    }
+
+    private void publishFinalized(UUID subjectId, String subjectType, String transition,
+                                  VerdictResult verdict, String txHash) {
+        eventPublisher.publishEvent(new OrgChainTransitionFinalizedEvent(
+                subjectId, subjectType, transition, verdict.verdict() == TxVerdict.SUCCESS,
+                txHash, verdict.blockNumber(), verdict.blockHash()));
     }
 
     private void resolveRegistration(OrgRegistration registration) {
@@ -220,6 +412,8 @@ class OrgEcosystemTxPoller {
         switch (verdict.verdict()) {
             case SUCCESS -> {
                 registration.setStatus(OrgRegistrationStatus.ACTIVE);
+                registration.setConfirmedBlockNumber(verdict.blockNumber());
+                registration.setConfirmedBlockHash(verdict.blockHash());
                 log.info("Org registration={} confirmed active (tx={})",
                         registration.getId(), registration.getRegisteredTx());
                 registrationRepository.save(registration);
@@ -247,6 +441,8 @@ class OrgEcosystemTxPoller {
         switch (verdict.verdict()) {
             case SUCCESS -> {
                 wallet.setStatus(MemberWalletStatus.ACTIVE);
+                wallet.setBoundBlockNumber(verdict.blockNumber());
+                wallet.setBoundBlockHash(verdict.blockHash());
                 log.info("Member wallet={} binding confirmed (tx={})", wallet.getId(), wallet.getBoundTx());
                 walletRepository.save(wallet);
                 recordEffect(wallet.getChainConfigId(), verdict, wallet.getBoundTx(),
@@ -269,8 +465,7 @@ class OrgEcosystemTxPoller {
 
     private enum TxVerdict { PENDING, SUCCESS, FAILED }
 
-    /** @param blockNumber/blockHash populated only on SUCCESS — the receipt's confirming block,
-     *  needed to journal a chain effect (see {@link #recordEffect}); null for PENDING/FAILED. */
+    /** @param blockNumber/blockHash populated for finalized SUCCESS/FAILED receipts. */
     private record VerdictResult(TxVerdict verdict, Long blockNumber, String blockHash) {
         static VerdictResult of(TxVerdict verdict) { return new VerdictResult(verdict, null, null); }
     }
@@ -285,6 +480,9 @@ class OrgEcosystemTxPoller {
      * grant, or trusted issuer ACTIVE on a state the chain has since abandoned.
      */
     private VerdictResult resolveVerdict(UUID chainConfigId, String txHash) {
+        if (chainQuarantine.findActive(chainConfigId).isPresent()) {
+            throw new ChainQuarantinedException(chainConfigId);
+        }
         ChainConfig chainConfig = chainConfigRepository.findById(chainConfigId).orElse(null);
         if (chainConfig == null) return VerdictResult.of(TxVerdict.PENDING);
 
@@ -302,16 +500,21 @@ class OrgEcosystemTxPoller {
                 return VerdictResult.of(TxVerdict.PENDING);
             }
             TransactionReceipt receipt = receiptOpt.get();
-            if (!"0x1".equals(receipt.getStatus())) {
-                return VerdictResult.of(TxVerdict.FAILED);
-            }
-
             long blockNumber = receipt.getBlockNumber().longValueExact();
+            String blockHash = receipt.getBlockHash();
+            if (blockHash == null || blockHash.isBlank()) {
+                log.warn("Mined receipt for tx={} at block={} has no block hash; refusing to "
+                        + "write chain-derived state until exact incarnation identity is available",
+                        txHash, blockNumber);
+                return VerdictResult.of(TxVerdict.PENDING);
+            }
             boolean isFinal = finalityResolver.levelOf(chainConfig.getIdentifier(), web3j, blockNumber)
                     .atLeast(FinalityLevel.FINALIZED);
-            return isFinal
-                    ? new VerdictResult(TxVerdict.SUCCESS, blockNumber, receipt.getBlockHash())
-                    : VerdictResult.of(TxVerdict.PENDING);
+            if (!isFinal) {
+                return VerdictResult.of(TxVerdict.PENDING);
+            }
+            TxVerdict verdict = "0x1".equals(receipt.getStatus()) ? TxVerdict.SUCCESS : TxVerdict.FAILED;
+            return new VerdictResult(verdict, blockNumber, blockHash);
         } catch (Exception e) {
             log.debug("Receipt lookup failed for tx={}: {}", txHash, e.getMessage());
             return VerdictResult.of(TxVerdict.PENDING);
@@ -328,10 +531,10 @@ class OrgEcosystemTxPoller {
      */
     private void recordEffect(UUID chainConfigId, VerdictResult verdict, String txHash,
             String effectType, String entityType, UUID entityId) {
-        if (verdict.blockNumber() == null) {
-            return;
+        if (verdict.blockNumber() == null || verdict.blockHash() == null || verdict.blockHash().isBlank()) {
+            throw new IllegalStateException("A SUCCESS verdict requires exact block number and block hash identity");
         }
-        chainEffectRecorder.record(ChainEffectDescriptor.of(
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
                 chainConfigId, verdict.blockNumber(), verdict.blockHash(), txHash,
                 "orgidentity", effectType, entityType, entityId, null,
                 CompensationCategory.INVERSE_FLIP));

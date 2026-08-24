@@ -54,12 +54,12 @@ const CONFIDENTIAL_BALANCE_ABI = [
       </p>
 
       <div class="action-row">
-        <button mat-flat-button color="primary" (click)="runReconciliation()" [disabled]="loadingReport">
+        <button type="button" mat-flat-button color="primary" (click)="runReconciliation()" [disabled]="loadingReport">
           <mat-icon>fact_check</mat-icon>
           {{ loadingReport ? 'Reconciling…' : 'Run Reconciliation' }}
         </button>
         @if (!walletService.isConnected()) {
-          <button mat-stroked-button (click)="connectWallet()" [disabled]="connectingWallet">
+          <button type="button" mat-stroked-button (click)="connectWallet()" [disabled]="connectingWallet">
             <mat-icon>account_balance_wallet</mat-icon>
             {{ connectingWallet ? 'Connecting…' : 'Connect Viewer Wallet' }}
           </button>
@@ -106,7 +106,7 @@ const CONFIDENTIAL_BALANCE_ABI = [
               } @else if (revealedByWallet[h.walletAddress]) {
                 <span class="revealed">{{ revealedByWallet[h.walletAddress] }}</span>
               } @else {
-                <button mat-stroked-button (click)="revealViaWallet(h.walletAddress)" [disabled]="revealingWallet === h.walletAddress">
+                <button type="button" mat-stroked-button (click)="revealViaWallet(h.walletAddress)" [disabled]="revealingWallet === h.walletAddress">
                   {{ revealingWallet === h.walletAddress ? 'Decrypting…' : 'Reveal' }}
                 </button>
               }
@@ -133,10 +133,10 @@ const CONFIDENTIAL_BALANCE_ABI = [
             <mat-label>Viewer address</mat-label>
             <input matInput [(ngModel)]="viewerAddress" placeholder="0x…" />
           </mat-form-field>
-          <button mat-stroked-button color="primary" (click)="addViewer()" [disabled]="viewerActionLoading || !viewerAddress">
+          <button type="button" mat-stroked-button color="primary" (click)="addViewer()" [disabled]="viewerActionLoading || !viewerAddress">
             <mat-icon>visibility</mat-icon> Add Viewer
           </button>
-          <button mat-stroked-button color="warn" (click)="removeViewer()" [disabled]="viewerActionLoading || !viewerAddress">
+          <button type="button" mat-stroked-button color="warn" (click)="removeViewer()" [disabled]="viewerActionLoading || !viewerAddress">
             <mat-icon>visibility_off</mat-icon> Remove Viewer
           </button>
         </div>

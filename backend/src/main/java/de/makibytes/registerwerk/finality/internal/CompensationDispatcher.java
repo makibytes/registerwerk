@@ -89,8 +89,9 @@ class CompensationDispatcher {
      *  and drives it through its registered compensator. */
     @Transactional
     CompensationOutcome compensate(UUID chainEffectId) {
-        Instant staleBefore = Instant.now().minus(STUCK_COMPENSATING_RECLAIM_AFTER);
-        if (repository.claimForCompensation(chainEffectId, staleBefore) == 0) {
+        // claimed_at and the stale cutoff both use PostgreSQL's clock in one atomic UPDATE. An
+        // application-node clock skew can therefore never steal a still-live claim early.
+        if (repository.claimForCompensation(chainEffectId) == 0) {
             return new CompensationOutcome.NotApplicable(
                     "chain_effect " + chainEffectId + " was not claimable (already resolved or in progress)");
         }
@@ -109,10 +110,23 @@ class CompensationDispatcher {
             escalate(row, CompensationEscalatedEvent.Reason.NO_COMPENSATOR, reason);
             return new CompensationOutcome.Failed(reason, null);
         }
+        if (compensator.category() != row.getCategory()) {
+            String reason = "Compensator category=" + compensator.category()
+                    + " does not match persisted category=" + row.getCategory();
+            row.setAttemptCount(row.getAttemptCount() + 1);
+            row.setResolutionDetail(reason);
+            row.setStatus(ChainEffect.Status.COMPENSATION_FAILED);
+            repository.save(row);
+            escalate(row, CompensationEscalatedEvent.Reason.FAILED, reason);
+            return new CompensationOutcome.Failed(reason, null);
+        }
 
         CompensationOutcome outcome;
         try {
             outcome = compensator.compensate(toRecord(row));
+            if (outcome == null) {
+                outcome = new CompensationOutcome.Failed("Compensator returned null", null);
+            }
         } catch (Exception e) {
             outcome = new CompensationOutcome.Failed("Compensator threw: " + e.getMessage(), e);
         }

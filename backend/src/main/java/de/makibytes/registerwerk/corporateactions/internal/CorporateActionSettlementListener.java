@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementRequestedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.chain.api.Chain;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.modulith.events.ApplicationModuleListener;
@@ -115,8 +116,8 @@ class CorporateActionSettlementListener {
         UUID deploymentId = deployment.get().getId();
 
         switch (ca.getActionType()) {
-            case COUPON, DIVIDEND, INTEREST_PAYMENT -> dispatchCantonCoupon(ca, deploymentId);
-            case REDEMPTION, PARTIAL_REDEMPTION -> dispatchCantonRedemption(ca, deploymentId);
+            case COUPON, INTEREST_PAYMENT -> dispatchCantonCoupon(ca, deploymentId);
+            case REDEMPTION -> dispatchCantonRedemption(ca, deploymentId);
             case CALL -> dispatchCantonEarlyCall(ca, deploymentId);
             default -> log.info("No Canton lifecycle choice mapped for actionType={}. " +
                             "corporateActionId={} remains AWAITING_SETTLEMENT for operator review.",
@@ -126,7 +127,19 @@ class CorporateActionSettlementListener {
 
     private Optional<AssetDeployment> resolveCantonDeployment(UUID assetId) {
         List<AssetDeployment> deployments = assetDeploymentRepository.findByAssetId(assetId);
-        return deployments.stream().findFirst();
+        List<AssetDeployment> eligible = deployments.stream()
+                .filter(deployment -> deployment.getChain() == Chain.CANTON)
+                .filter(deployment -> deployment.getDeploymentStatus()
+                        == AssetDeployment.DeploymentStatus.CONFIRMED)
+                .filter(deployment -> deployment.getContractAddress() != null
+                        && !deployment.getContractAddress().isBlank())
+                .toList();
+        if (eligible.size() != 1) {
+            log.warn("Expected exactly one confirmed Canton deployment with a contract ID for assetId={}; found {}",
+                    assetId, eligible.size());
+            return Optional.empty();
+        }
+        return Optional.of(eligible.getFirst());
     }
 
     private void dispatchCantonCoupon(CorporateAction ca, UUID deploymentId) {

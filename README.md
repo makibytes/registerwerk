@@ -219,7 +219,7 @@ Each backend module follows the pattern `<module>/api/` (public surface), `<modu
 | SPL / SPL-2022 (Solana) | Repository integration present; production readiness unverified |
 | Starknet ERC-20 / ERC-3525 (Cairo) | Repository integration present; production readiness unverified |
 | Stellar classic asset | Repository integration present; production readiness unverified |
-| Daml Finance bonds (Canton) | Optional repository implementation (`-Pcanton`); production readiness unverified |
+| Custom Daml bond lifecycle (Canton) | Optional `-Pcanton` implementation; live participant/payment conformance still required |
 
 ### Supported Chains
 

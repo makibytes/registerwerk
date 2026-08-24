@@ -31,7 +31,7 @@ type DecisionMode = 'approve' | 'reject';
     <div class="ri-shell">
       <div class="ri-header">
         <h3 class="ri-title">Register inspection requests (§10 eWpG)</h3>
-        <button mat-stroked-button (click)="load()">
+        <button type="button" mat-stroked-button (click)="load()">
           <mat-icon>refresh</mat-icon> Refresh
         </button>
       </div>
@@ -67,15 +67,15 @@ type DecisionMode = 'approve' | 'reject';
               <span class="status-badge" [class]="r.status.toLowerCase()">{{ r.status }}</span>
               <div class="row-actions">
                 @if (r.status === 'REQUESTED') {
-                  <button mat-icon-button color="primary" matTooltip="Approve" (click)="openDecisionDialog(r, 'approve')">
+                  <button type="button" mat-icon-button color="primary" matTooltip="Approve" (click)="openDecisionDialog(r, 'approve')">
                     <mat-icon>check_circle</mat-icon>
                   </button>
-                  <button mat-icon-button color="warn" matTooltip="Reject" (click)="openDecisionDialog(r, 'reject')">
+                  <button type="button" mat-icon-button color="warn" matTooltip="Reject" (click)="openDecisionDialog(r, 'reject')">
                     <mat-icon>cancel</mat-icon>
                   </button>
                 }
                 @if (r.status === 'APPROVED') {
-                  <button mat-stroked-button [disabled]="fulfilling.has(r.id)" (click)="fulfil(r)">
+                  <button type="button" mat-stroked-button [disabled]="fulfilling.has(r.id)" (click)="fulfil(r)">
                     <mat-icon>picture_as_pdf</mat-icon>
                     {{ fulfilling.has(r.id) ? 'Preparing…' : 'Fulfil' }}
                   </button>
@@ -98,8 +98,8 @@ type DecisionMode = 'approve' | 'reject';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button [color]="decisionMode === 'approve' ? 'primary' : 'warn'"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button [color]="decisionMode === 'approve' ? 'primary' : 'warn'"
                 [disabled]="!decisionReason.trim()" (click)="submitDecision()">
           {{ decisionMode === 'approve' ? 'Approve' : 'Reject' }}
         </button>

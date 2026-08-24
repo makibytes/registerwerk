@@ -30,6 +30,7 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -71,6 +72,7 @@ public class Erc3643LifecycleService {
     private final AssetDeploymentRepository deploymentRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final EvmContractService evmContractService;
+    private final DurableEvmTransactionGateway evmTransactions;
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final BlockchainTransactionService txService;
     private final HolderBlockGate holderBlockGate;
@@ -84,6 +86,7 @@ public class Erc3643LifecycleService {
             AssetDeploymentRepository deploymentRepository,
             ApplicationEventPublisher eventPublisher,
             EvmContractService evmContractService,
+            DurableEvmTransactionGateway evmTransactions,
             BlockchainClientRegistry blockchainClientRegistry,
             BlockchainTransactionService txService,
             HolderBlockGate holderBlockGate) {
@@ -95,6 +98,7 @@ public class Erc3643LifecycleService {
         this.deploymentRepository = deploymentRepository;
         this.eventPublisher = eventPublisher;
         this.evmContractService = evmContractService;
+        this.evmTransactions = evmTransactions;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.txService = txService;
         this.holderBlockGate = holderBlockGate;
@@ -126,7 +130,10 @@ public class Erc3643LifecycleService {
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
         org.web3j.protocol.Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
         de.makibytes.registerwerk.wallet.api.EvmSigner signer = evmContractService.signer(descriptor);
-        evmContractService.send(web3j, signer, contractAddress, fn);
+        if (dep.getChainConfigId() == null) {
+            throw new IllegalStateException("EVM deployment is missing chainConfigId: " + dep.getId());
+        }
+        evmContractService.send(dep.getChainConfigId(), web3j, signer, contractAddress, fn);
     }
 
     /**
@@ -150,10 +157,10 @@ public class Erc3643LifecycleService {
         AssetDeployment dep = deploymentRepository.findById(suite.getAssetDeploymentId())
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment",
                         suite.getAssetDeploymentId()));
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-        EvmSigner signer = evmContractService.signer(descriptor);
-        String txHash = evmContractService.submit(web3j, signer, contractAddress, fn);
+        if (dep.getChainConfigId() == null) {
+            throw new IllegalStateException("Confirmed EVM deployment is missing chainConfigId: " + dep.getId());
+        }
+        String txHash = evmTransactions.submit(dep.getChainConfigId(), contractAddress, fn, params);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), fn.getName(), actorId, actorRole, params));
 

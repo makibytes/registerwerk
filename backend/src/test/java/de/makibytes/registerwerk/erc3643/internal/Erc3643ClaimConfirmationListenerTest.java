@@ -30,6 +30,7 @@ class Erc3643ClaimConfirmationListenerTest {
     @Mock private OnchainClaimRepository claimRepository;
     @Mock private BlockchainTransactionService blockchainTransactionService;
     @Mock private ChainEffectRecorder chainEffectRecorder;
+    @Mock private de.makibytes.registerwerk.shared.IsolatedTransactionExecutor isolatedTransactions;
 
     private Erc3643ClaimConfirmationListener listener;
     private final UUID chainConfigId = UUID.randomUUID();
@@ -37,7 +38,12 @@ class Erc3643ClaimConfirmationListenerTest {
 
     @BeforeEach
     void setUp() {
-        listener = new Erc3643ClaimConfirmationListener(claimRepository, blockchainTransactionService, chainEffectRecorder);
+        listener = new Erc3643ClaimConfirmationListener(
+                claimRepository, blockchainTransactionService, chainEffectRecorder, isolatedTransactions);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.getArgument(0, de.makibytes.registerwerk.shared.IsolatedTransactionExecutor.Work.class).run();
+            return null;
+        }).when(isolatedTransactions).run(any());
     }
 
     private OnchainClaim claimWithIssuanceTx() {
@@ -59,7 +65,7 @@ class Erc3643ClaimConfirmationListenerTest {
         listener.resolvePending();
 
         verify(claimRepository, never()).save(any());
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test
@@ -78,7 +84,7 @@ class Erc3643ClaimConfirmationListenerTest {
         assertThat(claim.getChainConfigId()).isEqualTo(chainConfigId);
         verify(claimRepository).save(claim);
         ArgumentCaptor<ChainEffectDescriptor> captor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
-        verify(chainEffectRecorder).record(captor.capture());
+        verify(chainEffectRecorder).recordFinalized(captor.capture());
         assertThat(captor.getValue().effectType()).isEqualTo("ERC3643_CLAIM_CONFIRMED");
         assertThat(captor.getValue().entityId()).isEqualTo(claimId);
     }
@@ -96,12 +102,12 @@ class Erc3643ClaimConfirmationListenerTest {
         assertThat(claim.isConfirmed()).isFalse();
         assertThat(claim.getTxHash()).isNull();
         verify(claimRepository).save(claim);
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test
-    @DisplayName("a confirmed revocation tx sets revokedAt without journalling (no compensator for it)")
-    void confirmedRevocation_setsRevokedAtWithoutJournalling() {
+    @DisplayName("a confirmed revocation tx records exact location and journals a compensable effect")
+    void confirmedRevocation_recordsLocationAndJournals() {
         OnchainClaim claim = new OnchainClaim();
         claim.setId(claimId);
         claim.setRevocationTxHash("0xrevoketx");
@@ -114,8 +120,14 @@ class Erc3643ClaimConfirmationListenerTest {
         listener.resolvePending();
 
         assertThat(claim.getRevokedAt()).isNotNull();
+        assertThat(claim.getRevocationChainConfigId()).isEqualTo(chainConfigId);
+        assertThat(claim.getRevocationBlockNumber()).isEqualTo(200L);
+        assertThat(claim.getRevocationBlockHash()).isEqualTo("0xblock200");
         verify(claimRepository).save(claim);
-        verify(chainEffectRecorder, never()).record(any());
+        ArgumentCaptor<ChainEffectDescriptor> captor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
+        verify(chainEffectRecorder).recordFinalized(captor.capture());
+        assertThat(captor.getValue().effectType()).isEqualTo("ERC3643_CLAIM_REVOKED");
+        assertThat(captor.getValue().blockHash()).isEqualTo("0xblock200");
     }
 
     @Test
@@ -132,6 +144,9 @@ class Erc3643ClaimConfirmationListenerTest {
 
         assertThat(claim.getRevocationTxHash()).isNull();
         assertThat(claim.getRevokedAt()).isNull();
+        assertThat(claim.getRevocationChainConfigId()).isNull();
+        assertThat(claim.getRevocationBlockNumber()).isNull();
+        assertThat(claim.getRevocationBlockHash()).isNull();
         verify(claimRepository).save(claim);
     }
 }

@@ -30,6 +30,7 @@ class Erc3643IdentityRegistryConfirmationListenerTest {
     @Mock private Erc3643IdentityRegistryRepository repository;
     @Mock private BlockchainTransactionService blockchainTransactionService;
     @Mock private ChainEffectRecorder chainEffectRecorder;
+    @Mock private de.makibytes.registerwerk.shared.IsolatedTransactionExecutor isolatedTransactions;
 
     private Erc3643IdentityRegistryConfirmationListener listener;
     private final UUID chainConfigId = UUID.randomUUID();
@@ -37,7 +38,12 @@ class Erc3643IdentityRegistryConfirmationListenerTest {
 
     @BeforeEach
     void setUp() {
-        listener = new Erc3643IdentityRegistryConfirmationListener(repository, blockchainTransactionService, chainEffectRecorder);
+        listener = new Erc3643IdentityRegistryConfirmationListener(
+                repository, blockchainTransactionService, chainEffectRecorder, isolatedTransactions);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.getArgument(0, de.makibytes.registerwerk.shared.IsolatedTransactionExecutor.Work.class).run();
+            return null;
+        }).when(isolatedTransactions).run(any());
     }
 
     private Erc3643IdentityRegistry entryWithRegisteredTx() {
@@ -59,7 +65,7 @@ class Erc3643IdentityRegistryConfirmationListenerTest {
         listener.resolvePending();
 
         verify(repository, never()).save(any());
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test
@@ -75,9 +81,11 @@ class Erc3643IdentityRegistryConfirmationListenerTest {
         listener.resolvePending();
 
         assertThat(entry.isRegistrationConfirmed()).isTrue();
+        assertThat(entry.getRegistrationBlockNumber()).isEqualTo(100L);
+        assertThat(entry.getRegistrationBlockHash()).isEqualTo("0xblock100");
         verify(repository).save(entry);
         ArgumentCaptor<ChainEffectDescriptor> captor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
-        verify(chainEffectRecorder).record(captor.capture());
+        verify(chainEffectRecorder).recordFinalized(captor.capture());
         assertThat(captor.getValue().effectType()).isEqualTo("ERC3643_IDENTITY_REGISTERED");
         assertThat(captor.getValue().chainConfigId()).isEqualTo(chainConfigId);
         assertThat(captor.getValue().blockNumber()).isEqualTo(100L);
@@ -85,8 +93,29 @@ class Erc3643IdentityRegistryConfirmationListenerTest {
     }
 
     @Test
-    @DisplayName("a failed registration tx marks the row confirmed (stops polling) without journalling")
-    void failedRegistration_marksConfirmedWithoutJournalling() {
+    @DisplayName("a confirmed registration cannot reactivate an entry with later removal intent")
+    void confirmedRegistration_preservesLaterRemovalIntent() {
+        Erc3643IdentityRegistry entry = entryWithRegisteredTx();
+        java.time.Instant removalIntentRecordedAt = java.time.Instant.parse("2026-08-23T10:15:30Z");
+        entry.setRemovedAt(removalIntentRecordedAt);
+        entry.setRemovedByTx("0xremove-pending");
+        entry.setRemovalConfirmed(false);
+        when(repository.findByRegisteredByTxIsNotNullAndRegistrationConfirmedFalse()).thenReturn(List.of(entry));
+        when(repository.findByRemovedByTxIsNotNullAndRemovalConfirmedFalse()).thenReturn(List.of());
+        when(blockchainTransactionService.isConfirmedFailure("0xregistertx")).thenReturn(false);
+        when(blockchainTransactionService.confirmedLocation("0xregistertx"))
+                .thenReturn(Optional.of(new BlockchainTransactionService.ConfirmedTxLocation(
+                        chainConfigId, 100L, "0xblock100")));
+
+        listener.resolvePending();
+
+        assertThat(entry.getRemovedAt()).isEqualTo(removalIntentRecordedAt);
+        assertThat(entry.isActive()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a failed registration tx soft-removes the optimistic mirror without journalling")
+    void failedRegistration_softRemovesOptimisticMirror() {
         Erc3643IdentityRegistry entry = entryWithRegisteredTx();
         when(repository.findByRegisteredByTxIsNotNullAndRegistrationConfirmedFalse()).thenReturn(List.of(entry));
         when(repository.findByRemovedByTxIsNotNullAndRemovalConfirmedFalse()).thenReturn(List.of());
@@ -95,8 +124,9 @@ class Erc3643IdentityRegistryConfirmationListenerTest {
         listener.resolvePending();
 
         assertThat(entry.isRegistrationConfirmed()).isTrue();
+        assertThat(entry.isActive()).isFalse();
         verify(repository).save(entry);
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test
@@ -114,9 +144,58 @@ class Erc3643IdentityRegistryConfirmationListenerTest {
         listener.resolvePending();
 
         assertThat(entry.isRemovalConfirmed()).isTrue();
+        assertThat(entry.isActive()).isFalse();
+        assertThat(entry.getRemovalBlockNumber()).isEqualTo(200L);
+        assertThat(entry.getRemovalBlockHash()).isEqualTo("0xblock200");
         ArgumentCaptor<ChainEffectDescriptor> captor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
-        verify(chainEffectRecorder).record(captor.capture());
+        verify(chainEffectRecorder).recordFinalized(captor.capture());
         assertThat(captor.getValue().effectType()).isEqualTo("ERC3643_IDENTITY_REMOVED");
         assertThat(captor.getValue().blockNumber()).isEqualTo(200L);
+    }
+
+    @Test
+    @DisplayName("a pending removal remains fail-closed and keeps its intent timestamp")
+    void pendingRemoval_keepsFailClosedIntent() {
+        Erc3643IdentityRegistry entry = new Erc3643IdentityRegistry();
+        org.springframework.test.util.ReflectionTestUtils.setField(entry, "id", entryId);
+        java.time.Instant removalIntentRecordedAt = java.time.Instant.parse("2026-08-23T10:15:30Z");
+        entry.setRemovedAt(removalIntentRecordedAt);
+        entry.setRemovedByTx("0xremovetx");
+        when(repository.findByRegisteredByTxIsNotNullAndRegistrationConfirmedFalse()).thenReturn(List.of());
+        when(repository.findByRemovedByTxIsNotNullAndRemovalConfirmedFalse()).thenReturn(List.of(entry));
+        when(blockchainTransactionService.isConfirmedFailure("0xremovetx")).thenReturn(false);
+        when(blockchainTransactionService.confirmedLocation("0xremovetx")).thenReturn(Optional.empty());
+
+        listener.resolvePending();
+
+        assertThat(entry.getRemovedAt()).isEqualTo(removalIntentRecordedAt);
+        assertThat(entry.isActive()).isFalse();
+        assertThat(entry.isRemovalConfirmed()).isFalse();
+        verify(repository, never()).save(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
+    }
+
+    @Test
+    @DisplayName("a failed removal tx restores the optimistically removed mirror")
+    void failedRemoval_restoresOptimisticMirror() {
+        Erc3643IdentityRegistry entry = new Erc3643IdentityRegistry();
+        org.springframework.test.util.ReflectionTestUtils.setField(entry, "id", entryId);
+        entry.setRemovedAt(java.time.Instant.now());
+        entry.setRemovedByTx("0xremovetx");
+        entry.setRemovalBlockNumber(199L);
+        entry.setRemovalBlockHash("0xorphaned-block");
+        when(repository.findByRegisteredByTxIsNotNullAndRegistrationConfirmedFalse()).thenReturn(List.of());
+        when(repository.findByRemovedByTxIsNotNullAndRemovalConfirmedFalse()).thenReturn(List.of(entry));
+        when(blockchainTransactionService.isConfirmedFailure("0xremovetx")).thenReturn(true);
+
+        listener.resolvePending();
+
+        assertThat(entry.isRemovalConfirmed()).isTrue();
+        assertThat(entry.isActive()).isTrue();
+        assertThat(entry.getRemovedByTx()).isEqualTo("0xremovetx");
+        assertThat(entry.getRemovalBlockNumber()).isNull();
+        assertThat(entry.getRemovalBlockHash()).isNull();
+        verify(repository).save(entry);
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 }

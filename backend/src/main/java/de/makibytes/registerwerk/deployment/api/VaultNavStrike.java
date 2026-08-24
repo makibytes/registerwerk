@@ -49,6 +49,10 @@ public class VaultNavStrike {
     @Column(name = "block_number")
     private Long blockNumber;
 
+    /** Exact block occurrence which produced the current confirmation. */
+    @Column(name = "block_hash", length = 128)
+    private String blockHash;
+
     /** True once {@link VaultConfirmationListener} has confirmed {@link #txHash} SUCCESS and
      *  applied this strike to {@code AssetVaultState}. False (the default) means either no tx has
      *  been submitted yet, or it's still awaiting confirmation — scopes the listener's polling
@@ -92,6 +96,9 @@ public class VaultNavStrike {
 
     public Long getBlockNumber() { return blockNumber; }
     public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
 
     public boolean isConfirmed() { return confirmed; }
     public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }

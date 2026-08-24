@@ -400,6 +400,7 @@ export class KycStatusComponent implements OnInit {
     if (!this.entityId) return;
     this.kycService.getKycStatus(this.entityId).subscribe({
       next: (res) => { this.entityKycStatus = res.kycStatus; this.cdr.detectChanges(); },
+      error: () => { this.entityKycStatus = null; this.cdr.detectChanges(); },
     });
   }
 
@@ -410,6 +411,10 @@ export class KycStatusComponent implements OnInit {
         this.jurisdictionApprovals = Object.fromEntries(
           approvals.map(a => [a.jurisdiction, a])
         ) as Partial<Record<Jurisdiction, KycJurisdictionApproval>>;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.jurisdictionApprovals = {};
         this.cdr.detectChanges();
       },
     });

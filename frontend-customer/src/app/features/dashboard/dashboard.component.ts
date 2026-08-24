@@ -71,7 +71,7 @@ import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponen
             <mat-card-content>
               <mat-icon>error_outline</mat-icon>
               <span>Some dashboard data could not be loaded. The numbers below may be incomplete.</span>
-              <button mat-stroked-button (click)="reload()">Retry</button>
+              <button type="button" mat-stroked-button (click)="reload()">Retry</button>
             </mat-card-content>
           </mat-card>
         }

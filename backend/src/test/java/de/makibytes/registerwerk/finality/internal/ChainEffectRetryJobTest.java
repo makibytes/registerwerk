@@ -7,9 +7,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,20 +26,13 @@ import static org.mockito.Mockito.when;
 class ChainEffectRetryJobTest {
 
     @Mock private ChainEffectRepository repository;
-    @Mock private CompensationDispatcher dispatcher;
+    @Mock private ChainEffectRetryExecutor retryExecutor;
 
     private ChainEffectRetryJob job;
 
     @BeforeEach
     void setUp() {
-        job = new ChainEffectRetryJob(repository, dispatcher);
-    }
-
-    private ChainEffect row(UUID id) {
-        ChainEffect row = new ChainEffect();
-        ReflectionTestUtils.setField(row, "id", id);
-        row.setRecordedAt(Instant.now());
-        return row;
+        job = new ChainEffectRetryJob(repository, retryExecutor);
     }
 
     @Test
@@ -46,15 +40,15 @@ class ChainEffectRetryJobTest {
     void retriesEveryEligibleRow() {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
-        when(repository.findByStatusAndAttemptCountLessThanOrderByRecordedAtAsc(
+        when(repository.findRetryableIds(
                 eq(ChainEffect.Status.COMPENSATION_FAILED), eq(ChainEffectRetryJob.MAX_AUTO_RETRY_ATTEMPTS)))
-                .thenReturn(List.of(row(first), row(second)));
-        when(dispatcher.compensate(any())).thenReturn(new CompensationOutcome.Compensated("ok"));
+                .thenReturn(List.of(first, second));
+        when(retryExecutor.retry(any())).thenReturn(new CompensationOutcome.Compensated("ok"));
 
         job.retryFailed();
 
-        verify(dispatcher).compensate(first);
-        verify(dispatcher).compensate(second);
+        verify(retryExecutor).retry(first);
+        verify(retryExecutor).retry(second);
     }
 
     @Test
@@ -62,26 +56,38 @@ class ChainEffectRetryJobTest {
     void oneFailureDoesNotAbortTheRestOfThePass() {
         UUID throwing = UUID.randomUUID();
         UUID ok = UUID.randomUUID();
-        when(repository.findByStatusAndAttemptCountLessThanOrderByRecordedAtAsc(any(), anyInt()))
-                .thenReturn(List.of(row(throwing), row(ok)));
-        when(dispatcher.compensate(throwing)).thenThrow(new RuntimeException("boom"));
-        when(dispatcher.compensate(ok)).thenReturn(new CompensationOutcome.Compensated("ok"));
+        when(repository.findRetryableIds(any(), anyInt())).thenReturn(List.of(throwing, ok));
+        when(retryExecutor.retry(throwing)).thenThrow(new RuntimeException("boom"));
+        when(retryExecutor.retry(ok)).thenReturn(new CompensationOutcome.Compensated("ok"));
 
         job.retryFailed();
 
-        verify(dispatcher, times(1)).compensate(throwing);
-        verify(dispatcher, times(1)).compensate(ok);
+        verify(retryExecutor, times(1)).retry(throwing);
+        verify(retryExecutor, times(1)).retry(ok);
     }
 
     @Test
     @DisplayName("no eligible rows means the dispatcher is never called")
     void noEligibleRowsCallsNothing() {
-        when(repository.findByStatusAndAttemptCountLessThanOrderByRecordedAtAsc(any(), anyInt()))
+        when(repository.findRetryableIds(any(), anyInt()))
                 .thenReturn(List.of());
 
         job.retryFailed();
 
-        verify(dispatcher, never()).compensate(any());
+        verify(retryExecutor, never()).retry(any());
+    }
+
+    @Test
+    @DisplayName("each retry is explicitly isolated in a REQUIRES_NEW physical transaction")
+    void retryExecutorUsesIndependentTransactions() throws Exception {
+        Method retry = ChainEffectRetryExecutor.class.getDeclaredMethod("retry", UUID.class);
+        Transactional transactional = retry.getAnnotation(Transactional.class);
+
+        org.assertj.core.api.Assertions.assertThat(transactional).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRES_NEW);
+        org.assertj.core.api.Assertions.assertThat(
+                ChainEffectRetryJob.class.getDeclaredMethod("retryFailed").getAnnotation(Transactional.class))
+                .isNull();
     }
 
     private static int anyInt() {

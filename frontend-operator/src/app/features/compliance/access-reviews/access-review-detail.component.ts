@@ -41,12 +41,12 @@ import { AuthService } from '../../../core/auth/auth.service';
   ],
   template: `
     <app-page-header [title]="campaign?.name ?? 'Access Review'" subtitle="Review each account's snapshotted roles">
-      <button mat-stroked-button routerLink="/compliance/access-reviews">
+      <button type="button" mat-stroked-button routerLink="/compliance/access-reviews">
         <mat-icon>arrow_back</mat-icon>
         All Campaigns
       </button>
       @if (campaign?.status === 'OPEN' && canCloseCampaign) {
-        <button mat-raised-button color="primary" [disabled]="pendingCount() > 0" (click)="closeCampaign()"
+        <button type="button" mat-raised-button color="primary" [disabled]="pendingCount() > 0" (click)="closeCampaign()"
                 [matTooltip]="pendingCount() > 0 ? pendingCount() + ' item(s) still awaiting a decision' : 'Close campaign'">
           <mat-icon>task_alt</mat-icon>
           Close Campaign
@@ -77,11 +77,11 @@ import { AuthService } from '../../../core/auth/auth.service';
 
     <ng-template #itemActions let-item>
       @if (item.decision === 'PENDING' && campaign?.status === 'OPEN') {
-        <button mat-stroked-button color="primary" (click)="decide(item, 'CONFIRMED')">
+        <button type="button" mat-stroked-button color="primary" (click)="decide(item, 'CONFIRMED')">
           <mat-icon>check_circle</mat-icon>
           Confirm
         </button>
-        <button mat-stroked-button color="warn" (click)="openRevokeDialog(item)">
+        <button type="button" mat-stroked-button color="warn" (click)="openRevokeDialog(item)">
           <mat-icon>block</mat-icon>
           Revoke
         </button>
@@ -106,8 +106,8 @@ import { AuthService } from '../../../core/auth/auth.service';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn" [disabled]="!decisionNotes.trim()" (click)="submitRevoke()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn" [disabled]="!decisionNotes.trim()" (click)="submitRevoke()">
           <mat-icon>block</mat-icon>
           Revoke Access
         </button>

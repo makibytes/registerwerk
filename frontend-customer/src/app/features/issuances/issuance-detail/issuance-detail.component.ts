@@ -126,7 +126,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
             <!-- Action buttons -->
             <div class="action-bar">
               @if (asset.status === 'DRAFT') {
-                <button
+                <button type="button"
                   mat-raised-button
                   color="primary"
                   [disabled]="actionLoading"
@@ -142,7 +142,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 </button>
               }
               @if (asset.status === 'APPROVED') {
-                <button
+                <button type="button"
                   mat-raised-button
                   color="accent"
                   [disabled]="actionLoading"
@@ -158,13 +158,13 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 </button>
               }
               @if (asset.status === 'ISSUED') {
-                <button mat-raised-button color="primary" (click)="openAddHolder()">
+                <button type="button" mat-raised-button color="primary" (click)="openAddHolder()">
                   <mat-icon>person_add</mat-icon>
                   Add Holder
                 </button>
               }
               @if (isIssuer) {
-                <button mat-stroked-button [disabled]="downloadingRegisterExtract" (click)="downloadRegisterExtract()"
+                <button type="button" mat-stroked-button [disabled]="downloadingRegisterExtract" (click)="downloadRegisterExtract()"
                         matTooltip="§ 10 eWpG register extract for this asset's full holder list">
                   <mat-icon>gavel</mat-icon>
                   @if (downloadingRegisterExtract) { Preparing… } @else { Register extract (§10) }
@@ -811,7 +811,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     <mat-label>Amount</mat-label>
                     <input matInput type="number" [(ngModel)]="mintAmount" min="1" step="1" />
                   </mat-form-field>
-                  <button mat-flat-button color="primary"
+                  <button type="button" mat-flat-button color="primary"
                           (click)="submitConfidentialMint()"
                           [disabled]="minting || !isValidWalletAddress(mintToAddress) || !isValidMintAmount()">
                     <mat-icon>add_circle</mat-icon>
@@ -892,6 +892,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
       } @else {
         <mat-card>
           <mat-card-content class="load-error" role="alert">
+            <h1 class="sr-only">Issuance details</h1>
             <mat-icon>cloud_off</mat-icon>
             <p>{{ loadError || 'Issuance not found.' }}</p>
             @if (assetId) {

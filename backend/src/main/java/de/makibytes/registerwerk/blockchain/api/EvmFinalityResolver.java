@@ -52,7 +52,22 @@ public class EvmFinalityResolver {
      *                      a per-item try/catch, matching every existing call site this replaces.
      */
     public FinalityLevel levelOf(String chainConfigIdentifier, Web3j web3j, long blockNumber) throws IOException {
-        ChainConfig.FinalityModel model = resolveModel(chainConfigIdentifier);
+        ChainConfig chain = chainConfigRepository.findByIdentifier(chainConfigIdentifier).orElse(null);
+        return levelOf(chain, chainConfigIdentifier, web3j, blockNumber);
+    }
+
+    /** Uses an already-resolved canonical chain row, avoiding a second identifier lookup. */
+    public FinalityLevel levelOf(ChainConfig chain, Web3j web3j, long blockNumber) throws IOException {
+        if (chain == null || chain.getIdentifier() == null) {
+            throw new IllegalArgumentException("Canonical chain configuration is required");
+        }
+        return levelOf(chain, chain.getIdentifier(), web3j, blockNumber);
+    }
+
+    private FinalityLevel levelOf(
+            ChainConfig chain, String identifier, Web3j web3j, long blockNumber) throws IOException {
+        ChainConfig.FinalityModel model = chain != null && chain.getFinalityModel() != null
+                ? chain.getFinalityModel() : ChainConfig.FinalityModel.DEPTH_BASED;
         return switch (model) {
             case INSTANT -> FinalityLevel.FINALIZED;
             case TAG_BASED -> {
@@ -62,7 +77,7 @@ public class EvmFinalityResolver {
             }
             case DEPTH_BASED -> {
                 long headBlockNumber = web3j.ethBlockNumber().send().getBlockNumber().longValueExact();
-                String chainName = chainNameFrom(chainConfigIdentifier);
+                String chainName = chainNameFrom(identifier);
                 yield EvmUtils.finalityOf(model, blockNumber, headBlockNumber, null, null,
                         txProperties.confirmationsFor(chainName), txProperties.safeConfirmationsFor(chainName));
             }

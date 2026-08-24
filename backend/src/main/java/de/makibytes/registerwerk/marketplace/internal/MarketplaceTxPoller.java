@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.marketplace.internal;
 
+import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.marketplace.api.DappListing;
 import de.makibytes.registerwerk.marketplace.api.DappListingRepository;
 import de.makibytes.registerwerk.marketplace.api.DappListingStatus;
@@ -10,15 +11,16 @@ import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.shared.AfterCommit;
+import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 
 /**
  * Confirms onchain DappRegistry anchors: once an approved version's transaction lands,
@@ -43,22 +45,24 @@ class MarketplaceTxPoller {
     private final MarketplaceTxGateway txGateway;
     private final MarketplaceOnchainAnchorService anchorService;
     private final ChainEffectRecorder chainEffectRecorder;
+    private final IsolatedTransactionExecutor isolatedTransactions;
 
     MarketplaceTxPoller(DappVersionRepository versionRepository,
                         DappListingRepository listingRepository,
                         MarketplaceTxGateway txGateway,
                         MarketplaceOnchainAnchorService anchorService,
-                        ChainEffectRecorder chainEffectRecorder) {
+                        ChainEffectRecorder chainEffectRecorder,
+                        IsolatedTransactionExecutor isolatedTransactions) {
         this.versionRepository = versionRepository;
         this.listingRepository = listingRepository;
         this.txGateway = txGateway;
         this.anchorService = anchorService;
         this.chainEffectRecorder = chainEffectRecorder;
+        this.isolatedTransactions = isolatedTransactions;
     }
 
     @SchedulerLock(name = "marketplaceTxPoller", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
     @Scheduled(fixedDelay = 30_000, initialDelay = 35_000)
-    @Transactional
     public void resolveApprovedVersions() {
         for (DappVersion version : versionRepository.findByStatus(DappVersionStatus.APPROVED)) {
             if (version.getOnchainTx() == null) {
@@ -69,7 +73,7 @@ class MarketplaceTxPoller {
                 continue;
             }
             try {
-                resolve(version);
+                isolatedTransactions.run(() -> resolve(version));
             } catch (Exception e) {
                 log.warn("Failed to resolve approved dApp version={}: {}", version.getId(), e.getMessage());
             }
@@ -91,12 +95,21 @@ class MarketplaceTxPoller {
             log.error("DappRegistry tx={} failed for listing={}; clearing anchor for re-approval",
                     txHash, listing.getSlug());
             version.setOnchainTx(null);
+            version.setAnchorChainConfigId(null);
+            version.setAnchorBlockNumber(null);
+            version.setAnchorBlockHash(null);
             version.setStatus(DappVersionStatus.IN_REVIEW);
             versionRepository.save(version);
             return;
         }
         if (!txGateway.isConfirmedSuccess(txHash)) {
             return; // still pending, or not yet final under the chain's FinalityModel
+        }
+        Optional<BlockchainTransactionService.ConfirmedTxLocation> location = txGateway.confirmedLocation(txHash);
+        if (location.isEmpty()) {
+            log.error("DappRegistry tx={} reported confirmed SUCCESS without durable block provenance; "
+                    + "refusing to publish listing={}", txHash, listing.getSlug());
+            return;
         }
 
         versionRepository.findByListingIdOrderByCreatedAtDesc(listing.getId()).stream()
@@ -107,6 +120,9 @@ class MarketplaceTxPoller {
                 });
 
         version.setStatus(DappVersionStatus.PUBLISHED);
+        version.setAnchorChainConfigId(location.get().chainConfigId());
+        version.setAnchorBlockNumber(location.get().blockNumber());
+        version.setAnchorBlockHash(location.get().blockHash());
         versionRepository.save(version);
 
         listing.setStatus(DappListingStatus.PUBLISHED);
@@ -118,10 +134,9 @@ class MarketplaceTxPoller {
         // A reorg retracting this anchor tx's confirming block must not leave the catalog
         // asserting a version as live that the chain no longer agrees was ever anchored — see
         // DappVersionRevertCompensator.
-        txGateway.confirmedLocation(txHash).ifPresent(location ->
-                chainEffectRecorder.record(ChainEffectDescriptor.of(
-                        location.chainConfigId(), location.blockNumber(), location.blockHash(), txHash,
-                        "marketplace", DappVersionRevertCompensator.EFFECT_TYPE, "DappVersion", version.getId(),
-                        null, CompensationCategory.INVERSE_FLIP)));
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
+                "marketplace", DappVersionRevertCompensator.EFFECT_TYPE, "DappVersion", version.getId(),
+                null, CompensationCategory.INVERSE_FLIP));
     }
 }

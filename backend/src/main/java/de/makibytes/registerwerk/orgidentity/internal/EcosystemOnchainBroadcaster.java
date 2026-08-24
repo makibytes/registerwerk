@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.orgidentity.internal;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuer;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuerRepository;
 import de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus;
+import de.makibytes.registerwerk.orgidentity.api.TrustedIssuerStatus;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWallet;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistration;
@@ -14,6 +15,7 @@ import de.makibytes.registerwerk.orgidentity.api.PermissionGrant;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantRepository;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantStatus;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantType;
+import de.makibytes.registerwerk.orgidentity.api.RoleRestrictionStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -26,16 +28,15 @@ import java.util.UUID;
 /**
  * Broadcasts ecosystem chain transactions <em>after</em> the intent has been committed
  * to the database (see {@link de.makibytes.registerwerk.shared.AfterCommit}): the
- * committed row (PENDING/REVOKED/REMOVED with a null tx hash) is the source of intent,
+ * committed row (PENDING/REVOCATION_PENDING/REMOVAL_PENDING with a null tx hash) is the source of intent,
  * this component turns it into a chain transaction and records the hash in a fresh
  * transaction. Every method is idempotent — it re-checks state and skips rows that
  * already carry a tx hash — so the {@link OrgEcosystemTxPoller} can safely retry rows
  * whose broadcast failed (RPC down, node hiccup). Failures are logged, never thrown:
  * the missing tx hash keeps the row eligible for the next retry.
  *
- * <p>Flows without a dedicated tx-hash column (org suspend/reinstate, member removal's
- * counterpart on the wallet row, role restriction) broadcast best-effort here and rely
- * on {@link OrgChainReconciliationService} to flag any resulting drift.
+ * <p>Every submitted transition stores its transaction hash before this transaction commits.
+ * The receipt poller is the sole writer of terminal chain-derived state.
  */
 @Component
 public class EcosystemOnchainBroadcaster {
@@ -87,24 +88,32 @@ public class EcosystemOnchainBroadcaster {
         });
     }
 
-    /** Best-effort {@code suspendOrg}/{@code reinstateOrg} mirror of the committed status. */
+    /** Submits a committed suspend/reinstate intent exactly once per stored attempt. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void broadcastOrgStatus(UUID registrationId, String reason) {
         registrationRepository.findById(registrationId).ifPresent(registration -> {
+            if ((registration.getStatus() != OrgRegistrationStatus.SUSPEND_PENDING
+                    && registration.getStatus() != OrgRegistrationStatus.REINSTATE_PENDING)
+                    || registration.getStatusTx() != null) {
+                return;
+            }
             try {
-                if (registration.getStatus() == OrgRegistrationStatus.SUSPENDED) {
-                    txGateway.submitToOrgRegistry(registration.getChainConfigId(),
+                String txHash;
+                if (registration.getStatus() == OrgRegistrationStatus.SUSPEND_PENDING) {
+                    txHash = txGateway.submitToOrgRegistry(registration.getChainConfigId(),
                             EcosystemAbi.suspendOrg(registration.getOrgAddress(), reason != null ? reason : ""),
                             Map.of("orgAddress", registration.getOrgAddress(),
                                     "reason", reason != null ? reason : ""));
-                } else if (registration.getStatus() == OrgRegistrationStatus.ACTIVE) {
-                    txGateway.submitToOrgRegistry(registration.getChainConfigId(),
+                } else {
+                    txHash = txGateway.submitToOrgRegistry(registration.getChainConfigId(),
                             EcosystemAbi.reinstateOrg(registration.getOrgAddress()),
                             Map.of("orgAddress", registration.getOrgAddress()));
                 }
+                registration.setStatusTx(txHash);
+                registrationRepository.save(registration);
             } catch (Exception e) {
-                log.error("Org status broadcast failed for registration={} — chain reconciliation will flag "
-                        + "the drift: {}", registrationId, e.getMessage());
+                log.warn("Org status broadcast failed for registration={} (poller will retry): {}",
+                        registrationId, e.getMessage());
             }
         });
     }
@@ -137,11 +146,12 @@ public class EcosystemOnchainBroadcaster {
         });
     }
 
-    /** Best-effort {@code removeMember} for a committed REMOVED wallet binding. */
+    /** Submits a committed fail-closed member-removal intent. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void broadcastRemoveMember(UUID walletId) {
         walletRepository.findById(walletId).ifPresent(wallet -> {
-            if (wallet.getStatus() != MemberWalletStatus.REMOVED) {
+            if (wallet.getStatus() != MemberWalletStatus.REMOVAL_PENDING
+                    || wallet.getRemovedTx() != null) {
                 return;
             }
             OrgRegistration registration = registrationRepository
@@ -150,12 +160,14 @@ public class EcosystemOnchainBroadcaster {
                 return;
             }
             try {
-                txGateway.submitToOrgRegistry(wallet.getChainConfigId(),
+                String txHash = txGateway.submitToOrgRegistry(wallet.getChainConfigId(),
                         EcosystemAbi.removeMember(registration.getOrgAddress(), wallet.getWalletAddress()),
                         Map.of("orgAddress", registration.getOrgAddress(), "wallet", wallet.getWalletAddress()));
+                wallet.setRemovedTx(txHash);
+                walletRepository.save(wallet);
             } catch (Exception e) {
-                log.error("removeMember broadcast failed for wallet={} — chain reconciliation will flag "
-                        + "the drift: {}", walletId, e.getMessage());
+                log.warn("removeMember broadcast failed for wallet={} (poller will retry): {}",
+                        walletId, e.getMessage());
             }
         });
     }
@@ -189,11 +201,11 @@ public class EcosystemOnchainBroadcaster {
         });
     }
 
-    /** Submits the revoke call for a committed REVOKED grant without a revoke tx yet. */
+    /** Submits the revoke call for a committed fail-closed revocation intent without a tx yet. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void broadcastRevoke(UUID grantId) {
         grantRepository.findById(grantId).ifPresent(grant -> {
-            if (grant.getStatus() != PermissionGrantStatus.REVOKED || grant.getRevokedTx() != null) {
+            if (grant.getStatus() != PermissionGrantStatus.REVOCATION_PENDING || grant.getRevokedTx() != null) {
                 return;
             }
             GrantContext context = grantContext(grant);
@@ -218,23 +230,30 @@ public class EcosystemOnchainBroadcaster {
         });
     }
 
-    /** Best-effort {@code setRoleRestricted} mirror of the committed flag. */
+    /** Submits a committed fail-closed role-restriction change. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void broadcastRoleRestriction(UUID grantId) {
         grantRepository.findById(grantId).ifPresent(grant -> {
+            if (grant.getRoleRestrictionStatus() != RoleRestrictionStatus.CHANGE_PENDING
+                    || grant.getRequestedRoleRestricted() == null
+                    || grant.getRoleRestrictionTx() != null) {
+                return;
+            }
             GrantContext context = grantContext(grant);
             if (context == null) {
                 return;
             }
             try {
-                txGateway.submitToPermissionRegistry(context.org().getChainConfigId(),
+                String txHash = txGateway.submitToPermissionRegistry(context.org().getChainConfigId(),
                         EcosystemAbi.setRoleRestricted(context.org().getOrgAddress(), context.code(),
-                                grant.isRoleRestricted()),
+                                grant.getRequestedRoleRestricted()),
                         Map.of("orgAddress", context.org().getOrgAddress(), "permission", context.code(),
-                                "restricted", String.valueOf(grant.isRoleRestricted())));
+                                "restricted", String.valueOf(grant.getRequestedRoleRestricted())));
+                grant.setRoleRestrictionTx(txHash);
+                grantRepository.save(grant);
             } catch (Exception e) {
-                log.error("Role-restriction broadcast failed for grant={} — chain reconciliation will flag "
-                        + "the drift: {}", grantId, e.getMessage());
+                log.warn("Role-restriction broadcast failed for grant={} (poller will retry): {}",
+                        grantId, e.getMessage());
             }
         });
     }
@@ -243,7 +262,7 @@ public class EcosystemOnchainBroadcaster {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void broadcastAddIssuer(UUID issuerId) {
         trustedIssuerRepository.findById(issuerId).ifPresent(issuer -> {
-            if (issuer.getStatus() != MemberWalletStatus.PENDING || issuer.getAddedTx() != null) {
+            if (issuer.getStatus() != TrustedIssuerStatus.PENDING || issuer.getAddedTx() != null) {
                 return;
             }
             try {
@@ -259,11 +278,11 @@ public class EcosystemOnchainBroadcaster {
         });
     }
 
-    /** Submits {@code removeTrustedIssuer} for a committed REMOVED issuer without a tx yet. */
+    /** Submits {@code removeTrustedIssuer} for a committed fail-closed removal intent. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void broadcastRemoveIssuer(UUID issuerId) {
         trustedIssuerRepository.findById(issuerId).ifPresent(issuer -> {
-            if (issuer.getStatus() != MemberWalletStatus.REMOVED || issuer.getRemovedTx() != null) {
+            if (issuer.getStatus() != TrustedIssuerStatus.REMOVAL_PENDING || issuer.getRemovedTx() != null) {
                 return;
             }
             try {

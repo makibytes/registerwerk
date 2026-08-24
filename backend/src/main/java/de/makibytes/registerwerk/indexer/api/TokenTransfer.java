@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.indexer.api;
 
+import de.makibytes.registerwerk.finality.api.BlockIdentity;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -22,7 +23,10 @@ import java.util.UUID;
         @Index(name = "idx_tt_contract_address",   columnList = "contract_address"),
         @Index(name = "idx_tt_asset_id",           columnList = "asset_id"),
         @Index(name = "idx_tt_deployment_id",      columnList = "deployment_id"),
-        @Index(name = "idx_tt_dedup",              columnList = "chain_config_id, tx_hash, log_index", unique = true)
+        // PostgreSQL requires every UNIQUE key on this RANGE-partitioned table to contain the
+        // partition key (occurred_at). block_hash is part of the logical EVM occurrence: the same
+        // tx/log may be mined into B after A was orphaned, while A itself may later return.
+        @Index(name = "idx_tt_evm_occurrence",      columnList = "chain_config_id, tx_hash, log_index, block_hash, occurred_at", unique = true)
     }
 )
 public class TokenTransfer {
@@ -148,7 +152,7 @@ public class TokenTransfer {
     public void setEventType(EventType eventType) { this.eventType = eventType; }
 
     public String getTxHash() { return txHash; }
-    public void setTxHash(String txHash) { this.txHash = txHash; }
+    public void setTxHash(String txHash) { this.txHash = BlockIdentity.normalize(txHash); }
 
     public Long getBlockNumber() { return blockNumber; }
     public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
@@ -172,5 +176,5 @@ public class TokenTransfer {
     public void setFinalityStatus(FinalityLevel finalityStatus) { this.finalityStatus = finalityStatus; }
 
     public String getBlockHash() { return blockHash; }
-    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = BlockIdentity.normalize(blockHash); }
 }

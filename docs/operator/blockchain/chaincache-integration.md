@@ -83,10 +83,10 @@ operator to set it directly either.
 ## Authentication
 
 chaincache's own default is `chaincache.auth.enabled: true`, requiring a bearer token with role
-`USER`/`ADMIN`/`OPERATOR` on `/api/**` and `/{chain}/api/**` (the RPC proxy path itself,
-`/{chain}/rpc` and `/{chain}/ws`, stays open by chaincache's own default —
-`chaincache.auth.rpc-enabled: false` — since that path is meant to be reachable the same way any
-RPC endpoint is). Registerwerk mints its own short-lived HS256 token
+`USER`/`ADMIN`/`OPERATOR` on `/api/**` and `/{chain}/api/**`. The standard RPC/WebSocket handshake
+may stay open under the default `chaincache.auth.rpc-enabled: false`, but durable methods still
+require an authenticated principal because they mutate named replay cursors
+(`chaincache.auth.durable-required: true`). Registerwerk therefore mints its own short-lived HS256 token
 (`chain.internal.ChaincacheTokenFactory`, a 5-minute token carrying `roles: ["OPERATOR"]`, cached
 until shortly before expiry) from `registerwerk.chaincache.jwt-secret` — a secret **distinct from**
 `JWT_DEV_SECRET`; never reuse Registerwerk's own operator-login signing key here, since anyone
@@ -109,7 +109,10 @@ case (`reason="unauthorized"`) from `chain_missing` (reachable, doesn't serve th
 Once detected, `GET /api/capabilities` is re-probed on the same schedule as kind re-detection, and
 its response is stored as the node's `capabilities`: finality model, safe/finalized confirmation
 depths, which RPC namespaces are configured, whether `debug_traceBlockByHash` is actually available
-upstream, durable-stream availability, and that workload's own Kafka relay posture. A confirmed
+upstream, durable-stream availability, a stable `durabilityDomainId`, and that workload's own Kafka
+relay posture. The domain ID identifies the backing PostgreSQL outbox/cursor database; Registerwerk
+refuses automatic failover unless every enabled candidate for a chain reports the same nonblank
+value, because an equal chain key does not make two independent event stores cursor-compatible. A confirmed
 match additionally folds in `GET /api/chains`' per-workload upstream provider counts
 (`configuredNodeCount`/`availableNodeCount` — how many upstream RPC providers that workload has
 configured for the chain, and how many currently answer). The operator node list's expandable panel
@@ -124,21 +127,27 @@ When a chain's `finalitySource` is `CHAINCACHE`, `blockchain.internal.Chaincache
 opens a persistent WebSocket to `<managementUrl>/<remoteChainKey>/ws` and issues
 `chaincache_subscribeDurable` with a `consumerId` of the form
 `registerwerk:<instanceId>:<remoteChainKey>` — stable across restarts of the same Registerwerk
-instance (so its cursor resumes rather than starting over), distinct per replica under
-`registerwerk.chaincache.instance-id` (so replicas don't share one cursor and silently split the
-event stream between them). **There is no separate resume call to make**: chaincache persists each
+deployment. Every replica deliberately uses that same logical ID: chaincache's cross-replica,
+PostgreSQL-backed lease elects exactly one active connection while the others retry as warm
+standbys. This preserves one cursor through rolling updates without splitting the stream or
+deriving durable identity from an ephemeral pod name. **There is no separate resume call to make**:
+chaincache persists each
 consumer's cursor server-side (`durable_consumer_cursor`, keyed by `consumerId` + stream) and
 resumes it automatically the moment that same `consumerId` subscribes again — `chaincache_resume`
 is a dispatch alias for the same `subscribeDurable` call, not a distinct step Registerwerk has to
 issue itself.
 
-Each durable event carries a monotonic `sequence`, a `kind` (`BLOCK` or `RETRACTION`), and — for a
-retraction — a `retractsEventId` (`"block:..."` vs `"log:..."`, only the block-level ones matter for
-canonical-chain tracking) plus a `payload` carrying the real correction: `commonAncestor`, the
-height everything after which is orphaned. This is what makes chaincache's reorg detection gap-free
-and push-based: Registerwerk doesn't have to poll for a retraction, chaincache tells it the moment
-one happens, replayably (a missed event is recoverable on reconnect via the persisted cursor, not
-silently lost). Events are acknowledged with `chaincache_ack` as they're processed.
+Each durable event carries a monotonic `sequence`, a deterministic event ID, and a `kind`. Normal
+progress is `BLOCK`; a fork first produces one typed `REORG` event whose `reorg` object is a
+versioned V1 envelope: occurrence ID, common ancestor, ordered orphaned/replacement lineages,
+severity (`ROUTINE`, `UNRESOLVED_ANCESTRY`, or `FINALITY_VIOLATION`), and observation time. Legacy
+per-event `RETRACTION`s follow for compatibility. Registerwerk applies a typed routine episode as
+one ordered compensation saga in reverse journal order, deduplicates the following legacy
+retractions by episode ID, and acknowledges only after the whole local transaction succeeds. A
+compensation failure leaves the cursor unacknowledged and quarantines the affected chain scope;
+unresolved ancestry or a finalized-history violation is quarantined immediately and never applied
+as an ordinary rollback. This is what makes detection and correction gap-free and push-based: a
+missed event is replayed on reconnect rather than silently lost.
 
 The plain-RPC reorg-detection path (`ReorgGuard`, described in
 [Indexer Resilience](../indexers/resilience.md)) is untouched and still runs for every
@@ -221,7 +230,7 @@ image tag.
 
 ### Production checklist
 
-- `chaincache.runtime.identity-validation-required: true`, with `expected-chain-id` set as
+- `chaincache.rpc.identity-validation-required: true`, with `expected-chain-id` set as
   `0x`-prefixed hex for every configured chain — an unvalidated or misconfigured chain identity
   means a workload could silently serve the wrong chain's data.
 - `chaincache.cache.local-snapshot-enabled: false` and `chaincache.request.local-stats-enabled:

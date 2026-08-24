@@ -57,7 +57,7 @@ class RpcNodeServiceTest {
 
     private static ChaincacheClient.ChainCapabilitiesProbe probe() {
         return new ChaincacheClient.ChainCapabilitiesProbe(
-                "anvil", "INSTANT", 0L, 0L, List.of("eth", "debug"), true,
+                "anvil", "shared-db", "INSTANT", 0L, 0L, List.of("eth", "debug"), true,
                 new ChaincacheClient.AddressTraceCapability(true, true, "2026-08-21T22:00:00Z"), true, false,
                 1, 1);
     }
@@ -94,6 +94,7 @@ class RpcNodeServiceTest {
         assertThat(node.getKind()).isEqualTo(RpcNode.NodeKind.CHAINCACHE);
         assertThat(node.getManagementUrl()).isEqualTo("http://chaincache:8080");
         assertThat(node.getRemoteChainKey()).isEqualTo("anvil");
+        assertThat(node.getCapabilities()).containsEntry("durabilityDomainId", "shared-db");
         assertThat(node.getCapabilities()).containsEntry("finalityModel", "INSTANT");
         assertThat(node.getCapabilities()).containsEntry("durableStreamAvailable", true);
     }

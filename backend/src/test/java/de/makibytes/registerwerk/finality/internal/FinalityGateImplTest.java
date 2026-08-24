@@ -30,13 +30,14 @@ class FinalityGateImplTest {
 
     @Mock private FinalityPolicyService policyService;
     @Mock private ChainEffectRepository chainEffectRepository;
+    @Mock private ChainQuarantineStore chainQuarantineStore;
 
     private FinalityGateImpl gate;
     private final UUID assetId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        gate = new FinalityGateImpl(policyService, chainEffectRepository);
+        gate = new FinalityGateImpl(policyService, chainEffectRepository, chainQuarantineStore);
         // Both stubbed leniently: nullAssetId_skipsUnresolvedCompensationCheck calls check() with a
         // different (null) assetId, so neither this policyService stub nor the chainEffectRepository
         // one below is exercised by that test — lenient() avoids Mockito flagging them unnecessary.
@@ -89,6 +90,19 @@ class FinalityGateImplTest {
         FinalityDecision.Blocked blocked = (FinalityDecision.Blocked) decision;
         assertThat(blocked.reason()).isEqualTo(FinalityDecision.Blocked.Reason.UNRESOLVED_COMPENSATION);
         assertThat(blocked.currentLevel()).isEqualTo(FinalityLevel.FINALIZED);
+    }
+
+    @Test
+    @DisplayName("an asset scoped to an active chain quarantine is frozen regardless of finality")
+    void chainQuarantine_blocksAffectedAsset() {
+        when(chainQuarantineStore.isAssetAffected(assetId)).thenReturn(true);
+
+        FinalityDecision decision = gate.check(
+                GatedOperation.AUTHORITATIVE_BALANCE, assetId, TokenStandard.ERC20, FinalityLevel.FINALIZED);
+
+        assertThat(decision).isInstanceOf(FinalityDecision.Blocked.class);
+        assertThat(((FinalityDecision.Blocked) decision).reason())
+                .isEqualTo(FinalityDecision.Blocked.Reason.CHAIN_QUARANTINED);
     }
 
     @Test

@@ -20,7 +20,7 @@ import { LegalEntity } from '../../core/models';
   template: `
     <div class="page-header">
       <h1>My Clients</h1>
-      <button mat-stroked-button (click)="load()">
+      <button type="button" mat-stroked-button (click)="load()">
         <mat-icon>refresh</mat-icon> Refresh
       </button>
     </div>
@@ -66,7 +66,7 @@ import { LegalEntity } from '../../core/models';
           <ng-container matColumnDef="actions">
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let row">
-              <button mat-icon-button color="primary" (click)="$event.stopPropagation(); viewEntity(row)"
+              <button type="button" mat-icon-button color="primary" (click)="$event.stopPropagation(); viewEntity(row)"
                       [attr.aria-label]="'View ' + row.currentName">
                 <mat-icon>open_in_new</mat-icon>
               </button>
@@ -74,7 +74,10 @@ import { LegalEntity } from '../../core/models';
           </ng-container>
 
           <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-          <tr mat-row *matRowDef="let row; columns: displayedColumns;" style="cursor:pointer" (click)="viewEntity(row)"></tr>
+          <tr mat-row *matRowDef="let row; columns: displayedColumns;" class="interactive-row"
+              tabindex="0" [attr.aria-label]="'Open client ' + row.currentName"
+              (click)="viewEntity(row)" (keydown.enter)="viewEntity(row)"
+              (keydown.space)="viewEntity(row); $event.preventDefault()"></tr>
         </table>
         </div>
       }

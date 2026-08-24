@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.finality.api.ChainEffectCompensator;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecord;
+import de.makibytes.registerwerk.finality.api.BlockIdentity;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.finality.api.CompensationOutcome;
 import org.slf4j.Logger;
@@ -60,11 +61,13 @@ class AssetDeploymentRevertCompensator implements ChainEffectCompensator {
             return new CompensationOutcome.NotApplicable("AssetDeployment " + deploymentId
                     + " is no longer CONFIRMED (status=" + deployment.getDeploymentStatus() + ")");
         }
+        if (!sameIncarnation(effect, deployment)) {
+            return new CompensationOutcome.NotApplicable("AssetDeployment " + deploymentId
+                    + " is owned by a different confirmation incarnation");
+        }
 
-        log.error("AssetDeployment id={} was CONFIRMED at block={} but that block was retracted by a reorg "
-                        + "— reverting to PENDING for re-verification. Compensation runs at any reorg depth; "
-                        + "if this retraction reached an already-FINALIZED block, that is additionally a "
-                        + "consensus failure deeper than the configured confirmation policy guarantees.",
+        log.error("AssetDeployment id={} was CONFIRMED at block={} but that block was retracted by an "
+                        + "automatically-compensable routine reorg — reverting to PENDING for re-verification.",
                 deploymentId, deployment.getBlockNumber());
         deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
         deployment.setBlockHash(null);
@@ -74,5 +77,15 @@ class AssetDeploymentRevertCompensator implements ChainEffectCompensator {
 
         return new CompensationOutcome.Compensated(
                 "Reverted asset_deployment " + deploymentId + " to PENDING after retraction");
+    }
+
+    private static boolean sameIncarnation(ChainEffectRecord effect, AssetDeployment deployment) {
+        return java.util.Objects.equals(deployment.getChainConfigId(), effect.chainConfigId())
+                && deployment.getBlockNumber() != null
+                && deployment.getBlockNumber() == effect.blockNumber()
+                && deployment.getBlockHash() != null && effect.blockHash() != null
+                && BlockIdentity.sameHash(deployment.getBlockHash(), effect.blockHash())
+                && deployment.getDeployedByTx() != null && effect.txHash() != null
+                && BlockIdentity.sameHash(deployment.getDeployedByTx(), effect.txHash());
     }
 }

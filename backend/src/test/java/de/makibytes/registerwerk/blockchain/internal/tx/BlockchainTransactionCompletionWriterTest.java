@@ -17,6 +17,7 @@ import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -60,7 +61,7 @@ class BlockchainTransactionCompletionWriterTest {
         writer.complete(tx, receipt);
 
         ArgumentCaptor<ChainEffectDescriptor> captor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
-        verify(chainEffectRecorder).record(captor.capture());
+        verify(chainEffectRecorder).recordFinalized(captor.capture());
         ChainEffectDescriptor descriptor = captor.getValue();
         assertThat(descriptor.chainConfigId()).isEqualTo(chainConfigId);
         assertThat(descriptor.blockNumber()).isEqualTo(100L);
@@ -80,20 +81,23 @@ class BlockchainTransactionCompletionWriterTest {
 
         writer.complete(tx, receipt);
 
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test
-    @DisplayName("a SUCCESS completion with no resolved chainConfigId is silently skipped, not an error")
-    void successWithoutChainConfigIdIsSkipped() {
+    @DisplayName("a SUCCESS completion with no resolved chainConfigId fails closed")
+    void successWithoutChainConfigIdFailsClosed() {
         BlockchainTransaction tx = pendingTx(null);
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setStatus("0x1");
         receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100");
         receipt.setGasUsed("0x5208");
 
-        writer.complete(tx, receipt);
+        assertThatThrownBy(() -> writer.complete(tx, receipt))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("provenance");
 
-        verify(chainEffectRecorder, never()).record(any());
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 }

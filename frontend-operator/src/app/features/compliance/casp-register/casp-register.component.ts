@@ -80,12 +80,12 @@ const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
     <app-page-header
       title="CASP Authorization Register"
       subtitle="MiCA Reg (EU) 2023/1114 — counterparty authorization status for Travel Rule transfers">
-      <button mat-stroked-button (click)="csvInput.click()"
+      <button type="button" mat-stroked-button (click)="csvInput.click()"
               matTooltip="Import a CSV export of the ESMA MiCA register (columns: legal_name, vasp_did or lei, status, …)">
         <mat-icon>upload_file</mat-icon>
         Import CSV
       </button>
-      <button mat-raised-button color="primary" (click)="openUpsertDialog()">
+      <button type="button" mat-raised-button color="primary" (click)="openUpsertDialog()">
         <mat-icon>add</mat-icon>
         Add Counterparty
       </button>
@@ -139,12 +139,12 @@ const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
     </rw-data-table>
 
     <ng-template #rowActions let-entry>
-      <button mat-icon-button color="primary"
+      <button type="button" mat-icon-button color="primary"
               (click)="openUpsertDialog(entry)"
               matTooltip="Edit entry">
         <mat-icon>edit</mat-icon>
       </button>
-      <button mat-icon-button color="warn"
+      <button type="button" mat-icon-button color="warn"
               (click)="remove(entry)"
               matTooltip="Delete entry">
         <mat-icon>delete_outline</mat-icon>
@@ -171,7 +171,7 @@ const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
         }
       </mat-dialog-content>
       <mat-dialog-actions align="end">
-        <button mat-raised-button color="primary" mat-dialog-close>Close</button>
+        <button type="button" mat-raised-button color="primary" mat-dialog-close>Close</button>
       </mat-dialog-actions>
     </ng-template>
 
@@ -229,8 +229,8 @@ const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions align="end">
-        <button mat-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!form.vaspDid.trim() || !form.legalName.trim() || saving"
                 (click)="save()">
           {{ saving ? 'Saving…' : 'Save' }}

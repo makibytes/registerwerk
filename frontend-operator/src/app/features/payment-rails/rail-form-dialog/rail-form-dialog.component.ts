@@ -138,12 +138,12 @@ interface ChainAddressRow {
             <mat-label>Contract address</mat-label>
             <input matInput [(ngModel)]="row.tokenAddress" placeholder="0x…" />
           </mat-form-field>
-          <button mat-icon-button (click)="removeChainRow($index)" matTooltip="Remove">
+          <button type="button" mat-icon-button (click)="removeChainRow($index)" matTooltip="Remove">
             <mat-icon>delete</mat-icon>
           </button>
         </div>
       }
-      <button mat-stroked-button (click)="addChainRow()" style="align-self:flex-start">
+      <button type="button" mat-stroked-button (click)="addChainRow()" style="align-self:flex-start">
         <mat-icon>add</mat-icon>
         Add chain address
       </button>
@@ -156,8 +156,8 @@ interface ChainAddressRow {
       <p class="hint-text">Off-chain rails (Pontes API, SEPA) need no chain address.</p>
     </mat-dialog-content>
     <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-      <button mat-stroked-button mat-dialog-close>Cancel</button>
-      <button mat-raised-button color="primary" [disabled]="!isValid()" (click)="submit()">
+      <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+      <button type="button" mat-raised-button color="primary" [disabled]="!isValid()" (click)="submit()">
         <mat-icon>save</mat-icon>
         {{ isEdit ? 'Save changes' : 'Create rail' }}
       </button>

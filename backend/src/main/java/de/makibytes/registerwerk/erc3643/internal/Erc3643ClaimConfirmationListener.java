@@ -6,12 +6,12 @@ import de.makibytes.registerwerk.erc3643.api.OnchainClaimRepository;
 import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
+import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -28,10 +28,11 @@ import java.util.Optional;
  * <p>Issuance confirmations are journaled via {@link ChainEffectRecorder} — a reorg deep enough to
  * retract the confirming {@code addClaim} block flips {@link OnchainClaim#isConfirmed()} back to
  * {@code false} (see {@link OnchainClaimRevertCompensator}), immediately excluding the claim from
- * {@code ClaimIssuanceService#getActiveClaims} again. Revocation confirmations are deliberately
- * <b>not</b> journaled: unlike a stale deposit cap, a stale-but-retracted revocation is fail-safe
- * (the claim simply stays excluded from compliance a little longer than strictly necessary) rather
- * than fail-open, so there is no compensator for it — see {@link #resolveRevocation}.
+ * {@code ClaimIssuanceService#getActiveClaims} again. Revocations are journaled independently:
+ * their chain-derived {@code revokedAt} and confirmation provenance are reverted, while the
+ * submitted {@code revocationTxHash} remains as fail-closed intent. The claim therefore stays
+ * excluded while the transaction awaits a new canonical verdict; only a confirmed failed receipt
+ * clears that marker and restores the claim.
  */
 @Component
 class Erc3643ClaimConfirmationListener {
@@ -41,30 +42,32 @@ class Erc3643ClaimConfirmationListener {
     private final OnchainClaimRepository claimRepository;
     private final BlockchainTransactionService blockchainTransactionService;
     private final ChainEffectRecorder chainEffectRecorder;
+    private final IsolatedTransactionExecutor isolatedTransactions;
 
     Erc3643ClaimConfirmationListener(
             OnchainClaimRepository claimRepository,
             BlockchainTransactionService blockchainTransactionService,
-            ChainEffectRecorder chainEffectRecorder) {
+            ChainEffectRecorder chainEffectRecorder,
+            IsolatedTransactionExecutor isolatedTransactions) {
         this.claimRepository = claimRepository;
         this.blockchainTransactionService = blockchainTransactionService;
         this.chainEffectRecorder = chainEffectRecorder;
+        this.isolatedTransactions = isolatedTransactions;
     }
 
     @SchedulerLock(name = "erc3643ClaimConfirmationListener", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
     @Scheduled(fixedDelay = 30_000, initialDelay = 45_000)
-    @Transactional
     public void resolvePending() {
         for (OnchainClaim claim : claimRepository.findByTxHashIsNotNullAndConfirmedFalse()) {
             try {
-                resolveIssuance(claim);
+                isolatedTransactions.run(() -> resolveIssuance(claim));
             } catch (Exception e) {
                 log.warn("Failed to resolve issuance for OnchainClaim={}: {}", claim.getId(), e.getMessage());
             }
         }
         for (OnchainClaim claim : claimRepository.findByRevocationTxHashIsNotNullAndRevokedAtIsNull()) {
             try {
-                resolveRevocation(claim);
+                isolatedTransactions.run(() -> resolveRevocation(claim));
             } catch (Exception e) {
                 log.warn("Failed to resolve revocation for OnchainClaim={}: {}", claim.getId(), e.getMessage());
             }
@@ -91,9 +94,10 @@ class Erc3643ClaimConfirmationListener {
         claim.setConfirmed(true);
         claim.setChainConfigId(location.get().chainConfigId());
         claim.setBlockNumber(location.get().blockNumber());
+        claim.setBlockHash(location.get().blockHash());
         claimRepository.save(claim);
 
-        chainEffectRecorder.record(ChainEffectDescriptor.of(
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
                 location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "erc3643", OnchainClaimRevertCompensator.EFFECT_TYPE,
                 "OnchainClaim", claim.getId(), null,
@@ -106,6 +110,9 @@ class Erc3643ClaimConfirmationListener {
             log.warn("OnchainClaim={} removeClaim tx={} failed on-chain; clearing so revocation can be resubmitted.",
                     claim.getId(), txHash);
             claim.setRevocationTxHash(null);
+            claim.setRevocationChainConfigId(null);
+            claim.setRevocationBlockNumber(null);
+            claim.setRevocationBlockHash(null);
             claimRepository.save(claim);
             return;
         }
@@ -115,7 +122,14 @@ class Erc3643ClaimConfirmationListener {
             return;
         }
         claim.setRevokedAt(Instant.now());
+        claim.setRevocationChainConfigId(location.get().chainConfigId());
+        claim.setRevocationBlockNumber(location.get().blockNumber());
+        claim.setRevocationBlockHash(location.get().blockHash());
         claimRepository.save(claim);
-        // Deliberately not journaled via ChainEffectRecorder — see class javadoc.
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
+                "erc3643", OnchainClaimRevocationRevertCompensator.EFFECT_TYPE,
+                "OnchainClaim", claim.getId(), null,
+                CompensationCategory.INVERSE_FLIP));
     }
 }

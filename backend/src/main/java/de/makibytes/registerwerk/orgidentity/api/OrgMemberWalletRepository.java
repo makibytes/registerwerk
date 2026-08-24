@@ -34,13 +34,18 @@ public interface OrgMemberWalletRepository extends JpaRepository<OrgMemberWallet
 
     long countByOrgRegistrationIdAndStatus(UUID orgRegistrationId, MemberWalletStatus status);
 
-    /** The live (pending or active) binding of a wallet on a chain, if any. */
+    /**
+     * A binding that may still exist on-chain. Pending/failed removal is intentionally included
+     * for uniqueness, while authorization callers still require {@code status == ACTIVE}.
+     */
     @Query("""
             SELECT w FROM OrgMemberWallet w
             WHERE w.chainConfigId = :chainConfigId
               AND lower(w.walletAddress) = lower(:walletAddress)
               AND w.status IN (de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus.PENDING,
-                               de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus.ACTIVE)
+                               de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus.ACTIVE,
+                               de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus.REMOVAL_PENDING,
+                               de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus.REMOVAL_FAILED)
             """)
     Optional<OrgMemberWallet> findLiveBinding(
             @Param("chainConfigId") UUID chainConfigId,

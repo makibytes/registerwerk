@@ -1,0 +1,17 @@
+{{- if .Values.monitoring.googleManagedPrometheus }}
+{{- $ctx := dict "context" . "component" "backend" }}
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: {{ include "registerwerk.fullname" . }}
+  labels:
+    {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: {{ .Values.monitoring.interval }}
+{{- end }}

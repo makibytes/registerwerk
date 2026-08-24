@@ -96,18 +96,18 @@ import {
     <app-page-header
       [title]="org?.entityName ?? 'Organization'"
       subtitle="Onchain organization, member wallets and status">
-      <button mat-stroked-button routerLink="/organizations">
+      <button type="button" mat-stroked-button routerLink="/organizations">
         <mat-icon>arrow_back</mat-icon>
         All organizations
       </button>
       @if (org?.status === 'ACTIVE') {
-        <button mat-raised-button color="warn" (click)="suspend()">
+        <button type="button" mat-raised-button color="warn" (click)="suspend()">
           <mat-icon>block</mat-icon>
           Suspend
         </button>
       }
       @if (org?.status === 'SUSPENDED') {
-        <button mat-raised-button color="primary" (click)="reinstate()">
+        <button type="button" mat-raised-button color="primary" (click)="reinstate()">
           <mat-icon>restart_alt</mat-icon>
           Reinstate
         </button>
@@ -157,7 +157,7 @@ import {
 
     <ng-template #walletActions let-wallet>
       @if (wallet.status === 'ACTIVE' || wallet.status === 'PENDING') {
-        <button mat-icon-button color="warn" (click)="removeWallet(wallet)"
+        <button type="button" mat-icon-button color="warn" (click)="removeWallet(wallet)"
                 matTooltip="Unbind wallet from organization">
           <mat-icon>link_off</mat-icon>
         </button>
@@ -180,8 +180,8 @@ import {
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn" [disabled]="!suspendReason.trim()"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn" [disabled]="!suspendReason.trim()"
                 (click)="confirmSuspend()">
           <mat-icon>block</mat-icon>
           Suspend

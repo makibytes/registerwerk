@@ -179,11 +179,12 @@ interface OnchainIdentityView {
   `],
   template: `
     <div class="back-row">
-      <button mat-button (click)="goBack()">
+      <button type="button" mat-button (click)="goBack()">
         <mat-icon>arrow_back</mat-icon>
         Back to Customers
       </button>
     </div>
+    <h1 class="sr-only">Customer details</h1>
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
@@ -204,24 +205,24 @@ interface OnchainIdentityView {
         <div class="entity-actions">
           @if (canMutate) {
           @if (entity.status === 'ACTIVE') {
-            <button mat-stroked-button color="warn" (click)="suspend()">Suspend</button>
+            <button type="button" mat-stroked-button color="warn" (click)="suspend()">Suspend</button>
           }
           @if (entity.status === 'SUSPENDED') {
-            <button mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
+            <button type="button" mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
           }
           @if (entity.status !== 'DISSOLVED') {
-            <button mat-stroked-button color="warn" (click)="dissolve()">Dissolve</button>
+            <button type="button" mat-stroked-button color="warn" (click)="dissolve()">Dissolve</button>
           }
           @if (entity.status !== 'CLOSED' && entity.status !== 'DISSOLVED') {
-            <button mat-stroked-button color="warn" (click)="terminate()" matTooltip="End the customer relationship: disables users, cancels open listings, revokes admin grants, moves to CLOSED. Requires step-up + a second approver.">
+            <button type="button" mat-stroked-button color="warn" (click)="terminate()" matTooltip="End the customer relationship: disables users, cancels open listings, revokes admin grants, moves to CLOSED. Requires step-up + a second approver.">
               Terminate
             </button>
           }
-          <button mat-raised-button color="primary" (click)="generateToken()">
+          <button type="button" mat-raised-button color="primary" (click)="generateToken()">
             <mat-icon>key</mat-icon>
             Onboarding Token
           </button>
-          <button mat-stroked-button (click)="openAsCompany()" matTooltip="Open this company in the customer portal as an admin">
+          <button type="button" mat-stroked-button (click)="openAsCompany()" matTooltip="Open this company in the customer portal as an admin">
             <mat-icon>open_in_new</mat-icon>
             Open as Company
           </button>
@@ -275,17 +276,17 @@ interface OnchainIdentityView {
                     <div style="display:flex;gap:8px;align-items:center">
                       <input matInput [(ngModel)]="rmIdInput" placeholder="Staff user ID (blank to clear)"
                              style="border:1px solid var(--rw-border);border-radius:4px;padding:4px 8px;font-size:13px;width:220px" />
-                      <button mat-icon-button color="primary" (click)="saveRelationshipManager()" matTooltip="Save">
+                      <button type="button" mat-icon-button color="primary" (click)="saveRelationshipManager()" matTooltip="Save">
                         <mat-icon>check</mat-icon>
                       </button>
-                      <button mat-icon-button (click)="editingRm = false" matTooltip="Cancel">
+                      <button type="button" mat-icon-button (click)="editingRm = false" matTooltip="Cancel">
                         <mat-icon>close</mat-icon>
                       </button>
                     </div>
                   } @else {
                     <code>{{ entity.assignedRelationshipManagerId ?? 'Unassigned' }}</code>
                     @if (canMutate) {
-                    <button mat-icon-button (click)="startEditRelationshipManager()" matTooltip="Assign relationship manager">
+                    <button type="button" mat-icon-button (click)="startEditRelationshipManager()" matTooltip="Assign relationship manager">
                       <mat-icon>edit</mat-icon>
                     </button>
                     }
@@ -303,7 +304,7 @@ interface OnchainIdentityView {
             <div class="kyc-actions">
               <label>
                 <input #fileInput type="file" style="display:none" (change)="onFileSelected($event)" />
-                <button mat-raised-button color="primary" (click)="fileInput.click()">
+                <button type="button" mat-raised-button color="primary" (click)="fileInput.click()">
                   <mat-icon>upload</mat-icon> Upload Document
                 </button>
               </label>
@@ -337,7 +338,7 @@ interface OnchainIdentityView {
                 <ng-container matColumnDef="actions">
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let doc">
-                    <button mat-icon-button (click)="downloadDoc(doc)" matTooltip="Download">
+                    <button type="button" mat-icon-button (click)="downloadDoc(doc)" matTooltip="Download">
                       <mat-icon>download</mat-icon>
                     </button>
                   </td>
@@ -414,17 +415,17 @@ interface OnchainIdentityView {
                     </div>
                   } @else {
                     <p style="font-size:12px;color:var(--rw-text-muted);margin-bottom:12px">
-                      <button mat-button (click)="loadCompliance(jur)">Load compliance checklist</button>
+                      <button type="button" mat-button (click)="loadCompliance(jur)">Load compliance checklist</button>
                     </p>
                   }
 
                   @if (canMutate) {
                   <div style="display:flex;gap:8px">
-                    <button mat-raised-button color="primary" (click)="approveJurisdiction(jur)"
+                    <button type="button" mat-raised-button color="primary" (click)="approveJurisdiction(jur)"
                             [disabled]="jurActionLoading[jur]">
                       <mat-icon>check_circle</mat-icon> Approve
                     </button>
-                    <button mat-stroked-button color="warn" (click)="rejectJurisdiction(jur)"
+                    <button type="button" mat-stroked-button color="warn" (click)="rejectJurisdiction(jur)"
                             [disabled]="jurActionLoading[jur]">
                       <mat-icon>cancel</mat-icon> Reject
                     </button>
@@ -481,7 +482,7 @@ interface OnchainIdentityView {
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let bo">
                     @if (canMutate) {
-                    <button mat-icon-button color="warn" matTooltip="Cease (mark no longer a beneficial owner)"
+                    <button type="button" mat-icon-button color="warn" matTooltip="Cease (mark no longer a beneficial owner)"
                             (click)="ceaseBeneficialOwner(bo)">
                       <mat-icon style="font-size:18px">person_remove</mat-icon>
                     </button>
@@ -540,7 +541,7 @@ interface OnchainIdentityView {
                 <mat-label>Source</mat-label>
                 <input matInput [(ngModel)]="uboForm.source" placeholder="e.g. Commercial register extract" />
               </mat-form-field>
-              <button mat-raised-button color="primary"
+              <button type="button" mat-raised-button color="primary"
                       [disabled]="!uboForm.givenName || !uboForm.familyName || uboSaving"
                       (click)="addBeneficialOwner()">
                 <mat-icon>person_add</mat-icon>
@@ -571,7 +572,7 @@ interface OnchainIdentityView {
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
               <strong>On-Chain Identities (ONCHAINID)</strong>
               @if (canMutate) {
-              <button mat-raised-button color="primary" (click)="deployIdentity()">
+              <button type="button" mat-raised-button color="primary" (click)="deployIdentity()">
                 <mat-icon>add</mat-icon> Deploy ONCHAINID
               </button>
               }
@@ -614,10 +615,10 @@ interface OnchainIdentityView {
                      </div>
                      @if (canMutate) {
                      <div style="display:flex;gap:8px">
-                       <button mat-stroked-button color="primary" (click)="issueKycClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
+                       <button type="button" mat-stroked-button color="primary" (click)="issueKycClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
                          <mat-icon>verified</mat-icon> Issue KYC Claim
                        </button>
-                       <button mat-stroked-button (click)="issueAmlClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
+                       <button type="button" mat-stroked-button (click)="issueAmlClaim(identity)" [disabled]="identity.syncStatus !== 'READY'">
                          Issue AML Claim
                        </button>
                      </div>
@@ -703,7 +704,7 @@ interface OnchainIdentityView {
                     <input matInput [(ngModel)]="mergeForm.notes" />
                   </mat-form-field>
                 </div>
-                <button mat-raised-button color="warn"
+                <button type="button" mat-raised-button color="warn"
                         [disabled]="!mergeForm.targetEntityId || !mergeForm.effectiveDate"
                         (click)="recordMerger()">
                   <mat-icon>call_merge</mat-icon>
@@ -725,7 +726,7 @@ interface OnchainIdentityView {
                 </div>
               </div>
               @if (canMutate) {
-                <button mat-stroked-button color="warn"
+                <button type="button" mat-stroked-button color="warn"
                         [routerLink]="'/compliance/holder-blocks'">
                   <mat-icon>gavel</mat-icon>
                   Manage Blocks
@@ -794,7 +795,7 @@ interface OnchainIdentityView {
                   <mat-label>Monthly cap (ETH)</mat-label>
                   <input matInput type="number" min="0" step="0.01" [(ngModel)]="gasMonthlyCapEth" />
                 </mat-form-field>
-                <button mat-raised-button color="primary" (click)="saveGasSponsorshipDefault()">
+                <button type="button" mat-raised-button color="primary" (click)="saveGasSponsorshipDefault()">
                   <mat-icon>save</mat-icon>
                   Set default
                 </button>
@@ -828,7 +829,7 @@ interface OnchainIdentityView {
                     <td mat-cell *matCellDef="let p">
                       {{ p.createdAt | date:'mediumDate' }}
                       @if (p.active && canMutate) {
-                        <button mat-icon-button color="warn" matTooltip="Deactivate" (click)="deactivateGasPolicy(p)">
+                        <button type="button" mat-icon-button color="warn" matTooltip="Deactivate" (click)="deactivateGasPolicy(p)">
                           <mat-icon style="font-size:18px">delete</mat-icon>
                         </button>
                       }
@@ -859,7 +860,7 @@ interface OnchainIdentityView {
                   <p style="font-size:12px;color:var(--rw-text-secondary)">
                     Current portfolio statement including all token holdings, balances and valuations.
                   </p>
-                  <button mat-stroked-button color="primary" (click)="downloadStatement()">
+                  <button type="button" mat-stroked-button color="primary" (click)="downloadStatement()">
                     <mat-icon>download</mat-icon>
                     Download Statement (PDF)
                   </button>
@@ -879,7 +880,7 @@ interface OnchainIdentityView {
                     <input matInput type="number" [(ngModel)]="taxCertYear"
                            [min]="2020" [max]="currentYear" />
                   </mat-form-field>
-                  <button mat-stroked-button color="primary" (click)="downloadTaxCert()">
+                  <button type="button" mat-stroked-button color="primary" (click)="downloadTaxCert()">
                     <mat-icon>download</mat-icon>
                     Download Certificate (PDF)
                   </button>
@@ -900,7 +901,7 @@ interface OnchainIdentityView {
                 </div>
               </div>
               @if (canMutate) {
-                <button mat-stroked-button color="primary"
+                <button type="button" mat-stroked-button color="primary"
                         (click)="reScreenEntity()"
                         [disabled]="screeningLoading">
                   <mat-icon>search</mat-icon>
@@ -935,13 +936,13 @@ interface OnchainIdentityView {
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let run">
                     @if (run.status === 'HIT') {
-                      <button mat-stroked-button color="warn" style="font-size:12px"
+                      <button type="button" mat-stroked-button color="warn" style="font-size:12px"
                               (click)="viewScreeningRun(run)">
                         <mat-icon style="font-size:16px;width:16px;height:16px">warning</mat-icon>
                         Review Hits
                       </button>
                     } @else {
-                      <button mat-icon-button (click)="viewScreeningRun(run)"
+                      <button type="button" mat-icon-button (click)="viewScreeningRun(run)"
                               matTooltip="View run details">
                         <mat-icon>open_in_new</mat-icon>
                       </button>

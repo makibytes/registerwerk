@@ -30,6 +30,7 @@ class IdentityRegistryRegistrationRevertCompensatorTest {
 
     private IdentityRegistryRegistrationRevertCompensator compensator;
     private final UUID id = UUID.randomUUID();
+    private final UUID chainConfigId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -37,7 +38,7 @@ class IdentityRegistryRegistrationRevertCompensatorTest {
     }
 
     private ChainEffectRecord effect() {
-        return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
+        return new ChainEffectRecord(UUID.randomUUID(), chainConfigId, 100L, "0xhash", "0xtxhash", null,
                 "erc3643", "ERC3643_IDENTITY_REGISTERED", "Erc3643IdentityRegistry", id, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
@@ -52,6 +53,11 @@ class IdentityRegistryRegistrationRevertCompensatorTest {
     void compensateSoftRemovesActiveEntry() {
         Erc3643IdentityRegistry entry = new Erc3643IdentityRegistry();
         entry.setWalletAddress("0xwallet");
+        entry.setChainConfigId(chainConfigId);
+        entry.setRegisteredByTx("0xtxhash");
+        entry.setRegistrationConfirmed(true);
+        entry.setRegistrationBlockNumber(100L);
+        entry.setRegistrationBlockHash("0xhash");
         when(repository.findById(id)).thenReturn(Optional.of(entry));
 
         CompensationOutcome outcome = compensator.compensate(effect());
@@ -72,6 +78,46 @@ class IdentityRegistryRegistrationRevertCompensatorTest {
 
         verify(repository, never()).save(any());
         assertThat(outcome).isInstanceOf(CompensationOutcome.NotApplicable.class);
+    }
+
+    @Test
+    void removalThenRegistrationLifoClearsRegistrationButPreservesPendingRemovalIntent() {
+        Erc3643IdentityRegistry entry = new Erc3643IdentityRegistry();
+        entry.setWalletAddress("0xwallet");
+        entry.setChainConfigId(chainConfigId);
+        entry.setRegisteredByTx("0xregister");
+        entry.setRegistrationConfirmed(true);
+        entry.setRegistrationBlockNumber(100L);
+        entry.setRegistrationBlockHash("0xregblock");
+        entry.setRemovedAt(Instant.parse("2026-08-23T10:15:30Z"));
+        entry.setRemovedByTx("0xremove");
+        entry.setRemovalConfirmed(true);
+        entry.setRemovalBlockNumber(101L);
+        entry.setRemovalBlockHash("0xremoveblock");
+        when(repository.findById(id)).thenReturn(Optional.of(entry));
+
+        ChainEffectRecord removalEffect = new ChainEffectRecord(
+                UUID.randomUUID(), chainConfigId, 101L, "0xremoveblock", "0xremove", null,
+                "erc3643", "ERC3643_IDENTITY_REMOVED", "Erc3643IdentityRegistry", id, null,
+                CompensationCategory.INVERSE_FLIP, null, null, null, null,
+                "COMPENSATING", 1, Instant.now());
+        ChainEffectRecord registrationEffect = new ChainEffectRecord(
+                UUID.randomUUID(), chainConfigId, 100L, "0xregblock", "0xregister", null,
+                "erc3643", "ERC3643_IDENTITY_REGISTERED", "Erc3643IdentityRegistry", id, null,
+                CompensationCategory.INVERSE_FLIP, null, null, null, null,
+                "COMPENSATING", 1, Instant.now());
+
+        new IdentityRegistryRemovalRevertCompensator(repository).compensate(removalEffect);
+        Instant pendingRemovalAt = entry.getRemovedAt();
+        CompensationOutcome outcome = compensator.compensate(registrationEffect);
+
+        assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
+        assertThat(entry.isRegistrationConfirmed()).isFalse();
+        assertThat(entry.getRegistrationBlockNumber()).isNull();
+        assertThat(entry.getRegistrationBlockHash()).isNull();
+        assertThat(entry.getRemovedAt()).isEqualTo(pendingRemovalAt);
+        assertThat(entry.getRemovedByTx()).isEqualTo("0xremove");
+        assertThat(entry.isRemovalConfirmed()).isFalse();
     }
 
     @Test

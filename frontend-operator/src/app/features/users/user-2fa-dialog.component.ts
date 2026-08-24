@@ -166,7 +166,7 @@ const ACTION_TAP = 'ENTRA_TEMPORARY_ACCESS_PASS';
                 <li>
                   <span class="label">{{ m.label }}</span>
                   @if (m.isDefault) { <span class="default-chip">Default</span> }
-                  <button mat-icon-button
+                  <button type="button" mat-icon-button
                           [disabled]="!m.deletable || busy"
                           [matTooltip]="m.deletable ? 'Remove this method' : 'This method cannot be removed individually'"
                           (click)="removeMethod(m.type, m.id)">
@@ -181,13 +181,13 @@ const ACTION_TAP = 'ENTRA_TEMPORARY_ACCESS_PASS';
 
           <div class="section-title">Lost-phone recovery</div>
           <div class="action-row">
-            <button mat-stroked-button color="warn" [disabled]="busy" (click)="resetAll()">
+            <button type="button" mat-stroked-button color="warn" [disabled]="busy" (click)="resetAll()">
               <mat-icon>restart_alt</mat-icon> Reset all methods
             </button>
-            <button mat-stroked-button [disabled]="busy" (click)="revokeSessions()">
+            <button type="button" mat-stroked-button [disabled]="busy" (click)="revokeSessions()">
               <mat-icon>logout</mat-icon> Revoke sign-in sessions
             </button>
-            <button mat-flat-button color="primary"
+            <button type="button" mat-flat-button color="primary"
                     [disabled]="busy || !state.tapSupported"
                     [matTooltip]="state.tapSupported
                       ? 'Issue a one-time pass so the customer can sign in and re-register'
@@ -210,10 +210,10 @@ const ACTION_TAP = 'ENTRA_TEMPORARY_ACCESS_PASS';
                 Deliver it over a channel you have already verified. It is not stored anywhere
                 and cannot be shown again.
               </p>
-              <button mat-stroked-button (click)="copyTap()">
+              <button type="button" mat-stroked-button (click)="copyTap()">
                 <mat-icon>content_copy</mat-icon> Copy
               </button>
-              <button mat-stroked-button (click)="dismissTap()">
+              <button type="button" mat-stroked-button (click)="dismissTap()">
                 <mat-icon>check</mat-icon> I have delivered this
               </button>
             </div>
@@ -222,7 +222,7 @@ const ACTION_TAP = 'ENTRA_TEMPORARY_ACCESS_PASS';
       }
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Close</button>
+      <button type="button" mat-button mat-dialog-close>Close</button>
     </mat-dialog-actions>
   `,
 })

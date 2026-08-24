@@ -422,7 +422,7 @@ interface BuyForm {
                             </td>
                             <td>
                               @if (listing.status === 'OPEN' || listing.status === 'PARTIALLY_FILLED') {
-                                <button mat-button color="warn" (click)="cancelListing(listing.id)">Cancel</button>
+                                <button type="button" mat-button color="warn" (click)="cancelListing(listing.id)">Cancel</button>
                               }
                             </td>
                           </tr>
@@ -482,27 +482,27 @@ interface BuyForm {
                             <td class="mono">{{ trade.walletAddress }}</td>
                             <td class="actions-cell">
                               @if (trade.side === 'BUY' && trade.settlementStatus === 'PENDING') {
-                                <button mat-flat-button color="primary" (click)="openDeclarePaymentDialog(trade)">Declare payment</button>
+                                <button type="button" mat-flat-button color="primary" (click)="openDeclarePaymentDialog(trade)">Declare payment</button>
                               }
                               @if (trade.settlementStatus === 'PENDING') {
-                                <button mat-stroked-button (click)="openCancelDialog(trade)">Cancel</button>
+                                <button type="button" mat-stroked-button (click)="openCancelDialog(trade)">Cancel</button>
                               }
                               @if (trade.side === 'SELL' && trade.settlementStatus === 'AWAITING_SELLER_CONFIRMATION') {
-                                <button mat-flat-button color="primary" (click)="confirmPayment(trade.id)"
+                                <button type="button" mat-flat-button color="primary" (click)="confirmPayment(trade.id)"
                                         [matTooltip]="'Buyer declared payment reference: ' + trade.paymentReference">
                                   Confirm receipt
                                 </button>
-                                <button mat-stroked-button color="warn" (click)="openDisputeDialog(trade)">Dispute</button>
+                                <button type="button" mat-stroked-button color="warn" (click)="openDisputeDialog(trade)">Dispute</button>
                               }
                               @if (trade.side === 'BUY' && trade.settlementStatus === 'AWAITING_SELLER_CONFIRMATION') {
                                 <span class="dimmed small">Awaiting seller confirmation…</span>
                               }
                               @if (trade.settlementStatus === 'SETTLED') {
-                                <button mat-stroked-button (click)="downloadConfirmation(trade.id)">
+                                <button type="button" mat-stroked-button (click)="downloadConfirmation(trade.id)">
                                   <mat-icon>picture_as_pdf</mat-icon>
                                   Confirmation
                                 </button>
-                                <button mat-stroked-button (click)="downloadIso20022Confirmation(trade.id)"
+                                <button type="button" mat-stroked-button (click)="downloadIso20022Confirmation(trade.id)"
                                         matTooltip="Download an ISO 20022-shaped settlement confirmation XML for straight-through processing">
                                   <mat-icon>code</mat-icon>
                                   ISO 20022
@@ -545,7 +545,7 @@ interface BuyForm {
                   <div class="wallet-defaults">
                     <div class="wallet-defaults-header">
                       <h3>Wallet defaults</h3>
-                      <button mat-stroked-button (click)="addWalletDefault()">
+                      <button type="button" mat-stroked-button (click)="addWalletDefault()">
                         <mat-icon>add</mat-icon>
                         Add wallet default
                       </button>
@@ -591,7 +591,7 @@ interface BuyForm {
                           </mat-form-field>
                         }
 
-                        <button mat-icon-button color="warn" (click)="removeWalletDefault(walletDefault)">
+                        <button type="button" mat-icon-button color="warn" (click)="removeWalletDefault(walletDefault)">
                           <mat-icon>delete</mat-icon>
                         </button>
                       </div>
@@ -599,7 +599,7 @@ interface BuyForm {
                   </div>
                 </mat-card-content>
                 <mat-card-actions align="end">
-                  <button mat-flat-button color="primary" (click)="saveSettings()">Save settings</button>
+                  <button type="button" mat-flat-button color="primary" (click)="saveSettings()">Save settings</button>
                 </mat-card-actions>
               </mat-card>
 

@@ -156,17 +156,17 @@ type ReportMode = 'all' | 'kyc-overrides';
       <h1>Audit Log</h1>
       <div class="header-actions">
         @if (reportMode === 'all') {
-        <button mat-stroked-button (click)="exportEvents()">
+        <button type="button" mat-stroked-button (click)="exportEvents()">
           <mat-icon>download</mat-icon>
           Export (CSV)
         </button>
-        <button mat-stroked-button (click)="exportEventsSigned()"
+        <button type="button" mat-stroked-button (click)="exportEventsSigned()"
                 matTooltip="CSV with per-row hash-chain columns, Ed25519-signed for independent verification">
           <mat-icon>verified</mat-icon>
           Signed export
         </button>
         }
-        <button mat-stroked-button (click)="clearFilters()">
+        <button type="button" mat-stroked-button (click)="clearFilters()">
           <mat-icon>clear</mat-icon>
           Clear Filters
         </button>
@@ -194,7 +194,7 @@ type ReportMode = 'all' | 'kyc-overrides';
           <div class="chain-status-detail">{{ chainStatus.rowsChecked }} rows checked before failure — checked {{ chainStatus.checkedAt | date:'short' }}</div>
         }
       </div>
-      <button mat-stroked-button (click)="verifyChainNow()" [disabled]="verifyingChain">
+      <button type="button" mat-stroked-button (click)="verifyChainNow()" [disabled]="verifyingChain">
         <mat-icon>{{ verifyingChain ? 'hourglass_empty' : 'refresh' }}</mat-icon>
         {{ verifyingChain ? 'Verifying…' : 'Verify now' }}
       </button>

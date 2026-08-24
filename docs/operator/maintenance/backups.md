@@ -70,7 +70,7 @@ reasonable alternatives if you'd rather not run WAL-G directly.
 Test your backup and restore procedure at least monthly. `scripts/dr-restore-drill.sh` automates
 this against the Docker Compose path end to end (pg_dump → restore into a disposable container →
 row-count comparison → optionally `--verify-audit-chain`, see
-[the DR runbook](../dr/runbook.md#2b-restore-from-pg_dump-fallback--rpo--last-dump)) — prefer it
+[the DR runbook](../dr/runbook.md#2b-restore-from-pg_dump-fallback-rpo-last-dump)) — prefer it
 over the manual steps below for anything beyond a one-off spot check:
 
 ```bash

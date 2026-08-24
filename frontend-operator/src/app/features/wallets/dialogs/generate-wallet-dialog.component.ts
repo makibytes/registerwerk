@@ -39,8 +39,8 @@ import { MatRadioModule } from '@angular/material/radio';
     </mat-dialog-content>
     <mat-dialog-actions style="padding: 0 24px 20px">
       <div class="actions">
-        <button mat-button mat-dialog-close>Cancel</button>
-        <button mat-flat-button color="primary" [disabled]="!name.trim()" (click)="submit()">Generate</button>
+        <button type="button" mat-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-flat-button color="primary" [disabled]="!name.trim()" (click)="submit()">Generate</button>
       </div>
     </mat-dialog-actions>
   `,

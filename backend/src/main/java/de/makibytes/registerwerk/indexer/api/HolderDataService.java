@@ -16,8 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -82,7 +80,7 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
     }
 
     /** Synchronizes holder balances for one asset from the indexed transfer history. */
-    @Transactional
+    @Transactional(noRollbackFor = UnmappedHolderIdentityException.class)
     public void syncHoldersFromBlockchain(UUID assetId) {
         List<AssetDeployment> deployments = deploymentRepository.findByAssetId(assetId);
         if (deployments.isEmpty()) {
@@ -125,7 +123,22 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
                     }
                 });
 
-        int created = 0;
+        List<String> unmappedWallets = balances.entrySet().stream()
+                .filter(entry -> entry.getValue().signum() > 0)
+                .map(Map.Entry::getKey)
+                .filter(wallet -> !existingByWallet.containsKey(wallet))
+                .sorted()
+                .toList();
+        if (!unmappedWallets.isEmpty()) {
+            // investor_id is mandatory register content and cannot be inferred from a transfer
+            // address alone.  The previous code built an AssetHolder without investorId, which
+            // failed at the NOT NULL/FK constraint after potentially modifying other holders in
+            // the same pass. Fail before any writes: reorg compensation then becomes
+            // COMPENSATION_FAILED and freezes the affected asset instead of publishing a
+            // partially reconciled securities register.
+            throw new UnmappedHolderIdentityException(assetId, unmappedWallets);
+        }
+
         int updated = 0;
         for (Map.Entry<String, BigDecimal> entry : balances.entrySet()) {
             BigDecimal balance = entry.getValue().max(BigDecimal.ZERO);
@@ -147,19 +160,6 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
                     updated++;
                     eventPublisher.publishEvent(new HolderBalanceSyncedEvent(holder.getId(), assetId, false, balance));
                 }
-            } else if (balance.signum() > 0) {
-                AssetHolder fresh = new AssetHolder();
-                fresh.setAssetId(assetId);
-                fresh.setWalletAddress(displayAddress.get(entry.getKey()));
-                fresh.setNominalAmount(balance);
-                fresh.setChainDerived(true);
-                Instant acquired = firstIncoming.get(entry.getKey());
-                fresh.setAcquisitionDate(acquired != null
-                        ? LocalDate.ofInstant(acquired, ZoneOffset.UTC)
-                        : LocalDate.now(ZoneOffset.UTC));
-                AssetHolder saved = assetHolderRepository.save(fresh);
-                created++;
-                eventPublisher.publishEvent(new HolderBalanceSyncedEvent(saved.getId(), assetId, true, balance));
             }
         }
 
@@ -182,9 +182,9 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
             }
         }
 
-        log.info("Holder sync for asset={}: {} deployments, {} transfers → {} holders created, "
-                        + "{} updated, {} zeroed (vanished from chain)",
-                assetId, deployments.size(), transferCount, created, updated, zeroed);
+        log.info("Holder sync for asset={}: {} deployments, {} transfers → {} holders updated, "
+                        + "{} zeroed (vanished from chain)",
+                assetId, deployments.size(), transferCount, updated, zeroed);
     }
 
     /** Manual refresh triggered by user action. */

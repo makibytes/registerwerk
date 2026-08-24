@@ -37,13 +37,25 @@ public class EcosystemTrustedIssuer {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
-    private MemberWalletStatus status = MemberWalletStatus.PENDING;
+    private TrustedIssuerStatus status = TrustedIssuerStatus.PENDING;
 
     @Column(name = "added_tx", length = 66)
     private String addedTx;
 
+    @Column(name = "added_block_number")
+    private Long addedBlockNumber;
+
+    @Column(name = "added_block_hash", length = 128)
+    private String addedBlockHash;
+
     @Column(name = "removed_tx", length = 66)
     private String removedTx;
+
+    @Column(name = "removed_block_number")
+    private Long removedBlockNumber;
+
+    @Column(name = "removed_block_hash", length = 128)
+    private String removedBlockHash;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
@@ -74,14 +86,26 @@ public class EcosystemTrustedIssuer {
     public UUID getLegalEntityId() { return legalEntityId; }
     public void setLegalEntityId(UUID legalEntityId) { this.legalEntityId = legalEntityId; }
 
-    public MemberWalletStatus getStatus() { return status; }
-    public void setStatus(MemberWalletStatus status) { this.status = status; }
+    public TrustedIssuerStatus getStatus() { return status; }
+    public void setStatus(TrustedIssuerStatus status) { this.status = status; }
 
     public String getAddedTx() { return addedTx; }
     public void setAddedTx(String addedTx) { this.addedTx = addedTx; }
 
+    public Long getAddedBlockNumber() { return addedBlockNumber; }
+    public void setAddedBlockNumber(Long addedBlockNumber) { this.addedBlockNumber = addedBlockNumber; }
+
+    public String getAddedBlockHash() { return addedBlockHash; }
+    public void setAddedBlockHash(String addedBlockHash) { this.addedBlockHash = addedBlockHash; }
+
     public String getRemovedTx() { return removedTx; }
     public void setRemovedTx(String removedTx) { this.removedTx = removedTx; }
+
+    public Long getRemovedBlockNumber() { return removedBlockNumber; }
+    public void setRemovedBlockNumber(Long removedBlockNumber) { this.removedBlockNumber = removedBlockNumber; }
+
+    public String getRemovedBlockHash() { return removedBlockHash; }
+    public void setRemovedBlockHash(String removedBlockHash) { this.removedBlockHash = removedBlockHash; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

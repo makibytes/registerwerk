@@ -38,7 +38,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     </rw-data-table>
 
     <ng-template #rowActions let-item>
-      <button mat-icon-button color="primary" (click)="openReview(item)" matTooltip="Review manifest">
+      <button type="button" mat-icon-button color="primary" (click)="openReview(item)" matTooltip="Review manifest">
         <mat-icon>rate_review</mat-icon>
       </button>
     </ng-template>

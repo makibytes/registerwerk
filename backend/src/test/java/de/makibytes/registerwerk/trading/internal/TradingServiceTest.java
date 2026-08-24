@@ -72,6 +72,7 @@ class TradingServiceTest {
     @Mock private de.makibytes.registerwerk.asset.api.InvestorLimitGate investorLimitGate;
     @Mock private ScreeningGate screeningGate;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private de.makibytes.registerwerk.finality.api.FinalityGate finalityGate;
 
     private TradingProperties tradingProperties;
     private TradingAssetTypeResolver tradingAssetTypeResolver;
@@ -92,7 +93,8 @@ class TradingServiceTest {
                 tradeListingRepository, tradeExecutionRepository, assetHolderRepository,
                 assetRepository, assetDeploymentRepository, endpointRepository,
                 List.of(venueAdapter), tradingAssetTypeResolver, eventPublisher,
-                legalEntityRepository, suitabilityAssessmentRepository, investorLimitGate, screeningGate, holderBlockGate);
+                legalEntityRepository, suitabilityAssessmentRepository, investorLimitGate, screeningGate,
+                holderBlockGate, finalityGate);
         lenient().when(tradeListingRepository.save(any(TradeListing.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(tradeExecutionRepository.save(any(TradeExecution.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(assetHolderRepository.save(any(AssetHolder.class))).thenAnswer(inv -> {
@@ -933,7 +935,28 @@ class TradingServiceTest {
         assertThat(execution.getSettledAt()).isNotNull();
         assertThat(execution.getBuyerHolderId()).isNotNull();
         assertThat(seller.getNominalAmount()).isEqualByComparingTo("47"); // 50 - 3
+        verify(finalityGate).require(
+                eq(de.makibytes.registerwerk.finality.api.GatedOperation.TRADE_SETTLEMENT_CONFIRM),
+                eq(ASSET_ID), any(), eq(de.makibytes.registerwerk.finality.api.FinalityLevel.FINALIZED));
         verify(eventPublisher).publishEvent(any(TradePaymentConfirmedEvent.class));
+    }
+
+    @Test
+    void confirmPaymentReceived_finalityFreezePreventsEitherBalanceMutation() {
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = awaitingConfirmationExecution();
+        when(tradeExecutionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+        AssetHolder seller = sellerHolder(BigDecimal.valueOf(50));
+        when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(seller));
+        doThrow(new IllegalStateException("unresolved compensation"))
+                .when(finalityGate).require(any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.confirmPaymentReceived(SELLER, UUID.randomUUID(), executionId))
+                .hasMessageContaining("unresolved compensation");
+
+        assertThat(seller.getNominalAmount()).isEqualByComparingTo("50");
+        verify(assetHolderRepository, never()).save(any());
+        verify(tradeExecutionRepository, never()).save(any());
     }
 
     @Test

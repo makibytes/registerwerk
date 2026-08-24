@@ -20,10 +20,10 @@ Registerwerk contiene implementaciones, integraciones o marcadores de posición 
 | [ERC-3643](erc3643.md) | EVM | Fungible + identidad | Valores regulados, acceso restringido | CONF_ERC3643 | Implementación presente; madurez no verificada |
 | [ERC-4626](erc4626.md) | EVM | Bóveda (síncrona) | Fondos monetarios, VL diario | — | Implementación presente; modelo económico/madurez no verificados |
 | [ERC-7540](erc7540.md) | EVM | Bóveda (asíncrona) | Fondos institucionales, T+1/T+2 | — | Implementación presente; modelo económico/madurez no verificados |
-| [DAML BOND FIXED](canton-daml.md) | Canton | Bono | Bonos a tipo fijo en libro privado | — | Implementación opcional (`-Pcanton`); madurez no verificada |
-| [DAML BOND FLOATING](canton-daml.md) | Canton | Bono | Bonos a tipo variable | — | Implementación opcional (`-Pcanton`); madurez no verificada |
-| [DAML BOND ZERO](canton-daml.md) | Canton | Bono | Bonos cupón cero | — | Implementación opcional (`-Pcanton`); madurez no verificada |
-| [CANTON_TOKEN](canton-daml.md) | Canton | Genérico | Activo digital basado en DAML | — | Implementación opcional (`-Pcanton`); madurez no verificada |
+| [DAML BOND FIXED](canton-daml.md) | Canton | Bono | Ciclo de vida a tipo fijo | — | Plantilla Daml propia; perfil verificado, conformidad live necesaria |
+| [DAML BOND FLOATING](canton-daml.md) | Canton | Bono | Ciclo de vida a tipo variable | — | Plantilla Daml propia; perfil verificado, conformidad live necesaria |
+| [DAML BOND ZERO](canton-daml.md) | Canton | Bono | Ciclo de vida cupón cero | — | Plantilla Daml propia; perfil verificado, conformidad live necesaria |
+| [CANTON_TOKEN](canton-daml.md) | Canton | Genérico | Activo CIP-0056 | — | Reservado; no desplegable hasta disponer de un adaptador específico del registro |
 | [SPL](../blockchains/solana.md) | Solana | Fungible | Tokens nativos de Solana | — | Integración presente; madurez no verificada |
 | [SPL_2022](spl-2022.md) | Solana | Fungible + ext. | Tokens de Solana extendidos | — | Integración presente; madurez no verificada |
 | [SPL_2022_BOND](spl-2022.md) | Solana | Fungible + intereses | Bonos con intereses en Solana | — | Integración presente; madurez no verificada |
@@ -70,6 +70,6 @@ El estándar elegido determina además qué operaciones de administración está
 | Bono con varios tramos / series | ERC-3525 | Modelo semifungible nativo de ranura + valor |
 | Participación de fondo con VL diario en EVM | ERC-4626 | Interfaz de bóveda normalizada |
 | Fondo institucional con reembolso T+1/T+2 | ERC-7540 | Modelo asíncrono de solicitud y reclamación |
-| Bono a tipo fijo en libro DAML privado | DAML_BOND_FIXED | Soporte nativo para el pago de cupones |
+| Bono a tipo fijo en libro Daml privado | DAML_BOND_FIXED | Ciclo de vida on-ledger; pago integrado por separado |
 | Valor que preserva la privacidad en EVM | CONF_ERC3643 | Zama fhEVM confidencial + regulado |
 | Bono con intereses en Solana | SPL_2022_BOND | Extensión Token-2022 con devengo de intereses |

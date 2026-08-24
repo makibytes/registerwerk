@@ -114,7 +114,8 @@ public class ConfidentialErc3643Service {
                     Collections.singletonList(new TypeReference<Address>() {})
             );
 
-            TransactionReceipt receipt = evmContractService.send(web3j, signer, factoryAddress, deploy);
+            TransactionReceipt receipt = evmContractService.send(
+                    evmContractService.chainConfigId(chain), web3j, signer, factoryAddress, deploy);
 
             String tokenAddress = ConfidentialTokenEvents.extractTokenAddress(receipt);
             log.info("Confidential ERC-3643 deployed: assetId={} → tokenAddress={} tx={}",

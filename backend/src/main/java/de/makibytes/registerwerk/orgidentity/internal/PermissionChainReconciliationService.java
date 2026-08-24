@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.orgidentity.api.PermissionGrant;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantRepository;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantStatus;
 import de.makibytes.registerwerk.orgidentity.api.PermissionGrantType;
+import de.makibytes.registerwerk.orgidentity.api.RoleRestrictionStatus;
 import de.makibytes.registerwerk.orgidentity.events.OrgChainDriftEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -125,18 +126,24 @@ class PermissionChainReconciliationService {
         // (restricted -> unrestricted) directly onchain is the single most dangerous drift of
         // the three this job watches for, since it silently widens who can act on this
         // permission without any operator/backend involvement at all.
+        // A pending transaction may already be mined but not finalized. Comparing that transient
+        // value to either the old confirmed value or the conservative effective value would emit
+        // a false drift alarm; the receipt poller owns this interval.
+        if (grant.getRoleRestrictionStatus() == RoleRestrictionStatus.CHANGE_PENDING) return;
+
         List<Type> restricted = txGateway.callPermissionRegistry(chain,
                 EcosystemAbi.isRoleRestricted(org.getOrgAddress(), definition.getCode()));
         if (restricted.isEmpty()) return;
         boolean onchainRestricted = ((Bool) restricted.get(0)).getValue();
-        if (onchainRestricted != grant.isRoleRestricted()) {
+        if (onchainRestricted != grant.isConfirmedRoleRestricted()) {
             driftCount.increment();
             log.warn("Drift: grant={} roleRestricted={} in DB but {} onchain (org={}, permission={})",
-                    grant.getId(), grant.isRoleRestricted(), onchainRestricted, org.getOrgAddress(), definition.getCode());
+                    grant.getId(), grant.isConfirmedRoleRestricted(), onchainRestricted,
+                    org.getOrgAddress(), definition.getCode());
             eventPublisher.publishEvent(new OrgChainDriftEvent(grant.getId(), "PermissionGrant", Map.of(
                     "permission", definition.getCode(),
                     "orgAddress", org.getOrgAddress(),
-                    "dbRoleRestricted", grant.isRoleRestricted(),
+                    "dbRoleRestricted", grant.isConfirmedRoleRestricted(),
                     "onchainRoleRestricted", onchainRestricted
             )));
         }

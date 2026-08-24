@@ -95,7 +95,7 @@ Cadenas EVM (Ethereum, Polygon, Base), Solana, Canton, StarkNet, Stellar y redes
 
 ### ¿Qué estándares de token se admiten?
 
-ERC-20, ERC-721, ERC-1155, ERC-3525, ERC-3643, ERC-4626, ERC-7540, sus variantes confidenciales, Solana SPL-2022 y bonos DAML Finance sobre Canton. Véase [Elegir un estándar de token](./issuers/token-standards.md) para orientarse.
+ERC-20, ERC-721, ERC-1155, ERC-3525, ERC-3643, ERC-4626, ERC-7540, sus variantes confidenciales, Solana SPL-2022 y las plantillas Daml de ciclo de vida de bonos de Registerwerk sobre Canton. El despliegue genérico `CANTON_TOKEN` está reservado, pero no implementado. Véase [Elegir un estándar de token](./issuers/token-standards.md) para orientarse.
 
 ### ¿Cómo accedo a la API?
 

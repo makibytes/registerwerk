@@ -209,12 +209,16 @@ registerwerk:
     # chaincache.auth.enabled: false). Deliberately a SEPARATE secret from JWT_DEV_SECRET — never
     # share a signing key across two products.
     jwt-secret: ${CHAINCACHE_JWT_SECRET:}
-    # Identifies this Registerwerk process to chaincache's durable-event consumerId (see
-    # blockchain.internal.ChaincacheDurableStreamManager) — must be stable across restarts of the
-    # SAME process/pod so its durable-stream cursor resumes rather than starting over, but distinct
-    # per replica under >1 instance so replicas don't share one cursor and silently split the
-    # event stream between them.
-    instance-id: ${HOSTNAME:registerwerk}
+    # Stable logical consumer group across pod recreation (see
+    # blockchain.internal.ChaincacheDurableStreamManager). Chaincache fences this identity with a
+    # database-backed lease, so one Registerwerk replica consumes while siblings remain warm
+    # standbys; using HOSTNAME here silently created a brand-new cursor after every pod rollout.
+    instance-id: ${REGISTERWERK_CHAINCACHE_CONSUMER_GROUP:registerwerk}
+    stream:
+      # A TCP-open socket is not a usable durable stream until every subscribe response arrives;
+      # likewise, an event is not safely resumable until chaincache confirms its cursor ACK.
+      subscribe-response-timeout-ms: ${CHAINCACHE_SUBSCRIBE_RESPONSE_TIMEOUT_MS:10000}
+      ack-response-timeout-ms: ${CHAINCACHE_ACK_RESPONSE_TIMEOUT_MS:10000}
   chains:
     ethereum:
       mainnet:

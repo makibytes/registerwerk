@@ -83,7 +83,7 @@ const LEVELS: FinalityLevel[] = ['SAFE', 'FINALIZED'];
             }
           </mat-select>
         </mat-form-field>
-        <button mat-flat-button color="primary" [disabled]="!canManage" (click)="saveGlobalProfile()">
+        <button type="button" mat-flat-button color="primary" [disabled]="!canManage" (click)="saveGlobalProfile()">
           Save
         </button>
       </div>
@@ -111,11 +111,11 @@ const LEVELS: FinalityLevel[] = ['SAFE', 'FINALIZED'];
                 </mat-form-field>
               </td>
               <td>
-                <button mat-icon-button matTooltip="Save" [disabled]="!canManage" (click)="saveTokenStandardProfile(standard)">
+                <button type="button" mat-icon-button matTooltip="Save" [disabled]="!canManage" (click)="saveTokenStandardProfile(standard)">
                   <mat-icon>save</mat-icon>
                 </button>
                 @if (tokenStandardAssignmentId[standard] && !tokenStandardProfiles[standard]) {
-                  <button mat-icon-button matTooltip="Remove assignment" [disabled]="!canManage" (click)="deleteTokenStandardAssignment(standard)">
+                  <button type="button" mat-icon-button matTooltip="Remove assignment" [disabled]="!canManage" (click)="deleteTokenStandardAssignment(standard)">
                     <mat-icon>delete_outline</mat-icon>
                   </button>
                 }
@@ -134,12 +134,12 @@ const LEVELS: FinalityLevel[] = ['SAFE', 'FINALIZED'];
           <mat-label>Asset ID</mat-label>
           <input matInput [(ngModel)]="lookupAssetId" placeholder="UUID" />
         </mat-form-field>
-        <button mat-stroked-button (click)="loadOverrides()" [disabled]="!lookupAssetId.trim()">
+        <button type="button" mat-stroked-button (click)="loadOverrides()" [disabled]="!lookupAssetId.trim()">
           <mat-icon>search</mat-icon>
           Load overrides
         </button>
         @if (canManage && overridesLoadedForAssetId) {
-          <button mat-flat-button color="primary" (click)="openCreateOverrideDialog()">
+          <button type="button" mat-flat-button color="primary" (click)="openCreateOverrideDialog()">
             <mat-icon>add</mat-icon>
             Add override
           </button>
@@ -162,7 +162,7 @@ const LEVELS: FinalityLevel[] = ['SAFE', 'FINALIZED'];
                   <td [matTooltip]="o.reason">{{ o.reason }}</td>
                   <td>{{ o.createdAt | date:'short' }}</td>
                   <td>
-                    <button mat-icon-button matTooltip="Delete override" [disabled]="!canManage" (click)="deleteOverride(o)">
+                    <button type="button" mat-icon-button matTooltip="Delete override" [disabled]="!canManage" (click)="deleteOverride(o)">
                       <mat-icon>delete_outline</mat-icon>
                     </button>
                   </td>
@@ -200,8 +200,8 @@ const LEVELS: FinalityLevel[] = ['SAFE', 'FINALIZED'];
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!overrideForm.operation || !overrideForm.requiredLevel || !overrideForm.reason.trim()"
                 (click)="submitCreateOverride()">
           <mat-icon>add</mat-icon>
@@ -267,7 +267,14 @@ export class FinalityPolicyComponent implements OnInit {
       next: (assignments) => this.applyAssignments(assignments),
       error: () => this.snackBar.open('Failed to load finality policy assignments.', 'Dismiss', { duration: 5000 }),
     });
-    this.service.listOperations().subscribe({ next: (ops) => (this.operations = ops) });
+    this.service.listOperations().subscribe({
+      next: (ops) => (this.operations = ops),
+      error: () => {
+        this.operations = [];
+        this.snackBar.open('Failed to load finality policy operations.', 'Dismiss', { duration: 5000 });
+        this.cdr.markForCheck();
+      },
+    });
   }
 
   private applyAssignments(assignments: FinalityPolicyAssignmentView[]): void {

@@ -24,6 +24,10 @@ import java.util.UUID;
  * — regardless of {@code currentLevel}, since the whole point is that a dashboard nobody watches
  * is not fail-closed. See {@code finality.web.FinalityJournalController} for the operator queue
  * that lists and acknowledges these.
+ *
+ * <p>A persisted chain quarantine is stricter still: every asset deployed on, or carrying effect
+ * provenance from, that chain is blocked with {@link FinalityDecision.Blocked.Reason#CHAIN_QUARANTINED}
+ * until an explicit operator-resolution workflow clears the active incident.
  */
 @Component
 class FinalityGateImpl implements FinalityGate {
@@ -33,16 +37,25 @@ class FinalityGateImpl implements FinalityGate {
 
     private final FinalityPolicyService policyService;
     private final ChainEffectRepository chainEffectRepository;
+    private final ChainQuarantineStore chainQuarantineStore;
 
-    FinalityGateImpl(FinalityPolicyService policyService, ChainEffectRepository chainEffectRepository) {
+    FinalityGateImpl(FinalityPolicyService policyService, ChainEffectRepository chainEffectRepository,
+            ChainQuarantineStore chainQuarantineStore) {
         this.policyService = policyService;
         this.chainEffectRepository = chainEffectRepository;
+        this.chainQuarantineStore = chainQuarantineStore;
     }
 
     @Override
     public FinalityDecision check(GatedOperation operation, UUID assetId, TokenStandard tokenStandard, FinalityLevel currentLevel) {
         FinalityLevel required = policyService.requiredLevel(operation, assetId, tokenStandard);
 
+        if (chainQuarantineStore.isAssetAffected(assetId)) {
+            return new FinalityDecision.Blocked(operation, assetId, required, currentLevel,
+                    FinalityDecision.Blocked.Reason.CHAIN_QUARANTINED,
+                    "A chain used by this asset is quarantined after a finality safety incident; "
+                            + "irreversible operations remain frozen pending explicit operator resolution.");
+        }
         if (currentLevel == FinalityLevel.ORPHANED) {
             return new FinalityDecision.Blocked(operation, assetId, required, currentLevel,
                     FinalityDecision.Blocked.Reason.ORPHANED,

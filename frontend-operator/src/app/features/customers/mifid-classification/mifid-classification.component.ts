@@ -31,7 +31,7 @@ import {
     <div class="mc-shell">
       <div class="mc-header">
         <h3 class="mc-title">MiFID II classification</h3>
-        <button mat-stroked-button (click)="load()">
+        <button type="button" mat-stroked-button (click)="load()">
           <mat-icon>refresh</mat-icon> Refresh
         </button>
       </div>
@@ -51,14 +51,14 @@ import {
               }
             </div>
           </div>
-          <button mat-raised-button color="primary" (click)="openClassifyDialog()">
+          <button type="button" mat-raised-button color="primary" (click)="openClassifyDialog()">
             {{ entity?.clientCategory ? 'Reclassify' : 'Classify client' }}
           </button>
         </div>
 
         <div class="mc-header" style="margin-top:2rem">
           <h3 class="mc-title">Suitability assessment history</h3>
-          <button mat-stroked-button color="primary" (click)="openAssessDialog()">
+          <button type="button" mat-stroked-button color="primary" (click)="openAssessDialog()">
             <mat-icon>add</mat-icon> New assessment
           </button>
         </div>
@@ -109,8 +109,8 @@ import {
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!selectedCategory" (click)="submitClassify()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" [disabled]="!selectedCategory" (click)="submitClassify()">
           Save classification
         </button>
       </mat-dialog-actions>
@@ -148,8 +148,8 @@ import {
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" (click)="submitAssess()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" (click)="submitAssess()">
           Save assessment
         </button>
       </mat-dialog-actions>

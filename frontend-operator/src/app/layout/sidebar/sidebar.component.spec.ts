@@ -80,7 +80,14 @@ describe('SidebarComponent', () => {
         const sections = fixture.componentInstance.visibleSections;
         expect(sections.map(section => section.label)).toEqual(['Overview', 'Registry', 'Compliance', 'Operations']);
         expect(sections.find(section => section.label === 'Compliance')?.items.map(item => item.label))
-            .toEqual(['Chain Drift', 'Support Tickets', 'Audit Log']);
+            .toEqual([
+              'Chain Drift',
+              'Unresolved Compensation',
+              'Finality Policy',
+              'Indexers',
+              'Support Tickets',
+              'Audit Log',
+            ]);
         expect(sections.find(section => section.label === 'Registry')?.items.map(item => item.label))
             .toEqual(['Assets', 'Customers', 'Registry']);
     });

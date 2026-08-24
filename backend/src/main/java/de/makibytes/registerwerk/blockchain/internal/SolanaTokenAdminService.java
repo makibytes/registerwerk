@@ -4,11 +4,10 @@ import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.finality.api.ChainSubmissionExecutor;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.AccountMeta;
@@ -63,16 +62,19 @@ public class SolanaTokenAdminService {
     private final BlockchainClientRegistry clientRegistry;
     private final WalletSigner walletSigner;
     private final ChainConfigRepository chainConfigRepository;
+    private final ChainSubmissionExecutor submissions;
 
     public SolanaTokenAdminService(
             AssetDeploymentRepository deploymentRepository,
             BlockchainClientRegistry clientRegistry,
             WalletSigner walletSigner,
-            ChainConfigRepository chainConfigRepository) {
+            ChainConfigRepository chainConfigRepository,
+            ChainSubmissionExecutor submissions) {
         this.deploymentRepository = deploymentRepository;
         this.clientRegistry       = clientRegistry;
         this.walletSigner         = walletSigner;
         this.chainConfigRepository = chainConfigRepository;
+        this.submissions = submissions;
     }
 
     // ── Forced transfer (eWpG §24) via Permanent Delegate ────────────────────
@@ -97,9 +99,10 @@ public class SolanaTokenAdminService {
                 deploymentId, fromTokenAccount, toTokenAccount, amount);
 
         AssetDeployment dep = requireDeployment(deploymentId);
-        return CompletableFuture.supplyAsync(() -> {
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                requireChainConfigId(dep), () -> {
             RpcClient client = solanaClient(dep);
-            Account payer = loadPayerAccount();
+            Account payer = loadPayerAccount(requireChainConfigId(dep));
             String mintAddress = dep.getContractAddress();
 
             // TransferChecked with permanent delegate authority
@@ -115,7 +118,7 @@ public class SolanaTokenAdminService {
             TransactionInstruction ix = new TransactionInstruction(new PublicKey(TOKEN_2022_PROGRAM_ID), accounts, data);
 
             return sendSingleIx(client, payer, ix);
-        });
+        }));
     }
 
     // ── Force burn (eWpG §26 Einziehung) via Permanent Delegate ──────────────
@@ -136,9 +139,10 @@ public class SolanaTokenAdminService {
                 deploymentId, tokenAccount, amount);
 
         AssetDeployment dep = requireDeployment(deploymentId);
-        return CompletableFuture.supplyAsync(() -> {
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                requireChainConfigId(dep), () -> {
             RpcClient client = solanaClient(dep);
-            Account payer = loadPayerAccount();
+            Account payer = loadPayerAccount(requireChainConfigId(dep));
             String mintAddress = dep.getContractAddress();
 
             // BurnChecked with permanent delegate authority
@@ -153,7 +157,7 @@ public class SolanaTokenAdminService {
             TransactionInstruction ix = new TransactionInstruction(new PublicKey(TOKEN_2022_PROGRAM_ID), accounts, data);
 
             return sendSingleIx(client, payer, ix);
-        });
+        }));
     }
 
     // ── Freeze / Thaw (via freeze authority) ─────────────────────────────────
@@ -161,25 +165,27 @@ public class SolanaTokenAdminService {
     public CompletableFuture<String> freezeTokenAccount(
             UUID deploymentId, String tokenAccount) {
         AssetDeployment dep = requireDeployment(deploymentId);
-        return CompletableFuture.supplyAsync(() -> {
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                requireChainConfigId(dep), () -> {
             RpcClient client = solanaClient(dep);
-            Account payer = loadPayerAccount();
+            Account payer = loadPayerAccount(requireChainConfigId(dep));
             return sendSingleIx(client, payer, buildFreezeOrThaw(
                     IX_FREEZE_ACCOUNT, new PublicKey(tokenAccount),
                     new PublicKey(dep.getContractAddress()), payer.getPublicKey()));
-        });
+        }));
     }
 
     public CompletableFuture<String> thawTokenAccount(
             UUID deploymentId, String tokenAccount) {
         AssetDeployment dep = requireDeployment(deploymentId);
-        return CompletableFuture.supplyAsync(() -> {
+        return CompletableFuture.supplyAsync(() -> submissions.execute(
+                requireChainConfigId(dep), () -> {
             RpcClient client = solanaClient(dep);
-            Account payer = loadPayerAccount();
+            Account payer = loadPayerAccount(requireChainConfigId(dep));
             return sendSingleIx(client, payer, buildFreezeOrThaw(
                     IX_THAW_ACCOUNT, new PublicKey(tokenAccount),
                     new PublicKey(dep.getContractAddress()), payer.getPublicKey()));
-        });
+        }));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -194,14 +200,30 @@ public class SolanaTokenAdminService {
     }
 
     private RpcClient solanaClient(AssetDeployment dep) {
-        return clientRegistry.getSolanaClient(new ChainDescriptor(Chain.SOLANA, dep.getNetwork()));
+        UUID chainConfigId = requireChainConfigId(dep);
+        ChainConfig chain = chainConfigRepository.findById(chainConfigId)
+                .filter(ChainConfig::isEnabled)
+                .filter(c -> c.getChainType() == ChainConfig.ChainType.SOLANA)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Enabled Solana chain config not found: " + chainConfigId));
+        return clientRegistry.getSolanaClientByIdentifier(chain.getIdentifier());
     }
 
-    private Account loadPayerAccount() {
-        return chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.SOLANA).stream()
-                .findFirst()
-                .map(c -> walletSigner.solanaAccountForChain(c.getId()))
-                .orElseThrow(() -> new IllegalStateException("No Solana wallet configured."));
+    private UUID requireChainConfigId(AssetDeployment deployment) {
+        if (deployment.getChainConfigId() == null) {
+            throw new IllegalStateException(
+                    "Solana deployment is missing chainConfigId: " + deployment.getId());
+        }
+        return deployment.getChainConfigId();
+    }
+
+    private Account loadPayerAccount(UUID chainConfigId) {
+        ChainConfig chain = chainConfigRepository.findById(chainConfigId)
+                .filter(ChainConfig::isEnabled)
+                .filter(c -> c.getChainType() == ChainConfig.ChainType.SOLANA)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Enabled Solana chain config not found: " + chainConfigId));
+        return walletSigner.solanaAccountForChain(chain.getId());
     }
 
     private String sendSingleIx(RpcClient client, Account payer, TransactionInstruction ix) {

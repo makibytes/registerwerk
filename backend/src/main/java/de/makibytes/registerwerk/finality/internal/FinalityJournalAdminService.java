@@ -1,7 +1,9 @@
 package de.makibytes.registerwerk.finality.internal;
 
 import de.makibytes.registerwerk.finality.api.CompensationOutcome;
+import de.makibytes.registerwerk.finality.api.QuarantineTrigger;
 import de.makibytes.registerwerk.finality.events.ChainEffectAcknowledgedEvent;
+import de.makibytes.registerwerk.finality.events.ChainQuarantineResolvedEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -27,12 +29,14 @@ public class FinalityJournalAdminService {
     private final ChainEffectRepository repository;
     private final CompensationDispatcher dispatcher;
     private final ApplicationEventPublisher eventPublisher;
+    private final ChainQuarantineStore quarantineStore;
 
     FinalityJournalAdminService(ChainEffectRepository repository, CompensationDispatcher dispatcher,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher, ChainQuarantineStore quarantineStore) {
         this.repository = repository;
         this.dispatcher = dispatcher;
         this.eventPublisher = eventPublisher;
+        this.quarantineStore = quarantineStore;
     }
 
     @Transactional(readOnly = true)
@@ -69,21 +73,61 @@ public class FinalityJournalAdminService {
      */
     @Transactional
     public ChainEffectView acknowledge(UUID chainEffectId, String reason, UUID actorId, String actorRole) {
-        ChainEffect row = repository.findById(chainEffectId)
-                .orElseThrow(() -> new EntityNotFoundException("ChainEffect", chainEffectId));
-        if (!UNRESOLVED_STATUSES.contains(row.getStatus())) {
+        Instant acknowledgedAt = Instant.now();
+        if (repository.acknowledgeIfUnresolved(chainEffectId, reason, actorId, acknowledgedAt) == 0) {
+            ChainEffect current = repository.findById(chainEffectId)
+                    .orElseThrow(() -> new EntityNotFoundException("ChainEffect", chainEffectId));
             throw new IllegalArgumentException(
-                    "ChainEffect " + chainEffectId + " is " + row.getStatus() + ", not an unresolved "
-                            + "compensation — nothing to acknowledge");
+                    "ChainEffect " + chainEffectId + " is " + current.getStatus()
+                            + (current.getAcknowledgedAt() == null ? "" : " and already acknowledged")
+                            + ", not an unacknowledged unresolved compensation");
         }
-        row.setAcknowledgedBy(actorId);
-        row.setAcknowledgedAt(Instant.now());
-        row.setAcknowledgeReason(reason);
-        ChainEffect saved = repository.save(row);
+        ChainEffect saved = repository.findById(chainEffectId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "ChainEffect " + chainEffectId + " vanished after acknowledgement"));
 
         eventPublisher.publishEvent(new ChainEffectAcknowledgedEvent(
                 saved.getId(), saved.getEffectType(), saved.getEntityType(), saved.getEntityId(),
                 saved.getAssetId(), reason, actorId, actorRole, Instant.now()));
         return ChainEffectView.of(saved);
+    }
+
+    /**
+     * Explicitly resolves a chain quarantine after every failed/irreversible effect on that chain
+     * has either compensated successfully or been individually acknowledged. A retry never
+     * auto-clears quarantine: the operator must review the complete incident and supply an audited
+     * reason before durable ingestion and organization authorization resume.
+     */
+    @Transactional
+    public void resolveQuarantine(UUID chainConfigId, String reason, UUID actorId, String actorRole) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Quarantine resolution reason is required");
+        }
+        quarantineStore.lockChain(chainConfigId);
+        var active = quarantineStore.findActive(chainConfigId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Chain " + chainConfigId + " has no active quarantine"));
+        if (requiresCanonicalReconciliation(active.trigger())) {
+            throw new IllegalStateException("Chain " + chainConfigId + " quarantine trigger "
+                    + active.trigger() + " requires explicit canonical-state reconciliation; "
+                    + "it cannot be cleared by the generic acknowledgement endpoint");
+        }
+        if (repository.existsByChainConfigIdAndStatusInAndAcknowledgedAtIsNull(
+                chainConfigId, UNRESOLVED_STATUSES)) {
+            throw new IllegalStateException("Chain " + chainConfigId
+                    + " still has unacknowledged failed or irreversible compensations");
+        }
+        Instant resolvedAt = Instant.now();
+        if (quarantineStore.resolve(chainConfigId, resolvedAt) != 1) {
+            throw new IllegalStateException("Chain quarantine changed concurrently for " + chainConfigId);
+        }
+        eventPublisher.publishEvent(new ChainQuarantineResolvedEvent(
+                chainConfigId, active.reorgId(), reason.strip(), actorId, actorRole, resolvedAt));
+    }
+
+    private static boolean requiresCanonicalReconciliation(QuarantineTrigger trigger) {
+        return trigger == QuarantineTrigger.CONSENSUS_FINALITY_VIOLATION
+                || trigger == QuarantineTrigger.UNRESOLVED_ANCESTRY
+                || trigger == QuarantineTrigger.LOCAL_FINALITY_CONFLICT;
     }
 }

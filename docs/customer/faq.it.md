@@ -95,7 +95,7 @@ Le chain EVM (Ethereum, Polygon, Base), Solana, Canton, StarkNet, Stellar e le r
 
 ### Quali standard di token sono supportati?
 
-ERC-20, ERC-721, ERC-1155, ERC-3525, ERC-3643, ERC-4626, ERC-7540, le loro varianti confidenziali, Solana SPL-2022 e le obbligazioni DAML Finance su Canton. Vedi [Scegliere uno standard di token](./issuers/token-standards.md) per orientarti.
+ERC-20, ERC-721, ERC-1155, ERC-3525, ERC-3643, ERC-4626, ERC-7540, le loro varianti confidenziali, Solana SPL-2022 e i modelli Daml di Registerwerk per il ciclo di vita obbligazionario su Canton. Il deployment generico `CANTON_TOKEN` è riservato ma non implementato. Vedi [Scegliere uno standard di token](./issuers/token-standards.md) per orientarti.
 
 ### Come accedo all'API?
 

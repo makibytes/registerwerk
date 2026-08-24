@@ -66,6 +66,10 @@ public class VaultRequest {
     @Column(name = "block_number")
     private Long blockNumber;
 
+    /** Exact block occurrence which produced the current resolution. */
+    @Column(name = "block_hash", length = 128)
+    private String blockHash;
+
     /** True once {@link VaultConfirmationListener} has confirmed whichever tx ({@link
      *  #fulfilledTx} or {@link #cancelledTx}) was submitted and applied the corresponding status
      *  transition. {@link #requestStatus} deliberately stays {@code PENDING} until then — see
@@ -120,6 +124,9 @@ public class VaultRequest {
 
     public Long getBlockNumber() { return blockNumber; }
     public void setBlockNumber(Long blockNumber) { this.blockNumber = blockNumber; }
+
+    public String getBlockHash() { return blockHash; }
+    public void setBlockHash(String blockHash) { this.blockHash = blockHash; }
 
     public boolean isConfirmed() { return confirmed; }
     public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }

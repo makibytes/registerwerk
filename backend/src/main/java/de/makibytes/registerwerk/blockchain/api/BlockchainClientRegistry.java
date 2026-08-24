@@ -169,6 +169,14 @@ public class BlockchainClientRegistry {
     // ── Legacy descriptor-based lookups ──────────────────────────────────────
 
     public Web3j getEvmClient(ChainDescriptor descriptor) {
+        String identifier = resolveIdentifier(descriptor, ChainConfig.ChainType.EVM);
+        if (identifier != null) {
+            try {
+                return getEvmClientByIdentifier(identifier);
+            } catch (IllegalArgumentException noDynamicClient) {
+                // Static descriptor clients remain a supported bootstrap fallback.
+            }
+        }
         Web3j client = staticEvmClients.get(descriptor);
         if (client == null) throw new IllegalArgumentException(
                 "No EVM client configured for chain descriptor: " + descriptor);
@@ -176,6 +184,14 @@ public class BlockchainClientRegistry {
     }
 
     public RpcClient getSolanaClient(ChainDescriptor descriptor) {
+        String identifier = resolveIdentifier(descriptor, ChainConfig.ChainType.SOLANA);
+        if (identifier != null) {
+            try {
+                return getSolanaClientByIdentifier(identifier);
+            } catch (IllegalArgumentException noDynamicClient) {
+                // Static descriptor clients remain a supported bootstrap fallback.
+            }
+        }
         RpcClient client = staticSolanaClients.get(descriptor);
         if (client == null) throw new IllegalArgumentException(
                 "No Solana client configured for chain descriptor: " + descriptor);
@@ -183,10 +199,37 @@ public class BlockchainClientRegistry {
     }
 
     public CantonLedgerEndpoint getCantonClient(ChainDescriptor descriptor) {
+        String identifier = resolveIdentifier(descriptor, ChainConfig.ChainType.CANTON);
+        if (identifier != null) {
+            try {
+                return getCantonClientByIdentifier(identifier);
+            } catch (IllegalArgumentException noDynamicClient) {
+                // Static descriptor clients remain a supported bootstrap fallback.
+            }
+        }
         CantonLedgerEndpoint client = staticCantonClients.get(descriptor);
         if (client == null) throw new IllegalArgumentException(
                 "No Canton client configured for chain descriptor: " + descriptor);
         return client;
+    }
+
+    private String resolveIdentifier(
+            ChainDescriptor descriptor, ChainConfig.ChainType expectedType) {
+        if (chainConfigRepository == null) {
+            return null;
+        }
+        List<ChainConfig> matches = chainConfigRepository
+                .findByIdentifierStartingWith(descriptor.chain().name() + "_").stream()
+                .filter(ChainConfig::isEnabled)
+                .filter(config -> config.getChainType() == expectedType)
+                .filter(config -> config.getNetworkType().name()
+                        .equals(descriptor.network().name()))
+                .toList();
+        if (matches.size() > 1) {
+            throw new IllegalStateException("Ambiguous enabled chain configuration for "
+                    + descriptor + ": " + matches.size() + " matches");
+        }
+        return matches.isEmpty() ? null : matches.getFirst().getIdentifier();
     }
 
     // ── Node pool refresh (called by health service) ──────────────────────────

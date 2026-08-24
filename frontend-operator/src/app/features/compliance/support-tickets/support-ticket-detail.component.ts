@@ -62,11 +62,12 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
   template: `
     <div class="page-container">
       <div class="back-row">
-        <button mat-button routerLink="/compliance/support-tickets">
+        <button type="button" mat-button routerLink="/compliance/support-tickets">
           <mat-icon>arrow_back</mat-icon>
           Back to Support Tickets
         </button>
       </div>
+      <h1 class="sr-only">Support ticket details</h1>
 
       @if (loading) {
         <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
@@ -90,23 +91,23 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
           @if (canManage) {
           <div class="ticket-actions">
             @if (!ticket.assignedTo || ticket.assignedTo !== myUserId) {
-              <button mat-stroked-button (click)="assignToMe()">
+              <button type="button" mat-stroked-button (click)="assignToMe()">
                 <mat-icon>person_add</mat-icon>
                 Assign to me
               </button>
             }
             @if (ticket.status === 'OPEN' || ticket.status === 'IN_PROGRESS') {
-              <button mat-stroked-button color="primary" (click)="openResolveDialog()">
+              <button type="button" mat-stroked-button color="primary" (click)="openResolveDialog()">
                 <mat-icon>check_circle</mat-icon>
                 Resolve
               </button>
-              <button mat-stroked-button color="warn" (click)="close()">
+              <button type="button" mat-stroked-button color="warn" (click)="close()">
                 <mat-icon>block</mat-icon>
                 Close
               </button>
             }
             @if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
-              <button mat-stroked-button (click)="reopen()">
+              <button type="button" mat-stroked-button (click)="reopen()">
                 <mat-icon>replay</mat-icon>
                 Reopen
               </button>
@@ -150,7 +151,7 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
             <mat-label>Reply</mat-label>
             <textarea matInput rows="2" [(ngModel)]="replyBody"></textarea>
           </mat-form-field>
-          <button mat-raised-button color="primary" [disabled]="!replyBody.trim() || sending" (click)="sendReply()">
+          <button type="button" mat-raised-button color="primary" [disabled]="!replyBody.trim() || sending" (click)="sendReply()">
             <mat-icon>send</mat-icon>
             Send
           </button>
@@ -173,8 +174,8 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!resolutionNotes.trim()" (click)="submitResolve()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" [disabled]="!resolutionNotes.trim()" (click)="submitResolve()">
           Resolve
         </button>
       </mat-dialog-actions>

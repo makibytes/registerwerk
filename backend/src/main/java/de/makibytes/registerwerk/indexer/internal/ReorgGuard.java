@@ -161,6 +161,16 @@ class ReorgGuard {
                     // configured finality guarantee and needs manual review.
                     boolean crossesFinalized = tokenTransferRepository.existsFinalizedAtOrAfter(chainConfigId, block);
                     boolean crossesSafe = tokenTransferRepository.existsSafeAtOrAfter(chainConfigId, block);
+                    List<String> storedHashes = tokenTransferRepository
+                            .findDistinctBlockHashesAt(chainConfigId, block);
+                    if (blockFinalityFeed.quarantineUnverifiableFinalizedRetraction(
+                            chainConfigId, block, storedHashes, outcome.identity())) {
+                        log.error("ReorgGuard: self-probe mismatch at chainConfigId={} block={} intersects "
+                                        + "locally finalized state; projections retained under chain quarantine",
+                                chainConfigId, block);
+                        reorgCrossesFinalizedCounter.increment();
+                        return new VerifyResult(promotedSafe, promotedFinalized, 0, block);
+                    }
                     int orphaned = tokenTransferRepository.markOrphanedFromBlock(chainConfigId, block);
                     compensateAffectedAssets(chainConfigId, block);
                     if (crossesFinalized) {
@@ -201,11 +211,12 @@ class ReorgGuard {
      *  additionally kicks in on these assets — it does, automatically, whenever a compensation here
      *  fails or escalates as irreversible. */
     private void compensateAffectedAssets(UUID chainConfigId, long forkBlock) {
+        UUID reorgOccurrenceId = UUID.randomUUID();
         for (UUID assetId : tokenTransferRepository.findDistinctAssetIdsAtOrAfter(chainConfigId, forkBlock)) {
-            ChainEffectDescriptor descriptor = ChainEffectDescriptor.of(
-                    chainConfigId, forkBlock, null, null,
+            ChainEffectDescriptor descriptor = new ChainEffectDescriptor(
+                    chainConfigId, forkBlock, null, null, null,
                     "indexer", HolderRecomputeCompensator.EFFECT_TYPE, "Asset", assetId, assetId,
-                    CompensationCategory.RECOMPUTE);
+                    CompensationCategory.RECOMPUTE, null, null, null, reorgOccurrenceId);
             chainEffectRecorder.recordAndCompensate(descriptor);
         }
     }

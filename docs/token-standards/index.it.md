@@ -20,10 +20,10 @@ Registerwerk contiene implementazioni, integrazioni o segnaposto per standard di
 | [ERC-3643](erc3643.md) | EVM | Fungibile + identità | Strumenti regolamentati, ad accesso limitato | CONF_ERC3643 | Implementazione presente; maturità non verificata |
 | [ERC-4626](erc4626.md) | EVM | Vault (sincrono) | Fondi monetari, NAV giornaliero | — | Implementazione presente; modello economico/maturità non verificati |
 | [ERC-7540](erc7540.md) | EVM | Vault (asincrono) | Fondi istituzionali, T+1/T+2 | — | Implementazione presente; modello economico/maturità non verificati |
-| [DAML BOND FIXED](canton-daml.md) | Canton | Obbligazione | Obbligazioni a tasso fisso su ledger privato | — | Implementazione opzionale (`-Pcanton`); maturità non verificata |
-| [DAML BOND FLOATING](canton-daml.md) | Canton | Obbligazione | Obbligazioni a tasso variabile | — | Implementazione opzionale (`-Pcanton`); maturità non verificata |
-| [DAML BOND ZERO](canton-daml.md) | Canton | Obbligazione | Obbligazioni zero coupon | — | Implementazione opzionale (`-Pcanton`); maturità non verificata |
-| [CANTON_TOKEN](canton-daml.md) | Canton | Generico | Attività digitale basata su DAML | — | Implementazione opzionale (`-Pcanton`); maturità non verificata |
+| [DAML BOND FIXED](canton-daml.md) | Canton | Obbligazione | Ciclo di vita a tasso fisso | — | Modello Daml proprio; profilo verificato, conformità live necessaria |
+| [DAML BOND FLOATING](canton-daml.md) | Canton | Obbligazione | Ciclo di vita a tasso variabile | — | Modello Daml proprio; profilo verificato, conformità live necessaria |
+| [DAML BOND ZERO](canton-daml.md) | Canton | Obbligazione | Ciclo di vita zero coupon | — | Modello Daml proprio; profilo verificato, conformità live necessaria |
+| [CANTON_TOKEN](canton-daml.md) | Canton | Generico | Attività CIP-0056 | — | Riservato; non distribuibile finché manca un adattatore specifico del registro |
 | [SPL](../blockchains/solana.md) | Solana | Fungibile | Token nativi Solana | — | Integrazione presente; maturità non verificata |
 | [SPL_2022](spl-2022.md) | Solana | Fungibile + est. | Token Solana estesi | — | Integrazione presente; maturità non verificata |
 | [SPL_2022_BOND](spl-2022.md) | Solana | Fungibile + interessi | Obbligazioni fruttifere su Solana | — | Integrazione presente; maturità non verificata |
@@ -70,6 +70,6 @@ Lo standard scelto determina anche quali operazioni di amministrazione sono disp
 | Obbligazione con più tranche / serie | ERC-3525 | Modello semi-fungibile nativo slot + valore |
 | Quota di fondo con NAV giornaliero su EVM | ERC-4626 | Interfaccia vault standardizzata |
 | Fondo istituzionale con rimborso T+1/T+2 | ERC-7540 | Modello asincrono richiesta/riscossione |
-| Obbligazione a tasso fisso su ledger DAML privato | DAML_BOND_FIXED | Supporto nativo al pagamento delle cedole |
+| Obbligazione a tasso fisso su ledger Daml privato | DAML_BOND_FIXED | Ciclo di vita on-ledger; pagamento integrato separatamente |
 | Strumento con tutela della riservatezza su EVM | CONF_ERC3643 | Zama fhEVM confidenziale + regolamentato |
 | Obbligazione fruttifera su Solana | SPL_2022_BOND | Estensione Token-2022 fruttifera di interessi |

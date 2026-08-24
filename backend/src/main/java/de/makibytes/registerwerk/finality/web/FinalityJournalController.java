@@ -62,4 +62,15 @@ public class FinalityJournalController {
         return ResponseEntity.ok(adminService.acknowledge(chainEffectId, request.reason(),
                 SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
+
+    @PostMapping("/chains/{chainConfigId}/resolve-quarantine")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(reason = "CHAIN_QUARANTINE_RESOLVE")
+    public ResponseEntity<Void> resolveQuarantine(
+            @PathVariable UUID chainConfigId, @Valid @RequestBody AcknowledgeRequest request,
+            Authentication auth) {
+        adminService.resolveQuarantine(chainConfigId, request.reason(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.noContent().build();
+    }
 }

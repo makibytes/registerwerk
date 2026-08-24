@@ -1,80 +1,64 @@
 ---
-title: DAML Finance Bonds (Canton)
-description: Canton / DAML Finance bond standards for private ledger deployments.
+title: Registerwerk Daml Bonds (Canton)
+description: Custom Canton bond lifecycle templates and their verified implementation boundary.
 ---
 
-# DAML Finance Bonds (Canton)
+# Registerwerk Daml Bonds (Canton)
 
-Canton is a privacy-first distributed ledger built on the **DAML** smart contract language. DAML Finance provides a library of composable financial primitives for Canton — including bonds, equities, and derivatives. Registerwerk supports three DAML Finance bond types on Canton for private-ledger deployments.
+Registerwerk ships three custom Daml bond templates under `Registerwerk.Bond.*`. They model an
+eWpG instrument's terms and on-ledger lifecycle. They are not Daml Finance templates, and their
+choices do not move cash or CIP-0056 holdings.
 
----
+## Supported deployable types
 
-## Supported DAML Finance bond types
-
-| Standard | Token enum | Description |
+| Token enum | Template | Lifecycle |
 |---|---|---|
-| `DAML_BOND_FIXED` | Fixed-rate bond | Known coupon rate, fixed schedule |
-| `DAML_BOND_FLOATING` | Floating-rate bond | Rate tied to EURIBOR/SOFR/other reference |
-| `DAML_BOND_ZERO` | Zero-coupon bond | No periodic coupon; trades at a discount |
-| `CANTON_TOKEN` | Generic Canton asset | Any DAML-based digital asset |
+| `DAML_BOND_FIXED` | `FixedRateBond` | Coupon authorization, redemption, early call, suspend/resume |
+| `DAML_BOND_FLOATING` | `FloatingRateBond` | Rate fixing plus the fixed-bond lifecycle |
+| `DAML_BOND_ZERO` | `ZeroCouponBond` | Redemption, early call, suspend/resume |
+| `CANTON_TOKEN` | — | Reserved but intentionally rejected until a registry-specific CIP-0056 adapter exists |
 
----
+CIP-0056 standardizes interoperability APIs and workflows; it does not supply one universal
+instrument factory or issuer-admin `Issue`, `ForceTransfer`, or `Pause` choice. Registerwerk
+therefore fails `CANTON_TOKEN` operations with an explicit unsupported error instead of sending
+guessed template/choice names to a production ledger.
 
-## How Canton differs from EVM
+## Terms mapping
 
-| Dimension | EVM (ERC standards) | Canton (DAML Finance) |
-|---|---|---|
-| Privacy | Public ledger (all participants see state) | Private — each participant sees only their contracts |
-| Smart contract language | Solidity / Vyper | DAML (Haskell-like) |
-| Finality | Probabilistic (n confirmations) | Deterministic (ledger API acknowledgment) |
-| Identity | Wallet address | Canton Party (unique identifier per participant) |
-| Off-ledger settlement | Optional | Native: DAML workflow includes settlement |
-| Confidential positions | Requires Zama fhEVM | Native — private contracts |
+`AssetBondTerms` is encoded into `EwpgBondTerms`: asset ID, face value, ISO currency, issue and
+maturity dates, day-count convention, payment frequency, callability, and call schedule. The
+instrument-specific fields are fixed coupon rate, reference rate/spread/latest fixing, or issue
+price. Complete required terms are validated before command construction.
 
----
+Creation uses `submitAndWaitForTransaction` and extracts exactly one visible created event matching
+the expected template. The committed contract ID—not the update ID—is stored as the deployment's
+contract address so later exercise commands target a real active contract.
 
-## Canton Party allocation
+## Lifecycle and settlement meaning
 
-Each `LegalEntity` in Registerwerk has a **Canton Party** — a unique identifier on the Canton ledger. This is managed by the `CantonPartyAllocator` service in the `blockchain` module:
+`PayCoupon`, `Redeem`, and `EarlyCall` are ledger records of registry authorization/lifecycle, not
+holder payment instructions. The backend's corporate-action flow requires issuer attestation and a
+separate operator confirmation before dispatch; after the Daml choice commits, it records the
+action as settled. This is suitable only where that dual-control attestation is the authoritative
+evidence that the external cash/holding leg was completed. Otherwise integrate a payment adapter
+and reconciliation proof before using the `SETTLED` state operationally.
 
-1. When a customer with a Canton-capable instrument is onboarded, `CantonPartyAllocator.allocate(entityId)` registers the entity on the Canton ledger
-2. The party identifier is stored in `LegalEntity.cantonPartyId`
-3. All DAML Finance contracts reference the Canton Party, not a wallet address
+## Privacy-role limitation
 
----
+The templates declare `registryAdmin` and `issuer` as signatories and `regulatorObserver` as an
+observer. The current deployment API supplies only one owner party and fills all three fields with
+it. That is a development integration, not real segregation of duties. Production use requires an
+extended creation request that resolves three distinct parties and validates their hosting and
+authorization.
 
-## Bond terms mapping
-
-`AssetBondTerms` stores the financial parameters for all bond types:
-
-| Field | DAML_BOND_FIXED | DAML_BOND_FLOATING | DAML_BOND_ZERO |
-|---|---|---|---|
-| `couponRate` | Fixed (e.g., 5.0%) | Reference rate spread | N/A |
-| `referenceRate` | N/A | e.g., EURIBOR_3M | N/A |
-| `maturityDate` | ✅ | ✅ | ✅ |
-| `paymentFrequency` | ANNUAL / SEMIANNUAL / QUARTERLY / MONTHLY | Same | N/A |
-| `dayCountConvention` | ACT_365 / ACT_ACT / 30_360 | Same | ACT_365 |
-| `issuePrice` | 100 (par) or discount/premium | Par | Discount (< 100) |
-
----
-
-## Coupon payment on Canton
-
-For `DAML_BOND_FIXED` and `DAML_BOND_FLOATING`, the `CantonBondOperations.payCoupon()` method exercises the DAML Finance coupon payment workflow:
-
-1. Registerwerk's Canton participant node proposes a coupon payment contract to the issuer's party
-2. The issuer's node exercises the coupon lifecycle choice
-3. All bond holder parties receive their coupon amounts through DAML's settlement batch
-4. The `CorporateAction(type=COUPON, status=SETTLED)` record is updated in Registerwerk's DB
-
----
-
-## The `-Pcanton` Maven profile
-
-Canton support requires the DAML SDK and associated Java libraries. These are activated via the `-Pcanton` Maven profile:
+## Build verification
 
 ```bash
 cd backend && ./mvnw verify -Pcanton
+cd ../daml && dpm build
 ```
 
-Without this profile, `CantonBondDisabledStub` is injected instead of the real Canton client, and all Canton-related API calls return `503 Service Unavailable` with a descriptive message. This allows the application to start cleanly without a Canton participant node.
+The Maven profile compiles the Ledger API v2 client and Canton services; without it,
+`CantonBondDisabledStub` returns an explicit unavailable error. A green profile build proves source
+and binding compatibility, not participant connectivity, package installation, party topology, or
+production conformance. Run live-participant contract tests before enabling the chain.

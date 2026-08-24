@@ -3,6 +3,9 @@ package de.makibytes.registerwerk.blockchain.internal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ConnectionCallback;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
@@ -75,9 +78,58 @@ public class NonceCoordinator {
     }
 
     private final DataSource dataSource;
+    private final JdbcTemplate jdbcTemplate;
 
     public NonceCoordinator(DataSource dataSource) {
         this.dataSource = dataSource;
+        this.jdbcTemplate = new JdbcTemplate(dataSource);
+    }
+
+    /**
+     * Reserves a nonce in the caller's database transaction and returns a value derived from it.
+     *
+     * <p>This is the prepare half of the durable signed-transaction outbox. The transaction must
+     * persist the signed payload before it commits. Both the nonce lease and that payload then
+     * become visible atomically; on rollback neither survives and no RPC submission has happened.
+     * The transaction-scoped advisory lock conflicts with {@link #withNonce}'s session lock, so
+     * durable and immediate submissions from any backend replica share one nonce sequence.
+     */
+    public <T> T withReservedNonce(long chainId, String senderAddress,
+            ChainNonceSupplier chainNonceSupplier, NonceCallback<T> callback) throws Exception {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Durable nonce reservation requires an active transaction");
+        }
+
+        String normalizedAddress = senderAddress.toLowerCase(Locale.ROOT);
+        String lockKey = chainId + ":" + normalizedAddress;
+        jdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+                statement.setString(1, lockKey);
+                statement.execute();
+            }
+            return null;
+        });
+
+        BigInteger leased = jdbcTemplate.query("""
+                        SELECT next_nonce FROM wallet_nonce_lease
+                        WHERE chain_id = ? AND sender_address = ?
+                        """,
+                rs -> rs.next() ? rs.getBigDecimal(1).toBigInteger() : null,
+                chainId, normalizedAddress);
+        BigInteger chainNonce = chainNonceSupplier.fetch();
+        BigInteger nonce = leased == null ? chainNonce : leased.max(chainNonce);
+
+        T result = callback.withNonce(nonce);
+        jdbcTemplate.update("""
+                        INSERT INTO wallet_nonce_lease (chain_id, sender_address, next_nonce, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT (chain_id, sender_address)
+                        DO UPDATE SET next_nonce = EXCLUDED.next_nonce, updated_at = EXCLUDED.updated_at
+                        """,
+                chainId, normalizedAddress, new BigDecimal(nonce.add(BigInteger.ONE)),
+                Timestamp.from(Instant.now()));
+        return result;
     }
 
     /**

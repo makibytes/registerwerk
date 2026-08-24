@@ -30,6 +30,7 @@ class OnchainClaimRevertCompensatorTest {
 
     private OnchainClaimRevertCompensator compensator;
     private final UUID id = UUID.randomUUID();
+    private final UUID chainConfigId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -37,7 +38,7 @@ class OnchainClaimRevertCompensatorTest {
     }
 
     private ChainEffectRecord effect() {
-        return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
+        return new ChainEffectRecord(UUID.randomUUID(), chainConfigId, 100L, "0xhash", "0xtxhash", null,
                 "erc3643", "ERC3643_CLAIM_CONFIRMED", "OnchainClaim", id, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
@@ -53,8 +54,10 @@ class OnchainClaimRevertCompensatorTest {
         OnchainClaim claim = new OnchainClaim();
         claim.setId(id);
         claim.setConfirmed(true);
-        claim.setChainConfigId(UUID.randomUUID());
+        claim.setChainConfigId(chainConfigId);
+        claim.setTxHash("0xtxhash");
         claim.setBlockNumber(100L);
+        claim.setBlockHash("0xhash");
         when(claimRepository.findById(id)).thenReturn(Optional.of(claim));
 
         CompensationOutcome outcome = compensator.compensate(effect());

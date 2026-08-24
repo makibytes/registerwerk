@@ -64,6 +64,16 @@ public class DappVersion {
     @Column(name = "onchain_tx", length = 66)
     private String onchainTx;
 
+    /** Exact canonical occurrence which currently anchors this published version. */
+    @Column(name = "anchor_chain_config_id")
+    private UUID anchorChainConfigId;
+
+    @Column(name = "anchor_block_number")
+    private Long anchorBlockNumber;
+
+    @Column(name = "anchor_block_hash", length = 128)
+    private String anchorBlockHash;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -110,6 +120,15 @@ public class DappVersion {
 
     public String getOnchainTx() { return onchainTx; }
     public void setOnchainTx(String onchainTx) { this.onchainTx = onchainTx; }
+
+    public UUID getAnchorChainConfigId() { return anchorChainConfigId; }
+    public void setAnchorChainConfigId(UUID anchorChainConfigId) { this.anchorChainConfigId = anchorChainConfigId; }
+
+    public Long getAnchorBlockNumber() { return anchorBlockNumber; }
+    public void setAnchorBlockNumber(Long anchorBlockNumber) { this.anchorBlockNumber = anchorBlockNumber; }
+
+    public String getAnchorBlockHash() { return anchorBlockHash; }
+    public void setAnchorBlockHash(String anchorBlockHash) { this.anchorBlockHash = anchorBlockHash; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

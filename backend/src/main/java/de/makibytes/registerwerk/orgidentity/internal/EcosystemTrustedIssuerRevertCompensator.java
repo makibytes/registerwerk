@@ -6,7 +6,7 @@ import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.finality.api.CompensationOutcome;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuer;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuerRepository;
-import de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus;
+import de.makibytes.registerwerk.orgidentity.api.TrustedIssuerStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -41,16 +41,32 @@ class EcosystemTrustedIssuerRevertCompensator implements ChainEffectCompensator 
         if (issuer == null) {
             return new CompensationOutcome.NotApplicable("EcosystemTrustedIssuer " + id + " no longer exists");
         }
-        if (issuer.getStatus() != MemberWalletStatus.ACTIVE) {
+        boolean pendingRemovalIntent = issuer.getStatus() == TrustedIssuerStatus.REMOVAL_PENDING
+                && issuer.getRemovedAt() != null
+                && issuer.getRemovedBlockNumber() == null
+                && issuer.getRemovedBlockHash() == null;
+        if (issuer.getStatus() != TrustedIssuerStatus.ACTIVE && !pendingRemovalIntent) {
             return new CompensationOutcome.NotApplicable(
-                    "EcosystemTrustedIssuer " + id + " is no longer ACTIVE (status=" + issuer.getStatus() + ")");
+                    "EcosystemTrustedIssuer " + id + " is neither ACTIVE nor awaiting removal (status="
+                            + issuer.getStatus() + ")");
+        }
+        if (!ChainEffectCausality.matches(effect, issuer.getChainConfigId(), issuer.getAddedTx(),
+                issuer.getAddedBlockNumber(), issuer.getAddedBlockHash())) {
+            return new CompensationOutcome.NotApplicable(
+                    "EcosystemTrustedIssuer " + id + " is owned by a different confirmation incarnation");
         }
 
-        log.error("EcosystemTrustedIssuer id={} was ACTIVE but its confirming block was retracted by a reorg "
-                        + "— reverting to PENDING for re-verification.", id);
-        issuer.setStatus(MemberWalletStatus.PENDING);
+        log.error("EcosystemTrustedIssuer id={} addition confirmation was retracted by a reorg (status={}) "
+                        + "— clearing addition provenance while preserving any fail-closed removal intent.",
+                id, issuer.getStatus());
+        if (!pendingRemovalIntent) {
+            issuer.setStatus(TrustedIssuerStatus.PENDING);
+        }
+        issuer.setAddedBlockNumber(null);
+        issuer.setAddedBlockHash(null);
         repository.save(issuer);
 
-        return new CompensationOutcome.Compensated("Reverted EcosystemTrustedIssuer " + id + " to PENDING after retraction");
+        return new CompensationOutcome.Compensated(
+                "Cleared EcosystemTrustedIssuer " + id + " addition confirmation after retraction");
     }
 }

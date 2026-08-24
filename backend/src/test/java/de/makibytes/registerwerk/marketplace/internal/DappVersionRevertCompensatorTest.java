@@ -37,6 +37,7 @@ class DappVersionRevertCompensatorTest {
     private DappVersionRevertCompensator compensator;
     private final UUID versionId = UUID.randomUUID();
     private final UUID listingId = UUID.randomUUID();
+    private final UUID chainConfigId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -44,9 +45,21 @@ class DappVersionRevertCompensatorTest {
     }
 
     private ChainEffectRecord effect() {
-        return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
+        return new ChainEffectRecord(UUID.randomUUID(), chainConfigId, 100L, "0xhash", "0xtxhash", null,
                 "marketplace", "DAPP_VERSION_PUBLISHED", "DappVersion", versionId, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
+    }
+
+    private DappVersion publishedVersion() {
+        DappVersion version = new DappVersion();
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.setListingId(listingId);
+        version.setStatus(DappVersionStatus.PUBLISHED);
+        version.setOnchainTx("0xtxhash");
+        version.setAnchorChainConfigId(chainConfigId);
+        version.setAnchorBlockNumber(100L);
+        version.setAnchorBlockHash("0xhash");
+        return version;
     }
 
     @Test
@@ -57,10 +70,7 @@ class DappVersionRevertCompensatorTest {
 
     @Test
     void compensateRevertsPublishedVersionAndLiveListing() {
-        DappVersion version = new DappVersion();
-        ReflectionTestUtils.setField(version, "id", versionId);
-        version.setListingId(listingId);
-        version.setStatus(DappVersionStatus.PUBLISHED);
+        DappVersion version = publishedVersion();
         when(versionRepository.findById(versionId)).thenReturn(Optional.of(version));
 
         DappListing listing = new DappListing();
@@ -83,10 +93,7 @@ class DappVersionRevertCompensatorTest {
     @DisplayName("restores a previously-superseded version to PUBLISHED instead of leaving the listing "
             + "with no live version")
     void compensateRestoresPreviousSupersededVersion() {
-        DappVersion version = new DappVersion();
-        ReflectionTestUtils.setField(version, "id", versionId);
-        version.setListingId(listingId);
-        version.setStatus(DappVersionStatus.PUBLISHED);
+        DappVersion version = publishedVersion();
         when(versionRepository.findById(versionId)).thenReturn(Optional.of(version));
 
         DappListing listing = new DappListing();
@@ -115,10 +122,7 @@ class DappVersionRevertCompensatorTest {
     @Test
     @DisplayName("if the listing's live version has already moved on, the listing is left untouched")
     void compensateLeavesListingAloneIfNoLongerLiveVersion() {
-        DappVersion version = new DappVersion();
-        ReflectionTestUtils.setField(version, "id", versionId);
-        version.setListingId(listingId);
-        version.setStatus(DappVersionStatus.PUBLISHED);
+        DappVersion version = publishedVersion();
         when(versionRepository.findById(versionId)).thenReturn(Optional.of(version));
 
         DappListing listing = new DappListing();
@@ -130,6 +134,20 @@ class DappVersionRevertCompensatorTest {
         compensator.compensate(effect());
 
         verify(listingRepository, never()).save(any());
+    }
+
+    @Test
+    void staleEffectCannotUnpublishReplacementAnchor() {
+        DappVersion version = publishedVersion();
+        version.setAnchorBlockHash("0xreplacement");
+        when(versionRepository.findById(versionId)).thenReturn(Optional.of(version));
+
+        CompensationOutcome outcome = compensator.compensate(effect());
+
+        verify(versionRepository, never()).save(any());
+        verify(listingRepository, never()).save(any());
+        assertThat(outcome).isInstanceOf(CompensationOutcome.NotApplicable.class);
+        assertThat(version.getStatus()).isEqualTo(DappVersionStatus.PUBLISHED);
     }
 
     @Test

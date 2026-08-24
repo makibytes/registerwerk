@@ -20,6 +20,8 @@ serviceAccount:
   create: true
   annotations: {}
   name: ""
+  # Keep false unless a workload feature needs Kubernetes/GCP workload identity.
+  automountServiceAccountToken: false
 
 podAnnotations:
   prometheus.io/scrape: "true"
@@ -30,14 +32,25 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
   fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   allowPrivilegeEscalation: false
   capabilities:
     drop: [ALL]
-  # false because Spring Boot needs a writable /tmp at minimum; also required if you switch
-  # wallets.persistence back on (storage-backend=FILESYSTEM writes under /data/wallets).
-  readOnlyRootFilesystem: false
+  readOnlyRootFilesystem: true
+
+rollout:
+  minReadySeconds: 10
+  maxUnavailable: 0
+  maxSurge: 1
+
+monitoring:
+  # Requires the monitoring.googleapis.com PodMonitoring CRD installed by Managed Service for
+  # Prometheus. The generic prometheus.io annotations above remain available on other clusters.
+  googleManagedPrometheus: false
+  interval: 30s
 
 service:
   type: ClusterIP
@@ -182,6 +195,27 @@ postgresql:
       requests:
         memory: 1Gi
         cpu: 500m
+
+# Optional production database path for GKE. Disable postgresql.enabled when this is enabled.
+# The proxy uses Application Default Credentials; with Workload Identity Federation for GKE,
+# annotate serviceAccount.annotations with iam.gke.io/gcp-service-account and set
+# serviceAccount.automountServiceAccountToken=true.
+cloudSqlProxy:
+  enabled: false
+  image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.0
+  instanceConnectionName: ""
+  privateIp: false
+  autoIamAuthn: false
+  database: registerwerk
+  username: registerwerk
+  secretName: registerwerk-postgres-secret
+  passwordKey: password
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
 
 kong:
   enabled: true

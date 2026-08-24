@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -48,6 +49,15 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
     boolean existsByChainConfigIdAndTxHashAndLogIndex(UUID chainConfigId, String txHash, Integer logIndex);
 
     /**
+     * Looks up one exact EVM log occurrence, including its block incarnation. {@code occurredAt}
+     * is the immutable block timestamp and also the table's RANGE partition key; including it
+     * makes this lookup match the database uniqueness constraint. An ORPHANED result is not a
+     * duplicate: Graph Node ingest reactivates it when the same block becomes canonical again.
+     */
+    Optional<TokenTransfer> findByChainConfigIdAndTxHashAndLogIndexAndBlockHashAndOccurredAt(
+            UUID chainConfigId, String txHash, Integer logIndex, String blockHash, Instant occurredAt);
+
+    /**
      * Returns the most recent transfer for a given chain, used to determine the high-water mark
      * for the next sync window.
      */
@@ -69,11 +79,12 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
             + "AND t.blockNumber IS NOT NULL ORDER BY t.blockNumber ASC")
     List<Long> findDistinctUnsettledBlocks(@Param("chainConfigId") UUID chainConfigId);
 
-    /** The block hash(es) previously recorded for a given chain+height — normally a single
-     *  distinct value; more than one indicates the rows themselves already disagree. */
+    /** The live block hash(es) previously recorded for a given chain+height — normally a single
+     * distinct value; historical ORPHANED incarnations are excluded so they cannot make a later
+     * A→B or A→B→A self-probe look like the fresh canonical hash was already present. */
     @Query("SELECT DISTINCT t.blockHash FROM TokenTransfer t "
             + "WHERE t.chainConfigId = :chainConfigId AND t.blockNumber = :blockNumber "
-            + "AND t.blockHash IS NOT NULL")
+            + "AND t.blockHash IS NOT NULL AND t.finalityStatus <> 'ORPHANED'")
     List<String> findDistinctBlockHashesAt(@Param("chainConfigId") UUID chainConfigId, @Param("blockNumber") Long blockNumber);
 
     /** Flips every row at exactly this height currently at {@code fromStatus} to {@code toStatus}.
@@ -102,6 +113,35 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
             + "WHERE t.chainConfigId = :chainConfigId AND t.blockNumber >= :forkBlock "
             + "AND t.finalityStatus <> 'ORPHANED'")
     int markOrphanedFromBlock(@Param("chainConfigId") UUID chainConfigId, @Param("forkBlock") Long forkBlock);
+
+    /** Exact-incarnation variant for Chaincache's typed reorg lineage. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE TokenTransfer t SET t.finalityStatus = 'ORPHANED' "
+            + "WHERE t.chainConfigId = :chainConfigId AND t.blockHash IN :blockHashes "
+            + "AND t.finalityStatus <> 'ORPHANED'")
+    int markOrphanedByBlockHashes(
+            @Param("chainConfigId") UUID chainConfigId,
+            @Param("blockHashes") List<String> blockHashes);
+
+    /** Policy-drift guard for typed reorgs: Chaincache may label an episode routine while this
+     * Registerwerk instance has already finalized the exact occurrence under a stronger/local
+     * policy. Such rows must be quarantined, never automatically orphaned. */
+    @Query("SELECT COUNT(t) > 0 FROM TokenTransfer t "
+            + "WHERE t.chainConfigId = :chainConfigId AND t.blockHash IN :blockHashes "
+            + "AND t.finalityStatus = 'FINALIZED'")
+    boolean existsFinalizedByBlockHashes(
+            @Param("chainConfigId") UUID chainConfigId,
+            @Param("blockHashes") List<String> blockHashes);
+
+    /** Assets touched by still-live rows from exactly the block incarnations in a typed reorg
+     * episode. The status predicate is the replay/idempotency boundary: once the rows are
+     * ORPHANED, duplicate delivery must not emit a second holder-recompute effect. */
+    @Query("SELECT DISTINCT t.assetId FROM TokenTransfer t "
+            + "WHERE t.chainConfigId = :chainConfigId AND t.blockHash IN :blockHashes "
+            + "AND t.finalityStatus <> 'ORPHANED' AND t.assetId IS NOT NULL")
+    List<UUID> findDistinctAssetIdsByBlockHashes(
+            @Param("chainConfigId") UUID chainConfigId,
+            @Param("blockHashes") List<String> blockHashes);
 
     /** True if any already-FINALIZED row is at or after the fork block — signals a reorg deeper
      *  than the configured confirmation depth (a CRITICAL condition, logged separately by the

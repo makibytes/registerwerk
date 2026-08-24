@@ -95,7 +95,7 @@ Les chaînes EVM (Ethereum, Polygon, Base), Solana, Canton, StarkNet, Stellar, a
 
 ### Quelles normes de jetons sont prises en charge ?
 
-ERC-20, ERC-721, ERC-1155, ERC-3525, ERC-3643, ERC-4626, ERC-7540, leurs variantes confidentielles, Solana SPL-2022 et les obligations DAML Finance sur Canton. Voir [Choisir une norme de jeton](./issuers/token-standards.md) pour vous orienter.
+ERC-20, ERC-721, ERC-1155, ERC-3525, ERC-3643, ERC-4626, ERC-7540, leurs variantes confidentielles, Solana SPL-2022 et les modèles Daml de cycle de vie obligataire propres à Registerwerk sur Canton. Le déploiement générique `CANTON_TOKEN` est réservé, mais non implémenté. Voir [Choisir une norme de jeton](./issuers/token-standards.md) pour vous orienter.
 
 ### Comment accéder à l'API ?
 

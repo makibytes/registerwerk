@@ -1,8 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.blockchain.internal.Erc3525AdminService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetErc3525AdminService;
@@ -23,8 +22,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.datatypes.Function;
-import de.makibytes.registerwerk.wallet.api.EvmSigner;
-import org.web3j.protocol.Web3j;
 
 import java.math.BigInteger;
 import java.util.Optional;
@@ -52,13 +49,10 @@ class Erc3525AdminServiceTest {
     @Mock private AssetSlotRepository slotRepository;
     @Mock private AssetTokenUnitRepository tokenUnitRepository;
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
-    @Mock private BlockchainClientRegistry clientRegistry;
-    @Mock private EvmContractService evmContractService;
+    @Mock private DurableEvmTransactionGateway evmTransactions;
     @Mock private BlockchainTransactionService txService;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private StarknetErc3525AdminService starknetErc3525AdminService;
-    @Mock private Web3j web3j;
-    @Mock private EvmSigner credentials;
 
     private Erc3525AdminService service;
 
@@ -71,13 +65,14 @@ class Erc3525AdminServiceTest {
     void setUp() {
         service = new Erc3525AdminService(
                 deploymentRepository, slotRepository, tokenUnitRepository, couponPaymentRepository,
-                clientRegistry, evmContractService, txService, eventPublisher, starknetErc3525AdminService);
+                evmTransactions, txService, eventPublisher, starknetErc3525AdminService);
     }
 
     private AssetDeployment deployment(Chain chain) {
         AssetDeployment dep = new AssetDeployment();
         dep.setId(DEPLOYMENT_ID);
         dep.setAssetId(ASSET_ID);
+        dep.setChainConfigId(UUID.randomUUID());
         dep.setChain(chain);
         dep.setNetwork(Network.TESTNET);
         dep.setContractAddress("0xdeployed");
@@ -91,9 +86,8 @@ class Erc3525AdminServiceTest {
         when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
         AssetSlot slot = new AssetSlot();
         when(slotRepository.findByAssetIdAndSlotId(ASSET_ID, SLOT_ID)).thenReturn(Optional.of(slot));
-        when(clientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(credentials);
-        when(evmContractService.submit(eq(web3j), eq(credentials), eq("0xdeployed"), any(Function.class)))
+        when(evmTransactions.submit(eq(dep.getChainConfigId()), eq("0xdeployed"),
+                any(Function.class), any()))
                 .thenReturn("0xtxhash");
         UUID expectedTxId = UUID.randomUUID();
         when(txService.record(eq("0xtxhash"), eq("pauseSlot"), eq(DEPLOYMENT_ID), eq(ASSET_ID),
@@ -129,8 +123,7 @@ class Erc3525AdminServiceTest {
         UUID result = service.pauseSlot(DEPLOYMENT_ID, SLOT_ID, ACTOR_ID, "REGISTRY_ADMIN");
 
         assertThat(result).isEqualTo(expectedTxId);
-        verify(clientRegistry, never()).getEvmClient(any());
-        verify(evmContractService, never()).submit(any(), any(), anyString(), any());
+        verify(evmTransactions, never()).submit(any(), anyString(), any(Function.class), any());
         verify(eventPublisher).publishEvent(any(TokenAdminActionEvent.class));
     }
 
@@ -144,7 +137,7 @@ class Erc3525AdminServiceTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("setSlotSupplyCap")
                 .hasMessageContaining("Starknet");
-        verify(clientRegistry, never()).getEvmClient(any());
+        verify(evmTransactions, never()).submit(any(), anyString(), any(Function.class), any());
     }
 
     @Test

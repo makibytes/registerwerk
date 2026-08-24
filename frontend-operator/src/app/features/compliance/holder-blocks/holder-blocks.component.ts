@@ -46,7 +46,7 @@ import { AuthService } from '../../../core/auth/auth.service';
       title="Holder Blocks (Sperrvermerk)"
       subtitle="§16 eWpG — Legal blocks on holder wallets. All creates and lifts require step-up authentication and dual control.">
       @if (canManage) {
-        <button mat-raised-button color="warn" (click)="openCreateDialog()">
+        <button type="button" mat-raised-button color="warn" (click)="openCreateDialog()">
           <mat-icon>lock</mat-icon>
           Create Block
         </button>
@@ -64,7 +64,7 @@ import { AuthService } from '../../../core/auth/auth.service';
     </rw-data-table>
 
     <ng-template #rowActions let-block>
-      <button mat-stroked-button color="warn"
+      <button type="button" mat-stroked-button color="warn"
               (click)="liftBlock(block)"
               matTooltip="Lift block — requires step-up + dual control">
         <mat-icon>lock_open</mat-icon>
@@ -115,8 +115,8 @@ import { AuthService } from '../../../core/auth/auth.service';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="warn"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="warn"
                 (click)="submitCreate()"
                 [disabled]="!createForm.walletAddress || !createForm.blockType || !createForm.legalBasis">
           <mat-icon>lock</mat-icon>

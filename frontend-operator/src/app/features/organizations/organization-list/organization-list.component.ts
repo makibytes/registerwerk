@@ -49,7 +49,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     <app-page-header
       title="Organizations"
       subtitle="Onchain organizations — every participant wallet belongs to exactly one org per chain">
-      <button mat-raised-button color="primary" (click)="openRegisterDialog()">
+      <button type="button" mat-raised-button color="primary" (click)="openRegisterDialog()">
         <mat-icon>domain_add</mat-icon>
         Register organization
       </button>
@@ -71,7 +71,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     </rw-data-table>
 
     <ng-template #rowActions let-org>
-      <button mat-icon-button color="primary" (click)="openDetail(org)" matTooltip="Open organization">
+      <button type="button" mat-icon-button color="primary" (click)="openDetail(org)" matTooltip="Open organization">
         <mat-icon>chevron_right</mat-icon>
       </button>
     </ng-template>
@@ -111,8 +111,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary"
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary"
                 [disabled]="!selectedEntityId || !selectedChainId || submitting"
                 (click)="submitRegister()">
           <mat-icon>domain_add</mat-icon>

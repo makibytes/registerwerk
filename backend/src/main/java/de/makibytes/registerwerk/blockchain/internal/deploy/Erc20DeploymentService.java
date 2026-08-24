@@ -104,7 +104,8 @@ public class Erc20DeploymentService {
                     Collections.singletonList(new TypeReference<Address>() {})
             );
 
-            TransactionReceipt receipt = evmContractService.send(web3j, signer, factoryAddress, deployToken);
+            TransactionReceipt receipt = evmContractService.send(
+                    evmContractService.chainConfigId(chain), web3j, signer, factoryAddress, deployToken);
 
             String tokenAddress = EvmUtils.extractIndexedAddress(receipt, TOKEN_DEPLOYED_TOPIC, 3)
                     .orElseThrow(() -> new RuntimeException(

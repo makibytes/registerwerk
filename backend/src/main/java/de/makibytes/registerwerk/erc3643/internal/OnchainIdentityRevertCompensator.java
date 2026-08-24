@@ -52,11 +52,18 @@ class OnchainIdentityRevertCompensator implements ChainEffectCompensator {
             return new CompensationOutcome.NotApplicable(
                     "OnchainIdentity " + id + " is already pending/failed, not a resolved address");
         }
+        if (!ChainEffectCausality.matches(effect, identity.getChainConfigId(), identity.getDeployedByTx(),
+                identity.getDeployedBlockNumber(), identity.getDeployedBlockHash())) {
+            return new CompensationOutcome.NotApplicable(
+                    "OnchainIdentity " + id + " is owned by a different deployment incarnation");
+        }
 
         log.error("OnchainIdentity id={} address={} but its confirming block was retracted by a reorg "
                         + "— reverting to pending for re-verification.",
                 id, identity.getIdentityAddress());
         identity.setIdentityAddress("0x-PENDING-ONCHAINID-" + UUID.randomUUID());
+        identity.setDeployedBlockNumber(null);
+        identity.setDeployedBlockHash(null);
         repository.save(identity);
 
         return new CompensationOutcome.Compensated("Reverted OnchainIdentity " + id + " to pending after retraction");

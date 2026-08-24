@@ -7,6 +7,7 @@ metadata:
   labels:
     {{- include "registerwerk.componentLabels" $ctx | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
   {{/* componentSelectorLabels (component: backend) — the bare selectorLabels would count every
        frontend-operator/frontend-customer/zama-relayer pod toward minAvailable too. */}}

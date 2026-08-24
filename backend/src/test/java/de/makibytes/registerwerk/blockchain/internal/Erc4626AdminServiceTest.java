@@ -1,8 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -19,8 +18,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.datatypes.Function;
-import de.makibytes.registerwerk.wallet.api.EvmSigner;
-import org.web3j.protocol.Web3j;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -42,12 +39,9 @@ class Erc4626AdminServiceTest {
     @Mock AssetDeploymentRepository deploymentRepository;
     @Mock AssetVaultStateRepository vaultStateRepository;
     @Mock VaultNavStrikeRepository navStrikeRepository;
-    @Mock BlockchainClientRegistry clientRegistry;
-    @Mock EvmContractService evmContractService;
+    @Mock DurableEvmTransactionGateway evmTransactions;
     @Mock BlockchainTransactionService txService;
     @Mock ApplicationEventPublisher events;
-    @Mock Web3j web3j;
-    @Mock EvmSigner credentials;
 
     private Erc4626AdminService service;
     private AssetDeployment deployment;
@@ -57,12 +51,13 @@ class Erc4626AdminServiceTest {
     @BeforeEach
     void setUp() {
         service = new Erc4626AdminService(deploymentRepository, vaultStateRepository, navStrikeRepository,
-                clientRegistry, evmContractService, txService, events);
+                evmTransactions, txService, events);
         deploymentId = UUID.randomUUID();
         assetId = UUID.randomUUID();
         deployment = new AssetDeployment();
         deployment.setId(deploymentId);
         deployment.setAssetId(assetId);
+        deployment.setChainConfigId(UUID.randomUUID());
         deployment.setChain(Chain.ETHEREUM);
         deployment.setNetwork(Network.TESTNET);
         deployment.setContractAddress("0x0000000000000000000000000000000000000001");
@@ -72,10 +67,8 @@ class Erc4626AdminServiceTest {
     void strikeNavSubmitsTxAndRecordsHistoryButDoesNotTouchAssetVaultStateUntilConfirmed() {
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
         when(navStrikeRepository.findByAssetIdOrderByEffectiveAtDesc(assetId)).thenReturn(List.of());
-        when(clientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
-                .thenReturn(credentials);
-        when(evmContractService.submit(eq(web3j), eq(credentials), eq(deployment.getContractAddress()), any(Function.class)))
+        when(evmTransactions.submit(eq(deployment.getChainConfigId()),
+                eq(deployment.getContractAddress()), any(Function.class), any()))
                 .thenReturn("0xstriketx");
         when(txService.record(eq("0xstriketx"), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(UUID.randomUUID());
@@ -97,12 +90,10 @@ class Erc4626AdminServiceTest {
 
     @Test
     void setDepositCapUpsertsStateAndTracksPendingValueButDoesNotApplyUntilConfirmed() {
-        when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
-        when(vaultStateRepository.findById(assetId)).thenReturn(Optional.empty());
-        when(clientRegistry.getEvmClient(any())).thenReturn(web3j);
-        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class)))
-                .thenReturn(credentials);
-        when(evmContractService.submit(eq(web3j), eq(credentials), eq(deployment.getContractAddress()), any(Function.class)))
+        when(deploymentRepository.findByIdForUpdate(deploymentId)).thenReturn(Optional.of(deployment));
+        when(vaultStateRepository.findByAssetIdForUpdate(assetId)).thenReturn(Optional.empty());
+        when(evmTransactions.submit(eq(deployment.getChainConfigId()),
+                eq(deployment.getContractAddress()), any(Function.class), any()))
                 .thenReturn("0xcaptx");
         when(txService.record(eq("0xcaptx"), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(UUID.randomUUID());
@@ -116,5 +107,38 @@ class Erc4626AdminServiceTest {
         assertThat(saved.getPendingDepositCap()).isEqualByComparingTo(BigInteger.valueOf(1_000_000L));
         assertThat(saved.getDepositCapTxHash()).isEqualTo("0xcaptx");
         assertThat(saved.getDepositCap()).isNull();
+    }
+
+    @Test
+    void setDepositCapRejectsSecondSubmissionWhileCompletePendingPairExists() {
+        AssetVaultState state = new AssetVaultState();
+        state.setAssetId(assetId);
+        state.setPendingDepositCap(BigInteger.ONE);
+        state.setDepositCapTxHash("0x" + "1".repeat(64));
+        when(deploymentRepository.findByIdForUpdate(deploymentId)).thenReturn(Optional.of(deployment));
+        when(vaultStateRepository.findByAssetIdForUpdate(assetId)).thenReturn(Optional.of(state));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.setDepositCap(
+                        deploymentId, BigInteger.TWO, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("already pending");
+
+        verify(evmTransactions, never()).submit(any(), any(), any(Function.class), any());
+    }
+
+    @Test
+    void setDepositCapFailsClosedOnPartialPendingPairBeforeRpc() {
+        AssetVaultState state = new AssetVaultState();
+        state.setAssetId(assetId);
+        state.setDepositCapTxHash("0x" + "2".repeat(64));
+        when(deploymentRepository.findByIdForUpdate(deploymentId)).thenReturn(Optional.of(deployment));
+        when(vaultStateRepository.findByAssetIdForUpdate(assetId)).thenReturn(Optional.of(state));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.setDepositCap(
+                        deploymentId, BigInteger.TWO, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("incomplete");
+
+        verify(evmTransactions, never()).submit(any(), any(), any(Function.class), any());
     }
 }

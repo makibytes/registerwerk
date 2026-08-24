@@ -9,6 +9,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -21,6 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +50,9 @@ class NonceCoordinatorIT {
 
     @Autowired
     private NonceCoordinator coordinator;
+
+    @Autowired
+    private TransactionTemplate transactions;
 
     private static final long CHAIN_ID = 11155111L; // Sepolia
 
@@ -129,5 +135,61 @@ class NonceCoordinatorIT {
             expected.add(BigInteger.valueOf(i));
         }
         assertThat(observedNonces).isEqualTo(expected);
+    }
+
+    @Test
+    void durableReservationRollsBackWithItsPayloadTransaction() throws Exception {
+        String address = "0x" + "dd".repeat(20);
+
+        transactions.executeWithoutResult(status -> {
+            try {
+                BigInteger reserved = coordinator.withReservedNonce(CHAIN_ID, address,
+                        () -> BigInteger.valueOf(40), nonce -> nonce);
+                assertThat(reserved).isEqualTo(BigInteger.valueOf(40));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            status.setRollbackOnly();
+        });
+
+        BigInteger retry = coordinator.withNonce(CHAIN_ID, address,
+                () -> BigInteger.valueOf(40), nonce -> nonce);
+        assertThat(retry).isEqualTo(BigInteger.valueOf(40));
+    }
+
+    @Test
+    void durableReservationAndImmediateBroadcastShareOneFleetLock() throws Exception {
+        String address = "0x" + "ee".repeat(20);
+        CountDownLatch reservationHeld = new CountDownLatch(1);
+        CountDownLatch allowCommit = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<BigInteger> reserved = pool.submit(() -> transactions.<BigInteger>execute(status -> {
+                try {
+                    return coordinator.withReservedNonce(CHAIN_ID, address, () -> BigInteger.ZERO, nonce -> {
+                        reservationHeld.countDown();
+                        if (!allowCommit.await(5, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("test timed out waiting to commit reservation");
+                        }
+                        return nonce;
+                    });
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }));
+            assertThat(reservationHeld.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<BigInteger> immediate = pool.submit(() -> coordinator.withNonce(
+                    CHAIN_ID, address, () -> BigInteger.ZERO, nonce -> nonce));
+            Thread.sleep(150);
+            assertThat(immediate.isDone()).isFalse();
+
+            allowCommit.countDown();
+            assertThat(reserved.get(5, TimeUnit.SECONDS)).isEqualTo(BigInteger.ZERO);
+            assertThat(immediate.get(5, TimeUnit.SECONDS)).isEqualTo(BigInteger.ONE);
+        } finally {
+            allowCommit.countDown();
+            pool.shutdownNow();
+        }
     }
 }

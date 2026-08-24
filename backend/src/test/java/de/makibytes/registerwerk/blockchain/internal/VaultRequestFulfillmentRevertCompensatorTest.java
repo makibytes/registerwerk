@@ -35,6 +35,7 @@ class VaultRequestFulfillmentRevertCompensatorTest {
 
     private VaultRequestFulfillmentRevertCompensator compensator;
     private final UUID id = UUID.randomUUID();
+    private final UUID chainConfigId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -49,13 +50,14 @@ class VaultRequestFulfillmentRevertCompensatorTest {
         request.setRequestType(VaultRequestType.DEPOSIT);
         request.setRequestStatus(status);
         request.setConfirmed(true);
-        request.setChainConfigId(UUID.randomUUID());
-        request.setBlockNumber(123L);
+        request.setChainConfigId(chainConfigId);
+        request.setBlockNumber(100L);
+        request.setBlockHash("0xhash");
         return request;
     }
 
     private ChainEffectRecord effect() {
-        return new ChainEffectRecord(UUID.randomUUID(), UUID.randomUUID(), 100L, "0xhash", "0xtxhash", null,
+        return new ChainEffectRecord(UUID.randomUUID(), chainConfigId, 100L, "0xhash", "0xtxhash", null,
                 "blockchain", "VAULT_REQUEST_RESOLVED", "VaultRequest", id, null, CompensationCategory.INVERSE_FLIP,
                 null, null, null, null, "COMPENSATING", 1, Instant.now());
     }
@@ -69,7 +71,7 @@ class VaultRequestFulfillmentRevertCompensatorTest {
     @Test
     void revertsFulfilledRequestToPending() {
         VaultRequest request = request(VaultRequestStatus.FULFILLED);
-        request.setFulfilledTx("0xfulfiltx");
+        request.setFulfilledTx("0xtxhash");
         request.setFulfilledAt(Instant.now());
         request.setNavAtFulfill(new BigDecimal("1.5"));
         when(vaultRequestRepository.findById(id)).thenReturn(Optional.of(request));
@@ -90,7 +92,7 @@ class VaultRequestFulfillmentRevertCompensatorTest {
     @Test
     void revertsCancelledRequestToPending() {
         VaultRequest request = request(VaultRequestStatus.CANCELLED);
-        request.setCancelledTx("0xcanceltx");
+        request.setCancelledTx("0xtxhash");
         when(vaultRequestRepository.findById(id)).thenReturn(Optional.of(request));
 
         compensator.compensate(effect());
@@ -98,6 +100,20 @@ class VaultRequestFulfillmentRevertCompensatorTest {
         assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
         assertThat(request.getCancelledTx()).isNull();
         verify(vaultRequestRepository).save(request);
+    }
+
+    @Test
+    void fulfillmentEffectCannotUndoNewerCancellation() {
+        VaultRequest request = request(VaultRequestStatus.CANCELLED);
+        request.setCancelledTx("0xnew-cancel");
+        request.setBlockHash("0xreplacement");
+        when(vaultRequestRepository.findById(id)).thenReturn(Optional.of(request));
+
+        CompensationOutcome outcome = compensator.compensate(effect());
+
+        verify(vaultRequestRepository, never()).save(any());
+        assertThat(outcome).isInstanceOf(CompensationOutcome.NotApplicable.class);
+        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.CANCELLED);
     }
 
     @Test

@@ -156,9 +156,11 @@ public class CorrectionCapabilityService {
             // ERC-7540 (async vault): only the deposit-request cancel is actually wired up
             // (VaultController never calls Erc7540AdminService.cancelRedeemRequest).
             case ERC7540 -> List.of(CANCEL_DEPOSIT_REQUEST);
-            case CANTON_TOKEN ->
-                    List.of(FREEZE_HOLDING, PAUSE, FORCE_TRANSFER_CANTON, BURN_HOLDING);
-            // DAML Finance bonds (CantonBondOperations) expose only scheduled lifecycle events
+            // CIP-0056 standardizes interfaces and registry/wallet workflows; it does not define
+            // universal issuer-admin choices. A registry-specific adapter is required before any
+            // CANTON_TOKEN correction can be advertised safely.
+            case CANTON_TOKEN -> List.of();
+            // Registerwerk Daml bonds (CantonBondOperations) expose only scheduled lifecycle events
             // (coupon payment, rate fixing, redemption, early call) — no freeze/pause/forced
             // -transfer/force-burn primitive exists for this standard today.
             case DAML_BOND_FIXED, DAML_BOND_FLOATING, DAML_BOND_ZERO -> List.of();

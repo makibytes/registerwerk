@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.blockchain.internal;
 import de.makibytes.registerwerk.deployment.api.VaultRequest;
 import de.makibytes.registerwerk.deployment.api.VaultRequestRepository;
 import de.makibytes.registerwerk.deployment.api.VaultRequestStatus;
+import de.makibytes.registerwerk.finality.api.BlockIdentity;
 import de.makibytes.registerwerk.finality.api.ChainEffectCompensator;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecord;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
@@ -60,6 +61,18 @@ class VaultRequestFulfillmentRevertCompensator implements ChainEffectCompensator
             return new CompensationOutcome.NotApplicable(
                     "VaultRequest " + id + " is already PENDING (already reverted, or never resolved)");
         }
+        String currentTxHash = switch (request.getRequestStatus()) {
+            case FULFILLED -> request.getFulfilledTx();
+            case CANCELLED -> request.getCancelledTx();
+            case PENDING -> null;
+        };
+        if (!effect.chainConfigId().equals(request.getChainConfigId())
+                || !BlockIdentity.sameIncarnation(
+                        request.getBlockNumber(), request.getBlockHash(), effect.blockNumber(), effect.blockHash())
+                || !BlockIdentity.sameHash(effect.txHash(), currentTxHash)) {
+            return new CompensationOutcome.NotApplicable(
+                    "VaultRequest " + id + " now reflects a different resolution occurrence");
+        }
 
         log.error("VaultRequest id={} was marked {} but its confirming block was retracted by a reorg "
                         + "— the fulfil/cancel never actually happened on-chain; "
@@ -80,6 +93,7 @@ class VaultRequestFulfillmentRevertCompensator implements ChainEffectCompensator
         request.setConfirmed(false);
         request.setChainConfigId(null);
         request.setBlockNumber(null);
+        request.setBlockHash(null);
         vaultRequestRepository.save(request);
 
         return new CompensationOutcome.Compensated("Reverted VaultRequest " + id + " to PENDING after retraction");

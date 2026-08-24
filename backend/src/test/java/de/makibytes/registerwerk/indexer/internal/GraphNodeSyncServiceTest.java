@@ -23,6 +23,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -125,8 +126,6 @@ class GraphNodeSyncServiceTest {
                 null, "5", "TRANSFER", 100L, 1_700_000_000L, "0xtx1", 0L);
         when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
                 .thenReturn(List.of(transfer));
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(chainConfigId, "0xtx1", 0))
-                .thenReturn(false);
         // No provisional backlog to re-verify this tick.
         when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
 
@@ -147,6 +146,79 @@ class GraphNodeSyncServiceTest {
         // finalThrough = head(100) - required(2) = 98
         assertThat(savedState.getLastFinalBlock()).isEqualTo(98L);
         assertThat(savedState.getStatus()).isEqualTo(IndexerState.IndexerStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("A -> B stores the same transaction/log as a distinct block occurrence")
+    void syncChain_reminedLogInReplacementBlock_createsDistinctOccurrence() {
+        ChainConfig chain = ethereumChain();
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE)).thenReturn(Optional.empty());
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(graphNodeClient.fetchMeta(chain, null))
+                .thenReturn(Optional.of(new BlockMeta(100, "0xhead", false)));
+        when(graphNodeClient.fetchMeta(chain, 100L))
+                .thenReturn(Optional.of(new BlockMeta(100, "0xBBBB", false)));
+
+        GraphTransfer replacementB = new GraphTransfer("same-log", "0xtoken", "0xfrom", "0xto",
+                null, "5", "TRANSFER", 100L, 1_700_000_000L, "0xsame-tx", 7L);
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
+                .thenReturn(List.of(replacementB));
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
+
+        service.syncChain(chain);
+
+        verify(tokenTransferRepository)
+                .findByChainConfigIdAndTxHashAndLogIndexAndBlockHashAndOccurredAt(
+                        chainConfigId, "0xsame-tx", 7, "0xbbbb", Instant.ofEpochSecond(1_700_000_000L));
+        ArgumentCaptor<TokenTransfer> transfer = ArgumentCaptor.forClass(TokenTransfer.class);
+        verify(tokenTransferRepository).save(transfer.capture());
+        assertThat(transfer.getValue().getBlockHash()).isEqualTo("0xbbbb");
+        verify(tokenTransferRepository, never())
+                .existsByChainConfigIdAndTxHashAndLogIndex(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("A -> B -> A reactivates exact orphaned A with fresh finality instead of inserting it")
+    void syncChain_sameBlockReturns_reactivatesOrphanedOccurrence() {
+        ChainConfig chain = ethereumChain();
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE)).thenReturn(Optional.empty());
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(graphNodeClient.fetchMeta(chain, null))
+                .thenReturn(Optional.of(new BlockMeta(100, "0xhead", false)));
+        when(graphNodeClient.fetchMeta(chain, 100L))
+                .thenReturn(Optional.of(new BlockMeta(100, "0xAAAA", false)));
+
+        Instant occurredAt = Instant.ofEpochSecond(1_700_000_000L);
+        TokenTransfer orphanedA = new TokenTransfer();
+        orphanedA.setId(UUID.randomUUID());
+        orphanedA.setChainConfigId(chainConfigId);
+        orphanedA.setTxHash("0xaabb");
+        orphanedA.setLogIndex(7);
+        orphanedA.setBlockHash("0xaaaa");
+        orphanedA.setOccurredAt(occurredAt);
+        orphanedA.setFinalityStatus(FinalityLevel.ORPHANED);
+
+        GraphTransfer returnedA = new GraphTransfer("same-log", "0xtoken", "0xfrom", "0xto",
+                null, "5", "TRANSFER", 100L, occurredAt.getEpochSecond(), "0xAABB", 7L);
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
+                .thenReturn(List.of(returnedA));
+        when(tokenTransferRepository
+                .findByChainConfigIdAndTxHashAndLogIndexAndBlockHashAndOccurredAt(
+                        chainConfigId, "0xaabb", 7, "0xaaaa", occurredAt))
+                .thenReturn(Optional.of(orphanedA));
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
+
+        service.syncChain(chain);
+
+        ArgumentCaptor<TokenTransfer> transfer = ArgumentCaptor.forClass(TokenTransfer.class);
+        verify(tokenTransferRepository).save(transfer.capture());
+        assertThat(transfer.getValue()).isSameAs(orphanedA);
+        assertThat(orphanedA.getFinalityStatus()).isEqualTo(FinalityLevel.PROVISIONAL);
+        assertThat(orphanedA.getBlockHash()).isEqualTo("0xaaaa");
+        assertThat(orphanedA.getTxHash()).isEqualTo("0xaabb");
+        assertThat(orphanedA.getContractAddress()).isEqualTo("0xtoken");
     }
 
     @Test
@@ -359,8 +431,6 @@ class GraphNodeSyncServiceTest {
                 null, "5", "TRANSFER", 90L, 1_700_000_000L, "0xtx1", 0L);
         when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
                 .thenReturn(List.of(transfer));
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(chainConfigId, "0xtx1", 0))
-                .thenReturn(false);
         when(graphNodeClient.fetchMeta(chain, 90L))
                 .thenReturn(Optional.of(new BlockMeta(90, "0xblockhash90", false)));
         when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
@@ -373,8 +443,8 @@ class GraphNodeSyncServiceTest {
     }
 
     @Test
-    @DisplayName("TAG_BASED chain: a transfer at or below the node's finalized tag is written "
-            + "FINAL immediately, without ever fetching a block hash for it")
+    @DisplayName("TAG_BASED chain: a transfer first seen FINALIZED still persists its exact "
+            + "normalized block hash for typed-reorg selection")
     void syncChain_tagBased_atOrBelowFinalizedTag_writesFinalImmediately() {
         ChainConfig chain = ethereumChain();
         chain.setFinalityModel(ChainConfig.FinalityModel.TAG_BASED);
@@ -390,8 +460,8 @@ class GraphNodeSyncServiceTest {
                 null, "5", "TRANSFER", 70L, 1_700_000_000L, "0xtx2", 0L);
         when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
                 .thenReturn(List.of(transfer));
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(chainConfigId, "0xtx2", 0))
-                .thenReturn(false);
+        when(graphNodeClient.fetchMeta(chain, 70L))
+                .thenReturn(Optional.of(new BlockMeta(70, "0xABCDEF", false)));
         when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
 
         service.syncChain(chain);
@@ -399,7 +469,7 @@ class GraphNodeSyncServiceTest {
         ArgumentCaptor<TokenTransfer> captor = ArgumentCaptor.forClass(TokenTransfer.class);
         verify(tokenTransferRepository).save(captor.capture());
         assertThat(captor.getValue().getFinalityStatus()).isEqualTo(FinalityLevel.FINALIZED);
-        assertThat(captor.getValue().getBlockHash()).isNull();
-        verify(graphNodeClient, never()).fetchMeta(chain, 70L);
+        assertThat(captor.getValue().getBlockHash()).isEqualTo("0xabcdef");
+        verify(graphNodeClient).fetchMeta(chain, 70L);
     }
 }

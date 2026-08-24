@@ -1,3 +1,6 @@
+{{- if and .Values.postgresql.enabled .Values.cloudSqlProxy.enabled }}
+{{- fail "postgresql.enabled and cloudSqlProxy.enabled are mutually exclusive" }}
+{{- end }}
 {{- $ctx := dict "context" . "component" "backend" }}
 apiVersion: apps/v1
 kind: Deployment
@@ -14,6 +17,12 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  minReadySeconds: {{ .Values.rollout.minReadySeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.rollout.maxUnavailable }}
+      maxSurge: {{ .Values.rollout.maxSurge }}
   selector:
     matchLabels:
       {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 6 }}
@@ -29,6 +38,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "registerwerk.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- with .Values.affinity }}
@@ -61,6 +71,50 @@ spec:
               {{- include "registerwerk.componentSelectorLabels" $ctx | nindent 14 }}
       {{- with .Values.terminationGracePeriodSeconds }}
       terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- if .Values.cloudSqlProxy.enabled }}
+      initContainers:
+        # Kubernetes native sidecar (Kubernetes 1.29+): starts before the application and remains
+        # for the lifetime of the pod, avoiding startup and shutdown races around database access.
+        - name: cloud-sql-proxy
+          restartPolicy: Always
+          image: {{ .Values.cloudSqlProxy.image | quote }}
+          args:
+            - --structured-logs
+            - --health-check
+            - --http-address=0.0.0.0
+            - --http-port=9801
+            - --port=5432
+            {{- if .Values.cloudSqlProxy.privateIp }}
+            - --private-ip
+            {{- end }}
+            {{- if .Values.cloudSqlProxy.autoIamAuthn }}
+            - --auto-iam-authn
+            {{- end }}
+            - {{ required "cloudSqlProxy.instanceConnectionName is required when cloudSqlProxy.enabled" .Values.cloudSqlProxy.instanceConnectionName | quote }}
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: sql-health
+              containerPort: 9801
+          startupProbe:
+            httpGet: {path: /startup, port: sql-health}
+            failureThreshold: 60
+            periodSeconds: 1
+          livenessProbe:
+            httpGet: {path: /liveness, port: sql-health}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: {path: /readiness, port: sql-health}
+            periodSeconds: 5
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.cloudSqlProxy.resources | nindent 12 }}
       {{- end }}
       containers:
         - name: backend
@@ -103,6 +157,17 @@ spec:
                   name: {{ .Values.postgresql.auth.existingSecret }}
                   key: {{ .Values.postgresql.auth.secretKeys.userPasswordKey | default "password" }}
             {{- end }}
+            {{- if .Values.cloudSqlProxy.enabled }}
+            - name: DB_URL
+              value: "jdbc:postgresql://127.0.0.1:5432/{{ .Values.cloudSqlProxy.database }}"
+            - name: DB_USER
+              value: {{ .Values.cloudSqlProxy.username | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudSqlProxy.secretName }}
+                  key: {{ .Values.cloudSqlProxy.passwordKey }}
+            {{- end }}
             {{- if .Values.zamaRelayer.enabled }}
             {{/* zamaRelayer.enabled defaults to false (Compose mirrors this with its own
                  `profiles: [confidential]` opt-in) — HttpZamaRelayerClient.isConfigured() treats a
@@ -126,8 +191,12 @@ spec:
             - secretRef:
                 name: registerwerk-secrets
                 optional: false
-          {{- if .Values.wallets.persistence.enabled }}
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cds
+              mountPath: /app/cds
+          {{- if .Values.wallets.persistence.enabled }}
             - name: wallets
               mountPath: /data/wallets
           {{- end }}
@@ -145,8 +214,12 @@ spec:
             {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if .Values.wallets.persistence.enabled }}
       volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cds
+          emptyDir: {}
+      {{- if .Values.wallets.persistence.enabled }}
         - name: wallets
           persistentVolumeClaim:
             claimName: {{ include "registerwerk.fullname" . }}-wallets

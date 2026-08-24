@@ -87,7 +87,7 @@ import { AuthService } from '../../../core/auth/auth.service';
     <div class="page-header">
       <h1>Customers</h1>
       @if (canCreate) {
-      <button mat-raised-button color="primary" (click)="createNew()">
+      <button type="button" mat-raised-button color="primary" (click)="createNew()">
         <mat-icon>add</mat-icon>
         New Entity
       </button>
@@ -189,7 +189,7 @@ import { AuthService } from '../../../core/auth/auth.service';
             <th mat-header-cell *matHeaderCellDef></th>
             <td mat-cell *matCellDef="let row">
               <div class="actions-cell">
-                <button mat-icon-button color="primary" (click)="$event.stopPropagation(); viewEntity(row)"
+                <button type="button" mat-icon-button color="primary" (click)="$event.stopPropagation(); viewEntity(row)"
                         [attr.aria-label]="'View ' + row.currentName" matTooltip="View details">
                   <mat-icon>open_in_new</mat-icon>
                 </button>
@@ -198,7 +198,10 @@ import { AuthService } from '../../../core/auth/auth.service';
           </ng-container>
 
           <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-          <tr mat-row *matRowDef="let row; columns: displayedColumns;" style="cursor:pointer" (click)="viewEntity(row)"></tr>
+          <tr mat-row *matRowDef="let row; columns: displayedColumns;" class="interactive-row"
+              tabindex="0" [attr.aria-label]="'Open entity ' + row.currentName"
+              (click)="viewEntity(row)" (keydown.enter)="viewEntity(row)"
+              (keydown.space)="viewEntity(row); $event.preventDefault()"></tr>
         </table>
         </div>
 

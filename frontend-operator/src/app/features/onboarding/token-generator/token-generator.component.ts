@@ -108,11 +108,12 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
   `],
   template: `
     <div class="back-row">
-      <button mat-button (click)="goBack()">
+      <button type="button" mat-button (click)="goBack()">
         <mat-icon>arrow_back</mat-icon>
         Back to Customers
       </button>
     </div>
+    <h1 class="sr-only">Onboarding token</h1>
 
     @if (loading) {
       <div class="spinner-wrap"><mat-spinner diameter="40" /></div>
@@ -162,7 +163,7 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
                  Click the button below to generate a secure, single-use onboarding token
                  for this entity. The token expires in 24 hours.
                </p>
-              <button
+              <button type="button"
                 mat-raised-button
                 color="primary"
                 (click)="generate()"
@@ -189,7 +190,7 @@ import { StatusBadgeComponent } from '@registerwerk/ui';
                 </div>
 
                 <div class="token-actions">
-                  <button mat-raised-button color="accent" (click)="copyToken()">
+                  <button type="button" mat-raised-button color="accent" (click)="copyToken()">
                     <mat-icon>content_copy</mat-icon>
                     Copy Token
                   </button>

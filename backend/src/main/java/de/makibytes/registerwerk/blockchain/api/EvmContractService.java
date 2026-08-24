@@ -7,14 +7,17 @@ import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.finality.api.ChainQuarantinePort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.crypto.RawTransaction;
+import org.web3j.crypto.Hash;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.request.Transaction;
@@ -63,6 +66,7 @@ public class EvmContractService {
     private final ChainConfigRepository    chainConfigRepository;
     private final WalletSigner             walletSigner;
     private final NonceCoordinator         nonceCoordinator;
+    private final ChainQuarantinePort       chainQuarantine;
 
     /** eth_chainId per Web3j client — chain clients are long-lived singletons. */
     private final ConcurrentHashMap<Web3j, Long> chainIdCache = new ConcurrentHashMap<>();
@@ -70,11 +74,13 @@ public class EvmContractService {
     public EvmContractService(BlockchainClientRegistry clientRegistry,
                                ChainConfigRepository chainConfigRepository,
                                WalletSigner walletSigner,
-                               NonceCoordinator nonceCoordinator) {
+                               NonceCoordinator nonceCoordinator,
+                               ChainQuarantinePort chainQuarantine) {
         this.clientRegistry       = clientRegistry;
         this.chainConfigRepository = chainConfigRepository;
         this.walletSigner          = walletSigner;
         this.nonceCoordinator      = nonceCoordinator;
+        this.chainQuarantine       = chainQuarantine;
     }
 
     // ── Credential helpers ────────────────────────────────────────────────────
@@ -86,7 +92,7 @@ public class EvmContractService {
 
     /** Returns credentials for the default wallet of the given chain descriptor. */
     public EvmSigner signer(ChainDescriptor descriptor) {
-        return walletSigner.evmSignerForDescriptor(descriptor);
+        return signer(chainConfigId(descriptor));
     }
 
     /**
@@ -117,6 +123,22 @@ public class EvmContractService {
         return config.getChainId() != null ? config.getChainId() : 1L;
     }
 
+    /** Resolves the stable database identity required by every state-changing EVM call. */
+    public UUID chainConfigId(ChainDescriptor descriptor) {
+        var matches = chainConfigRepository
+                .findByIdentifierStartingWith(descriptor.chain().name() + "_").stream()
+                .filter(ChainConfig::isEnabled)
+                .filter(config -> config.getChainType() == ChainConfig.ChainType.EVM)
+                .filter(config -> config.getNetworkType().name()
+                        .equals(descriptor.network().name()))
+                .toList();
+        if (matches.size() != 1) {
+            throw new IllegalStateException("Expected exactly one enabled EVM ChainConfig for "
+                    + descriptor + ", found " + matches.size());
+        }
+        return matches.getFirst().getId();
+    }
+
     // ── Transaction sending ───────────────────────────────────────────────────
 
     /**
@@ -130,14 +152,40 @@ public class EvmContractService {
      *
      * @return EVM transaction hash (0x-prefixed, 66 characters)
      */
+    @Deprecated(forRemoval = true)
     public String submit(Web3j web3j, EvmSigner signer, String contractAddress, Function function) {
-        return submit(web3j, signer, contractAddress, FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+        throw new IllegalStateException("chainConfigId is required for quarantine-safe EVM submission");
+    }
+
+    /**
+     * Chain-aware immediate submission boundary. The chain row lock is retained through the
+     * RPC call, making submission and quarantine activation strictly ordered across replicas.
+     */
+    @Transactional
+    public String submit(UUID chainConfigId, Web3j web3j, EvmSigner signer,
+            String contractAddress, Function function) {
+        chainQuarantine.requireSubmissionAllowed(chainConfigId);
+        return submitEncoded(web3j, signer, contractAddress,
+                FunctionEncoder.encode(function), CALL_GAS_LIMIT);
     }
 
     /**
      * Submits a raw ABI-encoded call to {@code contractAddress} and returns the transaction hash.
      */
+    @Deprecated(forRemoval = true)
     public String submit(Web3j web3j, EvmSigner signer, String contractAddress,
+                         String encodedData, BigInteger gasLimit) {
+        throw new IllegalStateException("chainConfigId is required for quarantine-safe EVM submission");
+    }
+
+    @Transactional
+    public String submit(UUID chainConfigId, Web3j web3j, EvmSigner signer, String contractAddress,
+            String encodedData, BigInteger gasLimit) {
+        chainQuarantine.requireSubmissionAllowed(chainConfigId);
+        return submitEncoded(web3j, signer, contractAddress, encodedData, gasLimit);
+    }
+
+    private String submitEncoded(Web3j web3j, EvmSigner signer, String contractAddress,
                          String encodedData, BigInteger gasLimit) {
         try {
             long chainId = resolveChainId(web3j);
@@ -172,6 +220,72 @@ public class EvmContractService {
         }
     }
 
+    /** A deterministic signed transaction prepared without contacting {@code eth_sendRawTransaction}. */
+    public record PreparedRawTransaction(
+            String txHash, String signedPayload, long chainId, String senderAddress, BigInteger nonce) {}
+
+    /**
+     * Reserves a nonce and signs a transaction in the caller's database transaction. No broadcast
+     * occurs here. Persist the returned payload in that same transaction, then use
+     * {@link #broadcastPrepared} after commit. This eliminates the uncloseable "RPC succeeded,
+     * tx hash persistence failed" window of sign-and-submit APIs.
+     */
+    @Transactional
+    public PreparedRawTransaction prepareDurable(UUID chainConfigId, Web3j web3j, EvmSigner signer,
+            String contractAddress, Function function) {
+        chainQuarantine.requireSubmissionAllowed(chainConfigId);
+        try {
+            String encodedData = FunctionEncoder.encode(function);
+            long chainId = resolveChainId(web3j);
+            BigInteger effectiveGasLimit = estimateGasLimit(web3j, signer.address(), contractAddress,
+                    encodedData, CALL_GAS_LIMIT);
+            Fees fees = resolveFees(web3j);
+            return nonceCoordinator.withReservedNonce(chainId, signer.address(),
+                    () -> nonce(web3j, signer.address()), nonce -> {
+                        RawTransaction tx = buildTransaction(
+                                chainId, nonce, effectiveGasLimit, contractAddress, encodedData, fees);
+                        byte[] signed = signer.signTransaction(tx, chainId);
+                        String payload = Numeric.toHexString(signed);
+                        String txHash = Numeric.toHexString(Hash.sha3(signed));
+                        return new PreparedRawTransaction(
+                                txHash, payload, chainId, signer.address(), nonce);
+                    });
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("EVM durable transaction preparation error: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Broadcasts an already-persisted signed payload. Repeating this method can never create a
+     * second semantic transaction: the same signed bytes always have the same sender, nonce and
+     * hash. An ambiguous provider/network failure is deliberately propagated so the outbox retries
+     * those exact bytes.
+     */
+    @Transactional
+    public String broadcastPrepared(UUID chainConfigId, Web3j web3j,
+            String signedPayload, String expectedTxHash) {
+        chainQuarantine.requireSubmissionAllowed(chainConfigId);
+        try {
+            EthSendTransaction sent = web3j.ethSendRawTransaction(signedPayload).send();
+            if (sent.hasError()) {
+                throw new RuntimeException(
+                        "Prepared transaction submission error: " + sent.getError().getMessage());
+            }
+            String returnedHash = sent.getTransactionHash();
+            if (returnedHash == null || !returnedHash.equalsIgnoreCase(expectedTxHash)) {
+                throw new IllegalStateException("RPC returned tx hash " + returnedHash
+                        + " for prepared transaction " + expectedTxHash);
+            }
+            return returnedHash;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("EVM prepared transaction submit error: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * Encodes {@code function}, sends a signed raw transaction to {@code contractAddress},
      * and waits for the receipt.
@@ -179,15 +293,38 @@ public class EvmContractService {
      * @return mined {@link TransactionReceipt}
      * @throws RuntimeException wrapping any IO or timeout error
      */
+    @Deprecated(forRemoval = true)
     public TransactionReceipt send(Web3j web3j, EvmSigner signer, String contractAddress,
                                    Function function) {
-        return send(web3j, signer, contractAddress, FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+        throw new IllegalStateException("chainConfigId is required for quarantine-safe EVM submission");
+    }
+
+    /** Chain-aware synchronous submission retaining the quarantine lock through its receipt. */
+    @Transactional
+    public TransactionReceipt send(UUID chainConfigId, Web3j web3j, EvmSigner signer,
+            String contractAddress, Function function) {
+        chainQuarantine.requireSubmissionAllowed(chainConfigId);
+        return sendEncoded(web3j, signer, contractAddress,
+                FunctionEncoder.encode(function), CALL_GAS_LIMIT);
     }
 
     /**
      * Sends a raw ABI-encoded call to {@code contractAddress} with a custom gas limit.
      */
+    @Deprecated(forRemoval = true)
     public TransactionReceipt send(Web3j web3j, EvmSigner signer, String contractAddress,
+                                   String encodedData, BigInteger gasLimit) {
+        throw new IllegalStateException("chainConfigId is required for quarantine-safe EVM submission");
+    }
+
+    @Transactional
+    public TransactionReceipt send(UUID chainConfigId, Web3j web3j, EvmSigner signer,
+            String contractAddress, String encodedData, BigInteger gasLimit) {
+        chainQuarantine.requireSubmissionAllowed(chainConfigId);
+        return sendEncoded(web3j, signer, contractAddress, encodedData, gasLimit);
+    }
+
+    private TransactionReceipt sendEncoded(Web3j web3j, EvmSigner signer, String contractAddress,
                                    String encodedData, BigInteger gasLimit) {
         try {
             long chainId = resolveChainId(web3j);
@@ -231,7 +368,20 @@ public class EvmContractService {
      * @param encodedConstructor ABI-encoded constructor arguments (may be null for no-arg)
      * @return address of the newly deployed contract
      */
+    @Deprecated(forRemoval = true)
     public String deploy(Web3j web3j, EvmSigner signer, String binary,
+                         String encodedConstructor) {
+        throw new IllegalStateException("chainConfigId is required for quarantine-safe EVM deployment");
+    }
+
+    @Transactional
+    public String deploy(UUID chainConfigId, Web3j web3j, EvmSigner signer, String binary,
+                         String encodedConstructor) {
+        chainQuarantine.requireSubmissionAllowed(chainConfigId);
+        return deployEncoded(web3j, signer, binary, encodedConstructor);
+    }
+
+    private String deployEncoded(Web3j web3j, EvmSigner signer, String binary,
                          String encodedConstructor) {
         String data = Numeric.cleanHexPrefix(binary)
                 + (encodedConstructor != null ? Numeric.cleanHexPrefix(encodedConstructor) : "");

@@ -15,7 +15,9 @@ import java.util.UUID;
  *
  * @param chainConfigId which chain the source block belongs to
  * @param blockNumber   the block that caused this effect
- * @param blockHash     the block's hash when known (EVM); null for chains with no such concept
+ * @param blockHash     exact block-incarnation identity for a chain occurrence; required whenever
+ *                      {@code txHash} is present. Null only for a synthetic effect that instead
+ *                      supplies a unique occurrence {@code correlationId}
  * @param txHash        the transaction that caused this effect, when there is a single one
  * @param logIndex      the log index within the transaction, when applicable (EVM only)
  * @param moduleName    the recording module's name (e.g. {@code "indexer"}, {@code "orgidentity"}) —
@@ -38,7 +40,8 @@ import java.util.UUID;
  * @param auditEventId  the {@code audit_event} row this effect's state change was recorded under,
  *                      if any — populates {@code AuditableEvent.reversesEventId()} on compensation
  * @param correlationId caller-supplied correlation id for tracing a single on-chain event across
- *                      multiple recorded effects; may be null
+ *                      multiple recorded effects; mandatory as occurrence identity when both
+ *                      blockHash and txHash are null
  */
 public record ChainEffectDescriptor(
         UUID chainConfigId,

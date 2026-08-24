@@ -2,7 +2,10 @@ package de.makibytes.registerwerk.finality.internal;
 
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.finality.api.CompensationOutcome;
+import de.makibytes.registerwerk.finality.api.ReorgObservation;
+import de.makibytes.registerwerk.finality.api.QuarantineTrigger;
 import de.makibytes.registerwerk.finality.events.ChainEffectAcknowledgedEvent;
+import de.makibytes.registerwerk.finality.events.ChainQuarantineResolvedEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,6 +36,7 @@ class FinalityJournalAdminServiceTest {
     @Mock private ChainEffectRepository repository;
     @Mock private CompensationDispatcher dispatcher;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private ChainQuarantineStore quarantineStore;
 
     private FinalityJournalAdminService service;
     private final UUID actorId = UUID.randomUUID();
@@ -40,7 +44,7 @@ class FinalityJournalAdminServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new FinalityJournalAdminService(repository, dispatcher, eventPublisher);
+        service = new FinalityJournalAdminService(repository, dispatcher, eventPublisher, quarantineStore);
         lenient().when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -98,6 +102,12 @@ class FinalityJournalAdminServiceTest {
     void acknowledge_stampsAndPublishes() {
         UUID id = UUID.randomUUID();
         ChainEffect row = rowWithStatus(id, ChainEffect.Status.COMPENSATION_FAILED);
+        row.setAcknowledgedBy(actorId);
+        row.setAcknowledgedAt(java.time.Instant.now());
+        row.setAcknowledgeReason("Reviewed, accepting the discrepancy");
+        when(repository.acknowledgeIfUnresolved(
+                org.mockito.ArgumentMatchers.eq(id), any(), org.mockito.ArgumentMatchers.eq(actorId), any()))
+                .thenReturn(1);
         when(repository.findById(id)).thenReturn(Optional.of(row));
 
         ChainEffectView view = service.acknowledge(id, "Reviewed, accepting the discrepancy", actorId, "REGISTRY_ADMIN");
@@ -131,5 +141,68 @@ class FinalityJournalAdminServiceTest {
 
         assertThatThrownBy(() -> service.acknowledge(id, "reason", actorId, "REGISTRY_ADMIN"))
                 .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("quarantine resolution requires every chain compensation resolved or acknowledged")
+    void resolveQuarantine_unacknowledgedFailure_refusesToUnfreeze() {
+        UUID chainId = UUID.randomUUID();
+        when(quarantineStore.findActive(chainId)).thenReturn(Optional.of(
+                new de.makibytes.registerwerk.finality.api.ChainQuarantinePort.ActiveChainQuarantine(
+                        chainId, "episode-1", ReorgObservation.ReorgSeverity.ROUTINE,
+                        QuarantineTrigger.DOMAIN_COMPENSATION_FAILED, "failed effect",
+                        java.time.Instant.now(), java.time.Instant.now())));
+        when(repository.existsByChainConfigIdAndStatusInAndAcknowledgedAtIsNull(
+                org.mockito.ArgumentMatchers.eq(chainId), any())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.resolveQuarantine(
+                chainId, "incident reviewed", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unacknowledged");
+
+        verify(quarantineStore, never()).resolve(any(), any());
+        verify(eventPublisher, never()).publishEvent(any(ChainQuarantineResolvedEvent.class));
+    }
+
+    @Test
+    @DisplayName("explicit resolution clears the snapshot and emits actor/reason audit evidence")
+    void resolveQuarantine_resolvedEffects_unfreezesAndAudits() {
+        UUID chainId = UUID.randomUUID();
+        when(quarantineStore.findActive(chainId)).thenReturn(Optional.of(
+                new de.makibytes.registerwerk.finality.api.ChainQuarantinePort.ActiveChainQuarantine(
+                        chainId, "episode-1", ReorgObservation.ReorgSeverity.ROUTINE,
+                        QuarantineTrigger.DOMAIN_COMPENSATION_FAILED, "reconciled effects",
+                        java.time.Instant.now(), java.time.Instant.now())));
+        when(quarantineStore.resolve(org.mockito.ArgumentMatchers.eq(chainId), any())).thenReturn(1);
+
+        service.resolveQuarantine(chainId, "  all effects reconciled  ", actorId, "REGISTRY_ADMIN");
+
+        verify(quarantineStore).resolve(org.mockito.ArgumentMatchers.eq(chainId), any());
+        ArgumentCaptor<ChainQuarantineResolvedEvent> event =
+                ArgumentCaptor.forClass(ChainQuarantineResolvedEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().reorgId()).isEqualTo("episode-1");
+        assertThat(event.getValue().reason()).isEqualTo("all effects reconciled");
+        assertThat(event.getValue().actorId()).isEqualTo(actorId);
+    }
+
+    @Test
+    @DisplayName("generic acknowledgement cannot clear a quarantine with unreconciled canonical state")
+    void resolveQuarantine_consensusIncidentRequiresDedicatedReconciliation() {
+        UUID chainId = UUID.randomUUID();
+        when(quarantineStore.findActive(chainId)).thenReturn(Optional.of(
+                new de.makibytes.registerwerk.finality.api.ChainQuarantinePort.ActiveChainQuarantine(
+                        chainId, "episode-finalized", ReorgObservation.ReorgSeverity.FINALITY_VIOLATION,
+                        QuarantineTrigger.CONSENSUS_FINALITY_VIOLATION, "finalized lineage changed",
+                        java.time.Instant.now(), java.time.Instant.now())));
+
+        assertThatThrownBy(() -> service.resolveQuarantine(
+                chainId, "looks fine", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("explicit canonical-state reconciliation");
+
+        verify(repository, never()).existsByChainConfigIdAndStatusInAndAcknowledgedAtIsNull(any(), any());
+        verify(quarantineStore, never()).resolve(any(), any());
+        verify(eventPublisher, never()).publishEvent(any(ChainQuarantineResolvedEvent.class));
     }
 }

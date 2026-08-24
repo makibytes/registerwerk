@@ -12,6 +12,7 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+      appProtocol: http
   {{/* componentSelectorLabels (component: backend), not the bare selectorLabels — otherwise this
        Service round-robins traffic into every frontend-operator/frontend-customer/zama-relayer
        pod too, since they all carry app.kubernetes.io/{name,instance} as a subset of their own

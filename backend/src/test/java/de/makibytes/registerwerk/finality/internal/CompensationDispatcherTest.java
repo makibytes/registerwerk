@@ -69,7 +69,7 @@ class CompensationDispatcherTest {
     @Test
     @DisplayName("a successful compensation marks the row COMPENSATED and publishes ChainEffectCompensatedEvent")
     void successfulCompensationMarksCompensatedAndPublishes() {
-        when(repository.claimForCompensation(eq(effectId), any())).thenReturn(1);
+        when(repository.claimForCompensation(effectId)).thenReturn(1);
         when(repository.findById(effectId)).thenReturn(Optional.of(row(ChainEffect.Status.ACTIVE)));
         CompensationDispatcher dispatcher = dispatcherWith(compensatorReturning(new CompensationOutcome.Compensated("done")));
 
@@ -85,7 +85,7 @@ class CompensationDispatcherTest {
     @Test
     @DisplayName("a row that fails to claim (already resolved / in progress) returns NotApplicable and touches nothing else")
     void unclaimableRowIsNotApplicable() {
-        when(repository.claimForCompensation(eq(effectId), any())).thenReturn(0);
+        when(repository.claimForCompensation(effectId)).thenReturn(0);
         CompensationDispatcher dispatcher = dispatcherWith(compensatorReturning(new CompensationOutcome.Compensated("done")));
 
         CompensationOutcome outcome = dispatcher.compensate(effectId);
@@ -98,7 +98,7 @@ class CompensationDispatcherTest {
     @Test
     @DisplayName("no registered compensator for the effect type escalates as NO_COMPENSATOR")
     void noCompensatorEscalates() {
-        when(repository.claimForCompensation(eq(effectId), any())).thenReturn(1);
+        when(repository.claimForCompensation(effectId)).thenReturn(1);
         when(repository.findById(effectId)).thenReturn(Optional.of(row(ChainEffect.Status.ACTIVE)));
         CompensationDispatcher dispatcher = dispatcherWith(); // zero compensators registered
 
@@ -113,7 +113,7 @@ class CompensationDispatcherTest {
     @Test
     @DisplayName("a compensator returning Failed marks COMPENSATION_FAILED and escalates as FAILED")
     void failedCompensatorEscalates() {
-        when(repository.claimForCompensation(eq(effectId), any())).thenReturn(1);
+        when(repository.claimForCompensation(effectId)).thenReturn(1);
         when(repository.findById(effectId)).thenReturn(Optional.of(row(ChainEffect.Status.ACTIVE)));
         CompensationDispatcher dispatcher = dispatcherWith(
                 compensatorReturning(new CompensationOutcome.Failed("boom", null)));
@@ -129,7 +129,7 @@ class CompensationDispatcherTest {
     @Test
     @DisplayName("a compensator that throws is treated as Failed, not propagated")
     void throwingCompensatorIsTreatedAsFailed() {
-        when(repository.claimForCompensation(eq(effectId), any())).thenReturn(1);
+        when(repository.claimForCompensation(effectId)).thenReturn(1);
         when(repository.findById(effectId)).thenReturn(Optional.of(row(ChainEffect.Status.ACTIVE)));
         ChainEffectCompensator throwing = new ChainEffectCompensator() {
             public String effectType() { return "HOLDER_BALANCE_SYNCED"; }
@@ -145,9 +145,41 @@ class CompensationDispatcherTest {
     }
 
     @Test
+    @DisplayName("a null compensator outcome is persisted as a retryable failure")
+    void nullOutcomeIsTreatedAsFailed() {
+        when(repository.claimForCompensation(effectId)).thenReturn(1);
+        when(repository.findById(effectId)).thenReturn(Optional.of(row(ChainEffect.Status.ACTIVE)));
+        CompensationDispatcher dispatcher = dispatcherWith(compensatorReturning(null));
+
+        CompensationOutcome outcome = dispatcher.compensate(effectId);
+
+        assertThat(outcome).isInstanceOf(CompensationOutcome.Failed.class);
+        verify(eventPublisher).publishEvent(any(CompensationEscalatedEvent.class));
+    }
+
+    @Test
+    @DisplayName("a legacy row whose persisted category disagrees with its compensator fails without invoking it")
+    void persistedCategoryMismatchFailsClosed() {
+        ChainEffect mismatched = row(ChainEffect.Status.ACTIVE);
+        mismatched.setCategory(CompensationCategory.INVERSE_FLIP);
+        when(repository.claimForCompensation(effectId)).thenReturn(1);
+        when(repository.findById(effectId)).thenReturn(Optional.of(mismatched));
+        ChainEffectCompensator compensator = org.mockito.Mockito.mock(ChainEffectCompensator.class);
+        when(compensator.effectType()).thenReturn("HOLDER_BALANCE_SYNCED");
+        when(compensator.category()).thenReturn(CompensationCategory.RECOMPUTE);
+        CompensationDispatcher dispatcher = dispatcherWith(compensator);
+
+        CompensationOutcome outcome = dispatcher.compensate(effectId);
+
+        assertThat(outcome).isInstanceOf(CompensationOutcome.Failed.class);
+        verify(compensator, never()).compensate(any());
+        verify(eventPublisher).publishEvent(any(CompensationEscalatedEvent.class));
+    }
+
+    @Test
     @DisplayName("a compensator returning Irreversible marks IRREVERSIBLE_ESCALATED and escalates as IRREVERSIBLE")
     void irreversibleCompensatorEscalates() {
-        when(repository.claimForCompensation(eq(effectId), any())).thenReturn(1);
+        when(repository.claimForCompensation(effectId)).thenReturn(1);
         when(repository.findById(effectId)).thenReturn(Optional.of(row(ChainEffect.Status.ACTIVE)));
         CompensationDispatcher dispatcher = dispatcherWith(
                 compensatorReturning(new CompensationOutcome.Irreversible("issue a corrective statement")));

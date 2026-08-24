@@ -112,11 +112,12 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
   `],
   template: `
     <div class="back-row">
-      <button mat-button (click)="goBack()">
+      <button type="button" mat-button (click)="goBack()">
         <mat-icon>arrow_back</mat-icon>
         Back to Screening Queue
       </button>
     </div>
+    <h1 class="sr-only">Screening run details</h1>
 
     @if (loadState === 'pending') {
       <div style="display:flex;justify-content:center;padding:48px">
@@ -174,7 +175,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
           }
         </h3>
         @if (run.entityId) {
-          <button mat-stroked-button (click)="reScreenEntity()">
+          <button type="button" mat-stroked-button (click)="reScreenEntity()">
             <mat-icon>refresh</mat-icon>
             Re-screen Now
           </button>
@@ -198,7 +199,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             Accepted as false positive
           </div>
         } @else {
-          <button mat-stroked-button color="warn"
+          <button type="button" mat-stroked-button color="warn"
                   (click)="acceptHit(hit)"
                   matTooltip="Accept as false positive — requires step-up auth + dual control">
             <mat-icon>gavel</mat-icon>

@@ -45,8 +45,7 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetVaultStateRepository vaultStateRepository;
     private final VaultNavStrikeRepository navStrikeRepository;
-    private final BlockchainClientRegistry clientRegistry;
-    private final EvmContractService evmContractService;
+    private final de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions;
     private final BlockchainTransactionService txService;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -54,15 +53,13 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
             AssetDeploymentRepository deploymentRepository,
             AssetVaultStateRepository vaultStateRepository,
             VaultNavStrikeRepository navStrikeRepository,
-            BlockchainClientRegistry clientRegistry,
-            EvmContractService evmContractService,
+            de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions,
             BlockchainTransactionService txService,
             ApplicationEventPublisher eventPublisher) {
         this.deploymentRepository = deploymentRepository;
         this.vaultStateRepository = vaultStateRepository;
         this.navStrikeRepository = navStrikeRepository;
-        this.clientRegistry = clientRegistry;
-        this.evmContractService = evmContractService;
+        this.durableTransactions = durableTransactions;
         this.txService = txService;
         this.eventPublisher = eventPublisher;
     }
@@ -141,8 +138,28 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
      * once confirmed. Upserts the state row (previously a silent no-op when none existed yet).
      */
     public UUID setDepositCap(UUID deploymentId, java.math.BigInteger newCap, UUID actorId, String actorRole) {
-        AssetDeployment dep = requireDeployment(deploymentId);
+        // Lock the always-present deployment row before inspecting the optional vault-state row.
+        // Locking only asset_vault_state cannot serialize the first two requests when that row
+        // does not exist yet.
+        AssetDeployment dep = requireDeploymentForUpdate(deploymentId);
         log.info("ERC-4626 setDepositCap={} on deployment={}", newCap, deploymentId);
+
+        AssetVaultState state = vaultStateRepository.findByAssetIdForUpdate(dep.getAssetId())
+                .orElseGet(() -> {
+                    AssetVaultState created = new AssetVaultState();
+                    created.setAssetId(dep.getAssetId());
+                    return created;
+                });
+        boolean hasPendingValue = state.getPendingDepositCap() != null;
+        boolean hasPendingTx = state.getDepositCapTxHash() != null;
+        if (hasPendingValue != hasPendingTx) {
+            throw new IllegalStateException("Deposit-cap pending state is incomplete for asset="
+                    + dep.getAssetId() + "; refusing another irreversible submission");
+        }
+        if (hasPendingTx) {
+            throw new IllegalStateException("A deposit-cap transaction is already pending for asset="
+                    + dep.getAssetId() + " tx=" + state.getDepositCapTxHash());
+        }
 
         Function fn = new Function("setDepositCap",
                 Collections.singletonList(new Uint256(newCap)),
@@ -150,8 +167,6 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
 
         SubmittedTx tx = submitEvm(dep, fn, "setDepositCap", Map.of("newCap", newCap.toString()), actorId, actorRole);
 
-        AssetVaultState state = vaultStateRepository.findById(dep.getAssetId())
-                .orElseGet(() -> { AssetVaultState s = new AssetVaultState(); s.setAssetId(dep.getAssetId()); return s; });
         state.setPendingDepositCap(newCap);
         state.setDepositCapTxHash(tx.txHash());
         vaultStateRepository.save(state);
@@ -170,6 +185,15 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
         return dep;
     }
 
+    private AssetDeployment requireDeploymentForUpdate(UUID deploymentId) {
+        AssetDeployment dep = deploymentRepository.findByIdForUpdate(deploymentId)
+                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+        if (dep.getContractAddress() == null) {
+            throw new IllegalStateException("Vault contract not yet deployed: deploymentId=" + deploymentId);
+        }
+        return dep;
+    }
+
     /** @param txId the {@code blockchain_transaction} tracking row's id (what callers of this
      *              service return to their own callers); {@code txHash} the actual on-chain
      *              transaction hash (what gets stored on the vault mirror rows so {@code
@@ -180,10 +204,11 @@ public class Erc4626AdminService implements de.makibytes.registerwerk.blockchain
      *  audit log, so both strikeNav and setDepositCap reach the audit trail. */
     private SubmittedTx submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
                             UUID actorId, String actorRole) {
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        EvmSigner signer = evmContractService.signer(descriptor);
-        String txHash = evmContractService.submit(web3j, signer, dep.getContractAddress(), fn);
+        if (dep.getChainConfigId() == null) {
+            throw new IllegalStateException("Confirmed EVM deployment is missing chainConfigId: " + dep.getId());
+        }
+        String txHash = durableTransactions.submit(
+                dep.getChainConfigId(), dep.getContractAddress(), fn, params);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 

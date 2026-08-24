@@ -116,4 +116,4 @@ Liechtenstein bietet den blockchain-nativsten Rechtsrahmen in Europa:
 - Das TVTG ist technologieneutral (EVM, UTXO und DAG qualifizieren sich alle)
 - Keine gesonderte Bezeichnung als „Kryptowertpapier" erforderlich – der Token selbst trägt das Recht
 
-Das macht `LI_TVTG` attraktiv für innovative Instrumententypen wie [ERC-3525-teilfungible Anleihen](../token-standards/erc3525.md), [ERC-4626-Vault-Token](../token-standards/erc4626.md) und [DAML-Finance-Instrumente](../token-standards/canton-daml.md), für die noch kein entsprechender nationaler Instrumententyp existiert.
+Das macht `LI_TVTG` attraktiv für innovative Instrumententypen wie [ERC-3525-teilfungible Anleihen](../token-standards/erc3525.md), [ERC-4626-Vault-Token](../token-standards/erc4626.md) und [eigene Daml-Bond-Lebenszyklen](../token-standards/canton-daml.md), für die noch kein entsprechender nationaler Instrumententyp existiert.

@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.ClaimSigningService;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
@@ -24,7 +25,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
-import org.web3j.protocol.Web3j;
+import org.web3j.abi.datatypes.Function;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -59,11 +60,11 @@ class Erc3643DeploymentServiceClaimTest {
     @Mock ExplorerUrlBuilder explorerUrlBuilder;
     @Mock ChainConfigRepository chainConfigRepository;
     @Mock EvmContractService evmContractService;
+    @Mock DurableEvmTransactionGateway evmTransactions;
     @Mock ContractAddressConfig contractAddressConfig;
     @Mock ClaimSigningService claimSigningService;
     @Mock BlockchainTransactionService blockchainTransactionService;
     @Mock EvmSigner signer;
-    @Mock Web3j web3j;
 
     private Erc3643DeploymentService service;
     private final UUID chainConfigId = UUID.randomUUID();
@@ -74,7 +75,7 @@ class Erc3643DeploymentServiceClaimTest {
         service = new Erc3643DeploymentService(clientRegistry, identityRepository, claimRepository,
                 suiteRepository, claimTopicRepository, deploymentRepository, assetLookupPort,
                 eventPublisher, explorerUrlBuilder, chainConfigRepository, evmContractService,
-                contractAddressConfig, claimSigningService, blockchainTransactionService);
+                evmTransactions, contractAddressConfig, claimSigningService, blockchainTransactionService);
     }
 
     private OnchainIdentity deployedIdentity() {
@@ -102,7 +103,7 @@ class Erc3643DeploymentServiceClaimTest {
         assertThatThrownBy(() -> service.issueKycClaim(identityId, 1L, null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("not yet deployed");
-        verify(evmContractService, never()).submit(any(), any(), anyString(), any());
+        verify(evmTransactions, never()).submit(any(UUID.class), anyString(), any(Function.class), any());
         verify(blockchainTransactionService, never()).record(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
@@ -114,17 +115,16 @@ class Erc3643DeploymentServiceClaimTest {
         when(claimSigningService.signClaim(eq(chainConfigId), eq(identity.getIdentityAddress()), eq(1L), any()))
                 .thenReturn(new ClaimSigningService.SignedClaim("0x1234",
                         "0x" + "11".repeat(65), "0x1234567890123456789012345678901234567890"));
-        when(evmContractService.signer(chainConfigId)).thenReturn(signer);
         when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig()));
-        when(clientRegistry.getEvmClientByIdentifier("ETHEREUM_MAINNET")).thenReturn(web3j);
-        when(evmContractService.submit(eq(web3j), eq(signer), eq(identity.getIdentityAddress()), any()))
+        when(evmTransactions.submit(eq(chainConfigId), eq(identity.getIdentityAddress()),
+                any(Function.class), any()))
                 .thenReturn("0xissuetx");
 
         String txHash = service.issueKycClaim(identityId, 1L, null);
 
         assertThat(txHash).isEqualTo("0xissuetx");
-        // submit(), never the blocking send() — the whole point of this fix.
-        verify(evmContractService, never()).send(any(), any(), anyString(), any());
+        verify(evmTransactions).submit(eq(chainConfigId), eq(identity.getIdentityAddress()),
+                any(Function.class), any());
         verify(blockchainTransactionService).record(eq("0xissuetx"), eq("addClaim"), eq(null), eq(null),
                 eq("ETHEREUM"), eq("MAINNET"), eq(identity.getIdentityAddress()), any());
     }
@@ -145,7 +145,7 @@ class Erc3643DeploymentServiceClaimTest {
         assertThatThrownBy(() -> service.revokeKycClaim(claimId))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("not yet deployed");
-        verify(evmContractService, never()).submit(any(), any(), anyString(), any());
+        verify(evmTransactions, never()).submit(any(UUID.class), anyString(), any(Function.class), any());
     }
 
     @Test
@@ -162,14 +162,15 @@ class Erc3643DeploymentServiceClaimTest {
         when(evmContractService.signer(chainConfigId)).thenReturn(signer);
         when(signer.address()).thenReturn("0xissuer0000000000000000000000000000001");
         when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig()));
-        when(clientRegistry.getEvmClientByIdentifier("ETHEREUM_MAINNET")).thenReturn(web3j);
-        when(evmContractService.submit(eq(web3j), eq(signer), eq(identity.getIdentityAddress()), any()))
+        when(evmTransactions.submit(eq(chainConfigId), eq(identity.getIdentityAddress()),
+                any(Function.class), any()))
                 .thenReturn("0xrevoketx");
 
         String txHash = service.revokeKycClaim(claimId);
 
         assertThat(txHash).isEqualTo("0xrevoketx");
-        verify(evmContractService, never()).send(any(), any(), anyString(), any());
+        verify(evmTransactions).submit(eq(chainConfigId), eq(identity.getIdentityAddress()),
+                any(Function.class), any());
         verify(blockchainTransactionService).record(eq("0xrevoketx"), eq("removeClaim"), eq(null), eq(null),
                 eq("ETHEREUM"), eq("MAINNET"), eq(identity.getIdentityAddress()), any());
     }

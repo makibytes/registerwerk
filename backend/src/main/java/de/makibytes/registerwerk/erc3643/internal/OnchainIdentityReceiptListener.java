@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
 import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
+import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +17,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.scheduling.annotation.Scheduled;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.EthGetTransactionReceipt;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
@@ -42,23 +42,25 @@ class OnchainIdentityReceiptListener {
     private final BlockchainClientRegistry clientRegistry;
     private final EvmFinalityResolver finalityResolver;
     private final ChainEffectRecorder chainEffectRecorder;
+    private final IsolatedTransactionExecutor isolatedTransactions;
 
     OnchainIdentityReceiptListener(
             OnchainIdentityRepository identityRepository,
             ChainConfigRepository chainConfigRepository,
             BlockchainClientRegistry clientRegistry,
             EvmFinalityResolver finalityResolver,
-            ChainEffectRecorder chainEffectRecorder) {
+            ChainEffectRecorder chainEffectRecorder,
+            IsolatedTransactionExecutor isolatedTransactions) {
         this.identityRepository = identityRepository;
         this.chainConfigRepository = chainConfigRepository;
         this.clientRegistry = clientRegistry;
         this.finalityResolver = finalityResolver;
         this.chainEffectRecorder = chainEffectRecorder;
+        this.isolatedTransactions = isolatedTransactions;
     }
 
     @SchedulerLock(name = "onchainIdentityReceiptListener", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
     @Scheduled(fixedDelay = 30_000, initialDelay = 25_000)
-    @Transactional
     public void resolvePendingIdentities() {
         // Indexed prefix query — this poller runs every 30s; a full-table scan
         // with in-memory filtering would grow linearly with the identity count.
@@ -70,7 +72,7 @@ class OnchainIdentityReceiptListener {
 
         for (OnchainIdentity identity : pending) {
             try {
-                resolveIdentity(identity);
+                isolatedTransactions.run(() -> resolveIdentity(identity));
             } catch (Exception e) {
                 log.warn("Failed to resolve pending identity={}: {}", identity.getId(), e.getMessage());
             }
@@ -121,11 +123,13 @@ class OnchainIdentityReceiptListener {
         if (realAddress == null) return;
 
         identity.setIdentityAddress(realAddress);
+        identity.setDeployedBlockNumber(blockNumber);
+        identity.setDeployedBlockHash(receipt.getBlockHash());
         identityRepository.save(identity);
         log.info("Resolved ONCHAINID identity={} address={} tx={}",
                 identity.getId(), realAddress, identity.getDeployedByTx());
 
-        chainEffectRecorder.record(ChainEffectDescriptor.of(
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
                 identity.getChainConfigId(), blockNumber, receipt.getBlockHash(), identity.getDeployedByTx(),
                 "erc3643", OnchainIdentityRevertCompensator.EFFECT_TYPE, "OnchainIdentity", identity.getId(), null,
                 CompensationCategory.INVERSE_FLIP));

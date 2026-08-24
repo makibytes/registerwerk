@@ -59,8 +59,8 @@ import { ChainService } from '../../../core/api/chain.service';
     </mat-dialog-content>
     <mat-dialog-actions style="padding: 0 24px 20px">
       <div class="actions">
-        <button mat-button mat-dialog-close>Cancel</button>
-        <button mat-flat-button color="primary" [disabled]="loading() || loadError() || selectedCount === 0" (click)="submit()">Apply</button>
+        <button type="button" mat-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-flat-button color="primary" [disabled]="loading() || loadError() || selectedCount === 0" (click)="submit()">Apply</button>
       </div>
     </mat-dialog-actions>
   `,

@@ -214,7 +214,7 @@ export interface AddressPickerDialogData {
                   <mat-hint>Enter a custom {{ modeLabel }} address</mat-hint>
                 </mat-form-field>
                 <div style="margin-top:12px">
-                  <button mat-flat-button color="primary" [disabled]="!customAddress.trim()" (click)="pick(customAddress.trim())">
+                  <button type="button" mat-flat-button color="primary" [disabled]="!customAddress.trim()" (click)="pick(customAddress.trim())">
                     Use this address
                   </button>
                 </div>
@@ -226,7 +226,7 @@ export interface AddressPickerDialogData {
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
+      <button type="button" mat-button mat-dialog-close>Cancel</button>
     </mat-dialog-actions>
   `,
 })

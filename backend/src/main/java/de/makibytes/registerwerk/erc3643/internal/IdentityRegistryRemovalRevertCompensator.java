@@ -10,14 +10,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.UUID;
 
 /**
- * The INVERSE_FLIP compensator for {@code ERC3643_IDENTITY_REMOVED} — undoes an
- * {@link Erc3643IdentityRegistry} soft-removal whose confirming {@code deleteIdentity} block was
- * later retracted, by clearing {@code removedAt} — the investor was never actually removed
- * on-chain. See {@link IdentityRegistryRegistrationRevertCompensator}'s javadoc for the shared
- * design rationale (direct repository access, never through a writer/listener that depends on
+ * The INVERSE_FLIP compensator for {@code ERC3643_IDENTITY_REMOVED}. A retracted confirming block
+ * clears only the chain-derived confirmation flag and exact block provenance. It deliberately
+ * preserves (or restores) {@code removedAt} and {@code removedByTx}: removing an identity narrows
+ * compliance access, so the submitted removal must remain fail-closed while that same transaction
+ * awaits a new canonical verdict. Only a confirmed failed receipt may reactivate the entry by
+ * clearing {@code removedAt} (see {@link Erc3643IdentityRegistryConfirmationListener}).
+ *
+ * <p>See {@link IdentityRegistryRegistrationRevertCompensator}'s javadoc for the shared design
+ * rationale (direct repository access, never through a writer/listener that depends on
  * {@code ChainEffectRecorder}).
  */
 @Component
@@ -46,18 +51,25 @@ class IdentityRegistryRemovalRevertCompensator implements ChainEffectCompensator
         if (entry == null) {
             return new CompensationOutcome.NotApplicable("Erc3643IdentityRegistry " + id + " no longer exists");
         }
-        if (entry.isActive()) {
+        if (!ChainEffectCausality.matches(effect, entry.getChainConfigId(), entry.getRemovedByTx(),
+                entry.getRemovalBlockNumber(), entry.getRemovalBlockHash())) {
             return new CompensationOutcome.NotApplicable(
-                    "Erc3643IdentityRegistry " + id + " is already active (not removed)");
+                    "Erc3643IdentityRegistry " + id + " is owned by a different removal incarnation");
         }
 
-        log.error("Erc3643IdentityRegistry id={} wallet={} was removed but its confirming block was retracted "
-                        + "by a reorg — the investor was never actually removed "
-                        + "on-chain; restoring this entry to active.",
+        log.error("Erc3643IdentityRegistry id={} wallet={} removal confirmation was retracted "
+                        + "by a reorg; retaining fail-closed removal intent while the transaction "
+                        + "awaits a new canonical verdict.",
                 id, entry.getWalletAddress());
-        entry.setRemovedAt(null);
+        if (entry.getRemovedAt() == null) {
+            entry.setRemovedAt(Instant.now());
+        }
+        entry.setRemovalConfirmed(false);
+        entry.setRemovalBlockNumber(null);
+        entry.setRemovalBlockHash(null);
         repository.save(entry);
 
-        return new CompensationOutcome.Compensated("Restored Erc3643IdentityRegistry " + id + " to active after retraction");
+        return new CompensationOutcome.Compensated(
+                "Returned Erc3643IdentityRegistry " + id + " removal to pending after retraction");
     }
 }

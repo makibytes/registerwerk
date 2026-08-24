@@ -1,10 +1,8 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
-import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
-import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
@@ -22,7 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.web3j.protocol.Web3j;
+import org.web3j.abi.datatypes.Function;
 
 import java.util.Map;
 import java.util.Optional;
@@ -54,8 +52,7 @@ class IdentityRegistryServiceTest {
     @Mock private Erc3643ClaimTopicRepository claimTopicRepo;
     @Mock private AssetDeploymentRepository deploymentRepo;
     @Mock private OnChainIdService onChainIdService;
-    @Mock private EvmContractService evmContractService;
-    @Mock private BlockchainClientRegistry blockchainClientRegistry;
+    @Mock private DurableEvmTransactionGateway evmTransactions;
     @Mock private BlockchainTransactionService blockchainTransactionService;
     @Mock private ApplicationEventPublisher eventPublisher;
 
@@ -65,11 +62,12 @@ class IdentityRegistryServiceTest {
     private final UUID registryEntryId = UUID.randomUUID();
     private final UUID deploymentId = UUID.randomUUID();
     private final UUID assetId = UUID.randomUUID();
+    private final UUID chainConfigId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         service = new IdentityRegistryService(registryRepo, suiteRepo, claimTopicRepo, deploymentRepo,
-                onChainIdService, evmContractService, blockchainClientRegistry,
+                onChainIdService, evmTransactions,
                 blockchainTransactionService, eventPublisher);
     }
 
@@ -78,6 +76,7 @@ class IdentityRegistryServiceTest {
         ReflectionTestUtils.setField(e, "id", registryEntryId);
         e.setSuiteId(suiteId);
         e.setWalletAddress("0x1234567890123456789012345678901234567890");
+        e.setChainConfigId(chainConfigId);
         return e;
     }
 
@@ -93,6 +92,7 @@ class IdentityRegistryServiceTest {
         AssetDeployment d = new AssetDeployment();
         d.setId(deploymentId);
         d.setAssetId(assetId);
+        d.setChainConfigId(chainConfigId);
         d.setChain(Chain.ETHEREUM);
         d.setNetwork(Network.MAINNET);
         return d;
@@ -105,18 +105,14 @@ class IdentityRegistryServiceTest {
         when(registryRepo.findById(registryEntryId)).thenReturn(Optional.of(entry()));
         when(suiteRepo.findById(suiteId)).thenReturn(Optional.of(deployedSuite()));
         when(deploymentRepo.findById(deploymentId)).thenReturn(Optional.of(deployment()));
-        Web3j web3j = mock(Web3j.class);
-        when(blockchainClientRegistry.getEvmClient(new ChainDescriptor(Chain.ETHEREUM, Network.MAINNET)))
-                .thenReturn(web3j);
-        when(evmContractService.signer(new ChainDescriptor(Chain.ETHEREUM, Network.MAINNET)))
-                .thenReturn(mock(de.makibytes.registerwerk.wallet.api.EvmSigner.class));
-        when(evmContractService.submit(eq(web3j), any(), eq("0xregistry"), any())).thenReturn("0xdeletetx");
+        when(evmTransactions.submit(eq(chainConfigId), eq("0xregistry"),
+                any(Function.class), any())).thenReturn("0xdeletetx");
 
         UUID actorId = UUID.randomUUID();
         service.removeInvestor(suiteId, registryEntryId, actorId, "REGISTRY_ADMIN");
 
-        verify(evmContractService).submit(eq(web3j), any(), eq("0xregistry"), any());
-        verify(evmContractService, never()).send(any(), any(), anyString(), any());
+        verify(evmTransactions).submit(eq(chainConfigId), eq("0xregistry"),
+                any(Function.class), any());
         verify(blockchainTransactionService).record(
                 eq("0xdeletetx"), eq("deleteIdentity"), eq(deploymentId), eq(assetId),
                 eq("ETHEREUM"), eq("MAINNET"), eq("0xregistry"),
@@ -130,9 +126,8 @@ class IdentityRegistryServiceTest {
         when(registryRepo.findById(registryEntryId)).thenReturn(Optional.of(entry));
         when(suiteRepo.findById(suiteId)).thenReturn(Optional.of(deployedSuite()));
         when(deploymentRepo.findById(deploymentId)).thenReturn(Optional.of(deployment()));
-        when(blockchainClientRegistry.getEvmClient(any())).thenReturn(mock(Web3j.class));
-        when(evmContractService.signer(any(ChainDescriptor.class))).thenReturn(mock(de.makibytes.registerwerk.wallet.api.EvmSigner.class));
-        when(evmContractService.submit(any(), any(), anyString(), any())).thenReturn("0xdeletetx");
+        when(evmTransactions.submit(any(UUID.class), anyString(), any(Function.class), any()))
+                .thenReturn("0xdeletetx");
 
         service.removeInvestor(suiteId, registryEntryId, UUID.randomUUID(), "REGISTRY_ADMIN");
 
@@ -153,9 +148,8 @@ class IdentityRegistryServiceTest {
         when(registryRepo.findById(registryEntryId)).thenReturn(Optional.of(entry));
         when(suiteRepo.findById(suiteId)).thenReturn(Optional.of(deployedSuite()));
         when(deploymentRepo.findById(deploymentId)).thenReturn(Optional.of(deployment()));
-        when(blockchainClientRegistry.getEvmClient(any())).thenReturn(mock(Web3j.class));
-        when(evmContractService.signer(any(ChainDescriptor.class))).thenReturn(mock(de.makibytes.registerwerk.wallet.api.EvmSigner.class));
-        when(evmContractService.submit(any(), any(), anyString(), any())).thenReturn("0xdeletetx2");
+        when(evmTransactions.submit(any(UUID.class), anyString(), any(Function.class), any()))
+                .thenReturn("0xdeletetx2");
 
         service.removeInvestor(suiteId, registryEntryId, UUID.randomUUID(), "REGISTRY_ADMIN");
 
@@ -169,9 +163,7 @@ class IdentityRegistryServiceTest {
         when(registryRepo.findById(registryEntryId)).thenReturn(Optional.of(entry));
         when(suiteRepo.findById(suiteId)).thenReturn(Optional.of(deployedSuite()));
         when(deploymentRepo.findById(deploymentId)).thenReturn(Optional.of(deployment()));
-        when(blockchainClientRegistry.getEvmClient(any())).thenReturn(mock(Web3j.class));
-        when(evmContractService.signer(any(ChainDescriptor.class))).thenReturn(mock(de.makibytes.registerwerk.wallet.api.EvmSigner.class));
-        when(evmContractService.submit(any(), any(), anyString(), any()))
+        when(evmTransactions.submit(any(UUID.class), anyString(), any(Function.class), any()))
                 .thenThrow(new RuntimeException("RPC down"));
 
         assertThatThrownBy(() -> service.removeInvestor(suiteId, registryEntryId, UUID.randomUUID(), "REGISTRY_ADMIN"))
@@ -195,7 +187,7 @@ class IdentityRegistryServiceTest {
         service.removeInvestor(suiteId, registryEntryId, UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(entry.getRemovedAt()).isNotNull();
-        verify(evmContractService, never()).submit(any(), any(), anyString(), any());
+        verify(evmTransactions, never()).submit(any(UUID.class), anyString(), any(Function.class), any());
         verify(blockchainTransactionService, never()).record(any(), any(), any(), any(), any(), any(), any(), any());
     }
 }

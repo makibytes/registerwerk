@@ -66,11 +66,12 @@ import { EntityService } from '../../../core/api/entity.service';
   `],
   template: `
     <div class="back-row">
-      <button mat-button (click)="cancel()">
+      <button type="button" mat-button (click)="cancel()">
         <mat-icon>arrow_back</mat-icon>
         Back
       </button>
     </div>
+    <h1 class="sr-only">Register new legal entity</h1>
 
     <mat-card class="form-card">
       <mat-card-header>

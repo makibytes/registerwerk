@@ -14,7 +14,6 @@ import de.makibytes.registerwerk.asset.events.DeploymentFailedEvent;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.erc3643.api.Erc3643DeploymentPort;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -22,7 +21,9 @@ import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,6 +34,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
@@ -47,10 +49,12 @@ import java.util.concurrent.CompletableFuture;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -90,6 +94,12 @@ class AssetDeploymentServiceTest {
     @Mock
     private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
 
+    @Mock
+    private WalletSigner walletSigner;
+
+    @Mock
+    private de.makibytes.registerwerk.blockchain.api.SolanaFinalityReader solanaFinalityReader;
+
     /** Real instance (not a mock), same pattern as BlockchainTransactionServiceTest — a plain
      *  POJO with getters/setters is more reliable to configure directly than to stub. */
     private BlockchainTxProperties txProperties;
@@ -110,10 +120,64 @@ class AssetDeploymentServiceTest {
         txProperties = new BlockchainTxProperties();
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         EvmFinalityResolver finalityResolver = new EvmFinalityResolver(chainConfigRepository, txProperties);
+        lenient().when(chainConfigRepository.findByIdentifierStartingWith(any()))
+                .thenAnswer(invocation -> {
+                    String prefix = invocation.getArgument(0);
+                    ChainConfig config = new ChainConfig();
+                    config.setId(UUID.randomUUID());
+                    config.setIdentifier(prefix + "SEPOLIA");
+                    config.setChainType(prefix.startsWith("SOLANA_")
+                            ? ChainConfig.ChainType.SOLANA : ChainConfig.ChainType.EVM);
+                    config.setNetworkType(ChainConfig.NetworkType.TESTNET);
+                    config.setEnabled(true);
+                    return List.of(config);
+                });
+        lenient().when(walletSigner.chainAddressForWallet(any())).thenReturn("configured-owner");
         assetDeploymentService = new AssetDeploymentService(
                 assetDeploymentRepository, assetRepository, eventPublisher, tokenDeploymentPort,
                 erc3643DeploymentPort, blockchainClientRegistry, evmContractService, completionWriter,
-                txProperties, chainConfigRepository, finalityResolver, restClientBuilder, chainEffectRecorder);
+                txProperties, chainConfigRepository, finalityResolver, restClientBuilder,
+                chainEffectRecorder, walletSigner, solanaFinalityReader);
+    }
+
+    @AfterEach
+    void clearTransactionSynchronization() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    @DisplayName("deploy persists canonical chain identity and waits for commit before chain submission")
+    void deploy_persistsChainIdentityAndSubmitsOnlyAfterCommit() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.ERC20);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(assetDeploymentRepository.save(any())).thenAnswer(invocation -> {
+            AssetDeployment deployment = invocation.getArgument(0);
+            deployment.setId(deploymentId);
+            return deployment;
+        });
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC20),
+                eq(Chain.ETHEREUM), eq(Network.TESTNET), eq("configured-owner")))
+                .thenReturn(CompletableFuture.completedFuture(TokenDeploymentResult.txOnly("0xtx")));
+        TransactionSynchronizationManager.initSynchronization();
+
+        AssetDeployment deployment = assetDeploymentService.deploy(
+                assetId, Chain.ETHEREUM, Network.TESTNET, UUID.randomUUID());
+
+        assertThat(deployment.getChainConfigId()).isNotNull();
+        verify(walletSigner).chainAddressForWallet(deployment.getChainConfigId());
+        verify(tokenDeploymentPort, never()).deploy(any(), any(), any(), any(), any());
+
+        TransactionSynchronizationManager.getSynchronizations()
+                .forEach(synchronization -> synchronization.afterCommit());
+
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.ERC20),
+                eq(Chain.ETHEREUM), eq(Network.TESTNET), eq("configured-owner"));
     }
 
     @Test
@@ -160,7 +224,7 @@ class AssetDeploymentServiceTest {
         assertThat(result.getId()).isEqualTo(deploymentId);
         assertThat(result.getChain()).isEqualTo(Chain.ARBITRUM);
         assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.ARBITRUM), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.ARBITRUM), eq(Network.TESTNET), eq("configured-owner"));
         verify(eventPublisher).publishEvent(any(Object.class));
     }
 
@@ -191,7 +255,7 @@ class AssetDeploymentServiceTest {
                 assetId, Chain.ETHEREUM, Network.TESTNET, actorId);
 
         assertThat(result.getChain()).isEqualTo(Chain.ETHEREUM);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.CONF_ERC20), eq(Chain.ETHEREUM), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.CONF_ERC20), eq(Chain.ETHEREUM), eq(Network.TESTNET), eq("configured-owner"));
     }
 
     @Test
@@ -230,7 +294,7 @@ class AssetDeploymentServiceTest {
                 assetId, Chain.SOLANA, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result.getChain()).isEqualTo(Chain.SOLANA);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.SPL_2022), eq(Chain.SOLANA), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.SPL_2022), eq(Chain.SOLANA), eq(Network.TESTNET), eq("configured-owner"));
     }
 
     @Test
@@ -258,7 +322,7 @@ class AssetDeploymentServiceTest {
 
         assertThat(result.getChain()).isEqualTo(Chain.STARKNET);
         assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC20), eq(Chain.STARKNET), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC20), eq(Chain.STARKNET), eq(Network.TESTNET), eq("configured-owner"));
         verify(eventPublisher).publishEvent(any(Object.class));
     }
 
@@ -287,7 +351,7 @@ class AssetDeploymentServiceTest {
 
         assertThat(result.getChain()).isEqualTo(Chain.STELLAR);
         assertThat(result.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STELLAR_ASSET), eq(Chain.STELLAR), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STELLAR_ASSET), eq(Chain.STELLAR), eq(Network.TESTNET), eq("configured-owner"));
         verify(eventPublisher).publishEvent(any(Object.class));
     }
 
@@ -301,13 +365,6 @@ class AssetDeploymentServiceTest {
         asset.setTokenStandard(TokenStandard.ERC20);
 
         when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
-        when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
-            AssetDeployment dep = invocation.getArgument(0);
-            dep.setId(UUID.randomUUID());
-            return dep;
-        });
-        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.ERC20), eq(Chain.STARKNET), eq(Network.TESTNET), any()))
-                .thenThrow(new UnsupportedOperationException("Starknet does not support token standard: ERC20"));
 
         assertThatThrownBy(() -> assetDeploymentService.deploy(
                 assetId, Chain.STARKNET, Network.TESTNET, UUID.randomUUID()))
@@ -338,7 +395,7 @@ class AssetDeploymentServiceTest {
                 assetId, Chain.STARKNET, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result.getChain()).isEqualTo(Chain.STARKNET);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC3525), eq(Chain.STARKNET), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC3525), eq(Chain.STARKNET), eq(Network.TESTNET), eq("configured-owner"));
     }
 
     @Test
@@ -364,7 +421,7 @@ class AssetDeploymentServiceTest {
                 assetId, Chain.ETHEREUM, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result.getChain()).isEqualTo(Chain.ETHEREUM);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.ERC3525), eq(Chain.ETHEREUM), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.ERC3525), eq(Chain.ETHEREUM), eq(Network.TESTNET), eq("configured-owner"));
     }
 
     @Test
@@ -390,7 +447,25 @@ class AssetDeploymentServiceTest {
                 assetId, Chain.CANTON, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result.getChain()).isEqualTo(Chain.CANTON);
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.DAML_BOND_FIXED), eq(Chain.CANTON), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.DAML_BOND_FIXED), eq(Chain.CANTON), eq(Network.TESTNET), eq("configured-owner"));
+    }
+
+    @Test
+    @DisplayName("generic CANTON_TOKEN is rejected until a registry-specific CIP-0056 adapter exists")
+    void deploy_rejectsFabricatedGenericCantonTokenCommands() {
+        UUID assetId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.CANTON_TOKEN);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> assetDeploymentService.deploy(
+                assetId, Chain.CANTON, Network.TESTNET, UUID.randomUUID()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support token standard CANTON_TOKEN");
+
+        verify(assetDeploymentRepository, never()).save(any());
+        verify(tokenDeploymentPort, never()).deploy(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -416,7 +491,7 @@ class AssetDeploymentServiceTest {
                 assetId, Chain.SOLANA, Network.TESTNET, UUID.randomUUID());
 
         assertThat(result).isNotNull();
-        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.SPL_2022_BOND), eq(Chain.SOLANA), eq(Network.TESTNET), eq("owner-placeholder"));
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.SPL_2022_BOND), eq(Chain.SOLANA), eq(Network.TESTNET), eq("configured-owner"));
     }
 
     // ── Regression coverage: syncFromChain/deploy no longer key confirmation on
@@ -494,7 +569,7 @@ class AssetDeploymentServiceTest {
 
         when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
         Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
-        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(blockchainClientRegistry.getEvmClientByIdentifier(anyString())).thenReturn(web3j);
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setStatus("0x0"); // reverted
@@ -528,7 +603,7 @@ class AssetDeploymentServiceTest {
 
         when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
         Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
-        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(blockchainClientRegistry.getEvmClientByIdentifier(anyString())).thenReturn(web3j);
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setStatus("0x1"); // success — but no top-level contractAddress, since `to` was the factory
@@ -551,7 +626,6 @@ class AssetDeploymentServiceTest {
         // gives exactly 12 confirmations (111 - 100 + 1).
         when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(111));
         txProperties.setDefaultConfirmations(12);
-
         assetDeploymentService.syncFromChain(deploymentId);
 
         assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
@@ -559,6 +633,28 @@ class AssetDeploymentServiceTest {
         assertThat(deployment.getBlockHash()).isEqualTo("0xblock100");
         assertThat(deployment.getBlockNumber()).isEqualTo(100L);
         verify(eventPublisher).publishEvent(any(DeploymentConfirmedEvent.class));
+        verify(chainEffectRecorder).recordFinalized(any());
+    }
+
+    @Test
+    void syncFromChainRefusesFinalConfirmationWithoutChainConfigProvenance() throws java.io.IOException {
+        UUID deploymentId = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+
+        when(chainConfigRepository.findByIdentifierStartingWith("ETHEREUM_"))
+                .thenReturn(List.of());
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.PENDING);
+        verify(eventPublisher, never()).publishEvent(any(DeploymentConfirmedEvent.class));
+        verify(chainEffectRecorder, never()).recordFinalized(any());
     }
 
     @Test
@@ -580,10 +676,14 @@ class AssetDeploymentServiceTest {
         de.makibytes.registerwerk.chain.api.ChainConfig chainConfig = new de.makibytes.registerwerk.chain.api.ChainConfig();
         UUID chainConfigId = UUID.randomUUID();
         org.springframework.test.util.ReflectionTestUtils.setField(chainConfig, "id", chainConfigId);
-        when(chainConfigRepository.findByIdentifier("ETHEREUM_TESTNET")).thenReturn(Optional.of(chainConfig));
+        deployment.setChainConfigId(chainConfigId);
+        chainConfig.setEnabled(true);
+        chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
+        chainConfig.setNetworkType(ChainConfig.NetworkType.TESTNET);
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
 
         Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
-        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(blockchainClientRegistry.getEvmClientByIdentifier("ETHEREUM_SEPOLIA")).thenReturn(web3j);
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setStatus("0x1");
         receipt.setBlockNumber("0x64"); // block 100
@@ -598,11 +698,55 @@ class AssetDeploymentServiceTest {
         assertThat(deployment.getChainConfigId()).isEqualTo(chainConfigId);
         ArgumentCaptor<de.makibytes.registerwerk.finality.api.ChainEffectDescriptor> captor =
                 ArgumentCaptor.forClass(de.makibytes.registerwerk.finality.api.ChainEffectDescriptor.class);
-        verify(chainEffectRecorder).record(captor.capture());
+        verify(chainEffectRecorder).recordFinalized(captor.capture());
         assertThat(captor.getValue().chainConfigId()).isEqualTo(chainConfigId);
         assertThat(captor.getValue().blockNumber()).isEqualTo(100L);
         assertThat(captor.getValue().effectType()).isEqualTo("DEPLOYMENT_CONFIRMED");
         assertThat(captor.getValue().entityId()).isEqualTo(deploymentId);
+    }
+
+    @Test
+    @DisplayName("a deployment confirmation is not published when its compensation journal write fails")
+    void syncFromChain_propagatesJournalFailureBeforePublishingConfirmation() throws java.io.IOException {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setAssetId(assetId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setContractAddress("0xalreadyknown");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+
+        ChainConfig chainConfig = new ChainConfig();
+        org.springframework.test.util.ReflectionTestUtils.setField(chainConfig, "id", UUID.randomUUID());
+        UUID chainConfigId = (UUID) org.springframework.test.util.ReflectionTestUtils.getField(chainConfig, "id");
+        deployment.setChainConfigId(chainConfigId);
+        chainConfig.setEnabled(true);
+        chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
+        chainConfig.setNetworkType(ChainConfig.NetworkType.TESTNET);
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, Answers.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClientByIdentifier("ETHEREUM_SEPOLIA")).thenReturn(web3j);
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100");
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(111));
+        txProperties.setDefaultConfirmations(12);
+        when(chainEffectRecorder.recordFinalized(any())).thenThrow(new IllegalStateException("journal unavailable"));
+
+        assertThatThrownBy(() -> assetDeploymentService.syncFromChain(deploymentId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("journal unavailable");
+
+        verify(assetDeploymentRepository).save(deployment);
+        verify(chainEffectRecorder).recordFinalized(any());
+        verify(eventPublisher, never()).publishEvent(any(DeploymentConfirmedEvent.class));
     }
 
     @Test
@@ -619,7 +763,7 @@ class AssetDeploymentServiceTest {
 
         when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
         Web3j web3j = org.mockito.Mockito.mock(Web3j.class, Answers.RETURNS_DEEP_STUBS);
-        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(blockchainClientRegistry.getEvmClientByIdentifier(anyString())).thenReturn(web3j);
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setStatus("0x1");
@@ -655,7 +799,7 @@ class AssetDeploymentServiceTest {
 
         when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
         Web3j web3j = org.mockito.Mockito.mock(Web3j.class, Answers.RETURNS_DEEP_STUBS);
-        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        when(blockchainClientRegistry.getEvmClientByIdentifier(anyString())).thenReturn(web3j);
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setStatus("0x1");
@@ -736,6 +880,35 @@ class AssetDeploymentServiceTest {
     }
 
     @Test
+    @DisplayName("syncFromChain (Solana) confirms only finalized successful signatures and journals their slot incarnation")
+    void syncFromChain_confirmsFinalizedSolanaDeploymentWithCompensableProvenance() {
+        UUID deploymentId = UUID.randomUUID();
+        UUID chainConfigId = UUID.randomUUID();
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setAssetId(UUID.randomUUID());
+        deployment.setChain(Chain.SOLANA);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setChainConfigId(chainConfigId);
+        deployment.setContractAddress("MintAddress");
+        deployment.setDeployedByTx("SolanaSignature");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        when(solanaFinalityReader.read(chainConfigId, "SolanaSignature"))
+                .thenReturn(de.makibytes.registerwerk.blockchain.api.SolanaFinalityReader.Result
+                        .finalized(401_234_567L, "FinalizedBlockHash"));
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus())
+                .isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        assertThat(deployment.getBlockNumber()).isEqualTo(401_234_567L);
+        assertThat(deployment.getBlockHash()).isEqualTo("FinalizedBlockHash");
+        verify(chainEffectRecorder).recordFinalized(any());
+        verify(eventPublisher).publishEvent(any(DeploymentConfirmedEvent.class));
+    }
+
+    @Test
     @DisplayName("pollPendingDeploymentConfirmations syncs every PENDING deployment with an on-chain tx, "
             + "isolating one failure from the rest")
     void pollPendingDeploymentConfirmations_syncsAllPendingDeployments() {
@@ -759,7 +932,7 @@ class AssetDeploymentServiceTest {
                 AssetDeployment.DeploymentStatus.PENDING)).thenReturn(List.of(broken, ok));
         // "broken": simulate an unexpected RPC failure for the EVM path so we can prove one
         // deployment failing doesn't stop the rest of the batch from being polled.
-        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class)))
+        when(blockchainClientRegistry.getEvmClientByIdentifier(anyString()))
                 .thenThrow(new RuntimeException("RPC down"));
 
         ChainConfig starknetChain = new ChainConfig();

@@ -50,7 +50,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <mat-label>Legal basis</mat-label>
               <input matInput [(ngModel)]="transferForm.legalBasis" placeholder="e.g. BaFin Bescheid Az. 2025-001" />
             </mat-form-field>
-            <button mat-raised-button color="warn"
+            <button type="button" mat-raised-button color="warn"
                     [disabled]="!transferForm.fromTokenAccount || !transferForm.toTokenAccount || !transferForm.amount || !transferForm.legalBasis"
                     (click)="submitForcedTransfer()">
               <mat-icon>gavel</mat-icon>
@@ -77,7 +77,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <mat-label>Legal basis</mat-label>
               <input matInput [(ngModel)]="burnForm.legalBasis" placeholder="e.g. BaFin Einziehungsverfügung Az. 2025-002" />
             </mat-form-field>
-            <button mat-raised-button color="warn"
+            <button type="button" mat-raised-button color="warn"
                     [disabled]="!burnForm.tokenAccount || !burnForm.amount || !burnForm.legalBasis"
                     (click)="submitForceBurn()">
               <mat-icon>local_fire_department</mat-icon>
@@ -93,11 +93,11 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <input matInput [(ngModel)]="freezeAccount" placeholder="base58 account" />
             </mat-form-field>
             <div class="sa-row-actions">
-              <button mat-stroked-button color="warn" [disabled]="!freezeAccount" (click)="submitFreeze()">
+              <button type="button" mat-stroked-button color="warn" [disabled]="!freezeAccount" (click)="submitFreeze()">
                 <mat-icon>lock</mat-icon>
                 Freeze
               </button>
-              <button mat-stroked-button [disabled]="!freezeAccount" (click)="submitThaw()">
+              <button type="button" mat-stroked-button [disabled]="!freezeAccount" (click)="submitThaw()">
                 <mat-icon>lock_open</mat-icon>
                 Thaw
               </button>

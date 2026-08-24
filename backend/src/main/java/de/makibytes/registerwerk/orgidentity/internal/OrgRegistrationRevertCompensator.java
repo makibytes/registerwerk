@@ -46,16 +46,45 @@ class OrgRegistrationRevertCompensator implements ChainEffectCompensator {
         if (registration == null) {
             return new CompensationOutcome.NotApplicable("OrgRegistration " + id + " no longer exists");
         }
-        if (registration.getStatus() != OrgRegistrationStatus.ACTIVE) {
+        boolean pendingLaterIntent = hasCompletePendingTransition(registration,
+                OrgRegistrationStatus.SUSPEND_PENDING)
+                || hasCompletePendingTransition(registration, OrgRegistrationStatus.REINSTATE_PENDING);
+        if (registration.getStatus() != OrgRegistrationStatus.ACTIVE && !pendingLaterIntent) {
             return new CompensationOutcome.NotApplicable(
-                    "OrgRegistration " + id + " is no longer ACTIVE (status=" + registration.getStatus() + ")");
+                    "OrgRegistration " + id + " is neither ACTIVE nor awaiting a complete later transition (status="
+                            + registration.getStatus() + ")");
+        }
+        if (registration.getStatus() == OrgRegistrationStatus.ACTIVE && registration.getStatusTx() != null) {
+            return new CompensationOutcome.NotApplicable(
+                    "OrgRegistration " + id + " ACTIVE state is owned by a later reinstatement");
+        }
+        if (!ChainEffectCausality.matches(effect, registration.getChainConfigId(),
+                registration.getRegisteredTx(), registration.getConfirmedBlockNumber(),
+                registration.getConfirmedBlockHash())) {
+            return new CompensationOutcome.NotApplicable(
+                    "OrgRegistration " + id + " is owned by a different confirmation incarnation");
         }
 
-        log.error("OrgRegistration id={} was ACTIVE but its confirming block was retracted by a reorg "
-                        + "— reverting to PENDING for re-verification.", id);
-        registration.setStatus(OrgRegistrationStatus.PENDING);
+        log.error("OrgRegistration id={} base confirmation was retracted by a reorg (status={}) "
+                        + "— clearing base provenance while preserving any fail-closed suspension intent.",
+                id, registration.getStatus());
+        if (!pendingLaterIntent) {
+            registration.setStatus(OrgRegistrationStatus.PENDING);
+        }
+        registration.setConfirmedBlockNumber(null);
+        registration.setConfirmedBlockHash(null);
         repository.save(registration);
 
-        return new CompensationOutcome.Compensated("Reverted OrgRegistration " + id + " to PENDING after retraction");
+        return new CompensationOutcome.Compensated(
+                "Cleared OrgRegistration " + id + " base confirmation after retraction");
+    }
+
+    private static boolean hasCompletePendingTransition(
+            OrgRegistration registration, OrgRegistrationStatus expectedStatus) {
+        return registration.getStatus() == expectedStatus
+                && registration.getStatusRequestedAt() != null
+                && registration.getStatusChainConfigId() == null
+                && registration.getStatusBlockNumber() == null
+                && registration.getStatusBlockHash() == null;
     }
 }

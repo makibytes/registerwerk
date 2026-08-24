@@ -66,11 +66,11 @@ import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/compo
     <ng-template #rowActions let-effect>
       @if (!effect.acknowledgedAt) {
         <div class="action-row">
-          <button mat-stroked-button (click)="retry(effect)" [disabled]="!canManage">
+          <button type="button" mat-stroked-button (click)="retry(effect)" [disabled]="!canManage">
             <mat-icon>replay</mat-icon>
             Retry
           </button>
-          <button mat-stroked-button color="primary" (click)="openAcknowledgeDialog(effect)" [disabled]="!canManage">
+          <button type="button" mat-stroked-button color="primary" (click)="openAcknowledgeDialog(effect)" [disabled]="!canManage">
             <mat-icon>fact_check</mat-icon>
             Acknowledge
           </button>
@@ -108,8 +108,8 @@ import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/compo
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close>Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!acknowledgeReason.trim()" (click)="submitAcknowledge()">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" [disabled]="!acknowledgeReason.trim()" (click)="submitAcknowledge()">
           <mat-icon>fact_check</mat-icon>
           Acknowledge
         </button>

@@ -11,15 +11,18 @@ import de.makibytes.registerwerk.deployment.api.VaultRequestStatus;
 import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
+import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Closes the gap {@link Erc4626AdminService}/{@link Erc7540AdminService}'s javadoc documents but
@@ -31,11 +34,11 @@ import java.util.Optional;
  * {@code erc3643_identity_registry} (see {@code Erc3643IdentityRegistryConfirmationListener}).
  *
  * <p>NAV strikes and request fulfilment/cancellation affect share pricing and balances, so their
- * confirmations are journaled via {@link ChainEffectRecorder} — a reorg deep enough to retract the
- * confirming block still reverts them (see {@link VaultNavStrikeRevertCompensator} and
- * {@link VaultRequestFulfillmentRevertCompensator}). Deposit-cap confirmations are deliberately
- * <b>not</b> journaled: a stale cap after a deep reorg is a soft, non-funds-affecting
- * inconsistency, and there is no compensator registered for it — see {@link #resolveDepositCap}.
+ * confirmations are journaled via {@link ChainEffectRecorder} — an eligible routine retraction
+ * reverts them, while a finality violation quarantines the chain (see {@link VaultNavStrikeRevertCompensator} and
+ * {@link VaultRequestFulfillmentRevertCompensator}). Deposit caps control which future deposits
+ * the vault accepts and are therefore journaled too; their pre-image is retained so a retraction
+ * can restore the last canonical cap without guessing.
  */
 @Component
 class VaultConfirmationListener {
@@ -47,48 +50,50 @@ class VaultConfirmationListener {
     private final AssetVaultStateRepository vaultStateRepository;
     private final BlockchainTransactionService blockchainTransactionService;
     private final ChainEffectRecorder chainEffectRecorder;
+    private final IsolatedTransactionExecutor isolatedTransactions;
 
     VaultConfirmationListener(
             VaultNavStrikeRepository navStrikeRepository,
             VaultRequestRepository vaultRequestRepository,
             AssetVaultStateRepository vaultStateRepository,
             BlockchainTransactionService blockchainTransactionService,
-            ChainEffectRecorder chainEffectRecorder) {
+            ChainEffectRecorder chainEffectRecorder,
+            IsolatedTransactionExecutor isolatedTransactions) {
         this.navStrikeRepository = navStrikeRepository;
         this.vaultRequestRepository = vaultRequestRepository;
         this.vaultStateRepository = vaultStateRepository;
         this.blockchainTransactionService = blockchainTransactionService;
         this.chainEffectRecorder = chainEffectRecorder;
+        this.isolatedTransactions = isolatedTransactions;
     }
 
     @SchedulerLock(name = "vaultConfirmationListener", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
     @Scheduled(fixedDelay = 30_000, initialDelay = 40_000)
-    @Transactional
     public void resolvePending() {
         for (VaultNavStrike strike : navStrikeRepository.findByTxHashIsNotNullAndConfirmedFalse()) {
             try {
-                resolveNavStrike(strike);
+                isolatedTransactions.run(() -> resolveNavStrike(strike));
             } catch (Exception e) {
                 log.warn("Failed to resolve NAV strike={}: {}", strike.getId(), e.getMessage());
             }
         }
         for (VaultRequest request : vaultRequestRepository.findByFulfilledTxIsNotNullAndConfirmedFalse()) {
             try {
-                resolveFulfillment(request);
+                isolatedTransactions.run(() -> resolveFulfillment(request));
             } catch (Exception e) {
                 log.warn("Failed to resolve fulfilment for VaultRequest={}: {}", request.getId(), e.getMessage());
             }
         }
         for (VaultRequest request : vaultRequestRepository.findByCancelledTxIsNotNullAndConfirmedFalse()) {
             try {
-                resolveCancellation(request);
+                isolatedTransactions.run(() -> resolveCancellation(request));
             } catch (Exception e) {
                 log.warn("Failed to resolve cancellation for VaultRequest={}: {}", request.getId(), e.getMessage());
             }
         }
         for (AssetVaultState state : vaultStateRepository.findByDepositCapTxHashIsNotNull()) {
             try {
-                resolveDepositCap(state);
+                isolatedTransactions.run(() -> resolveDepositCap(state));
             } catch (Exception e) {
                 log.warn("Failed to resolve deposit cap for asset={}: {}", state.getAssetId(), e.getMessage());
             }
@@ -96,6 +101,7 @@ class VaultConfirmationListener {
     }
 
     private void resolveNavStrike(VaultNavStrike strike) {
+        strike = navStrikeRepository.findByIdForUpdate(strike.getId()).orElse(strike);
         String txHash = strike.getTxHash();
         if (blockchainTransactionService.isConfirmedFailure(txHash)) {
             log.warn("VaultNavStrike={} setNavPerShare tx={} failed on-chain; leaving AssetVaultState "
@@ -113,11 +119,12 @@ class VaultConfirmationListener {
         strike.setConfirmed(true);
         strike.setChainConfigId(location.get().chainConfigId());
         strike.setBlockNumber(location.get().blockNumber());
+        strike.setBlockHash(location.get().blockHash());
         navStrikeRepository.save(strike);
 
         long highestConfirmedStrikeId = navStrikeRepository.findByAssetIdOrderByEffectiveAtDesc(strike.getAssetId())
                 .stream()
-                .filter(VaultNavStrike::isConfirmed)
+                .filter(VaultConfirmationListener::hasCanonicalConfirmation)
                 .mapToLong(VaultNavStrike::getStrikeId)
                 .max()
                 .orElse(strike.getStrikeId());
@@ -127,14 +134,16 @@ class VaultConfirmationListener {
             return;
         }
 
-        AssetVaultState state = vaultStateRepository.findById(strike.getAssetId())
-                .orElseGet(() -> { AssetVaultState s = new AssetVaultState(); s.setAssetId(strike.getAssetId()); return s; });
+        UUID assetId = strike.getAssetId();
+        AssetVaultState state = vaultStateRepository.findByAssetIdForUpdate(assetId)
+                .orElseGet(() -> { AssetVaultState s = new AssetVaultState(); s.setAssetId(assetId); return s; });
         state.setLatestNavPerShare(strike.getNavPerShare());
         state.setLatestNavStrikeAt(strike.getEffectiveAt());
+        state.setLatestNavStrikeId(strike.getId());
         state.setLatestNavReportHash(strike.getReportHash());
         vaultStateRepository.save(state);
 
-        chainEffectRecorder.record(ChainEffectDescriptor.of(
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
                 location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "blockchain", VaultNavStrikeRevertCompensator.EFFECT_TYPE,
                 "VaultNavStrike", strike.getId(), strike.getAssetId(),
@@ -161,9 +170,10 @@ class VaultConfirmationListener {
         request.setConfirmed(true);
         request.setChainConfigId(location.get().chainConfigId());
         request.setBlockNumber(location.get().blockNumber());
+        request.setBlockHash(location.get().blockHash());
         vaultRequestRepository.save(request);
 
-        chainEffectRecorder.record(ChainEffectDescriptor.of(
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
                 location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "blockchain", VaultRequestFulfillmentRevertCompensator.EFFECT_TYPE,
                 "VaultRequest", request.getId(), request.getAssetId(),
@@ -188,9 +198,10 @@ class VaultConfirmationListener {
         request.setConfirmed(true);
         request.setChainConfigId(location.get().chainConfigId());
         request.setBlockNumber(location.get().blockNumber());
+        request.setBlockHash(location.get().blockHash());
         vaultRequestRepository.save(request);
 
-        chainEffectRecorder.record(ChainEffectDescriptor.of(
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
                 location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
                 "blockchain", VaultRequestFulfillmentRevertCompensator.EFFECT_TYPE,
                 "VaultRequest", request.getId(), request.getAssetId(),
@@ -198,6 +209,7 @@ class VaultConfirmationListener {
     }
 
     private void resolveDepositCap(AssetVaultState state) {
+        state = vaultStateRepository.findByAssetIdForUpdate(state.getAssetId()).orElse(state);
         String txHash = state.getDepositCapTxHash();
         if (blockchainTransactionService.isConfirmedFailure(txHash)) {
             log.warn("AssetVaultState asset={} setDepositCap tx={} failed on-chain; discarding pending value.",
@@ -212,12 +224,45 @@ class VaultConfirmationListener {
         if (location.isEmpty()) {
             return;
         }
-        state.setDepositCap(state.getPendingDepositCap());
+        java.math.BigInteger before = state.getDepositCap();
+        java.math.BigInteger after = state.getPendingDepositCap();
+        Map<String, Object> beforeState = new HashMap<>();
+        beforeState.put("depositCap", before != null ? before.toString() : null);
+        beforeState.put("chainConfigId", nullableString(state.getDepositCapChainConfigId()));
+        beforeState.put("blockNumber", state.getDepositCapBlockNumber());
+        beforeState.put("blockHash", state.getDepositCapBlockHash());
+        beforeState.put("txHash", state.getDepositCapConfirmedTxHash());
+
+        state.setDepositCap(after);
         state.setPendingDepositCap(null);
         state.setDepositCapTxHash(null);
         state.setDepositCapChainConfigId(location.get().chainConfigId());
         state.setDepositCapBlockNumber(location.get().blockNumber());
+        state.setDepositCapBlockHash(location.get().blockHash());
+        state.setDepositCapConfirmedTxHash(txHash);
         vaultStateRepository.save(state);
-        // Deliberately not journaled via ChainEffectRecorder — see class javadoc.
+
+        Map<String, Object> afterState = new HashMap<>();
+        afterState.put("depositCap", after.toString());
+        afterState.put("chainConfigId", location.get().chainConfigId().toString());
+        afterState.put("blockNumber", location.get().blockNumber());
+        afterState.put("blockHash", location.get().blockHash());
+        afterState.put("txHash", txHash);
+        chainEffectRecorder.recordFinalized(new ChainEffectDescriptor(
+                location.get().chainConfigId(), location.get().blockNumber(), location.get().blockHash(), txHash,
+                null, "blockchain", VaultDepositCapRevertCompensator.EFFECT_TYPE,
+                "AssetVaultState", state.getAssetId(), state.getAssetId(), CompensationCategory.INVERSE_FLIP,
+                beforeState, afterState, null, null));
+    }
+
+    private static boolean hasCanonicalConfirmation(VaultNavStrike strike) {
+        return strike.isConfirmed()
+                && strike.getChainConfigId() != null
+                && strike.getBlockNumber() != null
+                && strike.getBlockHash() != null;
+    }
+
+    private static String nullableString(Object value) {
+        return value != null ? value.toString() : null;
     }
 }

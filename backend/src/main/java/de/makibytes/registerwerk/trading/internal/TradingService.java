@@ -27,6 +27,9 @@ import de.makibytes.registerwerk.customer.api.SuitabilityAssessment;
 import de.makibytes.registerwerk.customer.api.SuitabilityAssessmentRepository;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpoint;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpointRepository;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
+import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.trading.api.*;
@@ -65,6 +68,7 @@ public class TradingService {
     private final InvestorLimitGate investorLimitGate;
     private final ScreeningGate screeningGate;
     private final HolderBlockGate holderBlockGate;
+    private final FinalityGate finalityGate;
 
     public TradingService(
             TradingProperties tradingProperties,
@@ -83,7 +87,8 @@ public class TradingService {
             SuitabilityAssessmentRepository suitabilityAssessmentRepository,
             InvestorLimitGate investorLimitGate,
             ScreeningGate screeningGate,
-            HolderBlockGate holderBlockGate) {
+            HolderBlockGate holderBlockGate,
+            FinalityGate finalityGate) {
         this.tradingProperties = tradingProperties;
         this.settingsRepository = settingsRepository;
         this.walletDefaultRepository = walletDefaultRepository;
@@ -101,6 +106,7 @@ public class TradingService {
         this.investorLimitGate = investorLimitGate;
         this.screeningGate = screeningGate;
         this.holderBlockGate = holderBlockGate;
+        this.finalityGate = finalityGate;
     }
 
     @Transactional(readOnly = true)
@@ -739,6 +745,13 @@ public class TradingService {
     private AssetHolder settleExecution(TradeExecution execution, UUID actorId) {
         AssetHolder sellerHolder = assetHolderRepository.findById(execution.getSellerHolderId())
                 .orElseThrow(() -> new EntityNotFoundException("AssetHolder", execution.getSellerHolderId()));
+        Asset settlementAsset = assetRepository.findById(execution.getAssetId())
+                .orElseThrow(() -> new EntityNotFoundException("Asset", execution.getAssetId()));
+        // The holder aggregate counts FINALIZED transfers only. Passing FINALIZED reflects that
+        // data contract while still enforcing the gate's chain-quarantine and unresolved-
+        // compensation freezes immediately before either legal register balance is mutated.
+        finalityGate.require(GatedOperation.TRADE_SETTLEMENT_CONFIRM, execution.getAssetId(),
+                settlementAsset.getTokenStandard(), FinalityLevel.FINALIZED);
         // Compliance gates — checked before either side of the register is touched. A
         // settlement is a real transfer of registered securities and must be subject to
         // exactly the same KYC/sanctions/Sperrvermerk controls as an operator-initiated

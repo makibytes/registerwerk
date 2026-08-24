@@ -65,23 +65,27 @@ public class BlockchainTransactionCompletionWriter {
     }
 
     /**
-     * Journals a {@code TX_COMPLETED} chain effect so a reorg deep enough to retract this
-     * transaction's already-FINALIZED block (see {@code BlockchainTransactionService.pollPendingTransactions}
-     * — SUCCESS is only ever written once the receipt clears the configured finality model, so this
-     * is always a crosses-FINALIZED-tier event, not routine reorg noise) gets reverted back to
-     * PENDING instead of the register asserting a completion the chain no longer agrees happened.
+     * Journals a {@code TX_COMPLETED} chain effect so an automatically compensable routine
+     * retraction can revert the transaction to PENDING. A typed finality violation is quarantined
+     * without automatic mutation, but the exact effect remains available for operator review.
      * Only SUCCESS is journalled — FAILED/TIMEOUT already represent "nothing happened", so there is
      * nothing to undo if that block is later retracted. Silently skipped (not an error) when
      * {@code chainConfigId}/{@code blockNumber} couldn't be resolved (see
      * {@link BlockchainTransaction#getChainConfigId()}'s javadoc) — this transaction simply won't be
-     * reached by the retraction sweep, a disclosed gap for unresolvable chain/network pairs.
+     * A SUCCESS without chain/block provenance is rejected so the surrounding transaction rolls
+     * back; committing a terminal business assertion with no compensable source would be a
+     * fail-open correctness bug.
      */
     private void recordChainEffectIfCompensable(BlockchainTransaction tx) {
-        if (tx.getStatus() != BlockchainTransaction.Status.SUCCESS
-                || tx.getChainConfigId() == null || tx.getBlockNumber() == null) {
+        if (tx.getStatus() != BlockchainTransaction.Status.SUCCESS) {
             return;
         }
-        chainEffectRecorder.record(ChainEffectDescriptor.of(
+        if (tx.getChainConfigId() == null || tx.getBlockNumber() == null
+                || tx.getBlockHash() == null || tx.getBlockHash().isBlank()) {
+            throw new IllegalStateException(
+                    "Cannot complete a successful blockchain transaction without chain and block provenance");
+        }
+        chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
                 tx.getChainConfigId(), tx.getBlockNumber(), tx.getBlockHash(), tx.getTxHash(),
                 "blockchain", BlockchainTxRevertCompensator.EFFECT_TYPE, "BlockchainTransaction", tx.getId(),
                 tx.getAssetId(), CompensationCategory.INVERSE_FLIP));

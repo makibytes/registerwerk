@@ -20,10 +20,10 @@ Registerwerk enthält Implementierungen, Integrationen oder Platzhalter für Tok
 | [ERC-3643](erc3643.md) | EVM | Fungibel + Identität | Regulierte Wertpapiere, zugangsbeschränkt | CONF_ERC3643 | Implementierung vorhanden; Reife ungeprüft |
 | [ERC-4626](erc4626.md) | EVM | Vault (synchron) | Geldmarktfonds, tägliche NAV | — | Implementierung vorhanden; Ökonomie/Reife ungeprüft |
 | [ERC-7540](erc7540.md) | EVM | Vault (asynchron) | Institutionelle Fonds, T+1/T+2 | — | Implementierung vorhanden; Ökonomie/Reife ungeprüft |
-| [DAML BOND FIXED](canton-daml.md) | Canton | Anleihe | Festverzinsliche Anleihen auf privatem Ledger | — | Optionale Implementierung (`-Pcanton`); Reife ungeprüft |
-| [DAML BOND FLOATING](canton-daml.md) | Canton | Anleihe | Variabel verzinsliche Anleihen | — | Optionale Implementierung (`-Pcanton`); Reife ungeprüft |
-| [DAML BOND ZERO](canton-daml.md) | Canton | Anleihe | Nullkuponanleihen | — | Optionale Implementierung (`-Pcanton`); Reife ungeprüft |
-| [CANTON_TOKEN](canton-daml.md) | Canton | Generisch | DAML-basierter digitaler Vermögenswert | — | Optionale Implementierung (`-Pcanton`); Reife ungeprüft |
+| [DAML BOND FIXED](canton-daml.md) | Canton | Anleihe | Festzins-Lebenszyklus | — | Eigene Daml-Vorlage; profilgeprüft, Live-Konformität erforderlich |
+| [DAML BOND FLOATING](canton-daml.md) | Canton | Anleihe | Variabeler Lebenszyklus | — | Eigene Daml-Vorlage; profilgeprüft, Live-Konformität erforderlich |
+| [DAML BOND ZERO](canton-daml.md) | Canton | Anleihe | Nullkupon-Lebenszyklus | — | Eigene Daml-Vorlage; profilgeprüft, Live-Konformität erforderlich |
+| [CANTON_TOKEN](canton-daml.md) | Canton | Generisch | CIP-0056-Vermögenswert | — | Reserviert; bis zu einem registryspezifischen Adapter bewusst nicht deploybar |
 | [SPL](../blockchains/solana.md) | Solana | Fungibel | Solana-native Token | — | Integration vorhanden; Reife ungeprüft |
 | [SPL_2022](spl-2022.md) | Solana | Fungibel + Erw. | Erweiterte Solana-Token | — | Integration vorhanden; Reife ungeprüft |
 | [SPL_2022_BOND](spl-2022.md) | Solana | Fungibel + Zins | Verzinsliche Anleihen auf Solana | — | Integration vorhanden; Reife ungeprüft |
@@ -70,6 +70,6 @@ Der gewählte Standard bestimmt außerdem, welche Verwaltungsoperationen im Betr
 | Anleihe mit mehreren Tranchen / Serien | ERC-3525 | Natives semi-fungibles Modell aus Slot + Wert |
 | Fondsanteil mit täglicher NAV auf EVM | ERC-4626 | Standardisierte Vault-Schnittstelle |
 | Institutioneller Fonds mit T+1/T+2-Rücknahme | ERC-7540 | Asynchrones Antrags-/Abrufmodell |
-| Festverzinsliche Anleihe auf privatem DAML-Ledger | DAML_BOND_FIXED | Native Unterstützung für Kuponzahlungen |
+| Festverzinsliche Anleihe auf privatem Daml-Ledger | DAML_BOND_FIXED | On-Ledger-Lebenszyklus; Zahlung separat integrieren |
 | Wertpapier mit Privatsphäre auf EVM | CONF_ERC3643 | Zama fhEVM vertraulich + reguliert |
 | Verzinsliche Anleihe auf Solana | SPL_2022_BOND | Token-2022-Erweiterung für Verzinsung |

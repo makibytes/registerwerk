@@ -9,10 +9,14 @@ import java.util.UUID;
  *  what is and isn't tracked here. */
 public interface BlockFinalityPort {
 
-    /** The last-recorded level for this block, if it was ever observed while unsettled. Empty
+    /** The current canonical incarnation for this height, if one is known. Empty
      *  does not mean "not final" — it usually means the block never entered the unsettled window
-     *  at all (see {@link BlockFinalityFeed}'s javadoc) or was never recorded. */
+     *  at all, was never recorded, or all known incarnations were retracted. */
     Optional<BlockFinalityRecord> find(UUID chainConfigId, long blockNumber);
+
+    /** Every incarnation ever recorded at this height, oldest first. Unlike {@link #find}, this
+     *  is an audit/history query and includes orphaned incarnations. */
+    List<BlockFinalityRecord> findIncarnations(UUID chainConfigId, long blockNumber);
 
     /**
      * Distinct block numbers on this chain that carry at least one not-yet-resolved
@@ -24,8 +28,10 @@ public interface BlockFinalityPort {
      */
     List<Long> findBlocksWithUnresolvedEffects(UUID chainConfigId);
 
+    /** {@code orphanedAt} is the most recent orphaning time; consult retraction audit events for
+     *  complete episode history. */
     record BlockFinalityRecord(
             UUID chainConfigId, long blockNumber, String blockHash, FinalityLevel level,
-            Instant observedAt, Instant updatedAt) {
+            boolean canonical, Instant observedAt, Instant updatedAt, Instant orphanedAt) {
     }
 }

@@ -45,9 +45,10 @@ later retracted. Three categories:
 - **RECOMPUTE** — the affected row can be re-derived from other still-current data. Currently one
   compensator: holder balances (`asset_holder`, re-run from `token_transfer`).
 - **INVERSE_FLIP** — the affected row flips a status field back to its pre-confirmation value.
-  Ten compensators today, across `blockchain` (submitted transactions), `asset` (deployment
-  confirmations), `orgidentity` (org/member/permission/trusted-issuer confirmations), `erc3643`
-  (identity-registry registration/removal, ONCHAINID deployment, KYC/AML claim issuance),
+  Twenty-one compensators today, across `blockchain` (submitted transactions and ERC-4626/7540
+  vault confirmations), `asset` (deployment confirmations), `orgidentity` (org lifecycle,
+  member-wallet, permission, role-restriction, and trusted-issuer confirmations), `erc3643`
+  (identity-registry registration/removal, ONCHAINID deployment, and claim issue/revocation), and
   `marketplace` (dApp version publication).
 - **IRREVERSIBLE** — the effect already crossed the system boundary and cannot be undone (e.g. a
   §19 eWpG register statement, once emailed, cannot be un-sent). Kept empty by construction: every
@@ -80,6 +81,9 @@ retried automatically.
   unacknowledged `COMPENSATION_FAILED`/`IRREVERSIBLE_ESCALATED` effect. This blocks *every*
   operation on the asset, regardless of the specific operation's own required level — the freeze
   described above.
+- **Blocked, reason `CHAIN_QUARANTINED`** — a chain used by the asset is frozen after unresolved
+  ancestry, a local/upstream finality conflict, an event-ID collision, or incomplete domain
+  compensation. This is chain-wide and remains in force until an explicit operator resolution.
 
 The gate is called inside the same transaction as the write it's guarding, immediately before that
 write — never at controller entry, never as a decorator — so the check and the write always
@@ -89,17 +93,31 @@ that are watching for real access-denial, not a time-bounded wait.
 
 ### What's gated today
 
-Sixteen `GatedOperation` values exist, derived from a survey of real mutating call sites across
-eight modules. As of this writing, `FinalityGate` is actually *wired* (called) at the five gate
-sites in `registerstatement` (§19 statement issuance) and `registertransfer` (extract export,
-transfer completion, portfolio migration completion, inspection fulfilment) — the two modules
-where an irreversible document leaving the system was the risk the plan specifically wanted closed
-first. The remaining modules (`corporateactions`, `trading`, `asset.ASSET_ISSUE`, `marketplace`,
-`erc3643`) were investigated and found not to need a *read-side* gate call today — Canton is
-final-on-write, and the states those flows would read are already never written except at
-`FINALIZED` by an existing poller, so a gate call there would be a permanent no-op. Their
-`GatedOperation` enum values exist so the policy that would drive them is configurable ahead of
-time, and to document the intended future call site.
+Sixteen `GatedOperation` values exist, derived from real mutating call sites across eight modules.
+The gate is currently wired at eleven call sites: five in `registerstatement`/`registertransfer`,
+five across corporate-action settlement/confirmation/tax-certificate flows, and one at trade
+settlement. The scheduled corporate-action path uses `check` and skips work when blocked; request
+paths use `require` and return the typed HTTP 409 response. The remaining enum values are explicit
+future policy points for asset issuance, authoritative balance allocation, marketplace approval,
+identity-claim initiation, trade-confirmation export, and regulatory export; their presence in the
+enum must not be read as a claim that a call site already exists.
+
+## Typed reorg episodes and compensation order
+
+When Chaincache is the source, Registerwerk consumes one `ReorgEventV1` envelope per fork rather
+than inferring the episode from a series of independent block retractions. The episode is claimed
+idempotently by `(chainConfigId, reorgId)` and its payload is immutable: replaying the same ID with
+different ancestry is a safety conflict. A routine episode orphans only the hashes named by the
+ordered lineage and compensates matching journal entries in descending journal sequence — true
+reverse write order for a saga. The legacy per-event retractions that follow are deduplicated by
+the typed episode ID.
+
+`FINALITY_VIOLATION` and `UNRESOLVED_ANCESTRY` never execute routine compensation. They preserve
+local canonical/business state and activate chain quarantine. Registerwerk also overrides an
+incorrect upstream `ROUTINE` label when the proposed lineage intersects a locally FINALIZED block
+or SETTLED effect. If any domain compensation fails, successful compensations and the quarantine
+are committed atomically, so reconnect/replay cannot expose a half-corrected, fail-open register.
+The Chaincache cursor advances only after that local transaction commits successfully.
 
 ## The policy model
 
@@ -152,7 +170,7 @@ using `finalityLabel`.
 
 - `DeepReorgDetected` (critical) / `ReorgCrossedSafeThreshold` (warning) — a reorg reached an
   already-FINALIZED or already-SAFE block, respectively. See
-  [Indexer Resilience](resilience.md#chain-reorg-detection-and-recovery).
+  [Indexer Resilience](resilience.md).
 - `CompensationEscalated` (critical) — a `chain_effect` row failed to compensate, found no
   registered compensator, or was found irreversible. This is the alert that makes the
   Unresolved-Compensation freeze visible *before* a trader or issuer notices their actions are

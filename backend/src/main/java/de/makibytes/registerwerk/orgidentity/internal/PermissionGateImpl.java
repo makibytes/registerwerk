@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.orgidentity.internal;
 
+import de.makibytes.registerwerk.finality.api.ChainQuarantinePort;
 import de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationRepository;
@@ -19,11 +20,14 @@ class PermissionGateImpl implements PermissionGate {
 
     private final OrgRegistrationRepository registrationRepository;
     private final OrgMemberWalletRepository walletRepository;
+    private final ChainQuarantinePort chainQuarantine;
 
     PermissionGateImpl(OrgRegistrationRepository registrationRepository,
-                       OrgMemberWalletRepository walletRepository) {
+                       OrgMemberWalletRepository walletRepository,
+                       ChainQuarantinePort chainQuarantine) {
         this.registrationRepository = registrationRepository;
         this.walletRepository = walletRepository;
+        this.chainQuarantine = chainQuarantine;
     }
 
     @Override
@@ -35,6 +39,7 @@ class PermissionGateImpl implements PermissionGate {
 
     @Override
     public boolean isOrgActive(UUID legalEntityId, UUID chainConfigId) {
+        if (chainQuarantine.findActive(chainConfigId).isPresent()) return false;
         return registrationRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId)
                 .map(reg -> reg.getStatus() == OrgRegistrationStatus.ACTIVE)
                 .orElse(false);
@@ -42,6 +47,7 @@ class PermissionGateImpl implements PermissionGate {
 
     @Override
     public Optional<UUID> entityForWallet(String walletAddress, UUID chainConfigId) {
+        if (chainQuarantine.findActive(chainConfigId).isPresent()) return Optional.empty();
         return walletRepository.findLiveBinding(chainConfigId, walletAddress)
                 .filter(wallet -> wallet.getStatus() == MemberWalletStatus.ACTIVE)
                 .flatMap(wallet -> registrationRepository.findById(wallet.getOrgRegistrationId()))

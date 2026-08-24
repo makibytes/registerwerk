@@ -141,5 +141,5 @@ Le Liechtenstein propose le cadre juridique le plus natif de la blockchain en Eu
 Cela rend `LI_TVTG` attractif pour des types d'instruments innovants tels que
 [les obligations semi-fongibles ERC-3525](../token-standards/erc3525.md),
 [les jetons de coffre ERC-4626](../token-standards/erc4626.md) et
-[les instruments DAML Finance](../token-standards/canton-daml.md), pour lesquels aucun type d'instrument
+[les cycles de vie obligataires Daml propres](../token-standards/canton-daml.md), pour lesquels aucun type d'instrument
 national équivalent n'existe encore.

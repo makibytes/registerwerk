@@ -64,8 +64,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
     private final AssetSlotRepository slotRepository;
     private final AssetTokenUnitRepository tokenUnitRepository;
     private final AssetCouponPaymentRepository couponPaymentRepository;
-    private final BlockchainClientRegistry clientRegistry;
-    private final EvmContractService evmContractService;
+    private final de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions;
     private final BlockchainTransactionService txService;
     private final ApplicationEventPublisher eventPublisher;
     private final StarknetErc3525AdminService starknetErc3525AdminService;
@@ -75,8 +74,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
             AssetSlotRepository slotRepository,
             AssetTokenUnitRepository tokenUnitRepository,
             AssetCouponPaymentRepository couponPaymentRepository,
-            BlockchainClientRegistry clientRegistry,
-            EvmContractService evmContractService,
+            de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions,
             BlockchainTransactionService txService,
             ApplicationEventPublisher eventPublisher,
             StarknetErc3525AdminService starknetErc3525AdminService) {
@@ -84,8 +82,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
         this.slotRepository = slotRepository;
         this.tokenUnitRepository = tokenUnitRepository;
         this.couponPaymentRepository = couponPaymentRepository;
-        this.clientRegistry = clientRegistry;
-        this.evmContractService = evmContractService;
+        this.durableTransactions = durableTransactions;
         this.txService = txService;
         this.eventPublisher = eventPublisher;
         this.starknetErc3525AdminService = starknetErc3525AdminService;
@@ -364,10 +361,11 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
      *  audit log. */
     private UUID submitEvm(AssetDeployment dep, Function fn, String methodName, Map<String, Object> params,
                             UUID actorId, String actorRole) {
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        EvmSigner signer = evmContractService.signer(descriptor);
-        String txHash = evmContractService.submit(web3j, signer, dep.getContractAddress(), fn);
+        if (dep.getChainConfigId() == null) {
+            throw new IllegalStateException("Confirmed EVM deployment is missing chainConfigId: " + dep.getId());
+        }
+        String txHash = durableTransactions.submit(
+                dep.getChainConfigId(), dep.getContractAddress(), fn, params);
 
         eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
 

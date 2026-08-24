@@ -16,8 +16,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigInteger;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -154,16 +152,9 @@ class StarknetTokenServiceTest {
         when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STARKNET))
                 .thenReturn(List.of());
 
-        CompletableFuture<StarknetTokenService.StarknetDeployment> future = starknetTokenService.createCairoErc20(
-                UUID.randomUUID(), Network.TESTNET, "0x0");
-
-        assertThatThrownBy(() -> {
-            try {
-                future.get();
-            } catch (ExecutionException ex) {
-                throw ex.getCause();
-            }
-        }).isInstanceOf(IllegalStateException.class)
+        assertThatThrownBy(() -> starknetTokenService.createCairoErc20(
+                UUID.randomUUID(), Network.TESTNET, "0x0"))
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No enabled Starknet chain config");
     }
 
@@ -177,16 +168,9 @@ class StarknetTokenServiceTest {
         when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.STARKNET))
                 .thenReturn(List.of(mainnetConfig));
 
-        CompletableFuture<StarknetTokenService.StarknetDeployment> future = starknetTokenService.createCairoErc20(
-                UUID.randomUUID(), Network.TESTNET, "0x0");
-
-        assertThatThrownBy(() -> {
-            try {
-                future.get();
-            } catch (ExecutionException ex) {
-                throw ex.getCause();
-            }
-        }).isInstanceOf(IllegalStateException.class)
+        assertThatThrownBy(() -> starknetTokenService.createCairoErc20(
+                UUID.randomUUID(), Network.TESTNET, "0x0"))
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No enabled Starknet chain config for TESTNET");
     }
 }

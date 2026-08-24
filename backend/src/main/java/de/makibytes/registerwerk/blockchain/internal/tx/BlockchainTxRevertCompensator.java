@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.internal.tx;
 
+import de.makibytes.registerwerk.finality.api.BlockIdentity;
 import de.makibytes.registerwerk.finality.api.ChainEffectCompensator;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecord;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
@@ -64,11 +65,16 @@ class BlockchainTxRevertCompensator implements ChainEffectCompensator {
             return new CompensationOutcome.NotApplicable(
                     "BlockchainTransaction " + txId + " is no longer SUCCESS (status=" + tx.getStatus() + ")");
         }
+        if (!effect.chainConfigId().equals(tx.getChainConfigId())
+                || !BlockIdentity.sameIncarnation(
+                        tx.getBlockNumber(), tx.getBlockHash(), effect.blockNumber(), effect.blockHash())
+                || !BlockIdentity.sameHash(effect.txHash(), tx.getTxHash())) {
+            return new CompensationOutcome.NotApplicable(
+                    "BlockchainTransaction " + txId + " now belongs to a different block occurrence");
+        }
 
-        log.error("Blockchain tx={} was SUCCESS at block={} but that block was retracted by a reorg "
-                        + "— reverting to PENDING for re-verification. Compensation runs at any reorg depth; "
-                        + "if this retraction reached an already-FINALIZED block, that is additionally a "
-                        + "consensus failure deeper than the configured confirmation policy guarantees.",
+        log.error("Blockchain tx={} was SUCCESS at block={} but that block was retracted by an "
+                        + "automatically-compensable routine reorg — reverting to PENDING for re-verification.",
                 tx.getTxHash(), tx.getBlockNumber());
         tx.setStatus(BlockchainTransaction.Status.PENDING);
         tx.setBlockHash(null);

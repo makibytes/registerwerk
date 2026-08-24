@@ -156,4 +156,49 @@ class ClaimIssuanceServiceTest {
 
         assertThat(active).containsExactly(confirmed);
     }
+
+    @Test
+    @DisplayName("getActiveClaims excludes a confirmed claim as soon as revocation is pending")
+    void getActiveClaims_excludesPendingRevocationFailClosed() {
+        when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
+                .thenReturn(Optional.of(identity()));
+        OnchainClaim claim = confirmedClaim();
+        claim.setRevocationTxHash("0xpending-revocation");
+        when(claimRepository.findByOnchainIdentityId(identityId)).thenReturn(List.of(claim));
+
+        assertThat(service.getActiveClaims(legalEntityId, chainConfigId)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("getActiveClaims restores a claim after a confirmed failed revocation clears its intent")
+    void getActiveClaims_includesAfterConfirmedFailureClearsRevocationIntent() {
+        when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
+                .thenReturn(Optional.of(identity()));
+        OnchainClaim claim = confirmedClaim();
+        claim.setRevocationTxHash(null); // state produced only by confirmed-failure reconciliation
+        when(claimRepository.findByOnchainIdentityId(identityId)).thenReturn(List.of(claim));
+
+        assertThat(service.getActiveClaims(legalEntityId, chainConfigId)).containsExactly(claim);
+    }
+
+    @Test
+    @DisplayName("getActiveClaims keeps a reorg-reverted revocation excluded while its tx is pending again")
+    void getActiveClaims_excludesReorgRevertedRevocationFailClosed() {
+        when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
+                .thenReturn(Optional.of(identity()));
+        OnchainClaim claim = confirmedClaim();
+        claim.setRevokedAt(null); // compensation clears only chain-derived state
+        claim.setRevocationTxHash("0xreorged-revocation");
+        when(claimRepository.findByOnchainIdentityId(identityId)).thenReturn(List.of(claim));
+
+        assertThat(service.getActiveClaims(legalEntityId, chainConfigId)).isEmpty();
+    }
+
+    private OnchainClaim confirmedClaim() {
+        OnchainClaim claim = new OnchainClaim();
+        claim.setId(UUID.randomUUID());
+        claim.setOnchainIdentityId(identityId);
+        claim.setConfirmed(true);
+        return claim;
+    }
 }

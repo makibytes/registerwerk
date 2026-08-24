@@ -96,34 +96,35 @@ public class TokenDeploymentPortImpl implements TokenDeploymentPort {
             };
         }
 
-        // Solana and Canton report only a tx hash at submission time (no address known before
-        // mining/confirmation) — wrapped in txOnly. EVM's standard token/vault standards
+        // Solana returns the locally generated mint address together with its transaction
+        // signature; the deployment confirmation poll does not promote it until the signature is
+        // finalized. Canton returns only the committed update ID. EVM's standard token/vault standards
         // (ERC20/721/1155/3525/4626/7540) resolve the real deployed address themselves (from the
         // factory's TokenDeployed/VaultDeployed event, since EvmContractService.send() already
         // waits for a mined, non-reverted receipt) and are returned as-is, not wrapped.
         if (chain == Chain.SOLANA) {
-            CompletableFuture<String> txHash = switch (standard) {
+            return switch (standard) {
                 case SPL -> solanaTokenService.createSplToken(assetId, network, ownerAddress);
                 case SPL_2022 -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress);
                 case SPL_2022_BOND -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress, SplExtensionSet.BOND);
                 case SPL_2022_CONFIDENTIAL -> solanaTokenService.createSplToken2022(assetId, network, ownerAddress, SplExtensionSet.CONFIDENTIAL);
                 default -> throw new UnsupportedOperationException("Solana does not support token standard: " + standard);
             };
-            return txHash.thenApply(TokenDeploymentResult::txOnly);
         }
 
         if (chain == Chain.CANTON) {
-            CompletableFuture<String> txHash = switch (standard) {
+            return switch (standard) {
                 // actorId is not threaded through AssetDeploymentPort.deploy(...) — it is shared
                 // uniformly across every chain/standard in this switch, and deployment itself is
                 // a creation event already covered elsewhere (asset lifecycle), not a correction.
-                case CANTON_TOKEN -> cantonTokenOperations.createInstrument(assetId, network, ownerAddress, 0, null, "SYSTEM");
+                case CANTON_TOKEN -> cantonTokenOperations.createInstrument(
+                        assetId, network, ownerAddress, 0, null, "SYSTEM")
+                        .thenApply(TokenDeploymentResult::txOnly);
                 case DAML_BOND_FIXED -> cantonBondOperations.createFixedBond(assetId, network, ownerAddress, null, null, "SYSTEM");
                 case DAML_BOND_FLOATING -> cantonBondOperations.createFloatingBond(assetId, network, ownerAddress, null, null, "SYSTEM");
                 case DAML_BOND_ZERO -> cantonBondOperations.createZeroBond(assetId, network, ownerAddress, null, null, "SYSTEM");
                 default -> throw new UnsupportedOperationException("Canton does not support token standard: " + standard);
             };
-            return txHash.thenApply(TokenDeploymentResult::txOnly);
         }
 
         // EVM chains (Ethereum, Polygon, Base, Arbitrum, Avalanche, Optimism, Fhenix, Inco)
@@ -136,11 +137,8 @@ public class TokenDeploymentPortImpl implements TokenDeploymentPort {
             case ERC7540 -> erc7540DeploymentService.deploy(assetId, descriptor, ownerAddress);
             case CONF_ERC20 -> confidentialErc20Service.deploy(assetId, descriptor, ownerAddress)
                     .thenApply(TokenDeploymentResult::txOnly);
-            default -> {
-                org.slf4j.LoggerFactory.getLogger(TokenDeploymentPortImpl.class)
-                        .warn("No EVM deployment service for token standard: {}", standard);
-                yield CompletableFuture.completedFuture(TokenDeploymentResult.txOnly("UNSUPPORTED_" + standard));
-            }
+            default -> throw new UnsupportedOperationException(
+                    "EVM does not support token standard: " + standard);
         };
     }
 }

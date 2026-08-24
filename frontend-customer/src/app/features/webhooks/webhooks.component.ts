@@ -36,7 +36,7 @@ const EVENT_TYPES: WebhookEventType[] = [
     <div class="page-container">
       <div class="page-header">
         <h1>Webhooks</h1>
-        <button mat-flat-button color="primary" (click)="openCreateDialog()">
+        <button type="button" mat-flat-button color="primary" (click)="openCreateDialog()">
           <mat-icon>add</mat-icon>
           New Webhook
         </button>

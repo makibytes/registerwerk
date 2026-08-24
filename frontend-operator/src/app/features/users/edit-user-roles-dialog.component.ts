@@ -48,8 +48,8 @@ const COMPANY_ROLES: { value: AppUserRole; label: string }[] = [
       </mat-form-field>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
-      <button mat-flat-button color="primary" [disabled]="roles.length === 0" (click)="save()">Save</button>
+      <button type="button" mat-button mat-dialog-close>Cancel</button>
+      <button type="button" mat-flat-button color="primary" [disabled]="roles.length === 0" (click)="save()">Save</button>
     </mat-dialog-actions>
   `,
 })

@@ -82,7 +82,7 @@ import { Subscription } from 'rxjs';
 
     <ng-template #rowActions let-tx>
       @if ((tx.status === 'FAILED' || tx.status === 'TIMEOUT') && !tx.opsReviewedAt) {
-        <button mat-stroked-button color="primary" (click)="openReviewDialog(tx)">
+        <button type="button" mat-stroked-button color="primary" (click)="openReviewDialog(tx)">
           <mat-icon>fact_check</mat-icon>
           Resolve
         </button>
@@ -111,8 +111,8 @@ import { Subscription } from 'rxjs';
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close [disabled]="reviewing">Cancel</button>
-        <button mat-raised-button color="primary" [disabled]="!reviewNote.trim() || reviewing" (click)="submitReview()">
+        <button type="button" mat-stroked-button mat-dialog-close [disabled]="reviewing">Cancel</button>
+        <button type="button" mat-raised-button color="primary" [disabled]="!reviewNote.trim() || reviewing" (click)="submitReview()">
           <mat-icon>fact_check</mat-icon>
           {{ reviewing ? 'Resolving…' : 'Resolve' }}
         </button>

@@ -65,7 +65,7 @@ import { AuthService } from '../../core/auth/auth.service';
     <app-page-header
       title="Indexers"
       subtitle="Off-chain indexer sync state, one row per chain × indexer type. Reset clears a stuck ERROR state.">
-      <button mat-stroked-button (click)="load()">
+      <button type="button" mat-stroked-button (click)="load()">
         <mat-icon>refresh</mat-icon>
         Refresh
       </button>
@@ -83,12 +83,12 @@ import { AuthService } from '../../core/auth/auth.service';
 
     <ng-template #rowActions let-row>
       @if (row.status === 'ERROR') {
-        <button mat-stroked-button color="warn" (click)="openResetDialog(row)" matTooltip="Clear the error state and resume indexing">
+        <button type="button" mat-stroked-button color="warn" (click)="openResetDialog(row)" matTooltip="Clear the error state and resume indexing">
           <mat-icon>restart_alt</mat-icon>
           Reset
         </button>
       } @else {
-        <button mat-icon-button (click)="openResetDialog(row)" matTooltip="Reset anyway (not in ERROR)">
+        <button type="button" mat-icon-button (click)="openResetDialog(row)" matTooltip="Reset anyway (not in ERROR)">
           <mat-icon>restart_alt</mat-icon>
         </button>
       }
@@ -125,8 +125,8 @@ import { AuthService } from '../../core/auth/auth.service';
         }
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
-        <button mat-stroked-button mat-dialog-close [disabled]="resetting">Cancel</button>
-        <button mat-raised-button color="warn" [disabled]="resetting" (click)="confirmReset()">
+        <button type="button" mat-stroked-button mat-dialog-close [disabled]="resetting">Cancel</button>
+        <button type="button" mat-raised-button color="warn" [disabled]="resetting" (click)="confirmReset()">
           <mat-icon>restart_alt</mat-icon>
           {{ resetting ? 'Resetting…' : 'Reset' }}
         </button>

@@ -499,7 +499,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 "3b9c7d1f5e2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c",
                 daysAgo(60));
 
-        // Issued fixed-rate bond on Canton (Daml Finance instrument, Daml Token Standard)
+        // Issued fixed-rate bond using Registerwerk's custom Canton Daml lifecycle template.
         Asset cantonBond = asset("DEMO-BOND-MC-004",
                 "Meridian Canton Institutional Bond",
                 "DE000A3H2XQ0",
@@ -515,7 +515,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                         "totalSupply", 4000,
                         "maturityDate", "2033-06-30",
                         "interestRate", 4.2,
-                        "description", "Institutional fixed-rate bond issued via Daml Finance on Canton — synchronized privacy-preserving settlement"
+                        "description", "Institutional fixed-rate bond lifecycle recorded with Registerwerk Daml on Canton — payment integration remains deployment-specific"
                 ));
 
         deployment(cantonBond.getId(),

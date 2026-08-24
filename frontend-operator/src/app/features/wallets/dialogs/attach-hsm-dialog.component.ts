@@ -18,8 +18,8 @@ import { MatInputModule } from '@angular/material/input';
       <mat-form-field appearance="outline" style="width:100%"><mat-label>Ethereum address</mat-label><input matInput [(ngModel)]="address" placeholder="0x…"></mat-form-field>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
-      <button mat-flat-button [disabled]="!valid" (click)="submit()">Verify & attach</button>
+      <button type="button" mat-button mat-dialog-close>Cancel</button>
+      <button type="button" mat-flat-button [disabled]="!valid" (click)="submit()">Verify & attach</button>
     </mat-dialog-actions>
   `,
 })
