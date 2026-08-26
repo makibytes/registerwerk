@@ -141,10 +141,45 @@ severity (`ROUTINE`, `UNRESOLVED_ANCESTRY`, or `FINALITY_VIOLATION`), and observ
 per-event `RETRACTION`s follow for compatibility. Registerwerk applies a typed routine episode as
 one ordered compensation saga in reverse journal order, deduplicates the following legacy
 retractions by episode ID, and acknowledges only after the whole local transaction succeeds. A
-compensation failure leaves the cursor unacknowledged and quarantines the affected chain scope;
-unresolved ancestry or a finalized-history violation is quarantined immediately and never applied
-as an ordinary rollback. This is what makes detection and correction gap-free and push-based: a
-missed event is replayed on reconnect rather than silently lost.
+failed compensation quarantines the affected chain scope and **does** acknowledge the event —
+recording `INDEXER_COMPENSATION_FAILED` and moving on, rather than leaving the cursor stuck behind
+a poison event it will only ever fail to apply the same way again on every retry. Unresolved
+ancestry or a finalized-history violation is quarantined immediately and never applied as an
+ordinary rollback. This is what makes detection and correction gap-free and push-based: a missed
+event is replayed on reconnect rather than silently lost.
+
+A **malformed** lifecycle event (a payload-hash conflict on a reused `eventId`, or a lifecycle
+sequence gap/regression against this consumer's own cursor) is different from a resolved reorg
+episode: it quarantines both `chaincache_event_inbox` (that specific event) and
+`chain_contract_subscription` (this consumer, chain-wide) and does **not** acknowledge — the
+connection fail-stops (WebSocket close code 1011) so a later sequence can never acknowledge past
+it. This wedges the durable stream until an operator explicitly recovers it: the same
+`POST /api/v1/finality-journal/chains/{chainConfigId}/resolve-quarantine` action used to lift a
+chain-level quarantine also clears any quarantined inbox/subscription rows for that chain (see
+`GET .../chains/{chainConfigId}/quarantined-events` to review what will be cleared first) — the
+durable stream manager's next reconnect then resumes normal processing. A benign redelivery of an
+event this consumer already durably processed (a lease takeover mid-batch, or Chaincache's own
+cursor restore) is handled separately and does not wedge anything: it is acknowledged as a no-op
+without re-applying its effect or moving the cursor backwards.
+
+Chaincache prunes `durable_event` rows older than `chaincache.events.retention-max-age` (default
+30 days) once every known lifecycle consumer's acknowledged position has moved past them — never
+past the oldest still-unacknowledged position, so a healthy, merely-slow-to-reconnect consumer's
+history is never pruned out from under it. A consumer whose resolved replay position (its own
+persisted cursor takes priority over the `startBlock` Registerwerk supplies on every connect — see
+"The durable stream" above) falls at or below the resulting retention floor is refused with a
+distinct error at subscribe time instead of an ordinary forward gap, and
+`GET /{remoteChainKey}/api/durable/stats`'s `retentionFloorSequence` exposes the current boundary.
+Unlike a quarantine, this is **not** something `resolve-quarantine` recovers from: Registerwerk's
+stable `consumerId` (`registerwerk:<instanceId>:<remoteChainKey>`) keeps retrying the same rejected
+resume point on every `reconcile()` tick. Recovering requires an explicit operator decision — most
+directly, deleting that consumer's `durable_consumer_cursor` row on the Chaincache side so its next
+subscribe falls back to Registerwerk's supplied `startBlock` (a bounded resync from the earliest
+deployment block, not a silent one) — which is exactly why the target Chaincache workload's own
+`chaincache.events.retention-max-age` should comfortably exceed the longest Registerwerk-side
+outage this deployment is willing to tolerate without a manual resync, and why
+`registerwerk_chaincache_stream_last_event_timestamp_seconds` (see
+Observability below) is worth alerting on well before a stalled connection could approach it.
 
 The plain-RPC reorg-detection path (`ReorgGuard`, described in
 [Indexer Resilience](../indexers/resilience.md)) is untouched and still runs for every
@@ -307,11 +342,30 @@ integration is broken). A Grafana dashboard (`monitoring/grafana/dashboards/chai
 per-workload upstream health/latency/reorgs/disconnects plus the Registerwerk-side stream-health
 row.
 
-## Deep-linking to chaincheck
+## Deep-linking to the Chaincache console and chaincheck
+
+Every chaincache-kind node's expandable capability panel carries an "Open Chaincache console"
+link to `{{ node.managementUrl }}/console` — Chaincache's own operations console (durable-delivery
+consumers, retention, reorg history, quarantine, provider health, cache traffic). This needs no
+token handoff: `managementUrl` is already part of every `CHAINCACHE`-kind node's response, and
+Chaincache serves `/console` as `permitAll()` (the shell is public static code; every management
+API it reads still enforces the normal bearer-token check — the operator pastes a short-lived
+token into the console itself, kept in memory only).
+
+`managementUrl` is the origin the **backend** uses to reach Chaincache (probing
+`GET /api/capabilities`, health checks) — in a deployment where Chaincache has a real, internally
+routable hostname this is normally also reachable from an operator's browser (same corporate
+network/VPN), so the link works with no further configuration. This repo's own docker-compose demo
+stack is the one place that isn't true: `managementUrl` there is the Compose-internal service name
+(`chaincache-sepolia:8080`), which the host browser cannot resolve. For that case only, the
+operator frontend applies `environment.chaincacheConsoleOriginOverrides` — a small origin→origin
+map, empty in `environment.prod.ts`/`environment.testnet.ts` — to swap in the host-published port
+(`http://localhost:48090`/`:48091`) before opening the link. This is purely a display-layer
+substitution in the frontend; it never touches what the backend itself dials.
 
 [chaincheck](https://github.com/makibytes/chaincheck) is the third sibling product — an
 independent node-fleet monitor, not merged into either of the other two. When
-`environment.chaincheckUrl` is configured in the operator frontend, each chaincache-kind node's
-expandable capability panel includes a "View in chaincheck" link out to it. This is purely a
-deep link — Registerwerk does not query chaincheck's API or depend on it being reachable for
-anything shown on the node list itself.
+`environment.chaincheckUrl` is configured in the operator frontend, the same panel also shows a
+"View in chaincheck" link out to it. Both links are purely deep links — Registerwerk does not
+query either product's API or depend on it being reachable for anything shown on the node list
+itself.

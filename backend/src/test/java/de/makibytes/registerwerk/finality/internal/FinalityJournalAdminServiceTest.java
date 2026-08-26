@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.finality.internal;
 
+import de.makibytes.registerwerk.finality.api.ChaincacheInboxRecoveryPort;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.finality.api.CompensationOutcome;
 import de.makibytes.registerwerk.finality.api.ReorgObservation;
@@ -37,6 +38,7 @@ class FinalityJournalAdminServiceTest {
     @Mock private CompensationDispatcher dispatcher;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private ChainQuarantineStore quarantineStore;
+    @Mock private ChaincacheInboxRecoveryPort inboxRecovery;
 
     private FinalityJournalAdminService service;
     private final UUID actorId = UUID.randomUUID();
@@ -44,8 +46,10 @@ class FinalityJournalAdminServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new FinalityJournalAdminService(repository, dispatcher, eventPublisher, quarantineStore);
+        service = new FinalityJournalAdminService(repository, dispatcher, eventPublisher, quarantineStore,
+                inboxRecovery);
         lenient().when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(inboxRecovery.clearQuarantinedInbox(any())).thenReturn(0);
     }
 
     private ChainEffect rowWithStatus(UUID id, ChainEffect.Status status) {
@@ -178,6 +182,7 @@ class FinalityJournalAdminServiceTest {
         service.resolveQuarantine(chainId, "  all effects reconciled  ", actorId, "REGISTRY_ADMIN");
 
         verify(quarantineStore).resolve(org.mockito.ArgumentMatchers.eq(chainId), any());
+        verify(inboxRecovery).clearQuarantinedInbox(chainId);
         ArgumentCaptor<ChainQuarantineResolvedEvent> event =
                 ArgumentCaptor.forClass(ChainQuarantineResolvedEvent.class);
         verify(eventPublisher).publishEvent(event.capture());

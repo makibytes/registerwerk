@@ -11,5 +11,17 @@ export const environment = {
   // Base URL of a chaincheck instance (node-fleet monitor, a sibling product) to deep-link a
   // chaincache node row to, e.g. 'http://localhost:48090'. Empty means no deep-link is shown —
   // chaincheck is an independent product Registerwerk never requires.
-  chaincheckUrl: ''
+  chaincheckUrl: '',
+  // A CHAINCACHE-kind node's managementUrl is the origin the *backend* uses to reach Chaincache
+  // (RestClient probes, docker-compose service DNS) — in a real deployment that's typically also
+  // browser-reachable (real internal DNS), but in this repo's docker-compose demo stack it's the
+  // Compose-internal service name (e.g. "chaincache-sepolia:8080"), which a host browser cannot
+  // resolve at all. This maps such internal origins to their host-published equivalent purely for
+  // the operator-portal deep link; it never affects any backend-to-Chaincache call. Empty/absent
+  // origins fall through to managementUrl unchanged, which is the correct behavior for a real
+  // deployment with a genuinely browser-reachable managementUrl.
+  chaincacheConsoleOriginOverrides: {
+    'chaincache-sepolia:8080': 'http://localhost:48090',
+    'chaincache-base:8080': 'http://localhost:48091'
+  } as Record<string, string>
 };

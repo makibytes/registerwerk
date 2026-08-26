@@ -79,6 +79,7 @@ class RetentionSweepJob {
         sweepAppUserActionToken();
         sweepWebhookDelivery();
         sweepEventPublication();
+        sweepChaincacheEventInbox();
     }
 
     /**
@@ -190,6 +191,31 @@ class RetentionSweepJob {
                         + "ORDER BY completion_date LIMIT ?)",
                 cutoff(t), t.getBatchSize());
         logResult("event_publication", total);
+    }
+
+    /**
+     * Only PROCESSED rows are ever swept — the transactional inbox's role is dedup-by-eventId
+     * (see {@code ChaincacheLifecycleEventProcessor}'s class javadoc), which
+     * {@code chain_event_occurrence} (the actual dedup ledger, never swept here) durably preserves
+     * independently of this transport-layer inbox. QUARANTINED rows are never swept: they are the
+     * evidence an operator reviews via {@code GET .../quarantined-events} before resolving a
+     * quarantine, and {@code ChaincacheInboxRecoveryService.clearQuarantinedInbox} is the only
+     * thing allowed to change their state. A RECEIVED row should not durably exist under this
+     * method's own transactional semantics (see that class's javadoc); excluding it here is
+     * defense in depth, not an expected case.
+     */
+    void sweepChaincacheEventInbox() {
+        RetentionProperties.Target t = properties.getChaincacheEventInbox();
+        if (!t.isEnabled()) {
+            return;
+        }
+        int total = sweepBatched(
+                "DELETE FROM chaincache_event_inbox WHERE id IN "
+                        + "(SELECT id FROM chaincache_event_inbox "
+                        + "WHERE processing_state = 'PROCESSED' AND processed_at < ? "
+                        + "ORDER BY processed_at LIMIT ?)",
+                cutoff(t), t.getBatchSize());
+        logResult("chaincache_event_inbox", total);
     }
 
     private int sweepBatched(String deleteSql, Timestamp cutoff, int batchSize) {

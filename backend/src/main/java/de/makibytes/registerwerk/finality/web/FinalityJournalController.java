@@ -73,4 +73,12 @@ public class FinalityJournalController {
                 SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
+
+    /** What {@link #resolveQuarantine} is about to clear on the Chaincache lifecycle inbox side,
+     *  for operator visibility before doing so — see {@code ChaincacheInboxRecoveryPort}. */
+    @GetMapping("/chains/{chainConfigId}/quarantined-events")
+    public ResponseEntity<List<de.makibytes.registerwerk.finality.api.ChaincacheInboxRecoveryPort.QuarantinedInboxEvent>>
+            quarantinedEvents(@PathVariable UUID chainConfigId) {
+        return ResponseEntity.ok(adminService.listQuarantinedInboxEvents(chainConfigId));
+    }
 }

@@ -1,10 +1,13 @@
 package de.makibytes.registerwerk.finality.internal;
 
+import de.makibytes.registerwerk.finality.api.ChaincacheInboxRecoveryPort;
 import de.makibytes.registerwerk.finality.api.CompensationOutcome;
 import de.makibytes.registerwerk.finality.api.QuarantineTrigger;
 import de.makibytes.registerwerk.finality.events.ChainEffectAcknowledgedEvent;
 import de.makibytes.registerwerk.finality.events.ChainQuarantineResolvedEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +26,8 @@ import java.util.UUID;
 @Service
 public class FinalityJournalAdminService {
 
+    private static final Logger log = LoggerFactory.getLogger(FinalityJournalAdminService.class);
+
     private static final List<ChainEffect.Status> UNRESOLVED_STATUSES =
             List.of(ChainEffect.Status.COMPENSATION_FAILED, ChainEffect.Status.IRREVERSIBLE_ESCALATED);
 
@@ -30,13 +35,22 @@ public class FinalityJournalAdminService {
     private final CompensationDispatcher dispatcher;
     private final ApplicationEventPublisher eventPublisher;
     private final ChainQuarantineStore quarantineStore;
+    private final ChaincacheInboxRecoveryPort inboxRecovery;
 
     FinalityJournalAdminService(ChainEffectRepository repository, CompensationDispatcher dispatcher,
-            ApplicationEventPublisher eventPublisher, ChainQuarantineStore quarantineStore) {
+            ApplicationEventPublisher eventPublisher, ChainQuarantineStore quarantineStore,
+            ChaincacheInboxRecoveryPort inboxRecovery) {
         this.repository = repository;
         this.dispatcher = dispatcher;
         this.eventPublisher = eventPublisher;
         this.quarantineStore = quarantineStore;
+        this.inboxRecovery = inboxRecovery;
+    }
+
+    /** Quarantined Chaincache lifecycle inbox rows for this chain — what {@link #resolveQuarantine}
+     *  is about to clear, so an operator can review what wedged the stream before doing so. */
+    public List<ChaincacheInboxRecoveryPort.QuarantinedInboxEvent> listQuarantinedInboxEvents(UUID chainConfigId) {
+        return inboxRecovery.listQuarantinedInbox(chainConfigId);
     }
 
     @Transactional(readOnly = true)
@@ -120,6 +134,18 @@ public class FinalityJournalAdminService {
         Instant resolvedAt = Instant.now();
         if (quarantineStore.resolve(chainConfigId, resolvedAt) != 1) {
             throw new IllegalStateException("Chain quarantine changed concurrently for " + chainConfigId);
+        }
+        // The chain_quarantine row and the Chaincache lifecycle inbox's own QUARANTINED rows are
+        // two independent fail-closed states with a shared root cause — see
+        // ChaincacheInboxRecoveryPort's javadoc for why resolving only one leaves either a
+        // permanently wedged durable stream or gated operations resuming against a stream that
+        // still can't advance. Cleared unconditionally: a chain can be quarantined without its
+        // inbox ever having been (e.g. a local-finality-conflict trigger with no lifecycle event
+        // involved), in which case this is a no-op.
+        int inboxCleared = inboxRecovery.clearQuarantinedInbox(chainConfigId);
+        if (inboxCleared > 0) {
+            log.info("Cleared {} quarantined Chaincache lifecycle inbox row(s) for chain={} alongside "
+                    + "quarantine resolution", inboxCleared, chainConfigId);
         }
         eventPublisher.publishEvent(new ChainQuarantineResolvedEvent(
                 chainConfigId, active.reorgId(), reason.strip(), actorId, actorRole, resolvedAt));

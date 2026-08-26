@@ -100,13 +100,29 @@ class ChaincacheLifecycleEventProcessor {
 
         SubscriptionRow cursor = lockCursor(chainConfigId, consumerId, event);
         if (cursor.lastSequence() != null) {
-            if (event.sequence() == cursor.lastSequence()
-                    && event.eventId().equals(cursor.lastEventId())
-                    && "PROCESSED".equals(inbox.state())) {
-                recordRedelivery(inbox.id());
-                return;
-            }
             long expected = cursor.lastSequence() + 1;
+            if (event.sequence() <= cursor.lastSequence()) {
+                // A benign replay of already-durably-applied history — a lease takeover mid-batch,
+                // a Chaincache cursor restore, or any redelivery window wider than one event all
+                // legitimately redeliver a sequence this consumer already committed and acknowledged.
+                // The payload-hash check above already proved this is the identical immutable event
+                // (a genuine conflicting reuse threw before reaching here), so once its own inbox
+                // row confirms it was actually applied, this is a no-op ack: never re-apply, never
+                // advance the cursor backwards, and — critically — never treat "behind the cursor"
+                // as corruption the way a *forward* gap is. An inbox row that is NOT PROCESSED here
+                // (state RECEIVED, meaning the cursor advanced past this sequence without this exact
+                // event ever completing apply()) is a genuine anomaly under this method's own
+                // transactional semantics and is quarantined exactly like a forward gap.
+                if ("PROCESSED".equals(inbox.state())) {
+                    recordRedelivery(inbox.id());
+                    return;
+                }
+                String reason = "lifecycle sequence " + event.sequence() + " is behind the acknowledged "
+                        + "cursor (" + cursor.lastSequence() + ") but was never recorded as processed";
+                quarantineInbox(inbox.id(), reason);
+                quarantineSubscription(chainConfigId, consumerId, event, reason);
+                throw new ChaincacheProtocolException(reason);
+            }
             if (event.sequence() != expected) {
                 String reason = "lifecycle sequence gap/regression: expected " + expected
                         + " but received " + event.sequence();

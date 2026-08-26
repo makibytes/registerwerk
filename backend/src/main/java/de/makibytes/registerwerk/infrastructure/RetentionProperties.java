@@ -37,6 +37,7 @@ public class RetentionProperties {
     private final Target appUserActionToken = new Target(true, Duration.ofDays(90), 500);
     private final Target webhookDelivery = new Target(true, Duration.ofDays(90), 500);
     private final Target eventPublication = new Target(true, Duration.ofDays(30), 500);
+    private final Target chaincacheEventInbox = new Target(true, Duration.ofDays(30), 500);
 
     public Target getLoginAttempt() { return loginAttempt; }
     public Target getWalletBindChallenge() { return walletBindChallenge; }
@@ -44,6 +45,7 @@ public class RetentionProperties {
     public Target getAppUserActionToken() { return appUserActionToken; }
     public Target getWebhookDelivery() { return webhookDelivery; }
     public Target getEventPublication() { return eventPublication; }
+    public Target getChaincacheEventInbox() { return chaincacheEventInbox; }
 
     /** One sweep target's toggle + window + batch size. */
     public static class Target {

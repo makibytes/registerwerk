@@ -1307,7 +1307,7 @@ code {
 }
 
 .kind-badge { margin-top: 3px; }
-.kind-badge mat-icon, .chaincheck-link mat-icon { font-size: 12px; width: 12px; height: 12px; }
+.kind-badge mat-icon, .external-link mat-icon { font-size: 12px; width: 12px; height: 12px; }
 .expand-btn { color: var(--rw-text-muted); }
 .capabilities-row td { background: var(--rw-bg); padding: 0 20px 16px; }
 
@@ -1334,7 +1334,7 @@ code {
 
 .capabilities-empty { padding: 14px 16px; font-size: 12px; color: var(--rw-text-muted); font-style: italic; }
 .capabilities-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
-.chaincheck-link { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.external-link { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 
 .capability-item.wide { grid-column: 1 / -1; }
 .capability-item .value.mono {

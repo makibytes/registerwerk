@@ -93,6 +93,31 @@ class RetentionSweepJobTest {
     }
 
     @Test
+    @DisplayName("chaincache_event_inbox sweep only touches PROCESSED rows, never QUARANTINED")
+    void chaincacheEventInboxSweepsOnlyProcessedRows() {
+        init();
+        when(jdbc.update(anyString(), any(Timestamp.class), any(Integer.class))).thenReturn(0);
+
+        job.sweepChaincacheEventInbox();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(sql.capture(), any(Timestamp.class), any(Integer.class));
+        assertThat(sql.getValue()).contains("processing_state = 'PROCESSED'");
+        assertThat(sql.getValue()).doesNotContain("QUARANTINED");
+    }
+
+    @Test
+    @DisplayName("chaincache_event_inbox sweep respects its own enabled flag")
+    void chaincacheEventInboxSweepRespectsEnabledFlag() {
+        init();
+        properties.getChaincacheEventInbox().setEnabled(false);
+
+        job.sweepChaincacheEventInbox();
+
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
     @DisplayName("wallet_bind_challenge sweep binds both the 'now' cutoff and the age cutoff")
     void walletBindChallengeSweepBindsTwoCutoffs() {
         init();
@@ -113,9 +138,10 @@ class RetentionSweepJobTest {
 
         job.sweep();
 
-        // login_attempt, webhook_delivery, event_publication use the 2-cutoff-arg overload;
-        // wallet_bind_challenge, onboarding_token, app_user_action_token use the 3-arg overload.
-        verify(jdbc, times(3)).update(anyString(), any(Timestamp.class), any(Integer.class));
+        // login_attempt, webhook_delivery, event_publication, chaincache_event_inbox use the
+        // 2-cutoff-arg overload; wallet_bind_challenge, onboarding_token, app_user_action_token
+        // use the 3-arg overload.
+        verify(jdbc, times(4)).update(anyString(), any(Timestamp.class), any(Integer.class));
         verify(jdbc, times(3)).update(anyString(), any(Timestamp.class), any(Timestamp.class), any(Integer.class));
     }
 }

@@ -3,5 +3,6 @@ export const environment = {
   testEnvironment: false,
   apiUrl: '/api/v1',
   customerUrl: '',
-  chaincheckUrl: ''
+  chaincheckUrl: '',
+  chaincacheConsoleOriginOverrides: {} as Record<string, string>
 };

@@ -300,7 +300,7 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
     .add-chain-btn { font-size: 12px; height: 32px; }
     .chain-actions { display: flex; gap: 8px; align-items: center; }
     .settings-btn { color: var(--rw-text-muted); }
-    /* .finality-source-chip, .kind-badge, .capabilities-*, .chaincheck-link — global, see styles.scss
+    /* .finality-source-chip, .kind-badge, .capabilities-*, .external-link — global, see styles.scss
        "chaincache capability comparison" section: reused wherever a node exposes chaincache
        capability data, not just this page, and kept this component under its style budget. */
   `],
@@ -584,8 +584,13 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                           </div>
                         }
                         <div class="capabilities-actions">
+                          @if (node.managementUrl) {
+                            <a class="external-link" [href]="consoleUrl(node.managementUrl)" target="_blank" rel="noopener">
+                              <mat-icon>open_in_new</mat-icon> Open Chaincache console
+                            </a>
+                          }
                           @if (chaincheckUrl) {
-                            <a class="chaincheck-link" [href]="chaincheckUrl" target="_blank" rel="noopener">
+                            <a class="external-link" [href]="chaincheckUrl" target="_blank" rel="noopener">
                               <mat-icon>open_in_new</mat-icon> View in chaincheck
                             </a>
                           }
@@ -618,6 +623,29 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
   private readonly expandedNodeIds = signal<Set<string>>(new Set());
 
   readonly chaincheckUrl = environment.chaincheckUrl;
+
+  /** Chaincache serves its own operations console at GET /console (permitAll — the shell is
+   *  public static code, every management API it reads still enforces the normal bearer-token
+   *  check), so this needs no token handoff: just the node's own managementUrl, already carried
+   *  on RpcNodeResponse for every CHAINCACHE-kind node. managementUrl is the origin the *backend*
+   *  reaches Chaincache through; environment.chaincacheConsoleOriginOverrides swaps in a
+   *  browser-reachable origin when that differs (see environment.ts), and is a no-op otherwise. */
+  consoleUrl(managementUrl: string): string {
+    let origin: string;
+    let rest: string;
+    try {
+      const parsed = new URL(managementUrl);
+      origin = parsed.origin;
+      rest = managementUrl.slice(origin.length);
+    } catch {
+      origin = managementUrl.replace(/\/+$/, '');
+      rest = '';
+    }
+    const host = origin.replace(/^[a-z]+:\/\//, '');
+    const override = environment.chaincacheConsoleOriginOverrides?.[host];
+    const base = override ? `${override.replace(/\/+$/, '')}${rest}` : `${origin}${rest}`;
+    return `${base.replace(/\/+$/, '')}/console`;
+  }
 
   private pollSub?: Subscription;
   private readonly refreshTrigger = new Subject<void>();
