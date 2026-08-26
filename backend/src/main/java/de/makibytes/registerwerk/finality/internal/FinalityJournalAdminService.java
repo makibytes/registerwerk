@@ -111,6 +111,11 @@ public class FinalityJournalAdminService {
      * has either compensated successfully or been individually acknowledged. A retry never
      * auto-clears quarantine: the operator must review the complete incident and supply an audited
      * reason before durable ingestion and organization authorization resume.
+     *
+     * <p>Also the single recovery entry point when there is no {@code chain_quarantine} row at all
+     * — a poison/malformed lifecycle envelope quarantines the Chaincache inbox and subscription
+     * directly (see {@link ChaincacheInboxRecoveryPort}) without ever recording a reorg/finality
+     * incident, since transport-layer corruption never reached a canonical-chain decision.
      */
     @Transactional
     public void resolveQuarantine(UUID chainConfigId, String reason, UUID actorId, String actorRole) {
@@ -118,9 +123,26 @@ public class FinalityJournalAdminService {
             throw new IllegalArgumentException("Quarantine resolution reason is required");
         }
         quarantineStore.lockChain(chainConfigId);
-        var active = quarantineStore.findActive(chainConfigId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Chain " + chainConfigId + " has no active quarantine"));
+        var activeOpt = quarantineStore.findActive(chainConfigId);
+        if (activeOpt.isEmpty()) {
+            // A malformed/poison lifecycle envelope quarantines the Chaincache inbox and its
+            // subscription directly (ChaincacheLifecycleFailureRecorder), with no chain_quarantine
+            // row at all — that table models reorg/finality-violation incidents specifically, a
+            // different failure class from a transport-level poison event that never reached a
+            // canonical-chain decision. Recover that case here too, rather than forcing the
+            // operator through a path that insists an incident exists which never did.
+            int inboxCleared = inboxRecovery.clearQuarantinedInbox(chainConfigId);
+            if (inboxCleared == 0) {
+                throw new IllegalArgumentException("Chain " + chainConfigId + " has no active quarantine");
+            }
+            log.info("Cleared {} quarantined Chaincache lifecycle inbox row(s) for chain={} (no "
+                    + "chain-level quarantine was active)", inboxCleared, chainConfigId);
+            eventPublisher.publishEvent(new ChainQuarantineResolvedEvent(
+                    chainConfigId, "none (inbox-only quarantine)", reason.strip(), actorId, actorRole,
+                    Instant.now()));
+            return;
+        }
+        var active = activeOpt.get();
         if (requiresCanonicalReconciliation(active.trigger())) {
             throw new IllegalStateException("Chain " + chainConfigId + " quarantine trigger "
                     + active.trigger() + " requires explicit canonical-state reconciliation; "

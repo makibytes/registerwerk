@@ -192,6 +192,37 @@ class FinalityJournalAdminServiceTest {
     }
 
     @Test
+    @DisplayName("with no active chain_quarantine row, resolution falls back to clearing an inbox-only quarantine")
+    void resolveQuarantine_noChainQuarantine_clearsInboxOnlyQuarantine() {
+        UUID chainId = UUID.randomUUID();
+        when(quarantineStore.findActive(chainId)).thenReturn(Optional.empty());
+        when(inboxRecovery.clearQuarantinedInbox(chainId)).thenReturn(2);
+
+        service.resolveQuarantine(chainId, "poison envelope fixed and redeployed", actorId, "REGISTRY_ADMIN");
+
+        verify(quarantineStore, never()).resolve(any(), any());
+        verify(inboxRecovery).clearQuarantinedInbox(chainId);
+        ArgumentCaptor<ChainQuarantineResolvedEvent> event =
+                ArgumentCaptor.forClass(ChainQuarantineResolvedEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().reason()).isEqualTo("poison envelope fixed and redeployed");
+        assertThat(event.getValue().actorId()).isEqualTo(actorId);
+    }
+
+    @Test
+    @DisplayName("with neither a chain_quarantine row nor a quarantined inbox, resolution has nothing to clear")
+    void resolveQuarantine_nothingActiveAtAll_throws() {
+        UUID chainId = UUID.randomUUID();
+        when(quarantineStore.findActive(chainId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.resolveQuarantine(chainId, "reason", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("no active quarantine");
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
     @DisplayName("generic acknowledgement cannot clear a quarantine with unreconciled canonical state")
     void resolveQuarantine_consensusIncidentRequiresDedicatedReconciliation() {
         UUID chainId = UUID.randomUUID();
