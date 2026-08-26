@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.indexer.internal;
 
 import de.makibytes.registerwerk.blockchain.api.LifecycleLogProjectionPort;
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import org.springframework.stereotype.Service;
@@ -41,16 +42,13 @@ class ChaincacheLogProjectionService implements LifecycleLogProjectionPort {
     }
 
     @Override
-    public void promote(UUID transferId, de.makibytes.registerwerk.finality.api.FinalityLevel finality) {
-        repository.findById(transferId).ifPresent(transfer -> {
-            transfer.setFinalityStatus(finality);
-            repository.save(transfer);
-        });
+    public void promote(UUID transferId, FinalityLevel finality) {
+        repository.updateFinalityStatus(transferId, finality);
     }
 
     @Override
     public void orphan(UUID transferId) {
-        promote(transferId, de.makibytes.registerwerk.finality.api.FinalityLevel.ORPHANED);
+        promote(transferId, FinalityLevel.ORPHANED);
     }
 }
 

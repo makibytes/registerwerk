@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
+import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -37,8 +38,12 @@ class ChaincacheLifecycleFailureRecorder {
         String schema = event.path("schemaVersion").asText("UNKNOWN");
         String kind = event.path("kind").asText("UNKNOWN");
         String finality = event.path("finality").asText(null);
-        if (!java.util.Set.of("PROVISIONAL", "SAFE", "FINALIZED", "ORPHANED").contains(finality)) {
-            finality = null;
+        if (finality != null) {
+            try {
+                FinalityLevel.valueOf(finality);
+            } catch (IllegalArgumentException e) {
+                finality = null;
+            }
         }
         String raw = objectMapper.writeValueAsString(event);
         String hash = ChaincacheLifecycleEventProcessor.payloadHash(objectMapper, event);
@@ -56,12 +61,7 @@ class ChaincacheLifecycleFailureRecorder {
                       last_received_at = NOW(), delivery_count = chaincache_event_inbox.delivery_count + 1
                 """, domain, chainConfigId, chainKey, sequence.asLong(), eventId, schema, kind,
                 finality, hash, raw, reason);
-        jdbcTemplate.update("""
-                INSERT INTO chain_contract_subscription
-                  (durability_domain_id, chain_config_id, chain_key, consumer_id, subscription_state)
-                VALUES (?, ?, ?, ?, 'QUARANTINED')
-                ON CONFLICT (durability_domain_id, chain_config_id, consumer_id) DO UPDATE
-                  SET subscription_state = 'QUARANTINED', updated_at = NOW()
-                """, domain, chainConfigId, chainKey, consumerId);
+        ChaincacheSubscriptionSql.quarantineSubscription(
+                jdbcTemplate, domain, chainConfigId, chainKey, consumerId);
     }
 }

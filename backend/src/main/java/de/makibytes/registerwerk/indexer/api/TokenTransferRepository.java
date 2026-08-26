@@ -169,6 +169,12 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
             + "WHERE t.chainConfigId = :chainConfigId AND t.blockNumber >= :forkBlock AND t.assetId IS NOT NULL")
     List<UUID> findDistinctAssetIdsAtOrAfter(@Param("chainConfigId") UUID chainConfigId, @Param("forkBlock") Long forkBlock);
 
+    /** Single-row finality update by primary key — avoids a full-entity SELECT before writing
+     *  back one column on the Chaincache lifecycle inbox's per-event promote/orphan path. */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE TokenTransfer t SET t.finalityStatus = :finality WHERE t.id = :id")
+    int updateFinalityStatus(@Param("id") UUID id, @Param("finality") FinalityLevel finality);
+
     /** Backfills a block hash onto rows at a height that were written without one (e.g. a
      *  transient _meta lookup failure at insert time) — lets a later successful probe establish
      *  a comparison baseline it didn't have on the first pass. Never overwrites an existing hash. */

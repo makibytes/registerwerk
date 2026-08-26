@@ -341,7 +341,6 @@ CREATE TABLE asset (
 );
 
 CREATE UNIQUE INDEX idx_asset_isin          ON asset (isin) WHERE isin IS NOT NULL;
-CREATE INDEX        idx_asset_isin_btree    ON asset (isin) WHERE isin IS NOT NULL;
 CREATE INDEX        idx_asset_issuer        ON asset (issuer_id);
 CREATE INDEX        idx_asset_status        ON asset (status);
 CREATE INDEX        idx_asset_public_data   ON asset USING GIN (public_data) WHERE public_data IS NOT NULL;
@@ -3995,15 +3994,11 @@ ALTER TABLE ecosystem_trusted_issuer
 CREATE INDEX idx_ecosystem_trusted_issuer_status
     ON ecosystem_trusted_issuer (status);
 
--- Addition generations remain unique.  Retiring predecessors are deliberately excluded: after
--- a confirmed removal and replacement, a suffix reorg must be able to return both the replacement
--- addition and the predecessor removal to pending during LIFO compensation.  Application-level
--- lifecycle checks still reject a fresh addition while a predecessor removal is unresolved.
-DROP INDEX uq_ecosystem_trusted_issuer_live;
-CREATE UNIQUE INDEX uq_ecosystem_trusted_issuer_live
-    ON ecosystem_trusted_issuer (chain_config_id, lower(issuer_address))
-    WHERE status IN ('PENDING','ACTIVE');
-
+-- uq_ecosystem_trusted_issuer_live (defined above, at table creation) already excludes retiring
+-- predecessors: after a confirmed removal and replacement, a suffix reorg must be able to return
+-- both the replacement addition and the predecessor removal to pending during LIFO compensation.
+-- Application-level lifecycle checks still reject a fresh addition while a predecessor removal is
+-- unresolved.
 
 -- Service checks give a useful error; these indexes also close the concurrent-request race.
 CREATE UNIQUE INDEX uq_permission_grant_live_org
@@ -4085,13 +4080,10 @@ ALTER TABLE org_member_wallet
             AND removed_block_number IS NOT NULL AND removed_block_hash IS NOT NULL)
     );
 
--- Binding generations remain unique, while a retiring predecessor is excluded so LIFO reorg
--- compensation can represent both the replacement binding and the predecessor removal as pending.
--- MemberWalletService still rejects a fresh bind while a predecessor removal is unresolved.
-DROP INDEX uq_org_member_wallet_live;
-CREATE UNIQUE INDEX uq_org_member_wallet_live
-    ON org_member_wallet (chain_config_id, lower(wallet_address))
-    WHERE status IN ('PENDING','ACTIVE');
+-- uq_org_member_wallet_live (defined above, at table creation) already excludes a retiring
+-- predecessor so LIFO reorg compensation can represent both the replacement binding and the
+-- predecessor removal as pending. MemberWalletService still rejects a fresh bind while a
+-- predecessor removal is unresolved.
 
 ALTER TABLE permission_grant
     ADD COLUMN role_restriction_status VARCHAR(20) NOT NULL DEFAULT 'STABLE',
@@ -4370,6 +4362,10 @@ CREATE INDEX idx_chaincache_inbox_sequence
 CREATE INDEX idx_chaincache_inbox_unprocessed
     ON chaincache_event_inbox (chain_config_id, source_sequence)
     WHERE processing_state <> 'PROCESSED';
+-- RetentionSweepJob#sweepChaincacheEventInbox's batch DELETE targets exactly this predicate.
+CREATE INDEX idx_chaincache_inbox_processed_at
+    ON chaincache_event_inbox (processed_at)
+    WHERE processing_state = 'PROCESSED';
 
 CREATE TABLE chain_contract_subscription (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),

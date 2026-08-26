@@ -125,18 +125,21 @@ wait_for_finality() {
   return 1
 }
 
-wait_for_row_count() {
-  local query="$1" expected="$2" timeout_s="$3" waited=0 got=""
-  while [ "$waited" -lt "$timeout_s" ]; do
-    got=$(psql_q "$query")
-    if [ "$got" = "$expected" ]; then
-      return 0
-    fi
+# Polls a container's /actuator/health after a restart/recreate. Logs PASS/FAIL via ok()/bad()
+# itself (scenarios below just check the return code) so callers don't repeat the same
+# curl-retry-timeout boilerplate three times over.
+wait_for_health() {
+  local url="$1" label="$2" scenario="$3" timeout_s="${4:-60}" waited=0
+  until curl -sf -o /dev/null "$url" 2>/dev/null; do
     sleep 1
     waited=$((waited + 1))
+    if [ "$waited" -ge "$timeout_s" ]; then
+      bad "$label did not become healthy again within ${timeout_s}s" "$scenario"
+      return 1
+    fi
   done
-  echo "$got"
-  return 1
+  ok "$label healthy again after ${waited}s"
+  return 0
 }
 
 restore_mining() {
@@ -331,13 +334,7 @@ scenario_registerwerk_restart() {
   log "-> sent tx $tx in block $block, immediately recreating the backend container..."
   docker compose up -d --force-recreate backend >/dev/null 2>&1
 
-  local waited=0
-  until curl -sf -o /dev/null http://127.0.0.1:44200/actuator/health; do
-    sleep 1
-    waited=$((waited + 1))
-    if [ "$waited" -ge 60 ]; then bad "backend did not become healthy again within 60s" "rw_restart"; return; fi
-  done
-  ok "backend healthy again after ${waited}s"
+  wait_for_health "http://127.0.0.1:44200/actuator/health" "backend" "rw_restart" || return
 
   if wait_for_finality "$tx" PROVISIONAL 30; then
     ok "event delivered after restart (resumed from durable cursor)"
@@ -364,13 +361,7 @@ scenario_chaincache_restart() {
   log "-> sent tx $tx in block $block, immediately recreating chaincache-sepolia..."
   docker compose up -d --force-recreate chaincache-sepolia >/dev/null 2>&1
 
-  local waited=0
-  until curl -sf -o /dev/null http://127.0.0.1:48090/actuator/health 2>/dev/null; do
-    sleep 1
-    waited=$((waited + 1))
-    if [ "$waited" -ge 60 ]; then bad "chaincache-sepolia did not become healthy again within 60s" "cc_restart"; return; fi
-  done
-  ok "chaincache-sepolia healthy again after ${waited}s"
+  wait_for_health "http://127.0.0.1:48090/actuator/health" "chaincache-sepolia" "cc_restart" || return
 
   if wait_for_finality "$tx" PROVISIONAL 40; then
     ok "event delivered after Chaincache restart (Registerwerk's reconcile() reopened the stream)"
@@ -400,13 +391,7 @@ scenario_ack_lost() {
   docker kill registerwerk-backend-1 >/dev/null 2>&1
   docker compose up -d --force-recreate backend >/dev/null 2>&1
 
-  local waited=0
-  until curl -sf -o /dev/null http://127.0.0.1:44200/actuator/health; do
-    sleep 1
-    waited=$((waited + 1))
-    if [ "$waited" -ge 60 ]; then bad "backend did not recover" "ack_lost"; return; fi
-  done
-  ok "backend recovered after ${waited}s"
+  wait_for_health "http://127.0.0.1:44200/actuator/health" "backend" "ack_lost" || return
 
   sleep 5   # let a redelivery round-trip settle
   assert_eq "$(psql_q "SELECT count(*) FROM chain_event_occurrence WHERE transaction_hash = '${tx}';")" 1 \

@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.blockchain.api.LifecycleLogProjectionPort;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
@@ -26,7 +27,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -163,13 +163,14 @@ class ChaincacheLifecycleEventProcessor {
 
     private void applyLog(UUID chainConfigId, Envelope event) {
         JsonNode log = requireObject(event.payload(), "LOG payload");
-        String contract = normalizeHex(requiredText(log.path("address").asText(null), "payload.address"));
-        String txHash = normalizeHex(requiredText(log.path("transactionHash").asText(null),
+        String contract = EvmUtils.normalizeAddress(
+                requiredText(log.path("address").asText(null), "payload.address"));
+        String txHash = EvmUtils.normalizeAddress(requiredText(log.path("transactionHash").asText(null),
                 "payload.transactionHash"));
         int logIndex = requiredHexInt(log, "logIndex");
         Integer transactionIndex = optionalHexInt(log, "transactionIndex");
         long blockNumber = requiredBlockNumber(event);
-        String blockHash = normalizeHex(requiredText(event.blockHash(), "blockHash"));
+        String blockHash = EvmUtils.normalizeAddress(requiredText(event.blockHash(), "blockHash"));
         FinalityLevel finality = requiredFinality(event);
         String tenure = event.canonicalTenure();
         String logicalEventId = logicalEventId(event.eventId());
@@ -348,13 +349,8 @@ class ChaincacheLifecycleEventProcessor {
     }
 
     private void quarantineSubscription(UUID chainConfigId, String consumerId, Envelope event, String reason) {
-        jdbcTemplate.update("""
-                INSERT INTO chain_contract_subscription
-                  (durability_domain_id, chain_config_id, chain_key, consumer_id, subscription_state)
-                VALUES (?, ?, ?, ?, 'QUARANTINED')
-                ON CONFLICT (durability_domain_id, chain_config_id, consumer_id) DO UPDATE
-                  SET subscription_state = 'QUARANTINED', updated_at = NOW()
-                """, event.durabilityDomainId(), chainConfigId, event.chainKey(), consumerId);
+        ChaincacheSubscriptionSql.quarantineSubscription(
+                jdbcTemplate, event.durabilityDomainId(), chainConfigId, event.chainKey(), consumerId);
     }
 
     private InboxRow inbox(String domain, UUID chainConfigId, String eventId) {
@@ -437,20 +433,10 @@ class ChaincacheLifecycleEventProcessor {
     }
 
     private static void validatePromotion(FinalityLevel current, FinalityLevel next, String eventId) {
-        if (current == FinalityLevel.ORPHANED || next == FinalityLevel.ORPHANED
-                || rank(next) < rank(current)) {
+        if (!next.atLeast(current)) {
             throw new ChaincacheProtocolException("Impossible lifecycle transition " + current
                     + " -> " + next + " for " + eventId);
         }
-    }
-
-    private static int rank(FinalityLevel level) {
-        return switch (level) {
-            case PROVISIONAL -> 0;
-            case SAFE -> 1;
-            case FINALIZED -> 2;
-            case ORPHANED -> -1;
-        };
     }
 
     private static long requiredBlockNumber(Envelope event) {
@@ -485,11 +471,6 @@ class ChaincacheLifecycleEventProcessor {
         return level == null ? null : level.name();
     }
 
-    private static String normalizeHex(String value) {
-        return value.startsWith("0x") || value.startsWith("0X")
-                ? "0x" + value.substring(2).toLowerCase(Locale.ROOT) : value;
-    }
-
     private static int requiredHexInt(JsonNode node, String field) {
         Integer value = optionalHexInt(node, field);
         if (value == null || value < 0) {
@@ -516,7 +497,7 @@ class ChaincacheLifecycleEventProcessor {
     }
 
     private static String topicAddress(String topic) {
-        String normalized = normalizeHex(requiredText(topic, "transfer address topic"));
+        String normalized = EvmUtils.normalizeAddress(requiredText(topic, "transfer address topic"));
         String digits = normalized.startsWith("0x") ? normalized.substring(2) : normalized;
         if (digits.length() != 64) {
             throw new IllegalArgumentException("Transfer address topic must contain 32 bytes");
