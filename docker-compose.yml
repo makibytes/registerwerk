@@ -222,6 +222,42 @@ services:
           fi
           sleep 1
         done
+        # Force auto-mine before every broadcast attempt below, not only after the last one
+        # succeeds (see the interval-mining reassertion at the bottom of this script) — a prior
+        # run's success leaves anvil in interval mining, and broadcasting into that starves the tx
+        # pool exactly as the anvil service's own comment above describes ("--block-time interval
+        # mining measurably hangs forge script --broadcast"). Confirmed live: a hung deploy left
+        # forge spinning in its receipt-poll loop for ~34 minutes, with docker logs showing ~100
+        # transactions broadcast but only 6 blocks ever mined. Idempotent and cheap, so it runs
+        # unconditionally rather than trying to detect which mode anvil is currently in.
+        cast rpc anvil_setIntervalMining 0 --rpc-url http://anvil:8545 >/dev/null 2>&1 || true
+        cast rpc evm_setAutomine true --rpc-url http://anvil:8545 >/dev/null 2>&1 || true
+
+        # Bounds every `forge script --broadcast` to at most two attempts of 300s each instead of
+        # letting it block forever — the whole reason this wrapper exists. A hang here used to make
+        # anything depending on this container's service_completed_successfully (currently just
+        # `backend`) wait indefinitely until a human ran `docker stop` by hand; now it fails loudly
+        # (or self-heals on retry) within a bounded ~10 minutes worst case. Re-asserts auto-mine
+        # before the retry in case the first attempt's own broadcast somehow flipped it.
+        broadcast() {
+          script_target="$$1"
+          attempt=1
+          while true; do
+            if timeout 300 forge script "$$script_target" \
+                --rpc-url http://anvil:8545 --broadcast --non-interactive; then
+              return 0
+            fi
+            status=$$?
+            if [ "$$attempt" -ge 2 ]; then
+              echo "forge script $$script_target did not complete after 2 attempts (last exit $$status) — giving up" >&2
+              return 1
+            fi
+            echo "forge script $$script_target did not complete within 300s (exit $$status) — reasserting auto-mine and retrying once" >&2
+            cast rpc anvil_setIntervalMining 0 --rpc-url http://anvil:8545 >/dev/null 2>&1 || true
+            cast rpc evm_setAutomine true --rpc-url http://anvil:8545 >/dev/null 2>&1 || true
+            attempt=$$((attempt + 1))
+          done
+        }
         main_ready=false
         if [ -s /output/demo.env ]; then
           . /output/demo.env
@@ -237,8 +273,7 @@ services:
           fi
         fi
         if [ "$$main_ready" != true ]; then
-          forge script script/DeployLocalLendingDemo.s.sol:DeployLocalLendingDemo \
-            --rpc-url http://anvil:8545 --broadcast --non-interactive
+          broadcast script/DeployLocalLendingDemo.s.sol:DeployLocalLendingDemo
         fi
         . /output/demo.env
         trex_code=""
@@ -246,8 +281,7 @@ services:
           trex_code="$$(cast code "$$DEMO_ERC3643_TOKEN" --rpc-url http://anvil:8545 2>/dev/null || true)"
         fi
         if [ -z "$$trex_code" ] || [ "$$trex_code" = "0x" ]; then
-          forge script script/DeployLocalTrexDemo.s.sol:DeployLocalTrexDemo \
-            --rpc-url http://anvil:8545 --broadcast --non-interactive
+          broadcast script/DeployLocalTrexDemo.s.sol:DeployLocalTrexDemo
           cat /output/trex.env >> /output/demo.env
           . /output/trex.env
         fi
@@ -264,6 +298,9 @@ services:
         # Deployment is done — switch anvil from auto-mine to interval mining now, not before, so
         # the whole broadcast above ran against the fast default mode instead of fighting a chain
         # that keeps advancing empty blocks under it (see the anvil service's own comment on why).
+        # This is the counterpart to forcing auto-mine back on at the top of this script and inside
+        # broadcast()'s retry: every run starts from and stays in auto-mine through both broadcasts,
+        # and only switches to interval mining here, once, at the very end.
         # Idempotent: re-running this (e.g. after a backend-only restart, since main_ready/trex_code
         # above make this script otherwise skip straight to the end) just re-asserts the same mode.
         # Retried, not a bare call: anvil's own healthcheck (cast chain-id, 3s timeout) can time out
@@ -293,6 +330,12 @@ services:
     depends_on:
       anvil:
         condition: service_healthy
+    # PID 1 here is a bare `sh -c "<script>"` (Dockerfile.demo's own ENTRYPOINT) with no init and
+    # no trap, so SIGTERM has default (ignored) disposition — without this, `docker stop` silently
+    # no-ops for its whole grace period before escalating to SIGKILL. Doesn't replace the
+    # timeout/retry wrapper above (a genuinely stuck forge process still has to be timed out to be
+    # reaped at all); makes any *remaining* manual intervention actually responsive.
+    init: true
     restart: "no"
 
   # ─── Application Database ──────────────────────────────────────────────────
@@ -732,6 +775,11 @@ services:
       args:
         BACKEND_URL: ${BACKEND_URL:-http://localhost:48080}
         DOCS_SITE_URL: ${DOCS_SITE_URL:-http://localhost:48003/}
+        # Passthrough for anyone without read access to the private makibytes/chaincache repo —
+        # without this, `docker compose --profile docs up --build docs` (the documented command)
+        # is the only way to build docs, and it always fails for them since the submodule can
+        # never be initialized. Same escape hatch CI already sets — see docs/Dockerfile.
+        ALLOW_MISSING_CHAINCACHE_DOCS: ${ALLOW_MISSING_CHAINCACHE_DOCS:-0}
     image: registerwerk-docs:local
     ports:
       - "${DOCS_BIND_ADDR:-0.0.0.0}:${DOCS_HOST_PORT:-48003}:80"
