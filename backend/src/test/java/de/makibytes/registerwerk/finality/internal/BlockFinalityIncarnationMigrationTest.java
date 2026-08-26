@@ -10,15 +10,13 @@ import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DisplayName("V17 block-finality incarnation migration")
+@DisplayName("block-finality incarnation migration")
 class BlockFinalityIncarnationMigrationTest {
 
     @Test
     @DisplayName("migration preserves rows and replaces height uniqueness with incarnation/canonical invariants")
     void migrationDefinesIncarnationAndCanonicalConstraints() throws IOException {
-        String sql = Files.readString(
-                Path.of("src/main/resources/db/migration/V17__block_finality_incarnations.sql"),
-                StandardCharsets.UTF_8);
+        String sql = readMigration();
 
         assertThat(sql)
                 .contains("DROP CONSTRAINT uq_block_finality")
@@ -35,12 +33,12 @@ class BlockFinalityIncarnationMigrationTest {
     @Test
     @DisplayName("active quarantine references the immutable episode and is explicitly resolvable only")
     void quarantineMigrationDefinesFailClosedSnapshot() throws IOException {
-        String sql = Files.readString(
-                Path.of("src/main/resources/db/migration/V19__active_chain_quarantine.sql"),
-                StandardCharsets.UTF_8);
+        String sql = readMigration();
+        String chainQuarantineTable = sql.substring(
+                sql.indexOf("CREATE TABLE chain_quarantine"),
+                sql.indexOf(");", sql.indexOf("CREATE TABLE chain_quarantine")));
 
-        assertThat(sql)
-                .contains("CREATE TABLE chain_quarantine")
+        assertThat(chainQuarantineTable)
                 .contains("FOREIGN KEY (chain_config_id, reorg_id)")
                 .contains("REFERENCES chain_reorg_episode(chain_config_id, reorg_id)")
                 .contains("active           BOOLEAN      NOT NULL DEFAULT TRUE")
@@ -53,9 +51,7 @@ class BlockFinalityIncarnationMigrationTest {
     @Test
     @DisplayName("chain-effect migration adds canonical source identities and monotonic LIFO order")
     void chainEffectMigrationDefinesIncarnationAndOrder() throws IOException {
-        String sql = Files.readString(
-                Path.of("src/main/resources/db/migration/V20__chain_effect_incarnation_order.sql"),
-                StandardCharsets.UTF_8);
+        String sql = readMigration();
 
         assertThat(sql)
                 .contains("block_hash = lower(block_hash)")
@@ -73,9 +69,7 @@ class BlockFinalityIncarnationMigrationTest {
     @Test
     @DisplayName("legacy terminal projections without exact provenance are returned to verification")
     void domainCausalityMigrationFailsClosedOnUnmatchedLegacyRows() throws IOException {
-        String sql = Files.readString(
-                Path.of("src/main/resources/db/migration/V21__domain_effect_causality.sql"),
-                StandardCharsets.UTF_8);
+        String sql = readMigration();
 
         assertThat(sql)
                 .contains("UPDATE org_registration\nSET status = 'PENDING'")
@@ -87,5 +81,11 @@ class BlockFinalityIncarnationMigrationTest {
                 .contains("SET registration_confirmed = FALSE")
                 .contains("removed_at = COALESCE(removed_at, now())")
                 .contains("SET removal_confirmed = FALSE");
+    }
+
+    private static String readMigration() throws IOException {
+        return Files.readString(
+                Path.of("src/main/resources/db/migration/V1__initial_schema.sql"),
+                StandardCharsets.UTF_8);
     }
 }

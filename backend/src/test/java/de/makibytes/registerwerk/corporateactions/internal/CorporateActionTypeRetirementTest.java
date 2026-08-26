@@ -50,7 +50,7 @@ class CorporateActionTypeRetirementTest {
     }
 
     @Test
-    @DisplayName("V14 migration's ck_ca_action_type CHECK constraint excludes PLEDGE at the DB level")
+    @DisplayName("ck_ca_action_type CHECK constraint excludes PLEDGE at the DB level")
     void migration_actionTypeCheckConstraintExcludesPledge() throws IOException {
         String sql = readMigration();
 
@@ -62,7 +62,7 @@ class CorporateActionTypeRetirementTest {
     }
 
     @Test
-    @DisplayName("V14 migration's ck_ca_status CHECK constraint includes PROPOSED and REJECTED")
+    @DisplayName("ck_ca_status CHECK constraint includes PROPOSED and REJECTED")
     void migration_statusCheckConstraintIncludesProposedAndRejected() throws IOException {
         String sql = readMigration();
 
@@ -72,7 +72,7 @@ class CorporateActionTypeRetirementTest {
     }
 
     private static String readMigration() throws IOException {
-        Path path = Path.of("src/main/resources/db/migration/V14__corporate_action_issuer_workflow.sql");
+        Path path = Path.of("src/main/resources/db/migration/V1__initial_schema.sql");
         return Files.readString(path, StandardCharsets.UTF_8);
     }
 }

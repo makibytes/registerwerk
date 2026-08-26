@@ -3028,3 +3028,1398 @@ CREATE INDEX idx_repo_event_trade ON repo_lifecycle_event(repo_trade_id, created
 -- different JDBC type, so keep ISO currency validation while matching the entity mapping.
 ALTER TABLE repo_rfq ALTER COLUMN cash_currency TYPE VARCHAR(3);
 ALTER TABLE repo_trade ALTER COLUMN cash_currency TYPE VARCHAR(3);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V2 — CHAIN FINALITY MODEL
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Per-chain finality model: how a transaction/block on a chain becomes irreversible.
+-- DEPTH_BASED preserves the confirmation-depth-only behavior this registry always had, so
+-- existing rows are unaffected. TAG_BASED lets an EVM chain with real safe/finalized block tags
+-- (Ethereum L1, OP-Stack L2s) be confirmed against its actual finality guarantee instead of a
+-- depth heuristic; INSTANT is for permissioned BFT chains (Besu/Quorum QBFT, IBFT) that cannot
+-- reorg, where the first-seen receipt is already final.
+ALTER TABLE chain_config
+    ADD COLUMN finality_model VARCHAR(20) NOT NULL DEFAULT 'DEPTH_BASED';
+
+ALTER TABLE chain_config
+    ADD CONSTRAINT chk_finality_model CHECK (finality_model IN ('TAG_BASED', 'DEPTH_BASED', 'INSTANT'));
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V3 — THREE-TIER FINALITY (PROVISIONAL/SAFE/FINALIZED/ORPHANED)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Widens token_transfer.finality_status from the two-tier PROVISIONAL/FINAL/ORPHANED model to the
+-- three-tier PROVISIONAL/SAFE/FINALIZED/ORPHANED model (FinalityLevel), aligning with chaincache's
+-- BlockFinality vocabulary. FINAL becomes FINALIZED (a rename, not a demotion — chains that were
+-- already writing FINAL directly, or reorg-promoting to it, keep exactly the same authoritative
+-- meaning under the new name); no existing row is ever mapped to SAFE, since nothing in this
+-- registry has ever computed that level before this migration. Also adds the two columns the
+-- follow-on finality-gate/holder-reconciliation work needs.
+
+-- migration-safety: ack (constraint replacement only, immediately re-added below with the widened
+-- value set covering every value the old constraint allowed plus SAFE; no column or row is
+-- dropped, and dropping/re-adding a CHECK constraint on a partitioned table's parent cascades to
+-- every existing and future partition automatically)
+ALTER TABLE token_transfer DROP CONSTRAINT chk_transfer_finality;
+
+UPDATE token_transfer SET finality_status = 'FINALIZED' WHERE finality_status = 'FINAL';
+
+ALTER TABLE token_transfer ALTER COLUMN finality_status TYPE VARCHAR(16);
+ALTER TABLE token_transfer ALTER COLUMN finality_status SET DEFAULT 'FINALIZED';
+
+ALTER TABLE token_transfer ADD CONSTRAINT chk_transfer_finality
+    CHECK (finality_status IN ('PROVISIONAL', 'SAFE', 'FINALIZED', 'ORPHANED'));
+
+-- The old predicate (`<> 'FINAL'`) would now match every row post-rename (no row is ever literally
+-- 'FINAL' again), silently turning this from a partial index covering only the small
+-- still-unsettled window into a full index covering the whole table. Rebuilt against the current
+-- terminal value.
+DROP INDEX idx_transfer_finality;
+CREATE INDEX idx_transfer_finality ON token_transfer (chain_config_id, finality_status, block_number)
+    WHERE finality_status <> 'FINALIZED';
+
+-- Feeds the finality gate's "estimated time until this level is reached" — null (the default)
+-- means "unknown", never a guessed number; populated per chain by an operator, not derived here.
+ALTER TABLE chain_config ADD COLUMN avg_block_seconds INT;
+
+-- Distinguishes an off-chain register entry (manually maintained, chain not authoritative for it)
+-- from an on-chain holder whose wallet has, on a later resync, vanished from the counted set
+-- entirely — the two are otherwise indistinguishable to HolderDataService.syncHoldersFromBlockchain,
+-- which needs the flag to zero the latter without ever touching the former. Set by application code
+-- in a follow-on change; every existing row defaults to false (conservatively "not chain-derived",
+-- i.e. left untouched) until that code starts marking rows true going forward.
+ALTER TABLE asset_holder ADD COLUMN chain_derived BOOLEAN NOT NULL DEFAULT false;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V4 — BLOCK FINALITY LEDGER
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The finality module's own ledger of blocks observed while still "unsettled" (PROVISIONAL or
+-- SAFE) — see BlockFinalityFeed's javadoc for exactly what is and isn't tracked here. Owned by
+-- the finality module, fed by the indexer's ReorgGuard, so "what level did block N on chain C
+-- reach, and was it ever retracted" is answerable without importing the indexer module or
+-- scanning token_transfer.
+
+CREATE TABLE block_finality (
+    id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_config_id   UUID         NOT NULL REFERENCES chain_config(id),
+    block_number      BIGINT       NOT NULL,
+    block_hash        VARCHAR(128),
+    finality_level    VARCHAR(16)  NOT NULL,
+    observed_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT chk_block_finality_level CHECK (finality_level IN ('PROVISIONAL', 'SAFE', 'FINALIZED', 'ORPHANED')),
+    CONSTRAINT uq_block_finality UNIQUE (chain_config_id, block_number)
+);
+
+-- The hot query: bulk-marking every row at/after a fork block ORPHANED, and looking up one
+-- specific (chain, block).
+CREATE INDEX idx_block_finality_chain_block ON block_finality (chain_config_id, block_number);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V5 — CHAIN EFFECT JOURNAL
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The effect journal: one row per state change caused by an on-chain event, written in the same
+-- transaction as the change it describes. Descriptor-primary — the dispatcher routes on
+-- module_name + effect_type + entity_type + entity_id and never interprets before_state/
+-- after_state; the owning module decides how to undo (RECOMPUTE re-derives, INVERSE_FLIP restores
+-- a prior column value, IRREVERSIBLE only escalates). See finality.api.ChainEffectRecorder's
+-- javadoc for the full rationale.
+
+CREATE TABLE chain_effect (
+    id                  UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_config_id     UUID          NOT NULL REFERENCES chain_config(id),
+    block_number        BIGINT        NOT NULL,
+    block_hash          VARCHAR(128),
+    tx_hash             VARCHAR(128),
+    log_index           INT,
+    source_event_key    VARCHAR(300)  NOT NULL,
+    module_name         VARCHAR(40)   NOT NULL,
+    effect_type         VARCHAR(60)   NOT NULL,
+    entity_type         VARCHAR(60)   NOT NULL,
+    entity_id           UUID          NOT NULL,
+    category            VARCHAR(20)   NOT NULL,
+    before_state        JSONB,
+    after_state         JSONB,
+    audit_event_id      UUID,
+    correlation_id      UUID,
+    status              VARCHAR(24)   NOT NULL DEFAULT 'ACTIVE',
+    attempt_count        INT          NOT NULL DEFAULT 0,
+    last_error          TEXT,
+    recorded_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    settled_at          TIMESTAMPTZ,
+    compensated_at      TIMESTAMPTZ,
+    acknowledged_by     UUID,
+    acknowledged_at     TIMESTAMPTZ,
+    CONSTRAINT chk_chain_effect_category CHECK (category IN ('RECOMPUTE', 'INVERSE_FLIP', 'IRREVERSIBLE')),
+    CONSTRAINT chk_chain_effect_status CHECK (status IN (
+        'ACTIVE', 'SETTLED', 'COMPENSATING', 'COMPENSATED', 'COMPENSATION_FAILED', 'IRREVERSIBLE_ESCALATED')),
+    -- Idempotent recording: two dispatches of the same source event for the same entity collapse
+    -- into one row (ON CONFLICT DO NOTHING on the write side, see ChainEffectRecorderImpl).
+    CONSTRAINT uq_chain_effect_source UNIQUE (source_event_key, effect_type, entity_id)
+);
+
+-- The hot query: "which effects are still unresolved for entity X" (the FinalityGate freeze check,
+-- a later phase) and "find this entity's effects for a given module".
+CREATE INDEX idx_chain_effect_entity ON chain_effect (module_name, entity_type, entity_id);
+
+-- The retry job's query: everything still ACTIVE or COMPENSATION_FAILED, oldest first.
+CREATE INDEX idx_chain_effect_status ON chain_effect (status, recorded_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V6 — BLOCKCHAIN TRANSACTION <-> CHAIN CONFIG LINK
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Links blockchain_transaction back to chain_config so a reorg retraction (chainConfigId +
+-- forkBlockNumber) can find affected rows without going through chain/network string matching.
+-- Nullable: existing rows predate this column and simply won't be discoverable by the
+-- compensation sweep, which is an acceptable gap for historical rows on a reference
+-- implementation (see BlockchainTransactionService.record's javadoc for how new rows populate it).
+
+ALTER TABLE blockchain_transaction ADD COLUMN chain_config_id UUID REFERENCES chain_config(id);
+
+CREATE INDEX idx_blockchain_transaction_chain_config_block
+    ON blockchain_transaction (chain_config_id, block_number);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V7 — ASSET DEPLOYMENT <-> CHAIN CONFIG LINK
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Mirrors V6's blockchain_transaction.chain_config_id: lets the reorg-retraction sweep
+-- (finality.internal.BlockFinalityServiceImpl#recordRetraction) find affected asset_deployment
+-- rows by (chainConfigId, blockNumber) instead of resolving chain/network enums at query time.
+-- Nullable: existing rows predate this column.
+
+ALTER TABLE asset_deployment ADD COLUMN chain_config_id UUID REFERENCES chain_config(id);
+
+CREATE INDEX idx_asset_deployment_chain_config_block
+    ON asset_deployment (chain_config_id, block_number);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V8 — ERC-3643 IDENTITY REGISTRY CONFIRMATION
+-- ═══════════════════════════════════════════════════════════════════════════
+-- erc3643_identity_registry.register/deleteIdentity are optimistic writes (see
+-- IdentityRegistryService's javadoc) with no confirmation-gated moment before this migration —
+-- unlike blockchain_transaction/asset_deployment/orgidentity's *_registration tables, nothing here
+-- ever re-verified against finality, so a reorg un-mining registerIdentity/deleteIdentity could
+-- leave the register asserting a state the chain no longer agrees with. These columns give
+-- Erc3643IdentityRegistryConfirmationListener what it needs to close that gap: chain_config_id to
+-- locate the confirming block, removed_by_tx to track the deleteIdentity call the same way
+-- registered_by_tx already tracks registerIdentity, and the two *_confirmed flags to scope its
+-- polling query so it shrinks over time instead of re-scanning every entry ever written.
+
+ALTER TABLE erc3643_identity_registry ADD COLUMN chain_config_id UUID REFERENCES chain_config(id);
+ALTER TABLE erc3643_identity_registry ADD COLUMN removed_by_tx VARCHAR(66);
+ALTER TABLE erc3643_identity_registry ADD COLUMN registration_confirmed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE erc3643_identity_registry ADD COLUMN removal_confirmed BOOLEAN NOT NULL DEFAULT false;
+
+CREATE INDEX idx_erc3643_identity_registry_pending_registration
+    ON erc3643_identity_registry (registered_by_tx)
+    WHERE registration_confirmed = false AND registered_by_tx IS NOT NULL;
+
+CREATE INDEX idx_erc3643_identity_registry_pending_removal
+    ON erc3643_identity_registry (removed_by_tx)
+    WHERE removal_confirmed = false AND removed_by_tx IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V9 — FINALITY POLICY
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The finality policy model: which FinalityLevel a GatedOperation requires before it is allowed
+-- to proceed. Resolution chain (most specific wins, see FinalityPolicyResolverImpl): asset
+-- override > asset-scoped assignment > token-standard-scoped assignment > global assignment >
+-- compiled-in default (FinalityPolicyDefaults — code, not a seed row, so a fresh database, an
+-- integration test, and a failed migration all behave identically).
+--
+-- No gate call sites exist yet (that is a later phase) — this migration only makes the policy
+-- itself configurable and auditable ahead of time.
+
+CREATE TABLE finality_policy_assignment (
+    id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope_type      VARCHAR(20)   NOT NULL,
+    token_standard  VARCHAR(30),
+    asset_id        UUID          REFERENCES asset(id),
+    profile         VARCHAR(20)   NOT NULL,
+    created_by      UUID,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    CONSTRAINT chk_finality_policy_assignment_scope_type CHECK (scope_type IN ('GLOBAL', 'TOKEN_STANDARD', 'ASSET')),
+    CONSTRAINT chk_finality_policy_assignment_profile CHECK (profile IN ('FAST', 'BALANCED', 'CONSERVATIVE')),
+    -- Exactly one of token_standard/asset_id is set, matching scope_type — enforced here (not
+    -- just in application code) since this table is small and directly operator-editable.
+    CONSTRAINT chk_finality_policy_assignment_scope_shape CHECK (
+        (scope_type = 'GLOBAL' AND token_standard IS NULL AND asset_id IS NULL) OR
+        (scope_type = 'TOKEN_STANDARD' AND token_standard IS NOT NULL AND asset_id IS NULL) OR
+        (scope_type = 'ASSET' AND asset_id IS NOT NULL AND token_standard IS NULL)
+    )
+);
+
+-- At most one assignment per scope — partial unique indexes because a plain UNIQUE(scope_type,
+-- token_standard, asset_id) would not work: Postgres treats each NULL as distinct, so it would not
+-- actually stop two GLOBAL rows (both NULL/NULL) from coexisting.
+CREATE UNIQUE INDEX uq_finality_policy_assignment_global ON finality_policy_assignment (scope_type) WHERE scope_type = 'GLOBAL';
+CREATE UNIQUE INDEX uq_finality_policy_assignment_token_standard ON finality_policy_assignment (token_standard) WHERE scope_type = 'TOKEN_STANDARD';
+CREATE UNIQUE INDEX uq_finality_policy_assignment_asset ON finality_policy_assignment (asset_id) WHERE scope_type = 'ASSET';
+
+-- The audited, step-up-protected escape hatch — stays empty normally. One row per (asset,
+-- operation): the most specific rung in the resolution chain, always wins over any assignment.
+-- No expiry column: an override is removed by an explicit, audited delete, not left to lapse
+-- silently.
+CREATE TABLE finality_policy_override (
+    id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_id        UUID          NOT NULL REFERENCES asset(id),
+    operation       VARCHAR(50)   NOT NULL,
+    required_level  VARCHAR(16)   NOT NULL,
+    reason          TEXT          NOT NULL,
+    created_by      UUID          NOT NULL,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    CONSTRAINT chk_finality_policy_override_level CHECK (required_level IN ('PROVISIONAL', 'SAFE', 'FINALIZED')),
+    CONSTRAINT uq_finality_policy_override UNIQUE (asset_id, operation)
+);
+
+CREATE INDEX idx_finality_policy_override_asset ON finality_policy_override (asset_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V10 — VAULT ADMIN CONFIRMATION
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Erc4626AdminService.strikeNav/setDepositCap and Erc7540AdminService.fulfill/cancelExpectedRequest
+-- submit a real EVM transaction and then immediately wrote the off-chain mirror state
+-- (asset_vault_state, vault_nav_strike, vault_request) as if it were already confirmed — before
+-- any receipt existed. This mirrors the exact "optimistic write with no confirmation-gated
+-- moment" gap V8 closed for erc3643_identity_registry; see VaultConfirmationListener for the
+-- polling/confirmation side of this fix.
+
+-- One row per NAV-strike attempt; tx_hash already existed but was never populated.
+ALTER TABLE vault_nav_strike ADD COLUMN chain_config_id UUID REFERENCES chain_config(id);
+ALTER TABLE vault_nav_strike ADD COLUMN block_number BIGINT;
+ALTER TABLE vault_nav_strike ADD COLUMN confirmed BOOLEAN NOT NULL DEFAULT false;
+
+CREATE INDEX idx_vault_nav_strike_pending
+    ON vault_nav_strike (tx_hash)
+    WHERE confirmed = false AND tx_hash IS NOT NULL;
+
+-- request_status now deliberately stays PENDING through the confirmation window for both the
+-- fulfil and the cancel path — confirmed distinguishes "submitted, awaiting confirmation" from
+-- "genuinely never touched". cancelled_tx is new (fulfilled_tx already existed but, like
+-- vault_nav_strike.tx_hash, was never populated); the two tx columns are mutually exclusive per
+-- row since a request can only ever be fulfilled or cancelled once.
+ALTER TABLE vault_request ADD COLUMN chain_config_id UUID REFERENCES chain_config(id);
+ALTER TABLE vault_request ADD COLUMN block_number BIGINT;
+ALTER TABLE vault_request ADD COLUMN confirmed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE vault_request ADD COLUMN cancelled_tx VARCHAR(80);
+
+CREATE INDEX idx_vault_request_pending_fulfill
+    ON vault_request (fulfilled_tx)
+    WHERE confirmed = false AND fulfilled_tx IS NOT NULL;
+
+CREATE INDEX idx_vault_request_pending_cancel
+    ON vault_request (cancelled_tx)
+    WHERE confirmed = false AND cancelled_tx IS NOT NULL;
+
+-- setDepositCap has no history table of its own (unlike NAV strikes), so the in-flight value and
+-- its tx are tracked directly on the state row; deposit_cap_tx_hash IS NOT NULL is itself the
+-- "pending" signal (cleared once VaultConfirmationListener copies pending_deposit_cap into
+-- deposit_cap on confirmation) — no separate boolean needed since, unlike vault_request, this
+-- table has nothing else to poll concurrently.
+ALTER TABLE asset_vault_state ADD COLUMN pending_deposit_cap NUMERIC(78, 0);
+ALTER TABLE asset_vault_state ADD COLUMN deposit_cap_tx_hash VARCHAR(80);
+ALTER TABLE asset_vault_state ADD COLUMN deposit_cap_chain_config_id UUID REFERENCES chain_config(id);
+ALTER TABLE asset_vault_state ADD COLUMN deposit_cap_block_number BIGINT;
+
+CREATE INDEX idx_asset_vault_state_pending_deposit_cap
+    ON asset_vault_state (deposit_cap_tx_hash)
+    WHERE deposit_cap_tx_hash IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V11 — ERC-3643 CLAIM CONFIRMATION
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ClaimIssuanceService.issueClaim/revokeClaim (via Erc3643DeploymentService.issueKycClaim/
+-- revokeKycClaim) submitted a real EVM transaction (or, worse, silently skipped it entirely when
+-- the target identity was still 0x-PENDING-...) and then immediately persisted/mutated
+-- onchain_claim as if the on-chain call had already succeeded — before any receipt existed, and
+-- in the PENDING-identity case before anything was ever submitted at all. This mirrors the exact
+-- "optimistic write with no confirmation-gated moment" gap V8/V10 closed for
+-- erc3643_identity_registry / the vault-admin services; see Erc3643ClaimConfirmationListener for
+-- the polling/confirmation side of this fix.
+
+ALTER TABLE onchain_claim ADD COLUMN chain_config_id UUID REFERENCES chain_config(id);
+ALTER TABLE onchain_claim ADD COLUMN block_number BIGINT;
+ALTER TABLE onchain_claim ADD COLUMN confirmed BOOLEAN NOT NULL DEFAULT false;
+
+-- revocation_tx_hash IS NOT NULL is itself the "revocation pending" signal — revoked_at is only
+-- ever set once Erc3643ClaimConfirmationListener confirms this tx, so there is no separate
+-- "revocation confirmed" boolean needed (unlike issuance, nothing else on this row is concurrently
+-- pending once a revocation is in flight: confirmed is already true by then).
+ALTER TABLE onchain_claim ADD COLUMN revocation_tx_hash VARCHAR(80);
+
+-- migration-safety: ack (backfill only, no DROP/TRUNCATE) — claims issued before this migration
+-- were never tracked to confirmation at all (issueKycClaim used a blocking send() and discarded
+-- the receipt); getActiveClaims must not suddenly stop treating them as active just because the
+-- new confirmed column defaults to false. Grandfather them in; only claims issued from here on go
+-- through the new submit-then-confirm gate.
+UPDATE onchain_claim SET confirmed = true;
+
+CREATE INDEX idx_onchain_claim_pending_issuance
+    ON onchain_claim (tx_hash)
+    WHERE confirmed = false AND tx_hash IS NOT NULL;
+
+CREATE INDEX idx_onchain_claim_pending_revocation
+    ON onchain_claim (revocation_tx_hash)
+    WHERE revoked_at IS NULL AND revocation_tx_hash IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V12 — CHAINCACHE NODE KIND
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Promotes chaincache to a first-class node kind rather than an indistinguishable direct-RPC URL
+-- (see docs/plan "Preliminary-state awareness across the portfolio", Track C / P9). A
+-- CHAINCACHE-kind rpc_node additionally records the base chaincache instance URL
+-- (management_url, used for the GET /api/capabilities probe and the durable-stream WebSocket) and
+-- which of chaincache's own multi-chain keys (remote_chain_key) this ChainConfig maps to, plus the
+-- capabilities chaincache last reported (capabilities, JSONB — refreshed on add and by a periodic
+-- probe, not authoritative between probes).
+
+ALTER TABLE rpc_node ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'DIRECT_RPC';
+ALTER TABLE rpc_node ADD COLUMN management_url VARCHAR(512);
+ALTER TABLE rpc_node ADD COLUMN remote_chain_key VARCHAR(80);
+ALTER TABLE rpc_node ADD COLUMN capabilities JSONB;
+
+-- finality_source lets a chain opt into chaincache's push-based, gap-free durable retraction
+-- stream instead of this registry's own poll-based safe/finalized-tag probing — see
+-- blockchain.internal.ChaincacheDurableStreamManager. Defaults to the existing self-probe
+-- behavior so every pre-existing chain is unaffected until an operator explicitly opts in.
+ALTER TABLE chain_config ADD COLUMN finality_source VARCHAR(20) NOT NULL DEFAULT 'RPC_SELF_PROBE';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V13 — CHAIN EFFECT ASSET GATE
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Wires the FinalityGate freeze check V5's comment already anticipated ("the FinalityGate freeze
+-- check, a later phase") but was never actually implemented: FinalityGateImpl did not consult
+-- chain_effect at all, so an unresolved (failed or irreversible) compensation never blocked
+-- further operations on the affected asset, contrary to the portfolio plan's documented design
+-- ("the gate tightens: while any chain_effect for asset X is unresolved, FinalityGate blocks every
+-- operation on X until an admin acknowledges with a reason").
+--
+-- asset_id is denormalised onto chain_effect (rather than resolved via entity_type/entity_id at
+-- gate-check time) because the finality module deliberately imports nothing but shared and
+-- audit.api — resolving entity_id back to an asset would require importing asset/deployment/
+-- vault/etc. Populated only where the recording module already has an assetId at hand (asset
+-- deployments, vault strikes/requests, blockchain transactions); left null for effect types that
+-- are not asset-scoped (org identity, ecosystem permissions, marketplace listings) — no
+-- GatedOperation gates those today, so this is not a coverage gap in practice.
+ALTER TABLE chain_effect ADD COLUMN asset_id UUID;
+
+-- The reason an admin gave when unblocking an asset frozen by an unresolved compensation —
+-- acknowledged_by/acknowledged_at already existed (V5) but had no accompanying reason column,
+-- unlike every other break-glass action in this codebase (e.g. finality_policy_override.reason).
+ALTER TABLE chain_effect ADD COLUMN acknowledge_reason TEXT;
+
+-- The gate's hot query: "does asset X have any unresolved (failed/irreversible, unacknowledged)
+-- compensation". Partial index — only COMPENSATION_FAILED/IRREVERSIBLE_ESCALATED rows are ever
+-- looked up this way, and most rows never reach those statuses.
+CREATE INDEX idx_chain_effect_asset_unresolved ON chain_effect (asset_id)
+    WHERE asset_id IS NOT NULL
+      AND status IN ('COMPENSATION_FAILED', 'IRREVERSIBLE_ESCALATED')
+      AND acknowledged_at IS NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V14 — CORPORATE ACTION ISSUER WORKFLOW
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Corporate actions: issuer proposal/attestation workflow.
+--
+-- Adds the issuer's half of the new cross-party settlement control (issuer attests the
+-- obligation/cash-leg is ready; the existing dual_control_approver_id/dual_control_approved_at
+-- columns are repurposed, unchanged in name, to mean "operator confirmation" — see
+-- CorporateAction's updated javadoc) and the PROPOSED/REJECTED states an issuer-initiated
+-- DIVIDEND/SPLIT/CALL proposal moves through before an operator approves it onto the register.
+--
+-- Also retires the PLEDGE action type (never read or written by any code path — the real
+-- pledge/collateral mechanism lives in the `lending` module) via a CHECK constraint; all-additive
+-- otherwise, no data migration risk since these columns hold no data anywhere yet.
+
+ALTER TABLE corporate_action ADD COLUMN issuer_attested_by UUID;
+ALTER TABLE corporate_action ADD COLUMN issuer_attested_at TIMESTAMPTZ;
+ALTER TABLE corporate_action ADD COLUMN issuer_attestation_ref TEXT;
+
+ALTER TABLE corporate_action ADD CONSTRAINT ck_ca_action_type CHECK (action_type IN (
+    'COUPON', 'DIVIDEND', 'SPLIT', 'REVERSE_SPLIT', 'CONVERSION',
+    'REDEMPTION', 'PARTIAL_REDEMPTION', 'CALL', 'CAPITAL_CALL', 'INTEREST_PAYMENT'
+));
+
+ALTER TABLE corporate_action ADD CONSTRAINT ck_ca_status CHECK (status IN (
+    'PROPOSED', 'ANNOUNCED', 'RECORD_DATE_SET', 'COMPUTED', 'AWAITING_SETTLEMENT',
+    'SETTLED', 'CLOSED', 'CANCELLED', 'REJECTED'
+));
+
+-- The operator review queue's hot query: every PROPOSED row, across all assets.
+CREATE INDEX idx_ca_proposed ON corporate_action (asset_id) WHERE status = 'PROPOSED';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V15 — CHAIN EFFECT RESOLUTION DETAIL
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Review-pass cleanup of the chain_effect journal (see the "post-P11 hardening" plan, Phase 1):
+--
+-- last_error was written on every terminal outcome, not just failures — a COMPENSATED row whose
+-- compensator found the effect already undone (CompensationOutcome.NotApplicable) stored its
+-- benign explanation in a column literally named "error", which the operator queue would
+-- reasonably render as if something had gone wrong. Renamed to resolution_detail, which is
+-- accurate for all four terminal outcomes (Compensated/NotApplicable/Failed/Irreversible).
+ALTER TABLE chain_effect RENAME COLUMN last_error TO resolution_detail;
+
+-- Lets ChainEffectRepository#claimForCompensation reclaim a row stuck in COMPENSATING because the
+-- JVM that claimed it crashed mid-compensate — previously such a row was claimable only from
+-- ACTIVE/COMPENSATION_FAILED and would sit COMPENSATING forever.
+ALTER TABLE chain_effect ADD COLUMN claimed_at TIMESTAMPTZ;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V16 — CHAINCACHE NODE CONSTRAINTS
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Closes two real gaps V12 left open: no uniqueness constraint on rpc_node(chain_config_id, url)
+-- let the same URL be added twice (a compounding bug with RpcNodeService#redetectAll's old
+-- single-probe-failure demotion — see V16's sibling app-code fix — produced exactly this in a live
+-- demo environment), and no CHECK constraints meant an invalid enum string or a CHAINCACHE-kind
+-- row missing its management_url/remote_chain_key could only ever be caught application-side.
+
+-- Collapse any pre-existing duplicate (chain_config_id, lower(url)) groups down to one row before
+-- the unique index below can be created. Keeps the row with the most recent last_checked_at (the
+-- one with real health history), tie-broken by the lowest id for determinism when neither row has
+-- ever been checked. Not flagged by check-destructive-migrations.sh (DELETE without DROP/TRUNCATE
+-- is deliberately out of its scope — see that script's own comment), and not a statement this repo
+-- would normally route through RetentionSweepJob instead: these are duplicate rows from a bug, not
+-- a retention decision.
+DELETE FROM rpc_node a
+USING rpc_node b
+WHERE a.chain_config_id = b.chain_config_id
+  AND lower(a.url) = lower(b.url)
+  AND a.id <> b.id
+  AND (
+    (a.last_checked_at IS NULL AND b.last_checked_at IS NOT NULL)
+    OR (a.last_checked_at IS NOT NULL AND b.last_checked_at IS NOT NULL AND a.last_checked_at < b.last_checked_at)
+    OR (a.last_checked_at IS NOT NULL AND b.last_checked_at IS NOT NULL AND a.last_checked_at = b.last_checked_at AND a.id > b.id)
+    OR (a.last_checked_at IS NULL AND b.last_checked_at IS NULL AND a.id > b.id)
+  );
+
+CREATE UNIQUE INDEX ux_rpc_node_chain_url ON rpc_node (chain_config_id, lower(url));
+
+ALTER TABLE rpc_node ADD CONSTRAINT ck_rpc_node_kind
+    CHECK (kind IN ('DIRECT_RPC', 'CHAINCACHE'));
+
+ALTER TABLE rpc_node ADD CONSTRAINT ck_rpc_node_chaincache_fields
+    CHECK (kind <> 'CHAINCACHE' OR (management_url IS NOT NULL AND remote_chain_key IS NOT NULL));
+
+ALTER TABLE chain_config ADD CONSTRAINT ck_chain_config_finality_source
+    CHECK (finality_source IN ('RPC_SELF_PROBE', 'CHAINCACHE'));
+
+-- Consecutive-failure counter for RpcNodeService#redetectAll's demotion hysteresis: a CHAINCACHE
+-- node now only falls back to DIRECT_RPC after several consecutive failed probes, not one transient
+-- blip (the mechanism that produced the duplicate rows this migration just cleaned up).
+ALTER TABLE rpc_node ADD COLUMN chaincache_probe_failures INT NOT NULL DEFAULT 0;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V17 — BLOCK FINALITY INCARNATIONS
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A height can have several block incarnations across reorgs. Keep every incarnation for the
+-- regulated audit trail, while making "which block is canonical at this height right now" an
+-- explicit, database-enforced property.
+
+ALTER TABLE block_finality DROP CONSTRAINT uq_block_finality;
+
+ALTER TABLE block_finality
+    ADD COLUMN canonical BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN orphaned_at TIMESTAMPTZ;
+
+-- Preserve the meaning of every existing row. Existing ORPHANED rows are historical
+-- incarnations; all other rows were the sole (therefore canonical) observation at their height.
+UPDATE block_finality
+SET canonical = FALSE,
+    orphaned_at = updated_at
+WHERE finality_level = 'ORPHANED';
+
+-- EVM/Starknet hex identities are case-insensitive. Canonicalize legacy spellings so a replay
+-- that changes only hex case cannot manufacture a second incarnation. Case-sensitive identities
+-- such as Solana base58 hashes are deliberately untouched.
+UPDATE block_finality
+SET block_hash = lower(block_hash)
+WHERE block_hash ~ '^0[xX][0-9A-Fa-f]+$';
+
+-- The producer contract still permits a null/non-hash chain identity for legacy and non-EVM
+-- probes. NULLS NOT DISTINCT prevents duplicate unidentified incarnations at one height until
+-- the chain-specific phase upgrades every producer to a true protocol block hash.
+ALTER TABLE block_finality
+    ADD CONSTRAINT uq_block_finality_incarnation
+        UNIQUE NULLS NOT DISTINCT (chain_config_id, block_number, block_hash),
+    ADD CONSTRAINT ck_block_finality_canonical_level CHECK (
+        (canonical AND finality_level <> 'ORPHANED')
+        OR (NOT canonical AND finality_level = 'ORPHANED')
+    ),
+    ADD CONSTRAINT ck_block_finality_normalized_hex_hash CHECK (
+        block_hash IS NULL
+        OR block_hash !~ '^0[xX][0-9A-Fa-f]+$'
+        OR block_hash = lower(block_hash)
+    );
+
+-- PostgreSQL partial uniqueness is the authoritative concurrency guard: history is unlimited,
+-- but at most one incarnation can be current for a (chain, height).
+CREATE UNIQUE INDEX uq_block_finality_canonical_height
+    ON block_finality (chain_config_id, block_number)
+    WHERE canonical;
+
+CREATE INDEX idx_block_finality_incarnation_history
+    ON block_finality (chain_config_id, block_number, observed_at, id);
+
+-- Block identity is append-only. Finality/canonical state may advance, but an incarnation can
+-- never be rewritten to masquerade as a different block or height.
+CREATE FUNCTION rw_reject_block_finality_identity_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.chain_config_id IS DISTINCT FROM OLD.chain_config_id
+       OR NEW.block_number IS DISTINCT FROM OLD.block_number
+       OR NEW.block_hash IS DISTINCT FROM OLD.block_hash THEN
+        RAISE EXCEPTION 'block_finality incarnation identity is immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_block_finality_immutable_identity
+    BEFORE UPDATE OF chain_config_id, block_number, block_hash ON block_finality
+    FOR EACH ROW
+    EXECUTE FUNCTION rw_reject_block_finality_identity_change();
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V18 — CHAIN REORG EPISODE
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Durable episode claim for Chaincache's typed reorg envelope. The unique key is the boundary
+-- that makes replay after commit-before-ACK harmless: mutation and claim share one transaction.
+CREATE TABLE chain_reorg_episode (
+    id                      UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_config_id         UUID         NOT NULL REFERENCES chain_config(id),
+    reorg_id                VARCHAR(128) NOT NULL,
+    schema_version          VARCHAR(16)  NOT NULL,
+    severity                VARCHAR(32)  NOT NULL,
+    common_ancestor_number  BIGINT,
+    common_ancestor_hash    VARCHAR(128),
+    episode                 JSONB        NOT NULL,
+    observed_at             TIMESTAMPTZ  NOT NULL,
+    applied_at              TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uq_chain_reorg_episode UNIQUE (chain_config_id, reorg_id),
+    CONSTRAINT chk_chain_reorg_severity CHECK (
+        severity IN ('ROUTINE', 'FINALITY_VIOLATION', 'UNRESOLVED_ANCESTRY')
+    )
+);
+
+CREATE INDEX idx_chain_reorg_episode_chain_observed
+    ON chain_reorg_episode (chain_config_id, observed_at DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V19 — ACTIVE CHAIN QUARANTINE
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Current fail-closed state for a chain whose canonical history cannot safely be mutated.
+-- chain_reorg_episode remains the immutable incident journal; this row is the operational
+-- snapshot consulted by FinalityGate and ingestion. Resolution fields are reserved for the
+-- explicit, audited operator workflow rather than making quarantine self-clearing.
+CREATE TABLE chain_quarantine (
+    chain_config_id  UUID         PRIMARY KEY REFERENCES chain_config(id),
+    reorg_id         VARCHAR(128) NOT NULL,
+    severity         VARCHAR(32)  NOT NULL,
+    observed_at      TIMESTAMPTZ  NOT NULL,
+    activated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    active           BOOLEAN      NOT NULL DEFAULT TRUE,
+    resolved_at      TIMESTAMPTZ,
+    CONSTRAINT fk_chain_quarantine_episode
+        FOREIGN KEY (chain_config_id, reorg_id)
+        REFERENCES chain_reorg_episode(chain_config_id, reorg_id),
+    CONSTRAINT chk_chain_quarantine_severity
+        CHECK (severity IN ('FINALITY_VIOLATION', 'UNRESOLVED_ANCESTRY')),
+    CONSTRAINT chk_chain_quarantine_resolution
+        CHECK ((active AND resolved_at IS NULL) OR (NOT active AND resolved_at IS NOT NULL))
+);
+
+CREATE INDEX idx_chain_quarantine_active
+    ON chain_quarantine (chain_config_id) WHERE active = TRUE;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V20 — CHAIN EFFECT INCARNATION ORDER
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A chain effect is tied to one protocol block identity, not merely a height. The old
+-- source_event_key omitted block_hash, so two same-height canonical incarnations could collapse
+-- into one row. Canonicalise only hexadecimal identities: base58/base64-style identities used by
+-- non-EVM chains are case-sensitive and must remain byte-for-byte distinct.
+ALTER TABLE chain_effect ALTER COLUMN source_event_key TYPE VARCHAR(512);
+
+-- Normalizing hexadecimal block/transaction identities can collapse two legacy source keys that
+-- were distinct only by case. Fail before mutating any row so operators get a deterministic,
+-- actionable diagnosis instead of a mid-UPDATE unique-constraint violation.
+DO $$
+DECLARE
+    collision_detail TEXT;
+BEGIN
+    WITH projected AS (
+        SELECT effect_type,
+               entity_id,
+               chain_config_id::text || ':' || block_number::text
+                   || ':block=' || COALESCE(
+                       CASE WHEN block_hash ~ '^0[xX][0-9A-Fa-f]+$'
+                            THEN lower(block_hash) ELSE block_hash END, '~')
+                   || ':tx=' || COALESCE(
+                       CASE WHEN tx_hash ~ '^0[xX][0-9A-Fa-f]+$'
+                            THEN lower(tx_hash) ELSE tx_hash END, '~')
+                   || ':log=' || COALESCE(log_index::text, '~')
+                   || ':occurrence=' || CASE
+                       WHEN block_hash IS NULL AND tx_hash IS NULL
+                           THEN COALESCE(correlation_id::text, '~')
+                       ELSE '~'
+                   END AS projected_source_event_key
+        FROM chain_effect
+    ), collision AS (
+        SELECT effect_type, entity_id, projected_source_event_key, count(*) AS row_count
+        FROM projected
+        GROUP BY effect_type, entity_id, projected_source_event_key
+        HAVING count(*) > 1
+        ORDER BY effect_type, entity_id, projected_source_event_key
+        LIMIT 1
+    )
+    SELECT format('effect_type=%s entity_id=%s projected_key=%s rows=%s',
+                  effect_type, entity_id, projected_source_event_key, row_count)
+    INTO collision_detail
+    FROM collision;
+
+    IF collision_detail IS NOT NULL THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'V20 cannot normalize chain_effect source identities without data loss',
+            DETAIL = collision_detail,
+            HINT = 'Inspect the colliding legacy effects and remove only a proven duplicate before retrying migration.';
+    END IF;
+END $$;
+
+UPDATE chain_effect
+SET block_hash = lower(block_hash)
+WHERE block_hash ~ '^0[xX][0-9A-Fa-f]+$';
+
+UPDATE chain_effect
+SET tx_hash = lower(tx_hash)
+WHERE tx_hash ~ '^0[xX][0-9A-Fa-f]+$';
+
+UPDATE chain_effect
+SET source_event_key = chain_config_id::text || ':' || block_number::text
+    || ':block=' || COALESCE(block_hash, '~')
+    || ':tx=' || COALESCE(tx_hash, '~')
+    || ':log=' || COALESCE(log_index::text, '~')
+    || ':occurrence=' || CASE
+        WHEN block_hash IS NULL AND tx_hash IS NULL THEN COALESCE(correlation_id::text, '~')
+        ELSE '~'
+    END;
+
+ALTER TABLE chain_effect
+    ADD CONSTRAINT chk_chain_effect_normalized_hex_block_hash CHECK (
+        block_hash IS NULL
+        OR block_hash !~ '^0[xX][0-9A-Fa-f]+$'
+        OR block_hash = lower(block_hash)
+    ),
+    ADD CONSTRAINT chk_chain_effect_normalized_hex_tx_hash CHECK (
+        tx_hash IS NULL
+        OR tx_hash !~ '^0[xX][0-9A-Fa-f]+$'
+        OR tx_hash = lower(tx_hash)
+    );
+
+-- PostgreSQL CURRENT_TIMESTAMP is the transaction-start timestamp, so recorded_at cannot order
+-- two effects written in one transaction. A sequence is monotonic for committed inserts (gaps on
+-- rollback are harmless) and gives compensation sweeps an unambiguous LIFO order.
+CREATE SEQUENCE chain_effect_journal_sequence_seq AS BIGINT;
+
+ALTER TABLE chain_effect ADD COLUMN journal_sequence BIGINT;
+
+WITH historical_order AS (
+    SELECT id, row_number() OVER (ORDER BY recorded_at, id)::BIGINT AS sequence_number
+    FROM chain_effect
+)
+UPDATE chain_effect effect
+SET journal_sequence = historical_order.sequence_number
+FROM historical_order
+WHERE effect.id = historical_order.id;
+
+SELECT setval(
+    'chain_effect_journal_sequence_seq',
+    COALESCE((SELECT max(journal_sequence) FROM chain_effect), 0) + 1,
+    FALSE
+);
+
+ALTER SEQUENCE chain_effect_journal_sequence_seq OWNED BY chain_effect.journal_sequence;
+
+ALTER TABLE chain_effect
+    ALTER COLUMN journal_sequence SET DEFAULT nextval('chain_effect_journal_sequence_seq'),
+    ALTER COLUMN journal_sequence SET NOT NULL,
+    ADD CONSTRAINT uq_chain_effect_journal_sequence UNIQUE (journal_sequence);
+
+CREATE INDEX idx_chain_effect_chain_block_identity_sequence
+    ON chain_effect (chain_config_id, block_hash, journal_sequence DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V21 — DOMAIN EFFECT CAUSALITY
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Domain rows must retain the exact block incarnation that last moved them into an
+-- on-chain-confirmed state.  A status alone (ACTIVE/CONFIRMED) is not a causal token: after a
+-- reorg, the same transaction may be re-mined in a different block and confirm the same row
+-- again.  Compensating the older incarnation must not undo that newer canonical confirmation.
+
+ALTER TABLE org_registration
+    ADD COLUMN confirmed_block_number BIGINT,
+    ADD COLUMN confirmed_block_hash VARCHAR(128);
+
+ALTER TABLE org_member_wallet
+    ADD COLUMN bound_block_number BIGINT,
+    ADD COLUMN bound_block_hash VARCHAR(128);
+
+ALTER TABLE permission_grant
+    ADD COLUMN granted_chain_config_id UUID REFERENCES chain_config(id),
+    ADD COLUMN granted_block_number BIGINT,
+    ADD COLUMN granted_block_hash VARCHAR(128);
+
+ALTER TABLE ecosystem_trusted_issuer
+    ADD COLUMN added_block_number BIGINT,
+    ADD COLUMN added_block_hash VARCHAR(128);
+
+ALTER TABLE onchain_identity
+    ADD COLUMN deployed_block_number BIGINT,
+    ADD COLUMN deployed_block_hash VARCHAR(128);
+
+ALTER TABLE onchain_claim
+    ADD COLUMN block_hash VARCHAR(128),
+    ADD COLUMN revocation_chain_config_id UUID REFERENCES chain_config(id),
+    ADD COLUMN revocation_block_number BIGINT,
+    ADD COLUMN revocation_block_hash VARCHAR(128);
+
+ALTER TABLE erc3643_identity_registry
+    ADD COLUMN registration_block_number BIGINT,
+    ADD COLUMN registration_block_hash VARCHAR(128),
+    ADD COLUMN removal_block_number BIGINT,
+    ADD COLUMN removal_block_hash VARCHAR(128);
+
+-- Preserve causality for already-journalled pre-migration confirmations.  The most recently
+-- recorded forward effect is the only incarnation that can currently own the row's forward
+-- state; older effects remain audit history but cannot pass the domain guard.
+UPDATE org_registration r
+SET (confirmed_block_number, confirmed_block_hash) = (
+    SELECT ce.block_number, ce.block_hash FROM chain_effect ce
+    WHERE ce.entity_id = r.id AND ce.effect_type = 'ORG_REGISTRATION_CONFIRMED'
+    ORDER BY ce.journal_sequence DESC LIMIT 1
+)
+WHERE r.status = 'ACTIVE';
+
+UPDATE org_member_wallet w
+SET (bound_block_number, bound_block_hash) = (
+    SELECT ce.block_number, ce.block_hash FROM chain_effect ce
+    WHERE ce.entity_id = w.id AND ce.effect_type = 'MEMBER_WALLET_BOUND'
+    ORDER BY ce.journal_sequence DESC LIMIT 1
+)
+WHERE w.status = 'ACTIVE';
+
+UPDATE permission_grant g
+SET (granted_chain_config_id, granted_block_number, granted_block_hash) = (
+    SELECT ce.chain_config_id, ce.block_number, ce.block_hash FROM chain_effect ce
+    WHERE ce.entity_id = g.id AND ce.effect_type = 'PERMISSION_GRANTED'
+    ORDER BY ce.journal_sequence DESC LIMIT 1
+)
+WHERE g.status = 'ACTIVE';
+
+UPDATE ecosystem_trusted_issuer i
+SET (added_block_number, added_block_hash) = (
+    SELECT ce.block_number, ce.block_hash FROM chain_effect ce
+    WHERE ce.entity_id = i.id AND ce.effect_type = 'TRUSTED_ISSUER_ADDED'
+    ORDER BY ce.journal_sequence DESC LIMIT 1
+)
+WHERE i.status = 'ACTIVE';
+
+UPDATE onchain_identity i
+SET (deployed_block_number, deployed_block_hash) = (
+    SELECT ce.block_number, ce.block_hash FROM chain_effect ce
+    WHERE ce.entity_id = i.id AND ce.effect_type = 'ONCHAIN_IDENTITY_DEPLOYED'
+    ORDER BY ce.journal_sequence DESC LIMIT 1
+)
+WHERE i.identity_address NOT LIKE '0x-PENDING-%' AND i.identity_address NOT LIKE '0x-FAILED-%';
+
+UPDATE onchain_claim c
+SET block_hash = (
+    SELECT ce.block_hash FROM chain_effect ce
+    WHERE ce.entity_id = c.id AND ce.effect_type = 'ERC3643_CLAIM_CONFIRMED'
+    ORDER BY ce.journal_sequence DESC LIMIT 1
+)
+WHERE c.confirmed = TRUE;
+
+UPDATE erc3643_identity_registry r
+SET (registration_block_number, registration_block_hash) = (
+    SELECT ce.block_number, ce.block_hash FROM chain_effect ce
+    WHERE ce.entity_id = r.id AND ce.effect_type = 'ERC3643_IDENTITY_REGISTERED'
+    ORDER BY ce.journal_sequence DESC LIMIT 1
+)
+WHERE r.registration_confirmed = TRUE;
+
+UPDATE erc3643_identity_registry r
+SET (removal_block_number, removal_block_hash) = (
+    SELECT ce.block_number, ce.block_hash FROM chain_effect ce
+    WHERE ce.entity_id = r.id AND ce.effect_type = 'ERC3643_IDENTITY_REMOVED'
+    ORDER BY ce.journal_sequence DESC LIMIT 1
+)
+WHERE r.removal_confirmed = TRUE;
+
+-- A legacy terminal row without a matching exact journal incarnation is not safely compensable.
+-- Deliberately return it to its existing receipt-verification path (or soft-remove it for the
+-- optimistic ERC-3643 registration mirror) instead of silently retaining fail-open state.
+UPDATE org_registration
+SET status = 'PENDING',
+    confirmed_block_number = NULL,
+    confirmed_block_hash = NULL
+WHERE status = 'ACTIVE'
+  AND (confirmed_block_number IS NULL OR confirmed_block_hash IS NULL);
+
+UPDATE org_member_wallet
+SET status = 'PENDING',
+    bound_block_number = NULL,
+    bound_block_hash = NULL
+WHERE status = 'ACTIVE'
+  AND (bound_block_number IS NULL OR bound_block_hash IS NULL);
+
+UPDATE permission_grant
+SET status = 'PENDING',
+    granted_chain_config_id = NULL,
+    granted_block_number = NULL,
+    granted_block_hash = NULL
+WHERE status = 'ACTIVE'
+  AND (granted_chain_config_id IS NULL
+       OR granted_block_number IS NULL
+       OR granted_block_hash IS NULL);
+
+UPDATE ecosystem_trusted_issuer
+SET status = 'PENDING',
+    added_block_number = NULL,
+    added_block_hash = NULL
+WHERE status = 'ACTIVE'
+  AND (added_block_number IS NULL OR added_block_hash IS NULL);
+
+UPDATE onchain_identity
+SET identity_address = '0x-PENDING-ONCHAINID-' || id::text,
+    deployed_block_number = NULL,
+    deployed_block_hash = NULL
+WHERE identity_address NOT LIKE '0x-PENDING-%'
+  AND identity_address NOT LIKE '0x-FAILED-%'
+  AND (deployed_block_number IS NULL OR deployed_block_hash IS NULL);
+
+UPDATE onchain_claim
+SET confirmed = FALSE,
+    chain_config_id = NULL,
+    block_number = NULL,
+    block_hash = NULL
+WHERE confirmed = TRUE
+  AND (chain_config_id IS NULL OR block_number IS NULL OR block_hash IS NULL);
+
+UPDATE erc3643_identity_registry
+SET registration_confirmed = FALSE,
+    registration_block_number = NULL,
+    registration_block_hash = NULL,
+    removed_at = COALESCE(removed_at, now())
+WHERE registration_confirmed = TRUE
+  AND (chain_config_id IS NULL
+       OR registration_block_number IS NULL
+       OR registration_block_hash IS NULL);
+
+UPDATE erc3643_identity_registry
+SET removal_confirmed = FALSE,
+    removal_block_number = NULL,
+    removal_block_hash = NULL
+WHERE removal_confirmed = TRUE
+  AND (chain_config_id IS NULL
+       OR removal_block_number IS NULL
+       OR removal_block_hash IS NULL);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V22 — REMAINING PROJECTION BLOCK IDENTITIES
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Compensation must only undo the exact block occurrence that produced the current projection.
+-- A height (or transaction hash) can be reused when a transaction is re-mined in a replacement
+-- block, so the causal block hash is persisted beside every remaining reversible projection.
+
+ALTER TABLE vault_nav_strike ADD COLUMN block_hash VARCHAR(128);
+ALTER TABLE vault_request ADD COLUMN block_hash VARCHAR(128);
+ALTER TABLE asset_vault_state ADD COLUMN deposit_cap_block_hash VARCHAR(128);
+
+ALTER TABLE dapp_version ADD COLUMN anchor_chain_config_id UUID REFERENCES chain_config(id);
+ALTER TABLE dapp_version ADD COLUMN anchor_block_number BIGINT;
+ALTER TABLE dapp_version ADD COLUMN anchor_block_hash VARCHAR(128);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V23 — ORG/ISSUER REVOCATION FINALITY
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Revocation/removal is asynchronous.  The old model wrote the terminal status when the user
+-- merely requested a transaction and never inspected that transaction's receipt.  Distinct
+-- fail-closed intent/failure states prevent an unconfirmed or reverted operation from being
+-- represented as a confirmed chain fact.
+
+ALTER TABLE permission_grant DROP CONSTRAINT chk_permission_grant_status;
+ALTER TABLE ecosystem_trusted_issuer DROP CONSTRAINT chk_ecosystem_trusted_issuer_status;
+
+-- No legacy terminal row carries confirming-block provenance, because those receipts were never
+-- polled.  Reclassify it as an outstanding intent so the poller verifies the recorded tx hash.
+UPDATE permission_grant
+SET status = 'REVOCATION_PENDING'
+WHERE status = 'REVOKED';
+
+UPDATE ecosystem_trusted_issuer
+SET status = 'REMOVAL_PENDING'
+WHERE status = 'REMOVED';
+
+ALTER TABLE permission_grant
+    ADD COLUMN revoked_chain_config_id UUID REFERENCES chain_config(id),
+    ADD COLUMN revoked_block_number BIGINT,
+    ADD COLUMN revoked_block_hash VARCHAR(128),
+    ADD CONSTRAINT chk_permission_grant_status CHECK (
+        status IN ('PENDING','ACTIVE','REVOCATION_PENDING','REVOKED','REVOCATION_FAILED','FAILED')
+    ),
+    ADD CONSTRAINT chk_permission_grant_revocation_provenance CHECK (
+        (status = 'REVOKED') =
+        (revoked_chain_config_id IS NOT NULL
+            AND revoked_block_number IS NOT NULL
+            AND revoked_block_hash IS NOT NULL
+            AND revoked_tx IS NOT NULL)
+    );
+
+ALTER TABLE ecosystem_trusted_issuer
+    ADD COLUMN removed_block_number BIGINT,
+    ADD COLUMN removed_block_hash VARCHAR(128),
+    ADD CONSTRAINT chk_ecosystem_trusted_issuer_status CHECK (
+        status IN ('PENDING','ACTIVE','REMOVAL_PENDING','REMOVED','REMOVAL_FAILED','FAILED')
+    ),
+    ADD CONSTRAINT chk_trusted_issuer_removal_provenance CHECK (
+        (status = 'REMOVED') =
+        (removed_block_number IS NOT NULL
+            AND removed_block_hash IS NOT NULL
+            AND removed_tx IS NOT NULL)
+    );
+
+CREATE INDEX idx_ecosystem_trusted_issuer_status
+    ON ecosystem_trusted_issuer (status);
+
+-- Addition generations remain unique.  Retiring predecessors are deliberately excluded: after
+-- a confirmed removal and replacement, a suffix reorg must be able to return both the replacement
+-- addition and the predecessor removal to pending during LIFO compensation.  Application-level
+-- lifecycle checks still reject a fresh addition while a predecessor removal is unresolved.
+DROP INDEX uq_ecosystem_trusted_issuer_live;
+CREATE UNIQUE INDEX uq_ecosystem_trusted_issuer_live
+    ON ecosystem_trusted_issuer (chain_config_id, lower(issuer_address))
+    WHERE status IN ('PENDING','ACTIVE');
+
+
+-- Service checks give a useful error; these indexes also close the concurrent-request race.
+CREATE UNIQUE INDEX uq_permission_grant_live_org
+    ON permission_grant (permission_definition_id, org_registration_id)
+    WHERE grant_type = 'ORG'
+      AND status IN ('PENDING','ACTIVE');
+
+CREATE UNIQUE INDEX uq_permission_grant_live_role
+    ON permission_grant (permission_definition_id, org_registration_id, role_code)
+    WHERE grant_type = 'ROLE'
+      AND status IN ('PENDING','ACTIVE');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V24 — ORG TRANSITION FINALITY
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Org suspension/reinstatement, member removal and role restriction are distinct chain
+-- transactions.  Their previous mirrors wrote terminal values at request time and discarded the
+-- transaction hash, making receipt failure and reorg compensation impossible.  Persist intent,
+-- exact finalized receipt provenance and a fail-closed retry state for each transition.
+
+ALTER TABLE org_registration DROP CONSTRAINT chk_org_registration_status;
+ALTER TABLE org_registration ALTER COLUMN status TYPE VARCHAR(24);
+ALTER TABLE org_registration
+    ADD COLUMN status_tx VARCHAR(66),
+    ADD COLUMN status_chain_config_id UUID REFERENCES chain_config(id),
+    ADD COLUMN status_block_number BIGINT,
+    ADD COLUMN status_block_hash VARCHAR(128),
+    ADD COLUMN status_requested_at TIMESTAMPTZ;
+
+-- Legacy SUSPENDED rows were optimistic requests, not verified chain facts.
+UPDATE org_registration
+SET status = 'SUSPEND_PENDING',
+    status_requested_at = COALESCE(suspended_at, created_at)
+WHERE status = 'SUSPENDED';
+
+ALTER TABLE org_registration
+    ADD CONSTRAINT chk_org_registration_status CHECK (
+        status IN ('PENDING','ACTIVE','SUSPEND_PENDING','SUSPENDED','SUSPEND_FAILED',
+                   'REINSTATE_PENDING','REINSTATE_FAILED','FAILED')
+    ),
+    ADD CONSTRAINT chk_org_status_causality_complete CHECK (
+        (status_chain_config_id IS NULL AND status_block_number IS NULL AND status_block_hash IS NULL)
+        OR
+        (status_tx IS NOT NULL AND status_chain_config_id IS NOT NULL
+            AND status_block_number IS NOT NULL AND status_block_hash IS NOT NULL)
+    ),
+    ADD CONSTRAINT chk_org_status_terminal_provenance CHECK (
+        status NOT IN ('SUSPENDED','SUSPEND_FAILED','REINSTATE_FAILED')
+        OR (status_tx IS NOT NULL AND status_chain_config_id IS NOT NULL
+            AND status_block_number IS NOT NULL AND status_block_hash IS NOT NULL)
+    );
+
+ALTER TABLE org_member_wallet DROP CONSTRAINT chk_org_member_wallet_status;
+ALTER TABLE org_member_wallet
+    ADD COLUMN removed_tx VARCHAR(66),
+    ADD COLUMN removed_chain_config_id UUID REFERENCES chain_config(id),
+    ADD COLUMN removed_block_number BIGINT,
+    ADD COLUMN removed_block_hash VARCHAR(128);
+
+-- Legacy REMOVED rows likewise carried no receipt and must be re-verified.
+UPDATE org_member_wallet
+SET status = 'REMOVAL_PENDING',
+    removed_at = COALESCE(removed_at, created_at)
+WHERE status = 'REMOVED';
+
+ALTER TABLE org_member_wallet
+    ADD CONSTRAINT chk_org_member_wallet_status CHECK (
+        status IN ('PENDING','ACTIVE','REMOVAL_PENDING','REMOVED','REMOVAL_FAILED','FAILED')
+    ),
+    ADD CONSTRAINT chk_member_removal_causality_complete CHECK (
+        (removed_chain_config_id IS NULL AND removed_block_number IS NULL AND removed_block_hash IS NULL)
+        OR
+        (removed_tx IS NOT NULL AND removed_chain_config_id IS NOT NULL
+            AND removed_block_number IS NOT NULL AND removed_block_hash IS NOT NULL)
+    ),
+    ADD CONSTRAINT chk_member_removal_terminal_provenance CHECK (
+        status NOT IN ('REMOVED','REMOVAL_FAILED')
+        OR (removed_tx IS NOT NULL AND removed_chain_config_id IS NOT NULL
+            AND removed_block_number IS NOT NULL AND removed_block_hash IS NOT NULL)
+    );
+
+-- Binding generations remain unique, while a retiring predecessor is excluded so LIFO reorg
+-- compensation can represent both the replacement binding and the predecessor removal as pending.
+-- MemberWalletService still rejects a fresh bind while a predecessor removal is unresolved.
+DROP INDEX uq_org_member_wallet_live;
+CREATE UNIQUE INDEX uq_org_member_wallet_live
+    ON org_member_wallet (chain_config_id, lower(wallet_address))
+    WHERE status IN ('PENDING','ACTIVE');
+
+ALTER TABLE permission_grant
+    ADD COLUMN role_restriction_status VARCHAR(20) NOT NULL DEFAULT 'STABLE',
+    ADD COLUMN requested_role_restricted BOOLEAN,
+    ADD COLUMN role_restriction_tx VARCHAR(66),
+    ADD COLUMN role_restriction_chain_config_id UUID REFERENCES chain_config(id),
+    ADD COLUMN role_restriction_block_number BIGINT,
+    ADD COLUMN role_restriction_block_hash VARCHAR(128),
+    ADD COLUMN role_restriction_requested_at TIMESTAMPTZ,
+    ADD CONSTRAINT chk_role_restriction_status CHECK (
+        role_restriction_status IN ('STABLE','CHANGE_PENDING','CHANGE_FAILED')
+    ),
+    ADD CONSTRAINT chk_role_restriction_request CHECK (
+        (role_restriction_status = 'STABLE' AND requested_role_restricted IS NULL)
+        OR (role_restriction_status IN ('CHANGE_PENDING','CHANGE_FAILED')
+            AND requested_role_restricted IS NOT NULL AND role_restriction_requested_at IS NOT NULL)
+    ),
+    ADD CONSTRAINT chk_role_restriction_causality_complete CHECK (
+        (role_restriction_chain_config_id IS NULL AND role_restriction_block_number IS NULL
+            AND role_restriction_block_hash IS NULL)
+        OR
+        (role_restriction_tx IS NOT NULL AND role_restriction_chain_config_id IS NOT NULL
+            AND role_restriction_block_number IS NOT NULL AND role_restriction_block_hash IS NOT NULL)
+    ),
+    ADD CONSTRAINT chk_role_restriction_failed_provenance CHECK (
+        role_restriction_status <> 'CHANGE_FAILED'
+        OR (role_restriction_tx IS NOT NULL AND role_restriction_chain_config_id IS NOT NULL
+            AND role_restriction_block_number IS NOT NULL AND role_restriction_block_hash IS NOT NULL)
+    );
+
+CREATE INDEX idx_permission_grant_role_restriction_pending
+    ON permission_grant (role_restriction_status)
+    WHERE role_restriction_status = 'CHANGE_PENDING';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V25 — ROUTINE REORG COMPENSATION QUARANTINE
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A ROUTINE canonical reorg is normally applied automatically. If any local business-effect
+-- compensation fails or is irreversible, however, that same durable episode becomes the incident
+-- backing a chain-wide quarantine. Keeping the original episode severity preserves the distinction
+-- between a consensus finality violation and a local compensation failure.
+ALTER TABLE chain_quarantine
+    DROP CONSTRAINT chk_chain_quarantine_severity;
+
+ALTER TABLE chain_quarantine
+    ADD CONSTRAINT chk_chain_quarantine_severity
+        CHECK (severity IN ('ROUTINE', 'FINALITY_VIOLATION', 'UNRESOLVED_ANCESTRY'));
+
+ALTER TABLE chain_quarantine
+    ADD COLUMN trigger_reason VARCHAR(48),
+    ADD COLUMN trigger_detail TEXT;
+
+UPDATE chain_quarantine
+SET trigger_reason = CASE severity
+    WHEN 'FINALITY_VIOLATION' THEN 'CONSENSUS_FINALITY_VIOLATION'
+    ELSE 'UNRESOLVED_ANCESTRY'
+END;
+
+ALTER TABLE chain_quarantine
+    ALTER COLUMN trigger_reason SET NOT NULL,
+    ADD CONSTRAINT chk_chain_quarantine_trigger CHECK (trigger_reason IN (
+        'CONSENSUS_FINALITY_VIOLATION', 'UNRESOLVED_ANCESTRY', 'LOCAL_FINALITY_CONFLICT',
+        'INDEXER_COMPENSATION_FAILED', 'DOMAIN_COMPENSATION_FAILED', 'REORG_ID_COLLISION'
+    ));
+
+-- Block identity has the same protocol-safe invariant as block_finality and chain_effect:
+-- EVM-style 0x-prefixed hexadecimal identities are case-insensitive and canonicalized lowercase;
+-- identifiers from case-sensitive protocols are left byte-for-byte unchanged.
+UPDATE token_transfer
+SET block_hash = lower(block_hash)
+WHERE block_hash ~ '^0[xX][0-9A-Fa-f]+$';
+
+ALTER TABLE token_transfer
+    ADD CONSTRAINT chk_token_transfer_normalized_hex_block_hash CHECK (
+        block_hash IS NULL
+        OR block_hash !~ '^0[xX][0-9A-Fa-f]+$'
+        OR block_hash = lower(block_hash)
+    );
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V26 — TOKEN TRANSFER OCCURRENCE IDENTITY
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A transaction/log position is not globally unique across EVM block incarnations: a transaction
+-- can be re-mined after a reorg, and an earlier block can later become canonical again (A->B->A).
+-- Keep exact block identity in the occurrence key so the B row does not collide with historical A.
+--
+-- token_transfer is RANGE-partitioned by occurred_at. PostgreSQL therefore requires occurred_at
+-- in every UNIQUE constraint declared on the partitioned parent; the Graph Node value is the
+-- immutable block timestamp and the application includes it in its exact-occurrence lookup.
+ALTER TABLE token_transfer DROP CONSTRAINT uq_transfer_evm;
+
+-- Transaction identity follows the same protocol-safe rule as block identity: prefixed hex is
+-- case-insensitive, while Solana/Stellar/other non-hex identifiers remain byte-for-byte exact.
+UPDATE token_transfer
+SET tx_hash = lower(tx_hash)
+WHERE tx_hash ~ '^0[xX][0-9A-Fa-f]+$';
+
+ALTER TABLE token_transfer
+    ADD CONSTRAINT uq_transfer_evm UNIQUE NULLS NOT DISTINCT
+        (chain_config_id, tx_hash, log_index, block_hash, occurred_at);
+
+ALTER TABLE token_transfer
+    ADD CONSTRAINT chk_token_transfer_normalized_hex_tx_hash CHECK (
+        tx_hash !~ '^0[xX][0-9A-Fa-f]+$'
+        OR tx_hash = lower(tx_hash)
+    );
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V27 — VAULT PROJECTION OWNERSHIP
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Denormalized vault projections need an unambiguous owner. Business effective_at is not unique,
+-- so it cannot identify which NAV strike may be compensated after a reorg.
+ALTER TABLE asset_vault_state
+    ADD COLUMN latest_nav_strike_id UUID REFERENCES vault_nav_strike(id);
+
+-- Backfill only projections that exactly match a successfully confirmed strike. Highest strike_id
+-- wins when historical duplicate business timestamps exist.
+UPDATE asset_vault_state state
+SET latest_nav_strike_id = (
+    SELECT strike.id
+    FROM vault_nav_strike strike
+    WHERE strike.asset_id = state.asset_id
+      AND strike.confirmed = true
+      AND strike.chain_config_id IS NOT NULL
+      AND strike.block_number IS NOT NULL
+      AND strike.block_hash IS NOT NULL
+      AND strike.effective_at = state.latest_nav_strike_at
+      AND strike.nav_per_share = state.latest_nav_per_share
+      AND strike.report_hash IS NOT DISTINCT FROM state.latest_nav_report_hash
+    ORDER BY strike.strike_id DESC
+    LIMIT 1
+)
+WHERE state.latest_nav_strike_at IS NOT NULL;
+
+-- Preserve the transaction provenance of the current deposit-cap projection. This is separate
+-- from deposit_cap_tx_hash, which intentionally represents only an in-flight transaction.
+ALTER TABLE asset_vault_state
+    ADD COLUMN deposit_cap_confirmed_tx_hash VARCHAR(80);
+
+-- Recover transaction ownership where the pre-migration projection already had an exact block
+-- identity and its corresponding finalized effect is available.  Height/hash without the
+-- confirming transaction is not sufficient ownership: the same cap value may be written by
+-- several transactions and the compensator must only undo the current occurrence.
+UPDATE asset_vault_state state
+SET deposit_cap_confirmed_tx_hash = (
+    SELECT effect.tx_hash
+    FROM chain_effect effect
+    WHERE effect.entity_id = state.asset_id
+      AND effect.effect_type = 'VAULT_DEPOSIT_CAP_CONFIRMED'
+      AND effect.chain_config_id = state.deposit_cap_chain_config_id
+      AND effect.block_number = state.deposit_cap_block_number
+      AND effect.block_hash = state.deposit_cap_block_hash
+      AND effect.tx_hash IS NOT NULL
+    ORDER BY effect.journal_sequence DESC
+    LIMIT 1
+)
+WHERE state.deposit_cap_chain_config_id IS NOT NULL
+  AND state.deposit_cap_block_number IS NOT NULL
+  AND state.deposit_cap_block_hash IS NOT NULL;
+
+-- Older rows can contain a height without an exact hash because the original listener predated
+-- occurrence-aware finality. Keep their numeric cap as the baseline, but do not pretend that its
+-- incomplete provenance can participate in exact compensation.
+UPDATE asset_vault_state
+SET deposit_cap_chain_config_id = NULL,
+    deposit_cap_block_number = NULL,
+    deposit_cap_block_hash = NULL,
+    deposit_cap_confirmed_tx_hash = NULL
+WHERE (deposit_cap_chain_config_id IS NULL)
+   <> (deposit_cap_block_number IS NULL)
+   OR (deposit_cap_chain_config_id IS NULL)
+   <> (deposit_cap_block_hash IS NULL)
+   OR (deposit_cap_chain_config_id IS NOT NULL
+       AND deposit_cap_confirmed_tx_hash IS NULL);
+
+ALTER TABLE asset_vault_state
+    ADD CONSTRAINT chk_deposit_cap_complete_block_identity CHECK (
+        (deposit_cap_chain_config_id IS NULL
+            AND deposit_cap_block_number IS NULL
+            AND deposit_cap_block_hash IS NULL
+            AND deposit_cap_confirmed_tx_hash IS NULL)
+        OR
+        (deposit_cap_chain_config_id IS NOT NULL
+            AND deposit_cap_block_number IS NOT NULL
+            AND deposit_cap_block_hash IS NOT NULL
+            AND deposit_cap_confirmed_tx_hash IS NOT NULL)
+    );
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V28 — DURABLE EVM SUBMISSION
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Persist exact signed bytes before RPC broadcast. Retrying a prepared row can only resubmit the
+-- same sender/nonce/hash, closing the post-broadcast database-failure duplication window.
+CREATE TABLE evm_signed_submission (
+    id               UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_config_id  UUID          NOT NULL REFERENCES chain_config(id),
+    chain_id          NUMERIC(78,0) NOT NULL,
+    sender_address    VARCHAR(42)   NOT NULL,
+    nonce             NUMERIC(78,0) NOT NULL,
+    tx_hash           VARCHAR(66)   NOT NULL UNIQUE,
+    signed_payload    TEXT          NOT NULL,
+    status             VARCHAR(20)   NOT NULL DEFAULT 'PREPARED',
+    chain_name        VARCHAR(30)   NOT NULL,
+    network           VARCHAR(30)   NOT NULL,
+    contract_address  VARCHAR(42)   NOT NULL,
+    method_name       VARCHAR(100)  NOT NULL,
+    params             JSONB,
+    actor_name        VARCHAR(255),
+    actor_role        VARCHAR(30),
+    attempt_count     INTEGER       NOT NULL DEFAULT 0,
+    last_error        TEXT,
+    created_at        TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    broadcast_at      TIMESTAMPTZ,
+    CONSTRAINT uq_evm_signed_submission_nonce UNIQUE (chain_id, sender_address, nonce),
+    CONSTRAINT chk_evm_signed_submission_status CHECK (status IN ('PREPARED', 'BROADCAST')),
+    CONSTRAINT chk_evm_signed_submission_payload CHECK (signed_payload ~ '^0x[0-9a-fA-F]+$'),
+    CONSTRAINT chk_evm_signed_submission_hash CHECK (tx_hash ~ '^0x[0-9a-fA-F]{64}$'),
+    CONSTRAINT chk_evm_signed_submission_broadcast CHECK (
+        (status = 'PREPARED' AND broadcast_at IS NULL)
+        OR (status = 'BROADCAST' AND broadcast_at IS NOT NULL)
+    )
+);
+
+CREATE INDEX idx_evm_signed_submission_pending
+    ON evm_signed_submission (created_at) WHERE status = 'PREPARED';
+
+-- A deposit-cap intent is one inseparable pair. Partial legacy rows fail migration instead of
+-- being silently repaired because either value could describe an already-broadcast transaction.
+ALTER TABLE asset_vault_state
+    ADD CONSTRAINT chk_deposit_cap_pending_pair CHECK (
+        (pending_deposit_cap IS NULL AND deposit_cap_tx_hash IS NULL)
+        OR (pending_deposit_cap IS NOT NULL AND deposit_cap_tx_hash IS NOT NULL)
+    );
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V31 — WIDEN DEPLOYMENT TRANSACTION IDENTITY
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A Solana Ed25519 transaction signature is normally 88 base58 characters. The old EVM-sized
+-- varchar(66) made every successful Solana deployment fail while persisting its submission.
+ALTER TABLE asset_deployment
+    ALTER COLUMN deployed_by_tx TYPE varchar(128);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- V32 — CHAINCACHE LIFECYCLE INBOX (EXACTLY-ONCE DELIVERY)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Registerwerk is an at-least-once Chaincache consumer.  These tables form the local
+-- transactional inbox and occurrence ledger which turn redelivery into exactly-once effects.
+CREATE TABLE chaincache_event_inbox (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    durability_domain_id  VARCHAR(200) NOT NULL,
+    chain_config_id       UUID NOT NULL REFERENCES chain_config(id),
+    chain_key             VARCHAR(200) NOT NULL,
+    source_sequence       BIGINT NOT NULL CHECK (source_sequence >= 0),
+    event_id              VARCHAR(512) NOT NULL,
+    schema_version        VARCHAR(20) NOT NULL,
+    event_kind            VARCHAR(32) NOT NULL,
+    finality              VARCHAR(16),
+    payload_hash          VARCHAR(64) NOT NULL,
+    raw_event             JSONB NOT NULL,
+    processing_state      VARCHAR(20) NOT NULL DEFAULT 'RECEIVED',
+    delivery_count        BIGINT NOT NULL DEFAULT 1,
+    first_received_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_received_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at          TIMESTAMPTZ,
+    last_error            TEXT,
+    CONSTRAINT uq_chaincache_inbox_transport
+        UNIQUE (durability_domain_id, chain_config_id, event_id),
+    CONSTRAINT ck_chaincache_inbox_state
+        CHECK (processing_state IN ('RECEIVED', 'PROCESSED', 'FAILED', 'QUARANTINED')),
+    CONSTRAINT ck_chaincache_inbox_finality
+        CHECK (finality IS NULL OR finality IN ('PROVISIONAL', 'SAFE', 'FINALIZED', 'ORPHANED'))
+);
+
+CREATE INDEX idx_chaincache_inbox_sequence
+    ON chaincache_event_inbox (durability_domain_id, chain_config_id, source_sequence);
+CREATE INDEX idx_chaincache_inbox_unprocessed
+    ON chaincache_event_inbox (chain_config_id, source_sequence)
+    WHERE processing_state <> 'PROCESSED';
+
+CREATE TABLE chain_contract_subscription (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    durability_domain_id  VARCHAR(200) NOT NULL,
+    chain_config_id       UUID NOT NULL REFERENCES chain_config(id),
+    chain_key             VARCHAR(200) NOT NULL,
+    consumer_id           VARCHAR(300) NOT NULL,
+    last_sequence         BIGINT CHECK (last_sequence >= 0),
+    last_event_id         VARCHAR(512),
+    subscription_state    VARCHAR(20) NOT NULL DEFAULT 'LIVE',
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_chain_contract_subscription
+        UNIQUE (durability_domain_id, chain_config_id, consumer_id),
+    CONSTRAINT ck_chain_contract_subscription_state
+        CHECK (subscription_state IN ('BOOTSTRAP', 'REPLAY', 'LIVE', 'QUARANTINED'))
+);
+
+CREATE TABLE chain_event_occurrence (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_config_id       UUID NOT NULL REFERENCES chain_config(id),
+    durability_domain_id  VARCHAR(200) NOT NULL,
+    chain_key             VARCHAR(200) NOT NULL,
+    block_number          BIGINT NOT NULL CHECK (block_number >= 0),
+    block_hash            VARCHAR(128) NOT NULL,
+    transaction_hash      VARCHAR(128) NOT NULL,
+    transaction_index     INTEGER,
+    log_index             INTEGER NOT NULL CHECK (log_index >= 0),
+    contract_address      VARCHAR(128) NOT NULL,
+    canonical_tenure      VARCHAR(200) NOT NULL DEFAULT '0',
+    logical_event_id      VARCHAR(512) NOT NULL,
+    first_event_id        VARCHAR(512) NOT NULL,
+    last_event_id         VARCHAR(512) NOT NULL,
+    current_finality      VARCHAR(16) NOT NULL,
+    canonical             BOOLEAN NOT NULL DEFAULT TRUE,
+    occurred_at           TIMESTAMPTZ NOT NULL,
+    token_transfer_id     UUID,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_chain_event_occurrence UNIQUE
+        (chain_config_id, block_hash, transaction_hash, log_index, contract_address, canonical_tenure),
+    CONSTRAINT ck_chain_event_occurrence_finality
+        CHECK (current_finality IN ('PROVISIONAL', 'SAFE', 'FINALIZED', 'ORPHANED')),
+    CONSTRAINT ck_chain_event_occurrence_canonical
+        CHECK ((canonical AND current_finality <> 'ORPHANED')
+            OR (NOT canonical AND current_finality = 'ORPHANED'))
+);
+
+CREATE INDEX idx_chain_event_occurrence_logical_event
+    ON chain_event_occurrence (durability_domain_id, chain_config_id, logical_event_id);
+CREATE INDEX idx_chain_event_occurrence_block
+    ON chain_event_occurrence (chain_config_id, block_number, block_hash);
+
