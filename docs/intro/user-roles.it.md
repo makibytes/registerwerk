@@ -69,7 +69,7 @@ L'approvazione in doppio controllo è oggi una capacità di un secondo, diverso 
 
 ## Ruoli del cliente
 
-Gli utenti clienti accedono alla piattaforma dal frontend cliente (`:4201`), le cui chiamate API passano per Kong. Il loro JWT porta un claim `entityId` (emesso anche come `entity_id`) che indica a quale `LegalEntity` appartengono, e il backend ne ricava l'isolamento dei dati a ogni richiesta.
+Gli utenti clienti accedono alla piattaforma dal frontend cliente (`:44201`), le cui chiamate API passano per Kong. Il loro JWT porta un claim `entityId` (emesso anche come `entity_id`) che indica a quale `LegalEntity` appartengono, e il backend ne ricava l'isolamento dei dati a ogni richiesta.
 
 `X-Entity-Id` è il nome di un *header*, non un claim — e un header che Kong **rimuove** deliberatamente dalle richieste in entrata perché non possa essere contraffatto. Nel backend nulla vi si affida.
 

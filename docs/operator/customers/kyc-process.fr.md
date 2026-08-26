@@ -21,7 +21,7 @@ Registerwerk stocke :
 ## Téléchargement des preuves KYC
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/documents \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/documents \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -F "file=@certificate.pdf" \
    -F "documentType=INCORPORATION_CERTIFICATE" \
@@ -56,7 +56,7 @@ Modèle d'autorisation :
 Approbation sans lacunes dans la liste de contrôle configurée :
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"expiresAt":"2027-01-31"}'
@@ -65,7 +65,7 @@ curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/
 S'il existe des lacunes dans la liste de contrôle, l'approbation est bloquée à moins qu'une note de remplacement explicite ne soit fournie :
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"overrideNote":"Approved by compliance officer after manual source-of-funds review."}'
@@ -76,7 +76,7 @@ Lorsque le remplacement est utilisé, la note est stockée dans `kyc_jurisdictio
 ## Workflow de rejet
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/reject \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/reject \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"reason":"Missing certified beneficial ownership register extract."}'

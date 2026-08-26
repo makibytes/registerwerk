@@ -6,7 +6,7 @@ title: Puerta de enlace API (Kong)
 
 Kong 3.8 (OSS, sin base de datos) se sitúa únicamente delante del **tráfico de la API de la interfaz del cliente**. Se encarga de la
 limitación de velocidad, el almacenamiento en caché de respuestas y las cabeceras de seguridad. **No** se sitúa delante de la interfaz de usuario
-de ninguna de las dos aplicaciones; ambas se abren siempre directamente en el navegador, en su propio puerto (`:4200`, `:4201`), y
+de ninguna de las dos aplicaciones; ambas se abren siempre directamente en el navegador, en su propio puerto (`:44200`, `:44201`), y
 la **interfaz del operador omite Kong por completo**, incluso para sus propias llamadas a la API (su nginx reenvía
 `/api/` directamente a `backend:8080`). La validación del JWT y la extracción de entidad/rol siempre ocurren
 en el propio backend de Spring, a partir de los claims del propio token — no mediante ninguna cabecera inyectada por Kong,
@@ -56,9 +56,9 @@ Kong se ejecuta sin base de datos y en esta pila no incluye **ninguna GUI de adm
 eliminados o nunca se llegaron a conectar). El acceso a la API de administración está intencionadamente restringido a loopback:
 
 ```bash
-# Bound to 127.0.0.1:8001 on the host — never expose this publicly, it's unauthenticated
+# Bound to 127.0.0.1:48001 on the host — never expose this publicly, it's unauthenticated
 docker compose exec kong kong health
-curl http://127.0.0.1:8001/status
+curl http://127.0.0.1:48001/status
 ```
 
 Para cambiar el enrutamiento o los complementos, edite `gateway/kong.yml` y reinicie el servicio `kong`; es la única fuente de verdad

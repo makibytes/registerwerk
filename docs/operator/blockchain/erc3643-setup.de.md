@@ -26,7 +26,7 @@ Alle sechs werden atomar von `EwpgTREXFactory` über `AssetTokenFactory` bereitg
 Stellen Sie sicher, dass `AssetTokenFactory` und `EwpgTREXFactory` gemäß [Verträge bereitstellen](./deploying-contracts.md) bereitgestellt sind. Bestätigen Sie, dass die Factory-Adresse in `.env` gesetzt ist und das Backend sie geladen hat:
 
 ```bash
-curl http://localhost:8080/api/v1/admin/chains/11155111 \
+curl http://localhost:48080/api/v1/admin/chains/11155111 \
   -H "Authorization: Bearer $OPERATOR_JWT" \
   | jq '.factoryAddress'
 ```

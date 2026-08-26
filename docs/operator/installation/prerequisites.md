@@ -36,12 +36,15 @@ title: Prerequisites
 
 | Service | Port | Access |
 |---|---|---|
-| Operator frontend | 4200 | Public — opened directly, never through Kong |
-| Customer frontend | 4201 | Public — opened directly; only its own API calls route through Kong |
-| Kong proxy | 8000 | Public — customer-API traffic only, DB-less, no admin GUI |
-| Kong admin API | 8001 | Loopback only — `docker exec`/SSH tunnel, never expose publicly |
-| zama-relayer (opt-in, `--profile confidential`) | 3005 | Internal only |
-| Backend (direct) | 8080 | Internal only (operator frontend and, in prod, Kong both call this) |
+| Operator frontend | 44200 | Public — opened directly, never through Kong |
+| Customer frontend | 44201 | Public — opened directly; only its own API calls route through Kong |
+| Kong proxy | 48000 / 48443 | Public — customer-API HTTP/HTTPS traffic only, DB-less, no admin GUI |
+| Kong admin API | 48001 | Loopback only — `docker exec`/SSH tunnel, never expose publicly |
+| Documentation (opt-in, `docs` profile) | 48003 | Configurable bind address |
+| Chaincache Sepolia/Base (opt-in) | 48090 / 48091 | Loopback only |
+| Disposable Anvil | 48545 | Configurable bind address; container-only RPC remains `anvil:8545` |
+| zama-relayer (opt-in, `confidential` profile) | 43005 | Loopback only |
+| Backend (direct) | 48080 | Loopback by default (operator frontend and Kong use `backend:8080` internally) |
 | graph-node GraphQL | 8000 | Internal only |
 | graph-node admin | 8020 | Internal only |
-| PostgreSQL | 5432 | Internal only |
+| PostgreSQL | 45432 | Loopback only; containers use `postgres:5432` internally |

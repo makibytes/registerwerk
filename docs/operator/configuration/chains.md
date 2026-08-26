@@ -30,7 +30,7 @@ The following chains are seeded by the Flyway migrations:
 ### Step 1 — Register via Admin API
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -50,7 +50,7 @@ curl -X POST http://localhost:8000/api/v1/admin/chains \
 The backend's `BlockchainClientRegistry` picks up the new chain on next refresh (every 60 seconds) or immediately via:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

@@ -102,10 +102,10 @@ Ce glossaire définit les termes employés dans la documentation, le code et les
 ## Entités clientes
 
 **Opérateur**
-: L'organisation qui exploite une installation Registerwerk. Les opérateurs accèdent à l'interface opérateur (:4200) et peuvent administrer l'ensemble des clients, actifs et données de conformité.
+: L'organisation qui exploite une installation Registerwerk. Les opérateurs accèdent à l'interface opérateur (:44200) et peuvent administrer l'ensemble des clients, actifs et données de conformité.
 
 **Client**
-: Un émetteur ou un investisseur intégré par un opérateur. Les clients accèdent à l'interface client (:4201) au travers de la passerelle d'API Kong.
+: Un émetteur ou un investisseur intégré par un opérateur. Les clients accèdent à l'interface client (:44201) au travers de la passerelle d'API Kong.
 
 **Entité juridique (`LegalEntity`)**
 : Le modèle de données central pour la société d'un client. Il porte la juridiction, le numéro d'immatriculation, le LEI, le statut KYC, et les liens vers les bénéficiaires effectifs et les documents KYC.

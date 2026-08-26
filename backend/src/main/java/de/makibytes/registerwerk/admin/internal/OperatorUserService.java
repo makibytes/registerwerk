@@ -74,7 +74,7 @@ public class OperatorUserService {
             PasswordEncoder passwordEncoder,
             ApplicationEventPublisher eventPublisher,
             RegisterwerkAuthProperties authProperties,
-            @Value("${registerwerk.onboarding.frontend-url:http://localhost:4201}") String customerFrontendUrl,
+            @Value("${registerwerk.onboarding.frontend-url:http://localhost:44201}") String customerFrontendUrl,
             @Value("${registerwerk.onboarding.user-action-ttl-hours:48}") long userActionTokenTtlHours) {
         this.appUserRepository = appUserRepository;
         this.actionTokenRepository = actionTokenRepository;

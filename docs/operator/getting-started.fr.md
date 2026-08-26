@@ -56,7 +56,7 @@ Un `401` signifie que le jeton est mauvais. Un `403` signifie que le jeton est c
 
 ## Le portail opérateur
 
-À `:4200`. Il contourne entièrement la passerelle et utilise la connexion intégrée par nom d'utilisateur/mot de passe avec TOTP local pour l'authentification renforcée (step-up) — dans chaque configuration, y compris les déploiements où les clients utilisent Microsoft Entra ID.
+À `:44200`. Il contourne entièrement la passerelle et utilise la connexion intégrée par nom d'utilisateur/mot de passe avec TOTP local pour l'authentification renforcée (step-up) — dans chaque configuration, y compris les déploiements où les clients utilisent Microsoft Entra ID.
 
 | Zone | |
 |---|---|
@@ -83,9 +83,15 @@ Un `401` signifie que le jeton est mauvais. Un `403` signifie que le jeton est c
 ```bash
 git clone <your-registerwerk-remote> && cd registerwerk
 git submodule update --init --recursive
-cp .env.example .env
-docker compose up --build
+cp .env.example.test .env
+# CHAINCACHE_IMAGE dans .env doit désigner une image fournie indépendamment.
+docker compose up -d --build
 ```
+
+Avec `CHAINCACHE_ENABLED=true`, la même commande démarre les deux workloads Chaincache ainsi que
+leur PostgreSQL privé. Registerwerk exige seulement l'image indiquée par
+`CHAINCACHE_IMAGE` et ne construit pas `../chaincache`. Avec `false`, la pile principale démarre
+indépendamment.
 
 !!! danger "Laissez `JWT_ISSUER_URI` vide pour un démarrage local"
     Le configurer fait basculer le portail client en mode OIDC, qui nécessite un véritable tenant Entra, des enregistrements d'applications et l'accès conditionnel. Un URI d'émetteur à moitié configuré produit des échecs de connexion qui ressemblent à des bugs.
@@ -96,11 +102,11 @@ Ensuite :
 
 | | |
 |---|---|
-| Portail opérateur | `http://localhost:4200` |
-| Portail client | `http://localhost:4201` |
-| Santé du backend | `curl http://localhost:8080/actuator/health` |
-| Via la passerelle | `curl http://localhost:8000/api/v1/public/chains` |
-| Documentation | `docker compose --profile docs up` → `http://localhost:8003` |
+| Portail opérateur | `http://localhost:44200` |
+| Portail client | `http://localhost:44201` |
+| Santé du backend | `curl http://localhost:48080/actuator/health` |
+| Via la passerelle | `curl http://localhost:48000/api/v1/public/chains` |
+| Documentation | `docker compose --profile docs up` → `http://localhost:48003` |
 
 Connectez-vous avec `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` depuis votre `.env`.
 

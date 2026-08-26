@@ -31,7 +31,7 @@ sopra e `registerwerk.zama.relayer-url` del backend puntato su di esso.
 Flusso standard di distribuzione delle risorse, uguale a qualsiasi altro standard:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/assets/{assetId}/deploy \
+curl -X POST http://localhost:48080/api/v1/assets/{assetId}/deploy \
   -H "Authorization: Bearer $OPERATOR_JWT" \
   -d '{ "chain": "ETHEREUM", "network": "TESTNET" }'
 ```

@@ -6,7 +6,7 @@ title: Configuration du frontend
 
 Les deux frontaux sont des applications autonomes Angular 22 avec détection de changement sans zone native.
 
-## Frontend de l'opérateur (port 4200)
+## Frontend de l'opérateur (port 44200)
 
 ```bash
 cd frontend-operator
@@ -22,12 +22,12 @@ export const environment = {
 };
 ```
 
-## Frontend client (port 4201)
+## Frontend client (port 44201)
 
 ```bash
 cd frontend-customer
 npm install
-npm start           # Development (port 4201)
+npm start           # Development (port 44201)
 npm run build       # Production build → dist/frontend-customer/
 ```
 

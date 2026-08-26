@@ -69,7 +69,7 @@ Die Genehmigung im Vier-Augen-Prinzip ist derzeit eine Fähigkeit eines zweiten,
 
 ## Kundenrollen
 
-Kundennutzer greifen über das Kunden-Frontend (`:4201`) auf die Plattform zu; dessen API-Aufrufe laufen über Kong. Ihr JWT trägt einen Claim `entityId` (ebenfalls als `entity_id` ausgegeben), der angibt, zu welcher `LegalEntity` sie gehören; daraus erzwingt das Backend bei jeder Anfrage die Datentrennung.
+Kundennutzer greifen über das Kunden-Frontend (`:44201`) auf die Plattform zu; dessen API-Aufrufe laufen über Kong. Ihr JWT trägt einen Claim `entityId` (ebenfalls als `entity_id` ausgegeben), der angibt, zu welcher `LegalEntity` sie gehören; daraus erzwingt das Backend bei jeder Anfrage die Datentrennung.
 
 `X-Entity-Id` ist ein *Header*-Name, kein Claim — und einer, den Kong bei eingehenden Anfragen bewusst **entfernt**, damit er nicht gefälscht werden kann. Nichts im Backend vertraut ihm.
 

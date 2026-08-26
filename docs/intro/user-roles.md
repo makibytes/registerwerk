@@ -69,7 +69,7 @@ Dual-control approval is currently a capability of a second, distinct `REGISTRY_
 
 ## Customer roles
 
-Customer users access the platform through the customer frontend (`:4201`), whose API calls pass through Kong. Their JWT carries an `entityId` claim (also emitted as `entity_id`) identifying which `LegalEntity` they belong to, and the backend enforces data isolation from it on every request.
+Customer users access the platform through the customer frontend (`:44201`), whose API calls pass through Kong. Their JWT carries an `entityId` claim (also emitted as `entity_id`) identifying which `LegalEntity` they belong to, and the backend enforces data isolation from it on every request.
 
 `X-Entity-Id` is a *header* name, not a claim — and one Kong deliberately **strips** from inbound requests so it cannot be forged. Nothing in the backend trusts it.
 

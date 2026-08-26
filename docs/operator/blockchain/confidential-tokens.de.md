@@ -19,7 +19,7 @@ Diese Anleitung behandelt die Bereitstellung und Verwaltung vertraulicher ERC-20
 Standard-Asset-Bereitstellungsablauf, wie bei jedem anderen Standard:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/assets/{assetId}/deploy \
+curl -X POST http://localhost:48080/api/v1/assets/{assetId}/deploy \
   -H "Authorization: Bearer $OPERATOR_JWT" \
   -d '{ "chain": "ETHEREUM", "network": "TESTNET" }'
 ```

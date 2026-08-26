@@ -26,7 +26,7 @@ Los seis son implementados atómicamente por `EwpgTREXFactory` a través de `Ass
 Asegúrese de que `AssetTokenFactory` y `EwpgTREXFactory` se implementan según [Implementación de contratos](./deploying-contracts.md). Confirme que la dirección de fábrica esté configurada en `.env` y que el backend la haya cargado:
 
 ```bash
-curl http://localhost:8080/api/v1/admin/chains/11155111 \
+curl http://localhost:48080/api/v1/admin/chains/11155111 \
   -H "Authorization: Bearer $OPERATOR_JWT" \
   | jq '.factoryAddress'
 ```

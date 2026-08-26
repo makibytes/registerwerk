@@ -30,7 +30,7 @@ ci-dessus et le `registerwerk.zama.relayer-url` du backend pointé dessus.
 Flux de déploiement d'actifs standard, identique à toute autre norme :
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/assets/{assetId}/deploy \
+curl -X POST http://localhost:48080/api/v1/assets/{assetId}/deploy \
   -H "Authorization: Bearer $OPERATOR_JWT" \
   -d '{ "chain": "ETHEREUM", "network": "TESTNET" }'
 ```

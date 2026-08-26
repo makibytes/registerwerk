@@ -30,16 +30,16 @@ interval mining is what lets a chaincache workload observe a steady sequence of 
 the `SAFE`/`FINALIZED` promotion demo described below, rather than a chain that goes quiet the
 moment deployment ends.
 
-Two [chaincache](chaincache-integration.md) workloads sit in front of this chain (and one real
-public testnet): `chaincache-sepolia` (port `18090`) fronts this Anvil devnet with a `DEPTH_BASED`
-finality model; `chaincache-base` (port `18091`) fronts real public Base Sepolia RPC providers with
+When `CHAINCACHE_ENABLED=true`, two [chaincache](chaincache-integration.md) workloads sit in front
+of this chain (and one real public testnet): `chaincache-sepolia` (port `48090`) fronts this Anvil devnet with a `DEPTH_BASED`
+finality model; `chaincache-base` (port `48091`) fronts real public Base Sepolia RPC providers with
 a `TAG_BASED` model. Both are seeded as `CHAINCACHE`-kind nodes so the operator node list shows a
 live comparison against the plain direct-RPC nodes also configured for demo chains.
 
 ```bash
 docker compose up -d anvil softhsm
 docker compose run --rm demo-onchain-deploy
-curl http://localhost:8080/api/v1/demo/onchain
+curl http://localhost:48080/api/v1/demo/onchain
 ```
 
 The factory is split into a 3 KB coordinator and one deployer module per standard. Every runtime

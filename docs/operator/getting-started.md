@@ -56,7 +56,7 @@ A `401` means the token is bad. A `403` means the token is fine and the role is 
 
 ## The operator portal
 
-At `:4200`. It bypasses the gateway entirely and uses built-in username/password login with local TOTP for step-up — in every configuration, including deployments where customers use Microsoft Entra ID.
+At `:44200`. It bypasses the gateway entirely and uses built-in username/password login with local TOTP for step-up — in every configuration, including deployments where customers use Microsoft Entra ID.
 
 | Area | |
 |---|---|
@@ -83,9 +83,16 @@ At `:4200`. It bypasses the gateway entirely and uses built-in username/password
 ```bash
 git clone <your-registerwerk-remote> && cd registerwerk
 git submodule update --init --recursive
-cp .env.example .env
-docker compose up --build
+cp .env.example.test .env
+# Supply Chaincache under CHAINCACHE_IMAGE (pull, docker load, or build it independently).
+docker build -t registerwerk-chaincache:latest ../chaincache  # example for a sibling checkout
+docker compose up -d --build
 ```
+
+The test template sets `CHAINCACHE_ENABLED=true`; the normal command therefore starts both
+Chaincache workloads and their private Postgres service. Set it to `false` when you want the
+Registerwerk-only stack. See [Chaincache integration](blockchain/chaincache-integration.md) for the
+image contract and profile bridge.
 
 !!! danger "Leave `JWT_ISSUER_URI` blank for a local start"
     Setting it switches the customer portal into OIDC mode, which needs a real Entra tenant, app registrations and Conditional Access. A half-configured issuer URI produces sign-in failures that look like bugs.
@@ -96,11 +103,11 @@ Then:
 
 | | |
 |---|---|
-| Operator portal | `http://localhost:4200` |
-| Customer portal | `http://localhost:4201` |
-| Backend health | `curl http://localhost:8080/actuator/health` |
-| Through the gateway | `curl http://localhost:8000/api/v1/public/chains` |
-| Documentation | `docker compose --profile docs up` → `http://localhost:8003` |
+| Operator portal | `http://localhost:44200` |
+| Customer portal | `http://localhost:44201` |
+| Backend health | `curl http://localhost:48080/actuator/health` |
+| Through the gateway | `curl http://localhost:48000/api/v1/public/chains` |
+| Documentation | `docker compose --profile docs up` → `http://localhost:48003` |
 
 Sign in with `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` from your `.env`.
 
@@ -112,12 +119,12 @@ When the browser is on another host (for example `nibbler.local`), also set the 
 
 ```dotenv
 SEED_DEMO_DATA=true
-ANVIL_HOST_PORT=18545
-ANVIL_PUBLIC_RPC_URL=http://nibbler.local:18545
+ANVIL_HOST_PORT=48545
+ANVIL_PUBLIC_RPC_URL=http://nibbler.local:48545
 ```
 
 `ANVIL_HOST_PORT` is only the published host/browser port. Backend and deployment containers
-always connect to `http://anvil:8545` on the Compose network. Using `localhost` or port `18545`
+always connect to `http://anvil:8545` on the Compose network. Using `localhost` or port `48545`
 inside those containers points at the wrong network namespace and results in connection refused.
 
 Add that RPC to a disposable browser wallet as chain ID `11155111`. The Anvil mnemonic is the standard public development mnemonic:

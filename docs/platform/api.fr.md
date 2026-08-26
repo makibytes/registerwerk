@@ -147,7 +147,7 @@ La spécification OpenAPI et l'interface interactive sont servies **par le backe
 | [`{{ backend_url }}/actuator/info`]({{ backend_url }}/actuator/info) | Informations de build |
 
 !!! info "Ce site de documentation vs. l'API"
-    Ce site (port 8003) est une référence MkDocs statique — il ne fait pas office de proxy vers le backend. Ouvrez les liens ci-dessus directement dans un navigateur pendant que la stack tourne (`docker compose up -d`).
+    Ce site (port 48003) est une référence MkDocs statique — il ne fait pas office de proxy vers le backend. Ouvrez les liens ci-dessus directement dans un navigateur pendant que la stack tourne (`docker compose up -d`).
 
 !!! warning "Swagger UI en production"
     Swagger UI est désactivée dans le profil Spring `prod`. Dans les environnements de développement et de préproduction, elle est accessible sans authentification. En production, elle doit être explicitement activée et protégée derrière une liste blanche d'IP ou une authentification de base.

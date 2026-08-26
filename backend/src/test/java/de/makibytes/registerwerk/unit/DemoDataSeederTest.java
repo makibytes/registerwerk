@@ -97,6 +97,7 @@ class DemoDataSeederTest {
                 kycJurisdictionApprovalRepository,
                 holderBlockRepository,
                 assetBondTermsRepository,
+                true,
                 "ETHEREUM_SEPOLIA",
                 "http://chaincache-sepolia:8080/sepolia/rpc",
                 "chaincache (anvil)",
@@ -125,7 +126,6 @@ class DemoDataSeederTest {
         when(rpcNodeRepository.findByChainConfig_Identifier("SOLANA_MAINNET"))
                 .thenReturn(List.of());
         when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(chainConfigRepository.save(any(ChainConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         seeder.run(new DefaultApplicationArguments());
 
@@ -164,8 +164,6 @@ class DemoDataSeederTest {
                         ? Optional.of(sepolia) : Optional.empty());
         when(rpcNodeRepository.findByChainConfig_Identifier(anyString())).thenReturn(List.of());
         when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(chainConfigRepository.save(any(ChainConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
         seeder.run(new DefaultApplicationArguments());
 
         ArgumentCaptor<RpcNode> savedNodes = ArgumentCaptor.forClass(RpcNode.class);
@@ -183,7 +181,7 @@ class DemoDataSeederTest {
     }
 
     @Test
-    @DisplayName("run also seeds a second CHAINCACHE-kind node on BASE_SEPOLIA (the default-on "
+    @DisplayName("run also seeds a second CHAINCACHE-kind node on BASE_SEPOLIA (the enabled "
             + "second demo workload — a real TAG_BASED comparison next to sepolia's DEPTH_BASED one)")
     void run_seedsSecondChaincacheDemoNodeOnBaseSepolia() throws Exception {
         ChainConfig sepolia = chain("ETHEREUM_SEPOLIA", "http://anvil:8545");
@@ -199,7 +197,6 @@ class DemoDataSeederTest {
         when(rpcNodeRepository.findByChainConfig_Identifier(anyString())).thenReturn(List.of());
         when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(chainConfigRepository.save(any(ChainConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
         seeder.run(new DefaultApplicationArguments());
 
         ArgumentCaptor<RpcNode> savedNodes = ArgumentCaptor.forClass(RpcNode.class);
@@ -235,13 +232,12 @@ class DemoDataSeederTest {
         when(chainConfigRepository.findByIdentifier(anyString()))
                 .thenAnswer(invocation -> "ETHEREUM_SEPOLIA".equals(invocation.getArgument(0))
                         ? Optional.of(sepolia) : Optional.empty());
-        // Only the chaincache node exists yet — syncPublicNodes' own unrelated logic still adds
-        // ETHEREUM_SEPOLIA's public demo nodes and syncs its rpcUrl on top, which is not what
-        // this test is about; it isolates the chaincache-specific idempotency this method owns.
+        // Only the chaincache node exists yet — syncPublicNodes' unrelated local-Anvil
+        // reconciliation is not what this test is about; this isolates the chaincache-specific
+        // idempotency the method owns.
         when(rpcNodeRepository.findByChainConfig_Identifier("ETHEREUM_SEPOLIA"))
                 .thenReturn(List.of(existingChaincacheNode));
         when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(chainConfigRepository.save(any(ChainConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         seeder.run(new DefaultApplicationArguments());
 
@@ -250,6 +246,60 @@ class DemoDataSeederTest {
         assertThat(savedNodes.getAllValues())
                 .filteredOn(n -> n.getKind() == RpcNode.NodeKind.CHAINCACHE)
                 .isEmpty();
+    }
+
+    @Test
+    @DisplayName("run disables a previously seeded chaincache node when the showcase is disabled")
+    void run_disablesExistingChaincacheNodeWhenFeatureIsOff() throws Exception {
+        ChainConfig sepolia = chain("ETHEREUM_SEPOLIA", "http://anvil:8545");
+        RpcNode existingChaincacheNode = new RpcNode();
+        org.springframework.test.util.ReflectionTestUtils.setField(existingChaincacheNode, "id", UUID.randomUUID());
+        existingChaincacheNode.setChainConfig(sepolia);
+        existingChaincacheNode.setUrl("http://chaincache-sepolia:8080/sepolia/rpc");
+        existingChaincacheNode.setLabel("chaincache (anvil)");
+        existingChaincacheNode.setManagementUrl("http://chaincache-sepolia:8080");
+        existingChaincacheNode.setRemoteChainKey("sepolia");
+        existingChaincacheNode.setEnabled(true);
+        existingChaincacheNode.setKind(RpcNode.NodeKind.CHAINCACHE);
+        org.springframework.test.util.ReflectionTestUtils.setField(seeder, "chaincacheEnabled", false);
+
+        when(legalEntityRepository.findByEntityNumber("DEMO-MC-001")).thenReturn(Optional.of(new LegalEntity()));
+        when(chainConfigRepository.findByIdentifier(anyString()))
+                .thenAnswer(invocation -> "ETHEREUM_SEPOLIA".equals(invocation.getArgument(0))
+                        ? Optional.of(sepolia) : Optional.empty());
+        when(rpcNodeRepository.findByChainConfig_Identifier("ETHEREUM_SEPOLIA"))
+                .thenReturn(List.of(existingChaincacheNode));
+        when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        seeder.run(new DefaultApplicationArguments());
+
+        assertThat(existingChaincacheNode.isEnabled()).isFalse();
+        verify(rpcNodeRepository).save(existingChaincacheNode);
+    }
+
+    @Test
+    @DisplayName("run with Chaincache disabled does not seed showcase nodes into a clean database")
+    void run_doesNotSeedChaincacheNodesWhenFeatureIsOff() throws Exception {
+        ChainConfig sepolia = chain("ETHEREUM_SEPOLIA", "http://anvil:8545");
+        ChainConfig base = chain("BASE_SEPOLIA", "https://sepolia.base.org");
+        org.springframework.test.util.ReflectionTestUtils.setField(seeder, "chaincacheEnabled", false);
+
+        when(legalEntityRepository.findByEntityNumber("DEMO-MC-001")).thenReturn(Optional.of(new LegalEntity()));
+        when(chainConfigRepository.findByIdentifier(anyString()))
+                .thenAnswer(invocation -> switch ((String) invocation.getArgument(0)) {
+                    case "ETHEREUM_SEPOLIA" -> Optional.of(sepolia);
+                    case "BASE_SEPOLIA" -> Optional.of(base);
+                    default -> Optional.empty();
+                });
+        when(rpcNodeRepository.findByChainConfig_Identifier(anyString())).thenReturn(List.of());
+        when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        seeder.run(new DefaultApplicationArguments());
+
+        ArgumentCaptor<RpcNode> savedNodes = ArgumentCaptor.forClass(RpcNode.class);
+        verify(rpcNodeRepository, atLeast(0)).save(savedNodes.capture());
+        assertThat(savedNodes.getAllValues())
+                .noneMatch(node -> node.getKind() == RpcNode.NodeKind.CHAINCACHE);
     }
 
     @Test
@@ -278,7 +328,6 @@ class DemoDataSeederTest {
         when(rpcNodeRepository.findByChainConfig_Identifier("ETHEREUM_SEPOLIA"))
                 .thenReturn(List.of(existingNode));
         when(rpcNodeRepository.save(any(RpcNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(chainConfigRepository.save(any(ChainConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         seeder.run(new DefaultApplicationArguments());
 

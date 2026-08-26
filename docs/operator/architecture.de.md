@@ -20,11 +20,11 @@ graph TB
         CB["Customers"]
     end
 
-    OP["Operator portal<br/><small>Angular · :4200</small>"]
-    CU["Customer portal<br/><small>Angular · :4201</small>"]
+    OP["Operator portal<br/><small>Angular · :44200</small>"]
+    CU["Customer portal<br/><small>Angular · :44201</small>"]
     KONG["Kong gateway<br/><small>:8000 · DB-less</small>"]
     BE["Backend<br/><small>Spring Boot · :8080</small>"]
-    PG[("PostgreSQL 17")]
+    PG[("PostgreSQL 18.6")]
     S3["Object store<br/><small>KYC documents</small>"]
     IX["Indexers"]
     CH["Blockchains"]

@@ -62,10 +62,10 @@ jobs:
       - name: Verify docs runtime behavior
         run: |
           npx --prefix docs playwright install --with-deps chromium
-          docker run --rm -d --name registerwerk-docs-ci -p 8003:80 registerwerk-docs:ci
+          docker run --rm -d --name registerwerk-docs-ci -p 48003:80 registerwerk-docs:ci
           trap 'docker stop registerwerk-docs-ci' EXIT
           for attempt in {1..30}; do
-            curl --fail --silent http://127.0.0.1:8003/healthz && break
+            curl --fail --silent http://127.0.0.1:48003/healthz && break
             sleep 1
           done
           npm --prefix docs run test:browser

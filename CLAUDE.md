@@ -9,8 +9,8 @@ Reference implementation for an electronic-securities registry that models issua
 ```
 backend/              Spring Boot 4.1 / Java 25 — single API monolith (Spring Modulith 2.1)
 contracts/            Foundry smart contracts (EVM + confidential)
-frontend-operator/    Angular 22 — operator admin portal (:4200)
-frontend-customer/    Angular 22 — customer portal (:4201)
+frontend-operator/    Angular 22 — operator admin portal (:44200)
+frontend-customer/    Angular 22 — customer portal (:44201)
 gateway/              Kong declarative config
 indexer/              Off-chain event indexers (EVM + Solana)
 docker-compose.yml    / .env.example
@@ -21,7 +21,7 @@ docker-compose.yml    / .env.example
 ## Key Architecture Decisions
 
 - **Operator frontend bypasses Kong** — nginx proxies `/api/` directly to `backend:8080`. Uses built-in HS256 JWT login (`POST /api/v1/public/auth/login`).
-- **Customer frontend's API calls go through Kong** (the frontend itself is always opened directly at `:4201`) — Kong adds rate limiting/caching/security headers only; JWT validation and entity/role extraction happen in the backend itself (`SecurityConfig` + `EntraPrincipalNormalizationFilter`), not via a Kong-injected header. Kong's `openid-connect` plugin is Enterprise/Konnect-only and not active in this repo's OSS setup (`gateway/plugins/oidc-entra.yml` is a ready-to-merge snippet for anyone who is running Enterprise/Konnect).
+- **Customer frontend's API calls go through Kong** (the frontend itself is always opened directly at `:44201`) — Kong adds rate limiting/caching/security headers only; JWT validation and entity/role extraction happen in the backend itself (`SecurityConfig` + `EntraPrincipalNormalizationFilter`), not via a Kong-injected header. Kong's `openid-connect` plugin is Enterprise/Konnect-only and not active in this repo's OSS setup (`gateway/plugins/oidc-entra.yml` is a ready-to-merge snippet for anyone who is running Enterprise/Konnect).
 - **Backend is a pure resource server** — stateless JWT validation; does not issue OIDC tokens.
 - **Auth toggle:** `ENTRA_ENABLED=false` → HS256 dev mode with `JWT_DEV_SECRET`; `=true` → Entra sign-in for customers, validated by the backend. `DelegatingJwtDecoder` routes on the JWS `alg` header (HS256 → local, else JWKS), so the operator portal keeps built-in login and local TOTP step-up in both modes. Both branches are issuer-pinned; the OIDC branch is also audience-pinned via `JWT_AUDIENCE`.
 - **Two-factor auth** is Entra's, not ours: Graph cannot create an Authenticator/TOTP method, so enrolment happens on Microsoft's security-info page and `/security` guides users there. Conditional Access enforces it at sign-in — no app-side gate. Step-up is dual-track: local TOTP (403) in HS256 mode, `acrs` + a 401 claims challenge in Entra mode. Runbook: `docs/platform/entra-setup.md`.
@@ -128,18 +128,18 @@ With the local demo stack running, execute `cd docs && npm run test:frontends &&
 docker compose up --build                    # full stack
 docker compose up --build frontend-operator  # rebuild one service
 cd backend && ./mvnw verify                  # tests + coverage
-cd frontend-operator && npm start            # :4200
-cd frontend-customer && npm start            # :4201
+cd frontend-operator && npm start            # :44200
+cd frontend-customer && npm start            # :44201
 cd contracts && forge test -vvv
 cd contracts/cairo && scarb build && snforge test   # Cairo (Starknet) contracts
 cd daml && dpm build                                # Daml (Canton) bond templates — SDK via dpm
-docker compose --profile docs up                    # docs server :8003
+docker compose --profile docs up                    # docs server :48003
 ```
 
 **Documentation** is MkDocs Material (`mkdocs.yml` + `docs/`). The `docs` compose profile builds the site into a **static nginx image** (`docs/Dockerfile`) rather than running `mkdocs serve` — so doc changes need a rebuild to show up:
 
 ```bash
-docker compose --profile docs up --build docs      # http://localhost:8003
+docker compose --profile docs up --build docs      # http://localhost:48003
 ```
 
 Build it strictly before committing doc changes (CI enforces this via `.github/workflows/docs.yml`). Use the image built from `docs/Dockerfile`, not the bare `squidfunk/mkdocs-material` image — this site needs `mkdocs-static-i18n` (see `mkdocs.yml`'s `plugins:` list), which the bare image doesn't have; running `--strict` against it fails immediately with `Config value 'plugins': The "i18n" plugin is not installed`, not a real link-check failure:
@@ -154,7 +154,7 @@ with reload, build the MkDocs stage explicitly and run its `serve` command:
 
 ```bash
 docker build --target build -f docs/Dockerfile -t registerwerk-docs:authoring .
-docker run --rm -p 8003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro \
+docker run --rm -p 48003:8000 -v $PWD/mkdocs.yml:/docs/mkdocs.yml:ro -v $PWD/docs:/docs/docs:ro \
   registerwerk-docs:authoring serve -a 0.0.0.0:8000
 ```
 

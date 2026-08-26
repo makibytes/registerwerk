@@ -102,10 +102,10 @@ Questo glossario definisce i termini usati nella documentazione, nel codice e ne
 ## Soggetti clienti
 
 **Operatore**
-: L'organizzazione che gestisce un'installazione di Registerwerk. Gli operatori accedono al frontend operatore (:4200) e possono amministrare tutti i clienti, gli asset e i dati di conformità.
+: L'organizzazione che gestisce un'installazione di Registerwerk. Gli operatori accedono al frontend operatore (:44200) e possono amministrare tutti i clienti, gli asset e i dati di conformità.
 
 **Cliente**
-: Un emittente o un investitore attivato da un operatore. I clienti accedono al frontend cliente (:4201) attraverso il gateway API Kong.
+: Un emittente o un investitore attivato da un operatore. I clienti accedono al frontend cliente (:44201) attraverso il gateway API Kong.
 
 **Soggetto giuridico (`LegalEntity`)**
 : Il modello dati centrale per la società di un cliente. Contiene giurisdizione, numero di iscrizione, LEI, stato KYC e i collegamenti ai titolari effettivi e ai documenti KYC.

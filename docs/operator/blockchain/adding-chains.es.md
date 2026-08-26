@@ -19,7 +19,7 @@ y un objetivo de implementación compatible con fuentes de contrato explícitas.
 ### 1. Regístrese mediante la API de administración { #1-register-via-admin-api }
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -73,7 +73,7 @@ El subgrafo es una proyección de evento provisional. No establece la finalidad 
 ### 6. Activar la actualización del cliente { #6-trigger-client-refresh }
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

@@ -48,7 +48,7 @@ Questo è ciò che consente a una distribuzione di eseguire l'accesso Entra per 
 
 ```mermaid
 sequenceDiagram
-    participant OperatorFE as Operator Frontend :4200
+    participant OperatorFE as Operator Frontend :44200
     participant Nginx
     participant Backend as Backend :8080
 
@@ -71,7 +71,7 @@ Il frontend dell'operatore si connette **direttamente** al backend tramite nginx
 
 ```mermaid
 sequenceDiagram
-    participant CustomerFE as Customer Frontend :4201
+    participant CustomerFE as Customer Frontend :44201
     participant Entra as Microsoft Entra ID
     participant Kong as Kong :8000
     participant Backend as Backend :8080

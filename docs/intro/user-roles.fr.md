@@ -69,7 +69,7 @@ L'approbation en double validation est aujourd'hui une capacité d'un second `RE
 
 ## Rôles client
 
-Les utilisateurs clients accèdent à la plateforme par l'interface client (`:4201`), dont les appels d'API transitent par Kong. Leur JWT porte une revendication `entityId` (également émise sous la forme `entity_id`) indiquant à quelle `LegalEntity` ils appartiennent, et le backend en déduit l'isolation des données à chaque requête.
+Les utilisateurs clients accèdent à la plateforme par l'interface client (`:44201`), dont les appels d'API transitent par Kong. Leur JWT porte une revendication `entityId` (également émise sous la forme `entity_id`) indiquant à quelle `LegalEntity` ils appartiennent, et le backend en déduit l'isolation des données à chaque requête.
 
 `X-Entity-Id` est un nom d'*en-tête*, pas une revendication — et un en-tête que Kong **retire** délibérément des requêtes entrantes afin qu'il ne puisse pas être forgé. Rien dans le backend ne s'y fie.
 

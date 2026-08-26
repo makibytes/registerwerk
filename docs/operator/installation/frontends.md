@@ -6,7 +6,7 @@ title: Frontend Setup
 
 Both frontends are Angular 22 standalone applications with native zoneless change detection.
 
-## Operator frontend (port 4200)
+## Operator frontend (port 44200)
 
 ```bash
 cd frontend-operator
@@ -22,12 +22,12 @@ export const environment = {
 };
 ```
 
-## Customer frontend (port 4201)
+## Customer frontend (port 44201)
 
 ```bash
 cd frontend-customer
 npm install
-npm start           # Development (port 4201)
+npm start           # Development (port 44201)
 npm run build       # Production build → dist/frontend-customer/
 ```
 

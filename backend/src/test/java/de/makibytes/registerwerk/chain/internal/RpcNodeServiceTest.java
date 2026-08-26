@@ -58,7 +58,7 @@ class RpcNodeServiceTest {
     private static ChaincacheClient.ChainCapabilitiesProbe probe() {
         return new ChaincacheClient.ChainCapabilitiesProbe(
                 "anvil", "shared-db", "INSTANT", 0L, 0L, List.of("eth", "debug"), true,
-                new ChaincacheClient.AddressTraceCapability(true, true, "2026-08-21T22:00:00Z"), true, false,
+                new ChaincacheClient.AddressTraceCapability(true, true, "2026-08-21T22:00:00Z"), true, "2",
                 1, 1);
     }
 
@@ -197,6 +197,28 @@ class RpcNodeServiceTest {
 
         verify(chaincacheClient, never()).detect("http://also-anvil:8545");
         verify(rpcNodeRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("redetectAll resets finality when the last Chaincache node is disabled")
+    void redetectAll_disabledLastChaincacheNodeResetsFinalitySource() {
+        ChainConfig chain = chain();
+        chain.setFinalitySource(ChainConfig.FinalitySource.CHAINCACHE);
+        RpcNode disabled = new RpcNode();
+        disabled.setChainConfig(chain);
+        disabled.setUrl("http://chaincache:8080/anvil/rpc");
+        disabled.setKind(RpcNode.NodeKind.CHAINCACHE);
+        disabled.setEnabled(false);
+
+        when(rpcNodeRepository.findAllWithChainConfig()).thenReturn(List.of(disabled));
+        when(rpcNodeRepository.existsByChainConfig_IdAndKindAndEnabledTrue(
+                chainId, RpcNode.NodeKind.CHAINCACHE)).thenReturn(false);
+
+        service.redetectAll();
+
+        verify(chaincacheClient, never()).detect(anyString());
+        verify(chainConfigRepository).updateFinalitySource(
+                chainId, ChainConfig.FinalitySource.RPC_SELF_PROBE);
     }
 
     @Test

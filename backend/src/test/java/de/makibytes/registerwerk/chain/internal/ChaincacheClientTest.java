@@ -47,11 +47,11 @@ class ChaincacheClientTest {
                           {"chainKey":"anvil","durabilityDomainId":"postgres:shared-db","finalityModel":"INSTANT","safeConfirmations":0,
                            "finalizedConfirmations":0,"configuredApis":["eth","debug"],
                            "debugApiConfiguredOnAnyNode":true,"addressTraceCapability":{"attempted":true,"lastSuccessful":true,"lastAttemptAt":"2026-08-21T22:00:00Z"},
-                           "durableStreamAvailable":true,"kafkaRelayEnabled":false},
+                           "durableStreamAvailable":true,"durableProtocolVersion":"2"},
                           {"chainKey":"sepolia","finalityModel":"TAG_BASED","safeConfirmations":1,
                            "finalizedConfirmations":2,"configuredApis":["eth"],
                            "debugApiConfiguredOnAnyNode":false,"addressTraceCapability":{"attempted":false,"lastSuccessful":false,"lastAttemptAt":null},
-                           "durableStreamAvailable":true,"kafkaRelayEnabled":false}
+                           "durableStreamAvailable":true,"durableProtocolVersion":"2"}
                         ]
                         """, MediaType.APPLICATION_JSON));
         mockServer.expect(requestTo(MANAGEMENT_URL + "/api/chains"))
@@ -68,6 +68,7 @@ class ChaincacheClientTest {
         assertThat(result.get().durabilityDomainId()).isEqualTo("postgres:shared-db");
         assertThat(result.get().finalityModel()).isEqualTo("INSTANT");
         assertThat(result.get().durableStreamAvailable()).isTrue();
+        assertThat(result.get().durableProtocolVersion()).isEqualTo("2");
         assertThat(result.get().addressTraceCapability().attempted()).isTrue();
         assertThat(result.get().addressTraceCapability().lastSuccessful()).isTrue();
         assertThat(result.get().configuredNodeCount()).isEqualTo(2);
@@ -90,7 +91,7 @@ class ChaincacheClientTest {
                           "configuredApis":["trace","debug","miner","admin","txpool","web3","net","eth"],
                           "debugApiConfiguredOnAnyNode":true,
                           "addressTraceCapability":{"attempted":false,"lastSuccessful":false,"lastAttemptAt":null},
-                          "durableStreamAvailable":true,"kafkaRelayEnabled":false}]
+                          "durableStreamAvailable":true,"durableProtocolVersion":"2"}]
                         """, MediaType.APPLICATION_JSON));
         mockServer.expect(requestTo(MANAGEMENT_URL + "/api/chains"))
                 .andRespond(withServerError());
@@ -114,7 +115,7 @@ class ChaincacheClientTest {
                         [{"chainKey":"sepolia","finalityModel":"TAG_BASED","safeConfirmations":1,
                           "finalizedConfirmations":2,"configuredApis":["eth"],
                           "debugApiConfiguredOnAnyNode":false,"addressTraceCapability":{"attempted":false,"lastSuccessful":false,"lastAttemptAt":null},
-                          "durableStreamAvailable":true,"kafkaRelayEnabled":false}]
+                          "durableStreamAvailable":true,"durableProtocolVersion":"2"}]
                         """, MediaType.APPLICATION_JSON));
 
         assertThat(client.probeCapabilities(MANAGEMENT_URL, "anvil")).isEmpty();
@@ -149,7 +150,7 @@ class ChaincacheClientTest {
                         [{"chainKey":"anvil","finalityModel":"INSTANT","safeConfirmations":0,
                           "finalizedConfirmations":0,"configuredApis":["eth"],
                           "debugApiConfiguredOnAnyNode":true,"addressTraceCapability":{"attempted":true,"lastSuccessful":true,"lastAttemptAt":"2026-08-21T22:00:00Z"},
-                          "durableStreamAvailable":true,"kafkaRelayEnabled":false}]
+                          "durableStreamAvailable":true,"durableProtocolVersion":"2"}]
                         """, MediaType.APPLICATION_JSON));
         mockServer.expect(requestTo(MANAGEMENT_URL + "/api/chains"))
                 .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
@@ -230,7 +231,7 @@ class ChaincacheClientTest {
                 [{"chainKey":"anvil","finalityModel":"INSTANT","safeConfirmations":0,
                   "finalizedConfirmations":0,"configuredApis":["eth"],
                   "debugApiConfiguredOnAnyNode":true,"addressTraceCapability":null,
-                  "durableStreamAvailable":true,"kafkaRelayEnabled":false}]
+                  "durableStreamAvailable":true,"durableProtocolVersion":"2"}]
                 """;
         mockServer.expect(requestTo(MANAGEMENT_URL + "/api/capabilities"))
                 .andRespond(withSuccess(successBody, MediaType.APPLICATION_JSON));

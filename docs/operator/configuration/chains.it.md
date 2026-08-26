@@ -30,7 +30,7 @@ Le seguenti catene vengono seminate dalle migrazioni Flyway:
 ### Passaggio 1: registrazione tramite Admin API { #step-1-register-via-admin-api }
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -50,7 +50,7 @@ curl -X POST http://localhost:8000/api/v1/admin/chains \
 `BlockchainClientRegistry` del backend rileva la nuova catena al successivo aggiornamento (ogni 60 secondi) o immediatamente tramite:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

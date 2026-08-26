@@ -33,9 +33,9 @@ COPY --from=docs-assets /assets/node_modules/mermaid/dist/mermaid.min.js \
 # hooks.py substitutes {{ backend_url }} into pages. This used to be read from the environment at
 # serve time; now that the site is prebuilt it is necessarily a build-time value. Override with
 # `--build-arg BACKEND_URL=...` (compose passes it through, see docker-compose.yml).
-ARG BACKEND_URL=http://localhost:8080
+ARG BACKEND_URL=http://localhost:48080
 ENV BACKEND_URL=${BACKEND_URL}
-ARG DOCS_SITE_URL=http://localhost:8003/
+ARG DOCS_SITE_URL=http://localhost:48003/
 ENV DOCS_SITE_URL=${DOCS_SITE_URL}
 
 # --strict so a broken link fails the image build rather than shipping quietly.

@@ -102,10 +102,10 @@ This glossary defines the terms used across Registerwerk's documentation, code, 
 ## Customer Entities
 
 **Operator**
-: The organisation running a Registerwerk deployment. Operators have access to the operator frontend (:4200) and can manage all customers, assets, and compliance data.
+: The organisation running a Registerwerk deployment. Operators have access to the operator frontend (:44200) and can manage all customers, assets, and compliance data.
 
 **Customer**
-: An issuer or investor onboarded by an operator. Customers access the customer frontend (:4201) through the Kong API gateway.
+: An issuer or investor onboarded by an operator. Customers access the customer frontend (:44201) through the Kong API gateway.
 
 **Legal entity (`LegalEntity`)**
 : The core data model for a customer's company. Holds jurisdiction, registration number, LEI, KYC status, and links to beneficial owners and KYC documents.

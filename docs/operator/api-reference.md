@@ -11,7 +11,7 @@ The eWpG Registry provides a REST API for all registry operations. This page pro
 The Swagger UI is available at:
 
 ```
-http://localhost:8080/swagger-ui.html
+http://localhost:48080/swagger-ui.html
 ```
 
 For production:
@@ -23,7 +23,7 @@ https://api.registerwerk.example.com/swagger-ui.html
 The full OpenAPI 3 specification (JSON) is available at:
 
 ```
-http://localhost:8080/v3/api-docs
+http://localhost:48080/v3/api-docs
 ```
 
 ## Authentication
@@ -138,8 +138,8 @@ X-RateLimit-Remaining-Minute: 287
 The full OpenAPI specification is available at:
 
 ```
-http://localhost:8080/v3/api-docs
-http://localhost:8080/swagger-ui.html
+http://localhost:48080/v3/api-docs
+http://localhost:48080/swagger-ui.html
 ```
 
 ## Key endpoints

@@ -19,7 +19,7 @@ configuration and a supported deploy target with explicit contract sources.
 ### 1. Register via Admin API
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -73,7 +73,7 @@ effect, authoritative register state, or deployed-code identity.
 ### 6. Trigger client refresh
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

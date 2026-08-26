@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 
-const baseUrl = process.env.DOCS_BASE_URL ?? 'http://127.0.0.1:8003';
+const baseUrl = process.env.DOCS_BASE_URL ?? 'http://127.0.0.1:48003';
 const docsOrigin = new URL(baseUrl).origin;
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -38,7 +38,7 @@ try {
 
   // Test a nested page: Material normalises contextual language destinations without their
   // trailing slash, which exercises nginx's directory redirect. The redirect must be relative;
-  // an absolute redirect would use the container's internal port 80 and drop public port 8003.
+  // an absolute redirect would use the container's internal port 80 and drop public port 48003.
   await page.goto(new URL('/customer/intro/', docsOrigin).href, { waitUntil: 'networkidle' });
   const redirectResponse = await page.request.get(
     new URL('/fr/customer/intro', docsOrigin).href,
@@ -50,14 +50,14 @@ try {
   const frenchLink = page.locator('.md-select__link[hreflang="fr"]').first();
   await frenchLink.waitFor();
   const frenchUrl = new URL(await frenchLink.getAttribute('href'));
-  assert.equal(frenchUrl.port, '8003');
+  assert.equal(frenchUrl.port, '48003');
   assert.equal(frenchUrl.origin, docsOrigin);
 
   await frenchLink.locator('xpath=ancestor::div[contains(@class, "md-select")]//button').click();
   await frenchLink.click();
   await page.waitForLoadState('networkidle');
   const switchedUrl = new URL(page.url());
-  assert.equal(switchedUrl.port, '8003');
+  assert.equal(switchedUrl.port, '48003');
   assert.equal(switchedUrl.pathname, '/fr/customer/intro/');
   assert.equal(await page.locator('body').getAttribute('data-md-color-scheme'), 'slate');
 

@@ -21,7 +21,7 @@ Registerwerk speichert:
 ## KYC-Nachweise hochladen
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/documents \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/documents \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -F "file=@certificate.pdf" \
    -F "documentType=INCORPORATION_CERTIFICATE" \
@@ -56,7 +56,7 @@ Autorisierungsmodell:
 Genehmigung ohne konfigurierte Checklistenlücken:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"expiresAt":"2027-01-31"}'
@@ -65,7 +65,7 @@ curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/
 Bestehen Checklistenlücken, wird die Genehmigung blockiert, sofern kein expliziter Override-Hinweis angegeben wird:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"overrideNote":"Approved by compliance officer after manual source-of-funds review."}'
@@ -76,7 +76,7 @@ Wird ein Override verwendet, wird der Hinweis in `kyc_jurisdiction_approval.over
 ## Ablehnungs-Workflow
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/reject \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/reject \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"reason":"Missing certified beneficial ownership register extract."}'

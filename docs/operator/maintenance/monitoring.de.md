@@ -16,9 +16,9 @@ docker compose -f monitoring/docker-compose.yml up -d
 ```
 
 Das startet:
-- **Prometheus** unter `http://localhost:9090`
-- **Grafana** unter `http://localhost:3000` (Login: `admin` / `$GRAFANA_ADMIN_PASSWORD`, siehe `.env.example`)
-- **Alertmanager** unter `http://localhost:9093`
+- **Prometheus** unter `http://localhost:49090`
+- **Grafana** unter `http://localhost:43000` (Login: `admin` / `$GRAFANA_ADMIN_PASSWORD`, siehe `.env.example`)
+- **Alertmanager** unter `http://localhost:49093`
 - **postgres-exporter** und **node-exporter** (speisen die Panels für Datenbankzustand/Host-Metriken)
 
 ## Health-Endpunkte
@@ -140,7 +140,7 @@ Die Deployer-Wallet muss über ausreichend native Token (ETH, MATIC usw.) verfü
 noch nicht als Prometheus-Metrik verfügbar — prüfen Sie es in der Zwischenzeit über die Admin-API:
 
 ```bash
-curl http://localhost:8080/api/v1/admin/wallet/balances \
+curl http://localhost:48080/api/v1/admin/wallet/balances \
   -H "Authorization: Bearer $OPERATOR_JWT"
 ```
 

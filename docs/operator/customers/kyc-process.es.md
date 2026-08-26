@@ -21,7 +21,7 @@ Registerwerk almacena:
 ## Carga de evidencia KYC { #uploading-kyc-evidence }
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/documents \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/documents \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -F "file=@certificate.pdf" \
    -F "documentType=INCORPORATION_CERTIFICATE" \
@@ -56,7 +56,7 @@ Modelo de autorización:
 Aprobación sin lagunas en la lista de verificación configurada:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"expiresAt":"2027-01-31"}'
@@ -65,7 +65,7 @@ curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/
 Si existen lagunas en la lista de verificación, la aprobación queda bloqueada a menos que se proporcione una nota de anulación explícita:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"overrideNote":"Approved by compliance officer after manual source-of-funds review."}'
@@ -76,7 +76,7 @@ Cuando se utiliza la anulación, la nota se almacena en `kyc_jurisdiction_approv
 ## Flujo de trabajo de rechazo { #rejection-workflow }
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/reject \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/reject \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"reason":"Missing certified beneficial ownership register extract."}'

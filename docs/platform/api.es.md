@@ -147,7 +147,7 @@ La especificación OpenAPI y la interfaz de usuario interactiva son proporcionad
 | [`{{ backend_url }}/actuator/info`]({{ backend_url }}/actuator/info) | Información de compilación |
 
 !!! info "Este sitio de documentación frente a la API"
-    Este sitio (puerto 8003) es una referencia estática de MkDocs: no actúa de proxy hacia el backend. Abra los enlaces anteriores directamente en un navegador mientras se ejecuta la pila (`docker compose up -d`).
+    Este sitio (puerto 48003) es una referencia estática de MkDocs: no actúa de proxy hacia el backend. Abra los enlaces anteriores directamente en un navegador mientras se ejecuta la pila (`docker compose up -d`).
 
 !!! warning "Interfaz de usuario Swagger en producción"
     La interfaz de usuario de Swagger está deshabilitada en el perfil de Spring `prod`. En entornos de desarrollo y ensayo es accesible sin autenticación. En producción, debe estar habilitado y protegido explícitamente detrás de una lista de direcciones IP permitidas o autenticación básica.

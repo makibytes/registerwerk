@@ -30,7 +30,7 @@ Les chaînes suivantes sont amorcées par les migrations Flyway :
 ### Étape 1 — Enregistrer via l'API d'administration
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -50,7 +50,7 @@ curl -X POST http://localhost:8000/api/v1/admin/chains \
 Le `BlockchainClientRegistry` du backend récupère la nouvelle chaîne lors de la prochaine actualisation (toutes les 60 secondes) ou immédiatement via :
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

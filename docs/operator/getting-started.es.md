@@ -56,7 +56,7 @@ A `401` significa que el token está defectuoso. Un `403` significa que el token
 
 ## El portal del operador { #the-operator-portal }
 
-En `:4200`. Omite la puerta de enlace por completo y utiliza el inicio de sesión integrado con nombre de usuario y contraseña, con TOTP local para la autenticación reforzada (step-up), en cada configuración, incluidas las implementaciones donde los clientes usan Microsoft Entra ID.
+En `:44200`. Omite la puerta de enlace por completo y utiliza el inicio de sesión integrado con nombre de usuario y contraseña, con TOTP local para la autenticación reforzada (step-up), en cada configuración, incluidas las implementaciones donde los clientes usan Microsoft Entra ID.
 
 | Área | |
 |---|---|
@@ -83,9 +83,14 @@ En `:4200`. Omite la puerta de enlace por completo y utiliza el inicio de sesió
 ```bash
 git clone <your-registerwerk-remote> && cd registerwerk
 git submodule update --init --recursive
-cp .env.example .env
-docker compose up --build
+cp .env.example.test .env
+# CHAINCACHE_IMAGE en .env debe indicar una imagen suministrada de forma independiente.
+docker compose up -d --build
 ```
+
+Con `CHAINCACHE_ENABLED=true`, el mismo comando inicia ambos workloads Chaincache y sus PostgreSQL
+privado. Registerwerk solo necesita la imagen indicada por `CHAINCACHE_IMAGE` y no
+compila `../chaincache`. Con `false`, la pila principal puede arrancar de forma independiente.
 
 !!! danger "Deje `JWT_ISSUER_URI` en blanco para un inicio local"
     Al configurarla, el portal del cliente cambia al modo OIDC, que necesita un inquilino de Entra real, registros de aplicaciones y acceso condicional. Una URI de emisor configurada solo a medias produce fallos de inicio de sesión que parecen errores del sistema.
@@ -96,11 +101,11 @@ Entonces:
 
 | | |
 |---|---|
-| Portal del operador | `http://localhost:4200` |
-| Portal del cliente | `http://localhost:4201` |
-| Salud del backend | `curl http://localhost:8080/actuator/health` |
-| A través de la puerta de enlace | `curl http://localhost:8000/api/v1/public/chains` |
-| Documentación | `docker compose --profile docs up` → `http://localhost:8003` |
+| Portal del operador | `http://localhost:44200` |
+| Portal del cliente | `http://localhost:44201` |
+| Salud del backend | `curl http://localhost:48080/actuator/health` |
+| A través de la puerta de enlace | `curl http://localhost:48000/api/v1/public/chains` |
+| Documentación | `docker compose --profile docs up` → `http://localhost:48003` |
 
 Inicie sesión con `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` desde su `.env`.
 

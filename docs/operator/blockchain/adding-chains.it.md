@@ -19,7 +19,7 @@ e una destinazione di distribuzione supportata con origini contratto esplicite.
 ### 1. Registra tramite Admin API { #1-register-via-admin-api }
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -72,7 +72,7 @@ Il sottografo è una proiezione provvisoria degli eventi. Non stabilisce la fina
 ### 6. Attiva l'aggiornamento del client { #6-trigger-client-refresh }
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

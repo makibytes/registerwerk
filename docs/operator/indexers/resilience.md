@@ -134,16 +134,16 @@ An indexer that has hit `consecutive_errors >= 10` (5 for Canton) stops syncing 
 
 ```bash
 # List every indexer's current state
-curl -H "Authorization: Bearer $OPERATOR_JWT" http://localhost:8080/api/v1/indexers
+curl -H "Authorization: Bearer $OPERATOR_JWT" http://localhost:48080/api/v1/indexers
 
 # Clear the error state — the next scheduled tick resumes from the existing cursor, no restart required
 curl -X POST -H "Authorization: Bearer $OPERATOR_JWT" \
-  "http://localhost:8080/api/v1/indexers/<indexer-state-id>/reset"
+  "http://localhost:48080/api/v1/indexers/<indexer-state-id>/reset"
 
 # Force a full re-sync from genesis instead (only if the existing cursor itself is untrustworthy —
 # e.g. after a manual chain-state correction; this re-processes the chain's entire history)
 curl -X POST -H "Authorization: Bearer $OPERATOR_JWT" \
-  "http://localhost:8080/api/v1/indexers/<indexer-state-id>/reset?fullResync=true"
+  "http://localhost:48080/api/v1/indexers/<indexer-state-id>/reset?fullResync=true"
 ```
 
 Both actions require `REGISTRY_ADMIN` and are audited (`INDEXER_RESET`). Equivalent direct SQL

@@ -538,10 +538,8 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                               </div>
                             </div>
                             <div class="capability-item">
-                              <div class="label">Kafka relay (chaincache-internal)</div>
-                              <div class="value" [class.yes]="node.capabilities.kafkaRelayEnabled" [class.no]="!node.capabilities.kafkaRelayEnabled">
-                                {{ node.capabilities.kafkaRelayEnabled ? 'Enabled' : 'Disabled' }}
-                              </div>
+                              <div class="label">Durable protocol</div>
+                              <div class="value">{{ node.capabilities.durableProtocolVersion ?? '—' }}</div>
                             </div>
                             @if (node.capabilities.configuredApis?.length) {
                               <div class="capability-item wide">

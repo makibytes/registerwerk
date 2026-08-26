@@ -26,7 +26,7 @@ Les six sont déployés de manière atomique par le `EwpgTREXFactory` via `Asset
 Assurez-vous que `AssetTokenFactory` et `EwpgTREXFactory` sont déployés conformément à [Déploiement de contrats](./deploying-contracts.md). Confirmez que l'adresse d'usine est définie dans `.env` et que le backend l'a chargée :
 
 ```bash
-curl http://localhost:8080/api/v1/admin/chains/11155111 \
+curl http://localhost:48080/api/v1/admin/chains/11155111 \
   -H "Authorization: Bearer $OPERATOR_JWT" \
   | jq '.factoryAddress'
 ```

@@ -4,7 +4,7 @@
  * normalise them to the host's default HTTP(S) port. Make their origin explicit at runtime.
  *
  * `window.location.origin` intentionally includes the active scheme, host and non-default port,
- * so this works for `http://nibbler:8003`, TLS deployments, and a reverse-proxy host alike.
+ * so this works for `http://nibbler:48003`, TLS deployments, and a reverse-proxy host alike.
  */
 (() => {
   const languageLinkSelector = '.md-select__link[hreflang]';

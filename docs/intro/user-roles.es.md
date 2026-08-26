@@ -69,7 +69,7 @@ La aprobación en doble control es hoy una capacidad de un segundo `REGISTRY_ADM
 
 ## Funciones del cliente
 
-Los usuarios clientes acceden a la plataforma por el front end del cliente (`:4201`), cuyas llamadas a la API pasan por Kong. Su JWT lleva una atestación `entityId` (emitida también como `entity_id`) que indica a qué `LegalEntity` pertenecen, y el backend deriva de ella el aislamiento de datos en cada petición.
+Los usuarios clientes acceden a la plataforma por el front end del cliente (`:44201`), cuyas llamadas a la API pasan por Kong. Su JWT lleva una atestación `entityId` (emitida también como `entity_id`) que indica a qué `LegalEntity` pertenecen, y el backend deriva de ella el aislamiento de datos en cada petición.
 
 `X-Entity-Id` es el nombre de una *cabecera*, no una atestación — y una cabecera que Kong **elimina** deliberadamente de las peticiones entrantes para que no pueda falsificarse. Nada en el backend confía en ella.
 

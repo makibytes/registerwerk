@@ -83,7 +83,7 @@ This page covers the most common issues encountered when operating the eWpG Regi
 1. Check the current indexer state:
 
    ```bash
-   curl http://localhost:8080/api/v1/admin/chains \
+   curl http://localhost:48080/api/v1/admin/chains \
      -H "Authorization: Bearer $OPERATOR_JWT" \
      | jq '.[].latestIndexedBlock'
    ```
@@ -207,7 +207,7 @@ If a migration shows `success = false`, fix the migration SQL and restart. Never
 
 ## Backend won't start
 
-**Symptom**: `Connection refused` on `localhost:8080`
+**Symptom**: `Connection refused` on `localhost:48080`
 
 1. Check DB connectivity: `docker compose logs postgres`
 2. Check Flyway migrations: look for `FlywayException` in backend logs
@@ -249,7 +249,7 @@ a different problem entirely. See [Roles and permissions](customers/roles.md).
 
 Re-generate via API:
 ```bash
-curl -X POST http://localhost:8000/api/v1/onboarding/tokens \
+curl -X POST http://localhost:48000/api/v1/onboarding/tokens \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -d '{"legalEntityId": "<uuid>", "recipientEmail": "admin@acme.de"}'
 ```

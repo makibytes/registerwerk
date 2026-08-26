@@ -154,7 +154,8 @@ public class RpcNodeService {
     @Scheduled(fixedDelayString = "${registerwerk.rpc.chaincache-redetect-interval-ms:60000}",
                initialDelayString = "${registerwerk.rpc.chaincache-redetect-initial-delay-ms:15000}")
     public void redetectAll() {
-        List<RpcNode> nodes = rpcNodeRepository.findAllWithChainConfig().stream()
+        List<RpcNode> allNodes = rpcNodeRepository.findAllWithChainConfig();
+        List<RpcNode> nodes = allNodes.stream()
                 .filter(RpcNode::isEnabled)
                 .toList();
         for (RpcNode node : nodes) {
@@ -166,7 +167,10 @@ public class RpcNodeService {
         }
         // A chain's finalitySource depends on the (possibly just-changed) kind of its nodes —
         // recompute once per chain after the whole batch rather than once per node above.
-        nodes.stream().map(RpcNode::getChainConfig).distinct()
+        // Include chains whose last Chaincache node was just disabled. Restricting this pass to
+        // enabled nodes left those chains permanently stuck on CHAINCACHE finality even though
+        // no enabled Chaincache source remained (notably after CHAINCACHE_ENABLED was toggled).
+        allNodes.stream().map(RpcNode::getChainConfig).distinct()
                 .forEach(this::recomputeFinalitySource);
     }
 
@@ -351,7 +355,7 @@ public class RpcNodeService {
             map.put("addressTraceCapability", null);
         }
         map.put("durableStreamAvailable", probe.durableStreamAvailable());
-        map.put("kafkaRelayEnabled", probe.kafkaRelayEnabled());
+        map.put("durableProtocolVersion", probe.durableProtocolVersion());
         map.put("configuredNodeCount", probe.configuredNodeCount());
         map.put("availableNodeCount", probe.availableNodeCount());
         map.put("probedAt", Instant.now().toString());

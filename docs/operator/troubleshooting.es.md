@@ -83,7 +83,7 @@ Esta página cubre los problemas más comunes al operar el Registro eWpG, junto 
 1. Compruebe el estado actual del indexador:
 
    ```bash
-   curl http://localhost:8080/api/v1/admin/chains \
+   curl http://localhost:48080/api/v1/admin/chains \
      -H "Authorization: Bearer $OPERATOR_JWT" \
      | jq '.[].latestIndexedBlock'
    ```
@@ -207,7 +207,7 @@ Si una migración muestra `success = false`, corrija el SQL de la migración y r
 
 ## El backend no arranca { #backend-wont-start }
 
-**Síntoma**: `Connection refused` en `localhost:8080`
+**Síntoma**: `Connection refused` en `localhost:48080`
 
 1. Verifique la conectividad con la base de datos: `docker compose logs postgres`
 2. Verifique las migraciones de Flyway: busque `FlywayException` en los registros del backend
@@ -249,7 +249,7 @@ un problema completamente distinto. Véase [Roles y permisos](customers/roles.md
 
 Regenérelo a través de la API:
 ```bash
-curl -X POST http://localhost:8000/api/v1/onboarding/tokens \
+curl -X POST http://localhost:48000/api/v1/onboarding/tokens \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -d '{"legalEntityId": "<uuid>", "recipientEmail": "admin@acme.de"}'
 ```

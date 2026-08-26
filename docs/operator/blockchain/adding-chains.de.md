@@ -19,7 +19,7 @@ und ein unterstütztes Bereitstellungsziel mit expliziten Vertragsquellen.
 ### 1. Über die Admin-API registrieren
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -73,7 +73,7 @@ Wirkung, maßgeblichen Registerstatus noch die Identität des bereitgestellten C
 ### 6. Client-Aktualisierung auslösen
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

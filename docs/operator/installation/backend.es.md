@@ -12,7 +12,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
 El perfil `local` lee desde `src/main/resources/application-local.yml` y espera:
-- PostgreSQL en `localhost:5432`
+- PostgreSQL en `localhost:45432`
 - Variables de entorno de `.env` (cargadas mediante [direnv](https://direnv.net/) o `export` manualmente)
 
 ## Migraciones de Flyway { #flyway-migrations }
@@ -44,10 +44,10 @@ GET /actuator/prometheus
 
 La interfaz de usuario de Swagger está disponible en:
 ```
-http://localhost:8080/swagger-ui.html
+http://localhost:48080/swagger-ui.html
 ```
 
 JSON completo de OpenAPI:
 ```
-http://localhost:8080/v3/api-docs
+http://localhost:48080/v3/api-docs
 ```

@@ -21,7 +21,7 @@ Registerwerk stores:
 ## Uploading KYC evidence
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/documents \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/documents \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -F "file=@certificate.pdf" \
    -F "documentType=INCORPORATION_CERTIFICATE" \
@@ -56,7 +56,7 @@ Authorization model:
 Approval with no configured checklist gaps:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"expiresAt":"2027-01-31"}'
@@ -65,7 +65,7 @@ curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/
 If checklist gaps exist, approval is blocked unless an explicit override note is provided:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/approve \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"overrideNote":"Approved by compliance officer after manual source-of-funds review."}'
@@ -76,7 +76,7 @@ When override is used, the note is stored in `kyc_jurisdiction_approval.override
 ## Rejection workflow
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/reject \
+curl -X POST http://localhost:48000/api/v1/entities/{entityId}/kyc/jurisdictions/DE_EWPG/reject \
    -H "Authorization: Bearer $OPERATOR_TOKEN" \
    -H "Content-Type: application/json" \
    -d '{"reason":"Missing certified beneficial ownership register extract."}'

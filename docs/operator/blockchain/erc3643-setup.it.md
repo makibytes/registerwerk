@@ -26,7 +26,7 @@ Tutti e sei vengono distribuiti atomicamente da `EwpgTREXFactory` tramite `Asset
 Assicurarsi che `AssetTokenFactory` e `EwpgTREXFactory` siano stati distribuiti secondo [Distribuzione di contratti](./deploying-contracts.md). Conferma che l'indirizzo di fabbrica è impostato in `.env` e che il backend lo ha caricato:
 
 ```bash
-curl http://localhost:8080/api/v1/admin/chains/11155111 \
+curl http://localhost:48080/api/v1/admin/chains/11155111 \
   -H "Authorization: Bearer $OPERATOR_JWT" \
   | jq '.factoryAddress'
 ```

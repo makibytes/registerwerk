@@ -5,7 +5,7 @@ description: Diagramma dei componenti, flusso dei dati e struttura modulare dell
 
 # Architettura di sistema
 
-Registerwerk segue il modello **modulith**: una singola applicazione backend distribuibile, strutturata internamente in contesti delimitati debolmente accoppiati. Due frontend Angular distinti (operatore e cliente) sono sempre aperti direttamente dal browser — `:4200` e `:4201` — e si collegano allo stesso backend per percorsi diversi, per le sole chiamate API.
+Registerwerk segue il modello **modulith**: una singola applicazione backend distribuibile, strutturata internamente in contesti delimitati debolmente accoppiati. Due frontend Angular distinti (operatore e cliente) sono sempre aperti direttamente dal browser — `:44200` e `:44201` — e si collegano allo stesso backend per percorsi diversi, per le sole chiamate API.
 
 ---
 
@@ -16,8 +16,8 @@ graph TB
     U["Browser"]
 
     subgraph Frontends
-        FO["Operator Frontend<br/>Angular 22 · :4200"]
-        FC["Customer Frontend<br/>Angular 22 · :4201"]
+        FO["Operator Frontend<br/>Angular 22 · :44200"]
+        FC["Customer Frontend<br/>Angular 22 · :44201"]
     end
 
     subgraph Gateway
@@ -29,11 +29,11 @@ graph TB
     end
 
     subgraph Confidential
-        ZR["zama-relayer sidecar<br/>@zama-fhe/relayer-sdk<br/>:3005 (opt-in profile)"]
+        ZR["zama-relayer sidecar<br/>@zama-fhe/relayer-sdk<br/>:43005 (opt-in profile)"]
     end
 
     subgraph Data
-        PG[("PostgreSQL 17<br/>registerwerk (Kong is DB-less — no kong/konga database)")]
+        PG[("PostgreSQL 18.6<br/>registerwerk (Kong is DB-less — no kong/konga database)")]
         S3["S3 / Object Store<br/>KYC documents"]
     end
 
@@ -45,8 +45,8 @@ graph TB
         STR["StarkNet · Stellar"]
     end
 
-    U -->|"http://localhost:4200"| FO
-    U -->|"http://localhost:4201"| FC
+    U -->|"http://localhost:44200"| FO
+    U -->|"http://localhost:44201"| FC
     FO -->|"nginx /api/ → direct, bypasses Kong"| B
     FC -->|"nginx /api/ → Kong"| K
     K --> B
@@ -144,7 +144,7 @@ Per il grafo completo delle dipendenze e le motivazioni progettuali vedi [Archit
 
 ## Persistenza dei dati
 
-Tutti i dati applicativi risiedono in una singola istanza **PostgreSQL 17** con un solo database:
+Tutti i dati applicativi risiedono in una singola istanza **PostgreSQL 18.6** con un solo database:
 
 | Database | Proprietario | Contenuti |
 |---|---|---|

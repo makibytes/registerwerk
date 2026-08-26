@@ -1,5 +1,5 @@
 site_name: Registerwerk
-site_url: !ENV [DOCS_SITE_URL, "http://localhost:8003/"]
+site_url: !ENV [DOCS_SITE_URL, "http://localhost:48003/"]
 site_description: >-
   How a tokenised security is issued, held, traded, financed and redeemed —
   and how Registerwerk implements each step. Written for customers, operators,

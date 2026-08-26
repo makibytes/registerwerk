@@ -1,7 +1,7 @@
 # Standalone Kong gateway (OSS, DB-less) — docker compose -f docker-compose.kong.yml up
 #
 # ⚠ NOT PART OF THE MAIN STACK. The root docker-compose.yml defines its own `kong` service using
-# the same gateway/kong.yml and the same ports (8000/8443/8001), so the two cannot run at the same
+# the same gateway/kong.yml and published ports (48000/48443/48001), so the two cannot run at the same
 # time. This file exists only for running the gateway in isolation (e.g. to test a kong.yml change
 # without booting the backend). Keep its image tag and healthcheck in step with the root compose
 # file, or isolated runs will not reproduce what the real stack does.
@@ -55,10 +55,10 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8000:8000"
-      - "8443:8443"
+      - "${KONG_PROXY_HOST_PORT:-48000}:8000"
+      - "${KONG_HTTPS_HOST_PORT:-48443}:8443"
       # Admin API only ever on the host's loopback — never expose publicly.
-      - "127.0.0.1:8001:8001"
+      - "127.0.0.1:${KONG_ADMIN_HOST_PORT:-48001}:8001"
     healthcheck:
       # Mirrors the root docker-compose.yml. `kong health` is the Kong CLI, not a probe: it spawns
       # a full resty/LuaJIT process on every invocation. The image ships no curl/wget/nc, but it

@@ -707,7 +707,7 @@ export interface RpcNodeCapabilities {
   debugApiConfiguredOnAnyNode?: boolean;
   addressTraceCapability?: RpcNodeAddressTraceCapability | null;
   durableStreamAvailable?: boolean;
-  kafkaRelayEnabled?: boolean;
+  durableProtocolVersion?: string;
   /** From chaincache's GET /api/chains — how many upstream RPC providers this workload has
    *  configured for the chain, and how many currently answer. Null when the enrichment probe
    *  itself failed (a degraded, not fatal, outcome — see ChaincacheClient#fetchNodeCounts). */

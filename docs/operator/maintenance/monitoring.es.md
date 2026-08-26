@@ -17,9 +17,9 @@ docker compose -f monitoring/docker-compose.yml up -d
 ```
 
 Esto comienza:
-- **Prometheus** en `http://localhost:9090`
-- **Grafana** en `http://localhost:3000` (iniciar sesión: `admin` / `$GRAFANA_ADMIN_PASSWORD`, consulte `.env.example`)
-- **Alertmanager** en `http://localhost:9093`
+- **Prometheus** en `http://localhost:49090`
+- **Grafana** en `http://localhost:43000` (iniciar sesión: `admin` / `$GRAFANA_ADMIN_PASSWORD`, consulte `.env.example`)
+- **Alertmanager** en `http://localhost:49093`
 - **postgres-exporter** y **node-exporter** (alimentan los paneles de métricas del host/estado de la base de datos)
 
 ## Puntos finales de estado { #health-endpoints }
@@ -140,7 +140,7 @@ El monedero del implementador debe contener suficientes tokens nativos (ETH, MAT
 aún no está expuesto como métrica de Prometheus; mientras tanto, verifíquelo a través de la API de administración:
 
 ```bash
-curl http://localhost:8080/api/v1/admin/wallet/balances \
+curl http://localhost:48080/api/v1/admin/wallet/balances \
   -H "Authorization: Bearer $OPERATOR_JWT"
 ```
 

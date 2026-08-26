@@ -56,7 +56,7 @@ A `401` significa che il token non è valido. Un `403` significa che il token va
 
 ## Il portale dell'operatore
 
-Su `:4200`. Ignora completamente il gateway e utilizza il login integrato con nome utente/password, con TOTP locale per l'autenticazione rafforzata (step-up) — in ogni configurazione, comprese le distribuzioni in cui i clienti utilizzano Microsoft Entra ID.
+Su `:44200`. Ignora completamente il gateway e utilizza il login integrato con nome utente/password, con TOTP locale per l'autenticazione rafforzata (step-up) — in ogni configurazione, comprese le distribuzioni in cui i clienti utilizzano Microsoft Entra ID.
 
 | Area | |
 |---|---|
@@ -83,9 +83,14 @@ Su `:4200`. Ignora completamente il gateway e utilizza il login integrato con no
 ```bash
 git clone <your-registerwerk-remote> && cd registerwerk
 git submodule update --init --recursive
-cp .env.example .env
-docker compose up --build
+cp .env.example.test .env
+# CHAINCACHE_IMAGE in .env deve indicare un'immagine fornita indipendentemente.
+docker compose up -d --build
 ```
+
+Con `CHAINCACHE_ENABLED=true`, lo stesso comando avvia entrambi i workload Chaincache e i relativi
+PostgreSQL privato. Registerwerk richiede solo l'immagine indicata da `CHAINCACHE_IMAGE` e
+non compila `../chaincache`. Con `false`, lo stack principale si avvia in modo indipendente.
 
 !!! danger "Lascia `JWT_ISSUER_URI` vuoto per un avvio locale"
     Impostandolo, il portale clienti passa alla modalità OIDC, che richiede un vero tenant Entra, registrazioni di app e accesso condizionale. Un URI dell'issuer configurato solo in parte genera errori di accesso che sembrano bug.
@@ -96,11 +101,11 @@ Poi:
 
 | | |
 |---|---|
-| Portale operatore | `http://localhost:4200` |
-| Portale clienti | `http://localhost:4201` |
-| Salute del backend | `curl http://localhost:8080/actuator/health` |
-| Attraverso il gateway | `curl http://localhost:8000/api/v1/public/chains` |
-| Documentazione | `docker compose --profile docs up` → `http://localhost:8003` |
+| Portale operatore | `http://localhost:44200` |
+| Portale clienti | `http://localhost:44201` |
+| Salute del backend | `curl http://localhost:48080/actuator/health` |
+| Attraverso il gateway | `curl http://localhost:48000/api/v1/public/chains` |
+| Documentazione | `docker compose --profile docs up` → `http://localhost:48003` |
 
 Accedi con `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` dal tuo `.env`.
 

@@ -160,7 +160,7 @@ nicht von diesem Dokumentationsserver.
 | [`{{ backend_url }}/actuator/info`]({{ backend_url }}/actuator/info) | Build-Info |
 
 !!! info "Diese Dokumentationsseite vs. die API"
-    Diese Site (Port 8003) ist eine statische MkDocs-Referenz – sie proxyt das Backend nicht. Öffnen
+    Diese Site (port 48003) ist eine statische MkDocs-Referenz – sie proxyt das Backend nicht. Öffnen
     Sie die obigen Links direkt im Browser, während der Stack läuft (`docker compose up -d`).
 
 !!! warning "Swagger UI in der Produktion"

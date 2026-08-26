@@ -83,7 +83,7 @@ Questa pagina copre i problemi più comuni riscontrati durante il funzionamento 
 1. Controlla lo stato corrente dell'indicizzatore:
 
    ```bash
-   curl http://localhost:8080/api/v1/admin/chains \
+   curl http://localhost:48080/api/v1/admin/chains \
      -H "Authorization: Bearer $OPERATOR_JWT" \
      | jq '.[].latestIndexedBlock'
    ```
@@ -207,7 +207,7 @@ Se una migrazione mostra `success = false`, correggi la migrazione SQL e riavvia
 
 ## Il backend non si avvia { #backend-wont-start }
 
-**Sintomo**: `Connection refused` su `localhost:8080`
+**Sintomo**: `Connection refused` su `localhost:48080`
 
 1. Controlla la connettività DB: `docker compose logs postgres`
 2. Controlla le migrazioni Flyway: cerca `FlywayException` nei log di backend
@@ -249,7 +249,7 @@ un problema completamente diverso. Vedere [Ruoli e autorizzazioni](customers/rol
 
 Rigenerare tramite API:
 ```bash
-curl -X POST http://localhost:8000/api/v1/onboarding/tokens \
+curl -X POST http://localhost:48000/api/v1/onboarding/tokens \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -d '{"legalEntityId": "<uuid>", "recipientEmail": "admin@acme.de"}'
 ```

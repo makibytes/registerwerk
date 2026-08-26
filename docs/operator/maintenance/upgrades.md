@@ -44,7 +44,7 @@ docker compose up -d backend
 
 # Verify health
 docker compose logs -f backend | grep -E "Started|ERROR"
-curl http://localhost:8080/actuator/health
+curl http://localhost:48080/actuator/health
 ```
 
 !!! warning
@@ -54,7 +54,7 @@ curl http://localhost:8080/actuator/health
 ### 5. Verify
 
 After startup:
-- Check the API at `http://localhost:8080/swagger-ui.html`
+- Check the API at `http://localhost:48080/swagger-ui.html`
 - Create a test API call against a critical endpoint
 - Monitor the audit log for any unexpected errors in the first 15 minutes
 
@@ -121,7 +121,7 @@ Compliance modules can be added, removed, or replaced without upgrading the toke
 
 ```bash
 # Add a new compliance module to a token
-curl -X POST http://localhost:8080/api/v1/admin/tokens/{tokenAddress}/compliance/modules \
+curl -X POST http://localhost:48080/api/v1/admin/tokens/{tokenAddress}/compliance/modules \
   -H "Authorization: Bearer $OPERATOR_JWT" \
   -H "Content-Type: application/json" \
   -d '{"moduleAddress": "0xNewModuleAddress", "chain": "mainnet"}'
@@ -173,7 +173,7 @@ sidebar_position: 3
    docker compose up -d --no-deps backend
    ```
 
-4. Verify health: `curl http://localhost:8080/actuator/health`
+4. Verify health: `curl http://localhost:48080/actuator/health`
 
 ## Smart contract upgrades
 

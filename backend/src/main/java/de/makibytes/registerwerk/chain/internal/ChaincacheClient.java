@@ -63,7 +63,7 @@ class ChaincacheClient {
             Boolean debugApiConfiguredOnAnyNode,
             AddressTraceCapability addressTraceCapability,
             Boolean durableStreamAvailable,
-            Boolean kafkaRelayEnabled,
+            String durableProtocolVersion,
             Integer configuredNodeCount,
             Integer availableNodeCount) {
 
@@ -73,7 +73,8 @@ class ChaincacheClient {
         ChainCapabilitiesProbe withNodeCounts(ChainSummaryProbe summary) {
             return new ChainCapabilitiesProbe(chainKey, durabilityDomainId, finalityModel, safeConfirmations,
                     finalizedConfirmations, configuredApis, debugApiConfiguredOnAnyNode, addressTraceCapability,
-                    durableStreamAvailable, kafkaRelayEnabled, summary == null ? null : summary.configuredNodeCount(),
+                    durableStreamAvailable, durableProtocolVersion,
+                    summary == null ? null : summary.configuredNodeCount(),
                     summary == null ? null : summary.availableNodeCount());
         }
     }

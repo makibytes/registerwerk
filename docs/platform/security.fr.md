@@ -48,7 +48,7 @@ Les `sub` et `oid` d'un jeton Entra sont des identifiants propres à Entra ; la 
 
 ```mermaid
 sequenceDiagram
-    participant OperatorFE as Operator Frontend :4200
+    participant OperatorFE as Operator Frontend :44200
     participant Nginx
     participant Backend as Backend :8080
 
@@ -71,7 +71,7 @@ Le frontend de l'opérateur se connecte **directement** au backend via nginx —
 
 ```mermaid
 sequenceDiagram
-    participant CustomerFE as Customer Frontend :4201
+    participant CustomerFE as Customer Frontend :44201
     participant Entra as Microsoft Entra ID
     participant Kong as Kong :8000
     participant Backend as Backend :8080

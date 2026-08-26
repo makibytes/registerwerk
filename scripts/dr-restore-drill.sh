@@ -139,12 +139,12 @@ echo "   dumped ${SOURCE_BYTES} bytes"
 POSTGRES_CID=$(docker compose ps -q postgres)
 COMPOSE_NETWORK=$(docker inspect "$POSTGRES_CID" --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')
 
-echo "-> 2/5 Starting disposable Postgres 17 target on 127.0.0.1:${TARGET_PORT}..."
+echo "-> 2/5 Starting disposable Postgres 18.6 target on 127.0.0.1:${TARGET_PORT}..."
 docker run -d --name "$TARGET_CONTAINER" \
   --network "$COMPOSE_NETWORK" \
   -e POSTGRES_DB="$DB_NAME" -e POSTGRES_USER="$DB_USER" -e POSTGRES_PASSWORD=drill \
   -p "127.0.0.1:${TARGET_PORT}:5432" \
-  postgres:17.10-alpine >/dev/null
+  postgres:18.6-alpine >/dev/null
 
 echo -n "   waiting for target readiness"
 # The official postgres image briefly starts a throwaway internal server to run its init

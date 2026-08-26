@@ -48,7 +48,7 @@ An Entra token's `sub` and `oid` are Entra's identifiers; the corresponding `app
 
 ```mermaid
 sequenceDiagram
-    participant OperatorFE as Operator Frontend :4200
+    participant OperatorFE as Operator Frontend :44200
     participant Nginx
     participant Backend as Backend :8080
 
@@ -71,7 +71,7 @@ The operator frontend connects **directly** to the backend through nginx — it 
 
 ```mermaid
 sequenceDiagram
-    participant CustomerFE as Customer Frontend :4201
+    participant CustomerFE as Customer Frontend :44201
     participant Entra as Microsoft Entra ID
     participant Kong as Kong :8000
     participant Backend as Backend :8080

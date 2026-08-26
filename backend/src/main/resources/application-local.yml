@@ -1,6 +1,9 @@
+server:
+  port: 48080
+
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/registerwerk
+    url: jdbc:postgresql://localhost:45432/registerwerk
     username: registerwerk
     password: changeme
 

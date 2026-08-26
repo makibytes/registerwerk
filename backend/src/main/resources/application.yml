@@ -199,7 +199,7 @@ registerwerk:
     # are different origins to CORS even though they reach the same machine. Missing either one
     # here previously broke the whole demo stack with a bare "Invalid CORS request" 403 on login
     # for anyone who happened to open the frontend via the other spelling.
-    allowed-origins: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4201,http://127.0.0.1:4200,http://127.0.0.1:4201}
+    allowed-origins: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:http://localhost:44200,http://localhost:44201,http://127.0.0.1:44200,http://127.0.0.1:44201}
   chaincache:
     # HS256 signing key for the short-lived bearer token ChaincacheTokenFactory mints to
     # authenticate against a chaincache instance's read APIs (GET /api/capabilities, the durable
@@ -468,7 +468,7 @@ registerwerk:
   onboarding:
     token-ttl-hours: 48
     user-action-ttl-hours: 48
-    frontend-url: ${CUSTOMER_FRONTEND_URL:http://localhost:4201}
+    frontend-url: ${CUSTOMER_FRONTEND_URL:http://localhost:44201}
   mail:
     from: ${MAIL_USERNAME:noreply@registerwerk.example.com}
   auth:
@@ -533,7 +533,7 @@ registerwerk:
     batch-size: ${REGISTERWERK_DRIFT_BATCH_SIZE:500}
   lending:
     local-demo-backend-rpc-url: ${LENDING_LOCAL_DEMO_BACKEND_RPC_URL:http://anvil:8545}
-    local-demo-public-rpc-url: ${LENDING_LOCAL_DEMO_PUBLIC_RPC_URL:http://localhost:18545}
+    local-demo-public-rpc-url: ${LENDING_LOCAL_DEMO_PUBLIC_RPC_URL:http://localhost:48545}
     # Fail closed until legal, custody, oracle, liquidation, and operating controls have
     # completed release review. Both flags are required; enabling only one refuses startup
     # or endpoint/service access.

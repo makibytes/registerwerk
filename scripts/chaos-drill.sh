@@ -52,7 +52,7 @@ env_from_dotenv() {
 : "${DEFAULT_ADMIN_EMAIL:=$(env_from_dotenv DEFAULT_ADMIN_EMAIL)}"
 : "${DEFAULT_ADMIN_PASSWORD:=$(env_from_dotenv DEFAULT_ADMIN_PASSWORD)}"
 
-BACKEND_URL="http://127.0.0.1:8080"
+BACKEND_URL="http://127.0.0.1:48080"
 DRILL_ID="chaos-drill-${MODE}-$(date -u +%Y%m%dT%H%M%SZ)"
 COOKIE_JAR="$(mktemp)"
 trap 'rm -f "$COOKIE_JAR"' EXIT

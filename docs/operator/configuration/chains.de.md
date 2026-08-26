@@ -30,7 +30,7 @@ Die folgenden Chains werden durch die Flyway-Migrationen vorbelegt:
 ### Schritt 1 – Über die Admin-API registrieren
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -50,7 +50,7 @@ curl -X POST http://localhost:8000/api/v1/admin/chains \
 `BlockchainClientRegistry` des Backends übernimmt die neue Chain bei der nächsten Aktualisierung (alle 60 Sekunden) oder sofort über:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

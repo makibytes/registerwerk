@@ -56,7 +56,7 @@ public class OnboardingService {
             AuthApi authApi,
             RegisterwerkAuthProperties authProperties,
             @Value("${registerwerk.onboarding.token-ttl-hours:48}") long tokenTtlHours,
-            @Value("${registerwerk.onboarding.frontend-url:http://localhost:4201}") String frontendUrl) {
+            @Value("${registerwerk.onboarding.frontend-url:http://localhost:44201}") String frontendUrl) {
         this.onboardingTokenRepository = onboardingTokenRepository;
         this.legalEntityRepository = legalEntityRepository;
         this.eventPublisher = eventPublisher;

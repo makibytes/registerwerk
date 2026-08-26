@@ -9,7 +9,7 @@
 //     grafana/k6 run - < scripts/load/registry-read-load.js
 //
 // Or against the host-published port from outside the compose network:
-//   docker run --rm -i -e BASE_URL=http://host.docker.internal:8080 \
+//   docker run --rm -i -e BASE_URL=http://host.docker.internal:48080 \
 //     -e ADMIN_EMAIL=admin@local -e ADMIN_PASSWORD=changeme-please \
 //     grafana/k6 run - < scripts/load/registry-read-load.js
 //
@@ -21,7 +21,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
-const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:48080';
 const ADMIN_EMAIL = __ENV.ADMIN_EMAIL || 'admin@local';
 const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || 'changeme-please';
 

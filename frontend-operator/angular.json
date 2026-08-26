@@ -138,7 +138,7 @@
           },
           "defaultConfiguration": "development",
           "options": {
-            "port": 4200
+            "port": 44200
           }
         },
         "test": {

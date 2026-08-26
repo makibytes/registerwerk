@@ -4,8 +4,8 @@ A reference implementation for an electronic-securities registry built with Spri
 
 ## Architecture
 
-**You open both frontends directly in the browser — `:4200` and `:4201` are not going away
-in favor of Kong.** Kong (`:8000`) is an API gateway, not a frontend reverse proxy: it fronts
+**You open both frontends directly in the browser — `:44200` and `:44201` are not going away
+in favor of Kong.** Kong (published on `:48000`) is an API gateway, not a frontend reverse proxy: it fronts
 *only* the customer frontend's backend API calls, and even that only because the customer
 frontend's own nginx forwards `/api/` to Kong rather than to the backend directly. The operator
 frontend's nginx forwards `/api/` straight to `backend:8080` and never touches Kong at all — this
@@ -15,7 +15,7 @@ is intentional (see "Why two paths?" below), not a stopgap.
  ┌─────────────────────────────────────────────────────────────────────┐
  │                              Browser                                │
  └───────────────────┬───────────────────────────────┬─────────────────┘
-                     │ http://localhost:4200         │ http://localhost:4201
+                     │ http://localhost:44200         │ http://localhost:44201
               ┌──────▼──────┐                 ┌──────▼──────┐
               │  frontend-  │                 │  frontend-  │
               │  operator   │                 │  customer   │
@@ -25,19 +25,19 @@ is intentional (see "Why two paths?" below), not a stopgap.
                      │ backend:8080 directly         │ kong:8000
                      │ (bypasses Kong)               │
                      │                        ┌──────▼──────┐
-                     │                        │    Kong     │  :8000 (proxy)
-                     │                        │  API GW     │  :8001 (admin, loopback only)
+                     │                        │    Kong     │  :48000 -> :8000 (proxy)
+                     │                        │  API GW     │  :48001 -> :8001 (admin, loopback)
                      │                        └──────┬──────┘
                      │                               │
                      └───────────────┬───────────────┘
                               ┌──────▼──────┐
-                              │  Backend    │  :8080
+                              │  Backend    │  :48080 -> :8080
                               │ Spring Boot │
                               └──────┬──────┘
                     ┌────────────────┼─────────────────┐
               ┌─────▼─────┐   ┌──────▼──────┐   ┌──────▼──────┐
-              │ PostgreSQL│   │  S3 / OBS   │   │zama-relayer │  :3005 (opt-in,
-              │  :5432    │   │  (docs)     │   │(Zama fhEVM) │  `--profile confidential`)
+              │ PostgreSQL│   │  S3 / OBS   │   │zama-relayer │  :43005 -> :3001 (opt-in,
+              │ :45432→5432│  │  (docs)     │   │(Zama fhEVM) │  `--profile confidential`)
               └───────────┘   └─────────────┘   └─────────────┘
                     │
         ┌───────────┼───────────┐
@@ -90,19 +90,32 @@ JWT_DEV_SECRET=replace-me
 
 ### 2. Start all services
 
+The test template enables the Chaincache showcase. Provide its independently built or distributed
+image under the configured tag before starting Registerwerk; Registerwerk does not need a sibling
+checkout and never builds `../chaincache`:
+
+```bash
+# A registry pull or `docker load` works equally well.
+docker build -t registerwerk-chaincache:latest ../chaincache
+```
+
 ```bash
 docker compose up -d
 ```
 
 This already builds and starts **both frontends** as Docker services, so you can open them
 immediately — no separate `npm start` needed:
-- Operator portal: http://localhost:4200
-- Customer portal: http://localhost:4201
-- Backend API: http://localhost:8080/swagger-ui.html
-- Kong proxy (customer API traffic only): http://localhost:8000
-- Kong admin API (loopback only, no GUI): http://localhost:8001 — reach it via `docker exec` or an SSH tunnel, never expose it publicly
-- chaincache workloads (one Spring Boot process per chain, loopback-only — see [chaincache Integration](docs/operator/blockchain/chaincache-integration.md)): `chaincache-sepolia` on http://localhost:18090/sepolia/rpc, `chaincache-base` on http://localhost:18091/base/rpc
-- Confidential (Zama fhEVM) token support is opt-in: `docker compose --profile confidential up -d` also starts `zama-relayer` on http://localhost:3005
+- Operator portal: http://localhost:44200
+- Customer portal: http://localhost:44201
+- Backend API: http://localhost:48080/swagger-ui.html
+- Kong proxy (customer API traffic only): http://localhost:48000
+- Kong admin API (loopback only, no GUI): http://localhost:48001 — reach it via `docker exec` or an SSH tunnel, never expose it publicly
+- Chaincache workloads when `CHAINCACHE_ENABLED=true` (one Spring Boot process per chain,
+  loopback-only — see [chaincache Integration](docs/operator/blockchain/chaincache-integration.md)):
+  `chaincache-sepolia` on http://localhost:48090/sepolia/rpc and `chaincache-base` on
+  http://localhost:48091/base/rpc. Their shared Postgres dependency is a private service in
+  this same Compose project.
+- Confidential (Zama fhEVM) token support is opt-in: `docker compose --profile confidential up -d` also starts `zama-relayer` on http://localhost:43005
 
 ### 3. Frontend development with hot-reload
 
@@ -111,11 +124,11 @@ For local iteration on either Angular app instead of rebuilding the Docker image
 ```bash
 # Operator frontend
 cd frontend-operator && npm install && npm start
-# → http://localhost:4200 (stop the frontend-operator container first to free the port)
+# → http://localhost:44200 (stop the frontend-operator container first to free the port)
 
 # Customer frontend
 cd frontend-customer && npm install && npm start
-# → http://localhost:4201 (stop the frontend-customer container first to free the port)
+# → http://localhost:44201 (stop the frontend-customer container first to free the port)
 ```
 
 ### 4. Build & test the backend
@@ -261,7 +274,7 @@ Each backend module follows the pattern `<module>/api/` (public surface), `<modu
 
 ## API Documentation
 
-Once the backend is running: http://localhost:8080/swagger-ui.html
+Once the backend is running: http://localhost:48080/swagger-ui.html
 
 ## Database Migrations
 

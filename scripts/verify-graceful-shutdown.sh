@@ -16,7 +16,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-BACKEND_URL="http://127.0.0.1:8080"
+BACKEND_URL="http://127.0.0.1:48080"
 CONCURRENCY=25
 RESULTS_DIR="$(mktemp -d)"
 trap 'rm -rf "$RESULTS_DIR"' EXIT

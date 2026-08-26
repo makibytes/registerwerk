@@ -4,8 +4,8 @@ import { chromium } from 'playwright';
 
 // Use the documented browser origins: the backend's local CORS allowlist intentionally names
 // localhost, while 127.0.0.1 is a different origin and should not silently bypass that policy.
-const customerUrl = process.env.CUSTOMER_BASE_URL ?? 'http://localhost:4201';
-const operatorUrl = process.env.OPERATOR_BASE_URL ?? 'http://localhost:4200';
+const customerUrl = process.env.CUSTOMER_BASE_URL ?? 'http://localhost:44201';
+const operatorUrl = process.env.OPERATOR_BASE_URL ?? 'http://localhost:44200';
 const screenshotDir = process.env.BROWSER_SCREENSHOT_DIR ?? '/tmp/registerwerk-headless';
 const customerEmail = process.env.CUSTOMER_SMOKE_EMAIL ?? 'maria.braun@nordbank-invest.de';
 const customerPassword = process.env.CUSTOMER_SMOKE_PASSWORD ?? 'demo1234!';

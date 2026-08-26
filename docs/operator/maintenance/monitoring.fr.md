@@ -16,9 +16,9 @@ docker compose -f monitoring/docker-compose.yml up -d
 ```
 
 Cela commence :
-- **Prometheus** sur `http://localhost:9090`
-- **Grafana** sur `http://localhost:3000` (connexion : `admin` / `$GRAFANA_ADMIN_PASSWORD`, voir `.env.example`)
-- **Alertmanager** sur `http://localhost:9093`
+- **Prometheus** sur `http://localhost:49090`
+- **Grafana** sur `http://localhost:43000` (connexion : `admin` / `$GRAFANA_ADMIN_PASSWORD`, voir `.env.example`)
+- **Alertmanager** sur `http://localhost:49093`
 - **postgres-exporter** et **node-exporter** (alimentent les panneaux de santé de la base de données/métriques de l'hôte)
 
 ## Points de terminaison de santé
@@ -137,7 +137,7 @@ viable.
 Le portefeuille du déployeur doit contenir suffisamment de jetons natifs (ETH, MATIC, etc.) pour payer le gas. Ceci n'est pas encore exposé comme métrique Prometheus — vérifiez via l'API d'administration en attendant :
 
 ```bash
-curl http://localhost:8080/api/v1/admin/wallet/balances \
+curl http://localhost:48080/api/v1/admin/wallet/balances \
   -H "Authorization: Bearer $OPERATOR_JWT"
 ```
 

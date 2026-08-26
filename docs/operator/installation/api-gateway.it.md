@@ -6,7 +6,7 @@ title: API Gateway (Kong)
 
 Kong 3.8 (OSS, senza DB) si trova di fronte **solo al traffico API del frontend del cliente**. Gestisce la limitazione della velocità,
 la memorizzazione nella cache delle risposte e le intestazioni di sicurezza. **Non** fronteggia l'interfaccia utente di nessuno dei due
-frontend — entrambe le app vengono sempre aperte direttamente dal browser sulla propria porta (`:4200`, `:4201`) — e
+frontend — entrambe le app vengono sempre aperte direttamente dal browser sulla propria porta (`:44200`, `:44201`) — e
 il **frontend dell'operatore ignora completamente Kong**, anche per le proprie chiamate API (il suo nginx inoltra
 `/api/` direttamente a `backend:8080`). La convalida JWT e l'estrazione di entità/ruolo avvengono sempre nel
 backend Spring stesso, dalle attestazioni del token stesso — non tramite alcuna intestazione iniettata da
@@ -56,9 +56,9 @@ Kong viene eseguito senza DB e in questo stack **non fornisce alcuna GUI di ammi
 rimossi/mai collegati). L'accesso all'API di amministrazione è intenzionalmente limitato al loopback:
 
 ```bash
-# Bound to 127.0.0.1:8001 on the host — never expose this publicly, it's unauthenticated
+# Bound to 127.0.0.1:48001 on the host — never expose this publicly, it's unauthenticated
 docker compose exec kong kong health
-curl http://127.0.0.1:8001/status
+curl http://127.0.0.1:48001/status
 ```
 
 Per modificare routing/plugin, modifica `gateway/kong.yml` e riavvia il servizio `kong`: è l'unica fonte di verità

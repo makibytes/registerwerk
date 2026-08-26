@@ -36,12 +36,15 @@ title: Voraussetzungen
 
 | Dienst | Port | Zugriff |
 |---|---|---|
-| Operator-Frontend | 4200 | Öffentlich – direkt geöffnet, niemals über Kong |
-| Kunden-Frontend | 4201 | Öffentlich – direkt geöffnet; nur seine eigenen API-Aufrufe werden über Kong weitergeleitet |
-| Kong-Proxy | 8000 | Öffentlich – nur Kunden-API-Verkehr, DB-los, keine Admin-GUI |
-| Kong-Admin-API | 8001 | Nur Loopback – `docker exec`/SSH-Tunnel, nie öffentlich zugänglich machen |
-| zama-relayer (opt-in, `--profile confidential`) | 3005 | Nur intern |
-| Backend (direkt) | 8080 | Nur intern (wird sowohl vom Operator-Frontend als auch, in Produktion, von Kong aufgerufen) |
+| Operator-Frontend | 44200 | Öffentlich – direkt geöffnet, niemals über Kong |
+| Kunden-Frontend | 44201 | Öffentlich – direkt geöffnet; nur seine eigenen API-Aufrufe werden über Kong weitergeleitet |
+| Kong-Proxy | 48000 / 48443 | Öffentlich – nur Kunden-API-Verkehr (HTTP/HTTPS), DB-los, keine Admin-GUI |
+| Kong-Admin-API | 48001 | Nur Loopback – `docker exec`/SSH-Tunnel, nie öffentlich zugänglich machen |
+| Dokumentation (optionales Profil `docs`) | 48003 | Konfigurierbare Bind-Adresse |
+| Chaincache Sepolia/Base (optional) | 48090 / 48091 | Nur Loopback |
+| Temporäres Anvil | 48545 | Konfigurierbare Bind-Adresse; intern bleibt `anvil:8545` |
+| zama-relayer (opt-in, `--profile confidential`) | 43005 | Nur intern |
+| Backend (direkt) | 48080 | Nur intern (wird sowohl vom Operator-Frontend als auch, in Produktion, von Kong aufgerufen) |
 | graph-node GraphQL | 8000 | Nur intern |
 | graph-node-Admin | 8020 | Nur intern |
-| PostgreSQL | 5432 | Nur intern |
+| PostgreSQL | 45432 | Nur Loopback; intern `postgres:5432` |

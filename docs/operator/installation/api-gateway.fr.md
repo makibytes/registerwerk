@@ -4,7 +4,7 @@ title: Passerelle API (Kong)
 
 # Passerelle API (Kong)
 
-Kong 3.8 (OSS, sans DB) se trouve devant le **trafic API de l'interface client uniquement**. Il gère la limitation de débit, la mise en cache des réponses et les en-têtes de sécurité. Il ne dessert **pas** l'interface utilisateur de l'un ou l'autre frontend — les deux applications sont toujours ouvertes directement par le navigateur sur leur propre port (`:4200`, `:4201`) — et l'**interface opérateur contourne entièrement Kong**, même pour ses propres appels API (son nginx achemine `/api/` directement vers `backend:8080`). La validation JWT et l'extraction d'entité/rôle se produisent toujours dans le backend Spring lui-même, à partir des revendications propres au jeton — et non via un en-tête injecté par Kong, dans la configuration OSS livrée par ce dépôt.
+Kong 3.8 (OSS, sans DB) se trouve devant le **trafic API de l'interface client uniquement**. Il gère la limitation de débit, la mise en cache des réponses et les en-têtes de sécurité. Il ne dessert **pas** l'interface utilisateur de l'un ou l'autre frontend — les deux applications sont toujours ouvertes directement par le navigateur sur leur propre port (`:44200`, `:44201`) — et l'**interface opérateur contourne entièrement Kong**, même pour ses propres appels API (son nginx achemine `/api/` directement vers `backend:8080`). La validation JWT et l'extraction d'entité/rôle se produisent toujours dans le backend Spring lui-même, à partir des revendications propres au jeton — et non via un en-tête injecté par Kong, dans la configuration OSS livrée par ce dépôt.
 
 ## Démarrage de Kong
 
@@ -47,9 +47,9 @@ qui exécutent Kong Enterprise. Sans cela, la validation JWT et l'extraction d'e
 Kong fonctionne sans base de données et ne fournit **aucune interface graphique d'administration** dans cette pile (pas de Konga, pas de Kong Manager — les deux ont été supprimés/jamais câblés). L'accès à l'API d'administration est volontairement limité au loopback :
 
 ```bash
-# Bound to 127.0.0.1:8001 on the host — never expose this publicly, it's unauthenticated
+# Bound to 127.0.0.1:48001 on the host — never expose this publicly, it's unauthenticated
 docker compose exec kong kong health
-curl http://127.0.0.1:8001/status
+curl http://127.0.0.1:48001/status
 ```
 
 Pour modifier le routage/les plugins, modifiez `gateway/kong.yml` et redémarrez le service `kong` — c'est la source unique de vérité

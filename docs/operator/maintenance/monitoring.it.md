@@ -17,9 +17,9 @@ docker compose -f monitoring/docker-compose.yml up -d
 ```
 
 Questo inizia:
-- **Prometheus** presso `http://localhost:9090`
-- **Grafana** presso `http://localhost:3000` (login: `admin` / `$GRAFANA_ADMIN_PASSWORD`, vedere `.env.example`)
-- **Alertmanager** presso `http://localhost:9093`
+- **Prometheus** presso `http://localhost:49090`
+- **Grafana** presso `http://localhost:43000` (login: `admin` / `$GRAFANA_ADMIN_PASSWORD`, vedere `.env.example`)
+- **Alertmanager** presso `http://localhost:49093`
 - **postgres-exporter** e **node-exporter** (alimenta i pannelli di integrità del database/metriche host)
 
 ## Endpoint di integrità { #health-endpoints }
@@ -141,7 +141,7 @@ Il portafoglio del distributore deve contenere token nativi sufficienti (ETH, MA
 non è ancora esposto come metrica Prometheus: nel frattempo, verifica tramite l'API di amministrazione:
 
 ```bash
-curl http://localhost:8080/api/v1/admin/wallet/balances \
+curl http://localhost:48080/api/v1/admin/wallet/balances \
   -H "Authorization: Bearer $OPERATOR_JWT"
 ```
 

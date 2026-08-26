@@ -102,10 +102,10 @@ Dieses Glossar definiert die Begriffe, die in Dokumentation, Code und Oberfläch
 ## Kundenentitäten
 
 **Betreiber**
-: Die Organisation, die eine Registerwerk-Installation betreibt. Betreiber haben Zugang zum Betreiber-Frontend (:4200) und können alle Kunden, Assets und Compliance-Daten verwalten.
+: Die Organisation, die eine Registerwerk-Installation betreibt. Betreiber haben Zugang zum Betreiber-Frontend (:44200) und können alle Kunden, Assets und Compliance-Daten verwalten.
 
 **Kunde**
-: Ein von einem Betreiber aufgenommener Emittent oder Anleger. Kunden greifen über das Kong-API-Gateway auf das Kunden-Frontend (:4201) zu.
+: Ein von einem Betreiber aufgenommener Emittent oder Anleger. Kunden greifen über das Kong-API-Gateway auf das Kunden-Frontend (:44201) zu.
 
 **Rechtsträger (`LegalEntity`)**
 : Das zentrale Datenmodell für das Unternehmen eines Kunden. Enthält Jurisdiktion, Registernummer, LEI, KYC-Status sowie Verknüpfungen zu wirtschaftlich Berechtigten und KYC-Dokumenten.

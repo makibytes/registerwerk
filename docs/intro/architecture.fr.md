@@ -5,7 +5,7 @@ description: Diagramme de composants, flux de données et structure modulaire de
 
 # Architecture du système
 
-Registerwerk suit le modèle du **modulith** : une seule application backend déployable, structurée en interne en contextes délimités faiblement couplés. Deux interfaces Angular distinctes (opérateur et client) sont toujours ouvertes directement par le navigateur — `:4200` et `:4201` — et se connectent au même backend par des chemins différents, pour les seuls appels d'API.
+Registerwerk suit le modèle du **modulith** : une seule application backend déployable, structurée en interne en contextes délimités faiblement couplés. Deux interfaces Angular distinctes (opérateur et client) sont toujours ouvertes directement par le navigateur — `:44200` et `:44201` — et se connectent au même backend par des chemins différents, pour les seuls appels d'API.
 
 ---
 
@@ -16,8 +16,8 @@ graph TB
     U["Browser"]
 
     subgraph Frontends
-        FO["Operator Frontend<br/>Angular 22 · :4200"]
-        FC["Customer Frontend<br/>Angular 22 · :4201"]
+        FO["Operator Frontend<br/>Angular 22 · :44200"]
+        FC["Customer Frontend<br/>Angular 22 · :44201"]
     end
 
     subgraph Gateway
@@ -29,11 +29,11 @@ graph TB
     end
 
     subgraph Confidential
-        ZR["zama-relayer sidecar<br/>@zama-fhe/relayer-sdk<br/>:3005 (opt-in profile)"]
+        ZR["zama-relayer sidecar<br/>@zama-fhe/relayer-sdk<br/>:43005 (opt-in profile)"]
     end
 
     subgraph Data
-        PG[("PostgreSQL 17<br/>registerwerk (Kong is DB-less — no kong/konga database)")]
+        PG[("PostgreSQL 18.6<br/>registerwerk (Kong is DB-less — no kong/konga database)")]
         S3["S3 / Object Store<br/>KYC documents"]
     end
 
@@ -45,8 +45,8 @@ graph TB
         STR["StarkNet · Stellar"]
     end
 
-    U -->|"http://localhost:4200"| FO
-    U -->|"http://localhost:4201"| FC
+    U -->|"http://localhost:44200"| FO
+    U -->|"http://localhost:44201"| FC
     FO -->|"nginx /api/ → direct, bypasses Kong"| B
     FC -->|"nginx /api/ → Kong"| K
     K --> B
@@ -144,7 +144,7 @@ Voir [Architecture modulaire](../platform/modules.md) pour le graphe complet des
 
 ## Persistance des données
 
-Toutes les données applicatives résident dans une unique instance **PostgreSQL 17** dotée d'une seule base :
+Toutes les données applicatives résident dans une unique instance **PostgreSQL 18.6** dotée d'une seule base :
 
 | Base | Propriétaire | Contenu |
 |---|---|---|

@@ -147,7 +147,7 @@ La specifica OpenAPI e l'interfaccia utente interattiva sono fornite **dal backe
 | [`{{ backend_url }}/actuator/info`]({{ backend_url }}/actuator/info) | Informazioni di build |
 
 !!! info "Questo sito di documentazione rispetto all'API"
-    Questo sito (porta 8003) è un riferimento MkDocs statico: non esegue il proxy del backend. Apri i collegamenti sopra direttamente in un browser mentre lo stack è in esecuzione (`docker compose up -d`).
+    Questo sito (porta 48003) è un riferimento MkDocs statico: non esegue il proxy del backend. Apri i collegamenti sopra direttamente in un browser mentre lo stack è in esecuzione (`docker compose up -d`).
 
 !!! warning "Interfaccia utente Swagger in produzione"
     L'interfaccia utente Swagger è disabilitata nel profilo `prod` Spring. Negli ambienti di sviluppo e staging è accessibile senza autenticazione. In produzione deve essere esplicitamente abilitata e protetta da un elenco di IP consentiti (allowlist) o da un'autenticazione di base.

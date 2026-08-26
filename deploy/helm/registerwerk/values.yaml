@@ -256,7 +256,7 @@ kong:
 # ─── chaincache (independent product — installed separately, once per chain) ────────────────
 # This chart does NOT deploy chaincache; chaincache/deploy/helm/chaincache is a separate chart
 # with its own release cycle, installed once per chain workload (e.g. "chaincache-ethereum",
-# "chaincache-base"), typically sharing one Cloud SQL/Postgres instance and one Kafka cluster
+# "chaincache-base"), typically sharing one Cloud SQL/Postgres instance
 # across those releases — see that chart's own README. This block only carries what Registerwerk
 # needs on its own side to reach it:
 #   - the CHAINCACHE_JWT_SECRET key in the registerwerk-secrets Secret (templates/secret.yaml,

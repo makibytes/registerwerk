@@ -19,7 +19,7 @@ et une cible de déploiement prise en charge avec des sources de contrat explici
 ### 1. Enregistrer via l'API d'administration
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains \
+curl -X POST http://localhost:48000/api/v1/admin/chains \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -72,7 +72,7 @@ Le sous-graphe est une projection d'événement provisoire. Il n'établit ni la 
 ### 6. Déclencher l'actualisation du client
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/admin/chains/refresh \
+curl -X POST http://localhost:48000/api/v1/admin/chains/refresh \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

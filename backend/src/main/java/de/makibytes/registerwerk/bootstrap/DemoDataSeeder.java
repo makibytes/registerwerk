@@ -59,6 +59,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -112,6 +113,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
     private final String chaincacheDemoLabel;
     private final String chaincacheDemoManagementUrl;
     private final String chaincacheDemoRemoteChainKey;
+    private final boolean chaincacheEnabled;
 
     /** Fixed Base32 TOTP secret shared by every demo-seeded operator user (never used in
      *  production — DefaultAdminSeeder's own admin is never enrolled by this class). Lets a
@@ -144,6 +146,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
             KycJurisdictionApprovalRepository kycJurisdictionApprovals,
             HolderBlockRepository holderBlocks,
             AssetBondTermsRepository bondTerms,
+            @Value("${registerwerk.chaincache.enabled:false}") boolean chaincacheEnabled,
             @Value("${registerwerk.chaincache.demo.chain-identifier:ETHEREUM_SEPOLIA}") String chaincacheDemoChainIdentifier,
             @Value("${registerwerk.chaincache.demo.url:http://chaincache-sepolia:8080/sepolia/rpc}") String chaincacheDemoUrl,
             @Value("${registerwerk.chaincache.demo.label:chaincache (anvil)}") String chaincacheDemoLabel,
@@ -169,6 +172,7 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         this.kycJurisdictionApprovals = kycJurisdictionApprovals;
         this.holderBlocks = holderBlocks;
         this.bondTerms = bondTerms;
+        this.chaincacheEnabled = chaincacheEnabled;
         this.chaincacheDemoChainIdentifier = chaincacheDemoChainIdentifier;
         this.chaincacheDemoUrl = chaincacheDemoUrl;
         this.chaincacheDemoLabel = chaincacheDemoLabel;
@@ -181,17 +185,17 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
     public void run(ApplicationArguments args) {
         syncPublicNodes();
         syncChaincacheDemoNode(chaincacheDemoChainIdentifier, chaincacheDemoUrl, chaincacheDemoLabel,
-                chaincacheDemoManagementUrl, chaincacheDemoRemoteChainKey);
+                chaincacheDemoManagementUrl, chaincacheDemoRemoteChainKey, chaincacheEnabled);
         // The second chaincache workload (docker-compose.yml's chaincache-base service, fronting
         // real public Base Sepolia RPC providers — TAG_BASED finality, required-provider-agreement
-        // 2) is default-on in the demo per the portfolio plan's explicit decision: a genuine
+        // 2) is started alongside the local workload when Chaincache is enabled: a genuine
         // TAG_BASED comparison next to the local DEPTH_BASED devnet above, not just a second copy
         // of the same finality model. Unlike the sepolia node, this one is not @Value-overridable —
         // BASE_SEPOLIA's three direct-RPC nodes below (syncPublicNodes) are hardcoded literals too,
         // and a second full set of externalized properties for one fixed demo chain would be
         // over-engineering a seeder that already has no config surface for its other 40+ nodes.
         syncChaincacheDemoNode("BASE_SEPOLIA", "http://chaincache-base:8080/base/rpc", "chaincache (Base Sepolia)",
-                "http://chaincache-base:8080", "base");
+                "http://chaincache-base:8080", "base", chaincacheEnabled);
 
         if (entities.findByEntityNumber("DEMO-MC-001").isPresent()) {
             if (hasCompleteDemoEntityBaseline()) {
@@ -1071,9 +1075,12 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
                 new NodeDef("ETHEREUM_MAINNET", "https://eth.llamarpc.com", "LlamaRPC", true),
                 new NodeDef("ETHEREUM_MAINNET", "https://ethereum.publicnode.com", "PublicNode", true),
                 new NodeDef("ETHEREUM_MAINNET", "https://eth.drpc.org", "dRPC", true),
-                // Ethereum Sepolia
-                new NodeDef("ETHEREUM_SEPOLIA", "https://ethereum-sepolia.publicnode.com", "PublicNode", true),
-                new NodeDef("ETHEREUM_SEPOLIA", "https://sepolia.drpc.org", "dRPC", true),
+                // The Compose demo uses an isolated Anvil ledger with Sepolia's numeric chain ID.
+                // Chain ID equality is not chain identity: mixing real Sepolia nodes into this
+                // pool would let routing/finality compare different genesis histories. Keep the
+                // demo chain entirely Anvil-backed; LocalLendingDemoSeeder later marks this node
+                // and its Chaincache facade exclusive before any on-chain demo work begins.
+                new NodeDef("ETHEREUM_SEPOLIA", "http://anvil:8545", "Local Anvil", true),
                 // Polygon Mainnet
                 new NodeDef("POLYGON_MAINNET", "https://polygon.publicnode.com", "PublicNode", true),
                 new NodeDef("POLYGON_MAINNET", "https://polygon.drpc.org", "dRPC", true),
@@ -1196,9 +1203,12 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
      * Seeds the demo stack's chaincache connection: an additional {@code CHAINCACHE}-kind
      * {@link RpcNode} on the configured chain (this stack's anvil devnet, reached via
      * chaincache's own configured chain key — see docker-compose.yml's chaincache workload(s)),
-     * alongside the direct-RPC nodes {@link #syncPublicNodes} already seeds for that chain — per
-     * the portfolio plan's product decision that the demo stack runs chaincache default-on, side
-     * by side, so the operator node list shows a real capability comparison out of the box.
+     * alongside the same-ledger direct-RPC nodes {@link #syncPublicNodes} already seeds for that
+     * chain. The local demo deliberately never mixes public Sepolia with its Anvil devnet even
+     * though both report chain id 11155111; finality domains require a common genesis history.
+     * When
+     * the showcase is enabled, this gives the operator node list a real capability comparison;
+     * when disabled, an existing showcase row is retained but disabled for clean re-enablement.
      *
      * <p>Idempotency key is {@code (chainConfigId, url)} — never {@code kind}, which is mutable
      * (owned by {@code RpcNodeService#redetectAll}'s auto-detection and can legitimately flip
@@ -1218,25 +1228,22 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
      * of kind.
      */
     private void syncChaincacheDemoNode(String chainIdentifier, String url, String label,
-            String managementUrl, String remoteChainKey) {
+            String managementUrl, String remoteChainKey, boolean enabled) {
         chainConfigs.findByIdentifier(chainIdentifier).ifPresent(chain -> {
-            RpcNode node = rpcNodes.findByChainConfig_Identifier(chainIdentifier).stream()
+            Optional<RpcNode> existing = rpcNodes.findByChainConfig_Identifier(chainIdentifier).stream()
                     .filter(n -> url.equalsIgnoreCase(n.getUrl()))
-                    .findFirst()
-                    .orElseGet(() -> {
-                        RpcNode fresh = new RpcNode();
-                        fresh.setChainConfig(chain);
-                        fresh.setUrl(url);
-                        fresh.setKind(RpcNode.NodeKind.CHAINCACHE);
-                        fresh.setManagementUrl(managementUrl);
-                        fresh.setRemoteChainKey(remoteChainKey);
-                        return fresh;
-                    });
+                    .findFirst();
+
+            if (existing.isEmpty() && !enabled) {
+                return;
+            }
+            RpcNode node = existing.orElseGet(
+                    () -> newChaincacheNode(chain, url, managementUrl, remoteChainKey));
 
             boolean changed = node.getId() == null;
             changed |= setIfChanged(node::getLabel, node::setLabel, label);
-            if (!node.isEnabled()) {
-                node.setEnabled(true);
+            if (node.isEnabled() != enabled) {
+                node.setEnabled(enabled);
                 changed = true;
             }
             if (changed) {
@@ -1247,6 +1254,17 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
             // RpcNodeService#redetectAll job (15s after boot) picks up this node's CHAINCACHE
             // kind on its first tick and flips the chain over itself, same as a live admin add.
         });
+    }
+
+    private RpcNode newChaincacheNode(ChainConfig chain, String url, String managementUrl,
+                                      String remoteChainKey) {
+        RpcNode fresh = new RpcNode();
+        fresh.setChainConfig(chain);
+        fresh.setUrl(url);
+        fresh.setKind(RpcNode.NodeKind.CHAINCACHE);
+        fresh.setManagementUrl(managementUrl);
+        fresh.setRemoteChainKey(remoteChainKey);
+        return fresh;
     }
 
     private static boolean setIfChanged(java.util.function.Supplier<String> getter,
