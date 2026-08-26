@@ -42,7 +42,19 @@ LANGUAGES = {
 }
 
 # Kept out of the build, or not prose.
-EXCLUDE_DIRS = {"node_modules", "includes", "build", "src", "static", "assets", "claims"}
+EXCLUDE_DIRS = {
+    "_chaincache",
+    # Symlinks into _chaincache (see prepare_chaincache_docs.py) — Chaincache's own docs, English
+    # + fallback_to_default in mkdocs.yml, not Registerwerk's to translate or own a stale copy of.
+    "chaincache",
+    "node_modules",
+    "includes",
+    "build",
+    "src",
+    "static",
+    "assets",
+    "claims",
+}
 EXCLUDE_FILES = {"TRANSLATION-TERMINOLOGY.md"}
 
 DEFAULT_MODEL = os.environ.get("RW_TRANSLATE_MODEL", "opus")
