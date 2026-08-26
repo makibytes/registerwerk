@@ -39,6 +39,8 @@ jobs:
         run: docker compose config -q
       - name: Validate root compose file with the docs profile
         run: docker compose --profile docs config -q
+      - name: Validate root compose file with the chaincache-true profile
+        run: docker compose --profile chaincache-true config -q
       - name: Validate the monitoring compose file
         run: docker compose -f monitoring/docker-compose.yml config -q
 

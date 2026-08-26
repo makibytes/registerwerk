@@ -6,17 +6,14 @@ import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChaincacheCredentials;
 import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
-import de.makibytes.registerwerk.finality.api.BlockFinalityFeed;
-import de.makibytes.registerwerk.finality.api.FinalityLevel;
-import de.makibytes.registerwerk.finality.api.ReorgObservation;
-import de.makibytes.registerwerk.finality.api.QuarantineTrigger;
-import de.makibytes.registerwerk.indexer.api.TypedReorgCompensationException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -39,15 +36,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * A second {@link BlockFinalityFeed} producer, alongside {@code indexer.internal.ReorgGuard}'s
- * poll-based RPC probing: for every {@link ChainConfig} that opted into
- * {@link ChainConfig.FinalitySource#CHAINCACHE}, subscribes to that chain's PROVISIONAL, SAFE, and
- * FINALIZED durable event streams on its {@link RpcNode.NodeKind#CHAINCACHE} node via
- * {@code chaincache_subscribeDurable} over the same WebSocket chaincache already serves
- * {@code eth_subscribe} on, and feeds every {@code BLOCK} event into
- * {@link BlockFinalityFeed#recordObservation} and typed {@code REORG} episodes into
- * {@link BlockFinalityFeed#recordReorg}. Legacy retractions remain readable for older Chaincache
- * versions, but a retraction carrying a typed episode id is never applied a second time.
+ * A second finality-feed producer, alongside {@code indexer.internal.ReorgGuard}'s poll-based RPC
+ * probing: for every {@link ChainConfig} that opted into {@link ChainConfig.FinalitySource#CHAINCACHE},
+ * subscribes to that chain's unified lifecycle-v2 stream on its {@link RpcNode.NodeKind#CHAINCACHE}
+ * node via {@code chaincache_subscribeLifecycle} over the same WebSocket chaincache already serves
+ * {@code eth_subscribe} on. Lifecycle events are transactionally projected into Registerwerk's
+ * inbox, finality ledger, and smart-contract projections (all inside {@link ChaincacheLifecycleEventProcessor})
+ * before their cursor is acknowledged.
  *
  * <p>This is possible only because {@code BlockFinalityFeed} already inverted the dependency
  * (indexer/blockchain call into {@code finality}, not the reverse) — the RPC-probing path in
@@ -63,14 +58,14 @@ import java.util.concurrent.atomic.AtomicLong;
  * Spring WebSocket client dependency for a single outbound connection per chain.
  */
 @Component
-class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
+class ChaincacheDurableStreamManager implements ChaincacheStreamStatus, SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(ChaincacheDurableStreamManager.class);
 
     private final ChainConfigRepository chainConfigRepository;
     private final RpcNodeRepository rpcNodeRepository;
-    private final BlockFinalityFeed blockFinalityFeed;
-    private final ChaincacheReorgCoordinator reorgCoordinator;
+    private final ChaincacheLifecycleEventProcessor lifecycleProcessor;
+    private final ChaincacheLifecycleFailureRecorder lifecycleFailureRecorder;
     private final ObjectMapper objectMapper;
     private final ChaincacheCredentials credentials;
     private final String instanceId;
@@ -78,6 +73,7 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
     private final MeterRegistry meterRegistry;
     private final long subscribeResponseTimeoutMs;
     private final long ackResponseTimeoutMs;
+    private final AtomicBoolean running = new AtomicBoolean(false);
 
     private final Map<UUID, ChainSubscription> activeByChain = new ConcurrentHashMap<>();
     /** chainId -> the node id whose connection attempt most recently failed, so the next tick's
@@ -92,22 +88,24 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
     private final Map<UUID, AtomicBoolean> connectedByChain = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicLong> lastEventEpochSecondByChain = new ConcurrentHashMap<>();
 
+    @Autowired
     ChaincacheDurableStreamManager(ChainConfigRepository chainConfigRepository, RpcNodeRepository rpcNodeRepository,
-            BlockFinalityFeed blockFinalityFeed,
-            ChaincacheReorgCoordinator reorgCoordinator,
-                                   ObjectMapper objectMapper,
-                                   ChaincacheCredentials credentials,
-                                   @Value("${registerwerk.chaincache.instance-id:registerwerk}") String instanceId,
-                                   @Value("${registerwerk.chaincache.stream.connect-timeout-ms:10000}") long connectTimeoutMs,
-                                   @Value("${registerwerk.chaincache.stream.subscribe-response-timeout-ms:10000}")
-                                   long subscribeResponseTimeoutMs,
-                                   @Value("${registerwerk.chaincache.stream.ack-response-timeout-ms:10000}")
-                                   long ackResponseTimeoutMs,
-                                   MeterRegistry meterRegistry) {
+            ChaincacheLifecycleEventProcessor lifecycleProcessor,
+            ChaincacheLifecycleFailureRecorder lifecycleFailureRecorder,
+            ObjectMapper objectMapper,
+            ChaincacheCredentials credentials,
+            @Value("${registerwerk.chaincache.instance-id:registerwerk}") String instanceId,
+            @Value("${registerwerk.chaincache.stream.connect-timeout-ms:10000}") long connectTimeoutMs,
+            @Value("${registerwerk.chaincache.stream.subscribe-response-timeout-ms:10000}")
+            long subscribeResponseTimeoutMs,
+            @Value("${registerwerk.chaincache.stream.ack-response-timeout-ms:10000}")
+            long ackResponseTimeoutMs,
+            MeterRegistry meterRegistry) {
         this.chainConfigRepository = chainConfigRepository;
         this.rpcNodeRepository = rpcNodeRepository;
-        this.blockFinalityFeed = blockFinalityFeed;
-        this.reorgCoordinator = reorgCoordinator;
+        this.lifecycleProcessor = java.util.Objects.requireNonNull(lifecycleProcessor, "lifecycleProcessor");
+        this.lifecycleFailureRecorder =
+                java.util.Objects.requireNonNull(lifecycleFailureRecorder, "lifecycleFailureRecorder");
         this.objectMapper = objectMapper;
         this.credentials = credentials;
         this.instanceId = instanceId;
@@ -115,6 +113,31 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
         this.subscribeResponseTimeoutMs = Math.max(1L, subscribeResponseTimeoutMs);
         this.ackResponseTimeoutMs = Math.max(1L, ackResponseTimeoutMs);
         this.meterRegistry = meterRegistry;
+    }
+
+    @Override
+    public void start() {
+        running.set(true);
+    }
+
+    @Override
+    public void stop() {
+        if (!running.getAndSet(false)) {
+            return;
+        }
+        activeByChain.values().forEach(ChainSubscription::close);
+        activeByChain.clear();
+        connectedByChain.values().forEach(state -> state.set(false));
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running.get();
+    }
+
+    @Override
+    public int getPhase() {
+        return Integer.MAX_VALUE - 100;
     }
 
     /** Deliberately reads {@link #connectedByChain} directly rather than going through
@@ -156,6 +179,9 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
     @Scheduled(fixedDelayString = "${registerwerk.chaincache.stream.reconcile-interval-ms:30000}",
                initialDelayString = "${registerwerk.chaincache.stream.reconcile-initial-delay-ms:20000}")
     void reconcile() {
+        if (!running.get()) {
+            return;
+        }
         List<ChainConfig> chaincacheChains =
                 chainConfigRepository.findByEnabledTrueAndFinalitySource(ChainConfig.FinalitySource.CHAINCACHE);
         Map<UUID, ChainConfig> stillWanted = new java.util.HashMap<>();
@@ -165,13 +191,14 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
             List<RpcNode> nodes = rpcNodeRepository.findByChainConfig_IdAndKindAndEnabledTrue(
                     chain.getId(), RpcNode.NodeKind.CHAINCACHE);
             java.util.Optional<String> durabilityDomain = sharedDurabilityDomain(nodes);
-            if (!nodes.isEmpty() && durabilityDomain.isPresent()) {
+            boolean lifecycleV2 = nodes.stream().allMatch(ChaincacheDurableStreamManager::supportsLifecycleV2);
+            if (!nodes.isEmpty() && durabilityDomain.isPresent() && lifecycleV2) {
                 stillWanted.put(chain.getId(), chain);
                 candidatesByChain.put(chain.getId(), nodes);
                 durabilityDomainByChain.put(chain.getId(), durabilityDomain.orElseThrow());
             } else if (!nodes.isEmpty()) {
                 log.error("Refusing chaincache durable stream for chain={}: every enabled candidate must expose "
-                        + "the same nonblank durabilityDomainId", chain.getId());
+                        + "the same nonblank durabilityDomainId and durableProtocolVersion=2", chain.getId());
             }
         }
 
@@ -260,6 +287,12 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
         return java.util.Optional.of(expected);
     }
 
+    private static boolean supportsLifecycleV2(RpcNode node) {
+        Object value = node.getCapabilities() == null ? null
+                : node.getCapabilities().get("durableProtocolVersion");
+        return "2".equals(String.valueOf(value));
+    }
+
     private void connect(UUID chainId, RpcNode node, String durabilityDomainId) {
         String wsUrl = toWebSocketUrl(node.getManagementUrl(), node.getRemoteChainKey());
         if (wsUrl == null) {
@@ -307,11 +340,9 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
     }
 
     /**
-     * One WebSocket connection per chain, subscribing to the PROVISIONAL, SAFE, and FINALIZED
-     * durable streams (each block appears once per stream it reaches — see chaincache's
-     * {@code CanonicalChainServiceImpl}). Buffers text frames until {@code last=true}: the JDK
-     * {@link WebSocket.Listener} contract may deliver one logical message across multiple
-     * {@code onText} calls.
+     * One WebSocket connection per chain, subscribing to the unified lifecycle-v2 stream.
+     * Buffers text frames until {@code last=true}: the JDK {@link WebSocket.Listener} contract may
+     * deliver one logical message across multiple {@code onText} calls.
      */
     final class ChainSubscription implements WebSocket.Listener {
 
@@ -322,16 +353,10 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
         private final String durabilityDomainId;
         private final StringBuilder buffer = new StringBuilder();
         private final AtomicLong requestIdSeq = new AtomicLong(1);
-        /** Our own outgoing JSON-RPC request id -> which stream we asked to subscribe to. */
-        private final Map<Long, FinalityLevel> pendingSubscribeRequests = new ConcurrentHashMap<>();
-        /** chaincache's local subscription id (returned in the subscribe result) -> which stream. */
-        private final Map<String, FinalityLevel> subscriptionLevels = new ConcurrentHashMap<>();
-        /** ACK request id -> cursor write awaiting a successful JSON-RPC response. */
-        private final Map<Long, PendingAck> pendingAckRequests = new ConcurrentHashMap<>();
-        /** At most one cursor write may be in flight per stream. */
-        private final Map<FinalityLevel, Long> pendingAckByStream = new ConcurrentHashMap<>();
-        /** Notifications already received for a stream whose preceding ACK is still in flight. */
-        private final Map<FinalityLevel, java.util.Deque<QueuedEvent>> queuedEvents = new ConcurrentHashMap<>();
+        private volatile Long pendingLifecycleSubscribeRequest;
+        private volatile String lifecycleSubscriptionId;
+        private volatile Long pendingLifecycleAckRequest;
+        private final java.util.Deque<QueuedEvent> queuedLifecycleEvents = new java.util.ArrayDeque<>();
         private volatile WebSocket webSocket;
         private volatile boolean closed = false;
 
@@ -368,34 +393,23 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
             if (activeByChain.get(chainId) == this) {
                 connectedGauge(chainId).set(false);
             }
-            // PROVISIONAL matters as much as SAFE/FINALIZED here, not just extra volume: chaincache
-            // only ever appends a RETRACTION to a stream the orphaned block had actually reached
-            // (CanonicalChainServiceImpl.appendRetraction always writes PROVISIONAL, and additionally
-            // SAFE only if the block got that far — never both unconditionally). A shallow reorg of a
-            // still-PROVISIONAL block — the common case for a chain that hasn't yet accumulated
-            // safeConfirmations of depth — would otherwise never reach this subscriber at all: proven
-            // live by an anvil_reorg drill against this exact code path, where a 3-block reorg of
-            // not-yet-SAFE blocks produced zero durable events on the SAFE/FINALIZED-only subscription
-            // this used to be.
-            subscribe(webSocket, FinalityLevel.PROVISIONAL);
-            subscribe(webSocket, FinalityLevel.SAFE);
-            subscribe(webSocket, FinalityLevel.FINALIZED);
+            subscribeLifecycle(webSocket);
             webSocket.request(1);
         }
 
-        private void subscribe(WebSocket webSocket, FinalityLevel level) {
+        private void subscribeLifecycle(WebSocket webSocket) {
             long requestId = requestIdSeq.getAndIncrement();
-            pendingSubscribeRequests.put(requestId, level);
+            pendingLifecycleSubscribeRequest = requestId;
             Map<String, Object> params = Map.of(
                     "consumerId", consumerId,
-                    "stream", level.name());
+                    "startBlock", lifecycleProcessor.earliestDeploymentBlock(chainId));
             Map<String, Object> request = Map.of(
                     "jsonrpc", "2.0",
                     "id", requestId,
-                    "method", "chaincache_subscribeDurable",
+                    "method", "chaincache_subscribeLifecycle",
                     "params", List.of(params));
-            sendText(webSocket, objectMapper.writeValueAsString(request), "subscribe " + level);
-            scheduleResponseDeadline(webSocket, requestId, true, subscribeResponseTimeoutMs);
+            sendText(webSocket, objectMapper.writeValueAsString(request), "subscribe lifecycle");
+            scheduleResponseDeadline(webSocket, requestId, true);
         }
 
         @Override
@@ -441,47 +455,37 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
             }
             if (node.hasNonNull("id")) {
                 long requestId = node.path("id").asLong();
-                FinalityLevel level = pendingSubscribeRequests.get(requestId);
-                if (level != null) {
+                if (pendingLifecycleSubscribeRequest != null
+                        && pendingLifecycleSubscribeRequest.longValue() == requestId) {
                     JsonNode result = node.get("result");
                     if (result == null || !result.isObject()) {
-                        throw new IllegalArgumentException("Subscribe response has no result object");
+                        throw new IllegalArgumentException("Lifecycle subscribe response has no result object");
                     }
-                    String localSubscriptionId = requiredText(result, "subscription");
-                    String returnedStream = requiredText(result, "stream");
-                    if (!level.name().equals(returnedStream)) {
-                        throw new IllegalArgumentException("Subscribe response stream does not match request");
+                    String subscriptionId = requiredText(result, "subscription");
+                    if (!consumerId.equals(requiredText(result, "consumerId"))
+                            || !"2".equals(requiredText(result, "schemaVersion"))
+                            || !durabilityDomainId.equals(requiredText(result, "durabilityDomainId"))
+                            || !remoteChainKey.equals(requiredText(result, "chainKey"))) {
+                        throw new IllegalArgumentException("Lifecycle subscribe response identity mismatch");
                     }
-                    JsonNode returnedConsumer = result.get("consumerId");
-                    if (returnedConsumer != null
-                            && (!returnedConsumer.isTextual() || !consumerId.equals(returnedConsumer.asText()))) {
-                        throw new IllegalArgumentException("Subscribe response consumerId does not match request");
-                    }
-                    FinalityLevel prior = subscriptionLevels.putIfAbsent(localSubscriptionId, level);
-                    if (prior != null && prior != level) {
-                        throw new IllegalArgumentException("Subscription id was reused for another stream");
-                    }
-                    pendingSubscribeRequests.remove(requestId);
-                    if (pendingSubscribeRequests.isEmpty() && subscriptionLevels.size() == 3
-                            && activeByChain.get(chainId) == this) {
+                    lifecycleSubscriptionId = subscriptionId;
+                    pendingLifecycleSubscribeRequest = null;
+                    if (activeByChain.get(chainId) == this) {
                         connectedGauge(chainId).set(true);
                     }
                     return;
                 }
-                PendingAck ack = pendingAckRequests.remove(requestId);
-                if (ack != null) {
+                if (pendingLifecycleAckRequest != null && pendingLifecycleAckRequest.longValue() == requestId) {
                     JsonNode result = node.get("result");
                     if (result == null || !result.isBoolean() || !result.asBoolean()) {
-                        throw new IllegalArgumentException("ACK response did not confirm cursor persistence");
+                        throw new IllegalArgumentException("Lifecycle ACK did not confirm cursor persistence");
                     }
-                    if (!pendingAckByStream.remove(ack.level(), requestId)) {
-                        throw new IllegalStateException("ACK response does not match the in-flight stream cursor");
-                    }
-                    java.util.Deque<QueuedEvent> queue = queuedEvents.get(ack.level());
-                    QueuedEvent next = queue == null ? null : queue.pollFirst();
+                    pendingLifecycleAckRequest = null;
+                    QueuedEvent next = queuedLifecycleEvents.pollFirst();
                     if (next != null) {
-                        handleEvent(webSocket, next.subscriptionId(), ack.level(), next.event());
+                        handleLifecycleEvent(webSocket, next.subscriptionId(), next.event());
                     }
+                    return;
                 }
                 return;
             }
@@ -495,117 +499,63 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
             }
             JsonNode params = node.path("params");
             String localSubscriptionId = params.path("subscription").asText(null);
-            FinalityLevel level = subscriptionLevels.get(localSubscriptionId);
-            if (level == null) {
-                throw new IllegalArgumentException("Durable event references an unknown subscription");
+            if (!java.util.Objects.equals(lifecycleSubscriptionId, localSubscriptionId)) {
+                throw new IllegalArgumentException("Lifecycle event references an unknown subscription");
             }
             JsonNode event = params.path("result");
-            if (pendingAckByStream.containsKey(level)) {
-                java.util.Deque<QueuedEvent> queue = queuedEvents.computeIfAbsent(
-                        level, ignored -> new java.util.ArrayDeque<>());
-                if (queue.size() >= 1_024) {
-                    throw new IllegalStateException("Durable event queue exceeded the per-stream safety limit");
+            if (pendingLifecycleAckRequest != null) {
+                if (queuedLifecycleEvents.size() >= 1_024) {
+                    throw new IllegalStateException("Lifecycle event queue exceeded the safety limit");
                 }
-                queue.addLast(new QueuedEvent(localSubscriptionId, event.deepCopy()));
-                return;
+                queuedLifecycleEvents.addLast(new QueuedEvent(localSubscriptionId, event.deepCopy()));
+            } else {
+                handleLifecycleEvent(webSocket, localSubscriptionId, event);
             }
-            handleEvent(webSocket, localSubscriptionId, level, event);
         }
 
-        private void handleEvent(WebSocket webSocket, String subscriptionId, FinalityLevel level, JsonNode event) {
-            if (!event.isObject()) {
-                throw new IllegalArgumentException("Durable event result must be an object");
-            }
-            JsonNode sequenceNode = event.get("sequence");
-            if (sequenceNode == null || !sequenceNode.isIntegralNumber()
-                    || !sequenceNode.canConvertToLong() || sequenceNode.asLong() < 0) {
-                throw new IllegalArgumentException("Durable event sequence must be a non-negative integer");
-            }
-            String eventStream = event.path("stream").asText(null);
-            if (!level.name().equals(eventStream)) {
-                throw new IllegalArgumentException("Durable event stream does not match its subscription");
-            }
-            String kind = event.path("kind").asText(null);
-            long sequence = sequenceNode.asLong();
-
-            Counter.builder("registerwerk_chaincache_stream_events_total")
-                    .tags("chain", chainId.toString(), "stream", level.name(), "kind", String.valueOf(kind))
-                    .register(meterRegistry)
-                    .increment();
-            lastEventGauge(chainId).set(Instant.now().getEpochSecond());
-
-            switch (String.valueOf(kind)) {
-                case "REORG" -> handleReorg(event);
-                case "RETRACTION" -> {
-                    long blockNumber = requiredNonNegativeLong(event, "blockNumber");
-                    requiredText(event, "retractsEventId");
-                    handleRetraction(event, blockNumber);
-                }
-                case "BLOCK" -> blockFinalityFeed.recordObservation(
-                        chainId,
-                        requiredNonNegativeLong(event, "blockNumber"),
-                        requiredText(event, "blockHash"),
-                        level);
-                case "LOG" -> {
-                    // Registerwerk's finality ledger is block-scoped. LOG remains a deliberate
-                    // no-op, but it is a known durable kind and therefore safe to acknowledge.
-                }
-                default -> throw new IllegalArgumentException("Unsupported durable event kind: " + kind);
-            }
-            acknowledge(webSocket, subscriptionId, level, sequence);
-        }
-
-        private void handleReorg(JsonNode event) {
-            JsonNode reorg = event.path("reorg");
-            if (reorg.isMissingNode() || reorg.isNull() || !reorg.isObject()) {
-                throw new IllegalArgumentException("REORG durable event has no typed reorg envelope");
-            }
-            String schemaVersion = requiredText(reorg, "schemaVersion");
-            String reorgId = requiredText(reorg, "reorgId");
-            String envelopeChainKey = requiredText(reorg.path("chainKey"), "value");
-            if (!remoteChainKey.equals(envelopeChainKey)) {
-                throw new IllegalArgumentException("REORG envelope chainKey does not match subscribed remote chain");
-            }
-            ReorgObservation.ReorgSeverity severity = ReorgObservation.ReorgSeverity.valueOf(
-                    requiredText(reorg, "severity"));
-            ReorgObservation.BlockReference commonAncestor = reorg.path("commonAncestor").isNull()
-                    || reorg.path("commonAncestor").isMissingNode()
-                    ? null
-                    : blockReference(reorg.path("commonAncestor"));
-            List<ReorgObservation.BlockReference> orphaned = blockReferences(reorg.path("orphanedLineage"));
-            List<ReorgObservation.BlockReference> replacements = blockReferences(reorg.path("replacementLineage"));
-            Instant observedAt = Instant.parse(requiredText(reorg, "observedAt"));
-
-            ReorgObservation observation = new ReorgObservation(
-                    schemaVersion, reorgId, severity, commonAncestor, orphaned, replacements, observedAt);
+        private void handleLifecycleEvent(WebSocket webSocket, String subscriptionId, JsonNode event) {
             try {
-                reorgCoordinator.apply(chainId, observation);
-            } catch (TypedReorgCompensationException failedIndexerCompensation) {
-                // The coordinator transaction rolled every indexer mutation back. Persist the
-                // incident in a fresh finality transaction, then ACK without a poison hot-loop.
-                blockFinalityFeed.recordReorg(chainId, observation, 0,
-                        QuarantineTrigger.INDEXER_COMPENSATION_FAILED);
+                lifecycleProcessor.process(chainId, consumerId, remoteChainKey, durabilityDomainId, event);
+            } catch (RuntimeException failure) {
+                try {
+                    lifecycleFailureRecorder.record(chainId, consumerId, remoteChainKey,
+                            durabilityDomainId, event, failure);
+                } catch (RuntimeException journalFailure) {
+                    failure.addSuppressed(journalFailure);
+                }
+                throw failure;
             }
+            String kind = event.path("kind").asText("UNKNOWN");
+            String finality = event.path("finality").asText("NONE");
+            Counter.builder("registerwerk_chaincache_stream_events_total")
+                    .tags("chain", chainId.toString(), "stream", "LIFECYCLE",
+                            "finality", finality, "kind", kind)
+                    .register(meterRegistry).increment();
+            lastEventGauge(chainId).set(Instant.now().getEpochSecond());
+            JsonNode sequence = event.get("sequence");
+            if (sequence == null || !sequence.isIntegralNumber() || !sequence.canConvertToLong()
+                    || sequence.asLong() < 0) {
+                throw new IllegalArgumentException("Lifecycle sequence must be a non-negative integer");
+            }
+            acknowledgeLifecycle(webSocket, subscriptionId, sequence.asLong());
         }
 
-        private static List<ReorgObservation.BlockReference> blockReferences(JsonNode array) {
-            if (!array.isArray()) {
-                throw new IllegalArgumentException("Reorg lineage must be an array");
+        private void acknowledgeLifecycle(WebSocket webSocket, String subscriptionId, long sequence) {
+            long requestId = requestIdSeq.getAndIncrement();
+            if (pendingLifecycleAckRequest != null) {
+                throw new IllegalStateException("Attempted a second lifecycle ACK before confirmation");
             }
-            java.util.ArrayList<ReorgObservation.BlockReference> blocks = new java.util.ArrayList<>();
-            array.forEach(node -> blocks.add(blockReference(node)));
-            return List.copyOf(blocks);
-        }
-
-        private static ReorgObservation.BlockReference blockReference(JsonNode node) {
-            if (!node.isObject()) {
-                throw new IllegalArgumentException("Malformed reorg block reference");
-            }
-            return new ReorgObservation.BlockReference(
-                    requiredNonNegativeLong(node, "blockNumber"),
-                    requiredText(node, "blockHash"),
-                    requiredText(node, "parentHash"),
-                    FinalityLevel.valueOf(requiredText(node, "finality")));
+            pendingLifecycleAckRequest = requestId;
+            Map<String, Object> request = Map.of(
+                    "jsonrpc", "2.0",
+                    "id", requestId,
+                    "method", "chaincache_ackLifecycle",
+                    "params", List.of(Map.of(
+                            "subscription", subscriptionId,
+                            "consumerId", consumerId,
+                            "sequence", sequence)));
+            sendText(webSocket, objectMapper.writeValueAsString(request), "acknowledge lifecycle");
+            scheduleResponseDeadline(webSocket, requestId, false);
         }
 
         private static String requiredText(JsonNode node, String field) {
@@ -618,73 +568,6 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
                 throw new IllegalArgumentException("Missing required durable field: " + field);
             }
             return value;
-        }
-
-        private static long requiredNonNegativeLong(JsonNode node, String field) {
-            JsonNode value = node.get(field);
-            if (value == null || !value.isIntegralNumber() || !value.canConvertToLong() || value.asLong() < 0) {
-                throw new IllegalArgumentException("Durable event " + field + " must be a non-negative integer");
-            }
-            return value.asLong();
-        }
-
-        /**
-         * A RETRACTION event's top-level {@code blockHash} is the ORPHANED block's own hash, not
-         * a replacement — chaincache's {@code CanonicalChainServiceImpl.appendRetraction} puts the
-         * real correction (the common-ancestor height and the new tip's hash) in {@code payload},
-         * exactly matching {@link de.makibytes.registerwerk.finality.api.BlockFinalityFeed#recordRetraction}'s
-         * "everything at or after {@code forkBlockNumber} is orphaned" semantics — passing the
-         * orphaned block's own hash there (as this class used to) would have recorded the WRONG
-         * block as the replacement.
-         *
-         * <p>chaincache emits one RETRACTION event per orphaned block, plus a separate one per
-         * orphaned LOG event (distinguishable by {@code retractsEventId}: {@code "block:..."} vs
-         * {@code "log:..."}) — only the block-level ones matter here, since this feed tracks
-         * canonical block state, not individual logs; a log-level retraction is silently
-         * (correctly) skipped, still acknowledged so chaincache doesn't keep redelivering it.
-         */
-        private void handleRetraction(JsonNode event, long orphanedBlockNumber) {
-            String retractsEventId = event.path("retractsEventId").asText(null);
-            if (retractsEventId == null || !retractsEventId.startsWith("block:")) {
-                return;
-            }
-            JsonNode payload = event.path("payload");
-            // New Chaincache versions retain per-block/per-log RETRACTIONs for generic Ethereum
-            // filter consumers after emitting one typed REORG episode. Applying both is unsafe:
-            // a replayed height-range retraction could orphan the already-installed replacement.
-            if (payload.hasNonNull("reorgId") && !payload.path("reorgId").asText().isBlank()) {
-                return;
-            }
-            long commonAncestor = payload.path("commonAncestor").asLong(orphanedBlockNumber - 1);
-            // payload.replacementBlockHash is the reorg's new TIP hash, not necessarily the hash
-            // now sitting at commonAncestor+1 (they coincide only for a 1-block-deep reorg) —
-            // recordRetraction's contract wants specifically the latter ("the freshly-observed
-            // canonical hash AT forkBlockNumber"), which this event doesn't carry. Passing the tip
-            // hash here would misrecord it as the fork-height hash for any deeper reorg; null is
-            // the documented, honest "not available" case (see the interface javadoc) — the next
-            // BLOCK event chaincache pushes for that height (chaincache always re-announces the
-            // new canonical block after a retraction) supplies the real hash instead.
-            blockFinalityFeed.recordRetraction(chainId, commonAncestor + 1, null, 0);
-        }
-
-        private void acknowledge(WebSocket webSocket, String subscriptionId, FinalityLevel level, long sequence) {
-            long requestId = requestIdSeq.getAndIncrement();
-            if (pendingAckByStream.putIfAbsent(level, requestId) != null) {
-                throw new IllegalStateException("Attempted a second ACK before the preceding cursor was confirmed");
-            }
-            pendingAckRequests.put(requestId, new PendingAck(level, sequence));
-            Map<String, Object> params = Map.of(
-                    "subscription", subscriptionId,
-                    "consumerId", consumerId,
-                    "stream", level.name(),
-                    "sequence", sequence);
-            Map<String, Object> request = Map.of(
-                    "jsonrpc", "2.0",
-                    "id", requestId,
-                    "method", "chaincache_ack",
-                    "params", List.of(params));
-            sendText(webSocket, objectMapper.writeValueAsString(request), "acknowledge " + level);
-            scheduleResponseDeadline(webSocket, requestId, false, ackResponseTimeoutMs);
         }
 
         private void sendText(WebSocket webSocket, String payload, String operation) {
@@ -709,20 +592,18 @@ class ChaincacheDurableStreamManager implements ChaincacheStreamStatus {
             });
         }
 
-        private void scheduleResponseDeadline(WebSocket webSocket, long requestId, boolean subscribe,
-                long timeoutMs) {
+        private void scheduleResponseDeadline(WebSocket webSocket, long requestId, boolean subscribe) {
+            long timeoutMs = subscribe ? subscribeResponseTimeoutMs : ackResponseTimeoutMs;
             CompletableFuture.runAsync(() -> {
                 boolean stillPending = subscribe
-                        ? pendingSubscribeRequests.containsKey(requestId)
-                        : pendingAckRequests.containsKey(requestId);
+                        ? java.util.Objects.equals(pendingLifecycleSubscribeRequest, requestId)
+                        : java.util.Objects.equals(pendingLifecycleAckRequest, requestId);
                 if (stillPending) {
                     failStop(webSocket, new IllegalStateException(
                             (subscribe ? "Subscribe" : "ACK") + " response deadline exceeded"));
                 }
             }, CompletableFuture.delayedExecutor(timeoutMs, TimeUnit.MILLISECONDS));
         }
-
-        private record PendingAck(FinalityLevel level, long sequence) {}
 
         private record QueuedEvent(String subscriptionId, JsonNode event) {}
 

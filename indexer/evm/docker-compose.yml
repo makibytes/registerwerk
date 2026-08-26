@@ -19,14 +19,18 @@ services:
 
   # ── PostgreSQL for graph-node ──────────────────────────────────────────────
   graph-db:
-    image: postgres:17-alpine
+    # PostgreSQL 18 declares VOLUME /var/lib/postgresql (PGDATA now lives under
+    # .../18/docker), not .../data as on 17 and earlier — mounting a pre-18 volume at the
+    # old .../data path silently starts a fresh empty cluster. graph_pg18 (not graphdata)
+    # forces that to be visible on any deployment that hasn't migrated yet.
+    image: postgres:18.6-alpine
     environment:
       POSTGRES_DB: graph-node
       POSTGRES_USER: graph-node
       POSTGRES_PASSWORD: ${GRAPH_DB_PASSWORD:-changeme}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
-      - graphdata:/var/lib/postgresql/data
+      - graph_pg18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U graph-node"]
       interval: 5s
@@ -96,4 +100,4 @@ services:
 
 volumes:
   ipfsdata:
-  graphdata:
+  graph_pg18:

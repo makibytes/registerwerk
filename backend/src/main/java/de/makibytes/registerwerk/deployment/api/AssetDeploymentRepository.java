@@ -33,6 +33,11 @@ public interface AssetDeploymentRepository extends JpaRepository<AssetDeployment
 
     Optional<AssetDeployment> findFirstByContractAddressIgnoreCase(String contractAddress);
 
+    /** Resolves an address only inside its concrete network; CREATE2 and test deployments can
+     *  legitimately reuse the same address on several EVM chains. */
+    Optional<AssetDeployment> findFirstByChainConfigIdAndContractAddressIgnoreCase(
+            UUID chainConfigId, String contractAddress);
+
     /** Deployments awaiting confirmation-depth / L1-acceptance re-verification. */
     List<AssetDeployment> findByDeploymentStatusAndDeployedByTxIsNotNull(AssetDeployment.DeploymentStatus status);
 }

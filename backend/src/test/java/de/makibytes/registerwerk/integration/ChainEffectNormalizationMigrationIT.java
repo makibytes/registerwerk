@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 class ChainEffectNormalizationMigrationIT {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @Test
     @DisplayName("case-normalization collision fails before rewriting with an actionable diagnosis")

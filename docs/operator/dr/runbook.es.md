@@ -41,11 +41,11 @@ verificarse externamente:
 
 ### 2a. Restaurar desde la copia de seguridad de wal-g (ruta principal) { #2a-restore-from-wal-g-backup-primary-path }
 ```bash
-# 1. Provision a new Postgres 17 instance
-docker run -d --name postgres-restore postgres:17-alpine
+# 1. Provision a new Postgres 18.6 instance
+docker run -d --name postgres-restore postgres:18.6-alpine
 
 # 2. Restore base backup
-docker exec postgres-restore wal-g backup-fetch /var/lib/postgresql/data LATEST \
+docker exec postgres-restore wal-g backup-fetch /var/lib/postgresql LATEST \
   --walg-s3-prefix s3://registerwerk-backups/wal-g
 
 # 3. Replay WAL to target time
@@ -82,11 +82,11 @@ cosign verify ghcr.io/makibytes/registerwerk/backend:VERSION
 docker run -d \
   --env-file /etc/registerwerk/prod.env \
   -e REGISTERWERK_PRODUCTION_MODE=true \
-  -p 127.0.0.1:8080:8080 \
+  -p 127.0.0.1:48080:8080 \
   ghcr.io/makibytes/registerwerk/backend:VERSION
 
 # Verify health
-curl http://localhost:8080/actuator/health | jq .status
+curl http://localhost:48080/actuator/health | jq .status
 ```
 
 ---
@@ -95,7 +95,7 @@ curl http://localhost:8080/actuator/health | jq .status
 ```bash
 # Trigger audit chain verification via actuator
 curl -H "Authorization: Bearer $ADMIN_TOKEN" \
-  http://localhost:8080/actuator/health/auditChainVerificationService | jq .
+  http://localhost:48080/actuator/health/auditChainVerificationService | jq .
 
 # If BROKEN: do NOT resume operations. Escalate to DORA CRITICAL incident.
 # The hash chain violation must be investigated before the registry resumes.
@@ -125,7 +125,7 @@ aws kms decrypt \
 ## 6. Restauración de Kong / la puerta de enlace { #6-kong-gateway-restore }
 ```bash
 deck gateway sync gateway/kong.yml \
-  --kong-addr http://localhost:8001
+  --kong-addr http://localhost:48001
 ```
 
 ---

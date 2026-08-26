@@ -16,11 +16,11 @@ the (deliberately minimal) configuration it takes.
 chaincache's deployment model is **one Spring Boot process per chain**, not one instance serving
 every chain — `chaincache.runtime.allow-multiple-chains: false` is its own default, and it refuses
 to start with zero or more than one configured chain. "Multi-chain" means N workloads, each its own
-deployable, each fronting exactly one chain. Shared infrastructure — PostgreSQL, monitoring,
+deployable, each fronting exactly one chain. Shared infrastructure — PostgreSQL and monitoring —
 ingress — is designed to be shared *across* those workloads: every row a workload writes is
 chain-scoped, so two workloads can point at one Postgres instance without colliding. The demo stack
 runs this for real: `chaincache-sepolia` and `chaincache-base` are two independent containers
-sharing one `chaincache-postgres`.
+sharing `chaincache-postgres`.
 
 This changes what "connecting Registerwerk to chaincache" means at the network level: there is no
 single chaincache hostname to point every chain's node at. Each `RpcNode` of kind `CHAINCACHE`
@@ -28,12 +28,10 @@ points at the specific workload that serves *its* chain — `managementUrl` is t
 host:port, and `remoteChainKey` is the chain key that workload was configured with (almost always
 the only chain key it knows, since each workload serves one chain).
 
-Kafka is explicitly **not** part of this integration surface. chaincache has its own optional Kafka
-fan-out for other downstream consumers (`chaincache.kafka.enabled`), but Registerwerk never
-consumes it — the two protocols Registerwerk actually speaks to chaincache are the JSON-RPC/web3j
-proxy (`/{chain}/rpc`) and chaincache's own durable-event WebSocket (`/{chain}/ws`). If you see
-`chaincache.kafka.enabled: true` on a workload, that's serving some other consumer, not
-Registerwerk.
+The PostgreSQL durable event log is Chaincache's sole authoritative delivery source, exposed
+through the acknowledged lifecycle WebSocket. Registerwerk uses the JSON-RPC/web3j proxy
+(`/{chain}/rpc`) and that WebSocket (`/{chain}/ws`); there is no second, broker-mediated path whose
+schema, ordering, or recovery behavior could diverge.
 
 ## Why this is a node kind, not a config file
 
@@ -109,8 +107,8 @@ case (`reason="unauthorized"`) from `chain_missing` (reachable, doesn't serve th
 Once detected, `GET /api/capabilities` is re-probed on the same schedule as kind re-detection, and
 its response is stored as the node's `capabilities`: finality model, safe/finalized confirmation
 depths, which RPC namespaces are configured, whether `debug_traceBlockByHash` is actually available
-upstream, durable-stream availability, a stable `durabilityDomainId`, and that workload's own Kafka
-relay posture. The domain ID identifies the backing PostgreSQL outbox/cursor database; Registerwerk
+upstream, durable-stream availability, and a stable `durabilityDomainId`. The domain ID identifies
+the backing PostgreSQL outbox/cursor database; Registerwerk
 refuses automatic failover unless every enabled candidate for a chain reports the same nonblank
 value, because an equal chain key does not make two independent event stores cursor-compatible. A confirmed
 match additionally folds in `GET /api/chains`' per-workload upstream provider counts
@@ -125,20 +123,19 @@ capability gap is deliberate and visible, not hidden.
 
 When a chain's `finalitySource` is `CHAINCACHE`, `blockchain.internal.ChaincacheDurableStreamManager`
 opens a persistent WebSocket to `<managementUrl>/<remoteChainKey>/ws` and issues
-`chaincache_subscribeDurable` with a `consumerId` of the form
+`chaincache_subscribeLifecycle` with a `consumerId` of the form
 `registerwerk:<instanceId>:<remoteChainKey>` — stable across restarts of the same Registerwerk
 deployment. Every replica deliberately uses that same logical ID: chaincache's cross-replica,
 PostgreSQL-backed lease elects exactly one active connection while the others retry as warm
 standbys. This preserves one cursor through rolling updates without splitting the stream or
 deriving durable identity from an ephemeral pod name. **There is no separate resume call to make**:
 chaincache persists each
-consumer's cursor server-side (`durable_consumer_cursor`, keyed by `consumerId` + stream) and
-resumes it automatically the moment that same `consumerId` subscribes again — `chaincache_resume`
-is a dispatch alias for the same `subscribeDurable` call, not a distinct step Registerwerk has to
-issue itself.
+consumer's unified lifecycle cursor server-side (`durable_consumer_cursor`, keyed by
+`consumerId`) and resumes it automatically when that identity subscribes again.
 
-Each durable event carries a monotonic `sequence`, a deterministic event ID, and a `kind`. Normal
-progress is `BLOCK`; a fork first produces one typed `REORG` event whose `reorg` object is a
+Each durable event carries a chain-local sequence, deterministic event ID, finality stream, and
+kind. `BLOCK`, `LOG`, finality promotions, reorgs, and retractions share one delivery order and one
+ACK cursor. A fork first produces one typed `REORG` event whose `reorg` object is a
 versioned V1 envelope: occurrence ID, common ancestor, ordered orphaned/replacement lineages,
 severity (`ROUTINE`, `UNRESOLVED_ANCESTRY`, or `FINALITY_VIOLATION`), and observation time. Legacy
 per-event `RETRACTION`s follow for compatibility. Registerwerk applies a typed routine episode as
@@ -159,18 +156,64 @@ there (404, 5xx, timeout, 401) falls back to RPC self-probing rather than manufa
 reorg, so chaincache being temporarily unreachable degrades gracefully instead of breaking finality
 tracking outright.
 
-## Minimal configuration
+## One-command demo deployment
 
-The demo stack runs two chaincache workloads side by side with a plain direct-RPC public node, so
-the operator node list shows a real comparison out of the box: `chaincache-sepolia` fronts the local
+Chaincache stays an independently versioned product and image. Registerwerk owns only the local
+orchestration: there is no `../chaincache` build context and no second Compose project to start.
+
+1. Make the desired image available to Docker by pulling it, loading an image archive, or building
+   it in the Chaincache repository.
+2. Set its exact tag as `CHAINCACHE_IMAGE` and set `CHAINCACHE_ENABLED=true` in Registerwerk's
+   `.env`. Keep `chaincache-true` in `COMPOSE_PROFILES`; the supplied example files already do.
+3. Run the normal `docker compose up -d` from Registerwerk.
+
+```dotenv
+COMPOSE_PROFILES=docs,chaincache-true
+CHAINCACHE_ENABLED=true
+CHAINCACHE_IMAGE=registerwerk-chaincache:latest
+CHAINCACHE_PULL_POLICY=missing
+```
+
+```bash
+docker compose up -d
+docker compose ps chaincache-postgres chaincache-sepolia chaincache-base
+```
+
+Setting `CHAINCACHE_ENABLED=false` leaves those three services out of a fresh Compose deployment.
+When switching off an already-running showcase, stop them once before the normal update:
+
+```bash
+docker compose stop chaincache-sepolia chaincache-base chaincache-postgres
+docker compose up -d
+```
+
+The backend has no `depends_on` edge to them, so a slow or unhealthy optional workload cannot hold
+up Registerwerk. Demo seeding follows the same flag: it does not create unreachable showcase nodes
+while disabled and disables previously seeded showcase nodes after an opt-out.
+
+Docker Compose has profiles but no native Boolean condition on a service. The `chaincache-true`
+profile bridge is how `CHAINCACHE_ENABLED=true` still works with an ordinary `docker compose up -d`
+instead of requiring a second CLI option.
+
+## Workload configuration
+
+When enabled, the demo stack runs two chaincache workloads side by side with plain direct-RPC nodes,
+so the operator node list shows a real comparison: `chaincache-sepolia` fronts the local
 anvil devnet (`DEPTH_BASED`, safe=3/finalized=6), and `chaincache-base` fronts real public Base
 Sepolia RPC providers (`TAG_BASED`, `required-provider-agreement: 2`). The entire chaincache-side
 configuration for the local devnet workload is:
 
+!!! warning "A chain id is not a chain identity"
+    The local Anvil instance reports `11155111` for demo-client compatibility, but it does not
+    share public Sepolia's genesis history. The demo therefore seeds only Anvil and its Chaincache
+    facade into that Registerwerk node pool. Never add a public Sepolia fallback to the same pool:
+    routing, finality comparison and reorg compensation are valid only among replicas of the same
+    ledger.
+
 ```yaml
 # chaincache-sepolia's own compose service
 environment:
-  SPRING_PROFILES_ACTIVE: demo
+  SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
   CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_PROVIDER: anvil
   CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_HTTP: http://anvil:8545
   CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_WS: ws://anvil:8545

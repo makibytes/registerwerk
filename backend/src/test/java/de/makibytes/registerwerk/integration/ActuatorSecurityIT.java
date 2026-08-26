@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ActuatorSecurityIT {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @DynamicPropertySource
     static void overrideProps(DynamicPropertyRegistry registry) {

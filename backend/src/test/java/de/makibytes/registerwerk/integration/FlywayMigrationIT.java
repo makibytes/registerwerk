@@ -27,7 +27,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class FlywayMigrationIT {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @DynamicPropertySource
     static void overrideProps(DynamicPropertyRegistry registry) {

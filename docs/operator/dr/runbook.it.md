@@ -40,11 +40,11 @@ autorità, termine, modulo e canale indicati di seguito costituiscono un element
 
 ### 2a. Ripristino dal backup wal-g (percorso primario)
 ```bash
-# 1. Effettuare il provisioning di una nuova istanza Postgres 17
-docker run -d --name postgres-restore postgres:17-alpine
+# 1. Effettuare il provisioning di una nuova istanza Postgres 18.6
+docker run -d --name postgres-restore postgres:18.6-alpine
 
 # 2. Ripristinare il backup di base
-docker exec postgres-restore wal-g backup-fetch /var/lib/postgresql/data LATEST \
+docker exec postgres-restore wal-g backup-fetch /var/lib/postgresql LATEST \
   --walg-s3-prefix s3://registerwerk-backups/wal-g
 
 # 3. Riapplicare i WAL fino al momento di destinazione
@@ -81,11 +81,11 @@ cosign verify ghcr.io/makibytes/registerwerk/backend:VERSION
 docker run -d \
   --env-file /etc/registerwerk/prod.env \
   -e REGISTERWERK_PRODUCTION_MODE=true \
-  -p 127.0.0.1:8080:8080 \
+  -p 127.0.0.1:48080:8080 \
   ghcr.io/makibytes/registerwerk/backend:VERSION
 
 # Verificare lo stato di salute
-curl http://localhost:8080/actuator/health | jq .status
+curl http://localhost:48080/actuator/health | jq .status
 ```
 
 ---
@@ -94,7 +94,7 @@ curl http://localhost:8080/actuator/health | jq .status
 ```bash
 # Attivare la verifica della catena di controllo tramite l'actuator
 curl -H "Authorization: Bearer $ADMIN_TOKEN" \
-  http://localhost:8080/actuator/health/auditChainVerificationService | jq .
+  http://localhost:48080/actuator/health/auditChainVerificationService | jq .
 
 # Se BROKEN: non riprendere le operazioni. Escalare a incidente DORA CRITICAL.
 # La violazione della catena di hash deve essere indagata prima che il registro riprenda l'attività.
@@ -124,7 +124,7 @@ aws kms decrypt \
 ## 6. Ripristino di Kong/Gateway
 ```bash
 deck gateway sync gateway/kong.yml \
-  --kong-addr http://localhost:8001
+  --kong-addr http://localhost:48001
 ```
 
 ---

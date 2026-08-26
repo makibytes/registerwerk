@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AuthApiIT {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     private static final String ADMIN_EMAIL = "admin@test.local";
     private static final String ADMIN_PASSWORD = "Sup3rSecret!";

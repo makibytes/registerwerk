@@ -52,7 +52,7 @@ class KycDocumentApiIT {
     private static final String TEST_JWT_SECRET = "integration-test-jwt-secret-32-bytes!!";
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @DynamicPropertySource
     @SuppressWarnings("unused")

@@ -35,7 +35,7 @@ services:
   # ─── Disposable local EVM ─────────────────────────────────────────────────
   # The demo's lending screens require real contract bytecode and live balances; seeded DB
   # addresses alone are intentionally rejected by the backend's on-chain verification.
-  # Port 8545 remains private to the Compose network. The host uses 18545 by default so this
+  # Port 8545 remains private to the Compose network. The host uses 48545 by default so this
   # disposable node cannot collide with a real node listening on the conventional port.
   anvil:
     image: ghcr.io/foundry-rs/foundry:v1.7.1
@@ -61,7 +61,9 @@ services:
       # nothing for the SAFE/FINALIZED ladder to promote through), without ever fighting a live
       # broadcast for it.
     ports:
-      - "${ANVIL_BIND_ADDR:-0.0.0.0}:${ANVIL_HOST_PORT:-18545}:8545"
+      # Keep Anvil's unlocked development accounts and admin RPC loopback-only by default.
+      # Set ANVIL_BIND_ADDR=0.0.0.0 only when a remote demo client genuinely needs it.
+      - "${ANVIL_BIND_ADDR:-127.0.0.1}:${ANVIL_HOST_PORT:-48545}:8545"
     volumes:
       - anvil_state:/data
     healthcheck:
@@ -75,18 +77,20 @@ services:
     restart: unless-stopped
 
   # ─── chaincache (the showcase) ─────────────────────────────────────────────
-  # Part of the default stack (`docker compose up` starts these) — per the portfolio plan's
-  # product decision: chaincache default-on, side-by-side with direct-node chains, so the
-  # operator node list shows a real A/B capability comparison out of the box rather than
-  # something only reachable via an opt-in profile.
+  # Opt-in through CHAINCACHE_ENABLED=true in .env. Compose has no conditional-service boolean,
+  # so the example env files keep profile `chaincache-true` active while this value selects
+  # whether the services belong to that active profile. This preserves the expected one-command
+  # flow (`docker compose up -d`) without making Chaincache a hard dependency of Registerwerk.
   #
   # chaincache's own architecture is one Spring Boot WORKLOAD per chain — a deployment with zero
   # or more than one configured chain refuses to start (see ChainRuntimeRegistry). This stack runs
   # TWO workloads, sharing one Postgres instance (chain-scoped rows, exactly as the GKE Helm chart
   # at chaincache/deploy/helm/chaincache shares one Cloud SQL instance across per-chain releases):
   #   - chaincache-sepolia fronts this stack's own anvil devnet as a CHAINCACHE-kind RpcNode on
-  #     ETHEREUM_SEPOLIA (DemoDataSeeder seeds it) — DEPTH_BASED finality, since anvil has no
-  #     safe/finalized tags of its own.
+  #     the demo's ETHEREUM_SEPOLIA slot (DemoDataSeeder seeds only Anvil-backed nodes for this
+  #     slot) — DEPTH_BASED finality, since anvil has no safe/finalized tags of its own. Never add
+  #     a real Sepolia endpoint to that node pool: the same chain id does not imply the same
+  #     genesis block, and finality/reorg comparison across those ledgers would be invalid.
   #   - chaincache-base fronts real public Base Sepolia RPC providers — TAG_BASED finality with
   #     real safe/finalized tags and required-provider-agreement: 2, demonstrating the capability
   #     an isolated local devnet structurally cannot (real reorgs, cross-provider agreement).
@@ -96,6 +100,7 @@ services:
   # above.
   chaincache-postgres:
     image: postgres:18.6-alpine
+    profiles: ["chaincache-${CHAINCACHE_ENABLED:-false}"]
     logging: *default-logging
     environment:
       POSTGRES_DB: chaincache
@@ -116,9 +121,9 @@ services:
     restart: unless-stopped
 
   chaincache-sepolia:
-    build:
-      context: ../chaincache
-    image: registerwerk-chaincache-demo:local
+    image: ${CHAINCACHE_IMAGE:-registerwerk-chaincache:latest}
+    pull_policy: ${CHAINCACHE_PULL_POLICY:-missing}
+    profiles: ["chaincache-${CHAINCACHE_ENABLED:-false}"]
     logging: *default-logging
     depends_on:
       chaincache-postgres:
@@ -129,9 +134,10 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
       SPRING_DATASOURCE_USERNAME: chaincache
       SPRING_DATASOURCE_PASSWORD: chaincache
-      # This stack's own anvil devnet (chain-id 11155111, impersonating Ethereum Sepolia for the
-      # local demo — see ETH_SEPOLIA_RPC below, still pointed straight at anvil as the untouched
-      # direct-RPC fallback) as this workload's sole upstream node, under the chain key
+      # This stack's own isolated anvil devnet (chain-id 11155111 for demo-client compatibility;
+      # it is not the public Sepolia ledger). Registerwerk seeds only this same Anvil instance as
+      # the direct-RPC fallback, so its finality domain never mixes different genesis histories.
+      # It is this workload's sole upstream node, under the chain key
       # "sepolia" — registerwerk's RpcNode.remoteChainKey for this connection must match.
       CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_PROVIDER: anvil
       CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_HTTP: http://anvil:8545
@@ -158,13 +164,12 @@ services:
       # never exposed on a published port — the exact same ClusterIP-only trust boundary the Helm
       # chart's values.yaml comment describes for this same setting.
       CHAINCACHE_AUTH_PROMETHEUS_PUBLIC: "true"
-      CHAINCACHE_KAFKA_ENABLED: "false"
       # Replicated-workload posture (also what the Helm chart configures) — exercised locally so
       # the demo matches production guidance. Postgres-backed cache warmup remains available.
       CHAINCACHE_CACHE_LOCAL_SNAPSHOT_ENABLED: "false"
       CHAINCACHE_REQUEST_LOCAL_STATS_ENABLED: "false"
     ports:
-      - "127.0.0.1:18090:8080"
+      - "${CHAINCACHE_BIND_ADDR:-127.0.0.1}:${CHAINCACHE_SEPOLIA_HOST_PORT:-48090}:8080"
     healthcheck:
       # /readiness (not the bare /health, and not /liveness — see chaincache's own Dockerfile
       # HEALTHCHECK, which correctly uses /liveness for container-restart purposes) is the
@@ -178,9 +183,9 @@ services:
     restart: unless-stopped
 
   chaincache-base:
-    build:
-      context: ../chaincache
-    image: registerwerk-chaincache-demo:local
+    image: ${CHAINCACHE_IMAGE:-registerwerk-chaincache:latest}
+    pull_policy: ${CHAINCACHE_PULL_POLICY:-missing}
+    profiles: ["chaincache-${CHAINCACHE_ENABLED:-false}"]
     logging: *default-logging
     depends_on:
       chaincache-postgres:
@@ -208,11 +213,10 @@ services:
       # never exposed on a published port — the exact same ClusterIP-only trust boundary the Helm
       # chart's values.yaml comment describes for this same setting.
       CHAINCACHE_AUTH_PROMETHEUS_PUBLIC: "true"
-      CHAINCACHE_KAFKA_ENABLED: "false"
       CHAINCACHE_CACHE_LOCAL_SNAPSHOT_ENABLED: "false"
       CHAINCACHE_REQUEST_LOCAL_STATS_ENABLED: "false"
     ports:
-      - "127.0.0.1:18091:8080"
+      - "${CHAINCACHE_BIND_ADDR:-127.0.0.1}:${CHAINCACHE_BASE_HOST_PORT:-48091}:8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health/readiness"]
       interval: 10s
@@ -316,10 +320,15 @@ services:
 
   # ─── Application Database ──────────────────────────────────────────────────
   postgres:
-    # Patch-pinned rather than tracking the floating `17-alpine`. Staying on 17.x is deliberate:
-    # moving to 18 requires a pg_upgrade or dump/restore of the pgdata volume, which is a separate
-    # deliberate migration, not something a `docker compose pull` should ever do implicitly.
-    image: postgres:17.10-alpine
+    # Patch-pinned, not tracking a floating tag. PostgreSQL 18 moved PGDATA under
+    # /var/lib/postgresql/<major>/docker and declares VOLUME /var/lib/postgresql (not
+    # .../data as on 17 and earlier) — mounting a pre-18 volume at the old .../data path under
+    # this image silently starts a fresh empty cluster instead of failing loudly, which is exactly
+    # why the named volume below was renamed pg18data rather than kept as pgdata: the rename
+    # forces a visible re-init on any deployment that hasn't migrated yet, instead of a silent one.
+    # A pgdata volume from a pre-18 deployment must be pg_dump'd and restored into this new volume
+    # as its own deliberate migration step — see docs/operator/installation/docker.md.
+    image: postgres:18.6-alpine
     logging: *default-logging
     environment:
       POSTGRES_DB: registerwerk
@@ -328,9 +337,9 @@ services:
       DB_USER: ${DB_USER:-registerwerk}
       DB_PASSWORD: ${DB_PASSWORD:-registerwerk}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pg18data:/var/lib/postgresql
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-45432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-registerwerk} -d registerwerk"]
       interval: 10s
@@ -355,7 +364,7 @@ services:
   # KYC/report buckets need separate off-host replication; this volume is local-Docker-host
   # only, same as the Helm path's PVC-backed approach before it reaches S3).
   postgres-backup:
-    image: postgres:17.10-alpine
+    image: postgres:18.6-alpine
     logging: *default-logging
     environment:
       PGHOST: postgres
@@ -452,10 +461,11 @@ services:
       # Must match the chaincache service's CHAINCACHE_JWT_SECRET below — a shared secret between
       # Registerwerk and every chaincache workload it talks to. See ChaincacheTokenFactory.
       CHAINCACHE_JWT_SECRET: ${CHAINCACHE_JWT_SECRET:-registerwerk-chaincache-demo-secret-change-me}
+      REGISTERWERK_CHAINCACHE_ENABLED: ${CHAINCACHE_ENABLED:-false}
       ETH_MAINNET_RPC: ${ETH_MAINNET_RPC}
       ETH_SEPOLIA_RPC: ${ETH_SEPOLIA_RPC:-http://anvil:8545}
       LENDING_LOCAL_DEMO_BACKEND_RPC_URL: http://anvil:8545
-      LENDING_LOCAL_DEMO_PUBLIC_RPC_URL: ${ANVIL_PUBLIC_RPC_URL:-http://localhost:18545}
+      LENDING_LOCAL_DEMO_PUBLIC_RPC_URL: ${ANVIL_PUBLIC_RPC_URL:-http://localhost:48545}
       POLYGON_MAINNET_RPC: ${POLYGON_MAINNET_RPC}
       POLYGON_AMOY_RPC: ${POLYGON_AMOY_RPC}
       BASE_MAINNET_RPC: ${BASE_MAINNET_RPC}
@@ -492,8 +502,8 @@ services:
       # allow-list derived from the deployable frontend URLs so a remote demo host (for example
       # nibbler.local) does not get an "Invalid CORS request" 403 before login credentials are
       # even evaluated. An explicit list remains available for separate-origin deployments.
-      REGISTERWERK_CORS_ALLOWED_ORIGINS: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:-${OPERATOR_FRONTEND_URL:-http://localhost:4200},${CUSTOMER_FRONTEND_URL:-http://localhost:4201}}
-      CUSTOMER_FRONTEND_URL: ${CUSTOMER_FRONTEND_URL:-http://localhost:4201}
+      REGISTERWERK_CORS_ALLOWED_ORIGINS: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:-${OPERATOR_FRONTEND_URL:-http://localhost:44200},${CUSTOMER_FRONTEND_URL:-http://localhost:44201}}
+      CUSTOMER_FRONTEND_URL: ${CUSTOMER_FRONTEND_URL:-http://localhost:44201}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       # Repo/lending ships fail-closed in application.yml; the dev stack opts in so the
@@ -537,14 +547,8 @@ services:
         condition: service_completed_successfully
       softhsm:
         condition: service_healthy
-      # service_started, not service_healthy: BlockchainClientRegistry's kind-aware routing (see
-      # blockchain/api/BlockchainClientRegistry) already fails over to the direct anvil node
-      # automatically when chaincache is unhealthy, so blocking the backend's own startup on
-      # chaincache's full health check would only add boot time for no correctness benefit.
-      chaincache-sepolia:
-        condition: service_started
     ports:
-      - "${BACKEND_BIND_ADDR:-127.0.0.1}:8080:8080"
+      - "${BACKEND_BIND_ADDR:-127.0.0.1}:${BACKEND_HOST_PORT:-48080}:8080"
     volumes:
       - registerwerk_wallets:/data/wallets
       - lending_demo_addresses:/demo-onchain:ro
@@ -618,7 +622,7 @@ services:
       PORT: 3001
     profiles: [confidential]
     ports:
-      - "127.0.0.1:3005:3001"
+      - "127.0.0.1:${ZAMA_RELAYER_HOST_PORT:-43005}:3001"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:3001/health || exit 1"]
       interval: 15s
@@ -645,7 +649,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "4200:80"
+      - "${FRONTEND_BIND_ADDR:-0.0.0.0}:${OPERATOR_FRONTEND_HOST_PORT:-44200}:80"
     healthcheck:
       # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
       # resolves to ::1 first inside the container and the probe is refused.
@@ -674,7 +678,7 @@ services:
       kong:
         condition: service_healthy
     ports:
-      - "4201:80"
+      - "${FRONTEND_BIND_ADDR:-0.0.0.0}:${CUSTOMER_FRONTEND_HOST_PORT:-44201}:80"
     healthcheck:
       # 127.0.0.1, not localhost: nginx here listens on IPv4 only, while `localhost`
       # resolves to ::1 first inside the container and the probe is refused.
@@ -752,10 +756,10 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8000:8000"
-      - "8443:8443"
+      - "${KONG_BIND_ADDR:-0.0.0.0}:${KONG_PROXY_HOST_PORT:-48000}:8000"
+      - "${KONG_BIND_ADDR:-0.0.0.0}:${KONG_HTTPS_HOST_PORT:-48443}:8443"
       # Kong admin port must NOT be exposed publicly. Access via: docker exec or SSH tunnel.
-      - "127.0.0.1:8001:8001"
+      - "127.0.0.1:${KONG_ADMIN_HOST_PORT:-48001}:8001"
     healthcheck:
       # Overrides the healthcheck baked into the kong image, which is `CMD-SHELL kong health`
       # every 10s. That is the Kong CLI, not a probe: each invocation spawns a full resty/LuaJIT
@@ -785,7 +789,7 @@ services:
 
   # ─── Documentation Server ─────────────────────────────────────────────────
   # Enable by setting COMPOSE_PROFILES=docs in your environment or .env file.
-  # Access at http://<host>:8003 once the service is up.
+  # Access at http://<host>:48003 once the service is up.
   # Binds to 0.0.0.0 by default so it is reachable on remote hosts.
   # Set DOCS_BIND_ADDR=127.0.0.1 in .env to restrict to loopback only.
   # Prebuilt static site served by nginx — see docs/Dockerfile for why this is no longer
@@ -805,11 +809,11 @@ services:
       dockerfile: docs/Dockerfile
       network: host
       args:
-        BACKEND_URL: ${BACKEND_URL:-http://localhost:8080}
-        DOCS_SITE_URL: ${DOCS_SITE_URL:-http://localhost:8003/}
+        BACKEND_URL: ${BACKEND_URL:-http://localhost:48080}
+        DOCS_SITE_URL: ${DOCS_SITE_URL:-http://localhost:48003/}
     image: registerwerk-docs:local
     ports:
-      - "${DOCS_BIND_ADDR:-0.0.0.0}:8003:80"
+      - "${DOCS_BIND_ADDR:-0.0.0.0}:${DOCS_HOST_PORT:-48003}:80"
     profiles: [docs]
     logging: *default-logging
     healthcheck:
@@ -832,7 +836,7 @@ volumes:
   anvil_state:
   chaincache_pg18:
   lending_demo_addresses:
-  pgdata:
+  pg18data:
   pg_backups:
   registerwerk_wallets:
   softhsm_tokens:

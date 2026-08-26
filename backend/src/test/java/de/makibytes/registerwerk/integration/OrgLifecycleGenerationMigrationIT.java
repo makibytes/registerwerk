@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrgLifecycleGenerationMigrationIT {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @Test
     @DisplayName("legacy removed/revoked predecessors can migrate beside active replacements")

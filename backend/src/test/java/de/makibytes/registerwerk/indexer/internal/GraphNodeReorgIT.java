@@ -55,7 +55,7 @@ class GraphNodeReorgIT {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     // Matches docker-compose.yml's anvil service: entrypoint anvil, --host 0.0.0.0 so the
     // container's own network interface (not just its loopback) accepts connections, which is

@@ -41,7 +41,7 @@ class HolderDataServiceTransactionIT {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @MockitoBean AssetDeploymentRepository deploymentRepository;
     @MockitoBean TokenTransferRepository tokenTransferRepository;

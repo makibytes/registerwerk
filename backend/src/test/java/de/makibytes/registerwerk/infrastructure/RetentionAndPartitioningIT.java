@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Proves, against a real Postgres 17 container, the partition and retention behavior.
+ * Proves, against a real Postgres 18.6 container, the partition and retention behavior.
  * <ol>
  *   <li>{@code token_transfer} is genuinely RANGE-partitioned by {@code occurred_at} after
  *       the baseline schema: thousands of rows spread across several months all
@@ -53,7 +53,7 @@ class RetentionAndPartitioningIT {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @Autowired
     private JdbcTemplate jdbc;

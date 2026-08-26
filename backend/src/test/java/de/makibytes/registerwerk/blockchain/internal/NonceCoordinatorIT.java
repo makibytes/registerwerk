@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Proves, against a real Postgres 17 container, the two properties {@link NonceCoordinator}
+ * Proves, against a real Postgres 18.6 container, the two properties {@link NonceCoordinator}
  * exists for: (1) two callers racing on the same {@code (chainId, senderAddress)} — from
  * separate JDBC connections, standing in for separate backend replicas — never receive the same
  * nonce, and (2) a failed submission does not advance the durable lease, so the same nonce is
@@ -46,7 +46,7 @@ class NonceCoordinatorIT {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @Autowired
     private NonceCoordinator coordinator;

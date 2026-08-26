@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class StepUpEnrollmentIT {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     static final String ADMIN_EMAIL = "enroll-admin@test.local";
     static final String ADMIN_PASSWORD = "Sup3rSecret!";
