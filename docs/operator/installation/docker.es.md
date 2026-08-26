@@ -34,7 +34,6 @@ services:
   kong:               # API gateway — DB-less, routes from gateway/kong.yml
   frontend-operator:  # Operator portal (nginx, direct to backend)
   frontend-customer:  # Customer portal (nginx, proxied through Kong)
-  chaincache-postgres:# Private Chaincache database (optional)
   chaincache-sepolia: # Local-Anvil Chaincache workload (optional)
   chaincache-base:    # Base Sepolia Chaincache workload (optional)
   docs:               # Documentation server (docs profile)
@@ -48,14 +47,19 @@ docker compose up -d
 
 Para el showcase completo, copie `.env.example.test` a `.env`, configure `CHAINCACHE_IMAGE` con
 una imagen creada, cargada u obtenible de forma independiente y mantenga
-`CHAINCACHE_ENABLED=true`. El mismo comando inicia ambos workloads Chaincache y sus dependencias
-privada PostgreSQL. Registerwerk nunca compila `../chaincache`; la imagen es el único
-artefacto Chaincache necesario. Consulte [Integración de Chaincache](../blockchain/chaincache-integration.md).
+`CHAINCACHE_ENABLED=true`. El mismo comando inicia ambos workloads Chaincache, que comparten el
+mismo servicio `postgres` que usa el propio Registerwerk (una segunda base de datos `chaincache`
+en esa misma instancia, no un contenedor Postgres dedicado a Chaincache). Registerwerk nunca
+compila `../chaincache`; la imagen es el único artefacto Chaincache necesario. Consulte
+[Integración de Chaincache](../blockchain/chaincache-integration.md).
 
 Kong se ejecuta en modo sin base de datos (declarativo): `gateway/kong.yml` está montado como de solo lectura y es
 la única fuente de verdad para rutas y complementos, por lo que no existe una base de datos de Kong separada
-para migrar o iniciar; solo se crea la base de datos de la aplicación `registerwerk` en el primer inicio de
-Postgres, propiedad de `${DB_USER}` con `${DB_PASSWORD}`.
+para migrar o iniciar. Al primer inicio de Postgres, `POSTGRES_DB` crea la base de datos de la
+aplicación `registerwerk` (propiedad de `${DB_USER}`/`${DB_PASSWORD}`), y `postgres-init/` crea
+además la base de datos y el rol `chaincache` para los workloads Chaincache opcionales anteriores —
+siempre, esté o no `CHAINCACHE_ENABLED=true`; si no, simplemente queda como una base de datos vacía
+sin usar.
 
 ### Registros { #logs }
 

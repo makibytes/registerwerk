@@ -34,7 +34,6 @@ services:
   kong:               # API gateway — DB-less, routes from gateway/kong.yml
   frontend-operator:  # Operator portal (nginx, direct to backend)
   frontend-customer:  # Customer portal (nginx, proxied through Kong)
-  chaincache-postgres:# Private Chaincache database (optional)
   chaincache-sepolia: # Local-Anvil Chaincache workload (optional)
   chaincache-base:    # Base Sepolia Chaincache workload (optional)
   docs:               # Documentation server (docs profile)
@@ -48,14 +47,19 @@ docker compose up -d
 
 Per lo showcase completo, copia `.env.example.test` in `.env`, imposta `CHAINCACHE_IMAGE` su
 un'immagine creata, caricata o scaricabile in modo indipendente e mantieni
-`CHAINCACHE_ENABLED=true`. Lo stesso comando avvia entrambi i workload Chaincache e le loro
-dipendenza PostgreSQL privata. Registerwerk non compila mai `../chaincache`; l'immagine è
-l'unico artefatto Chaincache richiesto. Vedi [Integrazione Chaincache](../blockchain/chaincache-integration.md).
+`CHAINCACHE_ENABLED=true`. Lo stesso comando avvia entrambi i workload Chaincache, che condividono
+lo stesso servizio `postgres` usato da Registerwerk stesso (un secondo database `chaincache`
+su quella stessa istanza, non un container Postgres dedicato a Chaincache). Registerwerk non
+compila mai `../chaincache`; l'immagine è l'unico artefatto Chaincache richiesto. Vedi
+[Integrazione Chaincache](../blockchain/chaincache-integration.md).
 
 Kong viene eseguito in modalità DB-less (dichiarativa): `gateway/kong.yml` è montato in sola lettura ed è
 l'unica fonte di verità per percorsi e plugin, quindi non esiste un database Kong separato
-da migrare o avviare: solo il database dell'applicazione `registerwerk` viene creato al primo avvio di
-Postgres, di proprietà di `${DB_USER}` con `${DB_PASSWORD}`.
+da migrare o avviare. Al primo avvio di Postgres, `POSTGRES_DB` crea il database
+dell'applicazione `registerwerk` (di proprietà di `${DB_USER}`/`${DB_PASSWORD}`), e
+`postgres-init/` crea inoltre il database e il ruolo `chaincache` usati dai workload
+Chaincache opzionali sopra — indipendentemente dal fatto che `CHAINCACHE_ENABLED=true` sia
+impostato o meno; in caso contrario resta semplicemente un database vuoto inutilizzato.
 
 ### Registri { #logs }
 

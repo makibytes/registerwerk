@@ -25,7 +25,7 @@ docker-compose.yml    / .env.example
 - **Backend is a pure resource server** — stateless JWT validation; does not issue OIDC tokens.
 - **Auth toggle:** `ENTRA_ENABLED=false` → HS256 dev mode with `JWT_DEV_SECRET`; `=true` → Entra sign-in for customers, validated by the backend. `DelegatingJwtDecoder` routes on the JWS `alg` header (HS256 → local, else JWKS), so the operator portal keeps built-in login and local TOTP step-up in both modes. Both branches are issuer-pinned; the OIDC branch is also audience-pinned via `JWT_AUDIENCE`.
 - **Two-factor auth** is Entra's, not ours: Graph cannot create an Authenticator/TOTP method, so enrolment happens on Microsoft's security-info page and `/security` guides users there. Conditional Access enforces it at sign-in — no app-side gate. Step-up is dual-track: local TOTP (403) in HS256 mode, `acrs` + a 401 claims challenge in Entra mode. Runbook: `docs/platform/entra-setup.md`.
-- **Single PostgreSQL instance** — hosts only the `registerwerk` database. Kong runs DB-less (`gateway/kong.yml` loaded via `KONG_DECLARATIVE_CONFIG`), so it has no database of its own — there is no `kong` or `konga` database/service in this stack.
+- **Single PostgreSQL instance** — always hosts the `registerwerk` database, plus a `chaincache` database (created by `postgres-init/01-create-chaincache-db.sql`) when the optional `chaincache-true` profile is enabled — chaincache does not get its own dedicated Postgres container, mirroring how a managed instance (Cloud SQL on GKE) hosts multiple databases in production. Kong runs DB-less (`gateway/kong.yml` loaded via `KONG_DECLARATIVE_CONFIG`), so it has no database of its own — there is no `kong` or `konga` database/service in this stack.
 
 ---
 

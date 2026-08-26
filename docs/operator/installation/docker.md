@@ -34,7 +34,6 @@ services:
   kong:               # API gateway — DB-less, routes from gateway/kong.yml
   frontend-operator:  # Operator portal (nginx, direct to backend)
   frontend-customer:  # Customer portal (nginx, proxied through Kong)
-  chaincache-postgres:# Private Chaincache database (optional)
   chaincache-sepolia: # Local-Anvil Chaincache workload (optional)
   chaincache-base:    # Base Sepolia Chaincache workload (optional)
   docs:               # Documentation server (docs profile)
@@ -48,14 +47,18 @@ docker compose up -d
 
 For the full showcase, copy `.env.example.test` to `.env`, set
 `CHAINCACHE_IMAGE` to an image you have independently built, loaded or can pull, and keep
-`CHAINCACHE_ENABLED=true`. The same ordinary command then starts both Chaincache workloads and
-their private PostgreSQL dependency. Registerwerk never builds `../chaincache`; the image
-is the only Chaincache artifact it requires. See [Chaincache integration](../blockchain/chaincache-integration.md).
+`CHAINCACHE_ENABLED=true`. The same ordinary command then starts both Chaincache workloads,
+which share the same `postgres` service Registerwerk itself uses (a second `chaincache` database
+on that one instance, not a dedicated Chaincache Postgres container). Registerwerk never builds
+`../chaincache`; the image is the only Chaincache artifact it requires. See
+[Chaincache integration](../blockchain/chaincache-integration.md).
 
 Kong runs in DB-less (declarative) mode: `gateway/kong.yml` is mounted read-only and is
 the single source of truth for routes and plugins, so there is no separate Kong database
-to migrate or bootstrap — only the `registerwerk` application database is created on
-Postgres' first start, owned by `${DB_USER}` with `${DB_PASSWORD}`.
+to migrate or bootstrap. On Postgres' first start, `POSTGRES_DB` creates the `registerwerk`
+application database (owned by `${DB_USER}`/`${DB_PASSWORD}`), and `postgres-init/` additionally
+creates the `chaincache` database + role used by the optional Chaincache workloads above — always,
+whether or not `CHAINCACHE_ENABLED=true`; an unused empty database is the only cost when it isn't.
 
 !!! warning "Upgrading an existing deployment onto the pg18data volume"
     PostgreSQL 18 moved PGDATA under `/var/lib/postgresql/<major>/docker` and declares
@@ -67,6 +70,22 @@ Postgres' first start, owned by `${DB_USER}` with `${DB_PASSWORD}`.
     as its own explicit migration step before running `docker compose up -d` against this compose
     file — never assume the rename alone carries the data across. `indexer/evm/docker-compose.yml`'s
     `graph-db` service needs the identical treatment (`graphdata` → `graph_pg18`).
+
+!!! warning "Upgrading from a separate chaincache-postgres container"
+    Earlier revisions of this stack ran Chaincache's database in its own dedicated
+    `chaincache-postgres` container (volume `chaincache_pg18`) instead of a second database on the
+    shared `postgres` service. `postgres-init/01-create-chaincache-db.sql` only runs against a
+    genuinely fresh, empty `pg18data` volume — exactly like the pg18data rename above — so an
+    existing deployment upgrading onto this compose file will **not** get the `chaincache` database
+    automatically. Before removing the old `chaincache-postgres` container: `pg_dump` it
+    (`docker compose exec chaincache-postgres pg_dump -U chaincache chaincache | gzip > chaincache.sql.gz`).
+    After upgrading, create the database on the existing `postgres` volume by hand and restore into
+    it:
+    ```bash
+    docker compose exec postgres psql -U ${DB_USER:-registerwerk} -d registerwerk -c \
+      "CREATE USER chaincache WITH PASSWORD 'chaincache'; CREATE DATABASE chaincache OWNER chaincache;"
+    gunzip -c chaincache.sql.gz | docker compose exec -T postgres psql -U chaincache chaincache
+    ```
 
 ### Logs
 

@@ -20,7 +20,8 @@ deployable, each fronting exactly one chain. Shared infrastructure — PostgreSQ
 ingress — is designed to be shared *across* those workloads: every row a workload writes is
 chain-scoped, so two workloads can point at one Postgres instance without colliding. The demo stack
 runs this for real: `chaincache-sepolia` and `chaincache-base` are two independent containers
-sharing `chaincache-postgres`.
+sharing the `chaincache` database on Registerwerk's own `postgres` service — not a dedicated
+Chaincache Postgres container.
 
 This changes what "connecting Registerwerk to chaincache" means at the network level: there is no
 single chaincache hostname to point every chain's node at. Each `RpcNode` of kind `CHAINCACHE`
@@ -211,14 +212,14 @@ CHAINCACHE_PULL_POLICY=missing
 
 ```bash
 docker compose up -d
-docker compose ps chaincache-postgres chaincache-sepolia chaincache-base
+docker compose ps chaincache-sepolia chaincache-base
 ```
 
-Setting `CHAINCACHE_ENABLED=false` leaves those three services out of a fresh Compose deployment.
+Setting `CHAINCACHE_ENABLED=false` leaves those two services out of a fresh Compose deployment.
 When switching off an already-running showcase, stop them once before the normal update:
 
 ```bash
-docker compose stop chaincache-sepolia chaincache-base chaincache-postgres
+docker compose stop chaincache-sepolia chaincache-base
 docker compose up -d
 ```
 
@@ -248,7 +249,7 @@ configuration for the local devnet workload is:
 ```yaml
 # chaincache-sepolia's own compose service
 environment:
-  SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/chaincache
   CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_PROVIDER: anvil
   CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_HTTP: http://anvil:8545
   CHAINCACHE_CHAINS_SEPOLIA_RPC_NODES_0_WS: ws://anvil:8545
@@ -283,8 +284,8 @@ follow automatically within one detection tick of that workload being reachable 
 
 chaincache's own [Helm chart](https://github.com/makibytes/chaincache) deploys one release per
 chain, each pointed at a shared Cloud SQL instance and a shared Kubernetes Gateway API `HTTPRoute`
-— the same shape the demo stack exercises locally with one shared `chaincache-postgres` behind two
-containers. Registerwerk's own chart does **not** deploy chaincache (it's an independently
+— the same shape the demo stack exercises locally with both containers sharing the `chaincache`
+database on Registerwerk's own `postgres` service. Registerwerk's own chart does **not** deploy chaincache (it's an independently
 versioned, independently deployed product); it carries a `chaincache:` values block naming the
 per-chain workload URLs to connect to and a reference to the shared JWT secret, plus a
 `NetworkPolicy` egress rule permitting traffic to chaincache's namespace when both charts run in the
@@ -304,7 +305,12 @@ dump/restore, and the data directory path itself changes between major Postgres 
 (`/var/lib/postgresql/data` vs. `/var/lib/postgresql` on 18+) — mounting the old volume at the new
 image's expected path silently starts a fresh empty cluster instead of failing loudly. Treat a
 Postgres major-version bump as its own deliberate migration step, never a side effect of bumping an
-image tag.
+image tag. Chaincache's `chaincache` database now lives on the same `postgres` service/volume as
+Registerwerk's own `registerwerk` database (not a separate container), so this applies to that one
+shared volume for both databases at once — see the migration warnings in
+[docker.md](../installation/docker.md#demo-single-host-docker-compose) for the exact steps, both
+for the PG-major-version case and for upgrading from an older deployment that still ran a separate
+`chaincache-postgres` container.
 
 ### Production checklist
 

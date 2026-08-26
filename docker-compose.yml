@@ -84,8 +84,10 @@ services:
   #
   # chaincache's own architecture is one Spring Boot WORKLOAD per chain — a deployment with zero
   # or more than one configured chain refuses to start (see ChainRuntimeRegistry). This stack runs
-  # TWO workloads, sharing one Postgres instance (chain-scoped rows, exactly as the GKE Helm chart
-  # at chaincache/deploy/helm/chaincache shares one Cloud SQL instance across per-chain releases):
+  # TWO workloads, sharing the `postgres` service below (its own `chaincache` database, created by
+  # postgres-init/01-create-chaincache-db.sql — chain-scoped rows, so this is safe exactly the way
+  # the GKE Helm chart at chaincache/deploy/helm/chaincache shares one Cloud SQL *instance* across
+  # per-chain releases; a managed instance like Cloud SQL hosts multiple databases the same way):
   #   - chaincache-sepolia fronts this stack's own anvil devnet as a CHAINCACHE-kind RpcNode on
   #     the demo's ETHEREUM_SEPOLIA slot (DemoDataSeeder seeds only Anvil-backed nodes for this
   #     slot) — DEPTH_BASED finality, since anvil has no safe/finalized tags of its own. Never add
@@ -94,44 +96,19 @@ services:
   #   - chaincache-base fronts real public Base Sepolia RPC providers — TAG_BASED finality with
   #     real safe/finalized tags and required-provider-agreement: 2, demonstrating the capability
   #     an isolated local devnet structurally cannot (real reorgs, cross-provider agreement).
-  # Every other chain stays direct-to-node, untouched. chaincache gets its own dedicated Postgres,
-  # per the single-instance architecture note in CLAUDE.md ("hosts only the registerwerk
-  # database") — it is not a second schema/database bolted onto the shared `postgres` service
-  # above.
-  chaincache-postgres:
-    image: postgres:18.6-alpine
-    profiles: ["chaincache-${CHAINCACHE_ENABLED:-false}"]
-    logging: *default-logging
-    environment:
-      POSTGRES_DB: chaincache
-      POSTGRES_USER: chaincache
-      POSTGRES_PASSWORD: chaincache
-    volumes:
-      # PostgreSQL 18 stores versioned data below /var/lib/postgresql, not /var/lib/postgresql/data
-      # — and chaincache's own Flyway history was squashed to a single fresh-install baseline with
-      # baseline-on-migrate disabled, so a volume carrying the old V1-V7 history would fail to
-      # validate against it anyway. New volume name (chaincache_pg18, not the old chaincache_pgdata)
-      # deliberately sidesteps both: nothing is deleted, the old volume is just orphaned.
-      - chaincache_pg18:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U chaincache -d chaincache"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-
+  # Every other chain stays direct-to-node, untouched.
   chaincache-sepolia:
     image: ${CHAINCACHE_IMAGE:-registerwerk-chaincache:latest}
     pull_policy: ${CHAINCACHE_PULL_POLICY:-missing}
     profiles: ["chaincache-${CHAINCACHE_ENABLED:-false}"]
     logging: *default-logging
     depends_on:
-      chaincache-postgres:
+      postgres:
         condition: service_healthy
       anvil:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/chaincache
       SPRING_DATASOURCE_USERNAME: chaincache
       SPRING_DATASOURCE_PASSWORD: chaincache
       # This stack's own isolated anvil devnet (chain-id 11155111 for demo-client compatibility;
@@ -188,10 +165,10 @@ services:
     profiles: ["chaincache-${CHAINCACHE_ENABLED:-false}"]
     logging: *default-logging
     depends_on:
-      chaincache-postgres:
+      postgres:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://chaincache-postgres:5432/chaincache
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/chaincache
       SPRING_DATASOURCE_USERNAME: chaincache
       SPRING_DATASOURCE_PASSWORD: chaincache
       # Two independent real public Base Sepolia providers, under the chain key "base" —
@@ -328,6 +305,15 @@ services:
     # forces a visible re-init on any deployment that hasn't migrated yet, instead of a silent one.
     # A pgdata volume from a pre-18 deployment must be pg_dump'd and restored into this new volume
     # as its own deliberate migration step — see docs/operator/installation/docker.md.
+    #
+    # One instance, two databases: postgres-init/01-create-chaincache-db.sql creates a second
+    # `chaincache` database + role here (only chaincache-sepolia/chaincache-base, the optional
+    # chaincache-true profile, ever connect to it) instead of running a second dedicated Postgres
+    # container for that workload — the same shape a managed instance (Cloud SQL on GKE) has in
+    # production: one instance, multiple databases. Like the pg18data rename above, that init
+    # script only runs against a genuinely fresh/empty volume — an existing deployment upgrading
+    # from a separate chaincache-postgres container needs its own explicit migration step, see
+    # docs/operator/installation/docker.md.
     image: postgres:18.6-alpine
     logging: *default-logging
     environment:
@@ -338,6 +324,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-registerwerk}
     volumes:
       - pg18data:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-45432}:5432"
     healthcheck:
@@ -353,72 +340,6 @@ services:
         limits:
           cpus: "1.0"
           memory: 1g
-
-  # ─── PostgreSQL backup ─────────────────────────────────────────────────────
-  # Docker Compose deployment — pg_dump path (docs/operator/maintenance/backups.md). Until now
-  # the only backup mechanism documented for this path was a cron entry the operator had to add
-  # to the HOST outside of Compose entirely — `docker compose up` alone produced zero backups.
-  # This runs the same pg_dump this repo already documents, as a real Compose service: dump on
-  # startup, then daily, retained on a named volume (survives container recreation, not the
-  # same durability as offsite/S3 — see backups.md's own "S3 document backup" section for why
-  # KYC/report buckets need separate off-host replication; this volume is local-Docker-host
-  # only, same as the Helm path's PVC-backed approach before it reaches S3).
-  postgres-backup:
-    image: postgres:18.6-alpine
-    logging: *default-logging
-    environment:
-      PGHOST: postgres
-      PGUSER: ${DB_USER:-registerwerk}
-      PGPASSWORD: ${DB_PASSWORD:-registerwerk}
-      PGDATABASE: registerwerk
-      BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-30}
-      # monitoring/docker-compose.yml's pushgateway service, reachable here because that stack
-      # is deliberately started on this same registerwerk_default network (see its own header
-      # comment) — but that stack is optional, so a failed push below only logs a warning, never
-      # fails the backup itself. monitoring/alerts/registerwerk.yml's BackupStale alert reads
-      # exactly the metric name pushed here.
-      PUSHGATEWAY_URL: ${PUSHGATEWAY_URL:-http://pushgateway:9091}
-    volumes:
-      - pg_backups:/backups
-    depends_on:
-      postgres:
-        condition: service_healthy
-    entrypoint: ["/bin/bash", "-c"]
-    # $$ throughout: Compose performs its OWN ${...} substitution on every string in this file
-    # (not just `environment:` blocks) before the container ever sees it — a bare $(...) or
-    # ${...} here would be silently resolved (usually to blank, since none of these are real
-    # Compose/.env variables) at `docker compose config`/`up` time instead of by bash inside the
-    # container. See the demo-onchain-deploy service's identical $$-escaping for the same reason.
-    command:
-      - |
-        set -e
-        echo "postgres-backup: daily pg_dump, $${BACKUP_RETAIN_DAYS}d local retention."
-        while true; do
-          STAMP=$$(date -u +%Y%m%d-%H%M%S)
-          FILE="/backups/registerwerk-$${STAMP}.sql.gz"
-          echo "[$$(date -u +%FT%TZ)] Starting pg_dump..."
-          if pg_dump --no-owner --no-privileges | gzip > "$$FILE"; then
-            echo "[$$(date -u +%FT%TZ)] Backup complete: $$FILE ($$(wc -c < "$$FILE") bytes)"
-            find /backups -name '*.sql.gz' -mtime "+$${BACKUP_RETAIN_DAYS}" -delete
-            # Pushgateway rejects a body with no trailing newline (HTTP 400) — --post-data
-            # never adds one, so piping through --post-file=/dev/stdin from a printf that does
-            # is required, not cosmetic; confirmed by hand against a running Pushgateway.
-            printf 'backup_last_success_timestamp %s\n' "$$(date +%s)" \
-              | wget -q -O- --post-file=/dev/stdin \
-                "$${PUSHGATEWAY_URL}/metrics/job/registerwerk_pg_backup" \
-              || echo "WARNING: backup succeeded but pushing the success metric to $${PUSHGATEWAY_URL} failed"
-          else
-            echo "ERROR: pg_dump failed" >&2
-            rm -f "$$FILE"
-          fi
-          sleep 86400
-        done
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256m
 
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
@@ -834,9 +755,7 @@ services:
 
 volumes:
   anvil_state:
-  chaincache_pg18:
   lending_demo_addresses:
   pg18data:
-  pg_backups:
   registerwerk_wallets:
   softhsm_tokens:

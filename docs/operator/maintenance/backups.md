@@ -21,29 +21,23 @@ The two deployment paths documented in the repo's `CLAUDE.md` use two different,
 interchangeable** backup mechanisms. Follow whichever section matches how you're actually
 running Registerwerk.
 
-### Docker Compose deployment — pg_dump
+### Docker Compose deployment — manual pg_dump
 
-`docker compose up` runs this automatically — the `postgres-backup` service in the root
-`docker-compose.yml` dumps on startup, then every 24h, gzips to the `pg_backups` named volume,
-and prunes anything older than `BACKUP_RETAIN_DAYS` (default 30). Nothing to install or cron
-separately; it starts with the rest of the stack. Override the retention window in `.env`:
+This is the demo/local single-host showcase (see `CLAUDE.md`'s "Not a production topology"
+warning), not something meant to simulate a real backup story — `docker compose up` does not run
+any automated backup service. Real deployments run PostgreSQL as a managed service (Cloud SQL on
+GKE), which handles automated backup/point-in-time-recovery itself; see the Helm/Kubernetes
+WAL-G section below for the actual production backup path this repo ships.
 
-```bash
-# .env
-BACKUP_RETAIN_DAYS=30
-```
-
-List or copy backups out of the named volume:
+For an ad-hoc manual dump of the local demo database:
 
 ```bash
-docker compose exec postgres-backup ls -la /backups
-docker cp registerwerk-postgres-backup-1:/backups/registerwerk-20260101-020000.sql.gz .
+docker compose exec postgres pg_dump -U ${DB_USER:-registerwerk} --no-owner --no-privileges registerwerk \
+  | gzip > registerwerk-$(date -u +%Y%m%d-%H%M%S).sql.gz
 ```
 
-The `pg_backups` volume is local to the Docker host — it survives container recreation but not
-host loss, and (unlike the S3-backed Helm path below) has no offsite replication of its own. For
-anything beyond local demo/dev use, mount `/backups` to network storage or copy files out to
-offsite storage on your own schedule; this service does not do that for you.
+There is no scheduled retention or offsite replication for this local file — it is a one-off,
+manual convenience, not a backup strategy.
 
 ### Helm/Kubernetes deployment — WAL-G continuous archiving
 
@@ -74,9 +68,10 @@ row-count comparison → optionally `--verify-audit-chain`, see
 over the manual steps below for anything beyond a one-off spot check:
 
 ```bash
-# Restore a backup (pulled from the postgres-backup service's pg_backups volume) to a test database
-docker cp registerwerk-postgres-backup-1:/backups/registerwerk-20260101-020000.sql.gz .
-gunzip -c registerwerk-20260101-020000.sql.gz \
+# Take a fresh manual dump (see above) and restore it into a test database
+docker compose exec postgres pg_dump -U registerwerk --no-owner --no-privileges registerwerk \
+  | gzip > registerwerk-test.sql.gz
+gunzip -c registerwerk-test.sql.gz \
   | docker exec -i registerwerk-postgres-1 \
   psql -U registerwerk registerwerk_test
 ```
@@ -135,8 +130,8 @@ docker compose stop backend
 docker exec registerwerk-postgres-1 \
   psql -U registerwerk -c "DROP DATABASE registerwerk; CREATE DATABASE registerwerk;"
 
-# Restore (pull the dump out of the postgres-backup service's pg_backups volume first)
-docker cp registerwerk-postgres-backup-1:/backups/registerwerk-latest.sql.gz .
+# Restore from whatever manual dump you took beforehand (see "Docker Compose deployment" above —
+# this local/demo path has no automated backup service to pull one from)
 gunzip -c registerwerk-latest.sql.gz \
   | docker exec -i registerwerk-postgres-1 \
   psql -U registerwerk registerwerk
@@ -173,18 +168,12 @@ kubectl scale deployment/registerwerk --replicas=<original-replica-count>
 
 `monitoring/alerts/registerwerk.yml` already includes a `BackupStale` rule querying
 `backup_last_success_timestamp`. That metric only exists if something actually pushes it — a
-CronJob (or, on Compose, a long-running loop container) is ephemeral and can't be scraped
-directly, so both backup paths push it to a Prometheus Pushgateway on success, and both require
-the payload to end with a trailing newline — Pushgateway rejects a POST body without one (HTTP
-400), silently, unless you check for it:
+CronJob is ephemeral and can't be scraped directly, so the Helm/Kubernetes WAL-G CronJob pushes it
+to a Prometheus Pushgateway on success (set `monitoring.pushgatewayUrl` in
+`deploy/helm/backup/values.yaml`; see `templates/backup-cronjob.yaml`), and Pushgateway rejects a
+POST body without a trailing newline (HTTP 400), silently, unless you check for it.
 
-- **Helm/Kubernetes (WAL-G)**: set `monitoring.pushgatewayUrl` in `deploy/helm/backup/values.yaml`
-  — the CronJob pushes automatically once set (see `templates/backup-cronjob.yaml`).
-- **Docker Compose (pg_dump)**: pushes automatically too — the `postgres-backup` service reads
-  `PUSHGATEWAY_URL` from `.env` (default `http://pushgateway:9091`, the hostname
-  `monitoring/docker-compose.yml`'s `pushgateway` service resolves to on the same
-  `registerwerk_default` network). Nothing to add to a cron script; there is no cron script.
-
-Neither path ships a Pushgateway by default — add one to whichever monitoring stack you're
-running (`monitoring/docker-compose.yml` for Compose, or a cluster-wide one for Kubernetes) if
-you want this alert to have real data behind it.
+The Docker Compose deployment has no automated backup service at all (see above), so this alert
+has no effect there — `time() - backup_last_success_timestamp` never matches an absent series,
+which Prometheus correctly treats as "no alert," not "always firing." This is expected: the
+Compose path's backup story is intentionally not production-grade.

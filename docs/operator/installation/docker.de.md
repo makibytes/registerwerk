@@ -34,7 +34,6 @@ services:
   kong:               # API gateway — DB-less, routes from gateway/kong.yml
   frontend-operator:  # Operator portal (nginx, direct to backend)
   frontend-customer:  # Customer portal (nginx, proxied through Kong)
-  chaincache-postgres:# Private Chaincache database (optional)
   chaincache-sepolia: # Local-Anvil Chaincache workload (optional)
   chaincache-base:    # Base Sepolia Chaincache workload (optional)
   docs:               # Documentation server (docs profile)
@@ -48,13 +47,18 @@ docker compose up -d
 
 Für den vollständigen Showcase kopieren Sie `.env.example.test` nach `.env`, setzen
 `CHAINCACHE_IMAGE` auf ein unabhängig gebautes, geladenes oder abrufbares Image und belassen
-`CHAINCACHE_ENABLED=true`. Derselbe normale Befehl startet dann beide Chaincache-Workloads samt
-privatem PostgreSQL. Registerwerk baut niemals `../chaincache`; das Image ist das einzige
-benötigte Chaincache-Artefakt. Siehe [Chaincache-Integration](../blockchain/chaincache-integration.md).
+`CHAINCACHE_ENABLED=true`. Derselbe normale Befehl startet dann beide Chaincache-Workloads, die sich
+denselben `postgres`-Dienst wie Registerwerk selbst teilen (eine zweite Datenbank `chaincache` auf
+dieser einen Instanz, kein eigener Chaincache-Postgres-Container). Registerwerk baut niemals
+`../chaincache`; das Image ist das einzige benötigte Chaincache-Artefakt. Siehe
+[Chaincache-Integration](../blockchain/chaincache-integration.md).
 
 Kong läuft im DB-losen (deklarativen) Modus: `gateway/kong.yml` wird schreibgeschützt gemountet und ist
 die einzige Quelle der Wahrheit für Routen und Plugins, daher gibt es keine separate Kong-Datenbank
-zum Migrieren oder Bootstrap – nur die `registerwerk`-Anwendungsdatenbank wird beim ersten Start von Postgres erstellt und gehört `${DB_USER}` mit `${DB_PASSWORD}`.
+zum Migrieren oder Bootstrap. Beim ersten Start von Postgres erstellt `POSTGRES_DB` die
+`registerwerk`-Anwendungsdatenbank (gehört `${DB_USER}`/`${DB_PASSWORD}`), und `postgres-init/`
+erstellt zusätzlich die Datenbank + Rolle `chaincache` für die optionalen Chaincache-Workloads oben –
+unabhängig davon, ob `CHAINCACHE_ENABLED=true` gesetzt ist; andernfalls bleibt sie einfach ungenutzt.
 
 ### Logs { #logs }
 
