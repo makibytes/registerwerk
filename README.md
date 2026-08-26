@@ -276,6 +276,20 @@ Each backend module follows the pattern `<module>/api/` (public surface), `<modu
 
 Once the backend is running: http://localhost:48080/swagger-ui.html
 
+## Product Documentation
+
+The documentation server includes a fifth, optional Chaincache path sourced from a pinned
+Chaincache submodule. Initialize it before building the docs image:
+
+```bash
+git submodule update --init docs/_chaincache
+docker compose --profile docs up --build docs
+```
+
+Open the resulting site at http://localhost:48003. The Markdown under
+`docs/_chaincache/docs/` remains owned by Chaincache; advance the submodule pointer when a newer
+canonical documentation version should appear in Registerwerk.
+
 ## Database Migrations
 
 Flyway migrations run automatically on startup. Scripts in `backend/src/main/resources/db/migration/`:

@@ -49,6 +49,14 @@ Parece un cambio pequeño. No lo es. Una vez desaparecido el título físico, to
 
     [:octicons-arrow-right-24: Arquitectura](intro/architecture.md) · [Módulos](platform/modules.md) · [API](platform/api.md)
 
+-   :material-database-sync:{ .lg .middle } **Uso Chaincache** · *Componente opcional*
+
+    ---
+
+    Utiliza Chaincache de forma independiente o con Registerwerk y necesita orientación para usarlo, operarlo, administrarlo o desarrollarlo.
+
+    [:octicons-arrow-right-24: Documentación de Chaincache](chaincache/index.md)
+
 </div>
 
 ---

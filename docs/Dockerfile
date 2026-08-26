@@ -38,8 +38,14 @@ ENV BACKEND_URL=${BACKEND_URL}
 ARG DOCS_SITE_URL=http://localhost:48003/
 ENV DOCS_SITE_URL=${DOCS_SITE_URL}
 
+# Registerwerk CI cannot read the private sibling repository. Its workflow opts into explicit
+# placeholder pages; normal builds fail if the canonical Chaincache submodule is not initialized.
+ARG ALLOW_MISSING_CHAINCACHE_DOCS=0
+ENV ALLOW_MISSING_CHAINCACHE_DOCS=${ALLOW_MISSING_CHAINCACHE_DOCS}
+
 # --strict so a broken link fails the image build rather than shipping quietly.
-RUN mkdocs build --strict \
+RUN python docs/prepare_chaincache_docs.py \
+    && mkdocs build --strict \
     && for locale in de es fr it; do \
          cp site/sitemap.xml "site/${locale}/sitemap.xml"; \
          cp site/sitemap.xml.gz "site/${locale}/sitemap.xml.gz"; \

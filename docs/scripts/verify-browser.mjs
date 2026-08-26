@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 
 const baseUrl = process.env.DOCS_BASE_URL ?? 'http://127.0.0.1:48003';
 const docsOrigin = new URL(baseUrl).origin;
+const docsPort = new URL(docsOrigin).port;
 const browser = await chromium.launch();
 const page = await browser.newPage();
 const pageErrors = [];
@@ -30,6 +31,15 @@ try {
     'Mermaid source blocks must be replaced by rendered diagrams',
   );
 
+  const chaincacheLink = page.getByRole('link', { name: 'Chaincache documentation' });
+  await chaincacheLink.waitFor();
+  assert.equal(await page.getByText('Optional component', { exact: true }).count(), 1);
+  assert.equal(new URL(await chaincacheLink.getAttribute('href'), page.url()).pathname, '/chaincache/');
+
+  await page.goto(new URL('/chaincache/', docsOrigin).href, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { level: 1, name: 'Chaincache documentation' }).waitFor();
+  assert.ok(await page.getByText('Chaincache (optional)', { exact: true }).count());
+
   const initialScheme = await page.locator('body').getAttribute('data-md-color-scheme');
   assert.equal(initialScheme, 'default');
   await page.locator('label[for="__palette_1"]').click();
@@ -50,14 +60,14 @@ try {
   const frenchLink = page.locator('.md-select__link[hreflang="fr"]').first();
   await frenchLink.waitFor();
   const frenchUrl = new URL(await frenchLink.getAttribute('href'));
-  assert.equal(frenchUrl.port, '48003');
+  assert.equal(frenchUrl.port, docsPort);
   assert.equal(frenchUrl.origin, docsOrigin);
 
   await frenchLink.locator('xpath=ancestor::div[contains(@class, "md-select")]//button').click();
   await frenchLink.click();
   await page.waitForLoadState('networkidle');
   const switchedUrl = new URL(page.url());
-  assert.equal(switchedUrl.port, '48003');
+  assert.equal(switchedUrl.port, docsPort);
   assert.equal(switchedUrl.pathname, '/fr/customer/intro/');
   assert.equal(await page.locator('body').getAttribute('data-md-color-scheme'), 'slate');
 

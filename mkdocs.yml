@@ -81,6 +81,12 @@ plugins:
             Home: Startseite
             For customers: Für Kunden
             For operators: Für Betreiber
+            Chaincache (optional): Chaincache (optional)
+            Overview: Überblick
+            User guide: Benutzerhandbuch
+            Operator guide: Betreiberhandbuch
+            Administrator guide: Administratorhandbuch
+            Developer guide: Entwicklerhandbuch
             Reference: Referenz
             Start here: Erste Schritte
             What Registerwerk is: Was Registerwerk ist
@@ -211,6 +217,12 @@ plugins:
             Home: Accueil
             For customers: Pour les clients
             For operators: Pour les opérateurs
+            Chaincache (optional): Chaincache (facultatif)
+            Overview: Vue d'ensemble
+            User guide: Guide utilisateur
+            Operator guide: Guide d'exploitation
+            Administrator guide: Guide d'administration
+            Developer guide: Guide de développement
             Reference: Référence
             Start here: Commencer ici
             What Registerwerk is: Qu'est-ce que Registerwerk
@@ -341,6 +353,12 @@ plugins:
             Home: Pagina iniziale
             For customers: Per i clienti
             For operators: Per gli operatori
+            Chaincache (optional): Chaincache (opzionale)
+            Overview: Panoramica
+            User guide: Guida per gli utenti
+            Operator guide: Guida operativa
+            Administrator guide: Guida per gli amministratori
+            Developer guide: Guida per gli sviluppatori
             Reference: Riferimento
             Start here: Da qui si comincia
             What Registerwerk is: Che cos'è Registerwerk
@@ -471,6 +489,12 @@ plugins:
             Home: Inicio
             For customers: Para clientes
             For operators: Para operadores
+            Chaincache (optional): Chaincache (opcional)
+            Overview: Descripción general
+            User guide: Guía del usuario
+            Operator guide: Guía de operaciones
+            Administrator guide: Guía de administración
+            Developer guide: Guía de desarrollo
             Reference: Referencia
             Start here: Empiece aquí
             What Registerwerk is: Qué es Registerwerk
@@ -606,9 +630,11 @@ hooks:
 # docker-compose actually runs, so everything below is excluded from the build —
 # without this, every npm package README in node_modules ships as a doc page.
 exclude_docs: |
+  _chaincache/
   hooks.py
   includes/
   Dockerfile
+  prepare_chaincache_docs.py
   translate.py
   TRANSLATION-TERMINOLOGY.md
   node_modules/
@@ -753,6 +779,13 @@ nav:
       - Disaster recovery: operator/dr/runbook.md
       - Troubleshooting: operator/troubleshooting.md
     - API reference: operator/api-reference.md
+
+  - Chaincache (optional):
+    - Overview: chaincache/index.md
+    - User guide: chaincache/user.md
+    - Operator guide: chaincache/operator.md
+    - Administrator guide: chaincache/admin.md
+    - Developer guide: chaincache/developer.md
 
   - Reference:
     - Concepts and architecture:

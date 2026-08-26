@@ -49,6 +49,14 @@ That change sounds small. It is not. Once the certificate is gone, every questio
 
     [:octicons-arrow-right-24: Architecture](intro/architecture.md) · [Modules](platform/modules.md) · [API](platform/api.md)
 
+-   :material-database-sync:{ .lg .middle } **I use Chaincache** · *Optional component*
+
+    ---
+
+    You use Chaincache on its own or with Registerwerk and need guidance for using, operating, administering, or developing it.
+
+    [:octicons-arrow-right-24: Chaincache documentation](chaincache/index.md)
+
 </div>
 
 ---

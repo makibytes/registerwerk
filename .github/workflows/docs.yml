@@ -57,7 +57,15 @@ jobs:
       # installed" — this was never actually green in CI once i18n was added; --strict was
       # promoting a config error to a build failure that nothing caught.
       - name: Build the docs container image
-        run: docker build -f docs/Dockerfile -t registerwerk-docs:ci .
+        # GitHub's repository-scoped token cannot read the private Chaincache sibling. The
+        # explicit build arg keeps the fifth path testable with marked placeholders; normal
+        # builds still require the pinned submodule and render its canonical Markdown.
+        run: >-
+          docker build
+          --build-arg ALLOW_MISSING_CHAINCACHE_DOCS=1
+          -f docs/Dockerfile
+          -t registerwerk-docs:ci
+          .
 
       - name: Verify docs runtime behavior
         run: |

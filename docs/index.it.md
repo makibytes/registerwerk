@@ -49,6 +49,14 @@ Sembra un cambiamento piccolo. Non lo è. Una volta scomparso il certificato, og
 
     [:octicons-arrow-right-24: Architettura](intro/architecture.md) · [Moduli](platform/modules.md) · [API](platform/api.md)
 
+-   :material-database-sync:{ .lg .middle } **Uso Chaincache** · *Componente opzionale*
+
+    ---
+
+    Usi Chaincache da solo o con Registerwerk e cerchi indicazioni per l'uso, la gestione, l'amministrazione o lo sviluppo.
+
+    [:octicons-arrow-right-24: Documentazione Chaincache](chaincache/index.md)
+
 </div>
 
 ---

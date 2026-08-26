@@ -139,8 +139,13 @@ docker compose --profile docs up                    # docs server :48003
 **Documentation** is MkDocs Material (`mkdocs.yml` + `docs/`). The `docs` compose profile builds the site into a **static nginx image** (`docs/Dockerfile`) rather than running `mkdocs serve` — so doc changes need a rebuild to show up:
 
 ```bash
+git submodule update --init docs/_chaincache             # canonical Chaincache docs
 docker compose --profile docs up --build docs      # http://localhost:48003
 ```
+
+Normal builds deliberately fail when `docs/_chaincache` is missing. CI has no cross-repository
+credential and explicitly sets `ALLOW_MISSING_CHAINCACHE_DOCS=1`, which builds marked placeholder
+pages while retaining the same fifth-path routes and browser checks.
 
 Build it strictly before committing doc changes (CI enforces this via `.github/workflows/docs.yml`). Use the image built from `docs/Dockerfile`, not the bare `squidfunk/mkdocs-material` image — this site needs `mkdocs-static-i18n` (see `mkdocs.yml`'s `plugins:` list), which the bare image doesn't have; running `--strict` against it fails immediately with `Config value 'plugins': The "i18n" plugin is not installed`, not a real link-check failure:
 

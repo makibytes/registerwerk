@@ -49,6 +49,14 @@ Das klingt nach einer kleinen Änderung. Ist es nicht. Sobald die Urkunde entfä
 
     [:octicons-arrow-right-24: Architektur](intro/architecture.md) · [Module](platform/modules.md) · [API](platform/api.md)
 
+-   :material-database-sync:{ .lg .middle } **Ich nutze Chaincache** · *Optionale Komponente*
+
+    ---
+
+    Sie nutzen Chaincache eigenständig oder zusammen mit Registerwerk und benötigen Anleitungen für Nutzung, Betrieb, Administration oder Entwicklung.
+
+    [:octicons-arrow-right-24: Chaincache-Dokumentation](chaincache/index.md)
+
 </div>
 
 ---

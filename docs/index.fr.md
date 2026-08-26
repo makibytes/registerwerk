@@ -49,6 +49,14 @@ Le changement paraît mineur. Il ne l'est pas. Une fois le papier disparu, toute
 
     [:octicons-arrow-right-24: Architecture](intro/architecture.md) · [Modules](platform/modules.md) · [API](platform/api.md)
 
+-   :material-database-sync:{ .lg .middle } **J'utilise Chaincache** · *Composant facultatif*
+
+    ---
+
+    Vous utilisez Chaincache seul ou avec Registerwerk et recherchez des indications pour son utilisation, son exploitation, son administration ou son développement.
+
+    [:octicons-arrow-right-24: Documentation Chaincache](chaincache/index.md)
+
 </div>
 
 ---
