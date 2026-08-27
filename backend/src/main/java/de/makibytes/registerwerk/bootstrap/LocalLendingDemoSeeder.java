@@ -108,13 +108,34 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         return 20;
     }
 
+    /**
+     * Never lets a stale/partial on-chain demo deployment (e.g. an interrupted
+     * {@code demo-onchain-deploy} retry writing an address for a contract that never actually
+     * landed) fail the whole application's startup — this is optional local-demo enrichment
+     * behind {@code registerwerk.seed-demo-data}, not core functionality. A verification failure
+     * here means some demo data doesn't get linked; it must never mean the backend won't boot.
+     * Caught (not propagated) inside this same {@code @Transactional} method — letting the
+     * exception escape the proxy boundary would still commit whatever ran before the failure,
+     * which is the desired partial-success outcome, but self-invoking a separate method from here
+     * would bypass Spring's transactional proxy entirely.
+     */
     @Override
     @Transactional
-    public void run(ApplicationArguments args) throws IOException {
+    public void run(ApplicationArguments args) {
         if (addressesFile == null || addressesFile.isBlank()) {
             log.info("Local on-chain lending demo is not configured — skipped");
             return;
         }
+        try {
+            seed();
+        } catch (Exception e) {
+            log.error("Local on-chain lending demo seeding failed — some demo data may be "
+                    + "unlinked (safe to ignore outside local/demo use; rerun after confirming "
+                    + "demo-onchain-deploy completed cleanly to retry)", e);
+        }
+    }
+
+    private void seed() throws IOException {
         Path file = Path.of(addressesFile);
         if (!Files.isRegularFile(file)) {
             throw new IllegalStateException("Local lending demo address file does not exist: " + file);

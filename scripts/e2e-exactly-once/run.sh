@@ -34,7 +34,13 @@ RECIPIENT_ADDR="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"                     
 # volume (confirmed empirically — the same script produced a different address on a rerun). Read
 # live from the demo deploy's own output volume in setup() instead.
 DEMO_ERC20_TOKEN=""
-SEPOLIA_CHAIN_CONFIG_ID="8ed90c59-c433-4586-8e67-57060bd126bd"
+# NOT hardcoded either, for the same reason as DEMO_ERC20_TOKEN above: chain_config.id defaults to
+# gen_random_uuid() in V1's seed INSERT, so it's a fresh value on every clean install (e.g. after
+# docker compose down -v) — confirmed live: a stale hardcoded id here silently no-ops every insert
+# that filters or foreign-keys on it (asset_deployment, the scenario_ack_lost/quarantine
+# subscription-state assertions), since psql_q's errors are swallowed by callers redirecting to
+# /dev/null. Resolved live from chain_config in setup() instead.
+SEPOLIA_CHAIN_CONFIG_ID=""
 # Must be an asset with ZERO pre-existing asset_deployment/token_transfer rows, not just "any real
 # demo asset" — confirmed live: reusing an already-deployed demo asset (Meridian Green Bond 2024)
 # made a reorg's holder-recompute compensation sweep in that asset's *seeded* fake transfers too
@@ -160,6 +166,14 @@ setup() {
     exit 1
   fi
 
+  log "-> Resolving ETHEREUM_SEPOLIA's chain_config id (fresh per install, not hardcoded)..."
+  SEPOLIA_CHAIN_CONFIG_ID=$(psql_q "SELECT id FROM chain_config WHERE identifier = 'ETHEREUM_SEPOLIA';")
+  if [ -z "$SEPOLIA_CHAIN_CONFIG_ID" ]; then
+    echo "FAILED: no chain_config row for ETHEREUM_SEPOLIA — is the stack fully seeded?"
+    exit 1
+  fi
+  log "   using SEPOLIA_CHAIN_CONFIG_ID=$SEPOLIA_CHAIN_CONFIG_ID"
+
   log "-> Reading the live demo ERC-20 address from demo-onchain-deploy's own output volume..."
   local lending_demo_volume
   lending_demo_volume=$(docker volume ls --filter "label=com.docker.compose.volume=lending_demo_addresses" --format '{{.Name}}' | head -1)
@@ -174,6 +188,15 @@ setup() {
     exit 1
   fi
   log "   using DEMO_ERC20_TOKEN=$DEMO_ERC20_TOKEN"
+
+  log "-> Ensuring the fixture asset row itself exists (asset_deployment/asset_holder both FK into it;"
+  log "   a truly fresh database — e.g. after docker compose down -v — has no row at this fixed id yet)..."
+  psql_q "
+    INSERT INTO asset (id, asset_number, issuer_id, name, token_standard, status)
+    SELECT '${FIXTURE_ASSET_ID}', 'E2E-EXACTLY-ONCE-FIXTURE', (SELECT id FROM legal_entity LIMIT 1),
+           'e2e-exactly-once harness fixture', 'ERC20', 'ISSUED'
+    WHERE NOT EXISTS (SELECT 1 FROM asset WHERE id = '${FIXTURE_ASSET_ID}');
+  " >/dev/null
 
   log "-> Ensuring the demo ERC-20 has an asset_deployment row on ETHEREUM_SEPOLIA (so projectTransfer recognizes it)..."
   psql_q "
@@ -336,7 +359,11 @@ scenario_registerwerk_restart() {
 
   wait_for_health "http://127.0.0.1:44200/actuator/health" "backend" "rw_restart" || return
 
-  if wait_for_finality "$tx" PROVISIONAL 30; then
+  # 45s, not 30: registerwerk.chaincache.stream.reconcile-initial-delay-ms defaults to 20000 —
+  # the scheduler doesn't even attempt its first reconnect until 20s after the Spring context
+  # (not the HTTP health check, which flips healthy first) is up, before the reconnect+replay
+  # itself takes any time at all. Confirmed live: the event reliably lands a few seconds past 30s.
+  if wait_for_finality "$tx" PROVISIONAL 45; then
     ok "event delivered after restart (resumed from durable cursor)"
   else
     bad "event never arrived after restart" "rw_restart"
