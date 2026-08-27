@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.chain.web;
 
 import de.makibytes.registerwerk.chain.internal.RpcNodeService;
 import de.makibytes.registerwerk.chain.api.RpcNode;
+import de.makibytes.registerwerk.chain.web.dto.ConsoleTokenResponse;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeCreateRequest;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeResponse;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeUpdateRequest;
@@ -69,6 +70,18 @@ public class RpcNodeController {
             @PathVariable UUID chainId, @PathVariable UUID nodeId) {
         RpcNode node = rpcNodeService.redetect(chainId, nodeId);
         return ResponseEntity.ok(rpcNodeService.toResponse(node));
+    }
+
+    /** Mints a short-lived (5 min) chaincache bearer token for the given node, for the operator to
+     *  paste into chaincache's own console dialog — see {@code RpcNodeService#mintConsoleToken}.
+     *  404s if the node isn't a chaincache connection or this deployment has no
+     *  {@code registerwerk.chaincache.jwt-secret} configured. */
+    @PostMapping("/{nodeId}/console-token")
+    public ResponseEntity<ConsoleTokenResponse> mintConsoleToken(
+            @PathVariable UUID chainId, @PathVariable UUID nodeId) {
+        return rpcNodeService.mintConsoleToken(chainId, nodeId)
+                .map(token -> ResponseEntity.ok(new ConsoleTokenResponse(token)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     /** Manually enables (un-stops) a node. */

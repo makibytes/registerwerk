@@ -1308,8 +1308,62 @@ code {
 
 .kind-badge { margin-top: 3px; }
 .kind-badge mat-icon, .external-link mat-icon { font-size: 12px; width: 12px; height: 12px; }
-.expand-btn { color: var(--rw-text-muted); }
 .capabilities-row td { background: var(--rw-bg); padding: 0 20px 16px; }
+
+// A chaincache-kind row is itself the expand/collapse control (click anywhere on it, not just a
+// button) — the chevron in the Health column is the visual affordance for that, not an action of
+// its own, so it isn't a button and doesn't need its own hit target or focus stop.
+tr.expandable-row { cursor: pointer; }
+tr.expandable-row:focus-visible { outline: 2px solid #6366f1; outline-offset: -2px; }
+tr.row-expanded td { background: var(--rw-bg); }
+
+.row-chevron, .row-chevron-spacer {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.row-chevron {
+  color: var(--rw-text-muted);
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.row-chevron.open { transform: rotate(90deg); color: #6366f1; }
+tr.expandable-row:hover .row-chevron { color: var(--rw-text-primary); }
+
+// Secondary status lines under the primary health dot/label — same left offset as the label
+// itself (chevron + gap), so they read as detail about that row's health rather than a separate
+// element. Shared by .failures-text and .stream-indicator.
+.row-indent { margin-left: 20px; }
+
+.stream-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--rw-text-muted);
+  margin-top: 3px;
+}
+
+.stream-indicator mat-icon { font-size: 12px; width: 12px; height: 12px; }
+.stream-indicator.connected { color: #16a34a; }
+
+.console-token-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6366f1;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.console-token-btn:hover { color: #4f46e5; text-decoration: underline; }
 
 .capabilities-panel {
   display: grid;
@@ -1333,7 +1387,7 @@ code {
 .capability-item .value.no { color: var(--rw-text-muted); }
 
 .capabilities-empty { padding: 14px 16px; font-size: 12px; color: var(--rw-text-muted); font-style: italic; }
-.capabilities-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.capabilities-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 10px; }
 .external-link { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 
 .capability-item.wide { grid-column: 1 / -1; }
@@ -1354,17 +1408,6 @@ code {
   border: 1px solid var(--rw-border);
   color: var(--rw-text-secondary);
 }
-
-.stream-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
-}
-.stream-status mat-icon { font-size: 12px; width: 12px; height: 12px; }
-.stream-status.connected { color: #16a34a; }
-.stream-status.disconnected { color: var(--rw-text-muted); }
 
 // ── Cross-view resilience and motion ─────────────────────────────────────────
 

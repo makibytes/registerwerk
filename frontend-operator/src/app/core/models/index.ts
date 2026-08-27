@@ -591,6 +591,7 @@ export interface ChainDriftEvent {
   delta: number;
   severity: 'WARNING' | 'CRITICAL';
   status: 'OPEN' | 'RESOLVED';
+  firstDetectedAt: string;
   detectedAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;

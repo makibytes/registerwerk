@@ -155,7 +155,8 @@ export class ChainDriftQueueComponent implements OnInit {
     { key: 'dbBalance', header: 'Registry Balance', cell: (e: ChainDriftEvent) => String(e.dbBalance), type: 'number' },
     { key: 'onchainBalance', header: 'On-chain Balance', cell: (e: ChainDriftEvent) => String(e.onchainBalance), type: 'number' },
     { key: 'delta', header: 'Delta', cell: (e: ChainDriftEvent) => String(e.delta), type: 'number' },
-    { key: 'detectedAt', header: 'Detected', cell: (e: ChainDriftEvent) => e.detectedAt, type: 'date' },
+    { key: 'firstDetectedAt', header: 'First seen', cell: (e: ChainDriftEvent) => e.firstDetectedAt, type: 'date' },
+    { key: 'detectedAt', header: 'Last confirmed', cell: (e: ChainDriftEvent) => e.detectedAt, type: 'date' },
   ];
 
   ngOnInit(): void {

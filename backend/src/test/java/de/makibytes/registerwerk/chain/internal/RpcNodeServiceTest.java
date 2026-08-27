@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.chain.internal;
 
+import de.makibytes.registerwerk.chain.api.ChaincacheCredentials;
 import de.makibytes.registerwerk.chain.api.ChaincacheStreamStatus;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
@@ -38,6 +39,7 @@ class RpcNodeServiceTest {
     @Mock ApplicationEventPublisher events;
     @Mock ChaincacheClient chaincacheClient;
     private final ChaincacheStreamStatus streamStatus = chainConfigId -> false;
+    private final ChaincacheCredentials chaincacheCredentials = managementUrl -> Optional.empty();
 
     private RpcNodeService service;
     private final UUID chainId = UUID.randomUUID();
@@ -45,7 +47,7 @@ class RpcNodeServiceTest {
     @BeforeEach
     void setUp() {
         service = new RpcNodeService(rpcNodeRepository, chainConfigRepository, events, chaincacheClient,
-                new ObjectMapper(), streamStatus);
+                new ObjectMapper(), streamStatus, chaincacheCredentials);
     }
 
     private ChainConfig chain() {

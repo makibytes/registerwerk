@@ -397,9 +397,21 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
               </thead>
               <tbody>
                 @for (node of chain.nodes; track node.id) {
-                  <tr [class.stopped-row]="!node.enabled">
+                  <tr [class.stopped-row]="!node.enabled"
+                      [class.expandable-row]="node.kind === 'CHAINCACHE'"
+                      [class.row-expanded]="node.kind === 'CHAINCACHE' && isExpanded(node.id)"
+                      [attr.tabindex]="node.kind === 'CHAINCACHE' ? 0 : null"
+                      [attr.aria-expanded]="node.kind === 'CHAINCACHE' ? isExpanded(node.id) : null"
+                      (click)="node.kind === 'CHAINCACHE' && toggleExpanded(node.id)"
+                      (keydown.enter)="node.kind === 'CHAINCACHE' && toggleExpanded(node.id)">
                     <td>
                       <div class="health-row">
+                        @if (node.kind === 'CHAINCACHE') {
+                          <mat-icon class="row-chevron" [class.open]="isExpanded(node.id)"
+                                    [matTooltip]="isExpanded(node.id) ? 'Hide capabilities' : 'Show capabilities'">chevron_right</mat-icon>
+                        } @else {
+                          <span class="row-chevron-spacer"></span>
+                        }
                         <span class="health-dot" [class.healthy]="node.healthy && node.enabled"
                               [class.unhealthy]="!node.healthy && node.enabled"
                               [class.unknown]="!node.enabled"></span>
@@ -416,7 +428,16 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                         }
                       </div>
                       @if (node.consecutiveFailures > 0 && node.enabled) {
-                        <div class="failures-text">{{ node.consecutiveFailures }} failures</div>
+                        <div class="failures-text row-indent">{{ node.consecutiveFailures }} failures</div>
+                      }
+                      @if (node.kind === 'CHAINCACHE') {
+                        <div class="stream-indicator row-indent" [class.connected]="node.streamConnected"
+                             [matTooltip]="node.streamConnected
+                               ? 'Live durable-event stream connected — SAFE/FINALIZED promotions and reorg retractions are being pushed from this workload right now'
+                               : 'No live durable-event stream — reconnects automatically; RPC-based routing is unaffected'">
+                          <mat-icon>{{ node.streamConnected ? 'sensors' : 'sensors_off' }}</mat-icon>
+                          {{ node.streamConnected ? 'Stream live' : 'Stream idle' }}
+                        </div>
                       }
                     </td>
                     <td>
@@ -425,23 +446,7 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                         <div class="node-label">{{ node.label }}</div>
                       }
                       @if (node.kind === 'CHAINCACHE') {
-                        <div class="kind-badge chaincache">
-                          <mat-icon>bolt</mat-icon> chaincache
-                          <button type="button" mat-icon-button class="expand-btn" style="width: 20px; height: 20px; line-height: 20px"
-                                  [matTooltip]="isExpanded(node.id) ? 'Hide capabilities' : 'Show capabilities'"
-                                  (click)="toggleExpanded(node.id)">
-                            <mat-icon style="font-size: 16px; width: 16px; height: 16px">
-                              {{ isExpanded(node.id) ? 'expand_less' : 'expand_more' }}
-                            </mat-icon>
-                          </button>
-                        </div>
-                        <div class="stream-status" [class.connected]="node.streamConnected" [class.disconnected]="!node.streamConnected"
-                             [matTooltip]="node.streamConnected
-                               ? 'Live durable-event stream connected — SAFE/FINALIZED promotions and reorg retractions are being pushed from this workload right now'
-                               : 'No live durable-event stream — reconnects automatically; RPC-based routing is unaffected'">
-                          <mat-icon>{{ node.streamConnected ? 'sensors' : 'sensors_off' }}</mat-icon>
-                          {{ node.streamConnected ? 'Stream live' : 'Stream idle' }}
-                        </div>
+                        <span class="kind-badge chaincache"><mat-icon>bolt</mat-icon> chaincache</span>
                       }
                     </td>
                     <td>
@@ -470,7 +475,7 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                         <span class="last-seen">Never</span>
                       }
                     </td>
-                    <td>
+                    <td (click)="$event.stopPropagation()">
                       <div class="action-row">
                         <mat-slide-toggle
                           [checked]="node.enabled"
@@ -585,6 +590,11 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                         }
                         <div class="capabilities-actions">
                           @if (node.managementUrl) {
+                            <button type="button" class="console-token-btn"
+                                    matTooltip="Mint a short-lived (5 min) chaincache bearer token and copy it — paste it into the console's 'Connect the console' dialog"
+                                    (click)="copyConsoleToken(chain, node)">
+                              <mat-icon>vpn_key</mat-icon> Copy console token
+                            </button>
                             <a class="external-link" [href]="consoleUrl(node.managementUrl)" target="_blank" rel="noopener">
                               <mat-icon>open_in_new</mat-icon> Open Chaincache console
                             </a>
@@ -784,6 +794,49 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
         },
         error: () => this.snackBar.open('Failed to update node', 'OK', { duration: 3000 }),
       });
+    });
+  }
+
+  /** Mints a fresh chaincache bearer token server-side and copies it to the clipboard, so the
+   *  operator can paste it straight into the console's own "Connect the console" dialog instead
+   *  of having to know or look up registerwerk.chaincache.jwt-secret. */
+  copyConsoleToken(chain: ChainHealth, node: RpcNode) {
+    this.chainService.mintConsoleToken(chain.id, node.id).subscribe({
+      next: ({ token }) => {
+        this.copyToClipboard(token).then(
+          () => this.snackBar.open('Console token copied — valid for 5 minutes', 'OK', { duration: 4000 }),
+          () => this.snackBar.open('Token minted but clipboard copy failed', 'OK', { duration: 4000 }),
+        );
+      },
+      error: () => this.snackBar.open('Failed to mint console token', 'OK', { duration: 3000 }),
+    });
+  }
+
+  /** navigator.clipboard is only exposed in a secure context (HTTPS, or localhost/127.0.0.1) —
+   *  it is simply undefined on a plain-HTTP origin such as the operator portal's own
+   *  http://<host>:44200 dev/demo deployments, so calling .writeText directly throws a
+   *  TypeError rather than failing gracefully. Falls back to the classic hidden-textarea +
+   *  execCommand('copy') technique, which works regardless of secure-context status. */
+  private copyToClipboard(text: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        const copied = document.execCommand('copy');
+        copied ? resolve() : reject(new Error('execCommand copy returned false'));
+      } catch (error) {
+        reject(error);
+      } finally {
+        document.body.removeChild(textarea);
+      }
     });
   }
 

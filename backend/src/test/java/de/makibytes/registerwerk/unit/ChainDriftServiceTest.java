@@ -93,10 +93,37 @@ class ChainDriftServiceTest {
     }
 
     @Test
-    @DisplayName("countOpen() delegates to the repository's status count")
+    @DisplayName("countOpen() delegates to the repository's confirmed-only open count")
     void countOpen_delegates() {
-        when(repository.countByStatus(ChainDriftStatus.OPEN)).thenReturn(3L);
+        when(repository.countByStatusAndConfirmedTrue(ChainDriftStatus.OPEN)).thenReturn(3L);
 
         assertThat(service.countOpen()).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("list(OPEN, null, ...) uses the confirmed-only finder — unconfirmed candidates "
+            + "stay out of the operator work queue")
+    void list_openStatus_usesConfirmedOnlyFinder() {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(repository.findByStatusAndConfirmedTrueOrderByDetectedAtDesc(ChainDriftStatus.OPEN, pageable))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        service.list(ChainDriftStatus.OPEN, null, pageable);
+
+        verify(repository).findByStatusAndConfirmedTrueOrderByDetectedAtDesc(ChainDriftStatus.OPEN, pageable);
+        verify(repository, org.mockito.Mockito.never()).findByStatusOrderByDetectedAtDesc(any(), any());
+    }
+
+    @Test
+    @DisplayName("list(RESOLVED, null, ...) uses the plain by-status finder — no confirmed gate on closed cases")
+    void list_resolvedStatus_usesPlainFinder() {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(repository.findByStatusOrderByDetectedAtDesc(ChainDriftStatus.RESOLVED, pageable))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        service.list(ChainDriftStatus.RESOLVED, null, pageable);
+
+        verify(repository).findByStatusOrderByDetectedAtDesc(ChainDriftStatus.RESOLVED, pageable);
+        verify(repository, org.mockito.Mockito.never()).findByStatusAndConfirmedTrueOrderByDetectedAtDesc(any(), any());
     }
 }

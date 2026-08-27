@@ -16,6 +16,7 @@ public record ChainDriftEventResponse(
         BigDecimal delta,
         String severity,
         String status,
+        Instant firstDetectedAt,
         Instant detectedAt,
         Instant resolvedAt,
         UUID resolvedBy,
@@ -26,7 +27,7 @@ public record ChainDriftEventResponse(
                 e.getId(), e.getAssetId(), e.getDeploymentId(), e.getWalletAddress(),
                 e.getDbBalance(), e.getOnchainBalance(), e.getDelta(),
                 e.getSeverity().name(), e.getStatus().name(),
-                e.getDetectedAt(), e.getResolvedAt(), e.getResolvedBy(), e.getResolutionNotes()
+                e.getFirstDetectedAt(), e.getDetectedAt(), e.getResolvedAt(), e.getResolvedBy(), e.getResolutionNotes()
         );
     }
 }

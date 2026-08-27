@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.chain.internal;
 
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.ChaincacheCredentials;
 import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChaincacheStreamStatus;
@@ -21,6 +22,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -45,16 +47,19 @@ public class RpcNodeService {
     private final ChaincacheClient chaincacheClient;
     private final ObjectMapper objectMapper;
     private final ChaincacheStreamStatus streamStatus;
+    private final ChaincacheCredentials chaincacheCredentials;
 
     public RpcNodeService(RpcNodeRepository rpcNodeRepository, ChainConfigRepository chainConfigRepository,
                           ApplicationEventPublisher events, ChaincacheClient chaincacheClient,
-                          ObjectMapper objectMapper, ChaincacheStreamStatus streamStatus) {
+                          ObjectMapper objectMapper, ChaincacheStreamStatus streamStatus,
+                          ChaincacheCredentials chaincacheCredentials) {
         this.rpcNodeRepository = rpcNodeRepository;
         this.chainConfigRepository = chainConfigRepository;
         this.events = events;
         this.chaincacheClient = chaincacheClient;
         this.objectMapper = objectMapper;
         this.streamStatus = streamStatus;
+        this.chaincacheCredentials = chaincacheCredentials;
     }
 
     @Transactional(readOnly = true)
@@ -300,6 +305,21 @@ public class RpcNodeService {
                 node.getKind() == RpcNode.NodeKind.CHAINCACHE
                         && streamStatus.isConnected(node.getChainConfig().getId())
         );
+    }
+
+    /** Mints a short-lived chaincache bearer token for pasting into chaincache's own operations
+     *  console — the same {@code ChaincacheCredentials} port and OPERATOR-role token shape used
+     *  for the backend's own server-to-server calls (see {@code ChaincacheClient}), just handed to
+     *  the operator instead of attached to an outgoing request. Empty when the node isn't a
+     *  chaincache connection, or when {@code registerwerk.chaincache.jwt-secret} isn't configured
+     *  on this deployment. */
+    @Transactional(readOnly = true)
+    public Optional<String> mintConsoleToken(UUID chainId, UUID nodeId) {
+        RpcNode node = getById(chainId, nodeId);
+        if (node.getKind() != RpcNode.NodeKind.CHAINCACHE || node.getManagementUrl() == null) {
+            return Optional.empty();
+        }
+        return chaincacheCredentials.bearerFor(node.getManagementUrl());
     }
 
     private RpcNode getById(UUID chainId, UUID id) {

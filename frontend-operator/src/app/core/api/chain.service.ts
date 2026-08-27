@@ -110,4 +110,11 @@ export class ChainService {
   deleteNode(chainId: string, nodeId: string): Observable<void> {
     return this.http.delete<void>(`${this.base}/${chainId}/nodes/${nodeId}`);
   }
+
+  /** Mints a short-lived (5 min) chaincache bearer token for pasting into chaincache's own
+   *  console dialog — see RpcNodeService#mintConsoleToken. 404s for a non-chaincache node or a
+   *  deployment with no registerwerk.chaincache.jwt-secret configured. */
+  mintConsoleToken(chainId: string, nodeId: string): Observable<{ token: string }> {
+    return this.http.post<{ token: string }>(`${this.base}/${chainId}/nodes/${nodeId}/console-token`, {});
+  }
 }

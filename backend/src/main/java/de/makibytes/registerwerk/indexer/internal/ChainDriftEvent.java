@@ -61,6 +61,21 @@ public class ChainDriftEvent {
     @Column(name = "detected_at", nullable = false)
     private Instant detectedAt = Instant.now();
 
+    /** Immutable — set once at first sighting, unlike {@link #detectedAt} which is refreshed on
+     *  every subsequent scan that still finds the divergence. Shows how long a confirmed case has
+     *  actually persisted. */
+    @Column(name = "first_detected_at", nullable = false)
+    private Instant firstDetectedAt = Instant.now();
+
+    /** Whether this divergence has survived a second, independent detection run — see
+     *  {@code ChainDriftDetectionJob}'s confirm-on-reconfirmation flow. An unconfirmed row is a
+     *  same-run "candidate": excluded from the operator "Open" queue and the open-count gauge,
+     *  and silently auto-resolved by the job itself if the divergence disappears before it is
+     *  ever confirmed (most likely a transient indexer/chain-stream catch-up window rather than
+     *  genuine drift). Once confirmed, only a human can close the case via {@code resolve()}. */
+    @Column(name = "confirmed", nullable = false)
+    private boolean confirmed = false;
+
     @Column(name = "resolved_at")
     private Instant resolvedAt;
 
@@ -102,6 +117,12 @@ public class ChainDriftEvent {
     public void setStatus(ChainDriftStatus status) { this.status = status; }
 
     public Instant getDetectedAt() { return detectedAt; }
+
+    public Instant getFirstDetectedAt() { return firstDetectedAt; }
+    public void setFirstDetectedAt(Instant firstDetectedAt) { this.firstDetectedAt = firstDetectedAt; }
+
+    public boolean isConfirmed() { return confirmed; }
+    public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }
 
     public Instant getResolvedAt() { return resolvedAt; }
     public void setResolvedAt(Instant resolvedAt) { this.resolvedAt = resolvedAt; }

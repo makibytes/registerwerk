@@ -28,9 +28,17 @@ public class ChainDriftService {
     @Transactional(readOnly = true)
     public Page<ChainDriftEvent> list(ChainDriftStatus status, UUID assetId, Pageable pageable) {
         if (assetId != null) {
+            // Unfiltered by confirmation on purpose: no UI passes assetId today, so there is no
+            // "Open" work-queue expectation to protect here. Apply the same confirmed-gate as
+            // below if this ever becomes an operator-facing per-asset view.
             return repository.findByAssetIdOrderByDetectedAtDesc(assetId, pageable);
         }
-        return repository.findByStatusOrderByDetectedAtDesc(status, pageable);
+        // A same-run "candidate" (not yet confirmed on a second detection pass) is not a decided
+        // case yet — RESOLVED already reflects a real outcome either way (human close, or the
+        // job's own auto-clear of a never-confirmed candidate), so only OPEN needs the gate.
+        return status == ChainDriftStatus.OPEN
+                ? repository.findByStatusAndConfirmedTrueOrderByDetectedAtDesc(status, pageable)
+                : repository.findByStatusOrderByDetectedAtDesc(status, pageable);
     }
 
     @Transactional(readOnly = true)
@@ -41,16 +49,18 @@ public class ChainDriftService {
 
     @Transactional(readOnly = true)
     public long countOpen() {
-        return repository.countByStatus(ChainDriftStatus.OPEN);
+        return repository.countByStatusAndConfirmedTrue(ChainDriftStatus.OPEN);
     }
 
     /**
      * Closes a drift case with a mandatory explanation of how it was resolved — a registry
      * correction, an on-chain correction, or a documented reason the divergence is expected
-     * (e.g. a since-reconciled indexer lag). The detection job only ever inserts/refreshes OPEN
-     * rows; this is the sole path to RESOLVED, and it is not reversible from here — a fresh
-     * divergence on the same wallet opens a new case rather than reopening this one, matching
-     * the job's own dedup rule (one OPEN event per deployment+wallet).
+     * (e.g. a since-reconciled indexer lag). This is the only path to RESOLVED for a
+     * <em>confirmed</em> case, and it is not reversible from here — a fresh divergence on the
+     * same wallet opens a new case rather than reopening this one, matching the job's own dedup
+     * rule (one OPEN event per deployment+wallet). The one exception is the detection job's own
+     * narrow auto-resolve of a same-run "candidate" that disappears before ever being confirmed —
+     * that case was never surfaced to a human in the first place, so it needs no human decision.
      */
     public ChainDriftEvent resolve(UUID id, UUID actorId, String actorRole, String notes) {
         ChainDriftEvent event = get(id);
