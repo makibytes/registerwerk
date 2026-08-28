@@ -1014,7 +1014,7 @@ export class TradingDeskComponent implements OnInit {
       error: (err) => {
         this.mutating = false;
         this.dialogError = err?.error?.message ?? 'Failed to declare payment.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -1058,7 +1058,7 @@ export class TradingDeskComponent implements OnInit {
       error: (err) => {
         this.mutating = false;
         this.dialogError = err?.error?.message ?? 'Failed to dispute payment.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -1086,7 +1086,7 @@ export class TradingDeskComponent implements OnInit {
       error: (err) => {
         this.mutating = false;
         this.dialogError = err?.error?.message ?? 'Failed to cancel trade.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -1137,7 +1137,7 @@ export class TradingDeskComponent implements OnInit {
         this.mutating = false;
         this.settings = settings;
         this.snackBar.open('Trader settings saved.', 'OK', { duration: 3000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: (err) => {
         this.mutating = false;
@@ -1153,7 +1153,7 @@ export class TradingDeskComponent implements OnInit {
     ).afterClosed().subscribe(addr => {
       if (addr) {
         setter(addr);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       }
     });
   }
@@ -1202,7 +1202,7 @@ export class TradingDeskComponent implements OnInit {
         this.loadWarnings = failures
           .filter((failure) => failure.error?.status !== 501)
           .map((failure) => `${failure.label} could not be loaded.`);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }

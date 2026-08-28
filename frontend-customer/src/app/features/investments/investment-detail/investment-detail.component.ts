@@ -857,7 +857,7 @@ export class InvestmentDetailComponent implements OnInit {
       next: (record) => {
         this.record = record;
         this.loading = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         this.loadDeployments(record.assetId, record.walletAddress);
         this.loadRegisterDocMeta(record.assetId);
         this.loadBondTerms(record.assetId);
@@ -867,7 +867,7 @@ export class InvestmentDetailComponent implements OnInit {
       error: (err) => {
         this.loadError = err?.error?.message ?? 'Failed to load the investment.';
         this.loading = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -876,7 +876,7 @@ export class InvestmentDetailComponent implements OnInit {
     this.registerDocumentService.listAvailable().subscribe({
       next: (docs) => {
         this.registerDocMeta = docs.find((d) => d.assetId === assetId) ?? null;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         // Non-critical: the download button falls back to a generic label.
@@ -888,7 +888,7 @@ export class InvestmentDetailComponent implements OnInit {
     this.bondTermsService.getBondTerms(assetId).subscribe({
       next: (terms) => {
         this.bondTerms = terms;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         // 404 for the (common) case of a non-bond asset — no terms to show, not an error.
@@ -904,11 +904,11 @@ export class InvestmentDetailComponent implements OnInit {
     this.tokenHistoryService.getAssetHistory(assetId, 0, 20).subscribe({
       next: (page) => {
         this.transferHistorySection = resolveAsyncSection(this.transferHistorySection, page.content);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.transferHistorySection = failAsyncSection(this.transferHistorySection);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -924,11 +924,11 @@ export class InvestmentDetailComponent implements OnInit {
     this.corporateActionsService.listForHolder(assetId).subscribe({
       next: (actions) => {
         this.corporateActionsSection = resolveAsyncSection(this.corporateActionsSection, actions);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.corporateActionsSection = failAsyncSection(this.corporateActionsSection);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -978,12 +978,12 @@ export class InvestmentDetailComponent implements OnInit {
       next: (pdf) => {
         downloadBlob(pdf, `registerauszug-${this.record!.assetId}.pdf`);
         this.downloadingRegisterDoc = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.downloadingRegisterDoc = false;
         this.snackBar.open('Failed to generate the register document. Please try again.', 'Dismiss', { duration: 5000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -998,7 +998,7 @@ export class InvestmentDetailComponent implements OnInit {
     if (this.inspectionForm.legalBasis === 'LEGITIMATE_INTEREST' && !this.inspectionForm.statedInterest.trim()) return;
 
     this.submittingInspection = true;
-    this.cdr.detectChanges();
+    this.cdr.markForCheck();
 
     this.registerInspectionService.submit(
       this.record.assetId,
@@ -1011,12 +1011,12 @@ export class InvestmentDetailComponent implements OnInit {
       next: () => {
         this.dialog.closeAll();
         this.submittingInspection = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         this.snackBar.open('Inspection request submitted. An operator will review it.', 'Dismiss', { duration: 5000 });
       },
       error: () => {
         this.submittingInspection = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         this.snackBar.open('Failed to submit inspection request. Please try again.', 'Dismiss', { duration: 5000 });
       },
     });
@@ -1025,7 +1025,7 @@ export class InvestmentDetailComponent implements OnInit {
   submitRegistrationRequest(): void {
     if (!this.record || this.deploymentsSection.data.length === 0 || this.registrationSubmitting) return;
     this.registrationSubmitting = true;
-    this.cdr.detectChanges();
+    this.cdr.markForCheck();
 
     const deployment = this.deploymentsSection.data[0];
     this.identityRequestService.requestIdentityRegistration({
@@ -1038,7 +1038,7 @@ export class InvestmentDetailComponent implements OnInit {
         this.registrationRequested = true;
         this.registrationSubmitting = false;
         this.showRegistrationForm = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         this.snackBar.open(
           'Registration request submitted. The registry operator will contact you.',
           'Dismiss',
@@ -1047,7 +1047,7 @@ export class InvestmentDetailComponent implements OnInit {
       },
       error: (err) => {
         this.registrationSubmitting = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         this.snackBar.open(
           err?.error?.message ?? 'Failed to submit request. Please try again.',
           'Dismiss',
@@ -1062,14 +1062,14 @@ export class InvestmentDetailComponent implements OnInit {
     this.issuanceService.getDeployments(assetId).subscribe({
       next: (deployments) => {
         this.deploymentsSection = resolveAsyncSection(this.deploymentsSection, deployments);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         if (this.isErc3643 && deployments.length > 0) {
           this.loadIdentityStatus(assetId, deployments[0].id, walletAddress);
         }
       },
       error: () => {
         this.deploymentsSection = failAsyncSection(this.deploymentsSection);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -1082,11 +1082,11 @@ export class InvestmentDetailComponent implements OnInit {
           entry => entry.walletAddress.toLowerCase() === walletAddress.toLowerCase()
         ) ?? null;
         this.identitySection = resolveAsyncSection(this.identitySection, match);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.identitySection = failAsyncSection(this.identitySection);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -1117,14 +1117,14 @@ export class InvestmentDetailComponent implements OnInit {
   async connectWallet(): Promise<void> {
     if (this.connecting) return;
     this.connecting = true;
-    this.cdr.detectChanges();
+    this.cdr.markForCheck();
     try {
       await this.walletService.connect();
     } catch (err: unknown) {
       this.snackBar.open((err as Error)?.message ?? 'Wallet connection failed.', 'Dismiss', { duration: 5000 });
     } finally {
       this.connecting = false;
-      this.cdr.detectChanges();
+      this.cdr.markForCheck();
     }
   }
 
@@ -1132,7 +1132,7 @@ export class InvestmentDetailComponent implements OnInit {
     if (!this.record || this.deploymentsSection.data.length === 0 || this.revealing) return;
     this.revealing = true;
     this.revealError = null;
-    this.cdr.detectChanges();
+    this.cdr.markForCheck();
     try {
       const dep = this.deploymentsSection.data[0];
       const ctx = await firstValueFrom(this.issuanceService.getConfidentialContext(this.record.assetId, dep.id));
@@ -1149,7 +1149,7 @@ export class InvestmentDetailComponent implements OnInit {
       this.revealError = (err as Error)?.message ?? 'Failed to reveal balance.';
     } finally {
       this.revealing = false;
-      this.cdr.detectChanges();
+      this.cdr.markForCheck();
     }
   }
 
@@ -1161,7 +1161,7 @@ export class InvestmentDetailComponent implements OnInit {
     this.transferring = true;
     this.transferError = null;
     this.transferSuccess = null;
-    this.cdr.detectChanges();
+    this.cdr.markForCheck();
     try {
       const amount = this.transferAmount!;
       const dep = this.deploymentsSection.data[0];
@@ -1185,7 +1185,7 @@ export class InvestmentDetailComponent implements OnInit {
       this.transferError = (err as Error)?.message ?? 'Confidential transfer failed.';
     } finally {
       this.transferring = false;
-      this.cdr.detectChanges();
+      this.cdr.markForCheck();
     }
   }
 }

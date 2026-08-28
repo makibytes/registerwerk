@@ -11,6 +11,7 @@ import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
+import de.makibytes.registerwerk.auth.events.OidcUserProvisionedEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -35,6 +37,7 @@ import static org.mockito.Mockito.when;
 class DefaultPrincipalResolverTest {
 
     @Mock private AppUserRepository repository;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     private DefaultPrincipalResolver resolver;
 
@@ -44,7 +47,7 @@ class DefaultPrincipalResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new DefaultPrincipalResolver(repository);
+        resolver = new DefaultPrincipalResolver(repository, eventPublisher);
     }
 
     @Test
@@ -101,7 +104,7 @@ class DefaultPrincipalResolverTest {
     }
 
     @Test
-    @DisplayName("an unknown Entra principal is provisioned with the token's app roles")
+    @DisplayName("an unknown Entra principal is provisioned disabled with no roles")
     void entraToken_provisionsNewAccount() {
         when(repository.findByEntraObjectId(entraOid)).thenReturn(Optional.empty());
         when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.empty());
@@ -114,32 +117,10 @@ class DefaultPrincipalResolverTest {
         assertThat(created.getEntraObjectId()).isEqualTo(entraOid);
         assertThat(created.getEmail()).isEqualTo("customer@test.local");
         assertThat(created.getAuthProvider()).isEqualTo(UserAuthProvider.ENTRA);
-        assertThat(created.isEnabled()).isTrue();
-        assertThat(created.getRoles()).containsExactly(AppUserRole.INVESTOR);
-    }
+        assertThat(created.isEnabled()).isFalse();
+        assertThat(created.getRoles()).isEmpty();
 
-    @Test
-    @DisplayName("unrecognised app roles are dropped rather than failing the sign-in")
-    void entraToken_ignoresUnknownRoles() {
-        when(repository.findByEntraObjectId(entraOid)).thenReturn(Optional.empty());
-        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.empty());
-        when(repository.save(any(AppUser.class))).thenAnswer(i -> i.getArgument(0));
-
-        Jwt jwt = Jwt.withTokenValue("t")
-                .header("alg", "RS256")
-                .claim("iss", "https://login.microsoftonline.com/" + tenantId + "/v2.0")
-                .claim("sub", "entra-subject-not-a-uuid")
-                .claim("oid", entraOid.toString())
-                .claim("tid", tenantId.toString())
-                .claim("preferred_username", "customer@test.local")
-                .claim("roles", List.of("INVESTOR", "SomeAzureGroupName"))
-                .issuedAt(Instant.now())
-                .expiresAt(Instant.now().plusSeconds(60))
-                .build();
-
-        Optional<AppUser> resolved = resolver.resolve(auth(jwt));
-
-        assertThat(resolved.orElseThrow().getRoles()).containsExactly(AppUserRole.INVESTOR);
+        verify(eventPublisher).publishEvent(any(OidcUserProvisionedEvent.class));
     }
 
     @Test
@@ -170,8 +151,6 @@ class DefaultPrincipalResolverTest {
         assertThatThrownBy(() -> resolver.requireUser(authentication))
                 .isInstanceOf(AccessDeniedException.class);
     }
-
-    // ── generic (non-Entra) OIDC — Track 6-4 ────────────────────────────────────
 
     @Test
     @DisplayName("a non-Entra OIDC token (no oid claim) resolves by sub, not email")
@@ -204,7 +183,7 @@ class DefaultPrincipalResolverTest {
     }
 
     @Test
-    @DisplayName("an unknown OIDC principal is provisioned with the token's app roles")
+    @DisplayName("an unknown OIDC principal is provisioned disabled with no roles")
     void oidcToken_provisionsNewAccount() {
         when(repository.findByExternalSubject("okta-user-42")).thenReturn(Optional.empty());
         when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.empty());
@@ -217,8 +196,10 @@ class DefaultPrincipalResolverTest {
         assertThat(created.getExternalSubject()).isEqualTo("okta-user-42");
         assertThat(created.getEmail()).isEqualTo("customer@test.local");
         assertThat(created.getAuthProvider()).isEqualTo(UserAuthProvider.OIDC);
-        assertThat(created.isEnabled()).isTrue();
-        assertThat(created.getRoles()).containsExactly(AppUserRole.INVESTOR);
+        assertThat(created.isEnabled()).isFalse();
+        assertThat(created.getRoles()).isEmpty();
+
+        verify(eventPublisher).publishEvent(any(OidcUserProvisionedEvent.class));
     }
 
     @Test
@@ -249,8 +230,6 @@ class DefaultPrincipalResolverTest {
                 .expiresAt(Instant.now().plusSeconds(60))
                 .build();
     }
-
-    // ── helpers ───────────────────────────────────────────────────────────────
 
     private AppUser account() {
         AppUser u = new AppUser();

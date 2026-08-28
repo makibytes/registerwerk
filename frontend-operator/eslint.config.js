@@ -15,6 +15,13 @@ module.exports = defineConfig([
     ],
     processor: angular.processInlineTemplates,
     rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.property.name='detectChanges']",
+          message: "Use cdr.markForCheck() in zoneless Angular components instead of detectChanges().",
+        },
+      ],
       "@angular-eslint/directive-selector": [
         "error",
         {
@@ -45,5 +52,13 @@ module.exports = defineConfig([
       // ships this exact escape hatch for that reason; keep strict `===`/`!==` everywhere else.
       "@angular-eslint/template/eqeqeq": ["error", { allowNullOrUndefined: true }],
     },
-  }
+  },
+  {
+    // `fixture.detectChanges()` is TestBed's own trigger for change detection in specs —
+    // unrelated to the zoneless `cdr.detectChanges()` anti-pattern the rule above targets.
+    files: ["**/*.spec.ts"],
+    rules: {
+      "no-restricted-syntax": "off",
+    },
+  },
 ]);

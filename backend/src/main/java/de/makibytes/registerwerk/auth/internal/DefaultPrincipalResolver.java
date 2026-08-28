@@ -2,7 +2,6 @@ package de.makibytes.registerwerk.auth.internal;
 
 import java.time.Instant;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -13,9 +12,11 @@ import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.api.PrincipalResolver;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
+import de.makibytes.registerwerk.auth.events.OidcUserProvisionedEvent;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -33,11 +34,12 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>JIT-provision a new row.</li>
  * </ol>
  *
- * <p>Roles come from the {@code app_user} row, not from the token's {@code roles} claim. Entra
- * app roles are consulted only when provisioning a brand-new account; after that, role changes
- * are made through {@code OperatorUserService} / {@code CompanyUserService} and Entra's copy is
- * ignored. That keeps a single authority for authorisation, and means an operator can revoke a
- * role without waiting for a token to expire.
+ * <p>Roles always come from the {@code app_user} row, never from the token's {@code roles} claim
+ * — including at first sight. A JIT-provisioned account is created disabled with zero roles and
+ * publishes {@link de.makibytes.registerwerk.auth.events.OidcUserProvisionedEvent}; an operator
+ * must review and enable it, assigning least-privilege roles through {@code OperatorUserService}
+ * / {@code CompanyUserService}. That keeps a single authority for authorisation and means neither
+ * a compromised nor a misconfigured IdP app-role assignment can hand out access on its own.
  */
 @Component
 class DefaultPrincipalResolver implements PrincipalResolver {
@@ -45,9 +47,11 @@ class DefaultPrincipalResolver implements PrincipalResolver {
     private static final Logger log = LoggerFactory.getLogger(DefaultPrincipalResolver.class);
 
     private final AppUserRepository appUserRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    DefaultPrincipalResolver(AppUserRepository appUserRepository) {
+    DefaultPrincipalResolver(AppUserRepository appUserRepository, ApplicationEventPublisher eventPublisher) {
         this.appUserRepository = appUserRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -137,11 +141,8 @@ class DefaultPrincipalResolver implements PrincipalResolver {
     /**
      * Creates an account for a principal Entra has authenticated but we have never seen.
      *
-     * <p>The new account is created <em>enabled</em>, because Entra has already authenticated
-     * them and Conditional Access has already applied — refusing entry here would just be a
-     * second, unmanaged access-control layer. Roles come from the token's app-role assignment
-     * this once; thereafter the DB row is authoritative. A principal with no recognised app
-     * role gets an account with no roles, which authenticates but authorises nothing.
+     * <p>The new account is created disabled with no functional roles. Operator approval enables
+     * the account and assigns least-privilege roles in the {@code app_user} row.
      */
     private AppUser provision(Jwt jwt, UUID objectId, String email) {
         AppUser user = new AppUser();
@@ -150,18 +151,17 @@ class DefaultPrincipalResolver implements PrincipalResolver {
         user.setEntraObjectId(objectId);
         user.setEntraTenantId(parseUuid(jwt.getClaimAsString("tid")));
         user.setAuthProvider(UserAuthProvider.ENTRA);
-        user.setEnabled(true);
+        user.setEnabled(false);
         user.setLastLoginAt(Instant.now());
         user.setLegalEntityId(parseUuid(claim(jwt, "entity_id", "entityId")));
 
-        Set<AppUserRole> roles = mapRoles(jwt.getClaimAsStringList("roles"));
-        if (!roles.isEmpty()) {
-            user.setRoles(roles);
-        }
+        user.setRoles(EnumSet.noneOf(AppUserRole.class));
 
         AppUser saved = appUserRepository.save(user);
-        log.info("Provisioned account for Entra principal: id={} oid={} email={} roles={}",
-                saved.getId(), objectId, email, roles);
+        eventPublisher.publishEvent(new OidcUserProvisionedEvent(
+                saved.getId(), saved.getEmail(), saved.getAuthProvider().name()));
+        log.info("Provisioned disabled account for Entra principal: id={} oid={} email={}",
+                saved.getId(), objectId, email);
         return saved;
     }
 
@@ -234,38 +234,22 @@ class DefaultPrincipalResolver implements PrincipalResolver {
         user.setFullName(firstNonBlank(jwt.getClaimAsString("name"), email));
         user.setExternalSubject(subject);
         user.setAuthProvider(UserAuthProvider.OIDC);
-        user.setEnabled(true);
+        user.setEnabled(false);
         user.setLastLoginAt(Instant.now());
         user.setLegalEntityId(parseUuid(claim(jwt, "entity_id", "entityId")));
 
-        Set<AppUserRole> roles = mapRoles(jwt.getClaimAsStringList("roles"));
-        if (!roles.isEmpty()) {
-            user.setRoles(roles);
-        }
+        user.setRoles(EnumSet.noneOf(AppUserRole.class));
 
         AppUser saved = appUserRepository.save(user);
-        log.info("Provisioned account for generic OIDC principal: id={} sub={} email={} roles={}",
-                saved.getId(), subject, email, roles);
+        eventPublisher.publishEvent(new OidcUserProvisionedEvent(
+                saved.getId(), saved.getEmail(), saved.getAuthProvider().name()));
+        log.info("Provisioned disabled account for generic OIDC principal: id={} sub={} email={}",
+                saved.getId(), subject, email);
         return saved;
     }
 
     private static boolean isLocallyMinted(Jwt jwt) {
         return JwtMintingService.LOCAL_ISSUER.equals(jwt.getClaimAsString("iss"));
-    }
-
-    private static Set<AppUserRole> mapRoles(List<String> claimed) {
-        EnumSet<AppUserRole> mapped = EnumSet.noneOf(AppUserRole.class);
-        if (claimed == null) {
-            return mapped;
-        }
-        for (String role : claimed) {
-            try {
-                mapped.add(AppUserRole.valueOf(role));
-            } catch (IllegalArgumentException ignored) {
-                log.debug("Ignoring unmapped role from token: {}", role);
-            }
-        }
-        return mapped;
     }
 
     private static String claim(Jwt jwt, String... names) {

@@ -42,14 +42,14 @@ final class JwtDecoderFactory {
      * for a different purpose entirely. The issuer check costs nothing and turns the secret from
      * a universal forgery key into one scoped to this issuer.
      */
-    static NimbusJwtDecoder localHs256(String devSecret) {
+    static NimbusJwtDecoder localHs256(String devSecret, String audience) {
         SecretKey key = new SecretKeySpec(devSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key)
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
-        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+        decoder.setJwtValidator(withAudience(new DelegatingOAuth2TokenValidator<>(
                 new JwtTimestampValidator(),
-                new JwtIssuerValidator(JwtMintingService.LOCAL_ISSUER)));
+                new JwtIssuerValidator(JwtMintingService.LOCAL_ISSUER)), audience));
         return decoder;
     }
 
@@ -66,21 +66,22 @@ final class JwtDecoderFactory {
     static JwtDecoder issuerBacked(String issuerUri, RegisterwerkAuthProperties props) {
         NimbusJwtDecoder decoder = (NimbusJwtDecoder) JwtDecoders.fromIssuerLocation(issuerUri);
         OAuth2TokenValidator<Jwt> defaults = JwtValidators.createDefaultWithIssuer(issuerUri);
-
-        String audience = props.getAudience();
-        if (audience.isBlank()) {
-            log.warn("JWT_AUDIENCE is not set — access tokens issued to any other application in "
-                    + "the same tenant will be accepted by this API. Set JWT_AUDIENCE to the API "
-                    + "app registration's client id or Application ID URI.");
-            decoder.setJwtValidator(defaults);
-            return decoder;
+        decoder.setJwtValidator(withAudience(defaults, props.getAudience()));
+        if (props.getAudience().isBlank()) {
+            log.warn("JWT_AUDIENCE is blank — audience validation is disabled");
+        } else {
+            log.info("JWT audience validation enabled for aud={}", props.getAudience());
         }
+        return decoder;
+    }
 
+    static OAuth2TokenValidator<Jwt> withAudience(OAuth2TokenValidator<Jwt> base, String audience) {
+        if (audience == null || audience.isBlank()) {
+            return base;
+        }
         OAuth2TokenValidator<Jwt> audienceValidator = new JwtClaimValidator<List<String>>(
                 JwtClaimNames.AUD,
                 aud -> aud != null && aud.contains(audience));
-        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(defaults, audienceValidator));
-        log.info("JWT audience validation enabled for aud={}", audience);
-        return decoder;
+        return new DelegatingOAuth2TokenValidator<>(base, audienceValidator);
     }
 }

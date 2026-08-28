@@ -112,6 +112,10 @@ class ProductionReadinessCheck {
                         "it bypasses the TOTP second factor that the dual-control (Vieraugenprinzip) " +
                         "actions depend on.");
             }
+            if (!noIssuerUri && authProps.getAudience().isBlank()) {
+                throw new IllegalStateException(
+                        "JWT_AUDIENCE is required in production when JWT_ISSUER_URI is set.");
+            }
             checkEntraConfiguration(noIssuerUri);
             log.info("Production readiness checks passed.");
         }

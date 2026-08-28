@@ -40,7 +40,7 @@ A user holds one or more. In the customer portal, roles determine which [workspa
 !!! danger "Roles live in the `app_user` row. Not in the identity provider."
     This is the single most important fact on the page, and it is the opposite of what many deployments assume.
 
-    Even when customers sign in through Microsoft Entra ID, **Entra does not determine what they may do here.** Entra answers *who is this person*. Registerwerk answers *what may they do*. Entra app roles are consulted only once, when a user is first provisioned, to pick a sensible default.
+    Even when customers sign in through Microsoft Entra ID, **Entra does not determine what they may do here.** Entra answers *who is this person*. Registerwerk answers *what may they do*. Entra app roles are ignored for authorization. First-time OIDC/Entra users are provisioned disabled with zero roles and require explicit operator approval.
 
     Consequences worth internalising:
 

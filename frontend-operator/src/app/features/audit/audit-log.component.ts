@@ -368,12 +368,12 @@ export class AuditLogComponent implements OnInit {
         this.chainStatus = result;
         this.chainStatusLoading = false;
         this.chainStatusError = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.chainStatusLoading = false;
         this.chainStatusError = true;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -381,19 +381,19 @@ export class AuditLogComponent implements OnInit {
   verifyChainNow(): void {
     this.verifyingChain = true;
     this.chainStatusError = false;
-    this.cdr.detectChanges();
+    this.cdr.markForCheck();
     this.auditService.verifyChainNow().subscribe({
       next: (result) => {
         this.chainStatus = result;
         this.verifyingChain = false;
         this.chainStatusError = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.verifyingChain = false;
         this.chainStatusError = true;
         this.snackBar.open('Hash-chain verification failed.', 'Dismiss', { duration: 5000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -425,12 +425,12 @@ export class AuditLogComponent implements OnInit {
         this.totalElements = resp.totalElements;
         this.loading = false;
         this.loadError = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.loading = false;
         this.loadError = true;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }

@@ -230,12 +230,12 @@ export class ResetPasswordComponent implements OnInit, OnDestroy {
       next: (info) => {
         this.email = info.email;
         this.loading = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.loading = false;
         this.error = 'This password reset link is invalid or has expired.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       }
     });
   }
@@ -248,13 +248,13 @@ export class ResetPasswordComponent implements OnInit, OnDestroy {
       next: () => {
         this.submitting = false;
         this.success = true;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         this.redirectTimer = setTimeout(() => this.router.navigate(['/login']), 2000);
       },
       error: (err) => {
         this.submitting = false;
         this.submitError = err?.error?.message ?? 'Password reset could not be completed.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       }
     });
   }

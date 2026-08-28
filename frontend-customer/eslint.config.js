@@ -15,6 +15,13 @@ module.exports = defineConfig([
     ],
     processor: angular.processInlineTemplates,
     rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.property.name='detectChanges']",
+          message: "Use cdr.markForCheck() in zoneless Angular components instead of detectChanges().",
+        },
+      ],
       // This codebase's convention (see TokenSource / MsalTokenSource / CookieTokenSource) is to
       // keep unused parameters in an implemented interface signature, prefixed with `_`, so the
       // shape stays self-documenting at call sites even when one implementation ignores an arg.
@@ -45,5 +52,13 @@ module.exports = defineConfig([
       angular.configs.templateAccessibility,
     ],
     rules: {},
-  }
+  },
+  {
+    // `fixture.detectChanges()` is TestBed's own trigger for change detection in specs —
+    // unrelated to the zoneless `cdr.detectChanges()` anti-pattern the rule above targets.
+    files: ["**/*.spec.ts"],
+    rules: {
+      "no-restricted-syntax": "off",
+    },
+  },
 ]);

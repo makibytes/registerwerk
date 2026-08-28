@@ -254,12 +254,12 @@ export class AssetListComponent implements OnInit {
           this.totalElements = resp.totalElements;
           this.loading = false;
           this.loadError = false;
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
         error: () => {
           this.loading = false;
           this.loadError = true;
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
       });
   }

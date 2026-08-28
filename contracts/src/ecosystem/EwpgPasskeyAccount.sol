@@ -50,6 +50,7 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
 
     error GuardianRequired(address target, bytes4 selector);
     error NotGuardian();
+    error SelfCallTrampolineForbidden();
 
     constructor(IEntryPoint entryPoint_, bytes32 qx, bytes32 qy) SignerP256(qx, qy) {
         _entryPoint = entryPoint_;
@@ -97,19 +98,75 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
         returns (bool)
     {
         if (caller == address(entryPoint())) {
-            Execution[] calldata executions = executionData.decodeBatch();
-            for (uint256 i = 0; i < executions.length; ++i) {
-                bytes32 required = callRole[executions[i].target][_selector(executions[i].callData)];
-                if (required == ROLE_ADMIN || required == ROLE_RECOVERY) {
-                    revert GuardianRequired(executions[i].target, _selector(executions[i].callData));
-                }
-            }
+            _validateExecutions(executionData.decodeBatch());
             return true;
         }
         return super._erc7821AuthorizedExecutor(caller, mode, executionData);
     }
 
+    function _validateExecutions(Execution[] calldata executions) private view {
+        for (uint256 i = 0; i < executions.length; ++i) {
+            _validateExecution(executions[i].target, executions[i].callData);
+        }
+    }
+
+    function _validateExecution(address target, bytes calldata data) private view {
+        address resolvedTarget = target == address(0) ? address(this) : target;
+        bytes4 selector = _selector(data);
+
+        if (resolvedTarget == address(this) && selector == this.execute.selector) {
+            if (data.length > 4) {
+                (, bytes memory nestedRaw) = abi.decode(data[4:], (bytes32, bytes));
+                _validateNestedExecutions(abi.decode(nestedRaw, (Execution[])));
+            }
+            revert SelfCallTrampolineForbidden();
+        }
+
+        bytes32 required = callRole[resolvedTarget][selector];
+        if (required == ROLE_ADMIN || required == ROLE_RECOVERY) {
+            revert GuardianRequired(resolvedTarget, selector);
+        }
+    }
+
+    function _validateNestedExecutions(Execution[] memory executions) private view {
+        for (uint256 i = 0; i < executions.length; ++i) {
+            address resolvedTarget = executions[i].target == address(0) ? address(this) : executions[i].target;
+            bytes memory callData = executions[i].callData;
+            bytes4 selector = _selectorMemory(callData);
+
+            if (resolvedTarget == address(this) && selector == this.execute.selector) {
+                if (callData.length > 4) {
+                    _validateNestedExecutions(_decodeNestedExecute(callData));
+                }
+                revert SelfCallTrampolineForbidden();
+            }
+
+            bytes32 required = callRole[resolvedTarget][selector];
+            if (required == ROLE_ADMIN || required == ROLE_RECOVERY) {
+                revert GuardianRequired(resolvedTarget, selector);
+            }
+        }
+    }
+
     function _selector(bytes calldata data) private pure returns (bytes4) {
         return data.length < 4 ? bytes4(0) : bytes4(data[:4]);
+    }
+
+    function _selectorMemory(bytes memory data) private pure returns (bytes4 selector) {
+        if (data.length < 4) {
+            return bytes4(0);
+        }
+        assembly ("memory-safe") {
+            selector := shr(224, mload(add(data, 32)))
+        }
+    }
+
+    function _decodeNestedExecute(bytes memory callData) private pure returns (Execution[] memory) {
+        bytes memory args = new bytes(callData.length - 4);
+        for (uint256 i = 4; i < callData.length; ++i) {
+            args[i - 4] = callData[i];
+        }
+        (, bytes memory nestedRaw) = abi.decode(args, (bytes32, bytes));
+        return abi.decode(nestedRaw, (Execution[]));
     }
 }

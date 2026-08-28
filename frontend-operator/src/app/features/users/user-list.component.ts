@@ -463,7 +463,7 @@ export class UserListComponent implements OnInit {
         this.users = this.users.filter(u => u.id !== user.id);
         this.totalElements = Math.max(0, this.totalElements - 1);
         this.snackBar.open(`${user.name || user.email} deleted`, 'OK', { duration: 3000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: (err) => {
         this.snackBar.open(err?.error?.message ?? 'Failed to delete user', 'Dismiss', { duration: 4000 });
@@ -495,18 +495,18 @@ export class UserListComponent implements OnInit {
         this.totalElements = page.totalElements;
         this.loading = false;
         this.loadError = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.loading = false;
         this.loadError = true;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
 
   private replaceUser(updated: OperatorUser): void {
     this.users = this.users.map(u => u.id === updated.id ? updated : u);
-    this.cdr.detectChanges();
+    this.cdr.markForCheck();
   }
 }

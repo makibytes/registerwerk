@@ -29,11 +29,13 @@ public class JwtMintingService {
 
     private final NimbusJwtEncoder encoder;
     private final long tokenTtlSeconds;
+    private final String audience;
 
     public JwtMintingService(RegisterwerkAuthProperties props) {
         byte[] keyBytes = props.getDevSecret().getBytes(StandardCharsets.UTF_8);
         this.encoder = new NimbusJwtEncoder(new ImmutableSecret<SecurityContext>(keyBytes));
         this.tokenTtlSeconds = props.getTokenTtlSeconds();
+        this.audience = props.getAudience();
     }
 
     public String mint(AppUser user) {
@@ -46,6 +48,9 @@ public class JwtMintingService {
             .claim("roles", roles)
             .issuedAt(now)
             .expiresAt(now.plusSeconds(tokenTtlSeconds));
+        if (audience != null && !audience.isBlank()) {
+            claims.claim("aud", List.of(audience));
+        }
         if (user.getEmail() != null) {
             claims.claim("email", user.getEmail());
         }
@@ -70,7 +75,7 @@ public class JwtMintingService {
     public String mintImpersonationToken(AppUser actor, UUID targetEntityId) {
         Instant now = Instant.now();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
+        JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
             .issuer(LOCAL_ISSUER)
             .subject(actor.getId().toString())
             .claim("roles", List.of("COMPANY_ADMIN", "ISSUER", "INVESTOR", "TRADER"))
@@ -80,9 +85,11 @@ public class JwtMintingService {
             .claim("entity_id", targetEntityId.toString())
             .claim("imp", true)
             .issuedAt(now)
-            .expiresAt(now.plusSeconds(tokenTtlSeconds))
-            .build();
-        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+            .expiresAt(now.plusSeconds(tokenTtlSeconds));
+        if (audience != null && !audience.isBlank()) {
+            claims.claim("aud", List.of(audience));
+        }
+        return encoder.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
     }
 
     public long getTokenTtlSeconds() {

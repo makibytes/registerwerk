@@ -497,12 +497,12 @@ export class InvestmentListComponent implements OnInit {
           this.dataSource.data = res.content;
           this.dataSource.filterPredicate = this.buildFilterPredicate();
           this.loading = false;
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
         error: () => {
           this.loading = false;
           this.loadError = true;
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
       });
   }

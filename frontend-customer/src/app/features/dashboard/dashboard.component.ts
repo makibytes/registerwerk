@@ -503,7 +503,7 @@ export class DashboardComponent implements OnInit {
       }
 
       this.loading = false;
-      this.cdr.detectChanges();
+      this.cdr.markForCheck();
     });
   }
 }

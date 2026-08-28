@@ -48,8 +48,9 @@ class DelegatingJwtDecoderTest {
         RegisterwerkAuthProperties props = new RegisterwerkAuthProperties();
         props.setDevSecret(DEV_SECRET);
         props.setTokenTtlSeconds(3600L);
+        props.setAudience("");
         minting = new JwtMintingService(props);
-        localDecoder = JwtDecoderFactory.localHs256(DEV_SECRET);
+        localDecoder = JwtDecoderFactory.localHs256(DEV_SECRET, "");
     }
 
     @Test
@@ -66,7 +67,7 @@ class DelegatingJwtDecoderTest {
     void foreignIssuer_rejected() {
         // The scenario the issuer pin exists for: someone obtains JWT_DEV_SECRET from a lower
         // environment and signs their own token. Without the pin the signature alone sufficed.
-        String forged = sign("https://evil.example.com", Instant.now(), 3600);
+        String forged = sign("https://evil.example.com", Instant.now(), 3600, null);
 
         assertThatThrownBy(() -> localDecoder.decode(forged)).isInstanceOf(JwtException.class);
     }
@@ -74,9 +75,27 @@ class DelegatingJwtDecoderTest {
     @Test
     @DisplayName("an expired local token is rejected")
     void expiredToken_rejected() {
-        String expired = sign(JwtMintingService.LOCAL_ISSUER, Instant.now().minusSeconds(7200), 60);
+        String expired = sign(JwtMintingService.LOCAL_ISSUER, Instant.now().minusSeconds(7200), 60, null);
 
         assertThatThrownBy(() -> localDecoder.decode(expired)).isInstanceOf(JwtException.class);
+    }
+
+    @Test
+    @DisplayName("local decoder rejects tokens without configured audience")
+    void localToken_missingAudience_rejectedWhenAudienceConfigured() {
+        JwtDecoder audiencePinned = JwtDecoderFactory.localHs256(DEV_SECRET, "registerwerk-api");
+        String tokenWithoutAud = sign(JwtMintingService.LOCAL_ISSUER, Instant.now(), 3600, null);
+
+        assertThatThrownBy(() -> audiencePinned.decode(tokenWithoutAud)).isInstanceOf(JwtException.class);
+    }
+
+    @Test
+    @DisplayName("local decoder rejects tokens with wrong audience")
+    void localToken_wrongAudience_rejectedWhenAudienceConfigured() {
+        JwtDecoder audiencePinned = JwtDecoderFactory.localHs256(DEV_SECRET, "registerwerk-api");
+        String tokenWrongAud = sign(JwtMintingService.LOCAL_ISSUER, Instant.now(), 3600, "other-api");
+
+        assertThatThrownBy(() -> audiencePinned.decode(tokenWrongAud)).isInstanceOf(JwtException.class);
     }
 
     @Test
@@ -132,18 +151,21 @@ class DelegatingJwtDecoderTest {
         return u;
     }
 
-    private String sign(String issuer, Instant issuedAt, long ttlSeconds) {
+    private String sign(String issuer, Instant issuedAt, long ttlSeconds, String audience) {
         NimbusJwtEncoder encoder = new NimbusJwtEncoder(
                 new ImmutableSecret<SecurityContext>(DEV_SECRET.getBytes(StandardCharsets.UTF_8)));
+        JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
+                .issuer(issuer)
+                .subject(userId.toString())
+                .claim("roles", List.of("REGISTRY_ADMIN"))
+                .issuedAt(issuedAt)
+                .expiresAt(issuedAt.plusSeconds(ttlSeconds));
+        if (audience != null) {
+            claims.claim("aud", List.of(audience));
+        }
         return encoder.encode(JwtEncoderParameters.from(
                 JwsHeader.with(MacAlgorithm.HS256).build(),
-                JwtClaimsSet.builder()
-                        .issuer(issuer)
-                        .subject(userId.toString())
-                        .claim("roles", List.of("REGISTRY_ADMIN"))
-                        .issuedAt(issuedAt)
-                        .expiresAt(issuedAt.plusSeconds(ttlSeconds))
-                        .build())).getTokenValue();
+                claims.build())).getTokenValue();
     }
 
     /**

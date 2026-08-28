@@ -200,12 +200,12 @@ export class RedeemTokenComponent implements OnInit, OnDestroy {
           } else {
             this.tokenInfo = info;
           }
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
         error: () => {
           this.loading = false;
           this.tokenError = 'Token is invalid or has expired. Please contact your registry administrator.';
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
       });
   }
@@ -228,14 +228,14 @@ export class RedeemTokenComponent implements OnInit, OnDestroy {
         next: () => {
           this.submitting = false;
           this.success = true;
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
           this.redirectTimer = setTimeout(() => this.router.navigate(['/login']), 3000);
         },
         error: (err) => {
           this.submitting = false;
           this.submitError =
             err?.error?.message ?? 'Setup failed. Please check your details and try again.';
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
       });
   }

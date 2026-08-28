@@ -117,9 +117,9 @@ export class MyClientsComponent implements OnInit {
         this.clients = clients;
         this.loading = false;
         this.loadError = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
-      error: () => { this.loading = false; this.loadError = true; this.cdr.detectChanges(); },
+      error: () => { this.loading = false; this.loadError = true; this.cdr.markForCheck(); },
     });
   }
 

@@ -324,7 +324,7 @@ export class ExternalIdAdminComponent implements OnInit {
     this.companyService.getMyEntity().subscribe({
       next: (entity) => {
         this.entity = entity;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.snackBar.open('Company details could not be loaded.', 'Dismiss', { duration: 5000 });
@@ -341,13 +341,13 @@ export class ExternalIdAdminComponent implements OnInit {
       next: (records) => {
         this.records = records;
         this.loading = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.records = [];
         this.loading = false;
         this.loadError = 'External IDs could not be loaded.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -364,13 +364,13 @@ export class ExternalIdAdminComponent implements OnInit {
       next: (records) => {
         this.records = records;
         this.loading = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.records = [];
         this.loading = false;
         this.loadError = 'The external-ID lookup failed.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -390,12 +390,12 @@ export class ExternalIdAdminComponent implements OnInit {
           this.assignExternalId = '';
           this.snackBar.open('External ID saved.', 'OK', { duration: 3000 });
           this.loadAll();
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
         error: (err) => {
           this.savingAssignment = false;
           this.snackBar.open(err?.error?.message ?? 'Failed to save external ID.', 'Dismiss', { duration: 4000 });
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         },
       });
   }

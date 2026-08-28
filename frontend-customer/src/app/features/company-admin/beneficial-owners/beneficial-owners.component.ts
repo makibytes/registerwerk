@@ -149,12 +149,12 @@ export class BeneficialOwnersComponent implements OnInit {
       next: (owners) => {
         this.owners = owners;
         this.loading = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.loading = false;
         this.loadError = true;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }

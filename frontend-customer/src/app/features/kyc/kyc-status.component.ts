@@ -399,8 +399,8 @@ export class KycStatusComponent implements OnInit {
   loadKycStatus(): void {
     if (!this.entityId) return;
     this.kycService.getKycStatus(this.entityId).subscribe({
-      next: (res) => { this.entityKycStatus = res.kycStatus; this.cdr.detectChanges(); },
-      error: () => { this.entityKycStatus = null; this.cdr.detectChanges(); },
+      next: (res) => { this.entityKycStatus = res.kycStatus; this.cdr.markForCheck(); },
+      error: () => { this.entityKycStatus = null; this.cdr.markForCheck(); },
     });
   }
 
@@ -411,11 +411,11 @@ export class KycStatusComponent implements OnInit {
         this.jurisdictionApprovals = Object.fromEntries(
           approvals.map(a => [a.jurisdiction, a])
         ) as Partial<Record<Jurisdiction, KycJurisdictionApproval>>;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.jurisdictionApprovals = {};
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -429,12 +429,12 @@ export class KycStatusComponent implements OnInit {
     this.loading = true;
     this.documentsLoadError = false;
     this.kycService.listDocuments(this.entityId).subscribe({
-      next: (docs) => { this.documents = docs; this.loading = false; this.cdr.detectChanges(); },
+      next: (docs) => { this.documents = docs; this.loading = false; this.cdr.markForCheck(); },
       error: () => {
         this.documents = [];
         this.loading = false;
         this.documentsLoadError = true;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -448,12 +448,12 @@ export class KycStatusComponent implements OnInit {
         this.compliance = { ...this.compliance, [jur]: result };
         this.complianceLoading = { ...this.complianceLoading, [jur]: false };
         this.complianceError = { ...this.complianceError, [jur]: false };
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.complianceLoading = { ...this.complianceLoading, [jur]: false };
         this.complianceError = { ...this.complianceError, [jur]: true };
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -484,14 +484,14 @@ export class KycStatusComponent implements OnInit {
         this.uploadFiles = { ...this.uploadFiles, [jur]: undefined };
         this.uploadDocType = { ...this.uploadDocType, [jur]: '' };
         this.uploadLoading = { ...this.uploadLoading, [jur]: false };
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         // Refresh compliance checklist
         this.loadCompliance(jur);
         this.snackBar.open('Document uploaded. Awaiting review.', 'OK', { duration: 4000 });
       },
       error: () => {
         this.uploadLoading = { ...this.uploadLoading, [jur]: false };
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
         this.snackBar.open('Upload failed. Please try again.', 'OK', { duration: 3000 });
       },
     });
@@ -518,7 +518,7 @@ export class KycStatusComponent implements OnInit {
         this.kycService.deleteDocument(this.entityId, doc.id).subscribe({
           next: () => {
             this.documents = this.documents.filter(d => d.id !== doc.id);
-            this.cdr.detectChanges();
+            this.cdr.markForCheck();
             this.snackBar.open('Document deleted.', 'OK', { duration: 2000 });
           },
           error: () => this.snackBar.open('Document could not be deleted.', 'Dismiss', { duration: 5000 }),

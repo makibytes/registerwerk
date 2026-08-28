@@ -70,6 +70,6 @@ Optionally, terminate OIDC at Kong too using `gateway/plugins/oidc-self-managed.
 The backend resolves each validated JWT to an `app_user` row; it does not rely on gateway-injected
 identity headers. Generic OIDC tokens need a stable `sub` claim and an email claim for first-time
 provisioning. Entra tokens use `oid` as the stable identity and accept `preferred_username`,
-`email`, or `upn` for the email address. The optional `roles` and `entity_id` claims seed a new
-account only; persisted roles and entity scope are authoritative after provisioning. There is no
-Kong-side entity-mapping step in this repository's OSS Kong setup.
+`email`, or `upn` for the email address. New identities are auto-provisioned as disabled accounts
+with no roles and must be approved by an operator before use; persisted roles and entity scope are
+authoritative after approval. There is no Kong-side entity-mapping step in this repository's OSS Kong setup.

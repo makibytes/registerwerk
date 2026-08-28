@@ -137,12 +137,12 @@ export class ExternalIdEditorComponent implements OnChanges {
         this.draftValue = response.externalId;
         this.saving = false;
         this.valueChange.emit(response.externalId);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: (err) => {
         this.saving = false;
         this.errorMessage = err?.error?.message ?? 'Failed to save external ID.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }
@@ -162,12 +162,12 @@ export class ExternalIdEditorComponent implements OnChanges {
         this.draftValue = '';
         this.saving = false;
         this.valueChange.emit(null);
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: (err) => {
         this.saving = false;
         this.errorMessage = err?.error?.message ?? 'Failed to clear external ID.';
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }

@@ -135,6 +135,26 @@ contract EwpgPasskeyAccountTest is Test {
         account.execute(bytes32(uint256(1) << 248), abi.encode(calls));
     }
 
+
+    function test_entryPointRejectsNestedExecuteSelfCallTrampoline() public {
+        bytes4 selector = bytes4(keccak256("pause()"));
+        account.setCallRole(address(0xB0B), selector, account.ROLE_ADMIN());
+
+        Execution[] memory nested = new Execution[](1);
+        nested[0] = Execution({target: address(0xB0B), value: 0, callData: abi.encodeWithSelector(selector)});
+
+        Execution[] memory outer = new Execution[](1);
+        outer[0] = Execution({
+            target: address(0),
+            value: 0,
+            callData: abi.encodeWithSelector(account.execute.selector, bytes32(uint256(1) << 248), abi.encode(nested))
+        });
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(EwpgPasskeyAccount.SelfCallTrampolineForbidden.selector);
+        account.execute(bytes32(uint256(1) << 248), abi.encode(outer));
+    }
+
     function test_onlyGuardianCanConfigureHighRiskPolicy() public {
         bytes32 adminRole = account.ROLE_ADMIN();
         vm.expectRevert(EwpgPasskeyAccount.NotGuardian.selector);

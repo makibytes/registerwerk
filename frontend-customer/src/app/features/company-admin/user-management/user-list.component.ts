@@ -371,12 +371,12 @@ export class UserListComponent implements OnInit {
         this.users = users;
         this.managedExternally = idp.lifecycleManagedExternally;
         this.loading = false;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.loading = false;
         this.loadError = true;
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       }
     });
   }
@@ -387,7 +387,7 @@ export class UserListComponent implements OnInit {
       if (!user) return;
       this.users = [...this.users, user];
       this.snackBar.open(`Invitation sent to ${user.email}`, 'OK', { duration: 3000 });
-      this.cdr.detectChanges();
+      this.cdr.markForCheck();
     });
   }
 
@@ -406,7 +406,7 @@ export class UserListComponent implements OnInit {
         },
         error: (err) => {
           this.snackBar.open(err?.error?.message ?? 'Failed to update roles.', 'Dismiss', { duration: 4000 });
-          this.cdr.detectChanges();
+          this.cdr.markForCheck();
         }
       });
     });
@@ -432,7 +432,7 @@ export class UserListComponent implements OnInit {
       error: (err) => {
         this.busyUsers.delete(user.id);
         this.snackBar.open(err?.error?.message ?? 'Failed to update status.', 'Dismiss', { duration: 4000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       }
     });
   }
@@ -448,7 +448,7 @@ export class UserListComponent implements OnInit {
       error: (err) => {
         this.busyUsers.delete(user.id);
         this.snackBar.open(err?.error?.message ?? 'Failed to send password reset.', 'Dismiss', { duration: 4000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       }
     });
   }
@@ -463,12 +463,12 @@ export class UserListComponent implements OnInit {
         this.busyUsers.delete(user.id);
         this.users = this.users.filter(existing => existing.id !== user.id);
         this.snackBar.open(`${user.name} has been removed.`, 'OK', { duration: 3000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: (err) => {
         this.busyUsers.delete(user.id);
         this.snackBar.open(err?.error?.message ?? 'Failed to remove user.', 'Dismiss', { duration: 4000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       }
     });
   }
@@ -487,6 +487,6 @@ export class UserListComponent implements OnInit {
 
   private replaceUser(updated: CompanyUser): void {
     this.users = this.users.map(existing => existing.id === updated.id ? updated : existing);
-    this.cdr.detectChanges();
+    this.cdr.markForCheck();
   }
 }

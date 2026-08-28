@@ -1450,11 +1450,11 @@ export class CustomerDetailComponent implements OnInit {
         this.entity = updated;
         this.editingRm = false;
         this.snackBar.open('Relationship manager updated.', 'Dismiss', { duration: 4000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
       error: (err) => {
         this.snackBar.open(err?.error?.message ?? 'Failed to update relationship manager.', 'Dismiss', { duration: 5000 });
-        this.cdr.detectChanges();
+        this.cdr.markForCheck();
       },
     });
   }

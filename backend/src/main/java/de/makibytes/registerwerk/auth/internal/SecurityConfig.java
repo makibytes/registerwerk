@@ -63,7 +63,7 @@ public class SecurityConfig {
                 "before running in any non-dev environment — it signs operator session tokens and " +
                 "step-up tokens even when Entra sign-in is enabled.");
         }
-        return JwtDecoderFactory.localHs256(devSecret);
+        return JwtDecoderFactory.localHs256(devSecret, props.getAudience());
     }
 
     /**
