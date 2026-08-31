@@ -1,14 +1,13 @@
 package de.makibytes.registerwerk.auth.internal;
 
 import java.time.Instant;
-import java.util.EnumSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
-import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.api.PrincipalResolver;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
@@ -116,7 +115,10 @@ class DefaultPrincipalResolver implements PrincipalResolver {
             }
         }
 
-        return Optional.of(provision(jwt, objectId, email));
+        return Optional.of(provisionDisabled(jwt, email, UserAuthProvider.ENTRA, user -> {
+            user.setEntraObjectId(objectId);
+            user.setEntraTenantId(parseUuid(jwt.getClaimAsString("tid")));
+        }));
     }
 
     /** Keeps the mirrored identity columns current without touching roles or enabled state. */
@@ -136,33 +138,6 @@ class DefaultPrincipalResolver implements PrincipalResolver {
             dirty = true;
         }
         return dirty ? appUserRepository.save(user) : user;
-    }
-
-    /**
-     * Creates an account for a principal Entra has authenticated but we have never seen.
-     *
-     * <p>The new account is created disabled with no functional roles. Operator approval enables
-     * the account and assigns least-privilege roles in the {@code app_user} row.
-     */
-    private AppUser provision(Jwt jwt, UUID objectId, String email) {
-        AppUser user = new AppUser();
-        user.setEmail(email);
-        user.setFullName(firstNonBlank(jwt.getClaimAsString("name"), email));
-        user.setEntraObjectId(objectId);
-        user.setEntraTenantId(parseUuid(jwt.getClaimAsString("tid")));
-        user.setAuthProvider(UserAuthProvider.ENTRA);
-        user.setEnabled(false);
-        user.setLastLoginAt(Instant.now());
-        user.setLegalEntityId(parseUuid(claim(jwt, "entity_id", "entityId")));
-
-        user.setRoles(EnumSet.noneOf(AppUserRole.class));
-
-        AppUser saved = appUserRepository.save(user);
-        eventPublisher.publishEvent(new OidcUserProvisionedEvent(
-                saved.getId(), saved.getEmail(), saved.getAuthProvider().name()));
-        log.info("Provisioned disabled account for Entra principal: id={} oid={} email={}",
-                saved.getId(), objectId, email);
-        return saved;
     }
 
     /**
@@ -210,7 +185,8 @@ class DefaultPrincipalResolver implements PrincipalResolver {
             return Optional.empty();
         }
 
-        return Optional.of(provisionOidc(jwt, subject, email));
+        return Optional.of(provisionDisabled(jwt, email, UserAuthProvider.OIDC,
+                user -> user.setExternalSubject(subject)));
     }
 
     /** Keeps the mirrored identity column current without touching roles or enabled state. */
@@ -227,24 +203,34 @@ class DefaultPrincipalResolver implements PrincipalResolver {
         return dirty ? appUserRepository.save(user) : user;
     }
 
-    /** Creates an account for a non-Entra OIDC principal seen for the first time. */
-    private AppUser provisionOidc(Jwt jwt, String subject, String email) {
+    /**
+     * Creates a disabled, roleless account for a principal the configured IdP has authenticated
+     * but this app has never seen. {@code applyIdentity} sets the provider-specific identity
+     * columns (Entra's {@code oid}/{@code tid}, or OIDC's {@code externalSubject}) before the
+     * shared fields are filled in and the account saved.
+     *
+     * <p>Roles are explicitly set to empty rather than left at {@link AppUser}'s default — that
+     * default seeds {@code REGISTRY_ADMIN} for the bundled seed admin, so leaving this unset would
+     * provision every first-time IdP sign-in as a registry admin. Operator approval assigns
+     * least-privilege roles through {@code OperatorUserService} / {@code CompanyUserService}.
+     */
+    private AppUser provisionDisabled(Jwt jwt, String email, UserAuthProvider provider,
+                                       Consumer<AppUser> applyIdentity) {
         AppUser user = new AppUser();
         user.setEmail(email);
         user.setFullName(firstNonBlank(jwt.getClaimAsString("name"), email));
-        user.setExternalSubject(subject);
-        user.setAuthProvider(UserAuthProvider.OIDC);
+        applyIdentity.accept(user);
+        user.setAuthProvider(provider);
         user.setEnabled(false);
         user.setLastLoginAt(Instant.now());
         user.setLegalEntityId(parseUuid(claim(jwt, "entity_id", "entityId")));
-
-        user.setRoles(EnumSet.noneOf(AppUserRole.class));
+        user.setRoles(Set.of());
 
         AppUser saved = appUserRepository.save(user);
         eventPublisher.publishEvent(new OidcUserProvisionedEvent(
                 saved.getId(), saved.getEmail(), saved.getAuthProvider().name()));
-        log.info("Provisioned disabled account for generic OIDC principal: id={} sub={} email={}",
-                saved.getId(), subject, email);
+        log.info("Provisioned disabled account for {} principal: id={} email={}",
+                provider, saved.getId(), email);
         return saved;
     }
 

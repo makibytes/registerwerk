@@ -18,7 +18,13 @@ module.exports = defineConfig([
       "no-restricted-syntax": [
         "error",
         {
-          selector: "CallExpression[callee.property.name='detectChanges']",
+          // Matches `this.cdr.detectChanges()` and an inject()ed local `cdr.detectChanges()` —
+          // scoped to the `cdr` receiver specifically so `fixture.detectChanges()` (TestBed's own
+          // trigger, unrelated to this zoneless anti-pattern) is never flagged and specs don't
+          // need a blanket rule override.
+          selector:
+            "CallExpression[callee.property.name='detectChanges'][callee.object.property.name='cdr'], " +
+            "CallExpression[callee.property.name='detectChanges'][callee.object.name='cdr']",
           message: "Use cdr.markForCheck() in zoneless Angular components instead of detectChanges().",
         },
       ],
@@ -52,13 +58,5 @@ module.exports = defineConfig([
       angular.configs.templateAccessibility,
     ],
     rules: {},
-  },
-  {
-    // `fixture.detectChanges()` is TestBed's own trigger for change detection in specs —
-    // unrelated to the zoneless `cdr.detectChanges()` anti-pattern the rule above targets.
-    files: ["**/*.spec.ts"],
-    rules: {
-      "no-restricted-syntax": "off",
-    },
   },
 ]);

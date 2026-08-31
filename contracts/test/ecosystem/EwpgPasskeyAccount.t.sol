@@ -135,7 +135,6 @@ contract EwpgPasskeyAccountTest is Test {
         account.execute(bytes32(uint256(1) << 248), abi.encode(calls));
     }
 
-
     function test_entryPointRejectsNestedExecuteSelfCallTrampoline() public {
         bytes4 selector = bytes4(keccak256("pause()"));
         account.setCallRole(address(0xB0B), selector, account.ROLE_ADMIN());

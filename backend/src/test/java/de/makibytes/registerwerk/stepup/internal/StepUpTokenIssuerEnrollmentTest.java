@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.stepup.internal;
 
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +41,7 @@ class StepUpTokenIssuerEnrollmentTest {
     void setUp() {
         RegisterwerkAuthProperties props = new RegisterwerkAuthProperties();
         props.setDevSecret("test-secret-at-least-32-bytes-long!!");
-        issuer = new StepUpTokenIssuer(userRepository, props, false);
+        issuer = new StepUpTokenIssuer(userRepository, new JwtMintingService(props), false);
         lenient().when(userRepository.save(any(AppUser.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 

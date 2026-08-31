@@ -2,19 +2,10 @@ package de.makibytes.registerwerk.stepup.internal;
 
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Component;
-
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
-import com.nimbusds.jose.proc.SecurityContext;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
-import de.makibytes.registerwerk.auth.api.JwtMintingService;
-import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -26,6 +17,8 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -63,7 +56,7 @@ public class StepUpTokenIssuer {
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final AppUserRepository userRepository;
-    private final NimbusJwtEncoder encoder;
+    private final JwtMintingService jwtMintingService;
     private final boolean allowUnenrolled;
 
     /** userId → last accepted TOTP time step (replay protection, RFC 6238 §5.2). */
@@ -78,12 +71,11 @@ public class StepUpTokenIssuer {
             .maximumSize(100_000)
             .build();
 
-    StepUpTokenIssuer(AppUserRepository userRepository, RegisterwerkAuthProperties props,
+    StepUpTokenIssuer(AppUserRepository userRepository, JwtMintingService jwtMintingService,
                       @Value("${registerwerk.auth.step-up.allow-unenrolled:false}") boolean allowUnenrolled) {
         this.userRepository = userRepository;
+        this.jwtMintingService = jwtMintingService;
         this.allowUnenrolled = allowUnenrolled;
-        byte[] key = props.getDevSecret().getBytes(StandardCharsets.UTF_8);
-        this.encoder = new NimbusJwtEncoder(new ImmutableSecret<SecurityContext>(key));
     }
 
     public String issueAfterVerification(UUID userId, String code, String method) {
@@ -121,20 +113,14 @@ public class StepUpTokenIssuer {
                     "(POST /api/v1/auth/step-up/enroll).");
         }
 
-        Instant now = Instant.now();
-        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        JwtClaimsSet.Builder claimsBuilder = JwtClaimsSet.builder()
-                .issuer(JwtMintingService.LOCAL_ISSUER)
-                .subject(userId.toString())
-                .claim("acr", "stepup")
-                .claim("roles", user.getRoles().stream().map(Enum::name).toList())
-                .claim("email", user.getEmail())
-                .issuedAt(now)
-                .expiresAt(now.plusSeconds(STEP_UP_TTL_SECONDS));
+        Map<String, Object> claims = new LinkedHashMap<>();
+        claims.put("acr", "stepup");
+        claims.put("roles", user.getRoles().stream().map(Enum::name).toList());
+        claims.put("email", user.getEmail());
         if (action != null && !action.isBlank()) {
-            claimsBuilder.claim("stepup_scope", action);
+            claims.put("stepup_scope", action);
         }
-        return encoder.encode(JwtEncoderParameters.from(header, claimsBuilder.build())).getTokenValue();
+        return jwtMintingService.mintLocal(userId.toString(), STEP_UP_TTL_SECONDS, claims);
     }
 
     /** Result of starting TOTP enrolment: the raw secret and an otpauth:// URI for a QR code. */

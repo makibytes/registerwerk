@@ -66,11 +66,14 @@ final class JwtDecoderFactory {
     static JwtDecoder issuerBacked(String issuerUri, RegisterwerkAuthProperties props) {
         NimbusJwtDecoder decoder = (NimbusJwtDecoder) JwtDecoders.fromIssuerLocation(issuerUri);
         OAuth2TokenValidator<Jwt> defaults = JwtValidators.createDefaultWithIssuer(issuerUri);
-        decoder.setJwtValidator(withAudience(defaults, props.getAudience()));
-        if (props.getAudience().isBlank()) {
-            log.warn("JWT_AUDIENCE is blank — audience validation is disabled");
+        String audience = props.getAudience();
+        decoder.setJwtValidator(withAudience(defaults, audience));
+        if (audience.isBlank()) {
+            log.warn("JWT_AUDIENCE is not set — access tokens issued to any other application in "
+                    + "the same tenant will be accepted by this API. Set JWT_AUDIENCE to the API "
+                    + "app registration's client id or Application ID URI.");
         } else {
-            log.info("JWT audience validation enabled for aud={}", props.getAudience());
+            log.info("JWT audience validation enabled for aud={}", audience);
         }
         return decoder;
     }

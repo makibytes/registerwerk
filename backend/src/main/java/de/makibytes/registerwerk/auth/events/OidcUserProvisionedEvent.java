@@ -10,32 +10,12 @@ import de.makibytes.registerwerk.audit.api.AuditableEvent;
  * operator approval.
  */
 public record OidcUserProvisionedEvent(UUID userId, String email, String provider) implements AuditableEvent {
-    @Override
-    public String eventType() {
-        return "OIDC_USER_PROVISIONED";
-    }
+    public String eventType()   { return "OIDC_USER_PROVISIONED"; }
+    public String subjectType() { return "AppUser"; }
+    public UUID   subjectId()   { return userId; }
+    public UUID   actorId()     { return null; }
+    public String actorRole()   { return "SYSTEM"; }
 
-    @Override
-    public String subjectType() {
-        return "AppUser";
-    }
-
-    @Override
-    public UUID subjectId() {
-        return userId;
-    }
-
-    @Override
-    public UUID actorId() {
-        return null;
-    }
-
-    @Override
-    public String actorRole() {
-        return "SYSTEM";
-    }
-
-    @Override
     public Map<String, Object> payload() {
         return Map.of(
                 "email", email == null ? "" : email,

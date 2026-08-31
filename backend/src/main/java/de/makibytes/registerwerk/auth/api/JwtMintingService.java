@@ -2,8 +2,6 @@ package de.makibytes.registerwerk.auth.api;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.proc.SecurityContext;
-import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
-import de.makibytes.registerwerk.auth.api.AppUser;
 import java.util.UUID;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -14,7 +12,9 @@ import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class JwtMintingService {
@@ -38,32 +38,42 @@ public class JwtMintingService {
         this.audience = props.getAudience();
     }
 
-    public String mint(AppUser user) {
+    /**
+     * The single place a registerwerk-issued HS256 token is assembled: stamps {@code iss}/{@code
+     * aud}/{@code iat}/{@code exp} so the issuer pin ({@link #LOCAL_ISSUER}) and the audience pin
+     * ({@code JWT_AUDIENCE}, consulted by both {@code JwtDecoderFactory} branches) can never drift
+     * apart between token kinds — session, impersonation and step-up all mint through this.
+     * {@code claims} values are skipped when null so callers don't need to pre-filter.
+     */
+    public String mintLocal(String subject, long ttlSeconds, Map<String, Object> claims) {
         Instant now = Instant.now();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        List<String> roles = user.getRoles().stream().map(Enum::name).toList();
-        JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
+        JwtClaimsSet.Builder builder = JwtClaimsSet.builder()
             .issuer(LOCAL_ISSUER)
-            .subject(user.getId().toString())
-            .claim("roles", roles)
+            .subject(subject)
             .issuedAt(now)
-            .expiresAt(now.plusSeconds(tokenTtlSeconds));
-        if (audience != null && !audience.isBlank()) {
-            claims.claim("aud", List.of(audience));
+            .expiresAt(now.plusSeconds(ttlSeconds));
+        claims.forEach((name, value) -> {
+            if (value != null) {
+                builder.claim(name, value);
+            }
+        });
+        if (!audience.isBlank()) {
+            builder.claim("aud", List.of(audience));
         }
-        if (user.getEmail() != null) {
-            claims.claim("email", user.getEmail());
-        }
-        if (user.getFullName() != null) {
-            claims.claim("name", user.getFullName());
-        }
+        return encoder.encode(JwtEncoderParameters.from(header, builder.build())).getTokenValue();
+    }
+
+    public String mint(AppUser user) {
+        Map<String, Object> claims = new LinkedHashMap<>();
+        claims.put("roles", user.getRoles().stream().map(Enum::name).toList());
+        claims.put("email", user.getEmail());
+        claims.put("name", user.getFullName());
         if (user.getLegalEntityId() != null) {
-            claims = JwtClaimsSet.from(claims.build())
-                .claim("entityId", user.getLegalEntityId().toString())
-                .claim("entity_id", user.getLegalEntityId().toString())
-                ;
+            claims.put("entityId", user.getLegalEntityId().toString());
+            claims.put("entity_id", user.getLegalEntityId().toString());
         }
-        return encoder.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
+        return mintLocal(user.getId().toString(), tokenTtlSeconds, claims);
     }
 
     /**
@@ -73,23 +83,14 @@ public class JwtMintingService {
      * the real admin's userId so audit events correctly attribute actions.
      */
     public String mintImpersonationToken(AppUser actor, UUID targetEntityId) {
-        Instant now = Instant.now();
-        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
-            .issuer(LOCAL_ISSUER)
-            .subject(actor.getId().toString())
-            .claim("roles", List.of("COMPANY_ADMIN", "ISSUER", "INVESTOR", "TRADER"))
-            .claim("email", actor.getEmail())
-            .claim("name", actor.getFullName() != null ? actor.getFullName() : actor.getEmail())
-            .claim("entityId", targetEntityId.toString())
-            .claim("entity_id", targetEntityId.toString())
-            .claim("imp", true)
-            .issuedAt(now)
-            .expiresAt(now.plusSeconds(tokenTtlSeconds));
-        if (audience != null && !audience.isBlank()) {
-            claims.claim("aud", List.of(audience));
-        }
-        return encoder.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
+        Map<String, Object> claims = new LinkedHashMap<>();
+        claims.put("roles", List.of("COMPANY_ADMIN", "ISSUER", "INVESTOR", "TRADER"));
+        claims.put("email", actor.getEmail());
+        claims.put("name", actor.getFullName() != null ? actor.getFullName() : actor.getEmail());
+        claims.put("entityId", targetEntityId.toString());
+        claims.put("entity_id", targetEntityId.toString());
+        claims.put("imp", true);
+        return mintLocal(actor.getId().toString(), tokenTtlSeconds, claims);
     }
 
     public long getTokenTtlSeconds() {
