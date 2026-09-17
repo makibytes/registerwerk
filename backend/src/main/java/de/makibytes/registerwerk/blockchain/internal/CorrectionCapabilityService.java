@@ -65,6 +65,18 @@ public class CorrectionCapabilityService {
             "force-burn-confidential", "Forced burn — confidential (§26 Einziehung, encrypted amount)", false,
             "Same compulsory-cancellation authority as force-burn, over an FHE-encrypted amount. "
                     + "Requires a configured Zama relayer sidecar to encrypt the amount before submission.");
+    private static final CorrectionCapability PAUSE_CONFIDENTIAL = new CorrectionCapability(
+            "confidential-pause", "Pause / Unpause contract — confidential", true,
+            "MiCAR Art. 36/84, eWpG §24 — reversible in place, halts all transfers. ConfidentialERC3643's "
+                    + "pause()/unpause() take no encrypted arguments, so no relayer round-trip is needed.");
+    private static final CorrectionCapability FREEZE_CONFIDENTIAL = new CorrectionCapability(
+            "confidential-freeze", "Freeze / Unfreeze address — confidential", true,
+            "AWG §17, GwG §40, MiCAR Art. 36 — reversible in place. ConfidentialERC3643.setAddressFrozen "
+                    + "takes no encrypted arguments, so no relayer round-trip is needed.");
+    private static final CorrectionCapability FORCED_TRANSFER_CONFIDENTIAL = new CorrectionCapability(
+            "confidential-forced-transfer", "Forced transfer — confidential (§24 Berichtigung, encrypted amount)", false,
+            "Same court/BaFin-ordered correction authority as forced-transfer, over an FHE-encrypted amount. "
+                    + "Requires a configured Zama relayer sidecar to encrypt the amount before submission.");
 
     // ── ERC-3643 / T-REX additions (Erc3643Controller) ──────────────────────
     private static final CorrectionCapability FREEZE_PARTIAL = new CorrectionCapability(
@@ -139,15 +151,18 @@ public class CorrectionCapabilityService {
             case ERC3643 ->
                     List.of(FREEZE, PAUSE, FORCED_TRANSFER, FREEZE_PARTIAL, FORCE_BURN,
                             BATCH_FORCED_TRANSFER, BATCH_BURN);
-            // ConfidentialERC3643.sol itself HAS pause/setAddressFrozen/forcedTransfer methods,
-            // but Erc3643LifecycleService/Erc3643Controller (the only wired admin path for
-            // ERC3643/CONF_ERC3643 — TokenAdminController explicitly rejects both) is built
-            // against the plain EwpgERC3643 ABI (plaintext uint256 amounts); calling it against
-            // a ConfidentialERC3643 contract would send mismatched calldata. Only forced-burn
-            // has a real, tested, confidential-specific path today
-            // (TokenAdminService.confidentialForceBurn) — reporting only that rather than
-            // claiming freeze/pause/forced-transfer work when they are not actually wired.
-            case CONF_ERC3643 -> List.of(FORCE_BURN_CONFIDENTIAL);
+            // ConfidentialERC3643.sol's pause()/unpause()/setAddressFrozen(address,bool) are wired
+            // via TokenAdminService.confidentialPause/confidentialUnpause/confidentialSetAddressFrozen
+            // (TokenAdminController's /admin/confidential-pause|-unpause|-freeze|-unfreeze) —
+            // Erc3643LifecycleService/Erc3643Controller (the plaintext T-REX admin path) can never
+            // reach a confidential deployment at all, since confidential deployments (via
+            // EwpgConfidentialFactory) never get an Erc3643Suite row. forcedTransfer and forceBurn
+            // both need their amount encrypted via the Zama relayer sidecar
+            // (TokenAdminService.confidentialForcedTransfer/confidentialForceBurn); T-REX's
+            // forcedApprove/freezePartialTokens/batch* have no equivalent on ConfidentialERC3643.sol
+            // at all, so they are deliberately omitted here rather than advertised and failing.
+            case CONF_ERC3643 -> List.of(
+                    PAUSE_CONFIDENTIAL, FREEZE_CONFIDENTIAL, FORCED_TRANSFER_CONFIDENTIAL, FORCE_BURN_CONFIDENTIAL);
             case ERC3525, STARKNET_ERC3525 ->
                     List.of(PAUSE_SLOT, FREEZE_TOKEN, FORCED_VALUE_TRANSFER);
             // ERC-4626 (sync vault) has no forced-correction endpoint today — only NAV strike

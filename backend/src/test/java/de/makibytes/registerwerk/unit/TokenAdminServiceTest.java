@@ -245,6 +245,56 @@ class TokenAdminServiceTest {
         assertThat(txId).isNotNull();
     }
 
+    // ── confidentialForcedTransfer ───────────────────────────────────────────
+
+    @Test
+    @DisplayName("confidentialForcedTransfer rejects non-CONF_ERC3643 standards (no forcedTransfer on Confidential ERC-20)")
+    void confidentialForcedTransfer_rejectsNonConfidentialErc3643Standard() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC20);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialForcedTransfer(
+                dep.getId(), "0x" + "1".repeat(40), "0x" + "2".repeat(40), BigInteger.TEN, "BaFin Bescheid",
+                UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("confidentialForcedTransfer requires a configured Zama relayer sidecar")
+    void confidentialForcedTransfer_requiresConfiguredRelayer() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        when(zamaRelayerClient.isConfigured()).thenReturn(false);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialForcedTransfer(
+                dep.getId(), "0x" + "1".repeat(40), "0x" + "2".repeat(40), BigInteger.TEN, "BaFin Bescheid",
+                UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("relayer");
+    }
+
+    @Test
+    @DisplayName("confidentialForcedTransfer encrypts the amount via the relayer and submits forcedTransfer")
+    void confidentialForcedTransfer_encryptsAndSubmits() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.CONF_ERC3643);
+        EvmSigner creds = new SoftwareEvmSigner(Credentials.create(ECKeyPair.create(BigInteger.TWO)));
+
+        when(zamaRelayerClient.isConfigured()).thenReturn(true);
+        when(evmContractService.signer(any(de.makibytes.registerwerk.chain.api.ChainDescriptor.class))).thenReturn(creds);
+        when(zamaRelayerClient.encryptInput(any(), any(), any())).thenReturn(
+                new ZamaRelayerClient.EncryptedInput("0x" + "aa".repeat(32), "0x" + "bb".repeat(10)));
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any()))
+                .thenReturn("0x" + "9".repeat(64));
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.confidentialForcedTransfer(
+                dep.getId(), "0x" + "1".repeat(40), "0x" + "2".repeat(40), BigInteger.TEN, "BaFin Bescheid",
+                UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(txId).isNotNull();
+    }
+
     // ── confidentialMint ─────────────────────────────────────────────────────
 
     @Test

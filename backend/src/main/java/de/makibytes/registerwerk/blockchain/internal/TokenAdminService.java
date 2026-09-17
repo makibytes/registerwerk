@@ -449,6 +449,49 @@ public class TokenAdminService implements TokenAdminPort {
                 Map.of("address", walletAddress, "frozen", frozen), actorId, actorRole);
     }
 
+    /**
+     * eWpG §24 Berichtigung on a confidential (Zama fhEVM) ERC-3643 token.
+     * {@code ConfidentialERC3643.forcedTransfer(address,address,einput,bytes)} — unlike
+     * {@code pause}/{@code unpause}/{@code setAddressFrozen} above, this one DOES take an
+     * encrypted argument (the amount), so it needs the same relayer round-trip as
+     * {@link #confidentialForceBurn}/{@link #confidentialMint}. Confidential ERC-20 has no
+     * {@code forcedTransfer} equivalent, so this is CONF_ERC3643-only (see
+     * {@link #requireConfidentialErc3643Token}), unlike {@code confidentialForceBurn} which
+     * covers both confidential standards.
+     */
+    public UUID confidentialForcedTransfer(UUID deploymentId, String from, String to, BigInteger amount,
+                                           String legalBasis, UUID actorId, String actorRole) {
+        log.info("ADMIN confidentialForcedTransfer from={} to={} on deployment={}", from, to, deploymentId);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
+        if (!zamaRelayerClient.isConfigured()) {
+            throw new IllegalStateException(
+                    "Confidential forced-transfer requires a configured Zama relayer sidecar "
+                    + "(registerwerk.zama.relayer-url) to encrypt the transfer amount.");
+        }
+        requireNotBlocked(from);
+        requireNotBlocked(to);
+        travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
+        String operatorAddress = evmContractService.signer(
+                new ChainDescriptor(dep.getChain(), dep.getNetwork())).address();
+        ZamaRelayerClient.EncryptedInput encrypted =
+                zamaRelayerClient.encryptInput(dep.getContractAddress(), operatorAddress, amount);
+
+        Function fn = new Function("forcedTransfer",
+                Arrays.asList(
+                        new Address(from),
+                        new Address(to),
+                        new org.web3j.abi.datatypes.generated.Bytes32(
+                                org.web3j.utils.Numeric.hexStringToByteArray(encrypted.ciphertextHandle())),
+                        new org.web3j.abi.datatypes.DynamicBytes(
+                                org.web3j.utils.Numeric.hexStringToByteArray(encrypted.inputProofHex()))
+                ),
+                Collections.emptyList());
+        return submitAdmin(dep, asset, fn, "confidentialForcedTransfer",
+                Map.of("from", from, "to", to, "amount", amount.toString(), "legalBasis", legalBasis),
+                actorId, actorRole);
+    }
+
     private AssetLookupPort.AssetInfo requireConfidentialErc3643Token(AssetDeployment dep) {
         AssetLookupPort.AssetInfo asset = assetLookupPort.findById(dep.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", dep.getAssetId()));

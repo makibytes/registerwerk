@@ -22,6 +22,7 @@ import {
   Erc3643Service, Erc3643Suite, IdentityRegistryEntry, ComplianceStatus,
   TrustedIssuer, ClaimTopic,
 } from '../../../core/api/erc3643.service';
+import { ConfidentialService } from '../../../core/api/confidential.service';
 import { MintControlService, MintControlRule, RuleType } from '../../../core/api/mint-control.service';
 import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../../core/api/gas-sponsorship.service';
 import { VaultService } from '../../../core/api/vault.service';
@@ -788,6 +789,12 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
 
         <!-- ── ERC-3643 Mode: T-REX tabs (shown when tokenStandard is ERC3643 or CONF_ERC3643) ── -->
         @if (isErc3643) {
+          <!-- T-REX Suite / Identity Registry: the full T-REX six-contract suite
+               (Erc3643Suite/Erc3643LifecycleService) is a plaintext-only concept — confidential
+               deployments (via EwpgConfidentialFactory) never get an Erc3643Suite row and instead
+               point at a single shared identityRegistry/compliance pair set at deploy time, so
+               these tabs genuinely don't apply and are hidden rather than shown broken. -->
+          @if (!isConfidential) {
           <!-- T-REX Suite -->
           <mat-tab label="T-REX Suite">
             <div class="tab-content">
@@ -797,9 +804,6 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
                   <mat-icon style="color:var(--rw-text-info)">verified_user</mat-icon>
                   <strong>T-REX Suite</strong>
-                  @if (suite.isConfidential) {
-                    <mat-chip color="accent" style="font-size:11px">Confidential (fhEVM)</mat-chip>
-                  }
                 </div>
                 <div class="field-grid">
                   <div class="field-item"><div class="field-label">Token Contract</div><div class="field-value"><app-address [address]="suite.tokenAddress" /></div></div>
@@ -860,11 +864,21 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
               }
             </div>
           </mat-tab>
+          }
 
-          <!-- Compliance -->
+          <!-- Compliance / Regulatory Actions. The compliance-status panel (investor limits,
+               active T-REX modules) is plaintext-suite-specific; the admin-actions panel below it
+               applies to both — its buttons are routed to the plaintext or confidential-specific
+               backend endpoints in the component (see isConfidential branches in pauseToken() etc). -->
           <mat-tab label="Compliance">
             <div class="tab-content">
-              @if (complianceLoading) {
+              @if (isConfidential) {
+                <p style="color:var(--rw-text-secondary);font-size:13px;margin-bottom:16px">
+                  Confidential ERC-3643 tokens share a single IdentityRegistry/Compliance pair
+                  configured at deploy time — there is no per-suite compliance-module panel.
+                  Use the Regulatory Actions below.
+                </p>
+              } @else if (complianceLoading) {
                 <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
               } @else if (complianceStatus) {
                 <div class="field-grid" style="margin-bottom:24px">
@@ -1003,13 +1017,16 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             </div>
           </mat-tab>
 
-          <!-- Bulk Operations — CSV batch-mint/batch-forced-transfer/batch-burn -->
-          @if (canMutate && primaryDeploymentId) {
+          <!-- Bulk Operations — CSV batch-mint/batch-forced-transfer/batch-burn. Batch operations
+               have no equivalent on ConfidentialERC3643.sol at all (only single-address
+               confidentialMint/confidentialBurn exist), so this is plaintext-only. -->
+          @if (!isConfidential && canMutate && primaryDeploymentId) {
             <mat-tab label="Bulk Operations">
               <app-bulk-erc3643-ops [assetId]="id" [deploymentId]="primaryDeploymentId" />
             </mat-tab>
           }
 
+          @if (!isConfidential) {
           <!-- Trusted Issuers -->
           <mat-tab label="Trusted Issuers">
             <div class="tab-content">
@@ -1065,6 +1082,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
               }
             </div>
           </mat-tab>
+          }
 
           <!-- Transactions tab — always shown for ERC-3643 assets -->
           <mat-tab label="Transactions">
@@ -1124,6 +1142,7 @@ export class AssetDetailComponent implements OnInit {
 
   private readonly assetService = inject(AssetService);
   private readonly erc3643Service = inject(Erc3643Service);
+  private readonly confidentialService = inject(ConfidentialService);
   private readonly mintControlService = inject(MintControlService);
   private readonly gasSponsorshipService = inject(GasSponsorshipService);
   private readonly vaultService = inject(VaultService);
@@ -1279,7 +1298,10 @@ export class AssetDetailComponent implements OnInit {
           if (this.asset?.onchainLevel === 'CONTROL') {
             this.loadMintRules(d[0].id);
           }
-          if (this.isErc3643) {
+          if (this.isErc3643 && !this.isConfidential) {
+            // T-REX suite/identity-registry/compliance/trusted-issuers/claim-topics are
+            // plaintext-only — confidential deployments never get an Erc3643Suite row (see
+            // ConfidentialService for the endpoints that actually apply to CONF_ERC3643).
             this.loadErc3643Data(d[0].id);
           }
           if (this.isVaultStandard) {
@@ -1585,7 +1607,10 @@ export class AssetDetailComponent implements OnInit {
   pauseToken(): void {
     const depId = this.primaryDeploymentId;
     if (!depId || !confirm('Pause all token transfers?')) return;
-    this.erc3643Service.pause(this.id, depId).subscribe({
+    const pause$ = this.isConfidential
+      ? this.confidentialService.pause(this.id, depId)
+      : this.erc3643Service.pause(this.id, depId);
+    pause$.subscribe({
       next: (r) => this.txService.track(r.txId, 'Pause token'),
       error: (err) => this.showActionError('Failed to pause token.', err),
     });
@@ -1594,7 +1619,10 @@ export class AssetDetailComponent implements OnInit {
   unpauseToken(): void {
     const depId = this.primaryDeploymentId;
     if (!depId) return;
-    this.erc3643Service.unpause(this.id, depId).subscribe({
+    const unpause$ = this.isConfidential
+      ? this.confidentialService.unpause(this.id, depId)
+      : this.erc3643Service.unpause(this.id, depId);
+    unpause$.subscribe({
       next: (r) => this.txService.track(r.txId, 'Unpause token'),
       error: (err) => this.showActionError('Failed to unpause token.', err),
     });
@@ -1604,7 +1632,10 @@ export class AssetDetailComponent implements OnInit {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.freezeAddress) return;
     const addr = this.freezeAddress;
-    this.erc3643Service.freezeAddress(this.id, depId, addr).subscribe({
+    const freeze$ = this.isConfidential
+      ? this.confidentialService.setAddressFrozen(this.id, depId, addr, true)
+      : this.erc3643Service.freezeAddress(this.id, depId, addr);
+    freeze$.subscribe({
       next: (r) => { this.txService.track(r.txId, `Freeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; },
       error: (err) => this.showActionError('Failed to freeze address.', err),
     });
@@ -1614,7 +1645,10 @@ export class AssetDetailComponent implements OnInit {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.freezeAddress) return;
     const addr = this.freezeAddress;
-    this.erc3643Service.unfreezeAddress(this.id, depId, addr).subscribe({
+    const unfreeze$ = this.isConfidential
+      ? this.confidentialService.setAddressFrozen(this.id, depId, addr, false)
+      : this.erc3643Service.unfreezeAddress(this.id, depId, addr);
+    unfreeze$.subscribe({
       next: (r) => { this.txService.track(r.txId, `Unfreeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; },
       error: (err) => this.showActionError('Failed to unfreeze address.', err),
     });
@@ -1624,10 +1658,16 @@ export class AssetDetailComponent implements OnInit {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.forceFrom || !this.forceTo || !this.forceAmount) return;
     if (!confirm(`Execute forced transfer of ${this.forceAmount} from ${this.forceFrom} to ${this.forceTo}?`)) return;
-    this.erc3643Service.forcedTransfer(this.id, depId, {
-      from: this.forceFrom, to: this.forceTo,
-      amount: this.forceAmount, reason: this.forceReason,
-    }).subscribe({
+    // Confidential forced-transfer needs a Zama-relayer round-trip on the backend to encrypt the
+    // amount, so it carries the same step-up + 4-eyes gating as the plaintext endpoint.
+    const forcedTransfer$ = this.isConfidential
+      ? this.confidentialService.forcedTransfer(this.id, depId, {
+          from: this.forceFrom, to: this.forceTo, value: this.forceAmount, legalBasis: this.forceReason,
+        })
+      : this.erc3643Service.forcedTransfer(this.id, depId, {
+          from: this.forceFrom, to: this.forceTo, amount: this.forceAmount, reason: this.forceReason,
+        });
+    forcedTransfer$.subscribe({
       next: (r) => {
         this.txService.track(r.txId, 'Forced transfer');
         this.forceFrom = ''; this.forceTo = ''; this.forceAmount = ''; this.forceReason = '';
@@ -1641,9 +1681,14 @@ export class AssetDetailComponent implements OnInit {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.forceBurnFrom || !this.forceBurnAmount) return;
     if (!confirm(`Force burn ${this.forceBurnAmount} from ${this.forceBurnFrom}?`)) return;
-    this.erc3643Service.forceBurn(this.id, depId, {
-      from: this.forceBurnFrom, amount: this.forceBurnAmount, legalBasis: this.forceBurnLegalBasis,
-    }).subscribe({
+    const forceBurn$ = this.isConfidential
+      ? this.confidentialService.forceBurn(this.id, depId, {
+          from: this.forceBurnFrom, value: this.forceBurnAmount, legalBasis: this.forceBurnLegalBasis,
+        })
+      : this.erc3643Service.forceBurn(this.id, depId, {
+          from: this.forceBurnFrom, amount: this.forceBurnAmount, legalBasis: this.forceBurnLegalBasis,
+        });
+    forceBurn$.subscribe({
       next: (r) => {
         this.txService.track(r.txId, 'Force burn');
         this.forceBurnFrom = ''; this.forceBurnAmount = ''; this.forceBurnLegalBasis = '';

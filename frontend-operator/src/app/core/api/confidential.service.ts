@@ -60,4 +60,32 @@ export class ConfidentialService {
     return this.http.post<{ txId: string }>(
       `${this.base}/${assetId}/deployments/${depId}/admin/confidential-remove-viewer`, { viewerAddress });
   }
+
+  // ── ERC-3643-family admin actions (ConfidentialERC3643 — CONF_ERC3643 only) ──────────────
+
+  pause(assetId: string, depId: string): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(
+      `${this.base}/${assetId}/deployments/${depId}/admin/confidential-pause`, {});
+  }
+
+  unpause(assetId: string, depId: string): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(
+      `${this.base}/${assetId}/deployments/${depId}/admin/confidential-unpause`, {});
+  }
+
+  setAddressFrozen(assetId: string, depId: string, address: string, frozen: boolean): Observable<{ txId: string }> {
+    const action = frozen ? 'confidential-freeze' : 'confidential-unfreeze';
+    return this.http.post<{ txId: string }>(
+      `${this.base}/${assetId}/deployments/${depId}/admin/${action}`, { address });
+  }
+
+  forceBurn(assetId: string, depId: string, body: { from: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(
+      `${this.base}/${assetId}/deployments/${depId}/admin/force-burn-confidential`, body);
+  }
+
+  forcedTransfer(assetId: string, depId: string, body: { from: string; to: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(
+      `${this.base}/${assetId}/deployments/${depId}/admin/confidential-forced-transfer`, body);
+  }
 }

@@ -284,6 +284,24 @@ public class TokenAdminController {
     }
 
     /**
+     * Confidential-ERC-3643 equivalent of {@link #forcedTransfer} (eWpG §24 Berichtigung).
+     * Unlike {@code confidential-pause/-unpause/-freeze/-unfreeze}, the amount is encrypted, so
+     * this carries the same step-up + 4-eyes gating as the plaintext endpoint.
+     */
+    @PostMapping("/confidential-forced-transfer")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
+    @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
+    public ResponseEntity<TxSubmissionResponse> confidentialForcedTransfer(
+            @PathVariable UUID assetId, @PathVariable UUID depId,
+            @RequestBody @Valid ForcedTransferRequest request, Authentication auth) {
+        log.info("ADMIN confidentialForcedTransfer from={} to={} on deployment={} by actor={}",
+                request.from(), request.to(), depId, actorName(auth));
+        return accepted(adminService.confidentialForcedTransfer(depId, request.from(), request.to(), request.value(),
+                request.legalBasis(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+    }
+
+    /**
      * Grants {@code viewerAddress} decrypt rights on every holder's balance on this confidential
      * token (e.g. adding an auditor, or an issuer's own wallet, after deployment) — see
      * {@code ConfidentialERC20.addViewer}'s doc comment on the additive/non-retroactive ACL model.

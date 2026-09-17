@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.asset.events.DeploymentFailedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTxProperties;
+import de.makibytes.registerwerk.blockchain.api.ConfidentialTokenEvents;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.blockchain.api.EvmFinalityResolver;
 import de.makibytes.registerwerk.blockchain.api.EvmUtils;
@@ -676,6 +677,14 @@ public class AssetDeploymentService {
         }
         if (standard == TokenStandard.ERC3643) {
             return EvmUtils.extractIndexedAddress(receipt, REGISTERWERK_SUITE_DEPLOYED_TOPIC, 2);
+        }
+        // EwpgConfidentialFactory.deployConfidentialErc20/deployConfidentialErc3643 both emit the
+        // same ConfidentialTokenDeployed(bytes32,uint8,address) event — one rule covers both
+        // confidential standards. Without this, a confidential deployment gets marked CONFIRMED
+        // with contractAddress left null forever (see the warning logged just below this method's
+        // only caller), which silently breaks every subsequent admin operation on the token.
+        if (standard == TokenStandard.CONF_ERC3643 || standard == TokenStandard.CONF_ERC20) {
+            return EvmUtils.extractIndexedAddress(receipt, ConfidentialTokenEvents.TOKEN_DEPLOYED_TOPIC, 3);
         }
         return Optional.empty();
     }

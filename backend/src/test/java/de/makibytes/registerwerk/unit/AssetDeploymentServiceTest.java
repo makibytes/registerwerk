@@ -637,6 +637,55 @@ class AssetDeploymentServiceTest {
     }
 
     @Test
+    @DisplayName("syncFromChain extracts the token address for a confidential ERC-3643 deployment from " +
+            "ConfidentialTokenDeployed event logs (EwpgConfidentialFactory has no top-level contractAddress " +
+            "capture, unlike the plaintext T-REX factory path)")
+    void syncFromChain_marksConfirmed_extractingConfidentialErc3643AddressFromEventLogs() throws java.io.IOException {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.CONF_ERC3643);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setAssetId(assetId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClientByIdentifier(anyString())).thenReturn(web3j);
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100");
+        String topicSig = de.makibytes.registerwerk.blockchain.api.ConfidentialTokenEvents.TOKEN_DEPLOYED_TOPIC;
+        String tokenAddress = "0x" + "cd".repeat(20);
+        String tokenAddressTopic = "0x" + "0".repeat(24) + tokenAddress.substring(2);
+        Log log = new Log();
+        log.setTopics(Arrays.asList(
+                topicSig,
+                "0x" + "1".repeat(64), // assetId (topics[1])
+                "0x" + "0".repeat(64), // tokenType (topics[2]) — CONFIDENTIAL_ERC3643
+                tokenAddressTopic      // tokenAddress (topics[3])
+        ));
+        receipt.setLogs(List.of(log));
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(111));
+        txProperties.setDefaultConfirmations(12);
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        assertThat(deployment.getContractAddress()).isEqualTo(tokenAddress);
+    }
+
+    @Test
     void syncFromChainRefusesFinalConfirmationWithoutChainConfigProvenance() throws java.io.IOException {
         UUID deploymentId = UUID.randomUUID();
         AssetDeployment deployment = new AssetDeployment();

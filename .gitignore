@@ -73,3 +73,9 @@ Thumbs.db
 /.claude
 /.vscode
 
+# graphify
+.graphify/
+graphify-out/
+.graphify_*.json
+.graphify_python
+
