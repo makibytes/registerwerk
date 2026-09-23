@@ -51,6 +51,20 @@ export const repoMarketAbi = [
   },
   {
     type: 'function',
+    name: 'claimLiquidationSurplus',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [{ name: 'amount', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'surplusOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'borrower', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
     name: 'addCollateral',
     stateMutability: 'nonpayable',
     inputs: [{ name: 'amount', type: 'uint256' }],
@@ -109,6 +123,13 @@ export const repoMarketAbi = [
       { name: 'collateralAmount', type: 'uint256' },
       { name: 'scaledDebt', type: 'uint256' },
     ],
+  },
+  {
+    type: 'function',
+    name: 'availableLiquidity',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint256' }],
   },
   {
     type: 'function',

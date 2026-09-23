@@ -72,10 +72,12 @@ public class LendingPositionService {
         if (wallets.isEmpty()) return List.of();
 
         List<LendingPosition> results = new ArrayList<>();
+        // Deliberately not limited to operational markets: a market paused on-chain (for example
+        // a legacy one, see LendingMarketService.MarketView#riskParametersLegacy) still has
+        // borrowers who must see their loans to repay, claim collateral or claim surplus.
         for (LendingMarket market : marketRepository.findByStatus(LendingMarketStatus.ACTIVE)) {
             String chainIdentifier;
             try {
-                marketService.requireOperational(market);
                 chainIdentifier = marketService.resolveChainIdentifier(market.getChainConfigId());
             } catch (RuntimeException e) {
                 log.warn("Skipping unavailable lending market {} while refreshing positions: {}",
@@ -101,10 +103,10 @@ public class LendingPositionService {
         if (wallets.isEmpty()) return List.of();
 
         List<LendingSupplyPosition> results = new ArrayList<>();
+        // Not limited to operational markets either: withdrawing stays available when paused.
         for (LendingMarket market : marketRepository.findByStatus(LendingMarketStatus.ACTIVE)) {
             String chainIdentifier;
             try {
-                marketService.requireOperational(market);
                 chainIdentifier = marketService.resolveChainIdentifier(market.getChainConfigId());
             } catch (RuntimeException e) {
                 log.warn("Skipping unavailable lending market {} while refreshing supply positions: {}",
@@ -131,11 +133,12 @@ public class LendingPositionService {
         BigInteger collateralAmount =
                 onchainReader.positionCollateralAmount(chainIdentifier, market.getMarketAddress(), walletAddress);
         BigInteger debt = onchainReader.debtOf(chainIdentifier, market.getMarketAddress(), walletAddress);
+        BigInteger surplus = liquidationSurplus(market, chainIdentifier, walletAddress);
 
         // Never interacted with this market and nothing cached yet — nothing worth persisting.
         // If a row already exists, we must still update it below (e.g. a full repay driving
         // both amounts to zero has to flip the cached status to CLOSED, not be skipped).
-        if (existing.isEmpty() && collateralAmount.signum() == 0 && debt.signum() == 0) {
+        if (existing.isEmpty() && collateralAmount.signum() == 0 && debt.signum() == 0 && surplus.signum() == 0) {
             return Optional.empty();
         }
 
@@ -163,6 +166,7 @@ public class LendingPositionService {
         position.setCurrentDebt(debt);
         position.setHealthFactorWad(healthFactor);
         position.setHealthFactorReliable(healthFactorReliable);
+        position.setLiquidationSurplus(surplus);
         if (debt.signum() > 0) {
             position.setStatus(LendingPositionStatus.OPEN);
         } else {
@@ -176,6 +180,21 @@ public class LendingPositionService {
         }
         position.setLastSyncedAt(Instant.now());
         return Optional.of(positionRepository.save(position));
+    }
+
+    /**
+     * Liquidation surplus owed to the wallet. A market predating {@code surplusOf} reverts the
+     * read; it has no surplus to offer, so that reads as zero.
+     */
+    private BigInteger liquidationSurplus(LendingMarket market, String chainIdentifier, String walletAddress) {
+        try {
+            BigInteger surplus = onchainReader.liquidationSurplus(chainIdentifier, market.getMarketAddress(), walletAddress);
+            return surplus != null ? surplus : BigInteger.ZERO;
+        } catch (RuntimeException e) {
+            log.debug("No liquidation surplus readable for market {} wallet {}: {}",
+                    market.getMarketAddress(), walletAddress, e.getMessage());
+            return BigInteger.ZERO;
+        }
     }
 
     private void observeClosingHint(LendingMarket market, String walletAddress) {

@@ -2,6 +2,7 @@ import {
   LegLocked as LegLockedEvent,
   TradeSettled as TradeSettledEvent,
   TradeCancelled as TradeCancelledEvent,
+  TradeForceCancelled as TradeForceCancelledEvent,
   Paused as PausedEvent,
   Unpaused as UnpausedEvent,
 } from '../generated/DvpSettlement/DvpSettlement'
@@ -9,7 +10,8 @@ import { DvpSettlementEvent } from '../generated/schema'
 
 /**
  * Lifecycle-event ingestion for the operator-provided DvpSettlement rail, including escrow,
- * settlement, expiry, and counterparty cancellation.
+ * settlement, expiry, counterparty cancellation, and operator force-cancellation under a legal
+ * order. tradeId is the contract-derived, locker-namespaced id (see DvpSettlement.tradeIdFor).
  */
 function newEvent(txHash: string, logIndex: string, eventType: string): DvpSettlementEvent {
   let id = txHash + '-' + logIndex
@@ -71,6 +73,19 @@ export function handlePaused(event: PausedEvent): void {
 export function handleUnpaused(event: UnpausedEvent): void {
   let e = newEvent(event.transaction.hash.toHexString(), event.logIndex.toString(), 'UNPAUSED')
   e.actor = event.params.by
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+/** Operator released the escrowed leg to a destination named in a legal order. */
+export function handleTradeForceCancelled(event: TradeForceCancelledEvent): void {
+  let e = newEvent(event.transaction.hash.toHexString(), event.logIndex.toString(), 'TRADE_FORCE_CANCELLED')
+  e.tradeId = event.params.tradeId
+  e.forcedDestination = event.params.to
+  e.legalBasis = event.params.legalBasis
   e.blockNumber = event.block.number
   e.blockTimestamp = event.block.timestamp
   e.transactionHash = event.transaction.hash

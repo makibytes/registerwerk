@@ -15,14 +15,28 @@ import "./mocks/MockOnchainId.sol";
 ///         the {RegisterwerkGated} modifiers to enforce Registerwerk identity/permissions.
 contract SampleLoanDesk is RegisterwerkGated {
     bytes32 public constant OPEN_LOAN = keccak256("loandesk.open");
+    bytes32 public constant SWEEP = keccak256("loandesk.sweep");
     uint256 public constant TOPIC_KYC = 1;
 
-    uint256 public loansOpened;
+    /// @notice Instance binding: the org whose desk this is. The slug permission says what an
+    ///         org may do; `operatorOrg` says whose instance it is.
+    address public immutable operatorOrg;
 
-    constructor(IPermissionOracle oracle_) RegisterwerkGated(oracle_) {}
+    uint256 public loansOpened;
+    uint256 public sweeps;
+
+    constructor(IPermissionOracle oracle_, address operatorOrg_) RegisterwerkGated(oracle_) {
+        _requireOrg(operatorOrg_);
+        operatorOrg = operatorOrg_;
+    }
 
     function openLoan() external requiresPermission(OPEN_LOAN) requiresClaim(TOPIC_KYC) {
         loansOpened += 1;
+    }
+
+    /// @notice Value-moving action: only the operating org's members holding "loandesk.sweep".
+    function sweep() external requiresOrgPermission(operatorOrg, SWEEP) {
+        sweeps += 1;
     }
 
     function ping() external requiresActiveMember {}
@@ -35,13 +49,16 @@ contract SampleGatedDappTest is Test {
     PermissionOracle oracle;
     SampleLoanDesk dapp;
     MockOnchainId orgId;
+    MockOnchainId otherOrgId;
     MockClaimIssuer issuer;
 
     address operator = address(0x1);
     address alice = address(0x3);
     address mallory = address(0x66);
+    address bob = address(0x4); // member of another org holding the same slug permissions
 
     bytes32 permOpen;
+    bytes32 permSweep;
     uint256 topicKyc;
 
     function setUp() public {
@@ -49,10 +66,12 @@ contract SampleGatedDappTest is Test {
         permissions = new PermissionRegistry(operator, orgRegistry);
         tir = new EcosystemTrustedIssuersRegistry(operator);
         oracle = new PermissionOracle(operator, orgRegistry, permissions, tir);
-        dapp = new SampleLoanDesk(oracle);
         orgId = new MockOnchainId();
+        otherOrgId = new MockOnchainId();
+        dapp = new SampleLoanDesk(oracle, address(orgId));
         issuer = new MockClaimIssuer();
         permOpen = dapp.OPEN_LOAN();
+        permSweep = dapp.SWEEP();
         topicKyc = dapp.TOPIC_KYC();
 
         // full happy-path wiring: registered org, bound member, org grant, trusted KYC claim
@@ -62,6 +81,11 @@ contract SampleGatedDappTest is Test {
         roles[0] = keccak256("TRADER");
         orgRegistry.addMember(address(orgId), alice, roles, "");
         permissions.grantToOrg(address(orgId), permOpen);
+        permissions.grantToOrg(address(orgId), permSweep);
+        // a second, fully legitimate org holding the very same slug grants
+        orgRegistry.registerOrg(address(otherOrgId), 276);
+        orgRegistry.addMember(address(otherOrgId), bob, roles, "");
+        permissions.grantToOrg(address(otherOrgId), permSweep);
         uint256[] memory topics = new uint256[](1);
         topics[0] = topicKyc;
         tir.addTrustedIssuer(address(issuer), topics);
@@ -142,5 +166,60 @@ contract SampleGatedDappTest is Test {
             abi.encodeWithSelector(RegisterwerkGated.NotAnActiveMember.selector, mallory)
         );
         dapp.ping();
+    }
+
+    // ── Instance binding (requiresOrgPermission) ─────────────────────────────
+
+    function test_sweep_succeedsForOperatingOrgMember() public {
+        vm.prank(alice);
+        dapp.sweep();
+        assertEq(dapp.sweeps(), 1);
+    }
+
+    /// @notice T2-06 regression: an org-wide grant of the same slug permission must not reach
+    ///         an instance operated by another org.
+    function test_sweep_revertsForOtherOrgWithSameSlugPermission() public {
+        assertTrue(oracle.hasPermission(bob, permSweep), "precondition: bob's org holds the grant");
+
+        vm.prank(bob);
+        vm.expectRevert(
+            abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, bob, address(orgId))
+        );
+        dapp.sweep();
+    }
+
+    function test_sweep_revertsForUnboundWallet() public {
+        vm.prank(mallory);
+        vm.expectRevert(
+            abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId))
+        );
+        dapp.sweep();
+    }
+
+    function test_sweep_stillRequiresPermissionWithinOperatingOrg() public {
+        vm.prank(operator);
+        permissions.revokeFromOrg(address(orgId), permSweep);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, alice, permSweep)
+        );
+        dapp.sweep();
+    }
+
+    function test_sweep_revertsWhileOperatingOrgSuspended() public {
+        vm.prank(operator);
+        orgRegistry.suspendOrg(address(orgId), "sanctions review");
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, alice, permSweep)
+        );
+        dapp.sweep();
+    }
+
+    function test_constructor_rejectsZeroOperatingOrg() public {
+        vm.expectRevert(RegisterwerkGated.ZeroOperatingOrg.selector);
+        new SampleLoanDesk(oracle, address(0));
     }
 }

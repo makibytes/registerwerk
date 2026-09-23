@@ -185,7 +185,11 @@ public class Erc3643DeploymentService {
             String assetName = assetInfo.name();
             String assetSymbol = deriveSymbol(assetName);
 
-            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, signer.address(), assetName, assetSymbol);
+            // Fails closed before broadcasting: a suite without a ClaimIssuer contract as trusted
+            // issuer could never have a verified holder (T2-21).
+            String claimIssuer = contractAddressConfig.requireClaimIssuer(chainConfig.getIdentifier());
+            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, signer.address(), claimIssuer,
+                    assetName, assetSymbol);
             evmContractService.send(chainConfigId, web3j, signer, factoryAddress, fn);
 
             Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deployment.getId());
@@ -241,7 +245,8 @@ public class Erc3643DeploymentService {
             byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
             AssetLookupPort.AssetInfo assetInfo = assetLookupPort.findById(assetId)
                     .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
-            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, ownerAddress,
+            String claimIssuer = contractAddressConfig.requireClaimIssuer(chainConfig.getIdentifier());
+            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, ownerAddress, claimIssuer,
                     assetInfo.name(), deriveSymbol(assetInfo.name()));
             TransactionReceipt receipt = evmContractService.send(
                     chainConfig.getId(), web3j, signer, factoryAddress, fn);
@@ -303,8 +308,9 @@ public class Erc3643DeploymentService {
      * Issue a KYC claim to an investor's ONCHAINID contract.
      *
      * <p>Signs a claim off-chain and calls
-     * {@code ONCHAINID.addClaim(topic, scheme, issuer, signature, data, uri)}.
-     * The registry backend wallet must be registered as a TrustedIssuer in the TIR.
+     * {@code ONCHAINID.addClaim(topic, scheme, issuer, signature, data, uri)} with the chain's
+     * configured ONCHAINID {@code ClaimIssuer} contract as {@code issuer} (see {@link #signClaim});
+     * that contract must be a TrustedIssuer in the suite's TIR.
      *
      * <p>Submits via {@link EvmContractService#submit} and returns immediately with the tx hash —
      * it does <b>not</b> wait for a receipt. {@code Erc3643ClaimConfirmationListener} confirms it
@@ -313,7 +319,11 @@ public class Erc3643DeploymentService {
      *
      * @param onchainIdentityId ID of the ONCHAINID record to receive the claim
      * @param claimTopic        claim topic number (e.g. {@link #CLAIM_TOPIC_KYC})
-     * @param expiresAt         optional expiry baked into the signed claim data; {@code null} means none
+     * @param expiresAt         optional expiry written into the signed claim data; {@code null} means
+     *                          none. Informational only: neither ONCHAINID's {@code ClaimIssuer
+     *                          .isClaimValid}, T-REX {@code isVerified} nor {@code PermissionOracle}
+     *                          reads it. Expiry reaches the chain by push revocation
+     *                          ({@code orgidentity.internal.KycChainPropagationListener}).
      * @return the submitted transaction's hash
      * @throws IllegalStateException if the target identity has no deployed contract yet (still
      *         {@code 0x-PENDING-...}) — previously this silently returned, letting callers persist
@@ -331,19 +341,20 @@ public class Erc3643DeploymentService {
                     "issueKycClaim: identity not yet deployed for id=" + onchainIdentityId);
         }
 
-        // Sign via ClaimSigningService — real ABI encoding (abi.encode(address,uint256,bytes) for
-        // the claim hash, matching OnchainID's ClaimIssuer.isClaimValid exactly). Using the same
-        // signer used by the durable transaction gateway must be the same configured registry
-        // signer returned by ClaimSigningService: the trusted-issuer address registered on-chain
-        // must equal the recovered claim signer.
-        ClaimSigningService.SignedClaim signed = claimSigningService.signClaim(
-                identity.getChainConfigId(), identityAddress, claimTopic, expiresAt);
-
-        // ONCHAINID.addClaim(uint256 topic, uint256 scheme, address issuer,
-        //                    bytes signature, bytes data, string uri)
         ChainConfig chainConfig = chainConfigRepository.findById(identity.getChainConfigId())
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig",
                         identity.getChainConfigId()));
+        String claimIssuer = contractAddressConfig.requireClaimIssuer(chainConfig.getIdentifier());
+        requireSignerIsClaimKey(identity.getChainConfigId(), chainConfig, claimIssuer);
+
+        // Sign via ClaimSigningService — real ABI encoding (abi.encode(address,uint256,bytes) for
+        // the claim hash, matching OnchainID's ClaimIssuer.isClaimValid exactly) — with the chain's
+        // registry signer, on behalf of the ClaimIssuer contract checked above.
+        ClaimSigningService.SignedClaim signed = claimSigningService.signClaim(
+                identity.getChainConfigId(), claimIssuer, identityAddress, claimTopic, expiresAt);
+
+        // ONCHAINID.addClaim(uint256 topic, uint256 scheme, address issuer,
+        //                    bytes signature, bytes data, string uri)
         Function fn = new Function(
                 "addClaim",
                 Arrays.asList(
@@ -369,9 +380,51 @@ public class Erc3643DeploymentService {
     }
 
     /**
+     * Signs a claim exactly as {@link #issueKycClaim} submits it: signed by the chain's registry
+     * signer on behalf of the chain's ONCHAINID {@code ClaimIssuer} contract
+     * ({@code registerwerk.contracts.claim-issuer.<chain>}). The issuer must be a contract —
+     * {@code Identity.addClaim} calls {@code IClaimIssuer(_issuer).isClaimValid}, which reverts for
+     * the signer EOA, so an EOA-issued claim can never land on chain (T2-21).
+     *
+     * @throws IllegalStateException if no ClaimIssuer is configured for the identity's chain
+     */
+    public ClaimSigningService.SignedClaim signClaim(UUID chainConfigId, String identityAddress,
+                                                     long topic, java.time.Instant expiresAt) {
+        ChainConfig chainConfig = chainConfigRepository.findById(chainConfigId)
+                .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
+        String claimIssuer = contractAddressConfig.requireClaimIssuer(chainConfig.getIdentifier());
+        return claimSigningService.signClaim(chainConfigId, claimIssuer, identityAddress, topic, expiresAt);
+    }
+
+    /**
+     * Pre-flight: {@code ClaimIssuer.isClaimValid} only accepts signatures from a key with CLAIM
+     * (or MANAGEMENT) purpose on the issuer. Fails before broadcasting an {@code addClaim} that
+     * would revert when the configured ClaimIssuer is not managed by this chain's registry signer.
+     */
+    private void requireSignerIsClaimKey(UUID chainConfigId, ChainConfig chainConfig, String claimIssuer) {
+        String signerAddress = evmContractService.signer(chainConfigId).address();
+        byte[] keyHash = org.web3j.crypto.Hash.sha3(
+                leftPad20ToBytes32(hexToBytes(signerAddress.replace("0x", "").toLowerCase())));
+        Function keyHasPurpose = new Function("keyHasPurpose",
+                List.of(new Bytes32(keyHash), new Uint256(CLAIM_SIGNER_PURPOSE)),
+                List.of(new TypeReference<org.web3j.abi.datatypes.Bool>() {}));
+        Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
+        List<Type> result = evmContractService.call(web3j, claimIssuer, keyHasPurpose);
+        if (result.isEmpty() || !Boolean.TRUE.equals(result.get(0).getValue())) {
+            throw new IllegalStateException("ClaimIssuer " + claimIssuer + " on chain "
+                    + chainConfig.getIdentifier() + " does not hold registry signer " + signerAddress
+                    + " as a CLAIM/MANAGEMENT key; claims it signs would be rejected by ONCHAINID");
+        }
+    }
+
+    /** ERC-734 key purpose 3 (CLAIM signer); a MANAGEMENT key (1) also satisfies it. */
+    private static final java.math.BigInteger CLAIM_SIGNER_PURPOSE = java.math.BigInteger.valueOf(3);
+
+    /**
      * Revoke a claim (e.g. when KYC expires or an investor fails re-verification).
      *
-     * <p>Calls {@code ONCHAINID.removeClaim(claimId)} via Web3j — same "submit, don't wait for a
+     * <p>Removal alone is reversible (see {@link #revokeClaimAtIssuer}); callers pair it with the
+     * issuer-level revocation. Calls {@code ONCHAINID.removeClaim(claimId)} via Web3j — same "submit, don't wait for a
      * receipt" shape as {@link #issueKycClaim}. The caller must not set {@code revokedAt} until
      * {@code Erc3643ClaimConfirmationListener} confirms the returned tx.
      *
@@ -394,10 +447,13 @@ public class Erc3643DeploymentService {
                     "revokeKycClaim: identity not yet deployed for claim=" + onchainClaimId);
         }
 
-        // ERC-735 claimId = keccak256(abi.encode(issuer, topic))
-        EvmSigner signer = evmContractService.signer(identity.getChainConfigId());
-        byte[] claimId = org.web3j.crypto.Hash.sha3(
-                encodeClaimId(signer.address(), claim.getTopic()));
+        // ERC-735 claimId = keccak256(abi.encode(issuer, topic)) — the issuer the claim was added
+        // under (the ClaimIssuer contract); the signer is only a fallback for legacy rows without one.
+        String issuer = claim.getIssuerAddress();
+        if (issuer == null || !org.web3j.crypto.WalletUtils.isValidAddress(issuer)) {
+            issuer = evmContractService.signer(identity.getChainConfigId()).address();
+        }
+        byte[] claimId = org.web3j.crypto.Hash.sha3(encodeClaimId(issuer, claim.getTopic()));
 
         ChainConfig chainConfig = chainConfigRepository.findById(identity.getChainConfigId())
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig",
@@ -416,6 +472,92 @@ public class Erc3643DeploymentService {
                 identityAddress, txParams);
         log.info("revokeKycClaim: claim={} removal submitted on identity={} tx={}",
                 onchainClaimId, identityAddress, txHash);
+        return txHash;
+    }
+
+    /**
+     * Revokes a claim at the issuer level: {@code ClaimIssuer.revokeClaimBySignature(signature)}.
+     *
+     * <p>{@link #revokeKycClaim} ({@code ONCHAINID.removeClaim}) alone is reversible: the issuer
+     * still vouches for the signature, so any CLAIM key on the subject identity (an org
+     * MANAGEMENT key can add itself as one) can re-{@code addClaim} the original signature and data
+     * from the public {@code ClaimAdded} log. Once the issuer has revoked the signature,
+     * {@code ClaimIssuer.isClaimValid} returns {@code false}, so {@code Identity.addClaim}, T-REX
+     * {@code IdentityRegistry.isVerified} and {@code PermissionOracle} all reject it.
+     *
+     * <p>Idempotent: {@code isClaimRevoked(signature)} is read first because the contract reverts
+     * {@code ClaimAlreadyRevoked} on a second revocation. Returns {@code null} (nothing submitted)
+     * when there is nothing to revoke at the issuer level:
+     * <ul>
+     *   <li>the claim carries no signature, or no real issuer address;</li>
+     *   <li>the issuer has no contract code (legacy rows signed with the chain signer EOA as
+     *       issuer, before T2-21): ONCHAINID's {@code addClaim} calls {@code isClaimValid} on the
+     *       issuer, which reverts for an EOA, so no such claim can exist on (or be re-added to) an
+     *       identity;</li>
+     *   <li>the issuer already reports the signature as revoked.</li>
+     * </ul>
+     * The registry signer must hold a MANAGEMENT key on the ClaimIssuer; otherwise the submitted
+     * transaction reverts ({@code onlyManager}). Same "submit, don't wait" shape as
+     * {@link #revokeKycClaim}.
+     *
+     * @param onchainClaimId ID of the {@code OnchainClaim} record to revoke at the issuer
+     * @return the submitted transaction's hash, or {@code null} if nothing was submitted
+     */
+    public String revokeClaimAtIssuer(UUID onchainClaimId) {
+        OnchainClaim claim = claimRepository.findById(onchainClaimId)
+                .orElseThrow(() -> new EntityNotFoundException("OnchainClaim", onchainClaimId));
+        String signature = claim.getClaimSignature();
+        String issuer = claim.getIssuerAddress();
+        if (signature == null || signature.isBlank() || issuer == null
+                || !org.web3j.crypto.WalletUtils.isValidAddress(issuer)) {
+            log.warn("revokeClaimAtIssuer: claim={} has no signature or real issuer address ({}); "
+                    + "nothing to revoke at issuer level", onchainClaimId, issuer);
+            return null;
+        }
+        OnchainIdentity identity = identityRepository.findById(claim.getOnchainIdentityId())
+                .orElseThrow(() -> new EntityNotFoundException("OnchainIdentity",
+                        claim.getOnchainIdentityId()));
+        ChainConfig chainConfig = chainConfigRepository.findById(identity.getChainConfigId())
+                .orElseThrow(() -> new EntityNotFoundException("ChainConfig",
+                        identity.getChainConfigId()));
+        Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
+
+        String code;
+        try {
+            code = web3j.ethGetCode(issuer,
+                    org.web3j.protocol.core.DefaultBlockParameterName.LATEST).send().getCode();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("revokeClaimAtIssuer: eth_getCode failed for issuer " + issuer, e);
+        }
+        if (code == null || code.isBlank() || "0x".equalsIgnoreCase(code)) {
+            log.info("revokeClaimAtIssuer: claim={} issuer {} is an EOA, not a ClaimIssuer contract; "
+                    + "ONCHAINID cannot hold a claim from it, nothing to revoke at issuer level",
+                    onchainClaimId, issuer);
+            return null;
+        }
+
+        byte[] sigBytes = Numeric.hexStringToByteArray(signature);
+        Function isRevoked = new Function("isClaimRevoked",
+                List.of(new DynamicBytes(sigBytes)),
+                List.of(new TypeReference<org.web3j.abi.datatypes.Bool>() {}));
+        List<Type> revoked = evmContractService.call(web3j, issuer, isRevoked);
+        if (!revoked.isEmpty() && Boolean.TRUE.equals(revoked.get(0).getValue())) {
+            log.info("revokeClaimAtIssuer: claim={} signature already revoked at issuer {}",
+                    onchainClaimId, issuer);
+            return null;
+        }
+
+        // ClaimIssuer.revokeClaimBySignature(bytes signature)
+        Function fn = new Function("revokeClaimBySignature",
+                List.of(new DynamicBytes(sigBytes)), Collections.emptyList());
+        Map<String, Object> txParams = Map.of("onchainClaimId", onchainClaimId.toString(),
+                "issuer", issuer);
+        String txHash = evmTransactions.submit(identity.getChainConfigId(), issuer, fn, txParams);
+        blockchainTransactionService.record(txHash, fn.getName(), null, null,
+                parseChain(chainConfig.getIdentifier()), chainConfig.getNetworkType().name(),
+                issuer, txParams);
+        log.info("revokeClaimAtIssuer: claim={} revokeClaimBySignature submitted on issuer={} tx={}",
+                onchainClaimId, issuer, txHash);
         return txHash;
     }
 
@@ -443,12 +585,13 @@ public class Erc3643DeploymentService {
      *
      * <p>{@code issuers}/{@code issuerClaims} must be the same length — {@code TREXFactory
      * .deployTREXSuite} reverts with {@code InvalidClaimPattern()} otherwise. There is exactly
-     * one issuer (the registry backend wallet), trusted for every topic in {@code claimTopics}
-     * (KYC + AML).
+     * one issuer (the chain's ONCHAINID ClaimIssuer contract, managed by the registry wallet),
+     * trusted for every topic in {@code claimTopics} (KYC + AML).
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static Function buildDeployEwpgSuiteFunction(
-            byte[] assetIdBytes, String salt, String ownerAddress, String name, String symbol) {
+    static Function buildDeployEwpgSuiteFunction(
+            byte[] assetIdBytes, String salt, String ownerAddress, String claimIssuer,
+            String name, String symbol) {
 
         DynamicStruct tokenDetails = new DynamicStruct(
                 new Address(ownerAddress),
@@ -464,15 +607,15 @@ public class Erc3643DeploymentService {
         );
 
         // Required topics: KYC + AML (AML revocation must also be visible to the on-chain
-        // compliance gate). The registry wallet is the sole trusted issuer for both at deploy
-        // time; more can be added later via addTrustedIssuer.
+        // compliance gate). The registry's ClaimIssuer contract is the sole trusted issuer for both
+        // at deploy time; more can be added later via addTrustedIssuer.
         List<Uint256> requiredTopics = List.of(
                 new Uint256(java.math.BigInteger.valueOf(CLAIM_TOPIC_KYC)),
                 new Uint256(java.math.BigInteger.valueOf(CLAIM_TOPIC_AML)));
 
         DynamicStruct claimDetails = new DynamicStruct(
                 new DynamicArray<>(Uint256.class, requiredTopics),
-                new DynamicArray<>(Address.class, new Address(ownerAddress)),
+                new DynamicArray<>(Address.class, new Address(claimIssuer)),
                 new DynamicArray<>(DynamicArray.class,
                         new DynamicArray<>(Uint256.class, requiredTopics))   // issuerClaims[0] = same topics
         );

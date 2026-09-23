@@ -12,6 +12,9 @@ import java.util.UUID;
  * {@code micarApplicable}/{@code defiInteropModel} are the collateral asset's jurisdiction
  * compliance-profile deltas (see {@code kyc.api.JurisdictionRequirementConfig}) — null when the
  * market has no linked collateral asset or that asset has no jurisdiction set.
+ * {@code riskParametersLegacy}/{@code operatorOrg}/{@code treasury}: see
+ * {@code LendingMarketService.MarketView} — a legacy market must not be offered for new
+ * borrowing or supply; repay, claim and withdraw stay available.
  */
 public record LendingMarketResponse(
         UUID id,
@@ -37,5 +40,8 @@ public record LendingMarketResponse(
         Jurisdiction jurisdiction,
         Boolean micarApplicable,
         DefiInteropModel defiInteropModel,
-        Instant createdAt
+        Instant createdAt,
+        boolean riskParametersLegacy,
+        String operatorOrg,
+        String treasury
 ) {}

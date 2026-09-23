@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.events.GasSponsorshipPolicyDeactivatedEvent;
 import de.makibytes.registerwerk.asset.internal.GasSponsorshipService;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -37,6 +39,9 @@ class GasSponsorshipServiceTest {
 
     @Mock
     private AssetRepository assetRepository;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private GasSponsorshipService gasSponsorshipService;
@@ -153,7 +158,7 @@ class GasSponsorshipServiceTest {
     }
 
     @Test
-    @DisplayName("deactivate sets active to false")
+    @DisplayName("deactivate sets active to false and publishes an audit event")
     void deactivate_setsActiveFalse() {
         UUID policyId = UUID.randomUUID();
         GasSponsorshipPolicy policy = buildPolicy();
@@ -162,9 +167,11 @@ class GasSponsorshipServiceTest {
         when(policyRepository.findById(policyId)).thenReturn(Optional.of(policy));
         when(policyRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        gasSponsorshipService.deactivate(policyId);
+        UUID actorId = UUID.randomUUID();
+        gasSponsorshipService.deactivate(policyId, actorId, "REGISTRY_ADMIN");
 
         assertThat(policy.getActive()).isFalse();
         verify(policyRepository).save(policy);
+        verify(eventPublisher).publishEvent(any(GasSponsorshipPolicyDeactivatedEvent.class));
     }
 }

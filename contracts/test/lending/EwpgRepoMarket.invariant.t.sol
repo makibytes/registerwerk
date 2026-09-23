@@ -47,11 +47,18 @@ contract EwpgRepoMarketInvariantTest is Test {
 
         loanToken = new MockStablecoin("AllUnity Euro", "AUEUR", 6);
         collateralToken = new MockStablecoin("Demo Bond Units", "BOND", 0);
-        navOracle = new RegisterwerkNavOracle(ecosystemOracle);
+        // pricePusher's org operates the NAV oracle (default pusher of every asset).
+        MockOnchainId pusherOrgId = new MockOnchainId();
+        // 15% tolerance: LLTV × (1 + bonus) = 0.84 ≤ 0.85 (T2-08).
+        navOracle =
+            new RegisterwerkNavOracle(ecosystemOracle, address(pusherOrgId), address(loanToken), 1500, 1 days, 0);
 
         market = new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 0, 0
+            ecosystemOracle,
+            MarketParams(
+                address(pusherOrgId), address(0x7EA5), loanToken, collateralToken, navOracle, MAX_LTV_BPS,
+                LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD, 0, 0
+            )
         );
 
         MockClaimIssuer kycIssuer = new MockClaimIssuer();
@@ -80,7 +87,6 @@ contract EwpgRepoMarketInvariantTest is Test {
         // pricePusher's org holds PUSH_PRICE only — never OVERRIDE_PRICE, so the handler's price
         // moves are always bounded by the oracle's ordinary deviation cap, matching real
         // day-to-day operation rather than emergency repricing.
-        MockOnchainId pusherOrgId = new MockOnchainId();
         orgRegistry.registerOrg(address(pusherOrgId), 276);
         bytes32[] memory pusherRoles = new bytes32[](1);
         pusherRoles[0] = keccak256("NAV_ADMIN");
@@ -104,6 +110,18 @@ contract EwpgRepoMarketInvariantTest is Test {
             sumPositions += collateralAmount;
         }
         assertEq(collateralToken.balanceOf(address(market)), sumPositions);
+        assertEq(market.totalCollateral(), sumPositions, "totalCollateral tracks every position");
+    }
+
+    /// @notice Liquidation surplus is fully attributed to borrowers and never exceeds the cash
+    ///         actually held (it is excluded from pool liquidity).
+    function invariant_surplusAttributedAndBacked() public view {
+        uint256 sumSurplus = 0;
+        for (uint256 i = 0; i < NUM_BORROWERS; i++) {
+            sumSurplus += market.surplusOf(handler.borrowers(i));
+        }
+        assertEq(market.totalSurplus(), sumSurplus);
+        assertGe(loanToken.balanceOf(address(market)), market.totalSurplus());
     }
 
     /// @notice Debt is never left without collateral backing it: collateral only leaves a
@@ -118,7 +136,8 @@ contract EwpgRepoMarketInvariantTest is Test {
     }
 
     /// @notice The pool's core accounting identity: idle cash plus outstanding debt must always
-    ///         equal what depositors (plus the protocol's own reserves) are owed. This must
+    ///         equal what depositors, the protocol's own reserves and liquidated borrowers
+    ///         (unclaimed liquidation surplus) are owed. This must
     ///         continue to hold through the bad-debt write-off path — a write-off
     ///         removes debt and depositor claims by the same amount, by construction, so this
     ///         identity is exactly what proves that fix keeps the books balanced rather than
@@ -128,8 +147,8 @@ contract EwpgRepoMarketInvariantTest is Test {
         uint256 totalDebt = (market.totalScaledDebt() * market.borrowIndex()) / 1e18;
         uint256 totalDepositorClaims = (market.totalScaledDeposits() * market.liquidityIndex()) / 1e18;
         uint256 lhs = cash + totalDebt;
-        uint256 rhs = market.totalReserves() + totalDepositorClaims;
-        assertApproxEqAbs(lhs, rhs, 100, "cash + debt must equal reserves + depositor claims");
+        uint256 rhs = market.totalReserves() + totalDepositorClaims + market.totalSurplus();
+        assertApproxEqAbs(lhs, rhs, 100, "cash + debt must equal reserves + depositor claims + surplus");
     }
 
     /// @notice Read paths must never revert for any tracked actor — an accounting invariant

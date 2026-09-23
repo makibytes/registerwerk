@@ -35,13 +35,24 @@ import "../settlement/DvpSettlement.sol";
 ///          exactly where the nominee exemption in `EwpgComplianceModule.moduleCheck`
 ///          applies.
 ///      Permission surface (namespace "secondary-market."), gated by {RegisterwerkGated}:
-///      only a wallet whose org holds `secondary-market.trade` AND a valid NOMINEE claim
-///      may operate the pool's inventory — never a self-declared property of the pool.
+///      only a wallet bound to this instance's {operatorOrg} whose org holds
+///      `secondary-market.trade` AND a valid NOMINEE claim may operate the pool's
+///      inventory — never a self-declared property of the pool. The slug grant alone is
+///      not enough: another nominee org holding the same code runs its own desk instance
+///      and cannot touch this one's inventory.
+///
+///      Trade ids are derived by {DvpSettlement} from this contract (the locker) and a
+///      caller-supplied `clientRef`; the counterparty settles with
+///      `DvpSettlement.settle(tradeId, hashTerms(...))`. If the counterparty never settles
+///      or renounces, {reclaimExpired} returns the escrowed leg to the pool after expiry.
 contract CompliantSecondaryMarket is RegisterwerkGated {
     using SafeERC20 for IERC20;
 
     bytes32 public constant TRADE = keccak256("secondary-market.trade");
     uint256 public constant TOPIC_NOMINEE = 4;
+
+    /// @notice The org (its ONCHAINID address) that operates this desk instance.
+    address public immutable operatorOrg;
 
     /// @notice The MiCAR EMT stablecoin every payment leg settles in.
     IERC20 public immutable paymentToken;
@@ -51,11 +62,16 @@ contract CompliantSecondaryMarket is RegisterwerkGated {
 
     event SoldFromInventory(bytes32 indexed tradeId, address indexed buyer, address indexed securityToken, uint256 assetAmount, uint256 paymentAmount);
     event BoughtIntoInventory(bytes32 indexed tradeId, address indexed seller, address indexed securityToken, uint256 assetAmount, uint256 paymentAmount);
+    event ExpiredEscrowReclaimed(bytes32 indexed tradeId);
 
     error ZeroAddress();
 
-    constructor(IPermissionOracle oracle_, IERC20 paymentToken_, DvpSettlement settlement_) RegisterwerkGated(oracle_) {
+    constructor(IPermissionOracle oracle_, address operatorOrg_, IERC20 paymentToken_, DvpSettlement settlement_)
+        RegisterwerkGated(oracle_)
+    {
+        _requireOrg(operatorOrg_);
         if (address(paymentToken_) == address(0) || address(settlement_) == address(0)) revert ZeroAddress();
+        operatorOrg = operatorOrg_;
         paymentToken = paymentToken_;
         settlement = settlement_;
     }
@@ -65,16 +81,17 @@ contract CompliantSecondaryMarket is RegisterwerkGated {
     ///         and receives the escrowed tokens by calling `DvpSettlement.settle` before
     ///         `expiry`. Reverts at the T-REX layer if `buyer` is not a verified,
     ///         compliant recipient — this desk does not bypass that check.
+    /// @return tradeId The id {DvpSettlement} derived for this desk and `clientRef`.
     function sellFromInventory(
-        bytes32 tradeId,
+        bytes32 clientRef,
         address buyer,
         IERC20 securityToken,
         uint256 assetAmount,
         uint256 paymentAmount,
         uint64 expiry
-    ) external requiresPermission(TRADE) requiresClaim(TOPIC_NOMINEE) {
+    ) external requiresOrgPermission(operatorOrg, TRADE) requiresClaim(TOPIC_NOMINEE) returns (bytes32 tradeId) {
         securityToken.forceApprove(address(settlement), assetAmount);
-        settlement.lockAsset(tradeId, buyer, securityToken, assetAmount, paymentToken, paymentAmount, expiry);
+        tradeId = settlement.lockAsset(clientRef, buyer, securityToken, assetAmount, paymentToken, paymentAmount, expiry);
         emit SoldFromInventory(tradeId, buyer, address(securityToken), assetAmount, paymentAmount);
     }
 
@@ -84,16 +101,28 @@ contract CompliantSecondaryMarket is RegisterwerkGated {
     ///         `DvpSettlement.settle` before `expiry`. This is the leg that grows the
     ///         pool's own onchain balance of `securityToken` — see the contract-level
     ///         NatSpec on why that requires a nominee exemption at the compliance layer.
+    /// @return tradeId The id {DvpSettlement} derived for this desk and `clientRef`.
     function buyIntoInventory(
-        bytes32 tradeId,
+        bytes32 clientRef,
         address seller,
         IERC20 securityToken,
         uint256 assetAmount,
         uint256 paymentAmount,
         uint64 expiry
-    ) external requiresPermission(TRADE) requiresClaim(TOPIC_NOMINEE) {
+    ) external requiresOrgPermission(operatorOrg, TRADE) requiresClaim(TOPIC_NOMINEE) returns (bytes32 tradeId) {
         paymentToken.forceApprove(address(settlement), paymentAmount);
-        settlement.lockPayment(tradeId, seller, securityToken, assetAmount, paymentToken, paymentAmount, expiry);
+        tradeId = settlement.lockPayment(clientRef, seller, securityToken, assetAmount, paymentToken, paymentAmount, expiry);
         emit BoughtIntoInventory(tradeId, seller, address(securityToken), assetAmount, paymentAmount);
+    }
+
+    /// @notice Returns an expired, unsettled inventory escrow of this desk to the pool via
+    ///         `DvpSettlement.cancel` — this contract is the locker, so nobody else can.
+    function reclaimExpired(bytes32 tradeId)
+        external
+        requiresOrgPermission(operatorOrg, TRADE)
+        requiresClaim(TOPIC_NOMINEE)
+    {
+        settlement.cancel(tradeId);
+        emit ExpiredEscrowReclaimed(tradeId);
     }
 }

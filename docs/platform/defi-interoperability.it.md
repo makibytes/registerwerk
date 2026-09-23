@@ -159,6 +159,10 @@ soprattutto alla scoperta del prezzo in TradFi, mentre è il repo a fare il lavo
 liquidità. Più operatori intestatari concorrenti possono ciascuno distribuire la propria istanza ed essere
 contrassegnati sullo stesso token, quindi questa è una concorrenza in stile dealer-to-client tra market maker,
 non un unico sportello monopolistico.
+  Gli identificativi degli scambi sono derivati dal desk e dalla sua `clientRef`, e l'investitore
+  regola con `settle(tradeId, expectedTermsHash)` sulle condizioni concordate, quindi uno scambio
+  occupato o alterato non può spostare i suoi fondi. I depositi scaduti e non regolati tornano al
+  pool tramite `reclaimExpired`.
 - **Gambe solo stablecoin: un semplice AMM a prodotto costante**
 (`contracts/src/examples/StablecoinAmm.sol`). Riservato alle coppie in cui nessuna delle due gambe è un titolo
 (ad esempio AUEUR/USDC, entrambi dichiarati tramite il catalogo dei canali `PaymentRailType.STABLECOIN` del
@@ -191,6 +195,66 @@ Aave) esistono ora entrambi in `EwpgRepoMarket` — la struttura originaria rest
 un'implementazione di riferimento più semplice. Il terzo punto — la revisione legale sul prestito a margine
 specifica per giurisdizione — si applica in modo identico a entrambe ed è **ancora aperto**; vedere la revisione
 più sotto.
+
+### Revisione di fase 2 (2026-09) — costruzione dei mercati e liquidazione
+
+I mercati distribuiti dopo questa revisione differiscono dai precedenti come segue. I mercati
+precedenti sono immutabili e mantengono il loro comportamento; vedere *Mercati legacy* più sotto.
+
+- **L'incentivo di liquidazione rientra nello scarto dell'oracolo.** Un mercato viene creato solo
+  se `lltvBps × (1 + liquidationBonusBps) ≤ 1 − oracle.maxDeviationBps()` (e sempre
+  `lltvBps × (1 + bonus) < 1`, anche per un oracolo senza limite di deviazione). Con i precedenti
+  parametri demo (LLTV 80 %, bonus 5 %, tolleranza dell'oracolo 20 %), un solo invio entro la
+  tolleranza a partire da un health factor di 1,0 lasciava già un credito inesigibile. Coppie
+  valide tipiche con tolleranza del 20 %: LLTV 75 % / bonus 5 % oppure LLTV 74 % / bonus 5 %; con
+  il 15 %: LLTV 80 % / bonus 5 %.
+- **Un oracolo per token di prestito.** `IRepoOracle.quoteToken()` deve coincidere con il token di
+  prestito del mercato; un mercato in USDC non può leggere quotazioni in EUR.
+  `DeployRepoMarkets.s.sol` distribuisce un `RegisterwerkNavOracle` per ogni binario di pagamento.
+- **Le liquidazioni nella finestra di tolleranza chiudono al massimo il 50 %.** Quando la
+  quotazione è più vecchia di `maxPriceAgeSeconds` ma rientra in `liquidationGracePeriodSeconds`,
+  una singola chiamata a `liquidate` è limitata al close factor del 50 %, anche sotto un health
+  factor di 0,95. Una quotazione aggiornata ripristina la chiusura completa.
+- **Escussione per unità intere con eccedenza in contanti.** La garanzia non ha decimali. Il
+  liquidatore acquista `ceil(repay × (1 + bonus) / price)` unità intere (almeno una) al prezzo di
+  riferimento meno il bonus. La parte del pagamento che supera il debito residuo viene accreditata
+  al mutuatario (`surplusOf`) e pagata tramite `claimLiquidationSurplus()`; non è liquidità del
+  pool. La pagina cliente **I miei prestiti** mostra l'eccedenza riscuotibile con un'azione di
+  riscossione.
+- **Amministrazione legata all'istanza.** Ogni mercato memorizza `operatorOrg` (l'org del wallet
+  che ha chiamato `EwpgRepoMarketFactory.createMarket`) e una `treasury` immutabile.
+  `setReserveFactor`, `setBorrowPaused` e `withdrawReserves` richiedono `repo-markets.configure`;
+  `reconcileCollateral` richiede `repo-markets.reconcile`. Entrambi devono essere detenuti da
+  `operatorOrg`. Il codice `repo-facility.configure` della facility non raggiunge più alcun
+  mercato. Le riserve vengono pagate solo a `treasury`.
+- **Riconciliazione limitata.** `reconcileCollateral(borrower, amount, forcedTransferRef)` può
+  ridurre le posizioni, in modo cumulativo, solo della garanzia effettivamente mancante nel
+  mercato (`totalCollateral − collateralToken.balanceOf(market)`). Senza un deflusso osservato la
+  chiamata fallisce con `NoObservedShortfall`. `forcedTransferRef` collega la riduzione alla
+  transazione di trasferimento forzoso.
+- **Registro della factory.** `EwpgRepoMarketFactory.isMarket(address)` identifica i mercati
+  distribuiti dalla factory.
+- **Curation del vault con allow-list, timelock e vincolata all'istanza.** Un nuovo
+  `EwpgRepoVault` viene costruito con la factory dei mercati, una `curatorOrg`, una `operatorOrg` e
+  un `timelock` (almeno un giorno, tranne sulla chain locale 31337). `submitAddMarket` accetta solo
+  mercati per cui `factory.isMarket(market)` è vero. Questa funzione e `submitCapIncrease` hanno
+  effetto solo dopo la scadenza del timelock, tramite `acceptAddMarket` / `acceptCapIncrease`.
+  Fino ad allora l'org curator (`repo-markets.curate-vault`) o l'org operatore
+  (`repo-markets.configure`) può chiamare `revokePending`. Le riduzioni del limite
+  (`setMarketCap`) e `removeMarket` si applicano subito. Ogni funzione di curation richiede un
+  wallet della `curatorOrg`; un permesso con lo stesso codice detenuto da un'altra org non ha
+  effetto. In precedenza un curator poteva inserire qualsiasi contratto che restituisse il
+  `loanToken()` corretto e assegnargli tutta la liquidità inattiva. I vault esistenti sono
+  immutabili: i depositanti riscattano dalla liquidità inattiva e il curator disalloca e rimuove
+  ogni mercato.
+
+**Mercati legacy.** Il backend contrassegna un mercato registrato come `riskParametersLegacy`
+quando non supera questi controlli (letti in tempo reale dal mercato e dal suo oracolo; una
+lettura non riuscita conta come legacy). Un tale mercato resta elencato: i mutuatari possono
+rimborsare, integrare la garanzia e riscuotere, i prestatori possono prelevare, ma il portale
+clienti non vi offre nuovi prestiti né nuovi depositi. Le nuove registrazioni che non superano i
+controlli vengono rifiutate. Gli operatori dovrebbero inoltre chiamare `setBorrowPaused(true)` su
+ogni mercato legacy.
 
 ## Revisione della conformità (2026-07-21): risultati e rafforzamento { #compliance-review-2026-07-21-findings-and-hardening }
 

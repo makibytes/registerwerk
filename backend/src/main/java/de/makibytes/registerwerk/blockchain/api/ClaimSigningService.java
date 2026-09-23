@@ -83,10 +83,26 @@ public class ClaimSigningService {
      */
     public SignedClaim signClaim(java.util.UUID chainConfigId, String identityAddress,
                                  long topic, Instant expiresAt) {
+        return signClaim(chainConfigId, null, identityAddress, topic, expiresAt);
+    }
+
+    /**
+     * Signs a claim with the registry wallet of the given chain on behalf of an ONCHAINID
+     * {@code ClaimIssuer} contract. This is the variant to submit on chain: {@code Identity.addClaim}
+     * calls {@code IClaimIssuer(_issuer).isClaimValid}, which reverts for an EOA, so the
+     * {@code _issuer} must be a ClaimIssuer whose MANAGEMENT (or CLAIM) key is the signing wallet.
+     * The contract address is written into the claim data and returned as
+     * {@link SignedClaim#issuerAddress()}; the signature is still made by the chain's wallet.
+     *
+     * @param issuerContract ClaimIssuer contract address; {@code null} = raw signer-as-issuer
+     *                       (only for off-chain proofs — ONCHAINID rejects such a claim)
+     */
+    public SignedClaim signClaim(java.util.UUID chainConfigId, String issuerContract,
+                                 String identityAddress, long topic, Instant expiresAt) {
         EvmSigner signer = chainConfigId != null
                 ? walletSigner.evmSignerForChain(chainConfigId)
                 : walletSigner.evmSignerForAnyEvm();
-        String issuer = signer.address();
+        String issuer = issuerContract != null ? issuerContract : signer.address();
 
         long expiry = expiresAt != null ? expiresAt.getEpochSecond() : 0L;
 

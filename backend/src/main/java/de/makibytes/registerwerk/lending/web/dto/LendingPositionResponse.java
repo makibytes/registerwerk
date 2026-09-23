@@ -16,6 +16,9 @@ public record LendingPositionResponse(
         // or stale — healthFactorWad must not be treated as trustworthy in
         // that case. Null when healthFactorWad itself is null (no debt, or the read failed).
         Boolean healthFactorReliable,
+        // Loan-token cash a liquidation credited to the wallet, claimable via
+        // claimLiquidationSurplus() on the market; zero when there is none.
+        BigInteger liquidationSurplus,
         LendingPositionStatus status,
         Instant lastSyncedAt
 ) {}

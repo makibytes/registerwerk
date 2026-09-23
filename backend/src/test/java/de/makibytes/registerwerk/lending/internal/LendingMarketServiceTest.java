@@ -30,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -235,15 +236,147 @@ class LendingMarketServiceTest {
         assertThat(quote.oracleReliable()).isTrue();
     }
 
+    private static final String LOAN_TOKEN = "0x3333333333333333333333333333333333333333";
+    private static final String OPERATOR_ORG = "0x5555555555555555555555555555555555555555";
+    private static final String TREASURY = "0x6666666666666666666666666666666666666666";
+
     private RepoMarketOnchainReader.MarketParameters parameters() {
+        // 75% LLTV × 1.05 = 0.7875 ≤ 1 − 20% oracle tolerance.
+        return parameters(7500, LOAN_TOKEN, BigInteger.valueOf(2000));
+    }
+
+    private RepoMarketOnchainReader.MarketParameters parameters(
+            int lltvBps, String oracleQuoteToken, BigInteger oracleMaxDeviationBps) {
         return new RepoMarketOnchainReader.MarketParameters(
-                "0x3333333333333333333333333333333333333333",
+                LOAN_TOKEN,
                 "0x2222222222222222222222222222222222222222",
                 "0x4444444444444444444444444444444444444444",
-                7000, 8000, 500,
+                7000, lltvBps, 500,
                 BigInteger.valueOf(20_000_000_000_000_000L),
                 BigInteger.valueOf(180_000_000_000_000_000L),
-                BigInteger.valueOf(3600), BigInteger.valueOf(7200), 6);
+                BigInteger.valueOf(3600), BigInteger.valueOf(7200), 6,
+                OPERATOR_ORG, TREASURY, oracleQuoteToken, oracleMaxDeviationBps);
+    }
+
+    private void stubRegistrableChainAndAsset(UUID assetId) {
+        when(marketRepository.existsByChainConfigIdAndMarketAddressIgnoreCase(chainConfigId, marketAddress))
+                .thenReturn(false);
+        ChainConfig chainConfig = new ChainConfig();
+        chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
+        chainConfig.setChainType(ChainConfig.ChainType.EVM);
+        chainConfig.setEnabled(true);
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(new Asset()));
+    }
+
+    @Test
+    @DisplayName("refuses to register a market whose LLTV × (1 + bonus) exceeds 1 − the oracle's deviation cap")
+    void rejectsMarketWhoseBonusEatsTheDeviationHaircut() {
+        UUID assetId = UUID.randomUUID();
+        stubRegistrableChainAndAsset(assetId);
+        // The former demo parameters: 80% × 1.05 = 0.84 > 1 − 0.20.
+        when(onchainReader.marketParameters("ETHEREUM_SEPOLIA", marketAddress))
+                .thenReturn(parameters(8000, LOAN_TOKEN, BigInteger.valueOf(2000)));
+
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, assetId, "aueur", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("deviation haircut");
+        verify(marketRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("refuses to register a market whose oracle quotes another token than the loan token")
+    void rejectsMarketWithOracleQuotedInAnotherToken() {
+        UUID assetId = UUID.randomUUID();
+        stubRegistrableChainAndAsset(assetId);
+        when(onchainReader.marketParameters("ETHEREUM_SEPOLIA", marketAddress))
+                .thenReturn(parameters(7500, "0x7777777777777777777777777777777777777777", BigInteger.valueOf(2000)));
+
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, assetId, "usdc", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("loan token");
+        verify(marketRepository, never()).save(any());
+    }
+
+    private LendingMarket registeredMarket(int lltvBps) {
+        LendingMarket market = new LendingMarket();
+        market.setId(UUID.randomUUID());
+        market.setChainConfigId(chainConfigId);
+        market.setMarketAddress(marketAddress);
+        market.setLoanTokenAddress(LOAN_TOKEN);
+        market.setPriceOracleAddress("0xoracle");
+        market.setLltvBps(lltvBps);
+        market.setLiquidationBonusBps(500);
+        market.setStatus(LendingMarketStatus.ACTIVE);
+        ChainConfig chainConfig = new ChainConfig();
+        chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
+        return market;
+    }
+
+    @Test
+    @DisplayName("an already-registered market failing the risk check stays listed but is flagged legacy")
+    void alreadyRegisteredUnsoundMarketIsFlaggedLegacyNotHidden() {
+        LendingMarket market = registeredMarket(8000);
+        when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
+        when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(LOAN_TOKEN);
+        when(onchainReader.oracleMaxDeviationBps("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(BigInteger.valueOf(2000));
+        when(onchainReader.operatorOrg("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(OPERATOR_ORG);
+        when(onchainReader.treasury("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(TREASURY);
+
+        var results = service.listMarkets(LendingMarketStatus.ACTIVE);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).riskParametersLegacy()).isTrue();
+        assertThat(results.get(0).effectiveStatus()).isEqualTo(LendingMarketStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("a sound market is not legacy and exposes its operating org and treasury")
+    void soundMarketExposesOperatorOrgAndTreasury() {
+        LendingMarket market = registeredMarket(7500);
+        when(marketRepository.findById(market.getId())).thenReturn(Optional.of(market));
+        when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(LOAN_TOKEN);
+        when(onchainReader.oracleMaxDeviationBps("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(BigInteger.valueOf(2000));
+        when(onchainReader.operatorOrg("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(OPERATOR_ORG);
+        when(onchainReader.treasury("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(TREASURY);
+
+        var view = service.getMarket(market.getId());
+
+        assertThat(view.riskParametersLegacy()).isFalse();
+        assertThat(view.operatorOrg()).isEqualTo(OPERATOR_ORG);
+        assertThat(view.treasury()).isEqualTo(TREASURY);
+    }
+
+    @Test
+    @DisplayName("a market predating operatorOrg (getter reverts) is flagged legacy")
+    void marketWithoutOperatorOrgGetterIsLegacy() {
+        LendingMarket market = registeredMarket(7500);
+        when(marketRepository.findById(market.getId())).thenReturn(Optional.of(market));
+        when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(LOAN_TOKEN);
+        when(onchainReader.oracleMaxDeviationBps("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(BigInteger.valueOf(2000));
+        when(onchainReader.operatorOrg("ETHEREUM_SEPOLIA", marketAddress))
+                .thenThrow(new IllegalStateException("Call to operatorOrg reverted"));
+
+        var view = service.getMarket(market.getId());
+
+        assertThat(view.riskParametersLegacy()).isTrue();
+        assertThat(view.operatorOrg()).isNull();
+    }
+
+    @Test
+    @DisplayName("risk check mirrors the contract: strict lltv × (1 + bonus) < 1, deviation haircut unless opted out")
+    void riskParametersSoundMirrorsContractCheck() {
+        BigInteger optOut = BigInteger.TWO.pow(256).subtract(BigInteger.ONE);
+        assertThat(LendingMarketService.riskParametersSound(7500, 500, BigInteger.valueOf(2000))).isTrue();
+        assertThat(LendingMarketService.riskParametersSound(8000, 500, BigInteger.valueOf(2000))).isFalse();
+        assertThat(LendingMarketService.riskParametersSound(8000, 500, BigInteger.valueOf(1500))).isTrue();
+        assertThat(LendingMarketService.riskParametersSound(9500, 500, optOut)).isTrue();
+        assertThat(LendingMarketService.riskParametersSound(9600, 500, optOut)).isFalse();
+        assertThat(LendingMarketService.riskParametersSound(5000, 0, BigInteger.valueOf(10_000))).isFalse();
+        assertThat(LendingMarketService.riskParametersSound(null, 500, BigInteger.valueOf(2000))).isFalse();
     }
 
     @Test

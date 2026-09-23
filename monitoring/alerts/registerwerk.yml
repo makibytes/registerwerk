@@ -55,6 +55,46 @@ groups:
           summary: "Chain ↔ DB balance drift detected"
           description: "{{ $value }} OPEN chain_drift_event row(s) — on-chain balances diverge from the registry DB (canonical per eWpG §16)."
 
+      # ── Register reconciliation (T2-18) ───────────────────────────────────
+      # Live counts from the DB (asset.holder_sync_status / corporate_action.status), not counters.
+      # A BLOCKED holder sync means finalized balances sit on wallets with no holder row (typically
+      # a pool contract without a nominee-pool row); the register is stale until it is resolved.
+      - alert: HolderSyncBlocked
+        expr: |
+          registerwerk_holder_sync_blocked_assets{job="registerwerk-backend"} > 0
+        for: 15m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Holder register not reconciled"
+          description: "{{ $value }} asset(s) have holder_sync_status = BLOCKED. Map the unmapped wallet(s) or register the pool address (operator asset detail banner), then refresh holders."
+
+      - alert: CorporateActionSnapshotBlocked
+        expr: |
+          registerwerk_corporate_action_snapshot_blocked{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Corporate-action entitlement snapshot refused"
+          description: "{{ $value }} corporate action(s) are SNAPSHOT_BLOCKED — record date reached on a register that is not reconciled. Coupons/redemptions will not compute until the register is fixed."
+
+      # ── KYC lapse → on-chain propagation (T2-19) ──────────────────────────
+      # Live count of kyc_chain_propagation rows in FAILED: a KYC expiry/rejection whose OrgRegistry
+      # suspension or claim revocation keeps failing, so the entity may still pass on-chain gates.
+      - alert: KycChainPropagationFailed
+        expr: |
+          registerwerk_kyc_chain_propagation_failed{job="registerwerk-backend"} > 0
+        for: 15m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "KYC lapse not propagated on chain"
+          description: "{{ $value }} KYC lapse(s) have a FAILED on-chain propagation (org suspension / KYC-AML claim revocation). The entity may still pass PermissionOracle / T-REX gates — check the kyc_chain_propagation rows and the chain signer, then let the retry job or an operator re-drive it."
+
       # ── Sanctions hits ────────────────────────────────────────────────────
       - alert: SanctionsHitOpenTooLong
         expr: |

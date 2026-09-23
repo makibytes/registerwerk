@@ -22,6 +22,10 @@ public interface AssetMapper {
     @Mapping(target = "publicData", ignore = true)
     @Mapping(target = "entryType", ignore = true)
     @Mapping(target = "lastHolderSyncTime", ignore = true)
+    @Mapping(target = "holderSyncStatus", ignore = true)
+    @Mapping(target = "holderSyncBlockedReason", ignore = true)
+    @Mapping(target = "holderSyncUnmappedWallets", ignore = true)
+    @Mapping(target = "lastSuccessfulHolderSyncAt", ignore = true)
     @Mapping(target = "targetMarketCategories", ignore = true)
     @Mapping(target = "targetMarketMinExperience", ignore = true)
     @Mapping(target = "minInvestmentAmount", ignore = true)
@@ -37,5 +41,6 @@ public interface AssetMapper {
      */
     @Mapping(target = "hasTermSheet", constant = "false")
     @Mapping(target = "externalId", constant = "")
+    @Mapping(target = "holderSyncUnmappedWallets", ignore = true)
     AssetResponse toResponse(Asset asset);
 }

@@ -31,31 +31,40 @@ curl http://localhost:48080/api/v1/admin/chains/11155111 \
   | jq '.factoryAddress'
 ```
 
-## Schritt 2 – Das Register als Trusted Issuer einrichten
+## Schritt 2 – ClaimIssuer des Registers bereitstellen und als vertrauenswürdig eintragen
 
-Das Operator-Wallet des Registrierungs-Backends muss im `TrustedIssuersRegistry` registriert sein, damit es KYC-/AML-Claims ausstellen kann. Dies erfolgt einmal pro Factory-Bereitstellung.
+Das Backend stellt KYC-/AML-Claims über einen ONCHAINID-`ClaimIssuer`-**Vertrag** aus, einen pro Chain, dessen MANAGEMENT-Schlüssel der Register-Signer des Backends ist. Das Signer-Wallet selbst kann nicht Aussteller sein: `addClaim` von ONCHAINID ruft `isClaimValid` auf dem Aussteller auf, was bei einem einfachen Wallet revertiert – solche Claims erreichen die Chain daher nie.
 
 ```bash
-cast send $TRUSTED_ISSUERS_REGISTRY \
-  "addTrustedIssuer(address,uint256[])" \
-  $REGISTRY_OPERATOR_ADDRESS "[1,2]" \
-  --rpc-url $RPC_URL \
-  --private-key $DEPLOYER_PRIVATE_KEY
+cd contracts
+REGISTRY_WALLET_PRIVATE_KEY=$REGISTRY_SIGNER_KEY \
+  forge script script/DeployClaimIssuer.s.sol --rpc-url $RPC_URL --broadcast
+# Logs "ClaimIssuer : 0x…"; CLAIM_ISSUER_MANAGEMENT_KEY overrides the management key
+# (default: the broadcasting wallet, which must be the backend's registry signer).
 ```
 
-Parameter:
-- Erstes Argument: Adresse des Registrierungsbetreibers (Deployer-Wallet)
-- Zweites Argument: Array der Claim-Topic-IDs, die dieser Aussteller signieren darf (1=KYC, 2=AML)
+Setzen Sie `CLAIM_ISSUER_<CHAIN>` (zum Beispiel `CLAIM_ISSUER_ETH_TESTNET`, gebunden an `registerwerk.contracts.claim-issuer.<chain>`) und starten Sie das Backend neu. Ohne diesen Wert weist das Backend die Claim-Ausstellung und die Bereitstellung von T-REX-Suiten auf dieser Chain ab (Fail-Closed), statt Transaktionen zu senden, die revertieren würden. Vor jedem `addClaim` prüft es außerdem, dass der Signer einen Schlüssel auf dem ClaimIssuer hält.
+
+Neue, vom Backend bereitgestellte Suiten vertrauen diesem ClaimIssuer für die Topics 1 (KYC) und 2 (AML). Eine Suite, die **vor** dieser Änderung bereitgestellt wurde, registrieren Sie einmalig (Operator-API, nur für den Owner des `TrustedIssuersRegistry` der Suite):
+
+```bash
+curl -X POST http://localhost:48080/api/v1/assets/$ASSET_ID/erc3643/$DEPLOYMENT_ID/trusted-issuers \
+  -H "Authorization: Bearer $OPERATOR_JWT" -H "Content-Type: application/json" \
+  -d "{\"issuerAddress\": \"$CLAIM_ISSUER\", \"claimTopics\": [1,2]}"
+```
 
 Überprüfen:
 
 ```bash
 cast call $TRUSTED_ISSUERS_REGISTRY \
-  "isTrustedIssuer(address)(bool)" \
-  $REGISTRY_OPERATOR_ADDRESS \
-  --rpc-url $RPC_URL
+  "isTrustedIssuer(address)(bool)" $CLAIM_ISSUER --rpc-url $RPC_URL
 # Expected: true
 ```
+
+Für Ökosystem-dApps, die über `PermissionOracle` abgesichert sind, registrieren Sie denselben ClaimIssuer über die Trusted-Issuer-Verwaltung des Registerbetreibers im `EcosystemTrustedIssuersRegistry`.
+
+!!! note
+    Beim Widerruf eines Claims wird dieser von der Identität entfernt **und** `revokeClaimBySignature` auf dem ClaimIssuer aufgerufen. Der zweite Schritt verhindert, dass jemand die veröffentlichte Signatur später erneut hinzufügt. Beide Schritte setzen voraus, dass der Register-Signer den MANAGEMENT-Schlüssel des ClaimIssuers hält.
 
 ## Schritt 3 – Claim Topics konfigurieren
 
@@ -110,9 +119,9 @@ cast call $IDENTITY_REGISTRY \
 
 Nach der KYC-Genehmigung im Operator-Frontend stellt das Backend automatisch Claims auf der ONCHAINID des Investors aus:
 
-1. Erstellt einen Claim mit Topic-ID, Ausstelleradresse und einem Hash des KYC-Verifizierungsdatensatzes
-2. Signiert den Claim mit dem privaten Schlüssel des Betreibers
-3. Ruft `addClaim` auf dem ONCHAINID-Vertrag des Investors auf
+1. Erstellt die Claim-Daten `abi.encode(topic, scheme=1, claimIssuer, expiresAt, "")`
+2. Signiert `keccak256(abi.encode(identity, topic, data))` (mit EIP-191-Präfix) mit dem Register-Signer
+3. Ruft `addClaim(topic, 1, claimIssuer, signature, data, "")` auf dem ONCHAINID-Vertrag des Investors auf, mit dem ClaimIssuer-Vertrag der Chain als Aussteller
 
 Claims haben ein Ablaufdatum (Standard: 365 Tage). Das Backend plant Erinnerungs-E-Mails zum Ablauf und kann Claims bei Verlängerung erneut ausstellen.
 

@@ -151,7 +151,22 @@ if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
 `KycMonitoringJob` (`kyc/internal/`) se ejecuta diariamente a las 02:00 UTC:
 
 1. Recupera todos los registros `LegalEntity` con `kycStatus = APPROVED`
-2. Si `kycExpiryDate` está dentro de los 30 días → hace la transición a `EXPIRING`, emite `KycExpiringEvent` → notificación por correo electrónico al `COMPANY_ADMIN` del cliente
-3. Si `kycExpiryDate` ha pasado → hace la transición a `EXPIRED`, emite `KycExpiredEvent` → activa la eliminación del [registro de identidad ERC-3643](../token-standards/erc3643.md)
+2. Si `kycExpiryDate` está dentro de los 30 días → emite `KycExpiringEvent` (`reason=EXPIRING_SOON`; el estado sigue siendo `APPROVED`) → notificación por correo electrónico al `COMPANY_ADMIN` del cliente
+3. Si `kycExpiryDate` ha pasado → hace la transición a `EXPIRED`, emite `KycExpiringEvent` (`reason=EXPIRED`) → `KycChainPropagationListener` traslada el vencimiento a la cadena (ver más abajo)
 
-Además, `ScreeningService` se ejecuta todas las noches para volver a examinar todas las entidades activas con las últimas listas de sanciones. Un hit recién descubierto hace que la entidad pase a un indicador `SCREENING_REVIEW` y notifica a `COMPLIANCE_OFFICER`.
+Además, el nuevo examen diario (`ScreeningRefreshJob`) vuelve a comprobar todas las entidades activas con las últimas listas de sanciones. Un nuevo hit se guarda como `ScreeningHit` abierto y se publica como `ScreeningHitDetectedEvent` (auditado). Los hits abiertos bloquean la aprobación de KYC y la liquidación off-chain de operaciones a través de `ScreeningGate`. Un hit sin revisar **todavía no desencadena ninguna acción on-chain automática**: la respuesta (suspensión, congelación o revisión dentro de un SLA) es una decisión de producto pendiente.
+
+### Propagación on-chain de un vencimiento de KYC
+
+Un vencimiento de KYC (`KycExpiringEvent` con `reason=EXPIRED`) o un rechazo (`KycRejectedEvent`) se traslada a cada cadena en la que la entidad tiene un registro de organización o una ONCHAINID. `KycChainPropagationListener` (`orgidentity/internal/`) registra una fila `kyc_chain_propagation` por entidad y cadena y la procesa hasta que todo está confirmado on-chain:
+
+- **Suspensión de la organización**: `OrgRegistry.suspendOrg`, por la misma vía fail-closed que una suspensión manual. Esto bloquea todas las dApps protegidas por `PermissionOracle` y el paymaster.
+- **Revocación de claims**: para los claims KYC (tema 1) y AML (tema 2) de la entidad, `ONCHAINID.removeClaim` **y** `ClaimIssuer.revokeClaimBySignature`. La eliminación por sí sola es reversible, porque la organización podría volver a añadir la firma original. La revocación en el emisor hace que `isClaimValid` devuelva `false` en todas partes, también en `isVerified` de T-REX.
+
+Cada paso es idempotente y se reintenta cada minuto hasta que se confirma. Los fallos se auditan (`KYC_CHAIN_PROPAGATION`) y se exponen mediante el gauge `registerwerk_kyc_chain_propagation_failed` para las alertas. Nada se revierte automáticamente: tras una nueva aprobación (principio de los cuatro ojos), el operador reactiva la organización y emite nuevos claims de forma explícita.
+
+!!! note "El vencimiento del claim no se aplica on-chain"
+    El valor `expiresAt` escrito en los datos del claim es solo informativo. Ni `ClaimIssuer.isClaimValid` de ONCHAINID, ni `isVerified` de T-REX, ni `PermissionOracle` lo leen. El vencimiento solo tiene efecto on-chain mediante la revocación activa descrita arriba.
+
+!!! warning "La revocación en el emisor requiere un contrato ClaimIssuer"
+    `revokeClaimBySignature` solo se aplica cuando el emisor del claim es un contrato `ClaimIssuer` de ONCHAINID en el que el firmante del registro tiene una clave MANAGEMENT. Para los claims cuyo emisor es una simple wallet firmante no hay nada que revocar en el emisor, y el paso se omite.

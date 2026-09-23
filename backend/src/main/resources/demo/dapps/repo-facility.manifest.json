@@ -2,12 +2,12 @@
   "slug": "repo-facility",
   "name": "eWpG Repo & Lending Facility",
   "version": "1.0.0",
-  "description": "Technical repo / collateralized-lending reference — get liquidity against a bond or equity position without selling it. Deposit a stablecoin to earn a utilization-based yield. Pledge a KYC-verified holding as collateral and draw a stablecoin loan up to a configured loan-to-value ratio; repay to reclaim collateral. Liquidations remain subject to token transfer controls, but those controls do not establish legal, custody, licensing, collateral, insolvency, or KYC sufficiency. This is not approved for production use pending jurisdiction-specific legal and risk decisions.",
+  "description": "Technical repo / collateralized-lending reference — get liquidity against a bond or equity position without selling it. Deposit a stablecoin to earn a utilization-based yield. Pledge a KYC-verified holding as collateral and draw a stablecoin loan up to a configured loan-to-value ratio; repay to reclaim collateral. After a full-close liquidation any collateral beyond the debt plus liquidation bonus stays credited to the borrower and is withdrawn with claimCollateral. Operator functions are bound to the deploying org (operatorOrg): another org holding the same repo-facility codes cannot configure or price this instance. Liquidations remain subject to token transfer controls, but those controls do not establish legal, custody, licensing, collateral, insolvency, or KYC sufficiency. This is not approved for production use pending jurisdiction-specific legal and risk decisions.",
   "category": "lending",
   "contracts": [
     {
       "name": "EwpgRepoFacility",
-      "abiSha256": "832229e7c1dab2647df5e6574459423c82f916310358be64a479c99b37737b83",
+      "abiSha256": "1aeac1d3bc3bd53c83aa299e2278512181047201c467b605b5d86d36111be59e",
       "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/examples/EwpgRepoFacility.sol"
     }
   ],
@@ -18,7 +18,11 @@
     },
     {
       "code": "repo-facility.configure",
-      "rationale": "Operator-only: enable a collateral asset and set its price mark, max LTV, liquidation threshold and liquidation bonus"
+      "rationale": "Operator-only, bound to this instance's operatorOrg: enable a collateral asset and set its max LTV, liquidation threshold and liquidation bonus (threshold x (1 + bonus) must stay below 100%)"
+    },
+    {
+      "code": "repo-facility.price",
+      "rationale": "Operator-only, bound to this instance's operatorOrg: push a fresh price mark for an enabled collateral asset (NAV feed or last fill). Separate from repo-facility.configure so a routine price pusher cannot change risk parameters"
     }
   ],
   "requiredClaimTopics": [

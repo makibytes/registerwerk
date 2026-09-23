@@ -1,10 +1,13 @@
 import {
   Allocated as AllocatedEvent,
+  CapIncreaseSubmitted as CapIncreaseSubmittedEvent,
   Deallocated as DeallocatedEvent,
   Deposit as DepositEvent,
+  MarketAddSubmitted as MarketAddSubmittedEvent,
   MarketAdded as MarketAddedEvent,
   MarketCapUpdated as MarketCapUpdatedEvent,
   MarketRemoved as MarketRemovedEvent,
+  PendingRevoked as PendingRevokedEvent,
   Transfer as TransferEvent,
   Withdraw as WithdrawEvent,
 } from '../generated/EwpgRepoVault/EwpgRepoVault'
@@ -75,6 +78,62 @@ function saveEvent(record: RepoVaultEvent, vault: RepoVault): void {
   record.save()
 }
 
+function clearPending(allocation: RepoVaultMarketAllocation): void {
+  allocation.pendingCap = null
+  allocation.pendingValidAt = null
+}
+
+/** Curator proposed a new market; it becomes allocatable only via MarketAdded after the timelock. */
+export function handleMarketAddSubmitted(event: MarketAddSubmittedEvent): void {
+  let vault = getOrCreateVault(event)
+  let allocation = getOrCreateIncompleteAllocation(vault, event.params.market, event)
+  if (allocation.enabled) {
+    allocation.projectionStatus = INCOMPLETE
+    vault.projectionStatus = INCOMPLETE
+  }
+  allocation.pendingCap = event.params.capWad
+  allocation.pendingValidAt = event.params.validAt
+  allocation.save()
+
+  let record = newEvent(event, vault, 'MARKET_ADD_SUBMITTED')
+  record.market = event.params.market
+  record.cap = event.params.capWad
+  record.validAt = event.params.validAt
+  saveEvent(record, vault)
+}
+
+/** Curator proposed a cap increase; it takes effect only via MarketCapUpdated after the timelock. */
+export function handleCapIncreaseSubmitted(event: CapIncreaseSubmittedEvent): void {
+  let vault = getOrCreateVault(event)
+  let allocation = getOrCreateIncompleteAllocation(vault, event.params.market, event)
+  if (!allocation.enabled) {
+    allocation.projectionStatus = INCOMPLETE
+    vault.projectionStatus = INCOMPLETE
+  }
+  allocation.pendingCap = event.params.capWad
+  allocation.pendingValidAt = event.params.validAt
+  allocation.save()
+
+  let record = newEvent(event, vault, 'CAP_INCREASE_SUBMITTED')
+  record.market = event.params.market
+  record.cap = event.params.capWad
+  record.validAt = event.params.validAt
+  saveEvent(record, vault)
+}
+
+/** A pending addition or cap increase was withdrawn by the curator or operator org. */
+export function handlePendingRevoked(event: PendingRevokedEvent): void {
+  let vault = getOrCreateVault(event)
+  let allocation = getOrCreateIncompleteAllocation(vault, event.params.market, event)
+  clearPending(allocation)
+  allocation.save()
+
+  let record = newEvent(event, vault, 'PENDING_REVOKED')
+  record.market = event.params.market
+  record.actor = event.params.by
+  saveEvent(record, vault)
+}
+
 export function handleMarketAdded(event: MarketAddedEvent): void {
   let vault = getOrCreateVault(event)
   let id = allocationId(vault.id, event.params.market)
@@ -92,6 +151,7 @@ export function handleMarketAdded(event: MarketAddedEvent): void {
   }
   allocation.enabled = true
   allocation.cap = event.params.capWad
+  clearPending(allocation)
   allocation.lastUpdatedBlock = event.block.number
   allocation.lastUpdatedTimestamp = event.block.timestamp
   allocation.save()
@@ -110,6 +170,8 @@ export function handleMarketCapUpdated(event: MarketCapUpdatedEvent): void {
     vault.projectionStatus = INCOMPLETE
   }
   allocation.cap = event.params.capWad
+  // Both acceptCapIncrease and a direct cap decrease delete any pending change on-chain.
+  clearPending(allocation)
   allocation.save()
 
   let record = newEvent(event, vault, 'MARKET_CAP_UPDATED')
@@ -126,6 +188,7 @@ export function handleMarketRemoved(event: MarketRemovedEvent): void {
     vault.projectionStatus = INCOMPLETE
   }
   allocation.enabled = false
+  clearPending(allocation)
   allocation.save()
 
   let record = newEvent(event, vault, 'MARKET_REMOVED')

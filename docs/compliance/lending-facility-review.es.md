@@ -44,6 +44,35 @@ cambio de diseño más amplio que el alcance de este pase).
 
 ---
 
+## Revisión de la fase 2 (2026-09) — parámetros de riesgo para nuevos mercados { #phase-2-review-2026-09-risk-parameters-for-new-markets }
+
+Esto sustituye a las indicaciones de parámetros de más abajo cuando difieran.
+
+- **Límite de desviación.** `RegisterwerkNavOracle` limita ahora el movimiento acumulado por
+  activo dentro de una ventana de desviación (un día por defecto), no solo el paso desde la marca
+  anterior. `setMaxDeviationBps` solo puede **reducir** el límite; un límite mayor requiere un
+  nuevo oráculo y nuevos mercados. A cada activo se le puede asignar su propia org de envío
+  (`setAssetPusher`); sin asignación, solo envía la org operadora del oráculo.
+- **LLTV y bonificación.** Elija `lltvBps × (1 + liquidationBonusBps) ≤ 1 − maxDeviationBps` del
+  oráculo del mercado. El constructor del mercado y el registro en el backend rechazan otros
+  valores. Con la tolerancia por defecto del 20 % y una bonificación del 5 %, la LLTV es como
+  máximo del 76,19 %; la demostración usa el 75 % y el 74 %.
+- **Moneda de cotización.** Despliegue un oráculo por token de préstamo; un mercado rechaza un
+  oráculo cotizado en otro token.
+- **Ventana de gracia.** Una liquidación sobre una marca desactualizada (dentro de
+  `liquidationGracePeriodSeconds`) se limita a un close factor del 50 % por llamada.
+- **Unidades enteras.** Las liquidaciones venden unidades de garantía enteras, redondeadas al
+  alza; la parte del pago que supera la deuda corresponde al prestatario como excedente en
+  efectivo reclamable.
+- **Conciliación (hallazgo 5).** `reconcileCollateral` requiere ahora `repo-markets.reconcile`,
+  en poder de la org operadora del mercado, y está acotada por la garantía cuya salida del mercado
+  se ha observado realmente. La configuración del mercado usa `repo-markets.configure`; las
+  reservas solo van a la tesorería fija del mercado.
+
+Los mercados ya registrados que no superan estas comprobaciones se marcan como
+`riskParametersLegacy`: el reembolso, la reclamación y la retirada siguen disponibles; no se
+ofrecen nuevos préstamos ni nuevos depósitos.
+
 ## P0: debe corregirse o obtener aprobación antes de la producción { #p0-must-fix-or-get-sign-off-before-production }
 
 ### 1. Disyuntor de desviación de precio del oráculo (corregido) { #1-oracle-price-deviation-circuit-breaker-fixed }
@@ -95,6 +124,9 @@ restricciones de rehipotecación que un simple préstamo garantizado en efectivo
 | `LU_CSSF` | CSSF | Reglas de la CSSF sobre custodio/depositario en materia de rehipotecación | Sin revisar |
 | `FR_AMF` | AMF | Restricciones del CMF al teneur de compte-conservation | Sin revisar |
 | `LI_TVTG` | FMA | Segregación de custodia del modelo de token-contenedor conforme a la TVTG | Sin revisar |
+| Lado prestamista (todas las jurisdicciones) | BaFin / autoridad nacional competente | AML/KYC de los proveedores de liquidez; MiCAR art. 50 (sin intereses sobre EMT); autorización CASP o negocio de depósitos de la KWG para `EwpgRepoMarket.supply` / participaciones de `EwpgRepoVault` | Sin revisar — aparcado (PARK-T2-20) |
+
+`EwpgRepoMarket.supply`/`withdraw` y el `EwpgRepoVault` ERC-4626 (con participaciones transferibles) no están restringidos por permisos ni por claims, por lo que cualquier wallet puede aportar stablecoins y obtener rendimiento. Si este lado prestamista es una actividad regulada del operador y si se puede pagar rendimiento sobre depósitos de EMT queda aparcado para el abogado (PARK-T2-20). El valor por defecto recomendado es restringir la aportación con `repo-markets.supply` más un claim AML, manteniendo los retiros abiertos para los proveedores existentes. Hasta que se decida, el portal de clientes ya no presenta Supply & Earn como algo que no requiere KYC, sino que indica que la elegibilidad del lado prestamista está en revisión legal.
 
 **Ningún grado adicional de endurecimiento del contrato sustituye esto.** Este hallazgo se mantiene
 sin cambios: está explícitamente fuera del alcance de una revisión de cumplimiento centrada solo en el código, y

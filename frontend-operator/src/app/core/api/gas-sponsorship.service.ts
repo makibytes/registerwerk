@@ -15,6 +15,27 @@ export interface GasSponsorshipPolicy {
   createdAt: string;
 }
 
+/** Why the on-chain panel shows what it shows — always a 200 answer, never a 404. */
+export type GasSponsorshipOnchainStatusKind = 'NO_POLICY' | 'NO_CHAIN' | 'NOT_CONFIGURED' | 'OK' | 'READ_ERROR';
+
+/** On-chain state of a policy on EwpgPaymaster (wei amounts as decimal strings). */
+export interface GasSponsorshipOnchainStatus {
+  status: GasSponsorshipOnchainStatusKind;
+  policyRowId: string | null;
+  configured: boolean;
+  paymaster: string | null;
+  chainIdentifier: string | null;
+  policyId: string | null;
+  registered: boolean;
+  active: boolean;
+  funder: string | null;
+  signer: string | null;
+  balanceWei: string | null;
+  reservedWei: string | null;
+  orgBudgetCapWei: string | null;
+  error: string | null;
+}
+
 export interface GasSponsorshipCreateRequest {
   sponsor: GasSponsor;
   monthlyCapEth?: string | number;
@@ -33,6 +54,13 @@ export class GasSponsorshipService {
   getEffectivePolicy(assetId: string, depId: string): Observable<GasSponsorshipPolicy | null> {
     return this.http
       .get<GasSponsorshipPolicy>(`${environment.apiUrl}/assets/${assetId}/deployments/${depId}/gas-sponsorship`)
+      .pipe(catchError(() => of(null)));
+  }
+
+  /** The effective policy's on-chain balance / reserved / active flag; `status` explains an empty state (null only on a request failure). */
+  getOnchainStatus(assetId: string, depId: string): Observable<GasSponsorshipOnchainStatus | null> {
+    return this.http
+      .get<GasSponsorshipOnchainStatus>(`${environment.apiUrl}/assets/${assetId}/deployments/${depId}/gas-sponsorship/onchain`)
       .pipe(catchError(() => of(null)));
   }
 

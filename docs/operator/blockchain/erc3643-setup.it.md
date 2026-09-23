@@ -31,31 +31,40 @@ curl http://localhost:48080/api/v1/admin/chains/11155111 \
   | jq '.factoryAddress'
 ```
 
-## Passaggio 2: impostare il registro come emittente attendibile { #step-2-set-up-the-registry-as-trusted-issuer }
+## Passaggio 2: distribuire il ClaimIssuer del registro e registrarlo come emittente attendibile { #step-2-deploy-the-registry-claimissuer-and-trust-it }
 
-Il portafoglio dell'operatore backend del registro deve essere registrato in `TrustedIssuersRegistry` in modo che possa emettere attestazioni KYC/AML. Questa operazione viene eseguita una volta per ogni distribuzione di fabbrica.
+Il backend emette le attestazioni KYC/AML tramite un **contratto** ONCHAINID `ClaimIssuer`, uno per catena, la cui chiave MANAGEMENT è il firmatario del registro del backend. Il wallet firmatario non può essere esso stesso l'emittente: `addClaim` di ONCHAINID chiama `isClaimValid` sull'emittente, che per un semplice wallet va in revert; tali attestazioni quindi non raggiungono mai la catena.
 
 ```bash
-cast send $TRUSTED_ISSUERS_REGISTRY \
-  "addTrustedIssuer(address,uint256[])" \
-  $REGISTRY_OPERATOR_ADDRESS "[1,2]" \
-  --rpc-url $RPC_URL \
-  --private-key $DEPLOYER_PRIVATE_KEY
+cd contracts
+REGISTRY_WALLET_PRIVATE_KEY=$REGISTRY_SIGNER_KEY \
+  forge script script/DeployClaimIssuer.s.sol --rpc-url $RPC_URL --broadcast
+# Logs "ClaimIssuer : 0x…"; CLAIM_ISSUER_MANAGEMENT_KEY overrides the management key
+# (default: the broadcasting wallet, which must be the backend's registry signer).
 ```
 
-Parametri:
-- Primo argomento: indirizzo dell'operatore del registro (portafoglio di distribuzione)
-- Secondo argomento: array di ID degli argomenti di attestazione che questo emittente è autorizzato a firmare (1=KYC, 2=AML)
+Impostare `CLAIM_ISSUER_<CHAIN>` (ad esempio `CLAIM_ISSUER_ETH_TESTNET`, associato a `registerwerk.contracts.claim-issuer.<chain>`) e riavviare il backend. Senza questo valore il backend rifiuta l'emissione di attestazioni e la distribuzione di suite T-REX su quella catena (rifiuto in caso di errore), invece di inviare transazioni che andrebbero in revert. Prima di ogni `addClaim` verifica inoltre che il firmatario detenga una chiave sul ClaimIssuer.
+
+Le nuove suite distribuite dal backend considerano attendibile questo ClaimIssuer per gli argomenti 1 (KYC) e 2 (AML). Per una suite distribuita **prima** di questa modifica, registrarlo una volta (API dell'operatore, riservata al proprietario del `TrustedIssuersRegistry` della suite):
+
+```bash
+curl -X POST http://localhost:48080/api/v1/assets/$ASSET_ID/erc3643/$DEPLOYMENT_ID/trusted-issuers \
+  -H "Authorization: Bearer $OPERATOR_JWT" -H "Content-Type: application/json" \
+  -d "{\"issuerAddress\": \"$CLAIM_ISSUER\", \"claimTopics\": [1,2]}"
+```
 
 Verificare:
 
 ```bash
 cast call $TRUSTED_ISSUERS_REGISTRY \
-  "isTrustedIssuer(address)(bool)" \
-  $REGISTRY_OPERATOR_ADDRESS \
-  --rpc-url $RPC_URL
+  "isTrustedIssuer(address)(bool)" $CLAIM_ISSUER --rpc-url $RPC_URL
 # Expected: true
 ```
+
+Per le dApp dell'ecosistema controllate tramite `PermissionOracle`, registrare lo stesso ClaimIssuer nell'`EcosystemTrustedIssuersRegistry`, tramite l'amministrazione degli emittenti attendibili dell'operatore del registro.
+
+!!! note
+    La revoca di un'attestazione la rimuove dall'identità **e** chiama `revokeClaimBySignature` sul ClaimIssuer. Il secondo passaggio impedisce a chiunque di aggiungere di nuovo in seguito la firma pubblicata. Entrambi i passaggi richiedono che il firmatario del registro detenga la chiave MANAGEMENT del ClaimIssuer.
 
 ## Passaggio 3: configurare gli argomenti di attestazione { #step-3-configure-claim-topics }
 
@@ -110,9 +119,9 @@ cast call $IDENTITY_REGISTRY \
 
 Dopo l'approvazione di KYC nel frontend dell'operatore, il backend emette automaticamente attestazioni sull'ONCHAINID dell'investitore:
 
-1. Costruisce un'attestazione con ID argomento, indirizzo dell'emittente e un hash del record di verifica KYC
-2. Firma l'attestazione con la chiave privata dell'operatore
-3. Chiama `addClaim` sul contratto ONCHAINID dell'investitore
+1. Costruisce i dati dell'attestazione `abi.encode(topic, scheme=1, claimIssuer, expiresAt, "")`
+2. Firma `keccak256(abi.encode(identity, topic, data))` (con prefisso EIP-191) con il firmatario del registro
+3. Chiama `addClaim(topic, 1, claimIssuer, signature, data, "")` sul contratto ONCHAINID dell'investitore, con il contratto ClaimIssuer della catena come emittente
 
 Le attestazioni includono una data di scadenza (impostazione predefinita: 365 giorni). Il backend pianifica le e-mail di promemoria della scadenza e può riemettere le attestazioni al rinnovo.
 

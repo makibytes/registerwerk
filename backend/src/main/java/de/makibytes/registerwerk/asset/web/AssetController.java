@@ -274,6 +274,10 @@ public class AssetController {
         }
     }
 
+    private static java.util.List<String> splitWallets(String csv) {
+        return csv == null || csv.isBlank() ? java.util.List.of() : java.util.List.of(csv.split(","));
+    }
+
     private AssetResponse toResponse(Asset asset, Authentication authentication, boolean hasTermSheet) {
         AssetResponse base = assetMapper.toResponse(asset);
         return new AssetResponse(
@@ -302,7 +306,11 @@ public class AssetController {
                 asset.getTargetMarketCategories(),
                 asset.getTargetMarketMinExperience(),
                 asset.getMinInvestmentAmount(),
-                asset.getMaxHoldingAmount()
+                asset.getMaxHoldingAmount(),
+                asset.getHolderSyncStatus(),
+                asset.getHolderSyncBlockedReason(),
+                splitWallets(asset.getHolderSyncUnmappedWallets()),
+                asset.getLastSuccessfulHolderSyncAt()
         );
     }
 

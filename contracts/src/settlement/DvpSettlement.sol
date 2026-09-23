@@ -37,6 +37,18 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 ///      payment leg instead ({lockPayment}) — plain ERC-20 stablecoins have no such
 ///      restriction, and the asset then moves directly seller → buyer on settlement,
 ///      passing T-REX compliance exactly as a normal transfer.
+///
+///      Trade ids are derived, never chosen: `tradeId = keccak256(abi.encode(chainid, this,
+///      locker, clientRef))` (see {tradeIdFor}), so no third party can occupy the id of a
+///      trade another party is about to lock. The counterparty binds its {settle} call to
+///      the terms it agreed off-chain by passing their {hashTerms} digest; a trade whose
+///      stored terms differ reverts {TermsMismatch} instead of moving the counterparty's
+///      approved funds.
+///
+///      Compliance holds are freeze-in-place: {settle} reverts {PartyFrozen} while the
+///      asset token (if it answers `isFrozen(address)`, as T-REX does) reports the seller
+///      or buyer frozen. The escrow then stays here until the freeze is lifted, the trade
+///      is cancelled, or the operator releases it under a legal order via {forceCancel}.
 contract DvpSettlement is ReentrancyGuard, AccessControl {
     using SafeERC20 for IERC20;
 
@@ -118,6 +130,9 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
     );
     event TradeSettled(bytes32 indexed tradeId);
     event TradeCancelled(bytes32 indexed tradeId, address indexed by);
+    /// @notice The escrowed leg was released by the operator to a destination named in a
+    ///         legal order, instead of to the locker.
+    event TradeForceCancelled(bytes32 indexed tradeId, address indexed to, string legalBasis);
 
     error TradeAlreadyExists(bytes32 tradeId);
     error TradeNotLocked(bytes32 tradeId);
@@ -126,18 +141,25 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
     error NotCounterparty(bytes32 tradeId, address caller);
     error NotTradeParty(bytes32 tradeId, address caller);
     error InvalidTrade();
+    error TermsMismatch(bytes32 tradeId, bytes32 expectedTermsHash, bytes32 actualTermsHash);
+    error PartyFrozen(bytes32 tradeId, address party);
+    error InvalidDestination();
 
     /// @notice Seller escrows the asset leg. The buyer completes via {settle} by paying
     ///         the payment leg, before `expiry`.
+    /// @param clientRef The locker's own reference for this trade (e.g. an RFQ id); the
+    ///        trade id is derived from it and the caller, see {tradeIdFor}.
+    /// @return tradeId The derived trade id both parties use from here on.
     function lockAsset(
-        bytes32 tradeId,
+        bytes32 clientRef,
         address buyer,
         IERC20 assetToken,
         uint256 assetAmount,
         IERC20 paymentToken,
         uint256 paymentAmount,
         uint64 expiry
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotPaused returns (bytes32 tradeId) {
+        tradeId = tradeIdFor(msg.sender, clientRef);
         _initTrade(
             tradeId, msg.sender, buyer, assetToken, assetAmount, paymentToken, paymentAmount, LockedLeg.Asset, expiry
         );
@@ -147,15 +169,18 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
 
     /// @notice Buyer escrows the payment leg. The seller completes via {settle} by
     ///         delivering the asset leg, before `expiry`.
+    /// @param clientRef The locker's own reference for this trade; see {lockAsset}.
+    /// @return tradeId The derived trade id both parties use from here on.
     function lockPayment(
-        bytes32 tradeId,
+        bytes32 clientRef,
         address seller,
         IERC20 assetToken,
         uint256 assetAmount,
         IERC20 paymentToken,
         uint256 paymentAmount,
         uint64 expiry
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotPaused returns (bytes32 tradeId) {
+        tradeId = tradeIdFor(msg.sender, clientRef);
         _initTrade(
             tradeId, seller, msg.sender, assetToken, assetAmount, paymentToken, paymentAmount, LockedLeg.Payment, expiry
         );
@@ -168,10 +193,19 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
     ///         not evidence of cross-system finality or legal effect. Only the counterparty of the escrowed leg
     ///         may call: it delivers its own leg (via prior ERC-20 approval to this
     ///         contract) and receives the escrowed one in the same transaction.
-    function settle(bytes32 tradeId) external nonReentrant whenNotPaused {
+    /// @param expectedTermsHash {hashTerms} over the terms the counterparty agreed to,
+    ///        computed from its own record of the deal — not read back from {termsHashOf},
+    ///        which would only echo whatever the locker stored.
+    function settle(bytes32 tradeId, bytes32 expectedTermsHash) external nonReentrant whenNotPaused {
         Trade storage trade = trades[tradeId];
         if (trade.state != TradeState.Locked) revert TradeNotLocked(tradeId);
         if (block.timestamp >= trade.expiry) revert TradeExpired(tradeId, trade.expiry);
+        bytes32 actualTermsHash = _termsHash(trade);
+        if (actualTermsHash != expectedTermsHash) {
+            revert TermsMismatch(tradeId, expectedTermsHash, actualTermsHash);
+        }
+        if (_isFrozen(trade.assetToken, trade.seller)) revert PartyFrozen(tradeId, trade.seller);
+        if (_isFrozen(trade.assetToken, trade.buyer)) revert PartyFrozen(tradeId, trade.buyer);
 
         trade.state = TradeState.Settled;
         if (trade.lockedLeg == LockedLeg.Asset) {
@@ -209,6 +243,62 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
         emit TradeCancelled(tradeId, msg.sender);
     }
 
+    /// @notice Legal-order release: cancels a locked trade and transfers the escrowed leg
+    ///         to `to`, the destination named in the order (e.g. when the locker is frozen
+    ///         and a return to it would revert at the token). Policy-neutral — the contract
+    ///         never picks a destination itself. Like {cancel}, available while paused.
+    /// @param legalBasis Reference to the legal authority (e.g. "BaFin Az. 2026-001").
+    function forceCancel(bytes32 tradeId, address to, string calldata legalBasis)
+        external
+        nonReentrant
+        onlyRole(OPERATOR_ROLE)
+    {
+        Trade storage trade = trades[tradeId];
+        if (trade.state != TradeState.Locked) revert TradeNotLocked(tradeId);
+        if (to == address(0) || to == address(this)) revert InvalidDestination();
+
+        (IERC20 lockedToken, uint256 lockedAmount) = trade.lockedLeg == LockedLeg.Asset
+            ? (trade.assetToken, trade.assetAmount)
+            : (trade.paymentToken, trade.paymentAmount);
+
+        trade.state = TradeState.Cancelled;
+        lockedToken.safeTransfer(to, lockedAmount);
+        emit TradeForceCancelled(tradeId, to, legalBasis);
+    }
+
+    // ── Views ─────────────────────────────────────────────────────────────────
+
+    /// @notice The trade id a `locker` gets for its `clientRef` on this deployment and chain.
+    ///         Namespacing by locker means an id can only ever be occupied by the party
+    ///         that derives it.
+    function tradeIdFor(address locker, bytes32 clientRef) public view returns (bytes32) {
+        return keccak256(abi.encode(block.chainid, address(this), locker, clientRef));
+    }
+
+    /// @notice Digest of a trade's economic terms, as {settle} expects it. Counterparties
+    ///         compute it from their own record of the agreed deal.
+    function hashTerms(
+        address seller,
+        address buyer,
+        IERC20 assetToken,
+        uint256 assetAmount,
+        IERC20 paymentToken,
+        uint256 paymentAmount,
+        LockedLeg lockedLeg,
+        uint64 expiry
+    ) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(seller, buyer, assetToken, assetAmount, paymentToken, paymentAmount, lockedLeg, expiry)
+        );
+    }
+
+    /// @notice {hashTerms} over the terms stored for `tradeId`; zero for an unknown id.
+    function termsHashOf(bytes32 tradeId) external view returns (bytes32) {
+        Trade storage trade = trades[tradeId];
+        if (trade.state == TradeState.None) return bytes32(0);
+        return _termsHash(trade);
+    }
+
     // ── Internal ──────────────────────────────────────────────────────────────
 
     function _initTrade(
@@ -240,6 +330,26 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
             expiry: expiry,
             state: TradeState.Locked
         });
+    }
+
+    function _termsHash(Trade storage trade) private view returns (bytes32) {
+        return hashTerms(
+            trade.seller,
+            trade.buyer,
+            trade.assetToken,
+            trade.assetAmount,
+            trade.paymentToken,
+            trade.paymentAmount,
+            trade.lockedLeg,
+            trade.expiry
+        );
+    }
+
+    /// @dev T-REX-style freeze probe. A token without `isFrozen(address)` (plain ERC-20),
+    ///      a reverting call or short return data all count as "not frozen".
+    function _isFrozen(IERC20 token, address account) private view returns (bool) {
+        (bool ok, bytes memory ret) = address(token).staticcall(abi.encodeWithSignature("isFrozen(address)", account));
+        return ok && ret.length >= 32 && abi.decode(ret, (uint256)) != 0;
     }
 
     function _emitLocked(bytes32 tradeId) private {

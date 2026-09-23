@@ -122,7 +122,7 @@ export type CorporateActionType =
  *  ANNOUNCED) or rejects it (→ REJECTED, terminal). System-raised COUPON/REDEMPTION skip
  *  PROPOSED entirely and start at ANNOUNCED. */
 export type CorporateActionStatus =
-  | 'PROPOSED' | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT'
+  | 'PROPOSED' | 'ANNOUNCED' | 'SNAPSHOT_BLOCKED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT'
   | 'SETTLED' | 'CLOSED' | 'CANCELLED' | 'REJECTED';
 
 /** §10 eWpG register inspection request. */
@@ -214,6 +214,8 @@ export interface CorporateAction {
   dualControlApproverId?: string;
   dualControlApprovedAt?: string;
   notes?: string;
+  /** Why the record-date snapshot is refused while status is SNAPSHOT_BLOCKED (register not reconciled). */
+  snapshotBlockedReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -441,6 +443,11 @@ export interface Asset {
   targetMarketMinExperience?: KnowledgeExperienceLevel | null;
   minInvestmentAmount?: number | null;
   maxHoldingAmount?: number | null;
+  /** Register reconciliation (T2-18): BLOCKED = finalized balances on wallets with no holder row. */
+  holderSyncStatus?: 'OK' | 'BLOCKED';
+  holderSyncBlockedReason?: string | null;
+  holderSyncUnmappedWallets?: string[];
+  lastSuccessfulHolderSyncAt?: string | null;
 }
 
 export interface InvestorLimit {

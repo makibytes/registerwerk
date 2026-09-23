@@ -46,6 +46,35 @@ limite MVP acceptable ou nécessite un changement de conception plus important q
 
 ---
 
+## Revue de phase 2 (2026-09) — paramètres de risque des nouveaux marchés {#phase-2-review-2026-09-risk-parameters-for-new-markets}
+
+Cette section remplace les indications de paramètres ci-dessous lorsqu'elles diffèrent.
+
+- **Plafond d'écart.** `RegisterwerkNavOracle` borne désormais le mouvement cumulé par actif dans
+  une fenêtre d'écart (un jour par défaut), et non plus seulement le pas depuis la marque
+  précédente. `setMaxDeviationBps` ne peut que **réduire** le plafond ; un plafond plus élevé
+  exige un nouvel oracle et de nouveaux marchés. Chaque actif peut recevoir sa propre org de
+  publication (`setAssetPusher`) ; à défaut, seule l'org opératrice de l'oracle publie.
+- **LLTV et bonus.** Choisissez `lltvBps × (1 + liquidationBonusBps) ≤ 1 − maxDeviationBps` de
+  l'oracle du marché. Le constructeur du marché et l'enregistrement backend refusent toute autre
+  valeur. Avec la tolérance par défaut de 20 % et un bonus de 5 %, la LLTV est au plus de
+  76,19 % ; la démonstration utilise 75 % et 74 %.
+- **Devise de cotation.** Déployez un oracle par jeton de prêt ; un marché refuse un oracle coté
+  dans un autre jeton.
+- **Fenêtre de grâce.** Une liquidation sur une marque périmée (dans
+  `liquidationGracePeriodSeconds`) est plafonnée à un close factor de 50 % par appel.
+- **Unités entières.** Les liquidations vendent des unités de garantie entières, arrondies au
+  supérieur ; la part du paiement au-delà de la dette revient à l'emprunteur sous forme
+  d'excédent en espèces réclamable.
+- **Rapprochement (constat 5).** `reconcileCollateral` exige désormais `repo-markets.reconcile`,
+  détenu par l'org opératrice du marché, et est borné par les garanties effectivement observées
+  en sortie du marché. La configuration du marché utilise `repo-markets.configure` ; les réserves
+  ne vont qu'à la trésorerie fixe du marché.
+
+Les marchés déjà enregistrés qui échouent à ces contrôles sont signalés `riskParametersLegacy` :
+remboursement, réclamation et retrait restent disponibles, aucun nouvel emprunt ni nouveau dépôt
+n'est proposé.
+
 ## P0 — à corriger ou nécessitant une validation avant la production {#p0-must-fix-or-get-sign-off-before-production}
 
 ### 1. Disjoncteur d'écart de prix de l'oracle (corrigé) {#1-oracle-price-deviation-circuit-breaker-fixed}
@@ -97,6 +126,9 @@ réhypothécation qu'un simple prêt garanti en espèces ne déclenche jamais.
 | `LU_CSSF` | CSSF | Règles CSSF du conservateur/dépositaire sur la réhypothécation | Non examiné |
 | `FR_AMF` | AMF | Restrictions du CMF sur le teneur de compte-conservation | Non examiné |
 | `LI_TVTG` | FMA | Ségrégation de la conservation des conteneurs de jetons TVTG | Non examiné |
+| Côté prêteur (toutes juridictions) | BaFin / autorité nationale compétente | LCB-FT/KYC des apporteurs ; MiCAR art. 50 (pas d'intérêts sur les EMT) ; agrément PSCA ou activité de dépôt au sens du KWG pour `EwpgRepoMarket.supply` / parts de `EwpgRepoVault` | Non examiné — en attente (PARK-T2-20) |
+
+`EwpgRepoMarket.supply`/`withdraw` et le `EwpgRepoVault` ERC-4626 (aux parts transférables) ne sont restreints ni par permission ni par claim : tout wallet peut apporter des stablecoins et percevoir un rendement. La question de savoir si ce côté prêteur constitue une activité réglementée de l'opérateur, et si un rendement peut être versé sur des dépôts d'EMT, est en attente d'un avis juridique (PARK-T2-20). Le choix par défaut recommandé est de restreindre l'apport à `repo-markets.supply` plus un claim AML, les retraits restant ouverts aux apporteurs existants. En attendant, le portail client ne présente plus Supply & Earn comme ne nécessitant pas de KYC et indique que l'éligibilité côté prêteur fait l'objet d'une revue juridique.
 
 **Aucun renforcement supplémentaire du contrat ne peut s'y substituer.** Ce constat est reporté sans changement —
 il est explicitement hors du périmètre d'une revue de conformité limitée au code, et nécessite un avis juridique

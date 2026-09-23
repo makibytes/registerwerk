@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.screening.api.NaturalPersonScreeningSubjectReso
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningHitDto;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningSubjectDto;
 import de.makibytes.registerwerk.screening.events.SanctionsHitAcceptedEvent;
+import de.makibytes.registerwerk.screening.events.ScreeningHitDetectedEvent;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import io.micrometer.core.instrument.Gauge;
@@ -128,6 +129,7 @@ public class ScreeningService {
                         hitRepository.save(hit);
                     }
                     log.warn("Sanctions HIT: entity={} provider={} hits={}", entityId, provider.providerName(), hits.size());
+                    publishHitDetected(run, "LEGAL_ENTITY", entityId, provider.providerName(), trigger, hits);
                 }
                 run.setCompletedAt(Instant.now());
             } catch (Exception e) {
@@ -193,6 +195,7 @@ public class ScreeningService {
                     }
                     log.warn("Sanctions HIT: natural_person={} provider={} hits={}",
                             naturalPersonId, provider.providerName(), hits.size());
+                    publishHitDetected(run, "NATURAL_PERSON", naturalPersonId, provider.providerName(), trigger, hits);
                 }
                 run.setCompletedAt(Instant.now());
             } catch (Exception e) {
@@ -204,6 +207,23 @@ public class ScreeningService {
             runRepository.save(run);
         }
         return runRepository.findTopByNaturalPersonIdOrderByStartedAtDesc(naturalPersonId);
+    }
+
+    /**
+     * Publishes the (still unreviewed) hit for audit and for a future on-chain response — see
+     * {@link ScreeningHitDetectedEvent}; the automatic response itself is a parked decision.
+     */
+    private void publishHitDetected(ScreeningRun run, String subjectType, UUID subjectId, String provider,
+                                    ScreeningTrigger trigger, List<ScreeningHitDto> hits) {
+        double maxScore = hits.stream().mapToDouble(ScreeningHitDto::matchScore).max().orElse(0.0);
+        List<String> listSources = hits.stream().map(ScreeningHitDto::listSource)
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        events.publishEvent(new ScreeningHitDetectedEvent(run.getId(), subjectType, subjectId, Map.of(
+                "provider", provider,
+                "trigger", trigger.name(),
+                "hitCount", hits.size(),
+                "maxMatchScore", maxScore,
+                "listSources", listSources)));
     }
 
     /**

@@ -34,6 +34,30 @@ import "../ecosystem/interfaces/IPermissionOracle.sol";
 ///        - bond-desk.issue       : sell new units to a KYC'd investor against payment
 ///        - bond-desk.pay-coupon  : pay the current coupon period per holder
 ///        - bond-desk.redeem      : pay principal and burn a matured position (AML re-checked)
+///        - bond-desk.pause       : suspend / resume the desk's cash leg
+///        - bond-desk.legal-order : release a withheld coupon / force-redeem a frozen holder
+///                                  to a destination named by a legal order
+///      Every one of them is additionally bound to this instance's {operatorOrg}: another
+///      org holding the same `bond-desk.*` grant cannot operate this issuer's desk.
+///
+///      Coupon schedule: anchored on {maturityTimestamp}, not on the deployment second.
+///      Period k falls due at `maturity - (finalCouponPeriod - k) * couponIntervalSecs`, with
+///      `finalCouponPeriod = ceil((maturity - deployment) / couponIntervalSecs)`, so the
+///      final period is due exactly at maturity and no period opens after it. When the term
+///      is not a whole number of intervals (always the case for a scripted deployment, whose
+///      transaction is mined a few seconds after the script computed maturity), the first
+///      period is a short stub; it still pays the full per-period coupon — pick a maturity on
+///      the interval grid of the intended start to avoid a materially short first period.
+///      {redeem} requires the final period to have been opened first — call {payCoupon}
+///      for the final period, then {redeem} — so a redemption can never burn a position
+///      before its last coupon is snapshotted.
+///
+///      Frozen holders (address frozen, or any frozen units on the bond): the desk withholds
+///      rather than pays. {payCoupon} records the coupon in {withheld} (the cash stays in the
+///      treasury) and {redeem} reverts; {subscribe} refuses a frozen investor. The withheld
+///      value is released only under a legal order, to the destination the order names
+///      ({releaseWithheld}, {forceRedeem}) — the same hold-in-place default the ERC-7540
+///      vault applies to a frozen owner's escrow.
 ///
 ///      Payment leg — every cash flow is a real on-chain stablecoin transfer, declared
 ///      as payment rails in the marketplace manifest:
@@ -55,6 +79,7 @@ contract EwpgBondDesk is RegisterwerkGated {
     bytes32 public constant PAY_COUPON = keccak256("bond-desk.pay-coupon");
     bytes32 public constant REDEEM = keccak256("bond-desk.redeem");
     bytes32 public constant PAUSE = keccak256("bond-desk.pause");
+    bytes32 public constant LEGAL_ORDER = keccak256("bond-desk.legal-order");
 
     uint256 public constant TOPIC_KYC = 1;
     uint256 public constant TOPIC_AML = 2;
@@ -84,6 +109,14 @@ contract EwpgBondDesk is RegisterwerkGated {
     /// @notice Unix timestamp at/after which {redeem} may be called.
     uint256 public immutable maturityTimestamp;
 
+    /// @notice Index of the last coupon period — the one due at {maturityTimestamp}.
+    ///         {payCoupon} never opens a period beyond it.
+    uint256 public immutable finalCouponPeriod;
+
+    /// @notice The org operating this instance (the issuer / its paying agent). Every
+    ///         privileged function requires the caller's wallet to be bound to this org.
+    address public immutable operatorOrg;
+
     /// @notice Number of coupon periods opened so far.
     uint256 public couponPeriod;
 
@@ -109,6 +142,11 @@ contract EwpgBondDesk is RegisterwerkGated {
     /// @notice Whether a holder has already redeemed their matured position.
     mapping(address => bool) public redeemed;
 
+    /// @notice Coupon withheld from a frozen holder for a period (payment-token base units).
+    ///         The cash stays in the treasury until {releaseWithheld} pays it out under a
+    ///         legal order; a withheld (period, holder) is never paid by {payCoupon}.
+    mapping(uint256 => mapping(address => uint256)) public withheld;
+
     /// @notice Circuit breaker for every cash-leg function ({subscribe}, {payCoupon},
     ///         {redeem}). Distinct from pausing the bond token itself: this stops the
     ///         desk's payment leg specifically, e.g. when the operator disables the
@@ -121,6 +159,13 @@ contract EwpgBondDesk is RegisterwerkGated {
     event BondRedeemed(address indexed holder, uint256 amount, uint256 principal);
     event DeskPaused(address indexed by);
     event DeskUnpaused(address indexed by);
+    event CouponWithheld(uint256 indexed period, address indexed holder, uint256 amount);
+    event WithheldReleased(
+        uint256 indexed period, address indexed holder, address indexed to, uint256 amount, string legalBasis
+    );
+    event ForcedRedemption(
+        address indexed holder, address indexed to, uint256 amount, uint256 principal, string legalBasis
+    );
 
     error ZeroAmount();
     error ZeroAddress();
@@ -128,6 +173,12 @@ contract EwpgBondDesk is RegisterwerkGated {
     error AlreadyRedeemed(address holder);
     error NoCouponPeriodOpen(uint256 nextCouponDue);
     error DeskIsPaused();
+    error InvalidCouponSchedule();
+    error FinalCouponNotOpened(uint256 finalCouponPeriod);
+    error HolderFrozen(address holder);
+    error HolderNotFrozen(address holder);
+    error NothingWithheld(uint256 period, address holder);
+    error LegalBasisRequired();
 
     constructor(
         IPermissionOracle oracle_,
@@ -137,12 +188,23 @@ contract EwpgBondDesk is RegisterwerkGated {
         uint256 pricePerUnit_,
         uint16 couponRateBps_,
         uint256 couponIntervalSecs_,
-        uint256 maturityTimestamp_
+        uint256 maturityTimestamp_,
+        address operatorOrg_
     ) RegisterwerkGated(oracle_) {
         if (address(bond_) == address(0) || address(paymentToken_) == address(0) || treasury_ == address(0)) {
             revert ZeroAddress();
         }
         if (pricePerUnit_ == 0 || couponIntervalSecs_ == 0) revert ZeroAmount();
+        _requireOrg(operatorOrg_);
+        // Anchor the schedule on maturity: the final period is due exactly at maturity and
+        // the first one may be a short stub. Requiring an exact multiple of the interval
+        // instead made the desk undeployable on a live chain (the mined block's timestamp
+        // never equals the one the deploy script computed maturity from).
+        if (maturityTimestamp_ <= block.timestamp) revert InvalidCouponSchedule();
+        uint256 term = maturityTimestamp_ - block.timestamp;
+        uint256 periods = (term + couponIntervalSecs_ - 1) / couponIntervalSecs_;
+        finalCouponPeriod = periods;
+        operatorOrg = operatorOrg_;
         bond = bond_;
         paymentToken = paymentToken_;
         treasury = treasury_;
@@ -150,7 +212,7 @@ contract EwpgBondDesk is RegisterwerkGated {
         couponRateBps = couponRateBps_;
         couponIntervalSecs = couponIntervalSecs_;
         maturityTimestamp = maturityTimestamp_;
-        nextCouponDue = block.timestamp + couponIntervalSecs_;
+        nextCouponDue = maturityTimestamp_ - (periods - 1) * couponIntervalSecs_;
     }
 
     modifier whenNotPaused() {
@@ -161,13 +223,13 @@ contract EwpgBondDesk is RegisterwerkGated {
     /// @notice Suspends {subscribe}, {subscribeWithPermit}, {payCoupon} and {redeem} — e.g.
     ///         when the payment rail this desk settles in (its immutable {paymentToken}) is
     ///         disabled at the catalog level and can no longer be relied on to move funds.
-    function pause() external requiresPermission(PAUSE) {
+    function pause() external requiresOrgPermission(operatorOrg, PAUSE) {
         paused = true;
         emit DeskPaused(msg.sender);
     }
 
     /// @notice Resumes normal operation.
-    function unpause() external requiresPermission(PAUSE) {
+    function unpause() external requiresOrgPermission(operatorOrg, PAUSE) {
         paused = false;
         emit DeskUnpaused(msg.sender);
     }
@@ -180,9 +242,11 @@ contract EwpgBondDesk is RegisterwerkGated {
     ///         if compliance rejects the mint (e.g. blocked country, max-investor cap) —
     ///         those checks are independent of, and in addition to, the ecosystem gating
     ///         below. The investor must have approved this desk on the payment token.
+    ///         Reverts {HolderFrozen} for a frozen investor: T-REX `mint` checks identity
+    ///         and compliance, not the address freeze.
     function subscribe(address investor, uint256 amount)
         external
-        requiresPermission(ISSUE)
+        requiresOrgPermission(operatorOrg, ISSUE)
         requiresClaim(TOPIC_KYC)
         whenNotPaused
     {
@@ -202,13 +266,14 @@ contract EwpgBondDesk is RegisterwerkGated {
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) external requiresPermission(ISSUE) requiresClaim(TOPIC_KYC) whenNotPaused {
+    ) external requiresOrgPermission(operatorOrg, ISSUE) requiresClaim(TOPIC_KYC) whenNotPaused {
         IERC20Permit(address(paymentToken)).permit(investor, address(this), amount * pricePerUnit, deadline, v, r, s);
         _subscribe(investor, amount);
     }
 
     function _subscribe(address investor, uint256 amount) private {
         if (amount == 0) revert ZeroAmount();
+        if (bond.isFrozen(investor)) revert HolderFrozen(investor);
         uint256 cost = amount * pricePerUnit;
         paymentToken.safeTransferFrom(investor, treasury, cost);
         bond.mint(investor, amount);
@@ -237,14 +302,18 @@ contract EwpgBondDesk is RegisterwerkGated {
     ///         holders are a data/process issue for the operator to correct out of band
     ///         (e.g. via the next period, or a manual register correction), not something
     ///         this contract can safely backfill from a live balance.
+    ///
+    ///         No period opens beyond {finalCouponPeriod}: once it is open, later calls keep
+    ///         paying that final period only. A frozen holder's coupon is recorded in
+    ///         {withheld} and left in the treasury (see {releaseWithheld}).
     function payCoupon(address[] calldata holders)
         external
-        requiresPermission(PAY_COUPON)
+        requiresOrgPermission(operatorOrg, PAY_COUPON)
         requiresClaim(TOPIC_KYC)
         whenNotPaused
         returns (uint256 period)
     {
-        if (block.timestamp >= nextCouponDue) {
+        if (block.timestamp >= nextCouponDue && couponPeriod < finalCouponPeriod) {
             couponPeriod += 1;
             nextCouponDue += couponIntervalSecs;
         }
@@ -258,7 +327,7 @@ contract EwpgBondDesk is RegisterwerkGated {
 
         for (uint256 i = 0; i < holders.length; i++) {
             address holder = holders[i];
-            if (couponPaid[period][holder]) {
+            if (couponPaid[period][holder] || withheld[period][holder] != 0) {
                 continue;
             }
             if (!periodBalanceSnapshotted[period][holder]) {
@@ -275,8 +344,15 @@ contract EwpgBondDesk is RegisterwerkGated {
             if (balance == 0) {
                 continue;
             }
-            couponPaid[period][holder] = true;
             uint256 amount = (balance * pricePerUnit * couponRateBps) / 10_000;
+            if (_isFrozen(holder)) {
+                if (amount != 0) {
+                    withheld[period][holder] = amount;
+                    emit CouponWithheld(period, holder, amount);
+                }
+                continue;
+            }
+            couponPaid[period][holder] = true;
             paymentToken.safeTransferFrom(treasury, holder, amount);
             emit CouponPaid(period, holder, amount);
         }
@@ -287,9 +363,18 @@ contract EwpgBondDesk is RegisterwerkGated {
     ///         by the AML topic rather than KYC: redemption is a payout event, so the
     ///         desk re-checks the stricter of the two claim topics independently of
     ///         whichever topic gated the issuance.
-    function redeem(address holder) external requiresPermission(REDEEM) requiresClaim(TOPIC_AML) whenNotPaused {
-        if (block.timestamp < maturityTimestamp) revert BondNotMatured(maturityTimestamp);
-        if (redeemed[holder]) revert AlreadyRedeemed(holder);
+    ///
+    ///         Requires the final coupon period to be open (its record-date snapshot taken
+    ///         by {payCoupon}), so burning the position cannot forfeit the last coupon.
+    ///         Reverts {HolderFrozen} for a frozen holder — see {forceRedeem}.
+    function redeem(address holder)
+        external
+        requiresOrgPermission(operatorOrg, REDEEM)
+        requiresClaim(TOPIC_AML)
+        whenNotPaused
+    {
+        _requireRedeemable(holder);
+        if (_isFrozen(holder)) revert HolderFrozen(holder);
 
         uint256 balance = bond.balanceOf(holder);
         redeemed[holder] = true;
@@ -299,5 +384,61 @@ contract EwpgBondDesk is RegisterwerkGated {
             bond.burn(holder, balance);
         }
         emit BondRedeemed(holder, balance, principal);
+    }
+
+    // ── Legal-order releases for frozen holders ─────────────────────────────
+
+    /// @notice Pays a coupon withheld from a frozen holder to the destination a legal order
+    ///         names (`to` may be the holder itself once the order lifts the hold). The
+    ///         `legalBasis` reference is emitted for the audit trail.
+    function releaseWithheld(uint256 period, address holder, address to, string calldata legalBasis)
+        external
+        requiresOrgPermission(operatorOrg, LEGAL_ORDER)
+        whenNotPaused
+    {
+        if (to == address(0)) revert ZeroAddress();
+        if (bytes(legalBasis).length == 0) revert LegalBasisRequired();
+        uint256 amount = withheld[period][holder];
+        if (amount == 0) revert NothingWithheld(period, holder);
+
+        withheld[period][holder] = 0;
+        couponPaid[period][holder] = true;
+        paymentToken.safeTransferFrom(treasury, to, amount);
+        emit WithheldReleased(period, holder, to, amount, legalBasis);
+    }
+
+    /// @notice Redeems a frozen holder's matured position under a legal order: burns the
+    ///         full balance (T-REX `burn` also consumes frozen units) and pays the principal
+    ///         to the destination the order names. Only for a frozen holder — an unfrozen
+    ///         one goes through {redeem}.
+    function forceRedeem(address holder, address to, string calldata legalBasis)
+        external
+        requiresOrgPermission(operatorOrg, LEGAL_ORDER)
+        whenNotPaused
+    {
+        if (to == address(0)) revert ZeroAddress();
+        if (bytes(legalBasis).length == 0) revert LegalBasisRequired();
+        _requireRedeemable(holder);
+        if (!_isFrozen(holder)) revert HolderNotFrozen(holder);
+
+        uint256 balance = bond.balanceOf(holder);
+        redeemed[holder] = true;
+        uint256 principal = balance * pricePerUnit;
+        if (balance > 0) {
+            paymentToken.safeTransferFrom(treasury, to, principal);
+            bond.burn(holder, balance);
+        }
+        emit ForcedRedemption(holder, to, balance, principal, legalBasis);
+    }
+
+    function _requireRedeemable(address holder) private view {
+        if (block.timestamp < maturityTimestamp) revert BondNotMatured(maturityTimestamp);
+        if (redeemed[holder]) revert AlreadyRedeemed(holder);
+        if (!periodOpened[finalCouponPeriod]) revert FinalCouponNotOpened(finalCouponPeriod);
+    }
+
+    /// @dev Frozen for payout purposes: the whole address is frozen, or part of its units.
+    function _isFrozen(address holder) private view returns (bool) {
+        return bond.isFrozen(holder) || bond.getFrozenTokens(holder) != 0;
     }
 }

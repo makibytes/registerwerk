@@ -36,9 +36,11 @@ contract EwpgRepoMarketTest is Test {
     address mallory = address(0x66); // unbound wallet
     address lender1 = address(0x11);
     address liquidator = address(0x44);
+    address treasury = address(0x99);
 
     bytes32 borrowPermission;
     bytes32 configurePermission;
+    bytes32 reconcilePermission;
     bytes32 pushPricePermission;
     bytes32 overridePricePermission;
     uint256 topicKyc;
@@ -50,6 +52,8 @@ contract EwpgRepoMarketTest is Test {
     uint256 constant BASE_RATE_WAD = 0.02e18;
     uint256 constant SLOPE_WAD = 0.18e18;
     uint256 constant GRACE_PERIOD = 2 hours;
+    // 15%: LLTV_BPS × (1 + LIQ_BONUS_BPS) = 0.84 must not exceed 1 − maxDeviation (T2-08).
+    uint256 constant ORACLE_MAX_DEVIATION_BPS = 1500;
 
     function setUp() public {
         orgRegistry = new OrgRegistry(operator);
@@ -59,29 +63,21 @@ contract EwpgRepoMarketTest is Test {
 
         loanToken = new MockStablecoin("AllUnity Euro", "AUEUR", 6);
         collateralToken = new MockStablecoin("Demo Bond Units", "BOND", 0);
-        navOracle = new RegisterwerkNavOracle(ecosystemOracle);
-
-        market = new EwpgRepoMarket(
-            ecosystemOracle,
-            loanToken,
-            collateralToken,
-            navOracle,
-            MAX_LTV_BPS,
-            LLTV_BPS,
-            LIQ_BONUS_BPS,
-            BASE_RATE_WAD,
-            SLOPE_WAD,
-            0, // no staleness check for these tests
-            0
+        orgId = new MockOnchainId();
+        navOracle = new RegisterwerkNavOracle(
+            ecosystemOracle, address(orgId), address(loanToken), ORACLE_MAX_DEVIATION_BPS, 1 days, 0
         );
+
+        // no staleness check for these tests
+        market = new EwpgRepoMarket(ecosystemOracle, _params(navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 0, 0));
 
         borrowPermission = market.BORROW();
         configurePermission = market.CONFIGURE();
+        reconcilePermission = market.RECONCILE();
         topicKyc = market.TOPIC_KYC();
         pushPricePermission = navOracle.PUSH_PRICE();
         overridePricePermission = navOracle.OVERRIDE_PRICE();
 
-        orgId = new MockOnchainId();
         kycIssuer = new MockClaimIssuer();
 
         vm.startPrank(operator);
@@ -91,6 +87,7 @@ contract EwpgRepoMarketTest is Test {
         orgRegistry.addMember(address(orgId), alice, roles, "");
         permissions.grantToOrg(address(orgId), borrowPermission);
         permissions.grantToOrg(address(orgId), configurePermission);
+        permissions.grantToOrg(address(orgId), reconcilePermission);
         permissions.grantToOrg(address(orgId), pushPricePermission);
         permissions.grantToOrg(address(orgId), overridePricePermission);
         uint256[] memory topics = new uint256[](1);
@@ -114,6 +111,48 @@ contract EwpgRepoMarketTest is Test {
         loanToken.approve(address(market), type(uint256).max);
         vm.prank(alice);
         collateralToken.approve(address(market), type(uint256).max);
+    }
+
+    function _params(
+        IRepoOracle oracle_,
+        uint256 maxLtvBps,
+        uint256 lltvBps,
+        uint256 bonusBps,
+        uint256 maxPriceAge,
+        uint256 grace
+    ) private view returns (MarketParams memory) {
+        return _params(collateralToken, oracle_, maxLtvBps, lltvBps, bonusBps, maxPriceAge, grace);
+    }
+
+    function _params(
+        IERC20 collateral,
+        IRepoOracle oracle_,
+        uint256 maxLtvBps,
+        uint256 lltvBps,
+        uint256 bonusBps,
+        uint256 maxPriceAge,
+        uint256 grace
+    ) private view returns (MarketParams memory) {
+        return MarketParams(
+            address(orgId), treasury, loanToken, collateral, oracle_, maxLtvBps, lltvBps, bonusBps, BASE_RATE_WAD,
+            SLOPE_WAD, maxPriceAge, grace
+        );
+    }
+
+    /// @dev One unit's price at the liquidation discount (floor).
+    function _discounted(uint256 price) private pure returns (uint256) {
+        return price * 10_000 / (10_000 + LIQ_BONUS_BPS);
+    }
+
+    /// @dev What a liquidator pays for `units` whole units (rounded up, as the market does).
+    function _payment(uint256 units, uint256 price) private pure returns (uint256) {
+        return (units * price * 10_000 + 10_000 + LIQ_BONUS_BPS - 1) / (10_000 + LIQ_BONUS_BPS);
+    }
+
+    /// @dev Simulates an issuer/agent forcedTransfer of `units` out of the market's custody.
+    function _forceOut(EwpgRepoMarket m, uint256 units) private {
+        vm.prank(address(m));
+        collateralToken.transfer(address(0xF0), units);
     }
 
     // ── lender side ──────────────────────────────────────────────────────────
@@ -197,11 +236,10 @@ contract EwpgRepoMarketTest is Test {
     }
 
     function test_pledgeAndBorrow_revertsWhenUnpriced() public {
-        RegisterwerkNavOracle freshOracle = new RegisterwerkNavOracle(ecosystemOracle);
-        EwpgRepoMarket unpricedMarket = new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, freshOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 0, 0
+        RegisterwerkNavOracle freshOracle = new RegisterwerkNavOracle(
+            ecosystemOracle, address(orgId), address(loanToken), ORACLE_MAX_DEVIATION_BPS, 1 days, 0
         );
+        EwpgRepoMarket unpricedMarket = new EwpgRepoMarket(ecosystemOracle, _params(freshOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 0, 0));
         vm.prank(lender1);
         loanToken.approve(address(unpricedMarket), type(uint256).max);
         vm.prank(lender1);
@@ -215,10 +253,7 @@ contract EwpgRepoMarketTest is Test {
     }
 
     function test_pledgeAndBorrow_revertsOnStalePrice() public {
-        EwpgRepoMarket staleMarket = new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 1 hours, GRACE_PERIOD
-        );
+        EwpgRepoMarket staleMarket = new EwpgRepoMarket(ecosystemOracle, _params(navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 1 hours, GRACE_PERIOD));
         vm.prank(lender1);
         loanToken.approve(address(staleMarket), type(uint256).max);
         vm.prank(lender1);
@@ -363,10 +398,11 @@ contract EwpgRepoMarketTest is Test {
         uint256 reserves = market.totalReserves();
         assertGt(reserves, 0);
 
-        address treasury = address(0x99);
+        vm.expectEmit(true, false, false, true);
+        emit EwpgRepoMarket.ReservesWithdrawn(treasury, reserves);
         vm.prank(alice);
-        market.withdrawReserves(treasury, reserves);
-        assertEq(loanToken.balanceOf(treasury), reserves);
+        market.withdrawReserves(reserves);
+        assertEq(loanToken.balanceOf(treasury), reserves, "reserves only ever go to the immutable treasury");
     }
 
     // ── repay ────────────────────────────────────────────────────────────────
@@ -506,8 +542,10 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(liquidator);
         (uint256 debtRepaid,) = market.liquidate(alice, debtBefore); // requests full debt
 
-        // Close factor caps a single call at 50% of outstanding debt.
-        assertApproxEqAbs(debtRepaid, debtBefore / 2, 1);
+        // Close factor caps a single call at 50% of outstanding debt, plus less than one whole
+        // unit bought at the discounted mark (85e6 / 1.05) from rounding the units up.
+        assertGe(debtRepaid, debtBefore / 2);
+        assertLt(debtRepaid, debtBefore / 2 + _discounted(85e6) + 1);
         assertGt(market.debtOf(alice), 0, "position still open after partial liquidation");
     }
 
@@ -542,11 +580,12 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         market.pledgeAndBorrow(100, 7_000e6);
 
-        // 100 * 50e6 * 0.80 / 7_000e6 = 0.571 — well below
+        // 100 * 75e6 * 0.80 / 7_000e6 = 0.857 — well below
         // FULL_CLOSE_HEALTH_FACTOR_THRESHOLD_WAD (0.95), so a single call may close the full
-        // outstanding debt instead of being capped at CLOSE_FACTOR_BPS .
+        // outstanding debt instead of being capped at CLOSE_FACTOR_BPS. 98 units at
+        // 75e6 / 1.05 pay exactly the 7_000e6 debt.
         vm.prank(alice);
-        navOracle.pushPriceWithOverride(address(collateralToken), 50e6);
+        navOracle.pushPriceWithOverride(address(collateralToken), 75e6);
 
         uint256 debtBefore = market.debtOf(alice);
         vm.prank(liquidator);
@@ -562,22 +601,26 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         market.pledgeAndBorrow(100, 7_000e6);
 
-        // HF = 100*80*0.8/7000 = 0.914 < 0.95 -> full close; seize = 7000*1.05/80 = 91 units.
+        // HF = 100*80*0.8/7000 = 0.914 < 0.95 -> full close; units = ceil(7000*1.05/80) = 92,
+        // paying 92*80/1.05 = 7009.52: the 9.52 above the debt is the borrower's surplus.
         vm.prank(alice);
-        navOracle.pushPrice(address(collateralToken), 80e6);
+        navOracle.pushPriceWithOverride(address(collateralToken), 80e6);
 
         vm.prank(liquidator);
-        (, uint256 seized) = market.liquidate(alice, 7_000e6);
+        (uint256 debtRepaid, uint256 seized) = market.liquidate(alice, 7_000e6);
 
-        assertEq(seized, 91);
+        assertEq(seized, 92);
+        assertEq(debtRepaid, 7_000e6);
+        uint256 payment = _payment(92, 80e6);
+        assertEq(market.surplusOf(alice), payment - 7_000e6);
         (uint256 collateral, uint256 scaledDebt) = market.positions(alice);
         assertEq(scaledDebt, 0);
-        assertEq(collateral, 9, "residual stays credited, not pushed");
+        assertEq(collateral, 8, "residual stays credited, not pushed");
         assertEq(collateralToken.balanceOf(alice), 900);
 
         vm.prank(alice);
-        assertEq(market.claimCollateral(), 9);
-        assertEq(collateralToken.balanceOf(alice), 909);
+        assertEq(market.claimCollateral(), 8);
+        assertEq(collateralToken.balanceOf(alice), 908);
     }
 
     function test_liquidate_isPermissionlessAtEcosystemLayer() public {
@@ -586,7 +629,7 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         market.pledgeAndBorrow(100, 7_000e6);
         vm.prank(alice);
-        navOracle.pushPrice(address(collateralToken), 80e6);
+        navOracle.pushPriceWithOverride(address(collateralToken), 80e6);
 
         vm.prank(liquidator);
         market.liquidate(alice, 7_000e6); // liquidator itself unbound — no revert
@@ -596,90 +639,60 @@ contract EwpgRepoMarketTest is Test {
 
     function test_setBorrowPaused_revertsForNonOperatorCaller() public {
         vm.prank(mallory);
-        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, mallory, configurePermission));
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId)));
         market.setBorrowPaused(true);
     }
 
     function test_constructor_revertsForInvalidLltv() public {
         vm.expectRevert(EwpgRepoMarket.InvalidLltv.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, MAX_LTV_BPS, 0, LIQ_BONUS_BPS, BASE_RATE_WAD,
-            SLOPE_WAD, 0, 0
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, MAX_LTV_BPS, 0, LIQ_BONUS_BPS, 0, 0));
 
         vm.expectRevert(EwpgRepoMarket.InvalidLltv.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, MAX_LTV_BPS, 10_001, LIQ_BONUS_BPS, BASE_RATE_WAD,
-            SLOPE_WAD, 0, 0
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, MAX_LTV_BPS, 10_001, LIQ_BONUS_BPS, 0, 0));
     }
 
     function test_constructor_revertsForInvalidMaxLtv() public {
         // maxLtvBps == 0
         vm.expectRevert(EwpgRepoMarket.InvalidMaxLtv.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, 0, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD,
-            SLOPE_WAD, 0, 0
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, 0, LLTV_BPS, LIQ_BONUS_BPS, 0, 0));
 
         // maxLtvBps == lltvBps (must be strictly below, not equal)
         vm.expectRevert(EwpgRepoMarket.InvalidMaxLtv.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, LLTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD,
-            SLOPE_WAD, 0, 0
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, LLTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 0, 0));
 
         // maxLtvBps > lltvBps
         vm.expectRevert(EwpgRepoMarket.InvalidMaxLtv.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, LLTV_BPS + 1, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 0, 0
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, LLTV_BPS + 1, LLTV_BPS, LIQ_BONUS_BPS, 0, 0));
     }
 
     function test_constructor_revertsForExcessiveLiquidationBonus() public {
         // MAX_LIQUIDATION_BONUS_BPS is 2000 (20%) — 2001 is one bps above the cap.
         vm.expectRevert(EwpgRepoMarket.InvalidLiquidationBonus.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, 2_001,
-            BASE_RATE_WAD, SLOPE_WAD, 0, 0
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, MAX_LTV_BPS, LLTV_BPS, 2_001, 0, 0));
     }
 
     function test_constructor_revertsForNonZeroDecimalCollateral() public {
         MockStablecoin eighteenDecimalCollateral = new MockStablecoin("Wrong Decimals Token", "WDT", 18);
         vm.expectRevert(EwpgRepoMarket.InvalidCollateralDecimals.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, eighteenDecimalCollateral, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 0, 0
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(eighteenDecimalCollateral, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 0, 0));
     }
 
     function test_constructor_revertsForHaircutThinnerThanOracleTolerance() public {
-        // Oracle's default maxDeviationBps is 2000 (20%); an LLTV of 9000 leaves only a 10%
-        // haircut — thinner than the oracle's own routine per-push deviation tolerance.
+        // The oracle tolerates a 15% move per window; an LLTV of 9000 plus the 5% bonus
+        // (0.945) leaves far less than that before a liquidation runs short.
         vm.expectRevert(EwpgRepoMarket.InsufficientLiquidationHaircut.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, 8000, 9000, LIQ_BONUS_BPS, BASE_RATE_WAD,
-            SLOPE_WAD, 0, 0
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, 8000, 9000, LIQ_BONUS_BPS, 0, 0));
     }
 
     function test_constructor_revertsForGracePeriodShorterThanMaxPriceAge() public {
         vm.expectRevert(EwpgRepoMarket.InvalidLiquidationGracePeriod.selector);
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 1 hours, 30 minutes
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 1 hours, 30 minutes));
     }
 
     function test_constructor_allowsGracePeriodEqualToMaxPriceAge() public {
         // A grace period exactly equal to maxPriceAgeSeconds is a valid degenerate case — no
         // additional tolerance beyond the normal staleness bound, not an error.
-        new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 1 hours, 1 hours
-        );
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 1 hours, 1 hours));
     }
 
     // ── collateral reconciliation (eWpG §24 Berichtigung) ───────────────────
@@ -690,12 +703,11 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         market.pledgeAndBorrow(100, 1_000e6);
 
-        // Simulates the token layer's own `positions` view desyncing from the market's
-        // internal ledger after an agent forcedTransfer/forceBurn moved collateral out of the
-        // pool independent of {repay}/{liquidate} — the operator reconciles down to what was
-        // actually attributable to alice's position following that forced move.
-        vm.prank(alice); // alice's org holds CONFIGURE in this suite's setUp
-        market.reconcileCollateral(alice, 40);
+        // An agent forcedTransfer/forceBurn moved 60 units out of the pool independent of
+        // {repay}/{liquidate} — the operator reconciles alice's position down by that amount.
+        _forceOut(market, 60);
+        vm.prank(alice); // alice's org holds RECONCILE in this suite's setUp
+        market.reconcileCollateral(alice, 40, keccak256("forced-transfer-tx"));
 
         (uint256 collateralAmount,) = market.positions(alice);
         assertEq(collateralAmount, 40);
@@ -707,10 +719,11 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         market.pledgeAndBorrow(100, 1_000e6);
 
+        _forceOut(market, 60);
         vm.expectEmit(true, false, false, true);
-        emit EwpgRepoMarket.CollateralReconciled(alice, 100, 40);
+        emit EwpgRepoMarket.CollateralReconciled(alice, 100, 40, keccak256("forced-transfer-tx"));
         vm.prank(alice);
-        market.reconcileCollateral(alice, 40);
+        market.reconcileCollateral(alice, 40, keccak256("forced-transfer-tx"));
     }
 
     function test_reconcileCollateral_revertsIfNotDecreasing() public {
@@ -721,11 +734,11 @@ contract EwpgRepoMarketTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(EwpgRepoMarket.ReconciliationWouldIncreaseCollateral.selector);
-        market.reconcileCollateral(alice, 100); // equal — not a decrease
+        market.reconcileCollateral(alice, 100, bytes32(0)); // equal — not a decrease
 
         vm.prank(alice);
         vm.expectRevert(EwpgRepoMarket.ReconciliationWouldIncreaseCollateral.selector);
-        market.reconcileCollateral(alice, 150); // above current — would increase
+        market.reconcileCollateral(alice, 150, bytes32(0)); // above current — would increase
     }
 
     function test_reconcileCollateral_revertsForNonOperatorCaller() public {
@@ -735,8 +748,8 @@ contract EwpgRepoMarketTest is Test {
         market.pledgeAndBorrow(100, 1_000e6);
 
         vm.prank(mallory);
-        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, mallory, configurePermission));
-        market.reconcileCollateral(alice, 40);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId)));
+        market.reconcileCollateral(alice, 40, bytes32(0));
     }
 
     // ── bad-debt write-off  ────────────────────────────
@@ -802,8 +815,9 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         market.pledgeAndBorrow(100, 1_000e6);
 
-        vm.prank(alice); // alice's org holds CONFIGURE in this suite's setUp
-        market.reconcileCollateral(alice, 0);
+        _forceOut(market, 100);
+        vm.prank(alice); // alice's org holds RECONCILE in this suite's setUp
+        market.reconcileCollateral(alice, 0, bytes32(0));
 
         (uint256 collateralAfter, uint256 scaledDebtAfter) = market.positions(alice);
         assertEq(collateralAfter, 0);
@@ -817,8 +831,9 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         market.pledgeAndBorrow(100, 1_000e6);
 
+        _forceOut(market, 60);
         vm.prank(alice);
-        market.reconcileCollateral(alice, 40); // still nonzero — no bad debt yet
+        market.reconcileCollateral(alice, 40, bytes32(0)); // still nonzero — no bad debt yet
 
         assertGt(market.debtOf(alice), 0, "debt untouched when some collateral remains");
     }
@@ -826,11 +841,10 @@ contract EwpgRepoMarketTest is Test {
     // ── healthFactor reliability  ──────────────────────
 
     function test_healthFactor_unreliableWhenNeverPriced() public {
-        RegisterwerkNavOracle freshOracle = new RegisterwerkNavOracle(ecosystemOracle);
-        EwpgRepoMarket unpricedMarket = new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, freshOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 0, 0
+        RegisterwerkNavOracle freshOracle = new RegisterwerkNavOracle(
+            ecosystemOracle, address(orgId), address(loanToken), ORACLE_MAX_DEVIATION_BPS, 1 days, 0
         );
+        EwpgRepoMarket unpricedMarket = new EwpgRepoMarket(ecosystemOracle, _params(freshOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 0, 0));
         (uint256 factor, bool priceReliable) = unpricedMarket.healthFactor(alice);
         assertFalse(priceReliable, "never-priced collateral must not be reported reliable");
         assertEq(factor, type(uint256).max, "no debt yet -> infinite, regardless of pricing");
@@ -862,10 +876,7 @@ contract EwpgRepoMarketTest is Test {
     //    desk and trading-desk business ruling) ──────────────────────────────
 
     function _newGraceAwareMarket() private returns (EwpgRepoMarket m) {
-        m = new EwpgRepoMarket(
-            ecosystemOracle, loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
-            BASE_RATE_WAD, SLOPE_WAD, 1 hours, GRACE_PERIOD
-        );
+        m = new EwpgRepoMarket(ecosystemOracle, _params(navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 1 hours, GRACE_PERIOD));
     }
 
     function _fundAndBorrow(EwpgRepoMarket m, uint256 borrowAmount) private {
@@ -885,10 +896,10 @@ contract EwpgRepoMarketTest is Test {
         EwpgRepoMarket staleAwareMarket = _newGraceAwareMarket();
         _fundAndBorrow(staleAwareMarket, 7_000e6);
 
-        // 100 * 75e6 * 0.80 / 7_000e6 = 0.857 — unhealthy even under the grace period's
+        // 100 * 80e6 * 0.80 / 7_000e6 = 0.914 — unhealthy even under the grace period's
         // stricter 0.95 bound.
         vm.prank(alice);
-        navOracle.pushPrice(address(collateralToken), 80e6);
+        navOracle.pushPriceWithOverride(address(collateralToken), 80e6);
         vm.warp(block.timestamp + 2 hours); // past maxPriceAgeSeconds(1h), within grace(3h)
 
         vm.prank(liquidator);
@@ -918,7 +929,7 @@ contract EwpgRepoMarketTest is Test {
         _fundAndBorrow(staleAwareMarket, 7_000e6);
 
         vm.prank(alice);
-        navOracle.pushPrice(address(collateralToken), 80e6); // clearly unhealthy at any threshold
+        navOracle.pushPriceWithOverride(address(collateralToken), 80e6); // clearly unhealthy at any threshold
         vm.warp(block.timestamp + GRACE_PERIOD + 1);
 
         vm.prank(liquidator);
@@ -931,7 +942,7 @@ contract EwpgRepoMarketTest is Test {
         _fundAndBorrow(staleAwareMarket, 7_000e6);
 
         vm.prank(alice);
-        navOracle.pushPrice(address(collateralToken), 80e6);
+        navOracle.pushPriceWithOverride(address(collateralToken), 80e6);
         vm.warp(block.timestamp + GRACE_PERIOD + 1);
 
         vm.prank(liquidator);
@@ -946,5 +957,301 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(liquidator);
         (uint256 debtRepaid,) = staleAwareMarket.liquidate(alice, 7_000e6);
         assertGt(debtRepaid, 0);
+    }
+
+    // ── Phase-2 review: instance binding, over-grant, risk invariant, grace close factor,
+    //    whole-unit seizure (T2-06 / T2-07 / T2-08 / T2-09 / T2-10 / T2-12) ────────────────
+
+    function _otherOrgWith(address wallet, bytes32 permission) private returns (MockOnchainId other) {
+        other = new MockOnchainId();
+        vm.startPrank(operator);
+        orgRegistry.registerOrg(address(other), 276);
+        bytes32[] memory roles = new bytes32[](1);
+        roles[0] = keccak256("OPERATOR");
+        orgRegistry.addMember(address(other), wallet, roles, "");
+        permissions.grantToOrg(address(other), permission);
+        vm.stopPrank();
+    }
+
+    /// T2-06: a same-slug `repo-markets.configure` grant held by another org does not reach
+    /// this instance.
+    function test_adminFunctions_revertForOtherOrgHoldingSameCode() public {
+        address otherAdmin = address(0x0B0B);
+        _otherOrgWith(otherAdmin, configurePermission);
+
+        vm.startPrank(otherAdmin);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, otherAdmin, address(orgId)));
+        market.setBorrowPaused(true);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, otherAdmin, address(orgId)));
+        market.withdrawReserves(0);
+        vm.stopPrank();
+    }
+
+    /// T2-07: `repo-facility.configure` (routine facility price pushes) no longer administers
+    /// markets — the market uses its own `repo-markets.*` codes.
+    function test_adminFunctions_revertWithOnlyFacilityConfigureCode() public {
+        bytes32 facilityConfigure = keccak256("repo-facility.configure");
+        vm.startPrank(operator);
+        permissions.revokeFromOrg(address(orgId), configurePermission);
+        permissions.revokeFromOrg(address(orgId), reconcilePermission);
+        permissions.grantToOrg(address(orgId), facilityConfigure);
+        vm.stopPrank();
+
+        vm.startPrank(alice);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, alice, configurePermission));
+        market.setReserveFactor(1000);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, alice, configurePermission));
+        market.withdrawReserves(0);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, alice, reconcilePermission));
+        market.reconcileCollateral(alice, 0, bytes32(0));
+        vm.stopPrank();
+    }
+
+    /// T2-07: without an observed outflow, reconciliation cannot write a position down (and
+    /// therefore cannot trigger a bad-debt write-off against depositors).
+    function test_reconcileCollateral_revertsWithoutObservedShortfall() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+        uint256 lenderClaim = market.balanceOf(lender1);
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoMarket.NoObservedShortfall.selector);
+        market.reconcileCollateral(alice, 0, bytes32(0));
+        assertEq(market.balanceOf(lender1), lenderClaim);
+    }
+
+    /// T2-07: after a forced transfer of k units, write-downs totalling ≤ k succeed and any
+    /// further reduction reverts — the bound is cumulative.
+    function test_reconcileCollateral_boundedByObservedShortfall() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 1_000e6);
+        _forceOut(market, 30);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgRepoMarket.ReconciliationExceedsShortfall.selector, 31, 30));
+        market.reconcileCollateral(alice, 69, bytes32(0));
+
+        vm.startPrank(alice);
+        market.reconcileCollateral(alice, 80, bytes32(0)); // 20 of 30
+        market.reconcileCollateral(alice, 70, bytes32(0)); // remaining 10
+        vm.expectRevert(EwpgRepoMarket.NoObservedShortfall.selector);
+        market.reconcileCollateral(alice, 69, bytes32(0));
+        vm.stopPrank();
+
+        assertEq(market.totalCollateral(), 70);
+        assertEq(collateralToken.balanceOf(address(market)), 70);
+    }
+
+    /// T2-08 (poc2B): lltv × (1 + bonus) ≥ 1 lets a still over-collateralised position be
+    /// liquidated into bad debt — rejected at construction even with an opted-out oracle.
+    function test_constructor_revertsWhenLltvTimesBonusReachesOne() public {
+        vm.expectRevert(EwpgRepoMarket.InvalidLiquidationIncentive.selector);
+        new EwpgRepoMarket(ecosystemOracle, _params(navOracle, 9000, 9500, 1000, 0, 0));
+
+        OptOutRepoOracle optOut = new OptOutRepoOracle(address(loanToken));
+        vm.expectRevert(EwpgRepoMarket.InvalidLiquidationIncentive.selector);
+        new EwpgRepoMarket(ecosystemOracle, _params(optOut, 9000, 9600, 500, 0, 0));
+        new EwpgRepoMarket(ecosystemOracle, _params(optOut, 9000, 9500, 500, 0, 0)); // 0.9975 < 1
+    }
+
+    /// T2-08 (poc2D): 80% LLTV / 5% bonus against a 20% oracle tolerance — one in-tolerance
+    /// push from HF 1.0 already left bad debt. The haircut check now includes the bonus.
+    function test_constructor_revertsWhenBonusEatsTheDeviationHaircut() public {
+        RegisterwerkNavOracle wideOracle =
+            new RegisterwerkNavOracle(ecosystemOracle, address(orgId), address(loanToken), 2000, 1 days, 0);
+        vm.expectRevert(EwpgRepoMarket.InsufficientLiquidationHaircut.selector);
+        new EwpgRepoMarket(ecosystemOracle, _params(wideOracle, 7000, 8000, 500, 0, 0));
+        // The demo retune (75% / 5%) fits exactly: 0.7875 ≤ 0.80.
+        new EwpgRepoMarket(ecosystemOracle, _params(wideOracle, 7000, 7500, 500, 0, 0));
+    }
+
+    /// T2-12: a market must quote collateral in its own loan token.
+    function test_constructor_revertsForOracleQuotedInAnotherToken() public {
+        MockStablecoin usdc = new MockStablecoin("USD Coin", "USDC", 6);
+        vm.expectRevert(
+            abi.encodeWithSelector(EwpgRepoMarket.OracleQuoteMismatch.selector, address(loanToken), address(usdc))
+        );
+        new EwpgRepoMarket(
+            ecosystemOracle,
+            MarketParams(
+                address(orgId), treasury, usdc, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS,
+                BASE_RATE_WAD, SLOPE_WAD, 0, 0
+            )
+        );
+    }
+
+    function test_constructor_revertsForZeroOperatorOrgOrTreasury() public {
+        MarketParams memory p = _params(navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 0, 0);
+        p.operatorOrg = address(0);
+        vm.expectRevert(RegisterwerkGated.ZeroOperatingOrg.selector);
+        new EwpgRepoMarket(ecosystemOracle, p);
+
+        p = _params(navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, 0, 0);
+        p.treasury = address(0);
+        vm.expectRevert(EwpgRepoMarket.ZeroAddress.selector);
+        new EwpgRepoMarket(ecosystemOracle, p);
+    }
+
+    /// T2-08: with the invariant in force, one liquidation from a health factor just below 1
+    /// always leaves the position healthier (or closed) — never shorter of collateral.
+    function testFuzz_liquidation_nearHealthFactorOne_raisesHealthFactor(uint256 priceSeed, uint256 repaySeed)
+        public
+    {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        // HF = 100 * p * 0.8 / 7000 ∈ [0.90, 1.0) ⇔ p ∈ [78.75e6, 87.5e6).
+        uint256 price = bound(priceSeed, 78.75e6, 87.5e6 - 1);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), price);
+        (uint256 hfBefore,) = market.healthFactor(alice);
+        assertLt(hfBefore, 1e18);
+
+        uint256 repay = bound(repaySeed, 1, 7_000e6);
+        vm.prank(liquidator);
+        market.liquidate(alice, repay);
+
+        if (market.debtOf(alice) == 0) return;
+        (uint256 hfAfter,) = market.healthFactor(alice);
+        assertGt(hfAfter, hfBefore, "a liquidation near HF 1 must raise the health factor");
+    }
+
+    /// T2-09: on a stale mark inside the grace window a single call closes at most 50% (plus
+    /// less than one rounded-up unit), even when the health factor is below 0.95. A fresh mark
+    /// at the same health factor restores the full close.
+    function test_liquidate_withinGracePeriod_capsAtCloseFactor() public {
+        EwpgRepoMarket staleAwareMarket = _newGraceAwareMarket();
+        _fundAndBorrow(staleAwareMarket, 7_000e6);
+
+        // HF = 100 * 78.75e6 * 0.8 / 7_000e6 = 0.90.
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 78.75e6);
+        vm.warp(block.timestamp + 2 hours); // stale, within grace
+
+        uint256 debtBefore = staleAwareMarket.debtOf(alice);
+        vm.prank(liquidator);
+        (uint256 repaidStale,) = staleAwareMarket.liquidate(alice, type(uint256).max);
+        assertLt(repaidStale, debtBefore / 2 + _discounted(78.75e6) + 1, "grace: 50% close factor");
+        assertGt(staleAwareMarket.debtOf(alice), 0);
+
+        // Same scenario on a fresh mark: full close.
+        EwpgRepoMarket freshMarket = _newGraceAwareMarket();
+        loanToken.mint(lender1, 1_000_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), PRICE_PER_UNIT);
+        _fundAndBorrow(freshMarket, 7_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 78.75e6);
+        vm.prank(liquidator);
+        freshMarket.liquidate(alice, type(uint256).max);
+        assertEq(freshMarket.debtOf(alice), 0, "fresh mark: full close below HF 0.95");
+    }
+
+    /// T2-10 (poc2B): a single-unit position at HF 0.92 used to seize zero units (no rational
+    /// liquidator acts). Now the unit is sold whole and the payment above the debt is credited
+    /// to the borrower as claimable cash.
+    function test_liquidate_singleUnit_seizesWholeUnitAndCreditsSurplus() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 100_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(1, 70_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 81_000e6);
+        vm.warp(block.timestamp + 60 days);
+        (uint256 hf,) = market.healthFactor(alice);
+        assertLt(hf, 0.95e18);
+
+        uint256 debt = market.debtOf(alice);
+        uint256 liquidatorCashBefore = loanToken.balanceOf(liquidator);
+        vm.prank(liquidator);
+        (uint256 repaid, uint256 seized) = market.liquidate(alice, type(uint256).max);
+
+        uint256 payment = _payment(1, 81_000e6);
+        assertEq(seized, 1);
+        assertEq(repaid, debt);
+        assertEq(liquidatorCashBefore - loanToken.balanceOf(liquidator), payment);
+        assertEq(market.surplusOf(alice), payment - debt);
+        assertEq(market.totalSurplus(), payment - debt);
+
+        // Surplus cash is not pool liquidity.
+        assertEq(market.availableLiquidity(), loanToken.balanceOf(address(market)) - (payment - debt));
+
+        uint256 aliceBefore = loanToken.balanceOf(alice);
+        vm.expectEmit(true, false, false, true);
+        emit EwpgRepoMarket.SurplusClaimed(alice, payment - debt);
+        vm.prank(alice);
+        assertEq(market.claimLiquidationSurplus(), payment - debt);
+        assertEq(loanToken.balanceOf(alice), aliceBefore + payment - debt);
+        assertEq(market.totalSurplus(), 0);
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoMarket.ZeroAmount.selector);
+        market.claimLiquidationSurplus();
+    }
+
+    /// T2-10: surplus owed to a borrower is not pool liquidity — a lender with a larger claim
+    /// cannot withdraw it while other loans keep the pool fully utilised.
+    function test_withdraw_cannotConsumeLiquidationSurplus() public {
+        address bob = address(0xB0B);
+        vm.prank(operator);
+        orgRegistry.addMember(address(orgId), bob, new bytes32[](0), "");
+        collateralToken.mint(bob, 1);
+        vm.prank(bob);
+        collateralToken.approve(address(market), type(uint256).max);
+
+        loanToken.mint(mallory, 140_000e6);
+        vm.prank(mallory);
+        loanToken.approve(address(market), type(uint256).max);
+        vm.prank(mallory);
+        market.supply(140_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 100_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(1, 70_000e6);
+        vm.prank(bob);
+        market.pledgeAndBorrow(1, 70_000e6); // pool cash now 0
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 81_000e6);
+        vm.prank(liquidator);
+        market.liquidate(alice, type(uint256).max);
+
+        uint256 surplus = market.surplusOf(alice);
+        assertGt(surplus, 0);
+        uint256 cash = loanToken.balanceOf(address(market));
+        assertEq(market.availableLiquidity(), cash - surplus);
+        vm.prank(mallory);
+        vm.expectRevert(EwpgRepoMarket.InsufficientPoolLiquidity.selector);
+        market.withdraw(cash);
+
+        vm.prank(mallory);
+        market.withdraw(cash - surplus);
+        vm.prank(alice);
+        assertEq(market.claimLiquidationSurplus(), surplus);
+        assertEq(loanToken.balanceOf(address(market)), 0);
+    }
+}
+
+/// @dev An `IRepoOracle` with no deviation concept (`maxDeviationBps() == type(uint256).max`).
+contract OptOutRepoOracle is IRepoOracle {
+    address public immutable quoteToken;
+
+    constructor(address quoteToken_) {
+        quoteToken = quoteToken_;
+    }
+
+    function price(address) external view returns (uint256, uint256) {
+        return (100e6, block.timestamp);
+    }
+
+    function maxDeviationBps() external pure returns (uint256) {
+        return type(uint256).max;
     }
 }

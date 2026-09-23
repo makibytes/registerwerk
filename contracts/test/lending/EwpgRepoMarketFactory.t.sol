@@ -28,9 +28,10 @@ contract EwpgRepoMarketFactoryTest is Test {
 
     address operator = address(0x1);
     address mallory = address(0x66);
+    address treasury = address(0x99);
 
     uint256 constant MAX_LTV_BPS = 7000;
-    uint256 constant LLTV_BPS = 8000;
+    uint256 constant LLTV_BPS = 7500; // 0.75 × 1.05 ≤ 1 − 0.20 oracle tolerance (T2-08)
     uint256 constant LIQ_BONUS_BPS = 500;
     uint256 constant BASE_RATE_WAD = 0.02e18;
     uint256 constant SLOPE_WAD = 0.18e18;
@@ -43,7 +44,9 @@ contract EwpgRepoMarketFactoryTest is Test {
 
         loanToken = new MockStablecoin("AllUnity Euro", "AUEUR", 6);
         collateralToken = new MockStablecoin("Demo Bond Units", "BOND", 0);
-        navOracle = new RegisterwerkNavOracle(ecosystemOracle);
+        navOracle = new RegisterwerkNavOracle(
+            ecosystemOracle, address(new MockOnchainId()), address(loanToken), 2000, 1 days, 0
+        );
 
         factory = new EwpgRepoMarketFactory(ecosystemOracle);
 
@@ -59,6 +62,13 @@ contract EwpgRepoMarketFactoryTest is Test {
         vm.stopPrank();
     }
 
+    function _params(uint256 maxPriceAge, uint256 grace) private view returns (MarketParams memory) {
+        return MarketParams(
+            address(operatorOrgId), treasury, loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS,
+            LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD, maxPriceAge, grace
+        );
+    }
+
     function test_createMarket_revertsForUnauthorizedCaller() public {
         // Compute the permission constant BEFORE pranking — calling factory.CREATE_MARKET()
         // after vm.prank(mallory) would itself consume the prank (it's still a call to
@@ -67,18 +77,12 @@ contract EwpgRepoMarketFactoryTest is Test {
         bytes32 createMarketPermission = factory.CREATE_MARKET();
         vm.prank(mallory);
         vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, mallory, createMarketPermission));
-        factory.createMarket(
-            loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD,
-            1 hours, 1 hours
-        );
+        factory.createMarket(_params(1 hours, 1 hours));
     }
 
     function test_createMarket_deploysWithCorrectImmutables() public {
         vm.prank(operator);
-        address marketAddress = factory.createMarket(
-            loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD,
-            1 hours, 2 hours
-        );
+        address marketAddress = factory.createMarket(_params(1 hours, 2 hours));
 
         EwpgRepoMarket market = EwpgRepoMarket(marketAddress);
         assertEq(address(market.loanToken()), address(loanToken));
@@ -89,35 +93,57 @@ contract EwpgRepoMarketFactoryTest is Test {
         assertEq(market.liquidationBonusBps(), LIQ_BONUS_BPS);
         assertEq(market.maxPriceAgeSeconds(), 1 hours);
         assertEq(market.liquidationGracePeriodSeconds(), 2 hours);
+        assertEq(market.operatorOrg(), address(operatorOrgId), "operated by the creator's org");
+        assertEq(market.treasury(), treasury);
         assertEq(factory.marketCount(), 1);
+        assertTrue(factory.isMarket(marketAddress));
+        assertFalse(factory.isMarket(address(navOracle)));
+    }
+
+    /// T2-06: the creator cannot bind a market to another org.
+    function test_createMarket_revertsForForeignOperatorOrg() public {
+        MarketParams memory p = _params(1 hours, 2 hours);
+        p.operatorOrg = address(0xBEEF);
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, operator, address(0xBEEF)));
+        factory.createMarket(p);
+    }
+
+    /// T2-12: a USDC market on the AUEUR NAV oracle is refused.
+    function test_createMarket_revertsForUsdcMarketOnEuroOracle() public {
+        MockStablecoin usdc = new MockStablecoin("USD Coin", "USDC", 6);
+        MarketParams memory p = _params(1 hours, 2 hours);
+        p.loanToken = usdc;
+        vm.prank(operator);
+        vm.expectRevert(
+            abi.encodeWithSelector(EwpgRepoMarket.OracleQuoteMismatch.selector, address(loanToken), address(usdc))
+        );
+        factory.createMarket(p);
+    }
+
+    /// T2-08: the demo's former 80% LLTV / 5% bonus against a 20% oracle tolerance is refused.
+    function test_createMarket_revertsWhenBonusEatsTheDeviationHaircut() public {
+        MarketParams memory p = _params(1 hours, 2 hours);
+        p.lltvBps = 8000;
+        vm.prank(operator);
+        vm.expectRevert(EwpgRepoMarket.InsufficientLiquidationHaircut.selector);
+        factory.createMarket(p);
     }
 
     function test_predictMarketAddress_matchesActualDeployment() public {
-        address predicted = factory.predictMarketAddress(
-            loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD,
-            1 hours, 2 hours
-        );
+        address predicted = factory.predictMarketAddress(_params(1 hours, 2 hours));
 
         vm.prank(operator);
-        address actual = factory.createMarket(
-            loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD,
-            1 hours, 2 hours
-        );
+        address actual = factory.createMarket(_params(1 hours, 2 hours));
 
         assertEq(actual, predicted);
     }
 
     function test_createMarket_sameParamsTwiceReverts() public {
         vm.startPrank(operator);
-        factory.createMarket(
-            loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD,
-            1 hours, 2 hours
-        );
+        factory.createMarket(_params(1 hours, 2 hours));
         vm.expectRevert(); // CREATE2 collision — same salt, same init code
-        factory.createMarket(
-            loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD,
-            1 hours, 2 hours
-        );
+        factory.createMarket(_params(1 hours, 2 hours));
         vm.stopPrank();
     }
 
@@ -127,9 +153,6 @@ contract EwpgRepoMarketFactoryTest is Test {
         // check disabled) must never be allowed to slip through here.
         vm.prank(operator);
         vm.expectRevert(EwpgRepoMarketFactory.InvalidMaxPriceAge.selector);
-        factory.createMarket(
-            loanToken, collateralToken, navOracle, MAX_LTV_BPS, LLTV_BPS, LIQ_BONUS_BPS, BASE_RATE_WAD, SLOPE_WAD,
-            0, 0
-        );
+        factory.createMarket(_params(0, 0));
     }
 }

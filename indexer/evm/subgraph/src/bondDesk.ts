@@ -4,6 +4,9 @@ import {
   BondRedeemed as BondRedeemedEvent,
   DeskPaused as DeskPausedEvent,
   DeskUnpaused as DeskUnpausedEvent,
+  CouponWithheld as CouponWithheldEvent,
+  WithheldReleased as WithheldReleasedEvent,
+  ForcedRedemption as ForcedRedemptionEvent,
 } from '../generated/EwpgBondDesk/EwpgBondDesk'
 import { BondDeskEvent } from '../generated/schema'
 import { Address } from '@graphprotocol/graph-ts'
@@ -74,6 +77,49 @@ export function handleDeskPaused(event: DeskPausedEvent): void {
 export function handleDeskUnpaused(event: DeskUnpausedEvent): void {
   let e = newEvent(event.address, event.transaction.hash.toHexString(), event.logIndex.toString(), 'UNPAUSED')
   e.actor = event.params.by
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+/** A frozen holder's coupon was withheld in the treasury instead of paid; no cash moved. */
+export function handleCouponWithheld(event: CouponWithheldEvent): void {
+  let e = newEvent(event.address, event.transaction.hash.toHexString(), event.logIndex.toString(), 'COUPON_WITHHELD')
+  e.actor = event.params.holder
+  e.period = event.params.period
+  e.paidOrPrincipal = event.params.amount
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+/** A withheld coupon was paid to a destination named in a legal order. */
+export function handleWithheldReleased(event: WithheldReleasedEvent): void {
+  let e = newEvent(event.address, event.transaction.hash.toHexString(), event.logIndex.toString(), 'WITHHELD_RELEASED')
+  e.actor = event.params.holder
+  e.period = event.params.period
+  e.paidOrPrincipal = event.params.amount
+  e.forcedDestination = event.params.to
+  e.legalBasis = event.params.legalBasis
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+/** A frozen holder's bonds were burned and the principal paid to a legal-order destination. */
+export function handleForcedRedemption(event: ForcedRedemptionEvent): void {
+  let e = newEvent(event.address, event.transaction.hash.toHexString(), event.logIndex.toString(), 'FORCED_REDEMPTION')
+  e.actor = event.params.holder
+  e.amount = event.params.amount
+  e.paidOrPrincipal = event.params.principal
+  e.forcedDestination = event.params.to
+  e.legalBasis = event.params.legalBasis
   e.blockNumber = event.block.number
   e.blockTimestamp = event.block.timestamp
   e.transactionHash = event.transaction.hash

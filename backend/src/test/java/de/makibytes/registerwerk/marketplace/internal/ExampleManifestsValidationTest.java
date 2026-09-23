@@ -99,6 +99,19 @@ class ExampleManifestsValidationTest {
     }
 
     @org.junit.jupiter.api.Test
+    @DisplayName("bond-desk declares every permission EwpgBondDesk gates on, including pause")
+    void bondDeskDeclaresAllContractPermissions() throws IOException {
+        var result = service.validate(readManifest("bond-desk"), "bond-desk", chainConfigId);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.manifest().requiredPermissions())
+                .extracting(ManifestValidationService.RequiredPermission::code)
+                .containsExactlyInAnyOrder(
+                        "bond-desk.issue", "bond-desk.pay-coupon", "bond-desk.redeem",
+                        "bond-desk.pause", "bond-desk.legal-order");
+    }
+
+    @org.junit.jupiter.api.Test
     @DisplayName("boardroom declares no payment methods (pure governance, no cash leg)")
     void boardroomDeclaresNoPaymentMethods() throws IOException {
         var result = service.validate(readManifest("boardroom"), "boardroom", chainConfigId);
@@ -122,7 +135,7 @@ class ExampleManifestsValidationTest {
     }
 
     @org.junit.jupiter.api.Test
-    @DisplayName("repo-markets declares its own permission namespace even though BORROW/CONFIGURE are shared with repo-facility")
+    @DisplayName("repo-markets declares its own permission namespace; only BORROW is shared with repo-facility")
     void repoMarketsDeclaresOwnNamespacedPermissions() throws IOException {
         var result = service.validate(readManifest("repo-markets"), "repo-markets", chainConfigId);
 
@@ -130,7 +143,8 @@ class ExampleManifestsValidationTest {
         assertThat(result.manifest().requiredPermissions())
                 .extracting(ManifestValidationService.RequiredPermission::code)
                 .containsExactlyInAnyOrder(
-                        "repo-markets.create-market", "repo-markets.curate-vault", "repo-markets.push-price");
+                        "repo-markets.create-market", "repo-markets.configure", "repo-markets.reconcile",
+                        "repo-markets.curate-vault", "repo-markets.push-price", "repo-markets.override-price");
         assertThat(result.manifest().paymentMethods()).hasSize(2)
                 .extracting(ManifestValidationService.PaymentMethod::railCode)
                 .containsExactlyInAnyOrder("aueur", "usdc");

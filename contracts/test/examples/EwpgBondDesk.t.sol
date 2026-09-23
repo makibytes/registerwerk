@@ -91,6 +91,7 @@ contract EwpgBondDeskTest is Test {
     bytes32 payCoupon_;
     bytes32 redeem_;
     bytes32 pause_;
+    bytes32 legalOrder_;
     uint256 maturity;
 
     address operator = address(0x1);
@@ -187,14 +188,17 @@ contract EwpgBondDeskTest is Test {
         stable.mint(investor4, 1_000_000e6);
 
         // ── The dApp itself ─────────────────────────────────────────────────────
-        maturity = block.timestamp + 365 days;
+        // Four coupon periods; maturity falls exactly on the fourth period boundary.
+        maturity = block.timestamp + 4 * COUPON_INTERVAL;
+        orgId = new MockOnchainId(); // the org operating this desk instance
         desk = new EwpgBondDesk(
-            oracle, bond, stable, issuerTreasury, PRICE_PER_UNIT, COUPON_BPS, COUPON_INTERVAL, maturity
+            oracle, bond, stable, issuerTreasury, PRICE_PER_UNIT, COUPON_BPS, COUPON_INTERVAL, maturity, address(orgId)
         );
         issue_ = desk.ISSUE();
         payCoupon_ = desk.PAY_COUPON();
         redeem_ = desk.REDEEM();
         pause_ = desk.PAUSE();
+        legalOrder_ = desk.LEGAL_ORDER();
 
         // Treasury funds coupon/redemption payouts; investors fund their subscriptions.
         vm.prank(issuerTreasury);
@@ -218,7 +222,6 @@ contract EwpgBondDeskTest is Test {
         vm.stopPrank();
 
         // ── Ecosystem wiring: the operating org may call the desk ────────────────
-        orgId = new MockOnchainId();
         ecosystemKycIssuer = new MockClaimIssuer();
         ecosystemAmlIssuer = new MockClaimIssuer();
 
@@ -231,6 +234,7 @@ contract EwpgBondDeskTest is Test {
         permissions.grantToOrg(address(orgId), payCoupon_);
         permissions.grantToOrg(address(orgId), redeem_);
         permissions.grantToOrg(address(orgId), pause_);
+        permissions.grantToOrg(address(orgId), legalOrder_);
 
         uint256[] memory kycTopic = new uint256[](1);
         kycTopic[0] = TOPIC_KYC;
@@ -297,7 +301,7 @@ contract EwpgBondDeskTest is Test {
 
     function test_subscribe_revertsForUnboundWallet() public {
         vm.prank(mallory);
-        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, mallory, issue_));
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId)));
         desk.subscribe(investor1, 1000);
     }
 
@@ -504,7 +508,7 @@ contract EwpgBondDeskTest is Test {
 
     function test_pause_revertsForWalletWithoutPausePermission() public {
         vm.prank(mallory);
-        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, mallory, pause_));
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId)));
         desk.pause();
     }
 
@@ -538,21 +542,26 @@ contract EwpgBondDeskTest is Test {
 
         uint256 cashBefore = stable.balanceOf(investor1);
         uint256 principal = 1000 * PRICE_PER_UNIT;
+        uint256 coupons = 4 * ((uint256(1000) * PRICE_PER_UNIT * COUPON_BPS) / 10_000);
 
         vm.warp(maturity);
+        _payThroughFinalPeriod(_one(investor1));
         vm.prank(alice);
         desk.redeem(investor1);
 
         assertEq(bond.balanceOf(investor1), 0);
         assertTrue(desk.redeemed(investor1));
         assertEq(complianceModule.getInvestorCount(complianceAddr), 0);
-        assertEq(stable.balanceOf(investor1), cashBefore + principal, "principal must be paid out on redemption");
+        assertEq(
+            stable.balanceOf(investor1), cashBefore + coupons + principal, "principal must be paid out on redemption"
+        );
     }
 
     function test_redeem_revertsOnDoubleRedeem() public {
         vm.prank(alice);
         desk.subscribe(investor1, 1000);
         vm.warp(maturity);
+        _payThroughFinalPeriod(_one(investor1));
 
         vm.startPrank(alice);
         desk.redeem(investor1);
@@ -571,6 +580,314 @@ contract EwpgBondDeskTest is Test {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.ClaimMissing.selector, alice, TOPIC_AML));
         desk.redeem(investor1);
+    }
+
+    // ── T2-15: coupon schedule tied to maturity ───────────────────────────
+
+    function _one(address a) internal pure returns (address[] memory holders) {
+        holders = new address[](1);
+        holders[0] = a;
+    }
+
+    /// @dev Opens (and pays) every period up to the final one; each call opens at most one.
+    function _payThroughFinalPeriod(address[] memory holders) internal {
+        vm.startPrank(alice);
+        while (desk.couponPeriod() < desk.finalCouponPeriod()) {
+            desk.payCoupon(holders);
+        }
+        vm.stopPrank();
+    }
+
+    function test_constructor_derivesFinalCouponPeriodFromMaturity() public view {
+        assertEq(desk.finalCouponPeriod(), 4);
+        assertEq(desk.operatorOrg(), address(orgId));
+    }
+
+    /// @notice Veto B2: an off-grid term no longer reverts — the schedule is anchored on
+    ///         maturity with a short first (stub) period, the final period due at maturity.
+    function test_constructor_offGridMaturityGetsShortFirstStubPeriod() public {
+        uint256 mat = block.timestamp + 365 days; // 4 periods + a 5-day stub
+        EwpgBondDesk d = new EwpgBondDesk(
+            oracle, bond, stable, issuerTreasury, PRICE_PER_UNIT, COUPON_BPS, COUPON_INTERVAL, mat, address(orgId)
+        );
+        assertEq(d.finalCouponPeriod(), 5);
+        assertEq(d.nextCouponDue(), block.timestamp + 5 days, "stub first period");
+        assertEq(d.nextCouponDue() + 4 * COUPON_INTERVAL, mat, "final period due at maturity");
+    }
+
+    function test_constructor_rejectsMaturityNotInTheFuture() public {
+        vm.expectRevert(EwpgBondDesk.InvalidCouponSchedule.selector);
+        new EwpgBondDesk(
+            oracle, bond, stable, issuerTreasury, PRICE_PER_UNIT, COUPON_BPS, COUPON_INTERVAL, block.timestamp, address(orgId)
+        );
+    }
+
+    /// @notice Veto B2 regression: `forge script` computes maturity from the simulated
+    ///         timestamp, but the constructor runs in a later mined block. The old exact-grid
+    ///         check reverted every real deployment; now it deploys, no period opens early,
+    ///         the final one falls due exactly at maturity and none opens after it.
+    function test_constructor_deploysWhenMinedAfterTheScriptTimestamp() public {
+        uint256 t0 = block.timestamp;
+        uint256 mat = t0 + 4 * COUPON_INTERVAL; // what DeployExampleDapps computes at simulation time
+        vm.warp(t0 + 7); // the transaction is mined 7 seconds later
+        EwpgBondDesk d = new EwpgBondDesk(
+            oracle, bond, stable, issuerTreasury, PRICE_PER_UNIT, COUPON_BPS, COUPON_INTERVAL, mat, address(orgId)
+        );
+        assertEq(d.finalCouponPeriod(), 4);
+        assertEq(d.nextCouponDue(), t0 + COUPON_INTERVAL, "first period shortened by the 7s stub");
+
+        vm.startPrank(alice);
+        vm.warp(t0 + COUPON_INTERVAL - 1);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NoCouponPeriodOpen.selector, t0 + COUPON_INTERVAL));
+        d.payCoupon(_one(investor1));
+
+        vm.warp(mat - 1);
+        for (uint256 i = 0; i < 3; i++) {
+            d.payCoupon(_one(investor1));
+        }
+        assertEq(d.payCoupon(_one(investor1)), 3, "final period is not due before maturity");
+
+        vm.warp(mat);
+        assertEq(d.payCoupon(_one(investor1)), 4, "final period due exactly at maturity");
+        vm.warp(mat + COUPON_INTERVAL);
+        assertEq(d.payCoupon(_one(investor1)), 4, "no period beyond the final one");
+        assertFalse(d.periodOpened(5));
+        vm.stopPrank();
+    }
+
+    function test_constructor_rejectsZeroOperatorOrg() public {
+        vm.expectRevert(RegisterwerkGated.ZeroOperatingOrg.selector);
+        new EwpgBondDesk(
+            oracle, bond, stable, issuerTreasury, PRICE_PER_UNIT, COUPON_BPS, COUPON_INTERVAL, maturity, address(0)
+        );
+    }
+
+    /// @notice Regression (B2-09): redeeming at maturity before the final period was opened
+    ///         burned the position, and the period-4 snapshot then read 0 — the last coupon
+    ///         was forfeited. Now redeem waits for the final period.
+    function test_redeem_revertsUntilFinalCouponPeriodOpened_thenFinalCouponIsPaid() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        uint256 coupon = (uint256(1000) * PRICE_PER_UNIT * COUPON_BPS) / 10_000;
+
+        vm.warp(maturity);
+        vm.startPrank(alice);
+        for (uint256 i = 0; i < 3; i++) {
+            desk.payCoupon(_one(investor1));
+        }
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.FinalCouponNotOpened.selector, 4));
+        desk.redeem(investor1);
+
+        uint256 cashBefore = stable.balanceOf(investor1);
+        assertEq(desk.payCoupon(_one(investor1)), 4);
+        assertEq(stable.balanceOf(investor1), cashBefore + coupon, "final coupon paid");
+        desk.redeem(investor1);
+        vm.stopPrank();
+        assertEq(stable.balanceOf(investor1), cashBefore + coupon + 1000 * PRICE_PER_UNIT);
+    }
+
+    /// @notice Regression (B2-09): the schedule was not capped at maturity, so a call one
+    ///         interval after maturity opened a period 5.
+    function test_payCoupon_opensNoPeriodBeyondMaturity() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.warp(maturity);
+        _payThroughFinalPeriod(_one(investor1));
+
+        uint256 cashBefore = stable.balanceOf(investor1);
+        vm.warp(maturity + COUPON_INTERVAL);
+        vm.prank(alice);
+        uint256 period = desk.payCoupon(_one(investor1));
+
+        assertEq(period, 4, "stays on the final period");
+        assertEq(desk.couponPeriod(), 4);
+        assertFalse(desk.periodOpened(5));
+        assertEq(stable.balanceOf(investor1), cashBefore, "no coupon after the final one");
+    }
+
+    // ── T2-16: frozen holders ─────────────────────────────────────────────
+
+    /// @notice Regression (C-05): a frozen holder was paid the coupon in cash. Now the
+    ///         coupon is recorded as withheld and the cash stays in the treasury.
+    function test_payCoupon_withholdsFromFrozenHolder() public {
+        vm.startPrank(alice);
+        desk.subscribe(investor1, 1000);
+        desk.subscribe(investor3, 2000);
+        vm.stopPrank();
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, true);
+
+        address[] memory holders = new address[](2);
+        holders[0] = investor1;
+        holders[1] = investor3;
+        uint256 coupon1 = (uint256(1000) * PRICE_PER_UNIT * COUPON_BPS) / 10_000;
+        uint256 cash1Before = stable.balanceOf(investor1);
+        uint256 treasuryBefore = stable.balanceOf(issuerTreasury);
+
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.expectEmit(true, true, false, true, address(desk));
+        emit EwpgBondDesk.CouponWithheld(1, investor1, coupon1);
+        vm.prank(alice);
+        desk.payCoupon(holders);
+
+        assertEq(stable.balanceOf(investor1), cash1Before, "frozen holder receives nothing");
+        assertEq(desk.withheld(1, investor1), coupon1);
+        assertFalse(desk.couponPaid(1, investor1));
+        uint256 coupon3 = (uint256(2000) * PRICE_PER_UNIT * COUPON_BPS) / 10_000;
+        assertEq(stable.balanceOf(issuerTreasury), treasuryBefore - coupon3, "withheld cash stays in the treasury");
+
+        // Unfreezing does not let a later payCoupon pay it — release is by legal order only.
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, false);
+        vm.prank(alice);
+        desk.payCoupon(holders);
+        assertEq(stable.balanceOf(investor1), cash1Before);
+    }
+
+    function test_payCoupon_withholdsFromHolderWithPartiallyFrozenUnits() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.freezePartialTokens(investor1, 10);
+
+        uint256 cashBefore = stable.balanceOf(investor1);
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+
+        assertEq(stable.balanceOf(investor1), cashBefore);
+        assertGt(desk.withheld(1, investor1), 0);
+    }
+
+    function test_redeem_revertsForFrozenHolder() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.warp(maturity);
+        _payThroughFinalPeriod(_one(investor3)); // opens the periods without touching investor1
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, true);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.HolderFrozen.selector, investor1));
+        desk.redeem(investor1);
+    }
+
+    function test_subscribe_revertsForFrozenInvestor() public {
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, true);
+        uint256 cashBefore = stable.balanceOf(investor1);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.HolderFrozen.selector, investor1));
+        desk.subscribe(investor1, 1000);
+        assertEq(stable.balanceOf(investor1), cashBefore);
+        assertEq(bond.balanceOf(investor1), 0);
+    }
+
+    function test_releaseWithheld_paysLegalOrderDestination() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, true);
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+        uint256 amount = desk.withheld(1, investor1);
+
+        address blockedAccount = makeAddr("courtBlockedAccount");
+        vm.expectEmit(true, true, true, true, address(desk));
+        emit EwpgBondDesk.WithheldReleased(1, investor1, blockedAccount, amount, "AG Frankfurt 2-01 O 123/26");
+        vm.prank(alice);
+        desk.releaseWithheld(1, investor1, blockedAccount, "AG Frankfurt 2-01 O 123/26");
+
+        assertEq(stable.balanceOf(blockedAccount), amount);
+        assertEq(desk.withheld(1, investor1), 0);
+        assertTrue(desk.couponPaid(1, investor1));
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NothingWithheld.selector, 1, investor1));
+        desk.releaseWithheld(1, investor1, blockedAccount, "again");
+    }
+
+    function test_releaseWithheld_requiresLegalOrderPermissionAndBasis() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, true);
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgBondDesk.LegalBasisRequired.selector);
+        desk.releaseWithheld(1, investor1, investor1, "");
+
+        vm.prank(operator);
+        permissions.revokeFromOrg(address(orgId), legalOrder_);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, alice, legalOrder_));
+        desk.releaseWithheld(1, investor1, investor1, "order");
+    }
+
+    function test_forceRedeem_burnsFrozenPositionAndPaysDestination() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.warp(maturity);
+        _payThroughFinalPeriod(_one(investor3));
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, true);
+
+        address to = makeAddr("courtBlockedAccount");
+        vm.prank(alice);
+        desk.forceRedeem(investor1, to, "BaFin order 42");
+
+        assertEq(bond.balanceOf(investor1), 0);
+        assertTrue(desk.redeemed(investor1));
+        assertEq(stable.balanceOf(to), 1000 * PRICE_PER_UNIT);
+    }
+
+    function test_forceRedeem_revertsForUnfrozenHolder() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.warp(maturity);
+        _payThroughFinalPeriod(_one(investor1));
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.HolderNotFrozen.selector, investor1));
+        desk.forceRedeem(investor1, investor1, "order");
+    }
+
+    // ── T2-06: instance binding ───────────────────────────────────────────
+
+    /// @notice Another org holding the same `bond-desk.*` grants cannot operate this
+    ///         issuer's desk (before, it could mint on it).
+    function test_otherOrgWithSameSlugGrants_cannotOperateDesk() public {
+        address bob = makeAddr("otherIssuerTreasury");
+        MockOnchainId otherOrg = new MockOnchainId();
+        vm.startPrank(operator);
+        orgRegistry.registerOrg(address(otherOrg), COUNTRY_DE);
+        bytes32[] memory roles = new bytes32[](1);
+        roles[0] = keccak256("TREASURY");
+        orgRegistry.addMember(address(otherOrg), bob, roles, "");
+        permissions.grantToOrg(address(otherOrg), issue_);
+        permissions.grantToOrg(address(otherOrg), payCoupon_);
+        permissions.grantToOrg(address(otherOrg), redeem_);
+        permissions.grantToOrg(address(otherOrg), pause_);
+        permissions.grantToOrg(address(otherOrg), legalOrder_);
+        vm.stopPrank();
+        otherOrg.addClaim(TOPIC_KYC, address(ecosystemKycIssuer), hex"01", hex"02");
+
+        bytes memory wrongOrg = abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, bob, address(orgId));
+        vm.startPrank(bob);
+        vm.expectRevert(wrongOrg);
+        desk.subscribe(investor1, 1000);
+        vm.expectRevert(wrongOrg);
+        desk.payCoupon(_one(investor1));
+        vm.expectRevert(wrongOrg);
+        desk.pause();
+        vm.expectRevert(wrongOrg);
+        desk.releaseWithheld(1, investor1, bob, "x");
+        vm.stopPrank();
     }
 
     // ── EwpgComplianceModule fixes ─────────────────────────────────────────

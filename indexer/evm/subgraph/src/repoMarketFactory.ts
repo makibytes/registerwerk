@@ -1,4 +1,4 @@
-import { MarketCreated } from '../generated/EwpgRepoMarketFactory/EwpgRepoMarketFactory'
+import { MarketCreated, MarketOperatorSet } from '../generated/EwpgRepoMarketFactory/EwpgRepoMarketFactory'
 import { EwpgRepoMarket } from '../generated/templates'
 import { RepoMarket } from '../generated/schema'
 
@@ -25,4 +25,17 @@ export function handleMarketCreated(event: MarketCreated): void {
   market.save()
 
   EwpgRepoMarket.create(marketAddress)
+}
+
+/**
+ * Handles EwpgRepoMarketFactory.MarketOperatorSet(market, operatorOrg, treasury), emitted right
+ * after MarketCreated in the same transaction. Markets from a factory that predates the event
+ * keep both fields null.
+ */
+export function handleMarketOperatorSet(event: MarketOperatorSet): void {
+  let market = RepoMarket.load(event.params.market.toHexString())
+  if (market == null) return
+  market.factoryReportedOperatorOrg = event.params.operatorOrg
+  market.factoryReportedTreasury = event.params.treasury
+  market.save()
 }

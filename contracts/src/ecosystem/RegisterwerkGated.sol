@@ -19,6 +19,22 @@ import "./interfaces/IPermissionOracle.sol";
 ///     }
 /// }
 /// ```
+///
+///         Permissions are org-wide: a grant of "loandesk.open" says *what* an org may do on
+///         every instance of the dApp, not *whose* instance it is. A value-holding instance
+///         therefore binds itself to its operating org and gates privileged functions with
+///         {requiresOrgPermission}:
+///
+/// ```solidity
+/// address public immutable operatorOrg;
+///
+/// constructor(IPermissionOracle oracle_, address operatorOrg_) RegisterwerkGated(oracle_) {
+///     _requireOrg(operatorOrg_);
+///     operatorOrg = operatorOrg_;
+/// }
+///
+/// function sweep() external requiresOrgPermission(operatorOrg, SWEEP) { ... }
+/// ```
 abstract contract RegisterwerkGated {
     /// @notice The Registerwerk permission oracle — the only ecosystem address a dApp stores.
     IPermissionOracle public immutable oracle;
@@ -26,6 +42,10 @@ abstract contract RegisterwerkGated {
     error PermissionDenied(address wallet, bytes32 permission);
     error ClaimMissing(address wallet, uint256 topic);
     error NotAnActiveMember(address wallet);
+    /// @notice The caller's wallet is not bound to the org that operates this instance.
+    error WrongOperatingOrg(address wallet, address expectedOrg);
+    /// @notice An instance was configured with the zero address as its operating org.
+    error ZeroOperatingOrg();
 
     constructor(IPermissionOracle oracle_) {
         require(address(oracle_) != address(0), "RegisterwerkGated: zero oracle address");
@@ -37,6 +57,15 @@ abstract contract RegisterwerkGated {
         if (!oracle.hasPermission(msg.sender, permission)) {
             revert PermissionDenied(msg.sender, permission);
         }
+        _;
+    }
+
+    /// @notice Instance binding: requires the caller's wallet to be bound to `org` (the org
+    ///         operating this instance) **and** to hold `permission` via that org. Reverts
+    ///         {WrongOperatingOrg} before the permission is looked at, so a same-slug grant
+    ///         held by another org never reaches a foreign instance.
+    modifier requiresOrgPermission(address org, bytes32 permission) {
+        _checkOrgPermission(msg.sender, org, permission);
         _;
     }
 
@@ -54,5 +83,22 @@ abstract contract RegisterwerkGated {
             revert NotAnActiveMember(msg.sender);
         }
         _;
+    }
+
+    /// @dev Body of {requiresOrgPermission}, for instances whose operating org is resolved
+    ///      inside the function (e.g. per-asset). `org == address(0)` never matches — an
+    ///      unset binding fails closed rather than matching unbound wallets.
+    function _checkOrgPermission(address wallet, address org, bytes32 permission) internal view {
+        if (org == address(0) || oracle.orgOf(wallet) != org) {
+            revert WrongOperatingOrg(wallet, org);
+        }
+        if (!oracle.hasPermission(wallet, permission)) {
+            revert PermissionDenied(wallet, permission);
+        }
+    }
+
+    /// @dev Constructor/setter guard for an operating-org binding.
+    function _requireOrg(address org) internal pure {
+        if (org == address(0)) revert ZeroOperatingOrg();
     }
 }

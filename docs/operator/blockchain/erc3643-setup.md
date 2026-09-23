@@ -31,31 +31,40 @@ curl http://localhost:48080/api/v1/admin/chains/11155111 \
   | jq '.factoryAddress'
 ```
 
-## Step 2 — Set up the registry as Trusted Issuer
+## Step 2 — Deploy the registry ClaimIssuer and trust it
 
-The registry backend operator wallet must be registered in the `TrustedIssuersRegistry` so it can issue KYC/AML claims. This is done once per factory deployment.
+The backend issues KYC/AML claims through an ONCHAINID `ClaimIssuer` **contract**, one per chain, whose MANAGEMENT key is the backend's registry signer. The signer wallet itself cannot be the issuer: ONCHAINID's `addClaim` calls `isClaimValid` on the issuer, which reverts for a plain wallet, so such claims never reach the chain.
 
 ```bash
-cast send $TRUSTED_ISSUERS_REGISTRY \
-  "addTrustedIssuer(address,uint256[])" \
-  $REGISTRY_OPERATOR_ADDRESS "[1,2]" \
-  --rpc-url $RPC_URL \
-  --private-key $DEPLOYER_PRIVATE_KEY
+cd contracts
+REGISTRY_WALLET_PRIVATE_KEY=$REGISTRY_SIGNER_KEY \
+  forge script script/DeployClaimIssuer.s.sol --rpc-url $RPC_URL --broadcast
+# Logs "ClaimIssuer : 0x…"; CLAIM_ISSUER_MANAGEMENT_KEY overrides the management key
+# (default: the broadcasting wallet, which must be the backend's registry signer).
 ```
 
-Parameters:
-- First arg: address of the registry operator (deployer wallet)
-- Second arg: array of claim topic IDs this issuer is trusted to sign (1=KYC, 2=AML)
+Set `CLAIM_ISSUER_<CHAIN>` (for example `CLAIM_ISSUER_ETH_TESTNET`, bound to `registerwerk.contracts.claim-issuer.<chain>`) and restart the backend. Without it, the backend rejects claim issuance and T-REX suite deployment on that chain instead of broadcasting transactions that would revert. Before each `addClaim`, it also checks that the signer holds a key on the ClaimIssuer.
+
+New suites deployed by the backend trust this ClaimIssuer for topics 1 (KYC) and 2 (AML). For a suite deployed **before** this change, register it once (operator API, owner-only on the suite's `TrustedIssuersRegistry`):
+
+```bash
+curl -X POST http://localhost:48080/api/v1/assets/$ASSET_ID/erc3643/$DEPLOYMENT_ID/trusted-issuers \
+  -H "Authorization: Bearer $OPERATOR_JWT" -H "Content-Type: application/json" \
+  -d "{\"issuerAddress\": \"$CLAIM_ISSUER\", \"claimTopics\": [1,2]}"
+```
 
 Verify:
 
 ```bash
 cast call $TRUSTED_ISSUERS_REGISTRY \
-  "isTrustedIssuer(address)(bool)" \
-  $REGISTRY_OPERATOR_ADDRESS \
-  --rpc-url $RPC_URL
+  "isTrustedIssuer(address)(bool)" $CLAIM_ISSUER --rpc-url $RPC_URL
 # Expected: true
 ```
+
+For ecosystem dApps gated through `PermissionOracle`, register the same ClaimIssuer in the `EcosystemTrustedIssuersRegistry`, using the operator's trusted-issuer administration.
+
+!!! note
+    Revoking a claim removes it from the identity **and** calls `revokeClaimBySignature` on the ClaimIssuer. The second step stops anyone from re-adding the published signature later. Both steps need the registry signer to hold the ClaimIssuer's MANAGEMENT key.
 
 ## Step 3 — Configure claim topics
 
@@ -109,9 +118,9 @@ cast call $IDENTITY_REGISTRY \
 
 After KYC approval in the operator frontend, the backend automatically issues claims on the investor's ONCHAINID:
 
-1. Constructs a claim with topic ID, issuer address, and a hash of the KYC verification record
-2. Signs the claim with the operator's private key
-3. Calls `addClaim` on the investor's ONCHAINID contract
+1. Constructs the claim data `abi.encode(topic, scheme=1, claimIssuer, expiresAt, "")`
+2. Signs `keccak256(abi.encode(identity, topic, data))` (EIP-191 prefixed) with the registry signer
+3. Calls `addClaim(topic, 1, claimIssuer, signature, data, "")` on the investor's ONCHAINID contract, with the chain's ClaimIssuer contract as issuer
 
 Claims include an expiry date (default: 365 days). The backend schedules expiry reminder emails and can re-issue claims on renewal.
 

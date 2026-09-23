@@ -13,10 +13,18 @@ import java.util.UUID;
  * entitlement is fixed at record date, not settlement date, per standard securities practice).
  * {@code entitlementAmount} is filled in when the action reaches {@code COMPUTED}.
  * {@code settlementTxHash}/{@code settledAt} are filled in when the action is settled.
+ *
+ * <p>{@code payoutStatus} (T2-18): an entry snapshotted for a nominee-pool holder (a pool contract
+ * holding units on behalf of others) is {@link PayoutStatus#HELD_LOOK_THROUGH} — recorded, but
+ * excluded from the action's payable total and from settlement until the look-through question
+ * (PARK-T2-18) is decided.
  */
 @Entity
 @Table(name = "corporate_action_entry")
 public class CorporateActionEntry {
+
+    /** Whether an entry's entitlement is paid out at settlement (T2-18). */
+    public enum PayoutStatus { PAYABLE, HELD_LOOK_THROUGH }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -42,6 +50,10 @@ public class CorporateActionEntry {
     @Column(name = "entitlement_amount", precision = 38, scale = 18)
     private BigDecimal entitlementAmount;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payout_status", nullable = false, length = 24)
+    private PayoutStatus payoutStatus = PayoutStatus.PAYABLE;
+
     @Column(name = "settlement_tx_hash")
     private String settlementTxHash;
 
@@ -64,6 +76,8 @@ public class CorporateActionEntry {
     public void setNominalAtRecord(BigDecimal v) { this.nominalAtRecord = v; }
     public BigDecimal getEntitlementAmount() { return entitlementAmount; }
     public void setEntitlementAmount(BigDecimal v) { this.entitlementAmount = v; }
+    public PayoutStatus getPayoutStatus() { return payoutStatus; }
+    public void setPayoutStatus(PayoutStatus v) { this.payoutStatus = v; }
     public String getSettlementTxHash() { return settlementTxHash; }
     public void setSettlementTxHash(String v) { this.settlementTxHash = v; }
     public Instant getSettledAt() { return settledAt; }

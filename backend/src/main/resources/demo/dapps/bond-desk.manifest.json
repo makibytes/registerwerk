@@ -2,12 +2,12 @@
   "slug": "bond-desk",
   "name": "eWpG Bond Desk",
   "version": "1.0.0",
-  "description": "Paying agent for a German eWpG-registered bond issued as a full ERC-3643 (T-REX) security token. Demonstrates the two authority layers a real eWpG instrument stacks on Registerwerk: T-REX agent rights (mint/burn on the bond token itself) plus ecosystem permission gating (which org/human may trigger issuance, coupon payment, or redemption), with independent ONCHAINID claim checks (KYC, AML) enforced through RegisterwerkGated and the PermissionOracle.",
+  "description": "Paying agent for a German eWpG-registered bond issued as a full ERC-3643 (T-REX) security token. Demonstrates the two authority layers a real eWpG instrument stacks on Registerwerk: T-REX agent rights (mint/burn on the bond token itself) plus ecosystem permission gating (which org/human may trigger issuance, coupon payment, or redemption), with independent ONCHAINID claim checks (KYC, AML) enforced through RegisterwerkGated and the PermissionOracle. Every desk function is bound to the issuer org the instance was deployed for (operatorOrg). Runbook order at maturity: the coupon schedule is anchored on maturity (the final period falls due exactly at maturity; any remainder of the term is a short first stub period); call payCoupon for the final period first (it opens no period after maturity), then redeem each holder — redeem reverts until the final period is open. Frozen holders are not paid: coupons are recorded as withheld (cash stays in the treasury) and redemption reverts; both are released only under a legal order to the destination it names (releaseWithheld / forceRedeem).",
   "category": "capital-markets",
   "contracts": [
     {
       "name": "EwpgBondDesk",
-      "abiSha256": "8bde3212e6f165f5ec0750613a74a6851c691008a262c8ad6cd3422a8aafb3ff",
+      "abiSha256": "80fb9250be05ff1bda25ee52923aa7d698c023390cd7f8ee99c50abd283e4935",
       "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/examples/EwpgBondDesk.sol"
     }
   ],
@@ -22,7 +22,15 @@
     },
     {
       "code": "bond-desk.redeem",
-      "rationale": "Pay principal and burn a matured holder's position at redemption"
+      "rationale": "Pay principal and burn a matured holder's position at redemption, after the final coupon period is open"
+    },
+    {
+      "code": "bond-desk.pause",
+      "rationale": "Suspend and resume every desk function that moves the payment leg (subscription, coupon, redemption and legal-order payouts), e.g. when the settlement rail is disabled"
+    },
+    {
+      "code": "bond-desk.legal-order",
+      "rationale": "Execute a legal order for a frozen holder: release a withheld coupon or force-redeem the matured position to the destination named in the order, recording its legal basis on chain"
     }
   ],
   "requiredClaimTopics": [

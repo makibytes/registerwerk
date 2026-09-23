@@ -24,7 +24,7 @@ import {
 } from '../../../core/api/erc3643.service';
 import { ConfidentialService } from '../../../core/api/confidential.service';
 import { MintControlService, MintControlRule, RuleType } from '../../../core/api/mint-control.service';
-import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../../core/api/gas-sponsorship.service';
+import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor, GasSponsorshipOnchainStatus } from '../../../core/api/gas-sponsorship.service';
 import { VaultService } from '../../../core/api/vault.service';
 import { VaultRequestsComponent } from '../wizards/vault-requests/vault-requests.component';
 import { NavStrikeComponent } from '../wizards/nav-strike/nav-strike.component';
@@ -45,6 +45,7 @@ import {
 import { StatusBadgeComponent, ChainNamePipe, DataTableComponent, TableColumn } from '@registerwerk/ui';
 import { PageEvent } from '@angular/material/paginator';
 import { RegisterInvestorDialogComponent, RegisterInvestorData } from './register-investor-dialog.component';
+import { HolderSyncBannerComponent } from './holder-sync-banner.component';
 import { AddIssuerDialogComponent, AddIssuerData } from './add-issuer-dialog.component';
 import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-topic-dialog.component';
 import { TransactionService, TxRecord } from '../../../core/api/transaction.service';
@@ -90,6 +91,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     BulkErc3643OpsComponent,
     ForceGrantsComponent,
     ConfidentialViewerPanelComponent,
+    HolderSyncBannerComponent,
   ],
 
   styles: [`
@@ -264,6 +266,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
           }
         </div>
       </div>
+
+      <app-holder-sync-banner [asset]="asset" [canMutate]="canMutate" (changed)="loadAsset()" />
 
       <mat-tab-group animationDuration="200ms">
         <!-- Overview -->
@@ -720,6 +724,42 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                     <span style="font-size:13px;color:var(--rw-text-secondary)">No gas sponsorship configured — investors pay their own gas.</span>
                   }
                 </div>
+
+                @if (effectiveGasPolicy && gasOnchain) {
+                  <div style="margin-bottom:20px;padding:12px 16px;border:1px solid var(--rw-border);border-radius:var(--rw-radius);background:var(--rw-surface);font-size:13px">
+                    <div style="font-weight:500;margin-bottom:8px">On-chain (EwpgPaymaster)</div>
+                    @if (gasOnchain.status === 'NO_POLICY') {
+                      <span style="color:var(--rw-text-secondary)">No sponsorship policy applies to this deployment.</span>
+                    } @else if (gasOnchain.status === 'NO_CHAIN') {
+                      <span style="color:var(--rw-text-secondary)">This deployment is not on an EVM chain yet — nothing to read on chain.</span>
+                    } @else if (gasOnchain.status === 'NOT_CONFIGURED' || !gasOnchain.configured) {
+                      <span style="color:var(--rw-pending-fg)">Not configured: no paymaster address is set for {{ gasOnchain.chainIdentifier }}, so no vouchers are issued and investors pay their own gas.</span>
+                    } @else if (gasOnchain.error) {
+                      <span style="color:var(--rw-rejected-fg)">Could not read the paymaster: {{ gasOnchain.error }}</span>
+                    } @else if (!gasOnchain.registered) {
+                      <span style="color:var(--rw-pending-fg)">Policy not registered on chain yet. The funder must call
+                        <code>registerPolicy</code> with id <code style="word-break:break-all">{{ gasOnchain.policyId }}</code>.</span>
+                    } @else {
+                      <div style="display:grid;grid-template-columns:max-content 1fr;gap:4px 16px">
+                        <span style="color:var(--rw-text-secondary)">Status</span>
+                        <span [style.color]="gasOnchain.active ? 'var(--rw-approved-fg)' : 'var(--rw-rejected-fg)'">{{ gasOnchain.active ? 'Active' : 'Inactive' }}</span>
+                        <span style="color:var(--rw-text-secondary)">Available</span>
+                        <span>{{ formatWei(gasOnchain.balanceWei) }} ETH</span>
+                        <span style="color:var(--rw-text-secondary)">Reserved (in-flight)</span>
+                        <span>{{ formatWei(gasOnchain.reservedWei) }} ETH</span>
+                        <span style="color:var(--rw-text-secondary)">Per-org cap</span>
+                        <span>{{ formatWei(gasOnchain.orgBudgetCapWei) }} ETH</span>
+                        <span style="color:var(--rw-text-secondary)">Funder</span>
+                        <code style="word-break:break-all">{{ gasOnchain.funder }}</code>
+                        <span style="color:var(--rw-text-secondary)">Voucher signer</span>
+                        <code style="word-break:break-all">{{ gasOnchain.signer }}</code>
+                      </div>
+                      @if (gasOnchain.active && !effectiveGasPolicy.active) {
+                        <p style="margin:8px 0 0;color:var(--rw-pending-fg)">Deactivated here, still active on chain — the funder or an operator wallet should call <code>setPolicyActive(policyId, false)</code>.</p>
+                      }
+                    }
+                  </div>
+                }
 
                 @if (canMutate) {
                 <h3 style="font-size:14px;font-weight:500;margin:0 0 12px">Set a deployment-specific override</h3>
@@ -1251,6 +1291,7 @@ export class AssetDetailComponent implements OnInit {
   effectiveGasPolicy: GasSponsorshipPolicy | null = null;
   gasSponsor: GasSponsor = 'ISSUER';
   gasMonthlyCapEth: number | null = 0.1;
+  gasOnchain: GasSponsorshipOnchainStatus | null = null;
 
   // ── ERC-3643 state ────────────────────────────────────────────────────────
   get isErc3643(): boolean {
@@ -1385,9 +1426,27 @@ export class AssetDetailComponent implements OnInit {
         this.gasMonthlyCapEth = policy?.monthlyCapEth != null ? Number(policy.monthlyCapEth) : 0.1;
         this.gasSponsorshipLoading = false;
         this.cdr.markForCheck();
+        this.loadGasOnchain(deploymentId);
       },
       error: () => { this.gasSponsorshipLoading = false; this.cdr.markForCheck(); },
     });
+  }
+
+  private loadGasOnchain(deploymentId: string): void {
+    this.gasOnchain = null;
+    if (!this.effectiveGasPolicy) return;
+    this.gasSponsorshipService.getOnchainStatus(this.id, deploymentId).subscribe({
+      next: (status) => { this.gasOnchain = status; this.cdr.markForCheck(); },
+    });
+  }
+
+  /** Wei (decimal string) → ETH with up to 6 decimals, bigint-exact. */
+  formatWei(wei: string | null): string {
+    if (wei == null) return '—';
+    const v = BigInt(wei);
+    const whole = v / 10n ** 18n;
+    const frac = ((v % 10n ** 18n) / 10n ** 12n).toString().padStart(6, '0').replace(/0+$/, '');
+    return frac ? `${whole}.${frac}` : whole.toString();
   }
 
   saveGasSponsorshipOverride(): void {
@@ -1412,7 +1471,7 @@ export class AssetDetailComponent implements OnInit {
     if (!policyId || !depId || !confirm('Remove this deployment\'s gas sponsorship override? It will fall back to the issuer default, if any.')) return;
     this.gasSponsorshipService.deactivate(policyId).subscribe({
       next: () => {
-        this.snackBar.open('Override removed.', 'OK', { duration: 3000 });
+        this.snackBar.open('Override removed — vouchers stop now; deactivate the policy on chain too.', 'OK', { duration: 5000 });
         this.loadGasSponsorship(depId);
       },
       error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to remove override.', 'OK', { duration: 4000 }),

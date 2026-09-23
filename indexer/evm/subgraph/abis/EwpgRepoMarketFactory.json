@@ -9,5 +9,14 @@
       { "name": "lltvBps",         "type": "uint256", "indexed": false },
       { "name": "priceOracle",     "type": "address", "indexed": false }
     ]
+  },
+  {
+    "type": "event",
+    "name": "MarketOperatorSet",
+    "inputs": [
+      { "name": "market",      "type": "address", "indexed": true },
+      { "name": "operatorOrg", "type": "address", "indexed": true },
+      { "name": "treasury",    "type": "address", "indexed": false }
+    ]
   }
 ]

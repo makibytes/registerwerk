@@ -5,6 +5,17 @@ import "forge-std/Test.sol";
 import "../../src/settlement/DvpSettlement.sol";
 import "../../src/examples/MockStablecoin.sol";
 
+/// @dev Asset-leg stand-in answering T-REX's `isFrozen(address)`.
+contract FreezableMockToken is MockStablecoin {
+    mapping(address => bool) public isFrozen;
+
+    constructor() MockStablecoin("Frozen-capable Bond", "FBOND", 0) {}
+
+    function setFrozen(address account, bool frozen) external {
+        isFrozen[account] = frozen;
+    }
+}
+
 /// @notice Tests for the ERC-7573-style same-chain DvP rail: one leg is escrowed, the
 ///         counterparty settles both legs atomically, expiry refunds the locker. A plain
 ///         ERC-20 stands in for the asset leg; see the DvpSettlement NatSpec for how
@@ -19,7 +30,8 @@ contract DvpSettlementTest is Test {
     address buyer = address(0x22);
     address stranger = address(0x33);
 
-    bytes32 constant TRADE = keccak256("trade-1");
+    bytes32 constant REF = keccak256("trade-1"); // locker's clientRef
+    bytes32 TRADE; // derived id of the trade the current test locked
     uint256 constant ASSET_AMOUNT = 1_000;
     uint256 constant PAYMENT_AMOUNT = 100_000e6;
     uint64 expiry;
@@ -41,12 +53,27 @@ contract DvpSettlementTest is Test {
 
     function _lockAsset() private {
         vm.prank(seller);
-        dvp.lockAsset(TRADE, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+        TRADE = dvp.lockAsset(REF, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
     }
 
     function _lockPayment() private {
         vm.prank(buyer);
-        dvp.lockPayment(TRADE, seller, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+        TRADE = dvp.lockPayment(REF, seller, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+    }
+
+    /// @dev What the counterparty computes from its own record of the agreed deal.
+    ///      Computed locally (not via the contract) so it also pins the documented encoding,
+    ///      and so it does not consume a pending `vm.prank`.
+    function _terms(DvpSettlement.LockedLeg leg) private view returns (bytes32) {
+        return keccak256(abi.encode(seller, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, leg, expiry));
+    }
+
+    function _assetTerms() private view returns (bytes32) {
+        return _terms(DvpSettlement.LockedLeg.Asset);
+    }
+
+    function _paymentTerms() private view returns (bytes32) {
+        return _terms(DvpSettlement.LockedLeg.Payment);
     }
 
     // ── asset-leg lock ────────────────────────────────────────────────────────
@@ -61,7 +88,7 @@ contract DvpSettlementTest is Test {
         _lockAsset();
 
         vm.prank(buyer);
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _assetTerms());
 
         assertEq(asset.balanceOf(buyer), ASSET_AMOUNT);
         assertEq(cash.balanceOf(seller), PAYMENT_AMOUNT);
@@ -73,7 +100,7 @@ contract DvpSettlementTest is Test {
         _lockAsset();
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(DvpSettlement.NotCounterparty.selector, TRADE, stranger));
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _assetTerms());
     }
 
     function test_settle_revertsWithoutBuyerFunds() public {
@@ -83,7 +110,7 @@ contract DvpSettlementTest is Test {
 
         vm.prank(buyer);
         vm.expectRevert();
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _assetTerms());
 
         // Escrow stays intact — the seller has not lost the asset leg.
         assertEq(asset.balanceOf(address(dvp)), ASSET_AMOUNT);
@@ -92,9 +119,9 @@ contract DvpSettlementTest is Test {
     function test_settle_revertsOnDoubleSettle() public {
         _lockAsset();
         vm.startPrank(buyer);
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _assetTerms());
         vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeNotLocked.selector, TRADE));
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _assetTerms());
         vm.stopPrank();
     }
 
@@ -103,7 +130,7 @@ contract DvpSettlementTest is Test {
         vm.warp(expiry);
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeExpired.selector, TRADE, expiry));
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _assetTerms());
     }
 
     // ── payment-leg lock (the ERC-3643-friendly direction) ───────────────────
@@ -113,7 +140,7 @@ contract DvpSettlementTest is Test {
         assertEq(cash.balanceOf(address(dvp)), PAYMENT_AMOUNT);
 
         vm.prank(seller);
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _paymentTerms());
 
         assertEq(asset.balanceOf(buyer), ASSET_AMOUNT);
         assertEq(cash.balanceOf(seller), PAYMENT_AMOUNT);
@@ -124,7 +151,7 @@ contract DvpSettlementTest is Test {
         _lockPayment();
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(DvpSettlement.NotCounterparty.selector, TRADE, buyer));
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _paymentTerms());
     }
 
     // ── cancellation / expiry refunds ─────────────────────────────────────────
@@ -173,28 +200,29 @@ contract DvpSettlementTest is Test {
         vm.warp(expiry - 1); // even if time could rewind, state is terminal
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeNotLocked.selector, TRADE));
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _assetTerms());
     }
 
     // ── validation ────────────────────────────────────────────────────────────
 
-    function test_lock_rejectsDuplicateTradeId() public {
+    function test_lock_rejectsReusedClientRefBySameLocker() public {
+        asset.mint(seller, ASSET_AMOUNT);
         _lockAsset();
-        vm.prank(buyer);
+        vm.prank(seller);
         vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeAlreadyExists.selector, TRADE));
-        dvp.lockPayment(TRADE, seller, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+        dvp.lockAsset(REF, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
     }
 
     function test_lock_rejectsInvalidParameters() public {
         vm.startPrank(seller);
         vm.expectRevert(DvpSettlement.InvalidTrade.selector);
-        dvp.lockAsset(TRADE, address(0), asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+        dvp.lockAsset(REF, address(0), asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
         vm.expectRevert(DvpSettlement.InvalidTrade.selector);
-        dvp.lockAsset(TRADE, buyer, asset, 0, cash, PAYMENT_AMOUNT, expiry);
+        dvp.lockAsset(REF, buyer, asset, 0, cash, PAYMENT_AMOUNT, expiry);
         vm.expectRevert(DvpSettlement.InvalidTrade.selector);
-        dvp.lockAsset(TRADE, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, uint64(block.timestamp));
+        dvp.lockAsset(REF, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, uint64(block.timestamp));
         vm.expectRevert(DvpSettlement.InvalidTrade.selector);
-        dvp.lockAsset(TRADE, seller, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry); // self-trade
+        dvp.lockAsset(REF, seller, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry); // self-trade
         vm.stopPrank();
     }
 
@@ -207,11 +235,11 @@ contract DvpSettlementTest is Test {
 
         vm.prank(seller);
         vm.expectRevert(DvpSettlement.ContractPaused.selector);
-        dvp.lockAsset(TRADE, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+        dvp.lockAsset(REF, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
 
         vm.prank(buyer);
         vm.expectRevert(DvpSettlement.ContractPaused.selector);
-        dvp.lockPayment(TRADE, seller, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+        dvp.lockPayment(REF, seller, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
     }
 
     function test_pause_stillAllowsSettleAndCancelOfAlreadyLockedTrades() public {
@@ -223,7 +251,7 @@ contract DvpSettlementTest is Test {
         // settle() IS gated — no new fund movement while paused...
         vm.prank(buyer);
         vm.expectRevert(DvpSettlement.ContractPaused.selector);
-        dvp.settle(TRADE);
+        dvp.settle(TRADE, _assetTerms());
 
         // ...but cancel() must never trap an already-escrowed leg.
         vm.warp(expiry);
@@ -247,5 +275,172 @@ contract DvpSettlementTest is Test {
         assertFalse(dvp.paused());
         _lockAsset(); // succeeds — no revert
         assertEq(asset.balanceOf(address(dvp)), ASSET_AMOUNT);
+    }
+
+    // ── derived trade ids (T2-03: no squatting) ──────────────────────────────
+
+    function test_tradeId_isDerivedFromLockerAndClientRef() public {
+        _lockAsset();
+        assertEq(TRADE, dvp.tradeIdFor(seller, REF));
+        assertEq(TRADE, keccak256(abi.encode(block.chainid, address(dvp), seller, REF)));
+        assertTrue(TRADE != dvp.tradeIdFor(buyer, REF), "ids are namespaced per locker");
+    }
+
+    /// @dev Port of the phase-2 PoC `Poc2BDvp.test_tradeIdSquat_buyerPaysForJunk`: on the old
+    ///      contract Mallory front-ran the seller's lock with the agreed global id, the seller's
+    ///      lock reverted, and the buyer's blind `settle(tradeId)` paid for Mallory's junk.
+    function test_squatAttempt_lockAsset_cannotBlockOrHijackTheAgreedTrade() public {
+        address mallory = address(0x66);
+        MockStablecoin junk = new MockStablecoin("Junk", "JUNK", 0);
+        junk.mint(mallory, ASSET_AMOUNT);
+        vm.startPrank(mallory);
+        junk.approve(address(dvp), type(uint256).max);
+        bytes32 malloryId = dvp.lockAsset(REF, buyer, junk, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+        vm.stopPrank();
+
+        _lockAsset(); // the seller's lock with the same clientRef still succeeds
+        assertTrue(malloryId != TRADE, "squatter gets its own id");
+
+        // Even if the buyer is handed Mallory's id, its agreed terms do not match.
+        bytes32 agreed = _assetTerms();
+        vm.prank(buyer);
+        vm.expectRevert(
+            abi.encodeWithSelector(DvpSettlement.TermsMismatch.selector, malloryId, agreed, dvp.termsHashOf(malloryId))
+        );
+        dvp.settle(malloryId, agreed);
+
+        vm.prank(buyer);
+        dvp.settle(TRADE, agreed);
+        assertEq(asset.balanceOf(buyer), ASSET_AMOUNT);
+        assertEq(cash.balanceOf(seller), PAYMENT_AMOUNT);
+        assertEq(cash.balanceOf(mallory), 0, "squatter received nothing");
+        assertEq(junk.balanceOf(buyer), 0);
+    }
+
+    /// @dev Mirror of the squat via `lockPayment` against a seller with a standing asset approval.
+    function test_squatAttempt_lockPayment_cannotPullSellersAsset() public {
+        address mallory = address(0x66);
+        MockStablecoin junkCash = new MockStablecoin("Junk", "JUNK", 6);
+        junkCash.mint(mallory, PAYMENT_AMOUNT);
+        vm.startPrank(mallory);
+        junkCash.approve(address(dvp), type(uint256).max);
+        bytes32 malloryId = dvp.lockPayment(REF, seller, asset, ASSET_AMOUNT, junkCash, PAYMENT_AMOUNT, expiry);
+        vm.stopPrank();
+
+        _lockPayment();
+        assertTrue(malloryId != TRADE);
+
+        bytes32 agreed = _paymentTerms();
+        vm.prank(seller);
+        vm.expectRevert(
+            abi.encodeWithSelector(DvpSettlement.TermsMismatch.selector, malloryId, agreed, dvp.termsHashOf(malloryId))
+        );
+        dvp.settle(malloryId, agreed);
+        assertEq(asset.balanceOf(seller), ASSET_AMOUNT, "seller's standing approval not drained");
+
+        vm.prank(seller);
+        dvp.settle(TRADE, agreed);
+        assertEq(asset.balanceOf(buyer), ASSET_AMOUNT);
+    }
+
+    function test_settle_revertsOnWrongTermsHash() public {
+        _lockAsset();
+        // Buyer agreed to pay less than the locker stored.
+        bytes32 agreed = dvp.hashTerms(
+            seller, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT - 1, DvpSettlement.LockedLeg.Asset, expiry
+        );
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TermsMismatch.selector, TRADE, agreed, _assetTerms()));
+        dvp.settle(TRADE, agreed);
+        assertEq(cash.balanceOf(buyer), PAYMENT_AMOUNT, "buyer funds untouched");
+    }
+
+    function test_termsHashOf_matchesHashTermsAndIsZeroForUnknownId() public {
+        _lockAsset();
+        assertEq(dvp.termsHashOf(TRADE), _assetTerms());
+        assertEq(
+            dvp.hashTerms(
+                seller, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, DvpSettlement.LockedLeg.Asset, expiry
+            ),
+            _assetTerms()
+        );
+        assertEq(dvp.termsHashOf(keccak256("unknown")), bytes32(0));
+    }
+
+    // ── frozen parties / legal-order release (T2-04) ─────────────────────────
+
+    function _lockFreezable() private returns (FreezableMockToken fbond, bytes32 id, bytes32 terms) {
+        fbond = new FreezableMockToken();
+        fbond.mint(seller, ASSET_AMOUNT);
+        vm.startPrank(seller);
+        fbond.approve(address(dvp), type(uint256).max);
+        id = dvp.lockAsset(REF, buyer, fbond, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry);
+        vm.stopPrank();
+        terms = dvp.hashTerms(
+            seller, buyer, fbond, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, DvpSettlement.LockedLeg.Asset, expiry
+        );
+    }
+
+    function test_settle_revertsWhenSellerFrozenAfterLock() public {
+        (FreezableMockToken fbond, bytes32 id, bytes32 terms) = _lockFreezable();
+        fbond.setFrozen(seller, true);
+
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.PartyFrozen.selector, id, seller));
+        dvp.settle(id, terms);
+        assertEq(cash.balanceOf(seller), 0, "frozen seller not paid");
+        assertEq(fbond.balanceOf(address(dvp)), ASSET_AMOUNT, "escrow held in place");
+
+        fbond.setFrozen(seller, false); // freeze lifted -> settles normally
+        vm.prank(buyer);
+        dvp.settle(id, terms);
+        assertEq(fbond.balanceOf(buyer), ASSET_AMOUNT);
+    }
+
+    function test_settle_revertsWhenBuyerFrozen() public {
+        (FreezableMockToken fbond, bytes32 id, bytes32 terms) = _lockFreezable();
+        fbond.setFrozen(buyer, true);
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.PartyFrozen.selector, id, buyer));
+        dvp.settle(id, terms);
+    }
+
+    function test_forceCancel_revertsForNonOperator() public {
+        _lockAsset();
+        vm.prank(stranger);
+        vm.expectRevert();
+        dvp.forceCancel(TRADE, stranger, "no order");
+    }
+
+    function test_forceCancel_releasesEscrowToNamedDestination() public {
+        (FreezableMockToken fbond, bytes32 id,) = _lockFreezable();
+        fbond.setFrozen(seller, true);
+        address custodian = address(0x44);
+
+        vm.prank(operator);
+        dvp.pause(); // a legal-order release must work regardless of the circuit breaker
+        vm.expectEmit(true, true, false, true, address(dvp));
+        emit DvpSettlement.TradeForceCancelled(id, custodian, "BaFin Az. 2026-001");
+        vm.prank(operator);
+        dvp.forceCancel(id, custodian, "BaFin Az. 2026-001");
+
+        assertEq(fbond.balanceOf(custodian), ASSET_AMOUNT);
+        assertEq(fbond.balanceOf(address(dvp)), 0);
+        (,,,,,,,, DvpSettlement.TradeState state) = dvp.trades(id);
+        assertEq(uint8(state), uint8(DvpSettlement.TradeState.Cancelled));
+
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeNotLocked.selector, id));
+        dvp.forceCancel(id, custodian, "BaFin Az. 2026-001");
+    }
+
+    function test_forceCancel_rejectsInvalidDestination() public {
+        _lockPayment();
+        vm.startPrank(operator);
+        vm.expectRevert(DvpSettlement.InvalidDestination.selector);
+        dvp.forceCancel(TRADE, address(0), "order");
+        vm.expectRevert(DvpSettlement.InvalidDestination.selector);
+        dvp.forceCancel(TRADE, address(dvp), "order");
+        vm.stopPrank();
     }
 }

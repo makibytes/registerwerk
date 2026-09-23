@@ -41,12 +41,13 @@ class CorporateActionTypeRetirementTest {
     }
 
     @Test
-    @DisplayName("Status has exactly 9 values, including the new PROPOSED/REJECTED pre-states")
-    void statusEnum_hasNineValuesIncludingProposedAndRejected() {
+    @DisplayName("Status has exactly 10 values, including PROPOSED/REJECTED pre-states and SNAPSHOT_BLOCKED")
+    void statusEnum_hasTenValuesIncludingProposedRejectedAndSnapshotBlocked() {
         CorporateAction.Status[] values = CorporateAction.Status.values();
 
-        assertThat(values).hasSize(9);
-        assertThat(values).contains(CorporateAction.Status.PROPOSED, CorporateAction.Status.REJECTED);
+        assertThat(values).hasSize(10);
+        assertThat(values).contains(CorporateAction.Status.PROPOSED, CorporateAction.Status.REJECTED,
+                CorporateAction.Status.SNAPSHOT_BLOCKED);
     }
 
     @Test

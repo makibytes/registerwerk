@@ -113,7 +113,7 @@ Il terzo merita attenzione. La **consegna contro pagamento** elimina il rischio 
 
 ??? note "Per gli specialisti: la consegna contro pagamento, e ciò che non prova"
 
-    `DvpSettlement.sol` implementa uno schema in stile ERC-7573. Entrambe le gambe sono bloccate contro un hash; la rivelazione del segreto regola entrambe o nessuna. `EwpgBondDesk` mostra la stessa forma «token e pagamento nella stessa transazione».
+    `DvpSettlement.sol` implementa uno schema in stile ERC-7573. Una parte blocca la propria gamba in deposito a garanzia; la controparte regola poi entrambe le gambe in un'unica transazione, oppure lo scambio scade e il deposito viene restituito. Al momento del regolamento il tuo client trasmette un'impronta delle condizioni concordate (parti, importi, token, scadenza): se quanto bloccato differisce in un qualsiasi dettaglio, non si muove nulla. Il regolamento si ferma anche finché una delle parti è congelata dai controlli di conformità del token. `EwpgBondDesk` mostra la stessa forma «token e pagamento nella stessa transazione».
 
     Due precisazioni oneste:
 

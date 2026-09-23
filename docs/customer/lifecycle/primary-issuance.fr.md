@@ -113,7 +113,7 @@ Le troisième mérite l'attention. La **livraison contre paiement** supprime le 
 
 ??? note "Pour les spécialistes : la LCP, et ce qu'elle ne prouve pas"
 
-    `DvpSettlement.sol` met en œuvre un schéma de type ERC-7573. Les deux volets sont verrouillés contre un hachage ; la révélation du secret dénoue les deux ou aucun. `EwpgBondDesk` illustre la même forme « jeton et paiement dans une seule transaction ».
+    `DvpSettlement.sol` met en œuvre un schéma de type ERC-7573. Une partie verrouille son volet en séquestre ; la contrepartie règle ensuite les deux volets en une seule transaction, ou l'opération expire et le séquestre est restitué. Au règlement, votre client transmet une empreinte des conditions convenues (parties, montants, jetons, échéance) : si ce qui a été verrouillé diffère sur un seul point, rien ne bouge. Le règlement s'arrête aussi tant que l'une des parties est gelée par les contrôles de conformité du jeton. `EwpgBondDesk` illustre la même forme « jeton et paiement dans une seule transaction ».
 
     Deux réserves honnêtes :
 

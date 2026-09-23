@@ -4,8 +4,11 @@ import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.HolderSyncStatusPort;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.events.HolderBalanceSyncedEvent;
+import de.makibytes.registerwerk.indexer.events.HolderSyncBlockedEvent;
+import de.makibytes.registerwerk.indexer.events.HolderSyncRestoredEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,6 +42,7 @@ class HolderDataServiceTest {
     @Mock private TokenTransferRepository tokenTransferRepository;
     @Mock private AssetHolderRepository assetHolderRepository;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private HolderSyncStatusPort holderSyncStatusPort;
 
     private HolderDataService service;
 
@@ -47,7 +51,8 @@ class HolderDataServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new HolderDataService(deploymentRepository, tokenTransferRepository, assetHolderRepository, eventPublisher);
+        service = new HolderDataService(deploymentRepository, tokenTransferRepository, assetHolderRepository, eventPublisher,
+                holderSyncStatusPort);
     }
 
     private void givenTransfers(TokenTransfer... transfers) {
@@ -156,6 +161,52 @@ class HolderDataServiceTest {
                 .hasMessageContaining("0xaaa1");
         verify(assetHolderRepository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("T2-18: an unmapped wallet persists BLOCKED with the wallets and audits the transition")
+    void unmappedWalletPersistsBlockedState() {
+        Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
+        givenTransfers(transfer("0x0000000000000000000000000000000000000000", "0xPOOL1", "1000", t0));
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+        when(holderSyncStatusPort.markBlocked(eq(assetId), any(), eq(List.of("0xpool1")), any())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(UnmappedHolderIdentityException.class);
+
+        verify(holderSyncStatusPort).markBlocked(eq(assetId), any(), eq(List.of("0xpool1")), any());
+        verify(holderSyncStatusPort, never()).markReconciled(any(), any());
+        verify(eventPublisher).publishEvent(new HolderSyncBlockedEvent(assetId, List.of("0xpool1")));
+    }
+
+    @Test
+    @DisplayName("T2-18: a still-blocked re-run (no state change) does not re-audit")
+    void unchangedBlockedStateIsNotReAudited() {
+        Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
+        givenTransfers(transfer("0x0000000000000000000000000000000000000000", "0xPOOL1", "1000", t0));
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+        when(holderSyncStatusPort.markBlocked(any(), any(), any(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(UnmappedHolderIdentityException.class);
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("T2-18: a completed sync marks the register reconciled; leaving BLOCKED is audited")
+    void completedSyncMarksReconciled() {
+        givenTransfers();
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+        when(holderSyncStatusPort.markReconciled(eq(assetId), any())).thenReturn(true);
+
+        service.syncHoldersFromBlockchain(assetId);
+
+        verify(holderSyncStatusPort).markReconciled(eq(assetId), any());
+        verify(eventPublisher).publishEvent(new HolderSyncRestoredEvent(assetId));
     }
 
     @Test

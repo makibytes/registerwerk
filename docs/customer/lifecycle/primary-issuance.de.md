@@ -113,7 +113,7 @@ Der dritte verdient Aufmerksamkeit. **Lieferung gegen Zahlung** beseitigt das ä
 
 ??? note "Für Fachleute: LgZ, und was es nicht beweist"
 
-    `DvpSettlement.sol` setzt ein Muster nach Art von ERC-7573 um. Beide Seiten werden gegen einen Hash gesperrt; die Freigabe des Geheimnisses erfüllt beide oder keine. `EwpgBondDesk` zeigt dieselbe Token-und-Zahlung-in-einer-Transaktion-Form.
+    `DvpSettlement.sol` setzt ein Muster nach Art von ERC-7573 um. Eine Seite hinterlegt ihre Leistung treuhänderisch; die Gegenpartei wickelt dann beide Seiten in einer Transaktion ab, oder der Handel läuft ab und die Hinterlegung geht zurück. Bei der Abwicklung übergibt Ihr Client einen Fingerabdruck der vereinbarten Konditionen (Parteien, Beträge, Token, Ablauf): Weicht das Hinterlegte in irgendeinem Detail ab, bewegt sich nichts. Die Abwicklung stoppt außerdem, solange eine der Parteien durch die Compliance-Kontrollen des Tokens eingefroren ist. `EwpgBondDesk` zeigt dieselbe Token-und-Zahlung-in-einer-Transaktion-Form.
 
     Zwei ehrliche Einschränkungen:
 

@@ -31,4 +31,17 @@ public interface Erc3643Api {
      * Used as the extra ERC-3643-specific eligibility check for {@code ASSET_TOKEN_ADMIN} grants.
      */
     boolean isWalletVerified(UUID suiteId, String walletAddress);
+
+    /** Chains on which the legal entity has an ONCHAINID record (deployed or pending). */
+    java.util.List<UUID> identityChainIds(UUID legalEntityId);
+
+    /**
+     * Revokes the legal entity's confirmed KYC (topic 1) and AML (topic 2) claims on one chain:
+     * {@code ONCHAINID.removeClaim} plus issuer-level {@code ClaimIssuer.revokeClaimBySignature}.
+     * Idempotent; each submitted step emits a {@code ClaimRevokedEvent} carrying {@code auditDetails}.
+     *
+     * @return number of claims still needing a retry (0 = done on this chain)
+     */
+    int revokeComplianceClaims(UUID legalEntityId, UUID chainConfigId, UUID actorId, String actorRole,
+                               java.util.Map<String, Object> auditDetails);
 }

@@ -122,7 +122,7 @@ import { LendingComplianceBannerComponent } from '../compliance-banner.component
               <mat-icon class="step-icon">savings</mat-icon>
               <div class="step-body">
                 <strong>Supply &amp; earn</strong>
-                <span>Deposit stablecoin into any market — no KYC needed — and earn utilization-based yield.</span>
+                <span>Deposit stablecoin into a market and earn utilization-based yield. Lender-side eligibility is under legal review.</span>
               </div>
               <a mat-stroked-button routerLink="/lending/supply">Supply</a>
             </mat-card-content>

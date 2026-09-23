@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.36;
 
-/// @dev Minimal ERC-4337 EntryPoint stand-in for unit-testing {EwpgPaymaster} in isolation.
-///      Only `depositTo` needs to actually exist, so `fundSponsorship` has somewhere to send
-///      its deposit; `validatePaymasterUserOp`/`postOp` are exercised directly via
-///      `vm.prank(address(mockEntryPoint))` in tests rather than through a real `handleOps`
-///      simulation — the paymaster's own accounting logic is what's under test here, not
-///      EntryPoint's (extensively tested upstream).
+/// @dev Minimal ERC-4337 EntryPoint stand-in: an address that {EwpgPasskeyAccount} tests can
+///      `vm.prank` as when calling `validateUserOp`/`execute` directly. {EwpgPaymaster} is NOT
+///      tested against this mock — its gas accounting only means something against the real
+///      EntryPoint's `handleOps` (see `test/aa-v08/` and `EwpgPaymaster.t.sol`).
 contract MockEntryPoint {
     mapping(address => uint256) public deposits;
 

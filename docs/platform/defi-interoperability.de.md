@@ -185,6 +185,10 @@ Verwahrung/Kontrolle, Verwertung, Orakel, Insolvenz und Smart-Contract-Freigabe 
   jeweils ihre eigene Instanz bereitstellen und auf demselben Token gekennzeichnet werden – es
   handelt sich also um Dealer-to-Client-Wettbewerb zwischen Market Makern, nicht um einen
   einzelnen Monopolschalter.
+  Handels-IDs werden aus dem Schalter und seiner `clientRef` abgeleitet, und der Anleger wickelt mit
+  `settle(tradeId, expectedTermsHash)` über die vereinbarten Konditionen ab. Ein besetzter oder
+  veränderter Handel kann seine Mittel daher nicht bewegen. Abgelaufene, nicht abgewickelte
+  Hinterlegungen kehren über `reclaimExpired` in den Pool zurück.
 - **Nur-Stablecoin-Seite: ein einfaches Konstantprodukt-AMM**
   (`contracts/src/examples/StablecoinAmm.sol`). Reserviert für Paare, bei denen keine der beiden
   Seiten ein Wertpapier ist (z. B. AUEUR/USDC, beide über den Zahlungswege-Katalog
@@ -220,6 +224,65 @@ Close-Factor, im Aave-Stil) existieren nun beide in `EwpgRepoMarket` – die Faz
 unverändert und eine einfachere Referenzimplementierung. Der dritte Punkt – die
 jurisdiktionsspezifische rechtliche Prüfung von Margin-Lending – gilt für beide identisch und ist
 **weiterhin offen**; siehe die Prüfung unten.
+
+### Phase-2-Überprüfung (2026-09) — Marktaufbau und Liquidation
+
+Märkte, die nach dieser Überprüfung deployt werden, unterscheiden sich von früheren wie folgt.
+Frühere Märkte sind unveränderlich und behalten ihr Verhalten; siehe *Legacy-Märkte* unten.
+
+- **Der Liquidationsanreiz passt in den Oracle-Haircut.** Ein Markt wird nur erzeugt, wenn
+  `lltvBps × (1 + liquidationBonusBps) ≤ 1 − oracle.maxDeviationBps()` gilt (und immer
+  `lltvBps × (1 + bonus) < 1`, auch für ein Oracle ohne Abweichungsgrenze). Mit den früheren
+  Demo-Parametern (80 % LLTV, 5 % Bonus, 20 % Oracle-Toleranz) hinterließ schon ein einziger
+  Push innerhalb der Toleranz ab Health Factor 1,0 einen Forderungsausfall. Typische gültige
+  Paare bei 20 % Toleranz: LLTV 75 % / Bonus 5 % oder LLTV 74 % / Bonus 5 %; bei 15 %: LLTV 80 % /
+  Bonus 5 %.
+- **Ein Oracle je Darlehenstoken.** `IRepoOracle.quoteToken()` muss dem Darlehenstoken des Markts
+  entsprechen; ein USDC-Markt kann keine EUR-Marken lesen. `DeployRepoMarkets.s.sol` deployt ein
+  `RegisterwerkNavOracle` je Zahlungsschiene.
+- **Liquidationen im Kulanzfenster schließen höchstens 50 %.** Ist die Marke älter als
+  `maxPriceAgeSeconds`, aber innerhalb von `liquidationGracePeriodSeconds`, ist ein einzelner
+  `liquidate`-Aufruf auch unter Health Factor 0,95 auf den Close Factor von 50 % begrenzt. Eine
+  frische Marke stellt die vollständige Schließung wieder her.
+- **Verwertung ganzer Einheiten mit Barüberschuss.** Sicherheiten haben keine Nachkommastellen.
+  Der Liquidator kauft `ceil(repay × (1 + bonus) / price)` ganze Einheiten (mindestens eine) zur
+  Marke abzüglich Bonus. Der Teil dieser Zahlung über der Restschuld wird dem Kreditnehmer
+  gutgeschrieben (`surplusOf`) und über `claimLiquidationSurplus()` ausgezahlt; er ist keine
+  Pool-Liquidität. Die Kundenseite **Meine Kredite** zeigt den abrufbaren Überschuss mit einer
+  Abruf-Aktion.
+- **Instanzgebundene Verwaltung.** Jeder Markt speichert `operatorOrg` (die Org der Wallet, die
+  `EwpgRepoMarketFactory.createMarket` aufgerufen hat) und eine unveränderliche `treasury`.
+  `setReserveFactor`, `setBorrowPaused` und `withdrawReserves` erfordern `repo-markets.configure`;
+  `reconcileCollateral` erfordert `repo-markets.reconcile`. Beide müssen von `operatorOrg`
+  gehalten werden. `repo-facility.configure` der Facility erreicht keinen Markt mehr. Reserven
+  gehen nur an `treasury`.
+- **Begrenzte Abstimmung.** `reconcileCollateral(borrower, amount, forcedTransferRef)` darf
+  Positionen kumulativ nur um die tatsächlich im Markt fehlenden Sicherheiten herabsetzen
+  (`totalCollateral − collateralToken.balanceOf(market)`). Ohne beobachteten Abfluss bricht der
+  Aufruf mit `NoObservedShortfall` ab. `forcedTransferRef` verknüpft die Herabsetzung mit der
+  Forced-Transfer-Transaktion.
+- **Factory-Register.** `EwpgRepoMarketFactory.isMarket(address)` erkennt von der Factory
+  deployte Märkte.
+- **Vault-Kuratierung mit Allow-List, Timelock und Instanzbindung.** Ein neuer `EwpgRepoVault`
+  wird mit der Markt-Factory, einer `curatorOrg`, einer `operatorOrg` und einem `timelock`
+  erzeugt (mindestens ein Tag, außer auf der lokalen Chain 31337). `submitAddMarket` akzeptiert
+  nur Märkte, für die `factory.isMarket(market)` wahr ist. Diese Funktion und `submitCapIncrease`
+  werden erst nach Ablauf des Timelocks über `acceptAddMarket` / `acceptCapIncrease` wirksam. Bis
+  dahin kann die Curator-Org (`repo-markets.curate-vault`) oder die Betreiber-Org
+  (`repo-markets.configure`) `revokePending` aufrufen. Senkungen der Obergrenze (`setMarketCap`)
+  und `removeMarket` gelten sofort. Jede Curator-Funktion verlangt ein Wallet der `curatorOrg`;
+  eine gleichnamige Berechtigung einer anderen Org bleibt wirkungslos. Bisher konnte ein Curator
+  jeden Vertrag, der den passenden `loanToken()` meldet, als Markt aufnehmen und ihm das gesamte
+  ungenutzte Guthaben zuweisen. Bestehende Vaults sind unveränderlich: Einleger lösen aus dem
+  ungenutzten Guthaben ein, und der Curator zieht jeden Markt ab und entfernt ihn.
+
+**Legacy-Märkte.** Das Backend kennzeichnet einen registrierten Markt als `riskParametersLegacy`,
+wenn er diese Prüfungen nicht besteht (live vom Markt und seinem Oracle gelesen; ein
+fehlgeschlagener Lesezugriff zählt als Legacy). Ein solcher Markt bleibt gelistet: Kreditnehmer
+können zurückzahlen, Sicherheiten nachschießen und abrufen, Kreditgeber können abheben, aber das
+Kundenportal bietet dort keine neue Kreditaufnahme und keine neue Einlage an. Neue
+Registrierungen, die die Prüfungen nicht bestehen, werden abgelehnt. Betreiber sollten zusätzlich
+`setBorrowPaused(true)` für jeden Legacy-Markt aufrufen.
 
 ## Compliance-Überprüfung (2026-07-21) — Ergebnisse und Härtungsmaßnahmen { #compliance-review-2026-07-21-findings-and-hardening }
 

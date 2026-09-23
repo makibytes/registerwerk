@@ -16,9 +16,9 @@ import java.util.UUID;
  * INITIAL_ENTRY/CHANGE Registerauszug.
  *
  * <p>Deliberately its own event rather than directly publishing {@code asset.events}'
- * {@code HolderEnteredEvent}/{@code HolderRegisterChangedEvent} from here: {@code asset.web}
- * already depends on {@code indexer.IndexerApi}, so the reverse dependency would create a
- * Spring Modulith module cycle. {@code registerstatement}'s listener translates this into the
+ * {@code HolderEnteredEvent}/{@code HolderRegisterChangedEvent} from here: {@code indexer} must
+ * not depend on {@code asset} (it would close a Spring Modulith cycle via {@code lending -> asset},
+ * since the indexer reacts to lending-market registrations — T2-18). {@code registerstatement}'s listener translates this into the
  * same statement-issuance trigger instead.
  */
 public record HolderBalanceSyncedEvent(

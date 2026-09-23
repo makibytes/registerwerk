@@ -13,12 +13,14 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionProposalRej
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionProposedEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementRequestedEvent;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionSnapshotBlockedEvent;
 import de.makibytes.registerwerk.corporateactions.web.dto.ProposeCorporateActionRequest;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPayment;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
+import de.makibytes.registerwerk.deployment.api.HolderKind;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.finality.api.FinalityDecision;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
@@ -39,6 +41,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -83,6 +87,7 @@ public class CorporateActionService {
     private final ApplicationEventPublisher events;
     private final HolderBlockGate holderBlockGate;
     private final FinalityGate finalityGate;
+    private final RegisterFreshnessGate registerFreshnessGate;
 
     CorporateActionService(CorporateActionRepository repository,
                             CorporateActionEntryRepository entryRepository,
@@ -92,7 +97,8 @@ public class CorporateActionService {
                             CorporateActionProposalValidator proposalValidator,
                             ApplicationEventPublisher events,
                             HolderBlockGate holderBlockGate,
-                            FinalityGate finalityGate) {
+                            FinalityGate finalityGate,
+                            RegisterFreshnessGate registerFreshnessGate) {
         this.repository = repository;
         this.entryRepository = entryRepository;
         this.holderRepository = holderRepository;
@@ -102,6 +108,7 @@ public class CorporateActionService {
         this.events = events;
         this.holderBlockGate = holderBlockGate;
         this.finalityGate = finalityGate;
+        this.registerFreshnessGate = registerFreshnessGate;
     }
 
     /** System-raised creation path — {@code CouponPaymentJob}/{@code BondMaturityJob} only. */
@@ -286,6 +293,19 @@ public class CorporateActionService {
             throw new IllegalArgumentException(
                     "Operator confirmer must be a different actor than whoever attested as issuer.");
         }
+        if (ca.getStatus() == CorporateAction.Status.SNAPSHOT_BLOCKED) {
+            throw new IllegalStateException("Corporate action " + corporateActionId
+                    + " has no entitlement snapshot yet (SNAPSHOT_BLOCKED): " + ca.getSnapshotBlockedReason());
+        }
+        // T2-18: no settlement approval on a register that is not reconciled with the chain. A
+        // record date still in the future is enforced by the snapshot itself, so only BLOCKED counts then.
+        LocalDate recordDate = ca.getRecordDate() != null && !ca.getRecordDate().isAfter(LocalDate.now())
+                ? ca.getRecordDate() : null;
+        Optional<String> registerBlocked = registerFreshnessGate.blockedReason(ca.getAssetId(), recordDate);
+        if (registerBlocked.isPresent()) {
+            throw new IllegalStateException("Settlement confirmation refused for corporate action "
+                    + corporateActionId + ": " + registerBlocked.get());
+        }
         finalityGate.require(GatedOperation.CORPORATE_ACTION_SETTLEMENT_CONFIRM, ca.getAssetId(),
                 resolveTokenStandard(corporateActionId), FinalityLevel.FINALIZED);
 
@@ -366,6 +386,15 @@ public class CorporateActionService {
         List<CorporateAction> ready = repository.findReadyToCompute(today);
         for (CorporateAction ca : ready) {
             try {
+                // T2-18 (SRE veto: no silent refusal): a register that is BLOCKED or not reconciled
+                // since the record date must not be snapshotted; the action is parked visibly as
+                // SNAPSHOT_BLOCKED (audited, metric + alert) and retried on the next run.
+                Optional<String> registerBlocked = registerFreshnessGate.blockedReason(ca.getAssetId(), ca.getRecordDate());
+                if (registerBlocked.isPresent()) {
+                    markSnapshotBlocked(ca, registerBlocked.get());
+                    continue;
+                }
+                ca.setSnapshotBlockedReason(null);
                 ca.setStatus(CorporateAction.Status.RECORD_DATE_SET);
                 repository.save(ca);
                 log.info("Corporate action record date set: id={}", ca.getId());
@@ -397,6 +426,18 @@ public class CorporateActionService {
         markMissedCoupons(today);
     }
 
+    private void markSnapshotBlocked(CorporateAction ca, String reason) {
+        boolean changed = ca.getStatus() != CorporateAction.Status.SNAPSHOT_BLOCKED
+                || !Objects.equals(reason, ca.getSnapshotBlockedReason());
+        ca.setStatus(CorporateAction.Status.SNAPSHOT_BLOCKED);
+        ca.setSnapshotBlockedReason(reason);
+        repository.save(ca);
+        if (changed) {
+            events.publishEvent(new CorporateActionSnapshotBlockedEvent(ca.getId(), ca.getAssetId(), reason));
+        }
+        log.error("Corporate action {} snapshot BLOCKED (recordDate={}): {}", ca.getId(), ca.getRecordDate(), reason);
+    }
+
     /**
      * Marks {@code AssetCouponPayment.couponStatus = MISSED} for coupons whose CorporateAction
      * is overdue and still unsettled, distinguishing a coupon that failed to pay from one
@@ -423,6 +464,11 @@ public class CorporateActionService {
      * COMPUTED. Actions without a per-unit amount (splits, calls, etc.) still get COMPUTED — there
      * is simply nothing to compute — since RECORD_DATE_SET → COMPUTED is otherwise a dead-end
      * status no code ever advances past.
+     *
+     * <p>A nominee-pool holder's entry (T2-18) is snapshotted with its entitlement but marked
+     * {@code HELD_LOOK_THROUGH} and left out of {@code totalAmount}: who is entitled to payments on
+     * pledged/escrowed units is undecided (PARK-T2-18), so they are neither paid to the pool nor
+     * silently dropped.
      */
     private void snapshotEntriesAndCompute(CorporateAction ca) {
         if (entryRepository.existsByCorporateActionId(ca.getId())) {
@@ -442,10 +488,15 @@ public class CorporateActionService {
             entry.setWalletAddress(holder.getWalletAddress());
             BigDecimal nominal = holder.getNominalAmount() != null ? holder.getNominalAmount() : BigDecimal.ZERO;
             entry.setNominalAtRecord(nominal);
+            boolean held = holder.getHolderKind() == HolderKind.NOMINEE_POOL;
+            entry.setPayoutStatus(held ? CorporateActionEntry.PayoutStatus.HELD_LOOK_THROUGH
+                    : CorporateActionEntry.PayoutStatus.PAYABLE);
             if (amountPerUnit != null) {
                 BigDecimal entitlement = amountPerUnit.multiply(nominal);
                 entry.setEntitlementAmount(entitlement);
-                total = total.add(entitlement);
+                if (!held) {
+                    total = total.add(entitlement);
+                }
             }
             entryRepository.save(entry);
         }

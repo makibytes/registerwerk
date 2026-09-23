@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.asset.internal;
 
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.events.GasSponsorshipPolicyDeactivatedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.GasSponsorshipPolicy;
@@ -8,6 +9,7 @@ import de.makibytes.registerwerk.deployment.api.GasSponsorshipPolicyRepository;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,14 +30,17 @@ public class GasSponsorshipService {
     private final GasSponsorshipPolicyRepository policyRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final AssetRepository assetRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public GasSponsorshipService(
             GasSponsorshipPolicyRepository policyRepository,
             AssetDeploymentRepository assetDeploymentRepository,
-            AssetRepository assetRepository) {
+            AssetRepository assetRepository,
+            ApplicationEventPublisher eventPublisher) {
         this.policyRepository = policyRepository;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.assetRepository = assetRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     public GasSponsorshipPolicy createForDeployment(UUID deploymentId, GasSponsorshipPolicy policy) {
@@ -58,12 +63,19 @@ public class GasSponsorshipService {
         return saved;
     }
 
-    public void deactivate(UUID policyId) {
+    /**
+     * Deactivates a policy. The voucher issuer refuses it immediately; the published event is the
+     * trigger for the funder/operator to also call {@code EwpgPaymaster.setPolicyActive(false)}
+     * on chain (the contract has its own flag since review phase 2, T2-02).
+     */
+    public void deactivate(UUID policyId, UUID actorId, String actorRole) {
         GasSponsorshipPolicy policy = policyRepository.findById(policyId)
             .orElseThrow(() -> new EntityNotFoundException("GasSponsorshipPolicy", policyId));
         policy.setActive(false);
         policyRepository.save(policy);
         log.info("Deactivated GasSponsorshipPolicy: id={}", policyId);
+        eventPublisher.publishEvent(new GasSponsorshipPolicyDeactivatedEvent(
+            policyId, policy.getAssetDeploymentId(), policy.getIssuerId(), actorId, actorRole));
     }
 
     @Transactional(readOnly = true)

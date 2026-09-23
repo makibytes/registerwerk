@@ -7,32 +7,44 @@
   "contracts": [
     {
       "name": "EwpgRepoMarket",
-      "abiSha256": "fd5ba70bb76f22df3f51481bb2100aea6f674378799dc122a1713586ce7e7a27",
+      "abiSha256": "810c2fdaee5403cbf4b53e5fc78aa244975ccb29b071f19b46252b511e8293b9",
       "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/lending/EwpgRepoMarket.sol"
     },
     {
       "name": "EwpgRepoMarketFactory",
-      "abiSha256": "db6e849c11ebe05576aa40e99d6efdd6e8b1caef3c0d02d64315a4e860dfa723",
+      "abiSha256": "f61d591003791db23d6cdfb7ea2d9a669cea38fddd8d5a0e4e9ba151a81e2946",
       "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/lending/EwpgRepoMarketFactory.sol"
     },
     {
       "name": "EwpgRepoVault",
-      "abiSha256": "22eb93076665e61a9c53591e1a0fb79f9cf54751939ee4050983ea00960afa9c",
+      "abiSha256": "efc14d6db57837f9563025290da6bd6b149dc341aa8005640d21d6bee11837e0",
       "sourceUrl": "https://github.com/registerwerk/registerwerk/blob/main/contracts/src/lending/EwpgRepoVault.sol"
     }
   ],
   "requiredPermissions": [
     {
       "code": "repo-markets.create-market",
-      "rationale": "Operator-only: deploy a new isolated market for a security via the CREATE2 factory"
+      "rationale": "Operator-only: deploy a new isolated market for a security via the CREATE2 factory; the market is bound to the creating wallet's org"
+    },
+    {
+      "code": "repo-markets.configure",
+      "rationale": "Operating org only, on its own markets: set the reserve factor, pause new borrowing, and sweep reserves to the market's fixed treasury; on a vault it operates, revoke the curator's pending market addition or cap increase"
+    },
+    {
+      "code": "repo-markets.reconcile",
+      "rationale": "Operating org only, on its own markets: write a position's collateral down after a forced transfer, bounded on-chain by the collateral actually observed leaving the market"
     },
     {
       "code": "repo-markets.curate-vault",
-      "rationale": "Curator-only: add/remove markets the vault allocates into, set per-market caps, and move idle cash into/out of a market"
+      "rationale": "Vault's curator org only, on its own vault: propose adding a factory-deployed market or raising its cap (applied after the vault's timelock), remove markets, lower caps, and move idle cash into/out of a market"
     },
     {
       "code": "repo-markets.push-price",
-      "rationale": "Operator or delegated NAV administrator: push a fresh collateral price mark shared across every market referencing it"
+      "rationale": "Operator or delegated NAV administrator: push a fresh collateral price mark shared across every market referencing it, within the oracle's per-window deviation cap; a delegated org may only push the assets the operator assigned to it with setAssetPusher"
+    },
+    {
+      "code": "repo-markets.override-price",
+      "rationale": "Oracle's operating org only: assign an asset's pusher org (setAssetPusher), push a mark past the deviation cap for a legitimate large NAV correction, and lower (never raise) the deviation cap"
     }
   ],
   "requiredClaimTopics": [

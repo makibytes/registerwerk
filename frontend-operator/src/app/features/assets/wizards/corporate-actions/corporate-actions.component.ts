@@ -59,7 +59,8 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
           @for (a of actions; track a.id) {
             <div class="ca-row">
               <span class="type-badge">{{ a.actionType.replace('_', ' ') }}</span>
-              <span class="status-badge" [class]="a.status.toLowerCase()">{{ a.status.replace('_', ' ') }}</span>
+              <span class="status-badge" [class]="a.status.toLowerCase()"
+                    [matTooltip]="a.status === 'SNAPSHOT_BLOCKED' ? (a.snapshotBlockedReason ?? '') : ''">{{ a.status.replace('_', ' ') }}</span>
               <span class="dimmed">{{ a.paymentDate ? (a.paymentDate | date:'dd MMM yyyy') : '—' }}</span>
               <span class="right mono">
                 {{ a.amountPerUnit != null ? (a.amountPerUnit | number:'1.0-8') + ' ' + (a.currency ?? '') : '—' }}
@@ -85,7 +86,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
                             (click)="overrideAttestation(a)">
                       <mat-icon>person_off</mat-icon> Override attestation
                     </button>
-                  } @else if (!a.dualControlApproverId) {
+                  } @else if (!a.dualControlApproverId && a.status !== 'SNAPSHOT_BLOCKED') {
                     <button type="button" mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
                             matTooltip="Requires step-up authentication"
                             (click)="confirmSettlement(a)">
@@ -171,7 +172,9 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
     }
     .status-badge.awaiting_settlement { background: rgba(245,158,11,.15); color: #f59e0b; }
     .status-badge.settled, .status-badge.closed { background: rgba(74,222,128,.15); color: #4ade80; }
-    .status-badge.cancelled, .status-badge.rejected { background: rgba(248,113,113,.15); color: #f87171; }
+    .status-badge.cancelled, .status-badge.rejected, .status-badge.snapshot_blocked {
+      background: rgba(248,113,113,.15); color: #f87171;
+    }
 
     .row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .375rem; }
   `],
@@ -209,7 +212,8 @@ export class CorporateActionsComponent implements OnInit {
 
   /** Non-terminal, past the proposal stage — where the two-party settlement control applies. */
   isPreSettlement(a: CorporateAction): boolean {
-    return a.status === 'ANNOUNCED' || a.status === 'RECORD_DATE_SET' || a.status === 'COMPUTED';
+    return a.status === 'ANNOUNCED' || a.status === 'SNAPSHOT_BLOCKED'
+      || a.status === 'RECORD_DATE_SET' || a.status === 'COMPUTED';
   }
 
   progressLabel(a: CorporateAction): string {
@@ -217,6 +221,8 @@ export class CorporateActionsComponent implements OnInit {
       case 'PROPOSED': return 'Awaiting operator review';
       case 'REJECTED': return 'Rejected — issuer must resubmit';
       case 'CANCELLED': return 'Cancelled';
+      case 'SNAPSHOT_BLOCKED':
+        return 'Snapshot refused — register not reconciled (retried daily)';
       case 'SETTLED':
       case 'CLOSED':
         return a.settlementTxHash ? `${a.settlementTxHash.slice(0, 10)}…` : 'off-chain';

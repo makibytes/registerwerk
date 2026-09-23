@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, map } from 'rxjs/operators';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -44,7 +44,7 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
   ],
   template: `
     <div class="page-container">
-      <app-page-header title="Supply & Earn" subtitle="Deposit stablecoin into any market and earn a transparent, utilization-based yield — no KYC needed.">
+      <app-page-header title="Supply & Earn" subtitle="Deposit stablecoin into a market and earn a transparent, utilization-based yield. Lender-side eligibility is under legal review.">
         <a mat-stroked-button routerLink="/lending">
           <mat-icon>arrow_back</mat-icon>
           Liquidity
@@ -73,7 +73,10 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
               <mat-label>Market</mat-label>
               <mat-select [(ngModel)]="selectedMarketId">
                 @for (m of markets; track m.id) {
-                  <mat-option [value]="m.id">{{ m.collateralAssetName ?? m.marketAddress }}</mat-option>
+                  <mat-option [value]="m.id">
+                    {{ m.collateralAssetName ?? m.marketAddress }}
+                    @if (!acceptsSupply(m)) { (withdraw only) }
+                  </mat-option>
                 }
               </mat-select>
             </mat-form-field>
@@ -83,6 +86,13 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
               <input matInput type="number" min="0.000001" step="0.000001" [(ngModel)]="amount" />
             </mat-form-field>
 
+            @if (selectedMarket && !acceptsSupply(selectedMarket)) {
+              <p class="hint-text" role="status">
+                {{ selectedMarket.riskParametersLegacy
+                  ? 'This market was set up under earlier risk parameters and takes no new supply. You can still withdraw.'
+                  : 'This market is paused. You can still withdraw.' }}
+              </p>
+            }
             @if (actionError) {
               <p class="error-text" role="alert">{{ actionError }}</p>
             }
@@ -94,7 +104,9 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
             }
 
             <div class="action-row">
-              <button mat-flat-button color="primary" type="button" [disabled]="acting || !selectedMarketId || !isValidAmount()" (click)="supply()">
+              <button mat-flat-button color="primary" type="button"
+                      [disabled]="acting || !selectedMarket || !acceptsSupply(selectedMarket) || !isValidAmount()"
+                      (click)="supply()">
                 @if (acting === 'supply') { Supplying… } @else { Supply }
               </button>
               <button mat-stroked-button type="button" [disabled]="acting || !selectedMarketId || !isValidAmount() || !!positionsError" (click)="withdraw()">
@@ -127,6 +139,7 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
     .full-width { width: 100%; }
     .action-row { display: flex; gap: 12px; margin-top: 8px; }
     .error-text { color: #dc2626; font-size: 12.5px; }
+    .hint-text { color: var(--rw-text-secondary); font-size: 12px; }
     .section-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
     .position-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
     .position-card { border-radius: 12px; }
@@ -162,10 +175,14 @@ export class SupplyEarnComponent implements OnInit {
     let marketsFailed = false;
     let positionsFailed = false;
     forkJoin({
-      markets: this.lendingService.listMarkets('ACTIVE').pipe(catchError(() => {
-        marketsFailed = true;
-        return of<LendingMarket[]>([]);
-      })),
+      // Not only ACTIVE: lenders must still be able to withdraw from a paused or legacy market.
+      markets: this.lendingService.listMarkets().pipe(
+        map((all) => all.filter((market) => market.status !== 'RETIRED')),
+        catchError(() => {
+          marketsFailed = true;
+          return of<LendingMarket[]>([]);
+        }),
+      ),
       positions: this.lendingService.supplyPositions().pipe(catchError(() => {
         positionsFailed = true;
         return of<LendingSupplyPosition[]>([]);
@@ -176,11 +193,20 @@ export class SupplyEarnComponent implements OnInit {
       if (marketsFailed) this.loadError = 'Supply markets could not be loaded.';
       if (positionsFailed) this.positionsError = 'Your existing supply positions could not be loaded.';
       if (!markets.some((market) => market.id === this.selectedMarketId)) {
-        this.selectedMarketId = markets[0]?.id ?? null;
+        this.selectedMarketId = (markets.find((market) => this.acceptsSupply(market)) ?? markets[0])?.id ?? null;
       }
       this.loading = false;
       this.cdr.markForCheck();
     });
+  }
+
+  get selectedMarket(): LendingMarket | null {
+    return this.markets.find((m) => m.id === this.selectedMarketId) ?? null;
+  }
+
+  /** New supply only into an active market with current risk parameters; withdraw always. */
+  acceptsSupply(market: LendingMarket): boolean {
+    return market.status === 'ACTIVE' && !market.riskParametersLegacy;
   }
 
   marketLabel(marketId: string): string {
@@ -200,7 +226,7 @@ export class SupplyEarnComponent implements OnInit {
 
   async supply(): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    if (!market || this.acting || !this.isValidAmount()) return;
+    if (!market || this.acting || !this.isValidAmount() || !this.acceptsSupply(market)) return;
     this.acting = 'supply';
     this.actionError = null;
     this.cdr.markForCheck();

@@ -28,7 +28,14 @@ import "../src/settlement/DvpSettlement.sol";
 ///                                      default 100e6 = 100.00 in a 6-decimals EMT)
 ///           EWPG_BOND_COUPON_BPS      (uint16,  default 450 = 4.50% per period)
 ///           BOND_COUPON_INTERVAL_SECS (uint256, default 90 days)
-///           EWPG_BOND_MATURITY        (uint256 unix timestamp, default now + 365 days)
+///           EWPG_BOND_MATURITY        (uint256 unix timestamp, default now + 4 coupon
+///                                      intervals; the schedule is anchored on maturity —
+///                                      the final coupon falls due exactly at maturity and
+///                                      the first period absorbs any remainder as a short
+///                                      stub, so the mined block's later timestamp is fine)
+///           BOND_DESK_OPERATOR_ORG    (address of the issuer org operating the desk; default
+///                                      the deployer wallet's org — every desk function is
+///                                      bound to this org, see EwpgBondDesk.operatorOrg)
 ///
 ///         Usage:
 ///           forge script script/DeployExampleDapps.s.sol --rpc-url <rpc> --broadcast
@@ -68,21 +75,7 @@ contract DeployExampleDapps is Script {
                 // Test networks only: stand-in for a MiCAR EMT (e.g. AllUnity Euro).
                 paymentToken = address(new MockStablecoin("AllUnity Euro (demo)", "AUEUR", 6));
             }
-            address treasury = vm.envOr("BOND_TREASURY", vm.addr(deployerKey));
-            uint256 pricePerUnit = vm.envOr("BOND_PRICE_PER_UNIT", uint256(100e6));
-            uint16 couponBps = uint16(vm.envOr("EWPG_BOND_COUPON_BPS", uint256(450)));
-            uint256 couponIntervalSecs = vm.envOr("BOND_COUPON_INTERVAL_SECS", uint256(90 days));
-            uint256 maturity = vm.envOr("EWPG_BOND_MATURITY", block.timestamp + 365 days);
-            bondDesk = new EwpgBondDesk(
-                oracle,
-                IERC3643(bondTokenAddress),
-                IERC20(paymentToken),
-                treasury,
-                pricePerUnit,
-                couponBps,
-                couponIntervalSecs,
-                maturity
-            );
+            bondDesk = _deployBondDesk(oracle, IERC3643(bondTokenAddress), IERC20(paymentToken), vm.addr(deployerKey));
         }
 
         vm.stopBroadcast();
@@ -94,8 +87,28 @@ contract DeployExampleDapps is Script {
             console.log("EwpgBondDesk               :", address(bondDesk));
             console.log("  -> bond token            :", bondTokenAddress);
             console.log("  -> payment token (EMT)   :", paymentToken);
+            console.log("  -> operator org          :", bondDesk.operatorOrg());
         } else {
             console.log("EwpgBondDesk               : skipped (set EWPG_BOND_TOKEN_ADDRESS)");
         }
+    }
+
+    /// @dev Split out of {run} to keep its stack shallow (legacy codegen, no via-IR).
+    function _deployBondDesk(IPermissionOracle oracle, IERC3643 bondToken, IERC20 paymentToken, address deployer)
+        private
+        returns (EwpgBondDesk)
+    {
+        uint256 couponIntervalSecs = vm.envOr("BOND_COUPON_INTERVAL_SECS", uint256(90 days));
+        return new EwpgBondDesk(
+            oracle,
+            bondToken,
+            paymentToken,
+            vm.envOr("BOND_TREASURY", deployer),
+            vm.envOr("BOND_PRICE_PER_UNIT", uint256(100e6)),
+            uint16(vm.envOr("EWPG_BOND_COUPON_BPS", uint256(450))),
+            couponIntervalSecs,
+            vm.envOr("EWPG_BOND_MATURITY", block.timestamp + 4 * couponIntervalSecs),
+            vm.envOr("BOND_DESK_OPERATOR_ORG", oracle.orgOf(deployer))
+        );
     }
 }

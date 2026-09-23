@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettledEvent;
@@ -83,6 +84,23 @@ class CorporateActionSettlementWriterTest {
         verify(events).publishEvent(captor.capture());
         assertThat(captor.getValue().actorId()).isEqualTo(actorId);
         assertThat(captor.getValue().actorRole()).isEqualTo("REGISTRY_ADMIN");
+    }
+
+    @Test
+    @DisplayName("T2-18: a HELD_LOOK_THROUGH (nominee-pool) entry is not recorded as settled")
+    void heldEntry_isNotSettled() {
+        UUID id = UUID.randomUUID();
+        actionAwaitingSettlement(id);
+        CorporateActionEntry payable = new CorporateActionEntry();
+        CorporateActionEntry held = new CorporateActionEntry();
+        held.setPayoutStatus(CorporateActionEntry.PayoutStatus.HELD_LOOK_THROUGH);
+        when(entryRepository.findByCorporateActionId(id)).thenReturn(List.of(payable, held));
+
+        writer.markSettled(id, "tx-hash-2");
+
+        assertThat(payable.getSettledAt()).isNotNull();
+        assertThat(held.getSettledAt()).isNull();
+        assertThat(held.getSettlementTxHash()).isNull();
     }
 
     @Test

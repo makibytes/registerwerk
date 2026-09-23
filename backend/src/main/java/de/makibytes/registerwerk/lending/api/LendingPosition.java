@@ -62,6 +62,15 @@ public class LendingPosition {
     @Column(name = "health_factor_reliable")
     private Boolean healthFactorReliable;
 
+    /**
+     * Loan-token cash a liquidation credited to this wallet ({@code EwpgRepoMarket.surplusOf}):
+     * the liquidator's payment for whole collateral units beyond the debt it closed. Claimable
+     * via {@code claimLiquidationSurplus()}; zero on markets that predate it.
+     */
+    @Column(name = "liquidation_surplus", nullable = false, precision = 78, scale = 0)
+    @NotNull
+    private BigInteger liquidationSurplus = BigInteger.ZERO;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @NotNull
@@ -95,6 +104,9 @@ public class LendingPosition {
 
     public Boolean getHealthFactorReliable() { return healthFactorReliable; }
     public void setHealthFactorReliable(Boolean healthFactorReliable) { this.healthFactorReliable = healthFactorReliable; }
+
+    public BigInteger getLiquidationSurplus() { return liquidationSurplus; }
+    public void setLiquidationSurplus(BigInteger liquidationSurplus) { this.liquidationSurplus = liquidationSurplus; }
 
     public LendingPositionStatus getStatus() { return status; }
     public void setStatus(LendingPositionStatus status) { this.status = status; }

@@ -83,6 +83,7 @@ public class LendingMarketController {
                 market.getLiquidationBonusBps(), market.getBaseRateWad(), market.getSlopeWad(),
                 market.getMaxPriceAgeSeconds(), market.getLiquidationGracePeriodSeconds(),
                 market.getPriceOracleAddress(), view.effectiveStatus(), view.jurisdiction(), view.micarApplicable(),
-                view.defiInteropModel(), market.getCreatedAt());
+                view.defiInteropModel(), market.getCreatedAt(), view.riskParametersLegacy(), view.operatorOrg(),
+                view.treasury());
     }
 }

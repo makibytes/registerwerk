@@ -113,7 +113,7 @@ The third one deserves attention. **Delivery versus Payment** is the mechanism t
 
 ??? note "For the specialist: DvP, and what it does not prove"
 
-    `DvpSettlement.sol` implements an ERC-7573-style pattern. Both legs are locked against a hash; releasing the secret settles both or neither. `EwpgBondDesk` demonstrates the same-transaction token-and-payment shape.
+    `DvpSettlement.sol` implements an ERC-7573-style pattern. One side locks its leg in escrow; the counterparty then settles both legs in one transaction, or the trade expires and the escrow goes back. When you settle, your client passes a fingerprint of the terms you agreed (parties, amounts, tokens, expiry): if what was locked differs in any detail, nothing moves. Settlement also stops while either party is frozen by the token's compliance controls. `EwpgBondDesk` demonstrates the same-transaction token-and-payment shape.
 
     Two honest qualifications:
 

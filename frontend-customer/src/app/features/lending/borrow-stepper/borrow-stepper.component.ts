@@ -76,6 +76,18 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
             <a mat-stroked-button routerLink="/positions">Back to My Positions</a>
           </mat-card-content>
         </mat-card>
+      } @else if (marketLegacy) {
+        <mat-card class="section-card">
+          <mat-card-content>
+            <mat-icon class="warn-icon">history</mat-icon>
+            <p>
+              This market was set up under earlier risk parameters and no longer takes new
+              borrowing. Existing loans are unaffected — you can still repay, add collateral or
+              claim what is owed to you from My Loans.
+            </p>
+            <a mat-stroked-button routerLink="/lending/loans">Go to My Loans</a>
+          </mat-card-content>
+        </mat-card>
       } @else if (marketPaused) {
         <mat-card class="section-card">
           <mat-card-content>
@@ -297,6 +309,11 @@ export class BorrowStepperComponent implements OnInit {
     return this.market?.status === 'PAUSED';
   }
 
+  /** Legacy risk parameters (see `LendingMarket.riskParametersLegacy`): no new borrowing. */
+  get marketLegacy(): boolean {
+    return this.market?.riskParametersLegacy === true;
+  }
+
   ngOnInit(): void {
     // debounced/switchMap so rapid typing doesn't fire a quote request per keystroke, and a
     // stale in-flight request can't overwrite a newer one's result.
@@ -355,7 +372,9 @@ export class BorrowStepperComponent implements OnInit {
         this.amountsForm.patchValue({ collateralAmount: investment.nominalAmount }, { emitEvent: false });
         this.lendingService.listMarkets('ACTIVE').subscribe({
           next: (markets) => {
-            this.market = markets.find((m) => m.collateralAssetId === investment.assetId) ?? null;
+            // Prefer a current market over a legacy one for the same collateral.
+            const candidates = markets.filter((m) => m.collateralAssetId === investment.assetId);
+            this.market = candidates.find((m) => !m.riskParametersLegacy) ?? candidates[0] ?? null;
             this.loading = false;
             this.cdr.markForCheck();
             if (this.market) {

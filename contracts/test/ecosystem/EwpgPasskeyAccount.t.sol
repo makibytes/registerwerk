@@ -10,6 +10,7 @@ import {P256} from "@openzeppelin/contracts/utils/cryptography/P256.sol";
 import {Execution} from "@openzeppelin/contracts/interfaces/draft-IERC7579.sol";
 import "../../src/ecosystem/EwpgPasskeyAccount.sol";
 import "./mocks/MockEntryPoint.sol";
+import "../../src/examples/MockStablecoin.sol";
 
 /// @notice Builds real WebAuthn authentication-assertion vectors using Foundry's native P256
 ///         cheatcodes (`vm.publicKeyP256`/`vm.signP256`) rather than a fixture recorded from an
@@ -27,7 +28,7 @@ contract EwpgPasskeyAccountTest is Test {
         (uint256 x, uint256 y) = vm.publicKeyP256(PRIVATE_KEY);
         (qx, qy) = (bytes32(x), bytes32(y));
         entryPoint = new MockEntryPoint();
-        account = new EwpgPasskeyAccount(IEntryPoint(address(entryPoint)), qx, qy);
+        account = new EwpgPasskeyAccount(IEntryPoint(address(entryPoint)), qx, qy, address(this));
     }
 
     function _sign(bytes32 hash, uint256 signingKey) private pure returns (bytes memory) {
@@ -159,5 +160,65 @@ contract EwpgPasskeyAccountTest is Test {
         vm.expectRevert(EwpgPasskeyAccount.NotGuardian.selector);
         vm.prank(address(0xBAD));
         account.setCallRole(address(0xB0B), bytes4(keccak256("pause()")), adminRole);
+    }
+
+    // ── T2-17: guardian is explicit; the contract is not a usable 7702 delegate ──
+
+    function test_guardianIsConstructorArgumentNotDeployer() public {
+        address deployer = address(0xD3);
+        address guardian = address(0x6A);
+        vm.prank(deployer);
+        EwpgPasskeyAccount a = new EwpgPasskeyAccount(IEntryPoint(address(entryPoint)), qx, qy, guardian);
+        assertEq(a.guardian(), guardian);
+
+        vm.prank(deployer);
+        vm.expectRevert(EwpgPasskeyAccount.NotGuardian.selector);
+        a.guardianExecute(address(0xB0B), 0, "");
+    }
+
+    function test_zeroGuardianRejected() public {
+        vm.expectRevert(EwpgPasskeyAccount.ZeroGuardian.selector);
+        new EwpgPasskeyAccount(IEntryPoint(address(entryPoint)), qx, qy, address(0));
+    }
+
+    /// Port of the phase-2 PoC `Passkey7702.t.sol`: an EOA delegating to a deployed instance via
+    /// EIP-7702 has no passkey in its own storage. On HEAD b810acb the implementation deployer was
+    /// the (shared, immutable) guardian of every delegating EOA; now the guardian is explicit and
+    /// signature validation fails closed on the empty signer.
+    function test_eip7702DelegateHasNoSignerAndFailsClosed() public {
+        address implDeployer = address(0xD3);
+        address registryGuardian = address(0x6A);
+        vm.prank(implDeployer);
+        EwpgPasskeyAccount impl = new EwpgPasskeyAccount(IEntryPoint(address(entryPoint)), qx, qy, registryGuardian);
+
+        MockStablecoin token = new MockStablecoin("EUR", "EUR", 6);
+        uint256 alicePk = 0xA11CE5;
+        address alice = vm.addr(alicePk);
+        token.mint(alice, 1_000_000e6);
+
+        vm.signAndAttachDelegation(address(impl), alicePk);
+        vm.prank(alice);
+        (bool ok,) = alice.call("");
+        assertTrue(ok);
+
+        EwpgPasskeyAccount delegated = EwpgPasskeyAccount(payable(alice));
+        (bytes32 sx, bytes32 sy) = delegated.signer();
+        assertEq(sx, bytes32(0));
+        assertEq(sy, bytes32(0));
+
+        // The deployer is no longer anybody's guardian.
+        assertTrue(delegated.guardian() != implDeployer);
+        vm.prank(implDeployer);
+        vm.expectRevert(EwpgPasskeyAccount.NotGuardian.selector);
+        delegated.guardianExecute(address(token), 0, abi.encodeCall(IERC20.transfer, (implDeployer, 1_000_000e6)));
+        assertEq(token.balanceOf(alice), 1_000_000e6);
+
+        // Empty signer => every signature is rejected (ERC-1271 and validateUserOp).
+        bytes32 hash = keccak256("anything");
+        assertEq(delegated.isValidSignature(hash, _sign(hash, PRIVATE_KEY)), bytes4(0xffffffff));
+        PackedUserOperation memory op = _buildUserOp(_sign(hash, PRIVATE_KEY));
+        op.sender = alice;
+        vm.prank(address(entryPoint));
+        assertEq(delegated.validateUserOp(op, hash, 0), 1, "SIG_VALIDATION_FAILED");
     }
 }

@@ -168,4 +168,34 @@ class ClaimSigningServiceTest {
 
         assertThat(withExpiry.claimData()).isNotEqualTo(withoutExpiry.claimData());
     }
+    /**
+     * T2-21 cross-implementation vector. The same constants are pinned in
+     * {@code contracts/test/ecosystem/ClaimIssuerBackendFormat.t.sol}, which checks them against a
+     * real ONCHAINID {@code ClaimIssuer.isClaimValid} whose MANAGEMENT key is this test's signer.
+     * The claim is issued on behalf of the ClaimIssuer contract (not the signing EOA).
+     */
+    static final String PINNED_IDENTITY = "0x00000000000000000000000000000000000001d1";
+    static final String PINNED_CLAIM_ISSUER = "0x000000000000000000000000000000000000c1a1";
+    static final String PINNED_DATA = "0x"
+            + "0000000000000000000000000000000000000000000000000000000000000001"
+            + "0000000000000000000000000000000000000000000000000000000000000001"
+            + "000000000000000000000000000000000000000000000000000000000000c1a1"
+            + "0000000000000000000000000000000000000000000000000000000000000000"
+            + "00000000000000000000000000000000000000000000000000000000000000a0"
+            + "0000000000000000000000000000000000000000000000000000000000000000";
+    static final String PINNED_SIGNATURE = "0xed6546e6cbd06f420e71af02067b9479b78e2b087cc7dc74edad75f61cfb8835"
+            + "43ba547e89dbbf172d6faf1f50eac9bf4ea2853c8a7e1e1b4d66afa52003da501b";
+
+    @Test
+    void signClaim_onBehalfOfClaimIssuerContract_matchesPinnedOnchainIdVector() {
+        UUID chainConfigId = UUID.randomUUID();
+        when(walletSigner.evmSignerForChain(chainConfigId)).thenReturn(signer);
+
+        SignedClaim signed = service.signClaim(chainConfigId, PINNED_CLAIM_ISSUER, PINNED_IDENTITY, 1L, null);
+
+        assertThat(signed.issuerAddress()).isEqualTo(PINNED_CLAIM_ISSUER);
+        assertThat(signed.issuerAddress()).isNotEqualToIgnoringCase(credentials.getAddress());
+        assertThat(signed.claimData()).isEqualTo(PINNED_DATA);
+        assertThat(signed.claimSignature()).isEqualTo(PINNED_SIGNATURE);
+    }
 }

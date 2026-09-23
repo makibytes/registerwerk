@@ -17,6 +17,8 @@ public interface CorporateActionRepository extends JpaRepository<CorporateAction
 
     List<CorporateAction> findByStatus(CorporateAction.Status status);
 
+    long countByStatus(CorporateAction.Status status);
+
     /** Idempotency guard: has a corporate action already been created for this coupon payment? */
     boolean existsByCouponPaymentId(UUID couponPaymentId);
 
@@ -50,12 +52,17 @@ public interface CorporateActionRepository extends JpaRepository<CorporateAction
      * been reviewed yet (or was rejected) must never be picked up for settlement dispatch just
      * because a client-supplied {@code paymentDate} happens to be in the past; only an
      * operator-approved (→ ANNOUNCED and beyond) action is a register fact.
+     *
+     * <p>Also excludes SNAPSHOT_BLOCKED (T2-18): with no entitlement snapshot there is nothing a
+     * settlement could correctly pay.
      */
     @Query("SELECT ca FROM CorporateAction ca WHERE ca.status NOT IN "
-            + "('PROPOSED','REJECTED','SETTLED','CLOSED','CANCELLED','AWAITING_SETTLEMENT') AND ca.paymentDate <= :date")
+            + "('PROPOSED','REJECTED','SNAPSHOT_BLOCKED','SETTLED','CLOSED','CANCELLED','AWAITING_SETTLEMENT') "
+            + "AND ca.paymentDate <= :date")
     List<CorporateAction> findDueForSettlement(@Param("date") LocalDate date);
 
-    @Query("SELECT ca FROM CorporateAction ca WHERE ca.status = 'ANNOUNCED' AND ca.recordDate <= :today")
+    /** Includes SNAPSHOT_BLOCKED (T2-18): a refused snapshot is retried on every daily run. */
+    @Query("SELECT ca FROM CorporateAction ca WHERE ca.status IN ('ANNOUNCED','SNAPSHOT_BLOCKED') AND ca.recordDate <= :today")
     List<CorporateAction> findReadyToCompute(@Param("today") LocalDate today);
 
     /** The operator's proposal review queue — every issuer-submitted proposal awaiting

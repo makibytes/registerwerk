@@ -45,6 +45,33 @@ larger design change than this pass's scope).
 
 ---
 
+## Phase-2 review (2026-09) — risk parameters for new markets
+
+This supersedes the parameter guidance below where they differ.
+
+- **Deviation cap.** `RegisterwerkNavOracle` now bounds the cumulative move per asset within a
+  deviation window (default one day), not only the step from the previous mark.
+  `setMaxDeviationBps` can only **lower** the cap; a higher cap needs a new oracle and new markets.
+  Each asset can be assigned its own pusher org (`setAssetPusher`); without one, only the
+  oracle's operator org pushes.
+- **LLTV and bonus.** Choose `lltvBps × (1 + liquidationBonusBps) ≤ 1 − maxDeviationBps` of the
+  market's oracle. The market constructor and the backend registration both refuse other values.
+  Against the default 20% tolerance and a 5% bonus, the LLTV can be at most 76.19%; the demo uses
+  75% and 74%.
+- **Quote currency.** Deploy one oracle per loan token; a market refuses an oracle quoted in
+  another token.
+- **Grace window.** Liquidation on a stale mark (within `liquidationGracePeriodSeconds`) is capped
+  at a 50% close factor per call.
+- **Whole units.** Liquidations sell whole collateral units rounded up; payment above the debt is
+  owed to the borrower as a claimable cash surplus.
+- **Reconciliation (finding 5).** `reconcileCollateral` now needs `repo-markets.reconcile` held by
+  the market's operating org, and is bounded by the collateral actually observed leaving the
+  market. Market configuration uses `repo-markets.configure`; reserves only go to the market's
+  fixed treasury.
+
+Already-registered markets that fail these checks are flagged `riskParametersLegacy`: repay,
+claim and withdraw stay available, new borrowing and supply are not offered.
+
 ## P0 — must fix or get sign-off before production
 
 ### 1. Oracle price-deviation circuit breaker (fixed)
@@ -96,6 +123,9 @@ jurisdiction) rehypothecation restrictions that a simple cash-secured loan never
 | `LU_CSSF` | CSSF | CSSF custodian/depositary rules on rehypothecation | Unreviewed |
 | `FR_AMF` | AMF | CMF teneur de compte-conservation restrictions | Unreviewed |
 | `LI_TVTG` | FMA | TVTG token-container custody segregation | Unreviewed |
+| Lender side (all jurisdictions) | BaFin / national competent authority | AML/KYC of suppliers; MiCAR Art. 50 (no interest on EMTs); CASP authorisation or KWG deposit business for `EwpgRepoMarket.supply` / `EwpgRepoVault` shares | Unreviewed — parked (PARK-T2-20) |
+
+`EwpgRepoMarket.supply`/`withdraw` and the ERC-4626 `EwpgRepoVault` (with transferable shares) are not permission- or claim-gated, so any wallet can supply stablecoin and earn yield. Whether this lender side is a regulated activity of the operator and whether yield may be paid on EMT deposits at all is parked for counsel (PARK-T2-20). The recommended default is to gate supply on `repo-markets.supply` plus an AML claim, while withdrawals stay open to existing suppliers. Until that is decided, the customer portal no longer describes Supply & Earn as needing no KYC. It says that lender-side eligibility is under legal review.
 
 **No amount of further contract hardening substitutes for this.** This finding is carried forward
 unchanged — it is explicitly out of scope for a code-only compliance pass and requires

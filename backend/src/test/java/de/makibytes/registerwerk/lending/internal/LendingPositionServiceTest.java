@@ -277,6 +277,72 @@ class LendingPositionServiceTest {
     }
 
     @Test
+    @DisplayName("still refreshes a loan on a market that is paused on-chain, so the borrower can repay (legacy markets)")
+    void refreshesPositionOnPausedMarket() {
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
+        LendingMarket market = activeMarket();
+        when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
+        lenient().doThrow(new IllegalStateException("Lending market is not operational"))
+                .when(marketService).requireOperational(market);
+        when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
+        when(positionRepository.findByMarketIdAndWalletAddressIgnoreCase(market.getId(), walletAddress))
+                .thenReturn(Optional.empty());
+        when(onchainReader.positionCollateralAmount("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenReturn(BigInteger.valueOf(100));
+        when(onchainReader.debtOf("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenReturn(BigInteger.valueOf(8_000_000_000L));
+
+        var positions = service.refreshAndListMyPositions(appUserId);
+
+        assertThat(positions).hasSize(1);
+        assertThat(positions.get(0).getStatus()).isEqualTo(LendingPositionStatus.OPEN);
+    }
+
+    @Test
+    @DisplayName("caches claimable liquidation surplus, even when debt and collateral are both zero")
+    void cachesLiquidationSurplusOfClosedPosition() {
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
+        LendingMarket market = activeMarket();
+        when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
+        when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
+        when(positionRepository.findByMarketIdAndWalletAddressIgnoreCase(market.getId(), walletAddress))
+                .thenReturn(Optional.empty());
+        when(onchainReader.positionCollateralAmount("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenReturn(BigInteger.ZERO);
+        when(onchainReader.debtOf("ETHEREUM_SEPOLIA", marketAddress, walletAddress)).thenReturn(BigInteger.ZERO);
+        when(onchainReader.liquidationSurplus("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenReturn(BigInteger.valueOf(7_142_857_143L));
+
+        var positions = service.refreshAndListMyPositions(appUserId);
+
+        assertThat(positions).hasSize(1);
+        assertThat(positions.get(0).getLiquidationSurplus()).isEqualTo(BigInteger.valueOf(7_142_857_143L));
+        assertThat(positions.get(0).getStatus()).isEqualTo(LendingPositionStatus.CLOSED);
+    }
+
+    @Test
+    @DisplayName("reads zero surplus on a market that predates surplusOf")
+    void legacyMarketWithoutSurplusGetterReadsZero() {
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
+        LendingMarket market = activeMarket();
+        when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
+        when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
+        when(positionRepository.findByMarketIdAndWalletAddressIgnoreCase(market.getId(), walletAddress))
+                .thenReturn(Optional.empty());
+        when(onchainReader.positionCollateralAmount("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenReturn(BigInteger.valueOf(100));
+        when(onchainReader.debtOf("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenReturn(BigInteger.valueOf(1_000_000L));
+        when(onchainReader.liquidationSurplus("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenThrow(new IllegalStateException("Call to surplusOf reverted"));
+
+        var positions = service.refreshAndListMyPositions(appUserId);
+
+        assertThat(positions).hasSize(1);
+        assertThat(positions.get(0).getLiquidationSurplus()).isZero();
+    }
+
+    @Test
     @DisplayName("skips a wallet whose chain does not match the market's chain")
     void skipsWalletOnDifferentChain() {
         OrgMemberWallet otherChainWallet = activeWallet();

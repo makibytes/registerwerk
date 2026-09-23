@@ -33,4 +33,7 @@ public interface OnchainClaimRepository extends JpaRepository<OnchainClaim, UUID
     /** Claims with a submitted {@code removeClaim} tx not yet resolved — {@code revokedAt} being
      *  null is itself the "not yet confirmed" signal (see {@code Erc3643ClaimConfirmationListener}). */
     List<OnchainClaim> findByRevocationTxHashIsNotNullAndRevokedAtIsNull();
+
+    /** Claims with a submitted issuer-level {@code revokeClaimBySignature} tx not yet resolved. */
+    List<OnchainClaim> findByIssuerRevocationTxHashIsNotNullAndIssuerRevokedAtIsNull();
 }

@@ -51,6 +51,41 @@ Permission ids are `keccak256("<your-slug>.<action>")`. Your marketplace slug is
 namespace — manifests declaring permissions outside `<slug>.*` are rejected unless the
 code already exists as a platform permission.
 
+### Binding an instance to its operating org { #binding-an-instance-to-its-operating-org }
+
+Permission grants are **org-wide**: a grant of `loandesk.sweep` lets the org's wallets call that
+action on *every* deployed instance of the dApp, including desks, vaults or markets operated by a
+different org. The slug permission says *what* an org may do; it does not say *whose* instance it
+is. A dApp instance that holds value or configuration of one org must therefore bind itself to that
+org and gate its privileged functions with `requiresOrgPermission`:
+
+```solidity
+contract LoanDesk is RegisterwerkGated {
+    bytes32 public constant SWEEP = keccak256("loandesk.sweep");
+    address public immutable operatorOrg;
+
+    constructor(IPermissionOracle oracle_, address operatorOrg_) RegisterwerkGated(oracle_) {
+        _requireOrg(operatorOrg_); // reverts ZeroOperatingOrg()
+        operatorOrg = operatorOrg_;
+    }
+
+    function sweep() external requiresOrgPermission(operatorOrg, SWEEP) { /* ... */ }
+}
+```
+
+- `requiresOrgPermission(address org, bytes32 permission)` — the caller's wallet must be bound to
+  `org` (checked first, reverts `WrongOperatingOrg(wallet, expectedOrg)`) **and** hold
+  `permission` (reverts `PermissionDenied`). `org == address(0)` never matches.
+- `_checkOrgPermission(wallet, org, permission)` — the same check as an internal function, for
+  instances whose operating org is resolved inside the function (for example per asset).
+- `_requireOrg(org)` — constructor/setter guard that reverts `ZeroOperatingOrg()`.
+
+Use the binding for every action that moves the instance's funds or inventory or changes its
+configuration. Only actions the dApp deliberately opens to members of other orgs stay on plain
+`requiresPermission`. Expose the
+bound org as a public getter (`operatorOrg()`), so operators and consumers can see who operates an
+attested instance. No PermissionRegistry change is needed: grants stay per slug.
+
 A minimal runnable example lives in `contracts/test/ecosystem/SampleGatedDapp.t.sol`. For
 two fully packaged, marketplace-ready reference dApps — including a real ERC-3643 (T-REX)
 integration — see [Reference example dApps](#reference-example-dapps) below.
@@ -141,6 +176,19 @@ atomically, or the trade expires and the locker reclaims it. See its NatSpec for
 ERC-3643-escrow caveat (T-REX tokens require the settlement contract's ONCHAINID to be
 verified in the identity registry before they can be escrowed — locking the payment leg
 instead sidesteps this for security tokens).
+
+Trade ids are derived, not chosen: `lockAsset`/`lockPayment` take the locker's own
+`clientRef` (e.g. an RFQ id) and return `tradeId = keccak256(abi.encode(chainid, dvp, locker,
+clientRef))` (also available as `tradeIdFor(locker, clientRef)`), so nobody can occupy the id of a
+trade another party is about to lock. The counterparty settles with
+`settle(tradeId, expectedTermsHash)`, where `expectedTermsHash` is `hashTerms(seller, buyer,
+assetToken, assetAmount, paymentToken, paymentAmount, lockedLeg, expiry)` computed from **its own
+record of the agreed deal**. Do not read the hash back from `termsHashOf(tradeId)` and pass it on:
+that only echoes what the locker stored. If the stored terms differ, `settle` reverts
+`TermsMismatch` and moves nothing. `settle` also reverts `PartyFrozen` while the asset token (if
+it answers `isFrozen(address)`, as T-REX does) reports the seller or buyer frozen; the escrow then
+stays in place until the freeze is lifted, the trade is cancelled, or the operator releases it
+under a legal order with `forceCancel(tradeId, to, legalBasis)` (event `TradeForceCancelled`).
 
 ## Publication workflow
 
@@ -253,6 +301,10 @@ ship as tested Solidity only (no manifest, not seeded as live marketplace listin
   through the unmodified, ungated `DvpSettlement` above, and its fills double as the price feed
   for `EwpgRepoFacility.updatePrice`. Tests:
   `contracts/test/examples/CompliantSecondaryMarket.t.sol`.
+  Each desk instance is bound to its operating org (`operatorOrg`, a constructor argument):
+  another nominee org holding the same `secondary-market.trade` grant reverts
+  `WrongOperatingOrg` on this instance. `reclaimExpired(tradeId)` returns an expired, unsettled
+  inventory escrow to the pool, since the desk contract is the locker.
 - `contracts/src/examples/StablecoinAmm.sol` — a minimal constant-product AMM restricted to
   stablecoin-only pairs, deliberately **not** `RegisterwerkGated` (see its NatSpec for why).
   Tests: `contracts/test/examples/StablecoinAmm.t.sol`.

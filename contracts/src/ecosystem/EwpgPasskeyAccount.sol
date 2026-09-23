@@ -4,6 +4,7 @@ pragma solidity ^0.8.36;
 import {Account} from "@openzeppelin/contracts/account/Account.sol";
 import {ERC7821} from "@openzeppelin/contracts/account/extensions/draft-ERC7821.sol";
 import {SignerWebAuthn} from "@openzeppelin/contracts/utils/cryptography/signers/SignerWebAuthn.sol";
+import {AbstractSigner} from "@openzeppelin/contracts/utils/cryptography/signers/AbstractSigner.sol";
 import {SignerP256} from "@openzeppelin/contracts/utils/cryptography/signers/SignerP256.sol";
 import {IEntryPoint} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
@@ -13,10 +14,21 @@ import {ERC7579Utils} from "@openzeppelin/contracts/account/utils/draft-ERC7579U
 /// @title EwpgPasskeyAccount
 /// @notice Reference minimal ERC-4337 smart account secured by a passkey (WebAuthn/secp256r1)
 ///         signer instead of a seed-phrase-managed ECDSA key — the retail-onboarding UX
-///         described in `docs/platform/account-abstraction.md`. Intended either as the code
-///         an EIP-7702 delegation designation points an existing EOA at (same address, new
-///         signing logic — see the EIP-7702 section of that doc) or as a freshly-deployed
-///         ERC-4337 account for a customer who has never held a wallet before.
+///         described in `docs/platform/account-abstraction.md`, deployed as a fresh ERC-4337
+///         account for a customer who has never held a wallet before.
+///
+///         **NOT an EIP-7702 delegate.** Per-account state (the passkey `signer()` and the
+///         `callRole` table) is constructor-initialised in *this* contract's storage, and
+///         `guardian` is an immutable in its code. An EOA that delegates to a deployed instance
+///         runs that code against its *own* (empty) storage — no passkey is set, so every
+///         signature fails closed ({_rawSignatureValidation}) — while sharing the instance's
+///         guardian with every other delegating EOA. Do not point a 7702 authorization at it.
+///
+///         **Guardian = full custodial override.** {guardianExecute} performs an arbitrary call
+///         from the account with no timelock, role check or passkey co-signature; whoever holds
+///         the guardian key controls the account's assets. The guardian is therefore an explicit
+///         constructor argument (never the deployer by accident). Whether a registry-held
+///         guardian with unilateral control is intended is an open custody decision.
 ///
 /// @dev Composes three pieces already vendored via `contracts/lib/openzeppelin-contracts` but
 ///      unused elsewhere in this repo before this contract — no new dependency was added:
@@ -51,14 +63,18 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
     error GuardianRequired(address target, bytes4 selector);
     error NotGuardian();
     error SelfCallTrampolineForbidden();
+    error ZeroGuardian();
 
-    constructor(IEntryPoint entryPoint_, bytes32 qx, bytes32 qy) SignerP256(qx, qy) {
+    constructor(IEntryPoint entryPoint_, bytes32 qx, bytes32 qy, address guardian_) SignerP256(qx, qy) {
+        if (guardian_ == address(0)) revert ZeroGuardian();
         _entryPoint = entryPoint_;
-        guardian = msg.sender;
+        guardian = guardian_;
     }
 
-    /// @notice Classifies high-risk calls. The HSM-backed guardian configures policy and is the
-    /// only executor for ADMIN/RECOVERY operations; passkey UserOperations remain routine-only.
+    /// @notice Classifies high-risk calls. The guardian configures policy and is the only
+    /// executor for ADMIN/RECOVERY operations; passkey UserOperations remain routine-only.
+    /// Note that the guardian sets this table itself, so it restricts the passkey, not the
+    /// guardian — see {guardianExecute}.
     function setCallRole(address target, bytes4 selector, bytes32 role) external {
         if (msg.sender != guardian) revert NotGuardian();
         require(role == ROLE_ROUTINE || role == ROLE_ADMIN || role == ROLE_RECOVERY, "invalid role");
@@ -66,6 +82,8 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
         emit CallRoleSet(target, selector, role);
     }
 
+    /// @notice Arbitrary call from the account by the guardian — a full custodial override,
+    ///         not a protective-only path (see the contract NatSpec).
     function guardianExecute(address target, uint256 value, bytes calldata data)
         external
         payable
@@ -73,7 +91,9 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
     {
         if (msg.sender != guardian) revert NotGuardian();
         (bool ok, bytes memory returned) = target.call{value: value}(data);
-        if (!ok) assembly ("memory-safe") { revert(add(returned, 32), mload(returned)) }
+        if (!ok) {
+            assembly ("memory-safe") { revert(add(returned, 32), mload(returned)) }
+        }
         emit GuardianExecution(target, _selector(data));
         return returned;
     }
@@ -86,6 +106,19 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
     /// @inheritdoc IERC1271
     function isValidSignature(bytes32 hash, bytes calldata signature) external view override returns (bytes4) {
         return _rawSignatureValidation(hash, signature) ? IERC1271.isValidSignature.selector : bytes4(0xffffffff);
+    }
+
+    /// @dev Fails closed when no passkey is set — the state of any EOA that (wrongly) delegates
+    ///      to this contract via EIP-7702, whose own storage holds no `signer()`.
+    function _rawSignatureValidation(bytes32 hash, bytes calldata signature)
+        internal
+        view
+        override(AbstractSigner, SignerWebAuthn)
+        returns (bool)
+    {
+        (bytes32 qx, bytes32 qy) = signer();
+        if (qx == bytes32(0) && qy == bytes32(0)) return false;
+        return super._rawSignatureValidation(hash, signature);
     }
 
     /// @dev Allows the EntryPoint to drive {execute} (per a validated UserOperation), in

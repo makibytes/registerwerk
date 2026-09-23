@@ -10,6 +10,24 @@ import "../ecosystem/RegisterwerkGated.sol";
 import "../ecosystem/interfaces/IPermissionOracle.sol";
 import "./oracle/IRepoOracle.sol";
 
+/// @notice Construction parameters of an {EwpgRepoMarket} — each maps 1:1 to the market's
+///         immutable of the same name. All fields are static, so the ABI encoding equals the
+///         flat parameter list.
+struct MarketParams {
+    address operatorOrg;
+    address treasury;
+    IERC20 loanToken;
+    IERC20 collateralToken;
+    IRepoOracle priceOracle;
+    uint256 maxLtvBps;
+    uint256 lltvBps;
+    uint256 liquidationBonusBps;
+    uint256 baseRateWad;
+    uint256 slopeWad;
+    uint256 maxPriceAgeSeconds;
+    uint256 liquidationGracePeriodSeconds;
+}
+
 /// @title EwpgRepoMarket
 /// @notice Isolated collateralized-lending market for exactly ONE {loanToken, collateralToken}
 ///         pair — the Morpho-Blue-style evolution of `EwpgRepoFacility` (see that contract's
@@ -24,9 +42,15 @@ import "./oracle/IRepoOracle.sol";
 ///         Same asymmetric gating as `EwpgRepoFacility`: the lender side ({supply}/{withdraw})
 ///         is open to any stablecoin holder, the borrower side ({pledgeAndBorrow}) requires
 ///         `repo-facility.borrow` plus a KYC claim, and {repay}/{repayDebtOnly}/
-///         {claimCollateral}/{liquidate} are intentionally ungated at this layer — the collateral
-///         token's own T-REX identity-registry check is the real, sufficient compliance gate on
-///         any transfer out.
+///         {claimCollateral}/{claimLiquidationSurplus}/{liquidate} are intentionally ungated at
+///         this layer — the collateral token's own T-REX identity-registry check is the real,
+///         sufficient compliance gate on any transfer out.
+///
+///         Operator functions are bound to this instance's {operatorOrg} (the org whose member
+///         created the market through `EwpgRepoMarketFactory`) and use this dApp's own
+///         `repo-markets.configure` / `repo-markets.reconcile` codes — never the facility's
+///         `repo-facility.configure`, whose holders routinely push facility prices. Reserves
+///         only ever go to the immutable {treasury}.
 ///
 ///         Debt repayment and collateral release are separable: {repay} does both in one call,
 ///         but a borrower whose collateral-token eligibility has lapsed (KYC expiry, country
@@ -57,7 +81,10 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     bytes32 public constant BORROW = keccak256("repo-facility.borrow");
-    bytes32 public constant CONFIGURE = keccak256("repo-facility.configure");
+    /// @notice Reserve factor, reserve sweep to {treasury}, borrow pause.
+    bytes32 public constant CONFIGURE = keccak256("repo-markets.configure");
+    /// @notice Collateral write-down after an observed forced transfer — see {reconcileCollateral}.
+    bytes32 public constant RECONCILE = keccak256("repo-markets.reconcile");
     uint256 public constant TOPIC_KYC = 1;
 
     uint256 private constant WAD = 1e18;
@@ -97,16 +124,22 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     /// @notice During the stale-price grace window (see {_currentPriceForLiquidation}), a
     ///         position must be unhealthy by this much more than the normal 1.0 threshold before
     ///         {liquidate} will act on it — a safety margin for the borrower against a mark that
-    ///         may no longer reflect the true price, in either direction.
+    ///         may no longer reflect the true price, in either direction. Within that window a
+    ///         single call is also held to {CLOSE_FACTOR_BPS}, never the full close.
     uint256 public constant STALE_GRACE_HEALTH_FACTOR_BUFFER_BPS = 500; // 5%
 
     // ── Immutable market identity ────────────────────────────────────────────
 
+    /// @notice Org operating this instance: only its members may call the operator functions.
+    address public immutable operatorOrg;
+    /// @notice The only recipient of {withdrawReserves}.
+    address public immutable treasury;
     /// @notice The stablecoin lenders supply and borrowers draw against pledged collateral.
     IERC20 public immutable loanToken;
     /// @notice The single restricted security-token collateral this market accepts.
     IERC20 public immutable collateralToken;
-    /// @notice Price feed for {collateralToken}, denominated in {loanToken} base units.
+    /// @notice Price feed for {collateralToken}, denominated in {loanToken} base units — its
+    ///         `quoteToken()` must be {loanToken} (checked at construction).
     IRepoOracle public immutable priceOracle;
     /// @notice Maximum LTV a new {pledgeAndBorrow} may open a position at — strictly below
     ///         {lltvBps}, so a borrower who draws the maximum this market allows is not
@@ -117,8 +150,10 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     uint256 public immutable maxLtvBps;
     /// @notice Liquidation LTV, in bps — the health-factor threshold. Always > {maxLtvBps}.
     uint256 public immutable lltvBps;
-    /// @notice Extra collateral (in bps of debt repaid) awarded to a liquidator. Capped at
-    ///         {MAX_LIQUIDATION_BONUS_BPS}.
+    /// @notice Discount (in bps of debt repaid) at which a liquidator buys collateral. Capped
+    ///         at {MAX_LIQUIDATION_BONUS_BPS}, and `lltvBps × (1 + bonus)` must stay below
+    ///         `1 − priceOracle.maxDeviationBps()` (see the constructor), so a liquidation of a
+    ///         position just below health factor 1 always leaves it healthier, never short.
     uint256 public immutable liquidationBonusBps;
     /// @notice Annualized rate-curve constants, WAD-scaled: borrowRate = baseRateWad +
     ///         slopeWad * utilization.
@@ -154,6 +189,18 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     ///         collateral asset, unlike `EwpgRepoFacility`'s per-collateral-token mapping.
     mapping(address => Position) public positions;
 
+    /// @notice Sum of every position's `collateralAmount` — what this market must hold.
+    ///         `collateralToken.balanceOf(this) < totalCollateral` is the only evidence of a
+    ///         forced transfer out, and it bounds {reconcileCollateral}.
+    uint256 public totalCollateral;
+
+    /// @notice Loan-token cash owed to a liquidated borrower: the part of a liquidator's
+    ///         payment for whole collateral units that exceeded the debt it closed. Held out of
+    ///         pool liquidity and paid out by {claimLiquidationSurplus}.
+    mapping(address => uint256) public surplusOf;
+    /// @notice Sum of {surplusOf} — loan-token cash in this contract that belongs to borrowers.
+    uint256 public totalSurplus;
+
     uint256 public liquidityIndex = WAD;
     uint256 public borrowIndex = WAD;
     uint256 public totalScaledDeposits;
@@ -174,7 +221,15 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     event ReserveFactorUpdated(uint256 reserveFactorBps);
     event ReservesWithdrawn(address indexed to, uint256 amount);
     event BorrowPausedSet(bool paused);
-    event CollateralReconciled(address indexed borrower, uint256 previousCollateral, uint256 newCollateral);
+    /// @notice `forcedTransferRef` links the write-down to the triggering forced-transfer
+    ///         transaction (the backend's reconciliation record).
+    event CollateralReconciled(
+        address indexed borrower, uint256 previousCollateral, uint256 newCollateral, bytes32 forcedTransferRef
+    );
+    /// @notice A liquidation paid more for whole collateral units than the debt it closed; the
+    ///         excess is owed to the borrower (see {surplusOf}).
+    event LiquidationSurplusCredited(address indexed borrower, uint256 amount);
+    event SurplusClaimed(address indexed borrower, uint256 amount);
     /// @notice A borrower's collateral was fully exhausted (via {liquidate} or
     ///         {reconcileCollateral}) while debt remained outstanding — that debt is now
     ///         written off rather than left to compound phantom interest forever.
@@ -189,6 +244,12 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     error InvalidLiquidationBonus();
     error InvalidCollateralDecimals();
     error InsufficientLiquidationHaircut();
+    /// @notice `lltvBps × (1 + liquidationBonusBps) ≥ 1`: liquidating a still over-collateralised
+    ///         position would already create bad debt.
+    error InvalidLiquidationIncentive();
+    error OracleQuoteMismatch(address oracleQuoteToken, address loanToken);
+    error NoObservedShortfall();
+    error ReconciliationExceedsShortfall(uint256 reduction, uint256 shortfall);
     error InvalidLiquidationGracePeriod();
     error InvalidReserveFactor();
     error BorrowIsPaused();
@@ -204,47 +265,39 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     error ReconciliationWouldIncreaseCollateral();
     error OutstandingDebt();
 
-    constructor(
-        IPermissionOracle oracle_,
-        IERC20 loanToken_,
-        IERC20 collateralToken_,
-        IRepoOracle priceOracle_,
-        uint256 maxLtvBps_,
-        uint256 lltvBps_,
-        uint256 liquidationBonusBps_,
-        uint256 baseRateWad_,
-        uint256 slopeWad_,
-        uint256 maxPriceAgeSeconds_,
-        uint256 liquidationGracePeriodSeconds_
-    ) RegisterwerkGated(oracle_) {
+    /// @param p Market parameters — see {MarketParams}. `EwpgRepoMarketFactory` only accepts
+    ///        its caller's own org as `p.operatorOrg`.
+    constructor(IPermissionOracle oracle_, MarketParams memory p) RegisterwerkGated(oracle_) {
+        _requireOrg(p.operatorOrg);
         if (
-            address(loanToken_) == address(0) || address(collateralToken_) == address(0)
-                || address(priceOracle_) == address(0)
+            p.treasury == address(0) || address(p.loanToken) == address(0)
+                || address(p.collateralToken) == address(0) || address(p.priceOracle) == address(0)
         ) revert ZeroAddress();
-        if (lltvBps_ == 0 || lltvBps_ > BPS_DENOMINATOR) revert InvalidLltv();
-        if (maxLtvBps_ == 0 || maxLtvBps_ >= lltvBps_) revert InvalidMaxLtv();
-        if (liquidationBonusBps_ > MAX_LIQUIDATION_BONUS_BPS) revert InvalidLiquidationBonus();
-        if (IERC20Metadata(address(collateralToken_)).decimals() != 0) revert InvalidCollateralDecimals();
-        // A haircut no wider than the oracle's own routine per-push deviation tolerance means a
-        // single ordinary, in-tolerance price push could already leave a liquidation
-        // under-collateralized — checked as a construction-time snapshot, same limitation
-        // {maxPriceAgeSeconds} already accepts (an immutable risk parameter that doesn't track
-        // a later change to what the "right" value would be).
-        if (BPS_DENOMINATOR - lltvBps_ < priceOracle_.maxDeviationBps()) revert InsufficientLiquidationHaircut();
-        if (maxPriceAgeSeconds_ != 0 && liquidationGracePeriodSeconds_ < maxPriceAgeSeconds_) {
+        if (p.lltvBps == 0 || p.lltvBps > BPS_DENOMINATOR) revert InvalidLltv();
+        if (p.maxLtvBps == 0 || p.maxLtvBps >= p.lltvBps) revert InvalidMaxLtv();
+        if (p.liquidationBonusBps > MAX_LIQUIDATION_BONUS_BPS) revert InvalidLiquidationBonus();
+        if (IERC20Metadata(address(p.collateralToken)).decimals() != 0) revert InvalidCollateralDecimals();
+        // One oracle serves one quote currency: a EUR mark read by a USDC market misprices
+        // every position.
+        address quote = p.priceOracle.quoteToken();
+        if (quote != address(p.loanToken)) revert OracleQuoteMismatch(quote, address(p.loanToken));
+        _checkLiquidationHaircut(p.lltvBps, p.liquidationBonusBps, p.priceOracle.maxDeviationBps());
+        if (p.maxPriceAgeSeconds != 0 && p.liquidationGracePeriodSeconds < p.maxPriceAgeSeconds) {
             revert InvalidLiquidationGracePeriod();
         }
 
-        loanToken = loanToken_;
-        collateralToken = collateralToken_;
-        priceOracle = priceOracle_;
-        maxLtvBps = maxLtvBps_;
-        lltvBps = lltvBps_;
-        liquidationBonusBps = liquidationBonusBps_;
-        baseRateWad = baseRateWad_;
-        slopeWad = slopeWad_;
-        maxPriceAgeSeconds = maxPriceAgeSeconds_;
-        liquidationGracePeriodSeconds = liquidationGracePeriodSeconds_;
+        operatorOrg = p.operatorOrg;
+        treasury = p.treasury;
+        loanToken = p.loanToken;
+        collateralToken = p.collateralToken;
+        priceOracle = p.priceOracle;
+        maxLtvBps = p.maxLtvBps;
+        lltvBps = p.lltvBps;
+        liquidationBonusBps = p.liquidationBonusBps;
+        baseRateWad = p.baseRateWad;
+        slopeWad = p.slopeWad;
+        maxPriceAgeSeconds = p.maxPriceAgeSeconds;
+        liquidationGracePeriodSeconds = p.liquidationGracePeriodSeconds;
         lastAccrualTimestamp = block.timestamp;
     }
 
@@ -275,7 +328,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         // the liquidity index had grown above WAD.
         scaledAmount = Math.mulDiv(amount, WAD, liquidityIndex, Math.Rounding.Ceil);
         if (scaledAmount > scaledDepositOf[msg.sender]) revert InsufficientShares();
-        if (amount > loanToken.balanceOf(address(this))) revert InsufficientPoolLiquidity();
+        if (amount > _availableCash()) revert InsufficientPoolLiquidity();
         scaledDepositOf[msg.sender] -= scaledAmount;
         totalScaledDeposits -= scaledAmount;
         loanToken.safeTransfer(msg.sender, amount);
@@ -292,27 +345,30 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
 
     /// @notice Sets the protocol's share of borrower interest, capped at
     ///         {MAX_RESERVE_FACTOR_BPS}.
-    function setReserveFactor(uint256 newReserveFactorBps) external requiresPermission(CONFIGURE) {
+    function setReserveFactor(uint256 newReserveFactorBps)
+        external
+        requiresOrgPermission(operatorOrg, CONFIGURE)
+    {
         if (newReserveFactorBps > MAX_RESERVE_FACTOR_BPS) revert InvalidReserveFactor();
         _accrue();
         reserveFactorBps = newReserveFactorBps;
         emit ReserveFactorUpdated(newReserveFactorBps);
     }
 
-    /// @notice Withdraws up to `amount` of accumulated protocol reserves to `to`.
-    function withdrawReserves(address to, uint256 amount) external requiresPermission(CONFIGURE) {
-        if (to == address(0)) revert ZeroAddress();
+    /// @notice Withdraws up to `amount` of accumulated protocol reserves to {treasury} — the
+    ///         only possible recipient, so the configure grant cannot redirect pool cash.
+    function withdrawReserves(uint256 amount) external requiresOrgPermission(operatorOrg, CONFIGURE) {
         _accrue();
         if (amount > totalReserves) revert InsufficientReserves();
-        if (amount > loanToken.balanceOf(address(this))) revert InsufficientPoolLiquidity();
+        if (amount > _availableCash()) revert InsufficientPoolLiquidity();
         totalReserves -= amount;
-        loanToken.safeTransfer(to, amount);
-        emit ReservesWithdrawn(to, amount);
+        loanToken.safeTransfer(treasury, amount);
+        emit ReservesWithdrawn(treasury, amount);
     }
 
     /// @notice Emergency-pauses (or resumes) new borrowing. {repay}/{liquidate} are never
     ///         affected — see the contract-level NatSpec.
-    function setBorrowPaused(bool paused) external requiresPermission(CONFIGURE) {
+    function setBorrowPaused(bool paused) external requiresOrgPermission(operatorOrg, CONFIGURE) {
         borrowPaused = paused;
         emit BorrowPausedSet(paused);
     }
@@ -331,20 +387,29 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     ///      from `collateralToken.balanceOf(address(this))`: that balance is the sum across
     ///      every borrower in this market, so only an off-chain reconciliation of the specific
     ///      forced-transfer transaction (the same operator act that ordered the forced transfer
-    ///      in the first place) can correctly attribute the reduction to this one borrower. The
-    ///      only on-chain invariant enforced here is that reconciliation can never increase a
-    ///      position's collateral — it can only correct it down to what was actually seen
-    ///      leaving the pool, never fabricate collateral that was never pledged.
-    function reconcileCollateral(address borrower, uint256 attributableCollateral)
+    ///      in the first place) can correctly attribute the reduction to this one borrower. What
+    ///      is enforced on-chain: reconciliation never increases a position's collateral, and the
+    ///      total written down can never exceed the observed outflow — the shortfall
+    ///      `totalCollateral − collateralToken.balanceOf(this)`, consumed cumulatively because
+    ///      each write-down also lowers {totalCollateral}. A write-down (and the bad-debt
+    ///      write-off it may trigger) without collateral actually having left is impossible.
+    /// @param forcedTransferRef Reference to the triggering forced-transfer transaction.
+    function reconcileCollateral(address borrower, uint256 attributableCollateral, bytes32 forcedTransferRef)
         external
-        requiresPermission(CONFIGURE)
+        requiresOrgPermission(operatorOrg, RECONCILE)
     {
         _accrue();
         Position storage pos = positions[borrower];
-        if (attributableCollateral >= pos.collateralAmount) revert ReconciliationWouldIncreaseCollateral();
         uint256 previous = pos.collateralAmount;
+        if (attributableCollateral >= previous) revert ReconciliationWouldIncreaseCollateral();
+        uint256 held = collateralToken.balanceOf(address(this));
+        if (held >= totalCollateral) revert NoObservedShortfall();
+        uint256 shortfall = totalCollateral - held;
+        uint256 reduction = previous - attributableCollateral;
+        if (reduction > shortfall) revert ReconciliationExceedsShortfall(reduction, shortfall);
+        totalCollateral -= reduction;
         pos.collateralAmount = attributableCollateral;
-        emit CollateralReconciled(borrower, previous, attributableCollateral);
+        emit CollateralReconciled(borrower, previous, attributableCollateral, forcedTransferRef);
 
         if (attributableCollateral == 0 && pos.scaledDebt > 0) {
             _writeOffBadDebt(borrower, pos);
@@ -377,11 +442,12 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         uint256 collateralValue = Math.mulDiv(newCollateral, pricePerUnit, 1);
         uint256 maxDebt = Math.mulDiv(collateralValue, maxLtvBps, BPS_DENOMINATOR);
         if (recordedNewDebt > maxDebt) revert ExceedsLltv();
-        if (borrowAmount > loanToken.balanceOf(address(this))) revert InsufficientPoolLiquidity();
+        if (borrowAmount > _availableCash()) revert InsufficientPoolLiquidity();
 
         collateralToken.safeTransferFrom(msg.sender, address(this), collateralAmount);
 
         pos.collateralAmount = newCollateral;
+        totalCollateral += collateralAmount;
         pos.scaledDebt = newScaledDebt;
         totalScaledDebt += addedScaledDebt;
 
@@ -400,6 +466,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
 
         collateralToken.safeTransferFrom(msg.sender, address(this), amount);
         pos.collateralAmount += amount;
+        totalCollateral += amount;
         emit CollateralAdded(msg.sender, amount, pos.collateralAmount);
     }
 
@@ -425,6 +492,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         if (currentDebt > maxDebt) revert ExceedsLltv();
 
         pos.collateralAmount = remainingCollateral;
+        totalCollateral -= amount;
         collateralToken.safeTransfer(msg.sender, amount);
         emit CollateralWithdrawn(msg.sender, amount, remainingCollateral);
     }
@@ -452,6 +520,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         pos.scaledDebt = residualScaledDebt;
         totalScaledDebt -= scaledRepaid;
         pos.collateralAmount = collateralBefore - collateralReturned;
+        totalCollateral -= collateralReturned;
 
         loanToken.safeTransferFrom(msg.sender, address(this), actualRepayAmount);
         collateralToken.safeTransfer(msg.sender, collateralReturned);
@@ -493,23 +562,48 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         if (amount == 0) revert ZeroAmount();
 
         pos.collateralAmount = 0;
+        totalCollateral -= amount;
         collateralToken.safeTransfer(msg.sender, amount);
         emit CollateralWithdrawn(msg.sender, amount, 0);
     }
 
+    /// @notice Pays out the caller's {surplusOf}: loan-token cash a liquidation credited because
+    ///         the liquidator's payment for whole collateral units exceeded the debt it closed
+    ///         (close-out netting — the excess belongs to the borrower). Not gated by
+    ///         {RegisterwerkGated}, like {claimCollateral}.
+    function claimLiquidationSurplus() external nonReentrant returns (uint256 amount) {
+        amount = surplusOf[msg.sender];
+        if (amount == 0) revert ZeroAmount();
+        surplusOf[msg.sender] = 0;
+        totalSurplus -= amount;
+        loanToken.safeTransfer(msg.sender, amount);
+        emit SurplusClaimed(msg.sender, amount);
+    }
+
     /// @notice Liquidation of an under-collateralized position (health factor below 1.0, or
     ///         below the stale-grace-period threshold — see {_currentPriceForLiquidation}): the
-    ///         caller repays up to {CLOSE_FACTOR_BPS} of the position's outstanding debt (capped
+    ///         caller closes up to {CLOSE_FACTOR_BPS} of the position's outstanding debt (capped
     ///         to `maxRepayAmount` if it requests less), or up to {MAX_CLOSE_FACTOR_BPS} (the
-    ///         full debt) once the position is severely underwater — see
-    ///         {FULL_CLOSE_HEALTH_FACTOR_THRESHOLD_WAD} — and receives the corresponding
-    ///         collateral plus the configured liquidation bonus. May be called repeatedly while
-    ///         the position remains unhealthy. Not gated by {RegisterwerkGated} — see the
+    ///         full debt) once the position is severely underwater with a fresh mark — see
+    ///         {FULL_CLOSE_HEALTH_FACTOR_THRESHOLD_WAD}. May be called repeatedly while the
+    ///         position remains unhealthy. Not gated by {RegisterwerkGated} — see the
     ///         contract-level NatSpec for why an unverified caller cannot actually succeed.
+    ///
+    ///         Collateral is whole units, so the liquidator buys whole units at the mark less
+    ///         the bonus: `collateralSeized = ceil(requested × (1 + bonus) / price)` (at least
+    ///         one, at most the pledged collateral), for a payment of `collateralSeized × price
+    ///         / (1 + bonus)`. That payment reduces the debt; any part of it beyond the
+    ///         remaining debt is credited to the borrower as {surplusOf}. Rounding up means the
+    ///         payment — and the debt closed — can exceed the requested amount (and the close
+    ///         factor) by less than one unit's discounted price; a small position is therefore
+    ///         always liquidatable instead of seizing zero units.
+    ///
     ///         When a call closes the debt completely, any collateral beyond the liquidator's
-    ///         entitlement stays credited to the position; the borrower takes it out with
-    ///         {claimCollateral}. It is not pushed to the borrower here, because a push to a
-    ///         frozen or no-longer-verified borrower would revert the whole liquidation.
+    ///         units stays credited to the position; the borrower takes it out with
+    ///         {claimCollateral}. Neither it nor the surplus is pushed to the borrower here,
+    ///         because a push to a frozen or no-longer-verified borrower would revert the whole
+    ///         liquidation.
+    /// @return debtRepaid Debt closed. The liquidator pays this plus any credited surplus.
     function liquidate(address borrower, uint256 maxRepayAmount)
         external
         nonReentrant
@@ -520,11 +614,12 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         uint256 currentDebt = Math.mulDiv(pos.scaledDebt, borrowIndex, WAD);
         if (currentDebt == 0) revert NoOutstandingDebt();
 
-        (uint256 pricePerUnit, uint256 requestedRepay) =
-            _liquidationPaymentLimit(pos, borrower, currentDebt, maxRepayAmount);
-        (debtRepaid, collateralSeized) = _applyLiquidationPayment(pos, currentDebt, requestedRepay, pricePerUnit);
+        (uint256 pricePerUnit, uint256 units) = _liquidationUnits(pos, borrower, currentDebt, maxRepayAmount);
+        uint256 payment;
+        (debtRepaid, payment) = _applyLiquidationPayment(pos, borrower, currentDebt, units, pricePerUnit);
+        collateralSeized = units;
 
-        loanToken.safeTransferFrom(msg.sender, address(this), debtRepaid);
+        loanToken.safeTransferFrom(msg.sender, address(this), payment);
         collateralToken.safeTransfer(msg.sender, collateralSeized);
         emit Liquidated(borrower, msg.sender, debtRepaid, collateralSeized);
 
@@ -560,10 +655,16 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         factor = _healthFactorFor(pos.collateralAmount, pricePerUnit, debt);
     }
 
+    /// @notice Loan-token cash available to borrowers and withdrawing lenders: the balance less
+    ///         the liquidation surplus owed to borrowers.
+    function availableLiquidity() external view returns (uint256) {
+        return _availableCash();
+    }
+
     /// @notice Pool utilization, WAD-scaled: outstanding debt / (outstanding debt + cash).
     function utilization() public view returns (uint256) {
         uint256 debt = Math.mulDiv(totalScaledDebt, borrowIndex, WAD);
-        uint256 cash = loanToken.balanceOf(address(this));
+        uint256 cash = _availableCash();
         uint256 total = debt + cash;
         if (total == 0) return 0;
         return Math.mulDiv(debt, WAD, total);
@@ -576,15 +677,14 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
-    /// @dev Applies the existing health-factor and close-factor policy and returns the maximum
-    ///      requested asset payment this liquidation call may apply. Kept separate from the
-    ///      accounting mutation so rounding locals cannot exhaust the EVM stack in {liquidate}.
-    function _liquidationPaymentLimit(
-        Position storage pos,
-        address borrower,
-        uint256 currentDebt,
-        uint256 maxRepayAmount
-    ) private view returns (uint256 pricePerUnit, uint256 requestedRepay) {
+    /// @dev Applies the health-factor and close-factor policy and returns the whole collateral
+    ///      units this liquidation call sells. Kept separate from the accounting mutation so
+    ///      rounding locals cannot exhaust the EVM stack in {liquidate}.
+    function _liquidationUnits(Position storage pos, address borrower, uint256 currentDebt, uint256 maxRepayAmount)
+        private
+        view
+        returns (uint256 pricePerUnit, uint256 units)
+    {
         bool withinGracePeriod;
         (pricePerUnit, withinGracePeriod) = _currentPriceForLiquidation();
         uint256 factor = _healthFactorFor(pos.collateralAmount, pricePerUnit, currentDebt);
@@ -593,42 +693,82 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
             : WAD;
         if (factor >= threshold) revert PositionHealthy(borrower);
 
-        // Severity-scaled close factor: preserve the existing 50%/100% policy exactly.
-        uint256 effectiveCloseFactorBps =
-            factor < FULL_CLOSE_HEALTH_FACTOR_THRESHOLD_WAD ? MAX_CLOSE_FACTOR_BPS : CLOSE_FACTOR_BPS;
+        // Severity-scaled close factor (50%/100%). On a stale mark inside the grace window the
+        // 50% cap always applies: the full close is reserved for a fresh mark, so the grace
+        // regime stays the borrower safety margin it is documented as.
+        uint256 effectiveCloseFactorBps = !withinGracePeriod && factor < FULL_CLOSE_HEALTH_FACTOR_THRESHOLD_WAD
+            ? MAX_CLOSE_FACTOR_BPS
+            : CLOSE_FACTOR_BPS;
         uint256 maxCloseable = Math.mulDiv(currentDebt, effectiveCloseFactorBps, BPS_DENOMINATOR);
         // Dust fallback: a close-factor result of zero may close the full remaining debt.
         if (maxCloseable == 0) {
             maxCloseable = currentDebt;
         }
-        requestedRepay = maxRepayAmount < maxCloseable ? maxRepayAmount : maxCloseable;
+        uint256 requestedRepay = maxRepayAmount < maxCloseable ? maxRepayAmount : maxCloseable;
         if (requestedRepay == 0) revert ZeroAmount();
+
+        // Whole units, rounded up (so never zero), capped at the pledged collateral.
+        units = Math.mulDiv(
+            requestedRepay, BPS_DENOMINATOR + liquidationBonusBps, BPS_DENOMINATOR * pricePerUnit, Math.Rounding.Ceil
+        );
+        if (units > pos.collateralAmount) {
+            units = pos.collateralAmount;
+        }
     }
 
-    /// @dev Applies conservative debt-share rounding and collateral accounting for liquidation.
-    ///      Collateral left over after a full close stays in `pos.collateralAmount` for
-    ///      {claimCollateral} (see {liquidate}).
+    /// @dev Sells `units` to the liquidator at the mark less the bonus. The payment reduces the
+    ///      debt (conservative debt-share rounding); whatever the debt reduction leaves of the
+    ///      payment is credited to the borrower's {surplusOf}. Collateral left over after a full
+    ///      close stays in `pos.collateralAmount` for {claimCollateral} (see {liquidate}).
     function _applyLiquidationPayment(
         Position storage pos,
+        address borrower,
         uint256 currentDebt,
-        uint256 requestedRepay,
+        uint256 units,
         uint256 pricePerUnit
-    ) private returns (uint256 debtRepaid, uint256 collateralSeized) {
-        uint256 collateralBefore = pos.collateralAmount;
+    ) private returns (uint256 debtRepaid, uint256 payment) {
+        payment = Math.mulDiv(units * pricePerUnit, BPS_DENOMINATOR, BPS_DENOMINATOR + liquidationBonusBps, Math.Rounding.Ceil);
         (uint256 residualScaledDebt, uint256 actualRepayAmount) =
-            _residualDebtAfterPayment(pos.scaledDebt, currentDebt, requestedRepay);
+            _residualDebtAfterPayment(pos.scaledDebt, currentDebt, payment < currentDebt ? payment : currentDebt);
         debtRepaid = actualRepayAmount;
-
-        uint256 seizeValue = Math.mulDiv(debtRepaid, BPS_DENOMINATOR + liquidationBonusBps, BPS_DENOMINATOR);
-        collateralSeized = seizeValue / pricePerUnit;
-        if (collateralSeized > collateralBefore) {
-            collateralSeized = collateralBefore;
-        }
 
         uint256 scaledRepaid = pos.scaledDebt - residualScaledDebt;
         pos.scaledDebt = residualScaledDebt;
         totalScaledDebt -= scaledRepaid;
-        pos.collateralAmount = collateralBefore - collateralSeized;
+        pos.collateralAmount -= units;
+        totalCollateral -= units;
+
+        uint256 surplus = payment - debtRepaid;
+        if (surplus > 0) {
+            surplusOf[borrower] += surplus;
+            totalSurplus += surplus;
+            emit LiquidationSurplusCredited(borrower, surplus);
+        }
+    }
+
+    /// @dev `lltv × (1 + bonus) ≤ 1 − maxDeviation`: a position just below health factor 1 that
+    ///      then takes one full in-tolerance oracle move can still pay the liquidator's bonus
+    ///      out of its own collateral, and a liquidation near health factor 1 always raises it.
+    ///      The strict `lltv × (1 + bonus) < 1` is checked on its own so it also holds for an
+    ///      oracle that opts out of the deviation check with `type(uint256).max`. Checked
+    ///      against the cap in force at construction; `RegisterwerkNavOracle` can only lower it.
+    function _checkLiquidationHaircut(uint256 lltvBps_, uint256 liquidationBonusBps_, uint256 maxDeviationBps_)
+        private
+        pure
+    {
+        uint256 incentiveAdjustedLltv = lltvBps_ * (BPS_DENOMINATOR + liquidationBonusBps_);
+        if (incentiveAdjustedLltv >= BPS_DENOMINATOR * BPS_DENOMINATOR) revert InvalidLiquidationIncentive();
+        if (maxDeviationBps_ == type(uint256).max) return;
+        if (
+            maxDeviationBps_ >= BPS_DENOMINATOR
+                || incentiveAdjustedLltv > BPS_DENOMINATOR * (BPS_DENOMINATOR - maxDeviationBps_)
+        ) revert InsufficientLiquidationHaircut();
+    }
+
+    /// @dev Pool cash less the liquidation surplus owed to borrowers.
+    function _availableCash() private view returns (uint256) {
+        uint256 balance = loanToken.balanceOf(address(this));
+        return balance > totalSurplus ? balance - totalSurplus : 0;
     }
 
     /// @dev Computes a conservative residual scaled debt for a requested asset payment. Partial

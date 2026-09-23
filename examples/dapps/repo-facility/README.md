@@ -54,6 +54,8 @@ REGISTRY_WALLET_PRIVATE_KEY=0x... \
   PERMISSION_ORACLE_ADDRESS=0x... \
   forge script script/DeployLiquidityDapps.s.sol --rpc-url <rpc> --broadcast
 
+# REPO_FACILITY_OPERATOR_ORG (default: the deployer wallet's org) is the facility's
+# operatorOrg — only members of that org can configure or price it.
 # Then, per collateral asset (operator-only):
 #   EwpgComplianceModule(compliance).setNomineePool(token, address(repoFacility), true)
 #   EwpgRepoFacility(repoFacility).setCollateralConfig(token, pricePerUnit, maxLtvBps,
@@ -69,7 +71,11 @@ deploying for real.
 | Code | Rationale |
 |---|---|
 | `repo-facility.borrow` | Pledge a KYC'd investor's security-token holding as collateral and draw a stablecoin loan against it |
-| `repo-facility.configure` | Operator-only: enable a collateral asset and set its price mark, max LTV, liquidation threshold and liquidation bonus |
+| `repo-facility.configure` | Operator-only, bound to `operatorOrg`: enable a collateral asset and set its max LTV, liquidation threshold and liquidation bonus (threshold × (1 + bonus) < 100%) |
+| `repo-facility.price` | Operator-only, bound to `operatorOrg`: push a fresh price mark (`updatePrice`) |
+
+After a full-close liquidation, collateral beyond debt plus bonus stays credited to the
+borrower's position; the borrower withdraws it with `claimCollateral(token)`.
 
 Claim topics: `1` (KYC) — only the borrower side requires it; the lender side is
 intentionally ungated.

@@ -1,0 +1,6 @@
+eth-infinitism/account-abstraction @account-abstraction/contracts v0.8.0 (GPL-3.0 / MIT, per file headers).
+Subset needed to instantiate the real EntryPoint v0.8 in Foundry tests (core/, interfaces/, utils/);
+EntryPointSimulations and the sample accounts/paymasters are omitted. Test-only: nothing under
+contracts/src imports these files, and they are never deployed by a script.
+Used by contracts/test/ecosystem/EwpgPaymaster.t.sol (handleOps regression tests for T2-01/T2-02).
+Do not edit; re-copy from the upstream v0.8.0 tag to update.

@@ -7,8 +7,8 @@ import "../../../src/lending/oracle/RegisterwerkNavOracle.sol";
 import "../../../src/examples/MockStablecoin.sol";
 
 /// @notice Bounded-random actor driving {EwpgRepoMarket} through its full lifecycle
-///         (supply/withdraw/pledgeAndBorrow/repay/repayDebtOnly/claimCollateral/liquidate/price
-///         moves) for
+///         (supply/withdraw/pledgeAndBorrow/repay/repayDebtOnly/claimCollateral/
+///         claimLiquidationSurplus/liquidate/price moves) for
 ///         `EwpgRepoMarket.invariant.t.sol` .
 ///
 /// @dev Borrowers are a small FIXED set pre-authorized (KYC + `repo-facility.borrow`) by the
@@ -123,13 +123,23 @@ contract EwpgRepoMarketHandler is Test {
         try market.claimCollateral() {} catch {}
     }
 
+    /// @dev Liquidation surplus (whole-unit rounding above the closed debt) is owed cash.
+    function claimLiquidationSurplus(uint256 borrowerSeed) public {
+        address borrower = borrowers[borrowerSeed % borrowers.length];
+        vm.prank(borrower);
+        try market.claimLiquidationSurplus() {} catch {}
+    }
+
     function liquidate(uint256 borrowerSeed, uint256 liquidatorSeed, uint256 maxRepayAmount) public {
         address borrower = borrowers[borrowerSeed % borrowers.length];
         uint256 debt = market.debtOf(borrower);
         if (debt == 0) return;
         address liquidatorAddr = _liquidator(liquidatorSeed);
         maxRepayAmount = bound(maxRepayAmount, 1, debt);
-        loanToken.mint(liquidatorAddr, maxRepayAmount);
+        // Whole units are sold rounded up, so the payment can exceed the request by up to one
+        // unit's (discounted) price.
+        (uint256 price,) = navOracle.price(address(collateralToken));
+        loanToken.mint(liquidatorAddr, maxRepayAmount + price);
         vm.startPrank(liquidatorAddr);
         loanToken.approve(address(market), type(uint256).max);
         try market.liquidate(borrower, maxRepayAmount) {} catch {}
@@ -140,7 +150,7 @@ contract EwpgRepoMarketHandler is Test {
     ///      handler never needs the override-permissioned path — a random walk within normal
     ///      operating conditions is the scenario these invariants are meant to hold under.
     function pushPrice(uint256 direction, uint256 magnitudeBps) public {
-        magnitudeBps = bound(magnitudeBps, 0, 1500); // stay under the oracle's 2000bps cap
+        magnitudeBps = bound(magnitudeBps, 0, 1500); // the oracle rejects moves beyond its 1500bps window cap
         uint256 newPrice = direction % 2 == 0
             ? currentPrice + (currentPrice * magnitudeBps) / 10_000
             : currentPrice - (currentPrice * magnitudeBps) / 10_000;

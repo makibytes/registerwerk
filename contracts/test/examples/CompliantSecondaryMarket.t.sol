@@ -37,8 +37,8 @@ contract CompliantSecondaryMarketTest is Test {
     address mallory = address(0x66); // unbound wallet
     address investor = address(0x7);
 
-    bytes32 tradeBuy = keccak256("trade-buy");
-    bytes32 tradeSell = keccak256("trade-sell");
+    bytes32 refBuy = keccak256("trade-buy"); // desk's clientRefs
+    bytes32 refSell = keccak256("trade-sell");
     uint256 constant ASSET_AMOUNT = 1_000;
     uint256 constant PAYMENT_AMOUNT = 100_000e6;
     uint64 expiry;
@@ -52,16 +52,16 @@ contract CompliantSecondaryMarketTest is Test {
         tir = new EcosystemTrustedIssuersRegistry(operator);
         oracle = new PermissionOracle(operator, orgRegistry, permissions, tir);
 
+        orgId = new MockOnchainId();
         settlement = new DvpSettlement(operator);
         securityToken = new MockStablecoin("Demo Bond Units", "BOND", 0);
         paymentToken = new MockStablecoin("USD Coin", "USDC", 6);
-        market = new CompliantSecondaryMarket(oracle, paymentToken, settlement);
+        market = new CompliantSecondaryMarket(oracle, address(orgId), paymentToken, settlement);
 
         tradePermission = market.TRADE();
         topicNominee = market.TOPIC_NOMINEE();
         expiry = uint64(block.timestamp + 1 days);
 
-        orgId = new MockOnchainId();
         nomineeIssuer = new MockClaimIssuer();
 
         vm.startPrank(operator);
@@ -89,17 +89,26 @@ contract CompliantSecondaryMarketTest is Test {
         securityToken.approve(address(settlement), type(uint256).max);
     }
 
+    function _terms(address seller, address buyer, DvpSettlement.LockedLeg leg) private view returns (bytes32) {
+        // Local encoding (see DvpSettlement.hashTerms) — an external call would consume vm.prank.
+        return keccak256(
+            abi.encode(seller, buyer, securityToken, ASSET_AMOUNT, paymentToken, PAYMENT_AMOUNT, leg, expiry)
+        );
+    }
+
     // ── sellFromInventory ────────────────────────────────────────────────────
 
     function test_sellFromInventory_escrowsPoolInventoryAndBuyerCanSettle() public {
         vm.prank(alice);
-        market.sellFromInventory(tradeSell, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        bytes32 tradeSell =
+            market.sellFromInventory(refSell, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        assertEq(tradeSell, settlement.tradeIdFor(address(market), refSell));
 
         assertEq(securityToken.balanceOf(address(market)), 0, "inventory escrowed out");
         assertEq(securityToken.balanceOf(address(settlement)), ASSET_AMOUNT);
 
         vm.prank(investor);
-        settlement.settle(tradeSell);
+        settlement.settle(tradeSell, _terms(address(market), investor, DvpSettlement.LockedLeg.Asset));
 
         assertEq(securityToken.balanceOf(investor), 2 * ASSET_AMOUNT, "investor received the escrowed leg");
         assertEq(paymentToken.balanceOf(address(market)), 2 * PAYMENT_AMOUNT, "sale proceeds landed on the pool");
@@ -108,9 +117,9 @@ contract CompliantSecondaryMarketTest is Test {
     function test_sellFromInventory_revertsForNonNomineeCaller() public {
         vm.prank(mallory);
         vm.expectRevert(
-            abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, mallory, tradePermission)
+            abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId))
         );
-        market.sellFromInventory(tradeSell, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        market.sellFromInventory(refSell, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
     }
 
     function test_sellFromInventory_revertsWhenNomineeClaimRevoked() public {
@@ -120,20 +129,21 @@ contract CompliantSecondaryMarketTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(RegisterwerkGated.ClaimMissing.selector, alice, topicNominee)
         );
-        market.sellFromInventory(tradeSell, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        market.sellFromInventory(refSell, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
     }
 
     // ── buyIntoInventory ─────────────────────────────────────────────────────
 
     function test_buyIntoInventory_escrowsPaymentAndSellerCanSettle() public {
         vm.prank(alice);
-        market.buyIntoInventory(tradeBuy, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        bytes32 tradeBuy =
+            market.buyIntoInventory(refBuy, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
 
         assertEq(paymentToken.balanceOf(address(market)), 0, "trading capital escrowed out");
         assertEq(paymentToken.balanceOf(address(settlement)), PAYMENT_AMOUNT);
 
         vm.prank(investor);
-        settlement.settle(tradeBuy);
+        settlement.settle(tradeBuy, _terms(investor, address(market), DvpSettlement.LockedLeg.Payment));
 
         // This is the leg that grows the pool's own onchain security-token balance —
         // exactly where EwpgComplianceModule's nominee exemption applies.
@@ -144,8 +154,85 @@ contract CompliantSecondaryMarketTest is Test {
     function test_buyIntoInventory_revertsForNonNomineeCaller() public {
         vm.prank(mallory);
         vm.expectRevert(
-            abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, mallory, tradePermission)
+            abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId))
         );
-        market.buyIntoInventory(tradeBuy, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        market.buyIntoInventory(refBuy, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+    }
+
+    // ── instance binding (T2-06) ─────────────────────────────────────────────
+
+    /// @dev Port of the phase-2 PoC `DeskCrossOrg.test_otherOrgEmptiesDeskInventoryForOneWei`:
+    ///      bank B, onboarded with the same `secondary-market.trade` code and a NOMINEE claim
+    ///      to run its own desk, previously emptied this desk's inventory for 1 wei.
+    function test_otherOrgWithSameSlugGrant_cannotOperateThisDesk() public {
+        MockOnchainId orgB = new MockOnchainId();
+        address bankB = address(0xB);
+        bytes32[] memory roles = new bytes32[](0);
+        vm.startPrank(operator);
+        orgRegistry.registerOrg(address(orgB), 276);
+        orgRegistry.addMember(address(orgB), bankB, roles, "");
+        permissions.grantToOrg(address(orgB), tradePermission);
+        vm.stopPrank();
+        orgB.addClaim(topicNominee, address(nomineeIssuer), hex"01", hex"02");
+        assertTrue(oracle.hasPermission(bankB, tradePermission), "B holds the slug grant");
+
+        vm.startPrank(bankB);
+        vm.expectRevert(
+            abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, bankB, address(orgId))
+        );
+        market.sellFromInventory(refSell, bankB, securityToken, ASSET_AMOUNT, 1, expiry);
+        vm.expectRevert(
+            abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, bankB, address(orgId))
+        );
+        market.buyIntoInventory(refBuy, bankB, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        vm.stopPrank();
+        assertEq(securityToken.balanceOf(address(market)), ASSET_AMOUNT, "inventory untouched");
+    }
+
+    function test_constructor_rejectsZeroOperatingOrg() public {
+        vm.expectRevert(RegisterwerkGated.ZeroOperatingOrg.selector);
+        new CompliantSecondaryMarket(oracle, address(0), paymentToken, settlement);
+    }
+
+    // ── reclaimExpired (T2-05) ───────────────────────────────────────────────
+
+    /// @dev Port of the phase-2 PoC `Poc2BCsm.test_expiredInventoryEscrowIsUnrecoverable`.
+    function test_reclaimExpired_returnsUnsettledInventoryToPool() public {
+        vm.prank(alice);
+        bytes32 tradeSell =
+            market.sellFromInventory(refSell, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeNotExpired.selector, tradeSell, expiry));
+        market.reclaimExpired(tradeSell);
+
+        vm.warp(expiry); // investor never settles or renounces
+        vm.prank(alice);
+        market.reclaimExpired(tradeSell);
+
+        assertEq(securityToken.balanceOf(address(market)), ASSET_AMOUNT, "inventory back in the pool");
+        assertEq(securityToken.balanceOf(address(settlement)), 0);
+    }
+
+    function test_reclaimExpired_returnsUnsettledPaymentEscrow() public {
+        vm.prank(alice);
+        bytes32 tradeBuy =
+            market.buyIntoInventory(refBuy, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        vm.warp(expiry);
+        vm.prank(alice);
+        market.reclaimExpired(tradeBuy);
+        assertEq(paymentToken.balanceOf(address(market)), PAYMENT_AMOUNT);
+    }
+
+    function test_reclaimExpired_revertsForUnboundCaller() public {
+        vm.prank(alice);
+        bytes32 tradeSell =
+            market.sellFromInventory(refSell, investor, securityToken, ASSET_AMOUNT, PAYMENT_AMOUNT, expiry);
+        vm.warp(expiry);
+        vm.prank(mallory);
+        vm.expectRevert(
+            abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId))
+        );
+        market.reclaimExpired(tradeSell);
     }
 }

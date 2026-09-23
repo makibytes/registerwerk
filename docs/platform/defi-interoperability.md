@@ -165,6 +165,9 @@ two-party closing settlement. Those live in the separate [Repo Desk](../customer
   liquidity heavy lifting. Multiple competing nominee operators can each deploy their own
   instance and be flagged on the same token, so this is dealer-to-client-style competition
   among market makers, not a single monopoly desk.
+  Trade ids are derived from the desk and its `clientRef`, and the investor settles with
+  `settle(tradeId, expectedTermsHash)` over the terms it agreed, so a squatted or altered trade
+  cannot move its funds. Expired, unsettled escrows return to the pool via `reclaimExpired`.
 - **Stablecoin-only legs: a plain constant-product AMM**
   (`contracts/src/examples/StablecoinAmm.sol`). Reserved for pairs where neither leg is a
   security (e.g. AUEUR/USDC, both declared via the `payment` module's
@@ -196,6 +199,59 @@ a reserve factor (capped at 25%, operator-settable) and partial (50% close-facto
 liquidation both now exist in `EwpgRepoMarket` — the facility itself is unchanged and remains a
 simpler reference implementation. The third point — jurisdiction-specific margin-lending legal
 review — applies identically to both and is **still open**; see the review below.
+
+### Phase-2 review (2026-09) — market construction and liquidation
+
+Markets deployed after this review differ from earlier ones as follows. Earlier markets are
+immutable and keep their old behavior; see *Legacy markets* below.
+
+- **Liquidation incentive fits inside the oracle haircut.** A market is only constructed when
+  `lltvBps × (1 + liquidationBonusBps) ≤ 1 − oracle.maxDeviationBps()` (and always
+  `lltvBps × (1 + bonus) < 1`, even for an oracle that opts out of the deviation cap). With the
+  former demo parameters (80% LLTV, 5% bonus, 20% oracle tolerance) one in-tolerance push from a
+  health factor of 1.0 already left bad debt. Typical valid pairs against a 20% tolerance:
+  LLTV 75% / bonus 5%, or LLTV 74% / bonus 5%; against 15%: LLTV 80% / bonus 5%.
+- **One oracle per loan token.** `IRepoOracle.quoteToken()` must equal the market's loan token,
+  so a USDC market cannot read EUR marks. `DeployRepoMarkets.s.sol` deploys one
+  `RegisterwerkNavOracle` per payment rail.
+- **Grace-window liquidations close at most 50%.** While the mark is older than
+  `maxPriceAgeSeconds` but within `liquidationGracePeriodSeconds`, a single `liquidate` call is
+  capped at the 50% close factor even below health factor 0.95. A fresh mark restores the full
+  close.
+- **Whole-unit seizure with a cash surplus.** Collateral has no decimals. The liquidator buys
+  `ceil(repay × (1 + bonus) / price)` whole units (at least one) at the mark less the bonus. The
+  part of that payment above the remaining debt is credited to the borrower (`surplusOf`) and paid
+  out by `claimLiquidationSurplus()`; it is not pool liquidity. The customer **My Loans** page
+  shows the claimable surplus with a claim action.
+- **Instance-bound administration.** Each market stores `operatorOrg` (the org of the wallet that
+  called `EwpgRepoMarketFactory.createMarket`) and an immutable `treasury`. `setReserveFactor`,
+  `setBorrowPaused` and `withdrawReserves` need `repo-markets.configure`; `reconcileCollateral`
+  needs `repo-markets.reconcile`. Both must be held by `operatorOrg`. The facility's
+  `repo-facility.configure` no longer reaches a market. Reserves are only paid to `treasury`.
+- **Bounded reconciliation.** `reconcileCollateral(borrower, amount, forcedTransferRef)` may only
+  write positions down by the collateral actually missing from the market
+  (`totalCollateral − collateralToken.balanceOf(market)`), cumulatively. Without an observed
+  outflow it reverts `NoObservedShortfall`. `forcedTransferRef` links the write-down to the
+  forced-transfer transaction.
+- **Factory registry.** `EwpgRepoMarketFactory.isMarket(address)` identifies markets the factory
+  deployed.
+- **Vault curation is allow-listed, timelocked and instance-bound.** A new `EwpgRepoVault` is
+  constructed with the market factory, a `curatorOrg`, an `operatorOrg` and a `timelock` (at least
+  one day, except on the local chain 31337). `submitAddMarket` only accepts markets for which
+  `factory.isMarket(market)` is true. It and `submitCapIncrease` take effect through
+  `acceptAddMarket` / `acceptCapIncrease` once the timelock has passed. Until then the curator org
+  (`repo-markets.curate-vault`) or the operator org (`repo-markets.configure`) can call
+  `revokePending`. Cap decreases (`setMarketCap`) and `removeMarket` apply immediately. Every
+  curator function requires a wallet of `curatorOrg`, so a same-code grant held by another org
+  has no effect. Previously a curator could list any contract that returned the right
+  `loanToken()` and allocate all idle cash to it. Existing vaults are immutable: depositors redeem
+  from idle cash, and the curator deallocates every market and removes it.
+
+**Legacy markets.** The backend flags a registered market as `riskParametersLegacy` when it fails
+these checks (read live from the market and its oracle; a failed read counts as legacy). Such a
+market stays listed: borrowers can repay, add collateral and claim, lenders can withdraw, but the
+customer portal offers no new borrowing or supply on it. New registrations that fail the checks
+are refused. Operators should also call `setBorrowPaused(true)` on each legacy market.
 
 ## Compliance review (2026-07-21) — findings and hardening
 

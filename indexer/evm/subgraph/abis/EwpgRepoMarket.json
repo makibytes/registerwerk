@@ -60,7 +60,24 @@
     "inputs": [
       { "name": "borrower",           "type": "address", "indexed": true },
       { "name": "previousCollateral", "type": "uint256", "indexed": false },
-      { "name": "newCollateral",      "type": "uint256", "indexed": false }
+      { "name": "newCollateral",      "type": "uint256", "indexed": false },
+      { "name": "forcedTransferRef",  "type": "bytes32", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "LiquidationSurplusCredited",
+    "inputs": [
+      { "name": "borrower", "type": "address", "indexed": true },
+      { "name": "amount",   "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SurplusClaimed",
+    "inputs": [
+      { "name": "borrower", "type": "address", "indexed": true },
+      { "name": "amount",   "type": "uint256", "indexed": false }
     ]
   }
 ]

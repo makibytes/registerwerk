@@ -28,9 +28,18 @@ import "../src/examples/MockStablecoin.sol";
 ///                                        deployed — pass the same address used by
 ///                                        `DeployExampleDapps.s.sol`'s BOND_PAYMENT_TOKEN
 ///                                        to share one lending currency across dApps)
+///           REPO_FACILITY_OPERATOR_ORG  (org operating the facility; default the deployer
+///                                        wallet's org — setCollateralConfig/updatePrice are
+///                                        bound to it, see EwpgRepoFacility.operatorOrg)
 ///           PAYMASTER_ENTRYPOINT        (address, default the canonical ERC-4337
 ///                                        EntryPoint v0.8 singleton,
 ///                                        `ERC4337Utils.ENTRYPOINT_V08`)
+///           PAYMASTER_STAKE_WEI         (default 0 = skip; when > 0, stakes that amount in
+///                                        the EntryPoint via `paymaster.addStake` — needs
+///                                        `paymaster.configure` on the deployer's org.
+///                                        ERC-7562 requires a staked paymaster because
+///                                        voucher validation writes reservations)
+///           PAYMASTER_UNSTAKE_DELAY     (seconds, default 86400; only used with a stake)
 ///
 ///         Usage:
 ///           forge script script/DeployLiquidityDapps.s.sol --rpc-url <rpc> --broadcast
@@ -40,8 +49,11 @@ import "../src/examples/MockStablecoin.sol";
 ///         `EwpgComplianceModule.setNomineePool(token, address(repoFacility), true)`
 ///         (token's compliance module, operator-only) and call its own
 ///         `setCollateralConfig` (operator-only) before any pledge can succeed; fund
-///         {EwpgPaymaster}'s sponsorship policies via `fundSponsorship` before sponsored
-///         transactions can be relayed; and anchor both dApps in the marketplace via the
+///         {EwpgPaymaster}'s sponsorship policies via
+///         `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` (payable; top
+///         up later with `fundSponsorship`) before sponsored transactions can be relayed, and
+///         configure the backend with `PAYMASTER_<CHAIN>` plus the voucher signer key
+///         (`REGISTERWERK_PAYMASTER_VOUCHER_SIGNER_KEY`); and anchor both dApps in the marketplace via the
 ///         `marketplace` backend module before they are usable end to end.
 contract DeployLiquidityDapps is Script {
     function run() external {
@@ -60,18 +72,31 @@ contract DeployLiquidityDapps is Script {
         // The exit-liquidity facility — pledge a security-token holding, borrow the
         // stablecoin above, without selling the position. Collateral assets are enabled
         // after deployment via the operator-only setCollateralConfig (see NatSpec above).
-        EwpgRepoFacility repoFacility = new EwpgRepoFacility(oracle, IERC20(paymentToken));
+        address facilityOrg = vm.envOr("REPO_FACILITY_OPERATOR_ORG", oracle.orgOf(vm.addr(deployerKey)));
+        EwpgRepoFacility repoFacility = new EwpgRepoFacility(oracle, IERC20(paymentToken), facilityOrg);
 
         // Sponsored (ERC-4337) transactions: operator- or issuer-funded gas policies.
         address entryPointAddress = vm.envOr("PAYMASTER_ENTRYPOINT", address(ERC4337Utils.ENTRYPOINT_V08));
         EwpgPaymaster paymaster = new EwpgPaymaster(oracle, IEntryPoint(entryPointAddress));
+
+        // Optional EntryPoint stake (ERC-7562: a paymaster whose validation writes storage
+        // must be staked). Skipped by default so a plain deploy needs no extra ETH.
+        uint256 stakeWei = vm.envOr("PAYMASTER_STAKE_WEI", uint256(0));
+        if (stakeWei > 0) {
+            paymaster.addStake{value: stakeWei}(uint32(vm.envOr("PAYMASTER_UNSTAKE_DELAY", uint256(86400))));
+        }
 
         vm.stopBroadcast();
 
         console.log("PermissionOracle           :", oracleAddress);
         console.log("EwpgRepoFacility           :", address(repoFacility));
         console.log("  -> payment token         :", paymentToken);
+        console.log("  -> operator org          :", facilityOrg);
         console.log("EwpgPaymaster              :", address(paymaster));
         console.log("  -> EntryPoint            :", entryPointAddress);
+        console.log("  -> EntryPoint stake (wei):", stakeWei);
+        console.log("Next: set PAYMASTER_<CHAIN> to the paymaster address and");
+        console.log("      REGISTERWERK_PAYMASTER_VOUCHER_SIGNER_KEY to the voucher key, then");
+        console.log("      registerPolicy(keccak256(policyRowId), voucherSigner, orgCap).");
     }
 }

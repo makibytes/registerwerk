@@ -8,24 +8,27 @@ const repoRoot = path.resolve(subgraphDir, '../../..')
 const manifest = fs.readFileSync(path.join(subgraphDir, 'subgraph.yaml'), 'utf8')
 const schema = fs.readFileSync(path.join(subgraphDir, 'schema.graphql'), 'utf8')
 const schemaDocument = parse(schema)
+// Forge output directory, relative to contracts/ (or absolute). Defaults to Forge's own default;
+// set FOUNDRY_OUT to validate against a scratch build (e.g. FOUNDRY_OUT=out-k9 forge build).
+const forgeOut = path.resolve(repoRoot, 'contracts', process.env.FOUNDRY_OUT || 'out')
 
 const artifactPaths = {
-  AssetTokenFactory: 'contracts/out/AssetTokenFactory.sol/AssetTokenFactory.json',
-  EwpgRepoMarketFactory: 'contracts/out/EwpgRepoMarketFactory.sol/EwpgRepoMarketFactory.json',
-  DvpSettlement: 'contracts/out/DvpSettlement.sol/DvpSettlement.0.8.36.json',
-  EwpgBondDesk: 'contracts/out/EwpgBondDesk.sol/EwpgBondDesk.json',
-  StablecoinAmm: 'contracts/out/StablecoinAmm.sol/StablecoinAmm.json',
-  EwpgConfidentialFactory: 'contracts/out/EwpgConfidentialFactory.sol/EwpgConfidentialFactory.json',
-  EwpgERC20: 'contracts/out/EwpgERC20.sol/EwpgERC20.json',
-  EwpgERC721: 'contracts/out/EwpgERC721.sol/EwpgERC721.json',
-  EwpgERC1155: 'contracts/out/EwpgERC1155.sol/EwpgERC1155.json',
-  EwpgERC3525: 'contracts/out/EwpgERC3525.sol/EwpgERC3525.json',
-  EwpgERC3643: 'contracts/out/EwpgERC3643.sol/EwpgERC3643.json',
-  EwpgERC4626: 'contracts/out/EwpgERC4626.sol/EwpgERC4626.json',
-  EwpgERC7540: 'contracts/out/EwpgERC7540.sol/EwpgERC7540.json',
-  EwpgRepoMarket: 'contracts/out/EwpgRepoMarket.sol/EwpgRepoMarket.json',
-  EwpgRepoVault: 'contracts/out/EwpgRepoVault.sol/EwpgRepoVault.json',
-  ConfidentialERC20: 'contracts/out/ConfidentialERC20.sol/ConfidentialERC20.json',
+  AssetTokenFactory: 'AssetTokenFactory.sol/AssetTokenFactory.json',
+  EwpgRepoMarketFactory: 'EwpgRepoMarketFactory.sol/EwpgRepoMarketFactory.json',
+  DvpSettlement: 'DvpSettlement.sol/DvpSettlement.0.8.36.json',
+  EwpgBondDesk: 'EwpgBondDesk.sol/EwpgBondDesk.json',
+  StablecoinAmm: 'StablecoinAmm.sol/StablecoinAmm.json',
+  EwpgConfidentialFactory: 'EwpgConfidentialFactory.sol/EwpgConfidentialFactory.json',
+  EwpgERC20: 'EwpgERC20.sol/EwpgERC20.json',
+  EwpgERC721: 'EwpgERC721.sol/EwpgERC721.json',
+  EwpgERC1155: 'EwpgERC1155.sol/EwpgERC1155.json',
+  EwpgERC3525: 'EwpgERC3525.sol/EwpgERC3525.json',
+  EwpgERC3643: 'EwpgERC3643.sol/EwpgERC3643.json',
+  EwpgERC4626: 'EwpgERC4626.sol/EwpgERC4626.json',
+  EwpgERC7540: 'EwpgERC7540.sol/EwpgERC7540.json',
+  EwpgRepoMarket: 'EwpgRepoMarket.sol/EwpgRepoMarket.json',
+  EwpgRepoVault: 'EwpgRepoVault.sol/EwpgRepoVault.json',
+  ConfidentialERC20: 'ConfidentialERC20.sol/ConfidentialERC20.json',
 }
 
 const requiredEconomicEvents = {
@@ -45,11 +48,31 @@ const requiredEconomicEvents = {
   EwpgRepoMarket: [
     'Supplied(indexed address,uint256,uint256)',
     'Withdrawn(indexed address,uint256,uint256)',
+    'CollateralReconciled(indexed address,uint256,uint256,bytes32)',
+    'LiquidationSurplusCredited(indexed address,uint256)',
+    'SurplusClaimed(indexed address,uint256)',
+  ],
+  EwpgRepoMarketFactory: [
+    'MarketCreated(indexed address,indexed address,indexed address,uint256,address)',
+    'MarketOperatorSet(indexed address,indexed address,address)',
+  ],
+  DvpSettlement: [
+    'TradeCancelled(indexed bytes32,indexed address)',
+    'TradeForceCancelled(indexed bytes32,indexed address,string)',
+  ],
+  EwpgBondDesk: [
+    'CouponPaid(indexed uint256,indexed address,uint256)',
+    'CouponWithheld(indexed uint256,indexed address,uint256)',
+    'WithheldReleased(indexed uint256,indexed address,indexed address,uint256,string)',
+    'ForcedRedemption(indexed address,indexed address,uint256,uint256,string)',
   ],
   EwpgRepoVault: [
     'MarketAdded(indexed address,uint256)',
     'MarketCapUpdated(indexed address,uint256)',
     'MarketRemoved(indexed address)',
+    'MarketAddSubmitted(indexed address,uint256,uint256)',
+    'CapIncreaseSubmitted(indexed address,uint256,uint256)',
+    'PendingRevoked(indexed address,indexed address)',
     'Allocated(indexed address,uint256)',
     'Deallocated(indexed address,uint256)',
     'Deposit(indexed address,indexed address,uint256,uint256)',
@@ -83,13 +106,13 @@ for (const line of manifest.split(/\r?\n/)) {
 const failures = []
 for (const [name, relativeArtifact] of Object.entries(artifactPaths)) {
   const abiPath = path.join(subgraphDir, 'abis', `${name}.json`)
-  const artifactPath = path.join(repoRoot, relativeArtifact)
+  const artifactPath = path.join(forgeOut, relativeArtifact)
   if (!fs.existsSync(abiPath)) {
     failures.push(`${name}: missing checked-in subgraph ABI ${abiPath}`)
     continue
   }
   if (!fs.existsSync(artifactPath)) {
-    failures.push(`${name}: missing canonical Forge artifact ${artifactPath}; run 'forge build' in contracts/ first`)
+    failures.push(`${name}: missing canonical Forge artifact ${artifactPath}; run 'forge build' in contracts/ first (or set FOUNDRY_OUT)`)
     continue
   }
 

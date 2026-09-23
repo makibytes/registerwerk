@@ -4,8 +4,11 @@ import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.HolderSyncStatusPort;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.events.HolderBalanceSyncedEvent;
+import de.makibytes.registerwerk.indexer.events.HolderSyncBlockedEvent;
+import de.makibytes.registerwerk.indexer.events.HolderSyncRestoredEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -56,6 +59,12 @@ import java.util.UUID;
  * {@code = 'FINALIZED'}, matching this service. This means a holder's balance can lag a submitted
  * transfer by up to the chain's confirmation depth; that lag is not currently surfaced to the UI as
  * a separate "pending" figure.
+ *
+ * <p>Every run persists the asset's reconciliation state through {@link HolderSyncStatusPort}
+ * (T2-18): a refused run marks the asset BLOCKED with the unmapped wallets before throwing (the
+ * {@code noRollbackFor} keeps that write), a completed run marks it OK and stamps
+ * {@code last_successful_holder_sync_at}. The corporate-action snapshot gate and the operator
+ * banner read that state; previously a refusal was only a WARN line in the scheduler log.
  */
 @Service
 public class HolderDataService implements de.makibytes.registerwerk.indexer.IndexerApi {
@@ -68,15 +77,18 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
     private final TokenTransferRepository tokenTransferRepository;
     private final AssetHolderRepository assetHolderRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final HolderSyncStatusPort holderSyncStatusPort;
 
     public HolderDataService(AssetDeploymentRepository deploymentRepository,
                              TokenTransferRepository tokenTransferRepository,
                              AssetHolderRepository assetHolderRepository,
-                             ApplicationEventPublisher eventPublisher) {
+                             ApplicationEventPublisher eventPublisher,
+                             HolderSyncStatusPort holderSyncStatusPort) {
         this.deploymentRepository = deploymentRepository;
         this.tokenTransferRepository = tokenTransferRepository;
         this.assetHolderRepository = assetHolderRepository;
         this.eventPublisher = eventPublisher;
+        this.holderSyncStatusPort = holderSyncStatusPort;
     }
 
     /** Synchronizes holder balances for one asset from the indexed transfer history. */
@@ -136,7 +148,15 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
             // the same pass. Fail before any writes: reorg compensation then becomes
             // COMPENSATION_FAILED and freezes the affected asset instead of publishing a
             // partially reconciled securities register.
-            throw new UnmappedHolderIdentityException(assetId, unmappedWallets);
+            // The BLOCKED state is persisted (not just logged) so the operator banner, the
+            // metric/alert and the corporate-action snapshot gate all see the stale register. A
+            // pool contract (lending market, escrow, desk) is resolved by registering it as a
+            // NOMINEE_POOL holder; an investor wallet by mapping it to its investor.
+            UnmappedHolderIdentityException refusal = new UnmappedHolderIdentityException(assetId, unmappedWallets);
+            if (holderSyncStatusPort.markBlocked(assetId, Instant.now(), unmappedWallets, refusal.getMessage())) {
+                eventPublisher.publishEvent(new HolderSyncBlockedEvent(assetId, unmappedWallets));
+            }
+            throw refusal;
         }
 
         int updated = 0;
@@ -182,13 +202,18 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
             }
         }
 
+        if (holderSyncStatusPort.markReconciled(assetId, Instant.now())) {
+            eventPublisher.publishEvent(new HolderSyncRestoredEvent(assetId));
+        }
+
         log.info("Holder sync for asset={}: {} deployments, {} transfers → {} holders updated, "
                         + "{} zeroed (vanished from chain)",
                 assetId, deployments.size(), transferCount, updated, zeroed);
     }
 
-    /** Manual refresh triggered by user action. */
-    @Transactional
+    /** Manual refresh triggered by user action. Same {@code noRollbackFor} as the sync it wraps
+     *  (self-invocation runs in this transaction): a refused refresh must still persist BLOCKED. */
+    @Transactional(noRollbackFor = UnmappedHolderIdentityException.class)
     public void manualRefreshIssuance(String assetId) {
         syncHoldersFromBlockchain(UUID.fromString(assetId));
     }

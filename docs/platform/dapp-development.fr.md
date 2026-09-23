@@ -51,6 +51,43 @@ Les identifiants de permission sont `keccak256("<your-slug>.<action>")`. Votre s
 est votre espace de noms — les manifestes déclarant des permissions en dehors de `<slug>.*` sont
 rejetés, à moins que le code n'existe déjà en tant que permission de plateforme.
 
+### Lier une instance à son organisation opératrice { #binding-an-instance-to-its-operating-org }
+
+Les octrois de permissions valent **pour toute l'organisation** : un octroi de `loandesk.sweep`
+permet aux wallets de l'organisation d'exécuter cette action sur *chaque* instance déployée de la
+dApp, y compris les desks, vaults ou marchés exploités par une autre organisation. La permission du
+slug indique *ce que* l'organisation peut faire ; elle n'indique pas *à qui* appartient l'instance.
+Une instance de dApp qui détient des valeurs ou la configuration d'une organisation doit donc se lier
+à cette organisation et protéger ses fonctions privilégiées avec `requiresOrgPermission` :
+
+```solidity
+contract LoanDesk is RegisterwerkGated {
+    bytes32 public constant SWEEP = keccak256("loandesk.sweep");
+    address public immutable operatorOrg;
+
+    constructor(IPermissionOracle oracle_, address operatorOrg_) RegisterwerkGated(oracle_) {
+        _requireOrg(operatorOrg_); // reverts ZeroOperatingOrg()
+        operatorOrg = operatorOrg_;
+    }
+
+    function sweep() external requiresOrgPermission(operatorOrg, SWEEP) { /* ... */ }
+}
+```
+
+- `requiresOrgPermission(address org, bytes32 permission)` — le wallet de l'appelant doit être lié à
+  `org` (vérifié en premier ; revert `WrongOperatingOrg(wallet, expectedOrg)`) **et** détenir
+  `permission` (revert `PermissionDenied`). `org == address(0)` ne correspond jamais.
+- `_checkOrgPermission(wallet, org, permission)` — la même vérification sous forme de fonction
+  interne, pour les instances dont l'organisation opératrice est déterminée dans la fonction (par
+  exemple par actif).
+- `_requireOrg(org)` — garde de constructeur/setter qui revert `ZeroOperatingOrg()`.
+
+Utilisez la liaison pour toute action qui déplace les fonds ou l'inventaire de l'instance ou
+modifie sa configuration. Seules les actions que la dApp ouvre délibérément aux membres d'autres
+organisations restent sur un simple `requiresPermission`. Exposez l'organisation liée via un getter public (`operatorOrg()`) afin
+que les opérateurs et les consommateurs voient qui exploite une instance attestée. Aucune
+modification de la PermissionRegistry n'est nécessaire : les octrois restent par slug.
+
 Un exemple minimal exécutable se trouve dans `contracts/test/ecosystem/SampleGatedDapp.t.sol`. Pour
 deux dApps de référence entièrement packagées et prêtes pour la marketplace — dont une véritable
 intégration ERC-3643 (T-REX) — voir [Exemples de dApps de référence](#reference-example-dapps)
@@ -144,6 +181,21 @@ Voir sa NatSpec pour la mise en garde relative au séquestre ERC-3643 (les jeton
 l'ONCHAINID du contrat de règlement soit vérifié dans le registre d'identité avant de pouvoir être
 mis en séquestre — verrouiller plutôt la jambe paiement contourne ce point pour les titres
 financiers).
+
+Les identifiants d'opération sont dérivés, non choisis : `lockAsset`/`lockPayment` reçoivent la
+`clientRef` propre à la partie qui verrouille (par exemple un identifiant de RFQ) et renvoient
+`tradeId = keccak256(abi.encode(chainid, dvp, locker, clientRef))` (également disponible via
+`tradeIdFor(locker, clientRef)`), de sorte que personne ne peut occuper l'identifiant d'une opération
+qu'une autre partie s'apprête à verrouiller. La contrepartie règle avec
+`settle(tradeId, expectedTermsHash)`, où `expectedTermsHash` est `hashTerms(seller, buyer,
+assetToken, assetAmount, paymentToken, paymentAmount, lockedLeg, expiry)` calculé à partir de **sa
+propre trace de l'accord conclu**. Ne relisez pas le hachage depuis `termsHashOf(tradeId)` pour le
+transmettre : cela ne fait que renvoyer ce que la partie qui verrouille a stocké. Si les conditions
+stockées diffèrent, `settle` échoue avec `TermsMismatch` et ne déplace rien. `settle` échoue aussi
+avec `PartyFrozen` tant que le jeton d'actif (s'il répond à `isFrozen(address)`, comme T-REX)
+signale le vendeur ou l'acheteur comme gelé ; le séquestre reste alors en place jusqu'à la levée du
+gel, l'annulation de l'opération ou sa libération par l'opérateur en vertu d'une décision légale via
+`forceCancel(tradeId, to, legalBasis)` (événement `TradeForceCancelled`).
 
 ## Flux de publication { #publication-workflow }
 
@@ -262,6 +314,11 @@ ne sont livrés qu'en Solidity testé (pas de manifeste, non semés comme fiches
   règle chaque transaction via le `DvpSettlement` ci-dessus, non modifié et sans autorisation
   préalable, et ses exécutions servent aussi de flux de prix pour
   `EwpgRepoFacility.updatePrice`. Tests : `contracts/test/examples/CompliantSecondaryMarket.t.sol`.
+  Chaque instance du guichet est liée à son organisation opératrice (`operatorOrg`, un argument du
+  constructeur) : une autre organisation nominee détenant la même autorisation
+  `secondary-market.trade` échoue avec `WrongOperatingOrg` sur cette instance.
+  `reclaimExpired(tradeId)` rend au pool un séquestre d'inventaire expiré et non réglé, puisque le
+  contrat du guichet est la partie qui a verrouillé.
 - `contracts/src/examples/StablecoinAmm.sol` — un AMM minimal à produit constant, restreint aux
   paires stablecoin uniquement, délibérément **pas** `RegisterwerkGated` (voir sa NatSpec pour
   savoir pourquoi). Tests : `contracts/test/examples/StablecoinAmm.t.sol`.

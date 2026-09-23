@@ -90,13 +90,15 @@ contract DeployLocalLendingDemo is Script {
             )
         );
         _registerStandardProducts();
-        navOracle = new RegisterwerkNavOracle(permissionOracle);
         factory = new EwpgRepoMarketFactory(permissionOracle);
 
         address operatorOrg = _registerMember(deployer);
+        navOracle = new RegisterwerkNavOracle(permissionOracle, operatorOrg, address(loanToken), 2000, 1 days, 0);
         _defineAndGrant(operatorOrg, "repo-markets.create-market");
         _defineAndGrant(operatorOrg, "repo-markets.push-price");
         _defineAndGrant(operatorOrg, "repo-markets.override-price");
+        _defineAndGrant(operatorOrg, "repo-markets.configure");
+        _defineAndGrant(operatorOrg, "repo-markets.reconcile");
         _defineAndGrant(operatorOrg, "repo-facility.borrow");
 
         address[5] memory traders = [NORDBANK, RHEINISCHE, AURORA, FRANKFURT, WUERTTEMBERG];
@@ -119,11 +121,39 @@ contract DeployLocalLendingDemo is Script {
 
         navOracle.pushPrice(address(greenBond), 1_050e6);
         navOracle.pushPrice(address(infraNote), 502_500_000);
+        // LLTV × (1 + 5% bonus) must stay within 1 − the oracle's 20% window tolerance
+        // (EwpgRepoMarket, T2-08): 75% → 0.7875 and 74% → 0.777, both ≤ 0.80.
         address greenMarket = factory.createMarket(
-            loanToken, greenBond, navOracle, 7000, 8000, 500, 0.02e18, 0.18e18, 365 days, 730 days
+            MarketParams(
+                operatorOrg,
+                deployer,
+                loanToken,
+                greenBond,
+                navOracle,
+                7000,
+                7500,
+                500,
+                0.02e18,
+                0.18e18,
+                365 days,
+                730 days
+            )
         );
         address infraMarket = factory.createMarket(
-            loanToken, infraNote, navOracle, 6500, 7800, 500, 0.025e18, 0.2e18, 365 days, 730 days
+            MarketParams(
+                operatorOrg,
+                deployer,
+                loanToken,
+                infraNote,
+                navOracle,
+                6500,
+                7400,
+                500,
+                0.025e18,
+                0.2e18,
+                365 days,
+                730 days
+            )
         );
 
         loanToken.mint(deployer, 10_000_000e6);

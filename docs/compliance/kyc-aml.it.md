@@ -153,7 +153,22 @@ if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
 `KycMonitoringJob` (`kyc/internal/`) viene eseguito ogni giorno alle 02:00 UTC:
 
 1. Recupera tutti i record `LegalEntity` con `kycStatus = APPROVED`
-2. Se `kycExpiryDate` è entro 30 giorni → passa a `EXPIRING`, emette `KycExpiringEvent` → notifica via email al `COMPANY_ADMIN` del cliente
-3. Se `kycExpiryDate` è passato → passa a `EXPIRED`, emette `KycExpiredEvent` → attiva la rimozione dal [registro delle identità ERC-3643](../token-standards/erc3643.md)
+2. Se `kycExpiryDate` è entro 30 giorni → emette `KycExpiringEvent` (`reason=EXPIRING_SOON`; lo stato resta `APPROVED`) → notifica via email al `COMPANY_ADMIN` del cliente
+3. Se `kycExpiryDate` è passato → passa a `EXPIRED`, emette `KycExpiringEvent` (`reason=EXPIRED`) → `KycChainPropagationListener` riporta la scadenza on-chain (vedi sotto)
 
-Inoltre, `ScreeningService` viene eseguito ogni notte per ripetere lo screening di tutte le entità attive rispetto agli elenchi di sanzioni più recenti. Un riscontro appena rilevato porta l'entità allo stato `SCREENING_REVIEW` e avvisa il `COMPLIANCE_OFFICER`.
+Inoltre, il nuovo screening giornaliero (`ScreeningRefreshJob`) ricontrolla tutte le entità attive rispetto agli elenchi di sanzioni più recenti. Un nuovo riscontro viene salvato come `ScreeningHit` aperto e pubblicato come `ScreeningHitDetectedEvent` (registrato nell'audit). I riscontri aperti bloccano l'approvazione KYC e il regolamento off-chain delle operazioni tramite `ScreeningGate`. Un riscontro non esaminato **non attiva ancora alcuna azione on-chain automatica**: la risposta (sospensione, congelamento o verifica entro uno SLA) è una decisione di prodotto in sospeso.
+
+### Propagazione on-chain di una scadenza KYC
+
+Una scadenza KYC (`KycExpiringEvent` con `reason=EXPIRED`) o un rifiuto (`KycRejectedEvent`) viene riportato su ogni chain in cui l'entità ha una registrazione di organizzazione o una ONCHAINID. `KycChainPropagationListener` (`orgidentity/internal/`) registra una riga `kyc_chain_propagation` per entità e chain e la porta avanti finché tutto è confermato on-chain:
+
+- **Sospensione dell'organizzazione**: `OrgRegistry.suspendOrg`, tramite lo stesso percorso fail-closed di una sospensione manuale. Questo blocca tutte le dApp protette da `PermissionOracle` e il paymaster.
+- **Revoca dei claim**: per i claim KYC (topic 1) e AML (topic 2) dell'entità, `ONCHAINID.removeClaim` **e** `ClaimIssuer.revokeClaimBySignature`. La sola rimozione è reversibile, perché l'organizzazione potrebbe aggiungere di nuovo la firma originale. La revoca presso l'emittente fa sì che `isClaimValid` restituisca `false` ovunque, anche in `isVerified` di T-REX.
+
+Ogni passaggio è idempotente e viene ritentato ogni minuto finché non è confermato. Gli errori vengono registrati nell'audit (`KYC_CHAIN_PROPAGATION`) ed esposti tramite il gauge `registerwerk_kyc_chain_propagation_failed` per l'alerting. Nulla viene annullato automaticamente: dopo una nuova approvazione (principio dei quattro occhi), l'operatore riattiva l'organizzazione ed emette esplicitamente nuovi claim.
+
+!!! note "La scadenza del claim non viene applicata on-chain"
+    Il valore `expiresAt` scritto nei dati del claim è solo informativo. Né `ClaimIssuer.isClaimValid` di ONCHAINID, né `isVerified` di T-REX, né `PermissionOracle` lo leggono. La scadenza ha effetto on-chain solo tramite la revoca attiva descritta sopra.
+
+!!! warning "La revoca presso l'emittente richiede un contratto ClaimIssuer"
+    `revokeClaimBySignature` si applica solo quando l'emittente del claim è un contratto `ClaimIssuer` di ONCHAINID su cui il firmatario del registro detiene una chiave MANAGEMENT. Per i claim il cui emittente è un semplice wallet firmatario non c'è nulla da revocare presso l'emittente, e il passaggio viene saltato.

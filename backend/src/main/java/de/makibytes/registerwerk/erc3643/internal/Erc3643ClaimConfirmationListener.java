@@ -72,6 +72,37 @@ class Erc3643ClaimConfirmationListener {
                 log.warn("Failed to resolve revocation for OnchainClaim={}: {}", claim.getId(), e.getMessage());
             }
         }
+        for (OnchainClaim claim : claimRepository.findByIssuerRevocationTxHashIsNotNullAndIssuerRevokedAtIsNull()) {
+            try {
+                isolatedTransactions.run(() -> resolveIssuerRevocation(claim));
+            } catch (Exception e) {
+                log.warn("Failed to resolve issuer revocation for OnchainClaim={}: {}", claim.getId(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Issuer-level {@code revokeClaimBySignature}. A confirmed failure clears the hash so the next
+     * revocation pass (manual revoke or {@code KycChainPropagationListener}) resubmits it — the
+     * resubmission reads {@code isClaimRevoked} first, so a lost race is not re-sent. Not
+     * journaled for reorg compensation: a retracted block re-includes the same signed tx, and
+     * {@code isClaimRevoked} stays the on-chain source of truth for any later pass.
+     */
+    private void resolveIssuerRevocation(OnchainClaim claim) {
+        String txHash = claim.getIssuerRevocationTxHash();
+        if (blockchainTransactionService.isConfirmedFailure(txHash)) {
+            log.error("OnchainClaim={} revokeClaimBySignature tx={} failed on-chain (registry signer lacks a "
+                    + "MANAGEMENT key on the ClaimIssuer?); the issuer still vouches for the signature. "
+                    + "Clearing so the next revocation pass resubmits.", claim.getId(), txHash);
+            claim.setIssuerRevocationTxHash(null);
+            claimRepository.save(claim);
+            return;
+        }
+        if (blockchainTransactionService.confirmedLocation(txHash).isEmpty()) {
+            return;
+        }
+        claim.setIssuerRevokedAt(Instant.now());
+        claimRepository.save(claim);
     }
 
     private void resolveIssuance(OnchainClaim claim) {

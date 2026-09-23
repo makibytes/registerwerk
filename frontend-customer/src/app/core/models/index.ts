@@ -924,6 +924,17 @@ export interface LendingMarket {
   micarApplicable: boolean | null;
   defiInteropModel: 'NONE' | 'NOMINEE_POOL' | 'ORACLE_ONLY' | null;
   createdAt: string;
+  /**
+   * The deployed market predates today's risk checks (LLTV × (1 + bonus) within the oracle's
+   * deviation haircut, oracle quoted in the loan token, operating-org binding). Kept listed so
+   * existing borrowers and lenders can repay, claim and withdraw — never offer new borrowing or
+   * supply on it.
+   */
+  riskParametersLegacy: boolean;
+  /** Org operating the market on-chain; null for a legacy market. */
+  operatorOrg: string | null;
+  /** The market's fixed reserve recipient; null for a legacy market. */
+  treasury: string | null;
 }
 
 export interface LendingQuote {
@@ -947,6 +958,8 @@ export interface LendingPosition {
   currentDebt: string;
   healthFactorWad: string | null;
   healthFactorReliable: boolean | null;
+  /** Loan-token base units a liquidation credited to this wallet; claim via `claimLiquidationSurplus`. */
+  liquidationSurplus: string;
   status: LendingPositionStatus;
   lastSyncedAt: string;
 }

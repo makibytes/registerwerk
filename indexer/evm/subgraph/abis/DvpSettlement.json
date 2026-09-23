@@ -31,6 +31,15 @@
   },
   {
     "type": "event",
+    "name": "TradeForceCancelled",
+    "inputs": [
+      { "name": "tradeId",    "type": "bytes32", "indexed": true },
+      { "name": "to",         "type": "address", "indexed": true },
+      { "name": "legalBasis", "type": "string",  "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
     "name": "Paused",
     "inputs": [
       { "name": "by", "type": "address", "indexed": true }

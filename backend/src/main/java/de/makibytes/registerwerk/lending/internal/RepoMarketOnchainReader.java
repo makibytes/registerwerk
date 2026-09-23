@@ -113,6 +113,12 @@ class RepoMarketOnchainReader {
         if (loanTokenDecimals < 0 || loanTokenDecimals > 36) {
             throw new IllegalArgumentException("Loan token decimals must be between 0 and 36");
         }
+        // Markets predating the instance binding (operatorOrg/treasury) or an oracle predating
+        // its quote denomination revert here — they are not registrable any more.
+        String operatorOrg = callAddress(chainIdentifier, marketAddress, "operatorOrg");
+        String treasury = callAddress(chainIdentifier, marketAddress, "treasury");
+        String oracleQuoteToken = oracleQuoteToken(chainIdentifier, priceOracle);
+        BigInteger oracleMaxDeviationBps = oracleMaxDeviationBps(chainIdentifier, priceOracle);
         return new MarketParameters(
                 loanToken,
                 collateralToken,
@@ -124,7 +130,11 @@ class RepoMarketOnchainReader {
                 callUint256(chainIdentifier, marketAddress, "slopeWad", Collections.emptyList()),
                 callUint256(chainIdentifier, marketAddress, "maxPriceAgeSeconds", Collections.emptyList()),
                 callUint256(chainIdentifier, marketAddress, "liquidationGracePeriodSeconds", Collections.emptyList()),
-                loanTokenDecimals);
+                loanTokenDecimals,
+                operatorOrg,
+                treasury,
+                oracleQuoteToken,
+                oracleMaxDeviationBps);
     }
 
     record MarketParameters(
@@ -138,7 +148,42 @@ class RepoMarketOnchainReader {
             BigInteger slopeWad,
             BigInteger maxPriceAgeSeconds,
             BigInteger liquidationGracePeriodSeconds,
-            int loanTokenDecimals) {}
+            int loanTokenDecimals,
+            String operatorOrg,
+            String treasury,
+            String oracleQuoteToken,
+            BigInteger oracleMaxDeviationBps) {}
+
+    /** {@code EwpgRepoMarket.operatorOrg() returns (address)} — the org operating the instance. */
+    String operatorOrg(String chainIdentifier, String marketAddress) {
+        return callAddress(chainIdentifier, marketAddress, "operatorOrg");
+    }
+
+    /** {@code EwpgRepoMarket.treasury() returns (address)} — the only reserve-withdrawal recipient. */
+    String treasury(String chainIdentifier, String marketAddress) {
+        return callAddress(chainIdentifier, marketAddress, "treasury");
+    }
+
+    /** {@code IRepoOracle.quoteToken() returns (address)} — the token every mark is quoted in. */
+    String oracleQuoteToken(String chainIdentifier, String oracleAddress) {
+        return callAddress(chainIdentifier, oracleAddress, "quoteToken");
+    }
+
+    /**
+     * {@code IRepoOracle.maxDeviationBps() returns (uint256)} — the oracle's per-window move
+     * tolerance; {@code type(uint256).max} means the oracle opts out of the deviation concept.
+     */
+    BigInteger oracleMaxDeviationBps(String chainIdentifier, String oracleAddress) {
+        return callUint256(chainIdentifier, oracleAddress, "maxDeviationBps", Collections.emptyList());
+    }
+
+    /**
+     * {@code EwpgRepoMarket.surplusOf(address) returns (uint256)} — loan-token cash a
+     * liquidation credited to the borrower, claimable via {@code claimLiquidationSurplus()}.
+     */
+    BigInteger liquidationSurplus(String chainIdentifier, String marketAddress, String wallet) {
+        return callUint256(chainIdentifier, marketAddress, "surplusOf", List.of(new Address(wallet)));
+    }
 
     BigInteger availableLiquidity(String chainIdentifier, String marketAddress, String loanTokenAddress) {
         return callUint256(chainIdentifier, loanTokenAddress, "balanceOf", List.of(new Address(marketAddress)));

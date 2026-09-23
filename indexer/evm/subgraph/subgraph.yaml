@@ -58,6 +58,8 @@ dataSources:
       eventHandlers:
         - event: MarketCreated(indexed address,indexed address,indexed address,uint256,address)
           handler: handleMarketCreated
+        - event: MarketOperatorSet(indexed address,indexed address,address)
+          handler: handleMarketOperatorSet
 
   # ── Payment-leg contracts  ────────────────────────────
   # These contracts are not all discoverable via an on-chain factory. The renderer expands the
@@ -89,6 +91,8 @@ dataSources:
           handler: handleTradeSettled
         - event: TradeCancelled(indexed bytes32,indexed address)
           handler: handleTradeCancelled
+        - event: TradeForceCancelled(indexed bytes32,indexed address,string)
+          handler: handleTradeForceCancelled
         - event: Paused(indexed address)
           handler: handlePaused
         - event: Unpaused(indexed address)
@@ -122,6 +126,12 @@ dataSources:
           handler: handleDeskPaused
         - event: DeskUnpaused(indexed address)
           handler: handleDeskUnpaused
+        - event: CouponWithheld(indexed uint256,indexed address,uint256)
+          handler: handleCouponWithheld
+        - event: WithheldReleased(indexed uint256,indexed address,indexed address,uint256,string)
+          handler: handleWithheldReleased
+        - event: ForcedRedemption(indexed address,indexed address,uint256,uint256,string)
+          handler: handleForcedRedemption
 
   - kind: ethereum
     name: StablecoinAmm
@@ -176,6 +186,12 @@ dataSources:
           handler: handleMarketCapUpdated
         - event: MarketRemoved(indexed address)
           handler: handleMarketRemoved
+        - event: MarketAddSubmitted(indexed address,uint256,uint256)
+          handler: handleMarketAddSubmitted
+        - event: CapIncreaseSubmitted(indexed address,uint256,uint256)
+          handler: handleCapIncreaseSubmitted
+        - event: PendingRevoked(indexed address,indexed address)
+          handler: handlePendingRevoked
         - event: Allocated(indexed address,uint256)
           handler: handleAllocated
         - event: Deallocated(indexed address,uint256)
@@ -460,8 +476,12 @@ templates:
           handler: handleLiquidated
         - event: BadDebtRecognized(indexed address,uint256,uint256)
           handler: handleBadDebtRecognized
-        - event: CollateralReconciled(indexed address,uint256,uint256)
+        - event: CollateralReconciled(indexed address,uint256,uint256,bytes32)
           handler: handleCollateralReconciled
+        - event: LiquidationSurplusCredited(indexed address,uint256)
+          handler: handleLiquidationSurplusCredited
+        - event: SurplusClaimed(indexed address,uint256)
+          handler: handleSurplusClaimed
 
   # ── Confidential (Zama fhEVM) token  ────────────────────
   # Instantiated by EwpgConfidentialFactory.handleConfidentialTokenDeployed for each newly

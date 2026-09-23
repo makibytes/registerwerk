@@ -6,6 +6,8 @@ import {
   Liquidated as LiquidatedEvent,
   BadDebtRecognized as BadDebtRecognizedEvent,
   CollateralReconciled as CollateralReconciledEvent,
+  LiquidationSurplusCredited as LiquidationSurplusCreditedEvent,
+  SurplusClaimed as SurplusClaimedEvent,
 } from '../generated/templates/EwpgRepoMarket/EwpgRepoMarket'
 import { RepoMarket, RepoMarketEvent } from '../generated/schema'
 
@@ -129,7 +131,39 @@ export function handleCollateralReconciled(event: CollateralReconciledEvent): vo
 
   let e = newEvent(market.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'COLLATERAL_RECONCILED')
   e.actor = event.params.borrower
+  e.amount = event.params.previousCollateral
   e.collateralAmount = event.params.newCollateral
+  e.forcedTransferRef = event.params.forcedTransferRef
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+/** Loan-token surplus left after a liquidation, credited to the borrower's claimable balance
+ *  in the same transaction as the LIQUIDATED event. */
+export function handleLiquidationSurplusCredited(event: LiquidationSurplusCreditedEvent): void {
+  let market = RepoMarket.load(event.address.toHexString())
+  if (market == null) return
+
+  let e = newEvent(market.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'LIQUIDATION_SURPLUS_CREDITED')
+  e.actor = event.params.borrower
+  e.amount = event.params.amount
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+export function handleSurplusClaimed(event: SurplusClaimedEvent): void {
+  let market = RepoMarket.load(event.address.toHexString())
+  if (market == null) return
+
+  let e = newEvent(market.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'SURPLUS_CLAIMED')
+  e.actor = event.params.borrower
+  e.amount = event.params.amount
   e.blockNumber = event.block.number
   e.blockTimestamp = event.block.timestamp
   e.transactionHash = event.transaction.hash

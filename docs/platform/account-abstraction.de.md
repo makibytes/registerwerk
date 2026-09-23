@@ -35,83 +35,205 @@ Ein Kunde, der sein bestehendes EOA auf einen 7702-delegierten Smart Account upg
 **keinerlei Migration** der obigen Punkte – die Adresse ändert sich nicht, sodass Org-Mitgliedschaft,
 Identitätsregistrierung und Whitelist-Einträge alle gültig bleiben. Die einzige neue Anforderung ist
 der ERC-1271-Pfad von `WalletSignatureVerifier` (bereits vorhanden), da der Code eines
-7702-delegierten EOA `isValidSignature` implementiert wie jede andere Smart-Contract-Wallet –
-einschließlich `EwpgPasskeyAccount` weiter unten, das genau eine solche Delegate-Implementierung ist.
+7702-delegierten EOA `isValidSignature` implementiert wie jede andere Smart-Contract-Wallet. Das
+Kundenportal delegiert an viems `Simple7702Account`. `EwpgPasskeyAccount` (unten) ist **kein**
+7702-Delegate: Passkey und Guardian sind Zustand der jeweiligen Deployment-Instanz. Ein EOA, das an
+sie delegiert, hätte gar keinen Passkey (jede Signatur wird abgelehnt) und teilte sich einen
+Guardian mit allen anderen delegierenden EOAs.
 
 `frontend-customer` bündelt Browser-Wallet-Zugriffe in `WalletService` und implementiert optionale
-EIP-7702-/ERC-4337-Ausführung in `SponsoredTxService`. Sponsoring ist nur mit konfigurierter
-`environment.bundlerUrl`, Paymaster-Adresse und aufgelöster Policy-ID verfügbar. Die UI erstellt
-und bedient keine `EwpgPasskeyAccount`-Instanzen.
+EIP-7702-/ERC-4337-Ausführung in `SponsoredTxService`. Sponsoring braucht eine konfigurierte
+`environment.bundlerUrl` und für jede UserOperation einen **Voucher** vom Backend (nächster
+Abschnitt). Lehnt das Backend den Voucher ab, wirft der Service `SponsorshipUnavailableError` mit
+dem Grund; `sendWithSponsorshipFallback` sendet denselben Aufruf dann als normale, selbst bezahlte
+Transaktion und meldet das. Ein stiller Fallback findet nie statt. Die UI erstellt und bedient keine
+`EwpgPasskeyAccount`-Instanzen.
 
 ## `EwpgPaymaster` — gesponserte Transaktionen { #ewpgpaymaster-sponsored-transactions }
 
-`contracts/src/ecosystem/EwpgPaymaster.sol` ist ein ERC-4337-`IPaymaster` (gegen EntryPoint v0.8, für
-native EIP-7702-Unterstützung), der Gas für verifizierte Registerwerk-Kunden sponsert:
+`contracts/src/ecosystem/EwpgPaymaster.sol` ist ein ERC-4337-**Verifying-Paymaster** (gegen
+EntryPoint v0.8, für native EIP-7702-Unterstützung), der Gas für verifizierte Registerwerk-Kunden
+sponsert.
 
-- **Compliance-gegated nach Wer, nicht nach Was aufgerufen wird**: `validatePaymasterUserOp` prüft
-  `PermissionOracle.isActiveMember(userOp.sender)` und `hasClaimTopic(userOp.sender, KYC)` – sponsert
-  niemals Gas für eine nicht verifizierte Wallet. Da ein 7702-delegiertes EOA seine ursprüngliche
-  Adresse behält, *ist* `userOp.sender` die bestehende Mitglieds-Wallet-Adresse des Kunden, sodass
-  hier direkt aus demselben Oracle gelesen wird, das jeder andere Ökosystemvertrag verwendet. Das
-  `callData` eines beliebigen Smart Accounts zu parsen, um einzuschränken, *welcher* Vertrag
-  aufgerufen werden darf, ist implementierungsspezifisch je Kontotyp und bewusst außerhalb des
-  Anwendungsbereichs – siehe die NatSpec des Vertrags.
-- **Das Sponsoring ist über eine opake `policyId`** (kodiert in `paymasterAndData`) abgegrenzt,
-  finanziert über `fundSponsorship(policyId)` durch jeden, der bereit ist zu sponsern (den Betreiber
-  oder das Treasury eines Emittenten) – das reserviert sowohl ein internes Budget als auch zahlt in
-  den EntryPoint ein.
-- **Ein Ausgabenlimit je Wallet** (`setWalletBudgetCap`) begrenzt, wie viel eine einzelne Wallet von
-  einem *gemeinsam genutzten* Policy-Budget verbrauchen kann, zusätzlich zum aggregierten
-  Policy-Budget selbst.
-- Unterlegt durch die Backend-Entität `deployment/api/GasSponsorshipPolicy` – spiegelt das bestehende
-  `MintControlRule`-Muster: eine Überschreibung je Deployment oder ein Standardwert auf
-  Emittentenebene, den künftige Deployments dieses Emittenten erben, bis sie eine eigene
-  Überschreibung erhalten (`GasSponsorshipService.resolveEffectivePolicy`,
-  `asset/web/GasSponsorshipController`). Die On-Chain-`policyId` einer bestimmten Zeile ist
-  `keccak256(id.toString())`. Diese Backend-Schicht ist reine Konfiguration – sie treibt noch keinen
-  On-Chain-Sync-Job an, der Budgets automatisch in den Paymaster überträgt; ein Betreiber/Emittent
-  finanziert `EwpgPaymaster.fundSponsorship` heute direkt.
-- Operator-UI: Die Asset-Detailseite von `frontend-operator` hat je Deployment einen Reiter
-  **Gas Sponsorship** (deploymentspezifische Überschreibung setzen/entfernen), und die
-  Kunden-Detailseite hat einen für Emittenten (den Standardwert auf Emittentenebene setzen, den neue
-  Deployments erben) – beide gestützt auf `core/api/gas-sponsorship.service.ts`, zeigen die aktuell
-  wirksame Policy und ob es sich um eine Überschreibung oder einen geerbten Standardwert handelt.
-- Deploy-Skript: `contracts/script/DeployLiquidityDapps.s.sol` stellt `EwpgPaymaster` bereit
-  (Standard-EntryPoint `ERC4337Utils.ENTRYPOINT_V08`) neben `EwpgRepoFacility` – getrennt von
-  `DeployExampleDapps.s.sol` gehalten, da beide Pragma `^0.8.36` sind und keine Kompilationseinheit
-  mit den erc3643-abhängigen Imports jenes Skripts teilen können (exakt gepinnt auf `0.8.30`).
-- Demo-Daten: `EcosystemDemoDataSeeder` sät drei `GasSponsorshipPolicy`-Zeilen – Meridian Capitals
-  eigenen Standardwert auf Emittentenebene (Sponsor `ISSUER`), Aurora Finances Emittenten-Standardwert,
-  stattdessen vom Betreiber finanziert (Sponsor `OPERATOR`, zeigt den anderen Sponsor-Typ), sowie eine
-  Deployment-Überschreibung auf Meridians Flaggschiff-Green-Bond-Deployment (`OPERATOR`, zeigt den
-  Vorrang von Überschreibung vor Standardwert).
-- Tests: `contracts/test/ecosystem/EwpgPaymaster.t.sol` (gegen einen minimalen `MockEntryPoint` –
-  siehe dessen NatSpec dazu, warum eine vollständige `handleOps`-Simulation nicht nötig ist, um die
-  eigene Buchungslogik des Paymasters zu testen), `backend/.../unit/GasSponsorshipServiceTest.java`.
+**Voucher.** Eine UserOperation wird nur gesponsert, wenn sie einen Voucher trägt, den der für die
+Policy registrierte Voucher-Signer signiert hat:
+
+```
+paymasterData = policyId (32) ‖ validUntil (6) ‖ validAfter (6) ‖ maxFeePerGasCap (16) ‖ signature (65)
+```
+
+Die Signatur ist eine EIP-191-Signatur (`personal_sign`) über `EwpgPaymaster.getHash(...)`. Dieser
+Digest deckt jedes Feld der UserOperation ab (Sender, Nonce, `keccak(initCode)`,
+`keccak(callData)`, Account-Gaslimits, die Paymaster-Gaslimits für Verifikation und postOp,
+`preVerificationGas` und `gasFees`) sowie `block.chainid`, die Paymaster-Adresse, die Policy-ID,
+das Gültigkeitsfenster und die Gaspreis-Obergrenze, unter dem Domain-Tag
+`keccak256("EwpgPaymasterVoucher(v1)")`. Die Signatur-Bytes selbst sind bewusst ausgenommen: Sie
+liegen in `paymasterAndData`, das Teil von `userOpHash` ist – ein Voucher kann also nicht
+`userOpHash` signieren. Ein falscher Signer liefert `SIG_VALIDATION_FAILED` (der EntryPoint meldet
+`AA34`), ein abgelaufener Voucher `AA32`. Die Validierung bricht außerdem ab, wenn die Policy
+inaktiv oder nicht registriert ist, `maxFeePerGas` über der signierten Obergrenze liegt,
+`paymasterPostOpGasLimit` unter 50.000 Gas liegt oder der Sender kein aktives, KYC-geprüftes
+Mitglied ist (Defence in Depth; das Backend prüft das ebenfalls).
+
+**Voucher-Aussteller (Backend).** `POST /api/v1/gas-sponsorship/vouchers` (Kunden-JWT,
+`asset/web/GasSponsorshipVoucherController`, `asset/internal/GasSponsorshipVoucherService`) nimmt
+die Deployment-ID und die vorbereitete UserOperation entgegen. Vor dem Signieren prüft er:
+
+- die effektive Policy des Deployments ist in der Datenbank **aktiv**. Das Deaktivieren einer
+  Policy stoppt Voucher sofort, schon bevor das On-Chain-Flag geändert ist.
+- der Sender ist eine **aktive Mitglieds-Wallet der juristischen Person des Aufrufers** auf dieser
+  Chain.
+- der Sender **hält das Asset**: Er hat einen aktiven Registereintrag (keine Nominee-Pool-Zeile)
+  der juristischen Person des Aufrufers für das Asset des Deployments. Erstzeichner ohne
+  Registereintrag werden nicht gesponsert und zahlen ihr Gas selbst.
+- **Scope** (Standard, bis das Produkt anders entscheidet): Jeder Aufruf im
+  `execute`/`executeBatch`-Batch zielt ohne Wert auf den Token-Contract des Deployments, und
+  `initCode` ist leer oder nur der EIP-7702-Marker. Factory-Deployments werden abgelehnt.
+- **Gas**: `maxFeePerGas` ≤ `registerwerk.paymaster.max-fee-per-gas-cap-wei` (die Obergrenze wird
+  in den Voucher signiert), die Summe der Gaslimits ≤ `max-total-gas` und postOp-Gas ≥ 50.000.
+- die **Monatsobergrenze** der Policy (`monthlyCapEth`). Jeder ausgestellte Voucher zählt mit seinen
+  Worst-Case-Kosten (`Σ Gaslimits × maxFeePerGas`, der EntryPoint-Prefund) und wird in
+  `gas_sponsorship_voucher` festgehalten, sodass die Obergrenze greift, bevor eine Operation
+  abgerechnet ist. Ein Voucher zählt einmal je `(Policy, Sender, UserOperation-Nonce)`: Eine
+  erneute Anfrage für dieselbe Nonce ersetzt den früheren Voucher. Eine juristische Person darf
+  pro Monat höchstens `registerwerk.paymaster.entity-monthly-cap-share` (Standard 10 %) der
+  Obergrenze nutzen, damit eine einzelne Organisation das Budget eines Emittenten nicht für alle
+  anderen Inhaber aufbraucht.
+
+Jeder Voucher ist `voucher-validity-seconds` lang gültig (Standard 300) und erzeugt das
+Audit-Event `GAS_SPONSORSHIP_VOUCHER_ISSUED`. Der Entwicklungs-Signaturschlüssel ist
+`registerwerk.paymaster.voucher-signer-key` (`REGISTERWERK_PAYMASTER_VOUCHER_SIGNER_KEY`). Er ist
+in die `EvmSigner`-Abstraktion des Wallet-Moduls eingebettet; in Produktion wandert er in KMS/HSM.
+Er darf **niemals** die Claim-Signing-Wallet (Trusted Issuer) sein: Ein Voucher-Schlüssel kann
+Sponsoring-Budget ausgeben. Leer deaktiviert das Sponsoring. Paymaster-Adressen werden je Chain
+unter `registerwerk.paymaster.addresses` konfiguriert (`PAYMASTER_<CHAIN>_<NETWORK>`). Die
+On-Chain-`policyId` einer `GasSponsorshipPolicy`-Zeile ist `keccak256(id.toString())`.
+
+**Budget-Buchhaltung.**
+
+- `registerPolicy(policyId, signer, orgCap)` hält den Aufrufer als **Funder** der Policy fest,
+  dazu den Voucher-Signer und eine Obergrenze je Org ungleich null. Die Policy kann im selben
+  Aufruf finanziert werden.
+- `fundSponsorship(policyId)` stockt auf. Nur der Funder darf das aufrufen, und nur der Funder darf
+  den Signer wechseln (`setPolicySigner`), da ein Signer die Policy ausgeben kann.
+- Die Validierung **reserviert** die `maxCost` der Operation aus dem Policy-Guthaben, sodass
+  mehrere Operationen in einem Bundle nicht alle gegen dasselbe Guthaben bestehen. Sie prüft
+  außerdem die Obergrenze der Sender-Org gegen verbraucht + reserviert + `maxCost`. Die Obergrenze
+  ist an `orgOf(sender)` gebunden; neue Wallets derselben Org vervielfachen sie nicht.
+- `postOp` bricht nie ab. Es bucht `min(maxCost, actualGasCost + (postOpGasLimit + 10.000) ×
+  feePerGas)` und gibt den Rest der Reservierung frei. EntryPoint v0.7/v0.8 übergeben `postOp` die
+  Kosten *bevor* das eigene postOp-Gas und die Strafe für ungenutztes Gas hinzukommen; würde nur
+  `actualGasCost` gebucht, lägen die Bücher mit der Zeit über dem echten Deposit. Der gebuchte
+  Betrag ist eine Obergrenze; die kleine Differenz bleibt als Überschuss im Deposit.
+- `depositSurplus()` = EntryPoint-Deposit − (Σ Guthaben + Σ Reservierungen). Der Wert darf nie
+  negativ werden. Als `paymaster_deposit_minus_booked_wei` überwachen und unter 0 alarmieren.
+
+**Eigentum und Steuerung (on-chain).**
+
+- `setPolicyActive(policyId, bool)` ist der On-Chain-Notschalter. Aufrufen dürfen der Funder oder
+  ein Inhaber von `paymaster.configure`.
+- `withdrawPolicy(policyId, amount)` zahlt unreserviertes Budget aus dem EntryPoint-Deposit
+  zurück. Der Funder oder ein Inhaber von `paymaster.configure` darf sie auslösen, sie zahlt aber
+  **immer an den festgehaltenen Funder**. Niemand kann sie umleiten.
+- `addStake(unstakeDelaySec)` (erfordert `paymaster.configure`), `unlockStake()` und
+  `withdrawStake()` verwalten den EntryPoint-Stake. Der erste Staker wird als `stakeFunder`
+  festgehalten, und der Stake geht immer an diese Adresse zurück. Nur `stakeFunder` darf
+  `unlockStake()` aufrufen: Ohne Stake verwerfen öffentliche Bundler den Paymaster, deshalb kann
+  ein anderer Inhaber von `paymaster.configure` das Unstaking nicht starten.
+
+**Operator-UI.** Die Asset-Detailseite von `frontend-operator` hat pro Deployment einen Tab
+**Gas Sponsorship** (deploymentspezifische Überschreibung setzen/entfernen). Die
+Kunden-Detailseite hat einen für Emittenten (Emittenten-Standard setzen, den neue Deployments
+erben). Beide nutzen `core/api/gas-sponsorship.service.ts`. Der Asset-Tab zeigt außerdem den
+On-Chain-Zustand der Policy: Aktiv-Flag, verfügbares und reserviertes Guthaben, Obergrenze je
+Org, Funder und Voucher-Signer (`GET /assets/{id}/deployments/{depId}/gas-sponsorship/onchain`).
+Er warnt, wenn eine Policy in der Datenbank deaktiviert, on-chain aber noch aktiv ist.
+`GET /gas-sponsorship/voucher-signer` liefert die Adresse, die jede Policy als Signer
+registrieren muss.
+
+- Deploy-Skript: `contracts/script/DeployLiquidityDapps.s.sol` deployt `EwpgPaymaster` mit
+  EntryPoint `ERC4337Utils.ENTRYPOINT_V08` zusammen mit `EwpgRepoFacility`.
+- Demo-Daten: `EcosystemDemoDataSeeder` legt drei `GasSponsorshipPolicy`-Zeilen an – den
+  Emittenten-Standard von Meridian Capital (Sponsor `ISSUER`), den Emittenten-Standard von Aurora
+  Finance, stattdessen vom Operator finanziert (Sponsor `OPERATOR`, als Beispiel für den anderen
+  Sponsortyp), und eine Überschreibung auf Deployment-Ebene für Meridians Green-Bond-Flaggschiff
+  (`OPERATOR`, zeigt den Vorrang der Überschreibung vor dem Standard).
+- Tests: `contracts/test/ecosystem/EwpgPaymaster.t.sol` führt jeden gesponserten Pfad durch
+  `handleOps` des **echten EntryPoint v0.8.0** (nur für Tests vendort unter
+  `contracts/test/aa-v08/`), einschließlich Regressionstests für die unten beim Rollout genannten
+  Drain-Szenarien. `backend/.../asset/internal/GasSponsorshipVoucherServiceTest.java` und
+  `unit/GasSponsorshipVoucherDigestTest.java` binden den Java-Digest über einen gemeinsamen
+  Testvektor an den Solidity-Digest.
+
+### Stake, Rollout und Stilllegung des bisherigen Paymasters { #paymaster-operations }
+
+Die Validierung schreibt Storage (Reservierungen) und liest andere Contracts
+(`PermissionOracle`). Nach ERC-7562 akzeptieren öffentliche Bundler den Paymaster daher nur, wenn
+er **gestakt** ist. Je Chain:
+
+| Chain | Empfohlener Stake | Unstake-Delay |
+|---|---|---|
+| Ethereum Mainnet | ≥ 1 ETH | ≥ 1 Tag (86.400 s) |
+| L2s (Base, Arbitrum, Optimism, Polygon) | Minimum des Bundlers (meist 0,1–1 des nativen Tokens) | ≥ 1 Tag |
+| Testnets | Minimum des Bundlers | ≥ 1 Tag |
+
+Vor dem Staken das veröffentlichte Minimum des Bundler-Anbieters prüfen. Ein Stake mit kürzerem
+Delay als vom Bundler verlangt gilt als nicht gestakt.
+
+Rollout:
+
+1. Der vor dieser Änderung deployte Paymaster (HEAD `b810acb` und früher) ist unveränderlich und
+   unsicher: Jedes Mitglied konnte jede Policy ausgeben, der Gaspreis war unbegrenzt, und ein
+   Bundle konnte mehr ausgeben als vorhanden. **Nicht mehr finanzieren.** Er hat keine
+   Auszahlungsfunktion, deshalb verweist keine Finanzierungsmöglichkeit mehr auf ihn.
+2. Den neuen `EwpgPaymaster` deployen. `addStake` aus der Operator-Wallet aufrufen und
+   `registerwerk.paymaster.addresses.<chain>` sowie den Voucher-Signer-Schlüssel setzen.
+3. Jeder Funder ruft `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` mit dem
+   Budget auf.
+4. Restliches ETH im alten Paymaster (`EntryPoint.balanceOf(old)`) je Chain als **gestrandetes
+   Guthaben** erfassen. Es lässt sich nur durch gesponserte Operationen verbrauchen, was wegen der
+   oben genannten Mängel unterbleiben muss.
+
+Bekannte Einschränkung: `registerPolicy` vergibt eine Policy-ID an den Ersten. Wer die
+Registrierung front-runnt, kann diese ID blockieren (aber keine Mittel entnehmen). Der Funder
+registriert die Policy dann unter einer neuen Zeilen-ID.
 
 ## `EwpgPasskeyAccount` — Passkey-Signaturgeber für Retail { #ewpgpasskeyaccount-passkey-signers-for-retail }
 
 `contracts/src/ecosystem/EwpgPasskeyAccount.sol` ist ein minimaler ERC-4337-Smart-Account, der durch
-einen WebAuthn-/secp256r1-Passkey statt eines seed-phrase-verwalteten ECDSA-Schlüssels gesichert ist
-und drei bereits über `contracts/lib/openzeppelin-contracts` eingebundene Bausteine kombiniert (keine
-neue Abhängigkeit): OZs `Account` (ERC-4337 `validateUserOp`), `SignerWebAuthn`
-(Passkey-Signaturprüfung) und `ERC7821` (minimale Batch-Ausführung). Er implementiert außerdem
-ERC-1271, sodass er sich genau wie jede andere Smart-Contract-Wallet als Registerwerk-Mitglieds-Wallet
-binden lässt.
+einen WebAuthn/secp256r1-Passkey statt eines per Seed-Phrase verwalteten ECDSA-Schlüssels gesichert
+ist. Er kombiniert drei Bausteine, die bereits über `contracts/lib/openzeppelin-contracts` vendort
+sind (keine neue Abhängigkeit): OZs `Account` (ERC-4337 `validateUserOp`), `SignerWebAuthn`
+(Passkey-Signaturprüfung) und `ERC7821` (minimale Batch-Ausführung). Außerdem implementiert er
+ERC-1271, sodass er sich wie jede andere Smart-Contract-Wallet als Registerwerk-Mitglieds-Wallet
+binden lässt. Er wird je Kunde als eigener Account deployt und ist **kein EIP-7702-Delegate**: Ohne
+Passkey im eigenen Storage des Accounts schlägt jede Signaturprüfung fehl.
 
-Zusammen mit `EwpgPaymaster` kommt der Weg eines Retail-Anlegers vom Onboarding bis zur ersten
-Zeichnung ohne Seed-Phrase und ohne Gas-Token aus – biometrische Passkey-Authentifizierung plus
-gesponserte Ausführung. Hinweis: `contracts/foundry.toml` aktiviert inzwischen den
-Solidity-Optimizer (`optimizer = true`, `optimizer_runs = 200`, passend zum eigenen Standard der
-eingebundenen OZ-Bibliothek) – ohne ihn stößt das WebAuthn-Signatur-Parsing auf „stack too deep“.
+Der Guardian ist ein explizites Konstruktorargument und nie versehentlich der Deployer. Aufrufe
+lassen sich nach Ziel und Selector als Routine, Admin oder Recovery einstufen. EntryPoint-/ERC-7821-
+Batches lehnen Admin- und Recovery-Operationen ab, sodass ein kompromittierter Session-Passkey oder
+eine gesponserte UserOperation sie nicht ausführen kann. `guardianExecute` ist ein **vollständiger
+Verwahr-Override**, kein rein schützender Pfad: Der Guardian kann ohne Timelock und ohne
+Mitsignatur des Passkeys jeden Aufruf aus dem Account ausführen und setzt die Rollentabelle selbst.
+Ob ein vom Register gehaltener Guardian mit einseitiger Kontrolle über Retail-Accounts gewollt
+ist, ist eine offene Verwahrungsentscheidung (Erlaubnis und Offenlegung). Bis dahin ist der
+Guardian-Schlüssel als Verwahrung der Vermögenswerte des Accounts zu behandeln.
+
+Zusammen mit `EwpgPaymaster` braucht der Weg eines Retail-Anlegers vom Onboarding bis zur ersten
+Zeichnung weder Seed-Phrase noch Gas-Token – biometrische Passkey-Authentifizierung plus gesponserte
+Ausführung. Hinweis: `contracts/foundry.toml` aktiviert jetzt den Solidity-Optimizer
+(`optimizer = true`, `optimizer_runs = 200`, passend zum Standard der vendorten OZ-Bibliothek) –
+das Parsen von WebAuthn-Signaturen läuft ohne ihn in „stack too deep“.
 
 Die Tests (`contracts/test/ecosystem/EwpgPasskeyAccount.t.sol`) bauen echte
 WebAuthn-Authentifizierungs-Assertions mit Foundrys nativen P256-Cheatcodes
-(`vm.publicKeyP256`/`vm.signP256`) auf, einschließlich eines durchgearbeiteten Beispiels für die eine
-nicht offensichtliche Falle: `abi.encode(structValue)` fügt für eine Struktur mit dynamischen Feldern
-ein zusätzliches Top-Level-Offset-Wort hinzu, das `WebAuthn.tryDecodeAuth` nicht erwartet – stattdessen
-die Felder der Struktur als separate Argumente kodieren (siehe den `_sign`-Helfer des Tests und dessen
-Inline-Kommentar).
+(`vm.publicKeyP256`/`vm.signP256`), einschließlich eines durchgearbeiteten Beispiels für den einen
+nicht offensichtlichen Stolperstein: `abi.encode(structValue)` fügt bei einem Struct mit
+dynamischen Feldern ein zusätzliches Offset-Wort auf oberster Ebene hinzu, das
+`WebAuthn.tryDecodeAuth` nicht erwartet – stattdessen die Felder des Structs als einzelne Argumente
+kodieren (siehe den `_sign`-Helper des Tests und seinen Inline-Kommentar).
+`test_eip7702DelegateHasNoSignerAndFailsClosed` zeigt, dass ein an eine Instanz delegierendes EOA
+keinen Signer hat und nicht vom Deployer der Instanz kontrolliert werden kann.
 
 ## Gaslose Genehmigungen (Permits) { #gasless-permits }
 

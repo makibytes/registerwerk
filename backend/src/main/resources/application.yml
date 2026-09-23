@@ -457,6 +457,22 @@ registerwerk:
       avalanche-testnet: ${ECOSYSTEM_TIR_AVALANCHE_TESTNET:}
       optimism-mainnet:  ${ECOSYSTEM_TIR_OPTIMISM_MAINNET:}
       optimism-testnet:  ${ECOSYSTEM_TIR_OPTIMISM_TESTNET:}
+    # ONCHAINID ClaimIssuer contract per chain: _issuer of backend-signed KYC/AML claims and the
+    # trusted issuer of new T-REX suites. MANAGEMENT key = the chain's registry signer
+    # (`forge script script/DeployClaimIssuer.s.sol`). Must be a contract, never an EOA.
+    claim-issuer:
+      ethereum-mainnet:  ${CLAIM_ISSUER_ETH_MAINNET:}
+      ethereum-testnet:  ${CLAIM_ISSUER_ETH_TESTNET:}
+      polygon-mainnet:   ${CLAIM_ISSUER_POLYGON_MAINNET:}
+      polygon-testnet:   ${CLAIM_ISSUER_POLYGON_TESTNET:}
+      base-mainnet:      ${CLAIM_ISSUER_BASE_MAINNET:}
+      base-testnet:      ${CLAIM_ISSUER_BASE_TESTNET:}
+      arbitrum-mainnet:  ${CLAIM_ISSUER_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${CLAIM_ISSUER_ARBITRUM_TESTNET:}
+      avalanche-mainnet: ${CLAIM_ISSUER_AVALANCHE_MAINNET:}
+      avalanche-testnet: ${CLAIM_ISSUER_AVALANCHE_TESTNET:}
+      optimism-mainnet:  ${CLAIM_ISSUER_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${CLAIM_ISSUER_OPTIMISM_TESTNET:}
   documents:
     max-inline-bytes: 5242880
     s3:
@@ -542,6 +558,29 @@ registerwerk:
     # Optional output of contracts/script/DeployLocalLendingDemo.s.sol. Only the demo seeder
     # reads it; production deployments leave it blank.
     local-demo-addresses-file: ${REGISTERWERK_LENDING_LOCAL_DEMO_ADDRESSES_FILE:}
+  # EwpgPaymaster voucher issuer (POST /api/v1/gas-sponsorship/vouchers). Each on-chain policy
+  # registers this key's address as its policySigner. Dev only: a raw hex key — production moves
+  # it to the KMS/HSM track. NEVER reuse the claim-signing (trusted-issuer) wallet key here.
+  # Blank = no sponsorship (customers pay their own gas).
+  paymaster:
+    voucher-signer-key: ${REGISTERWERK_PAYMASTER_VOUCHER_SIGNER_KEY:}
+    voucher-validity-seconds: ${REGISTERWERK_PAYMASTER_VOUCHER_VALIDITY_SECONDS:300}
+    max-fee-per-gas-cap-wei: ${REGISTERWERK_PAYMASTER_MAX_FEE_PER_GAS_CAP_WEI:50000000000}
+    max-total-gas: ${REGISTERWERK_PAYMASTER_MAX_TOTAL_GAS:3000000}
+    # Share (0..1) of a policy's monthly cap one legal entity may consume per month.
+    entity-monthly-cap-share: ${REGISTERWERK_PAYMASTER_ENTITY_MONTHLY_CAP_SHARE:0.10}
+    # EwpgPaymaster address per chain identifier (deploy: contracts/script/DeployLiquidityDapps.s.sol)
+    addresses:
+      ethereum-mainnet:  ${PAYMASTER_ETH_MAINNET:}
+      ethereum-testnet:  ${PAYMASTER_ETH_TESTNET:}
+      polygon-mainnet:   ${PAYMASTER_POLYGON_MAINNET:}
+      polygon-testnet:   ${PAYMASTER_POLYGON_TESTNET:}
+      base-mainnet:      ${PAYMASTER_BASE_MAINNET:}
+      base-testnet:      ${PAYMASTER_BASE_TESTNET:}
+      arbitrum-mainnet:  ${PAYMASTER_ARBITRUM_MAINNET:}
+      arbitrum-testnet:  ${PAYMASTER_ARBITRUM_TESTNET:}
+      optimism-mainnet:  ${PAYMASTER_OPTIMISM_MAINNET:}
+      optimism-testnet:  ${PAYMASTER_OPTIMISM_TESTNET:}
   repo-desk:
     enabled: ${REGISTERWERK_REPO_DESK_ENABLED:false}
     release-approved: ${REGISTERWERK_REPO_DESK_RELEASE_APPROVED:false}
@@ -609,6 +648,11 @@ registerwerk:
     batch-size: ${SYNC_BATCH_SIZE:50}
     # Enable verbose logging for sync operations
     log-sync-operations: ${SYNC_LOG_OPERATIONS:false}
+    # T2-18: the operator's legal entity (legal_entity.id) that nominee-pool holder rows for pool
+    # contracts (lending markets, DvP escrow, desk, facility) are held in. Blank = lending markets
+    # are not auto-registered; their collateral asset's sync then turns BLOCKED until an operator
+    # registers the pool address manually (asset detail -> "Register pool address").
+    nominee-pool-entity-id: ${SYNC_NOMINEE_POOL_ENTITY_ID:}
   audit:
     signing:
       # Blank (default) = no signing provider active; the audit_event hash chain is still

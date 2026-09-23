@@ -35,7 +35,8 @@ public class LendingPositionController {
         List<LendingPositionResponse> positions = positionService.refreshAndListMyPositions(legalEntityId).stream()
                 .map(p -> new LendingPositionResponse(
                         p.getMarketId(), p.getWalletAddress(), p.getCollateralAmount(), p.getCurrentDebt(),
-                        p.getHealthFactorWad(), p.getHealthFactorReliable(), p.getStatus(), p.getLastSyncedAt()))
+                        p.getHealthFactorWad(), p.getHealthFactorReliable(), p.getLiquidationSurplus(), p.getStatus(),
+                        p.getLastSyncedAt()))
                 .toList();
         return ResponseEntity.ok(positions);
     }

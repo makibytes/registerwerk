@@ -30,8 +30,11 @@ import java.util.UUID;
  *   <li>{@code 3} – ACCREDITATION (Qualified Investor)</li>
  * </ul>
  *
- * <p>The registry backend wallet must be registered as a TrustedIssuer in the suite's
- * TrustedIssuersRegistry for the relevant claim topics before claims can be issued on-chain.
+ * <p>Claims are signed by the registry backend wallet on behalf of the chain's ONCHAINID
+ * {@code ClaimIssuer} contract ({@code registerwerk.contracts.claim-issuer.<chain>}, managed by that
+ * wallet). That contract — not the wallet — must be a TrustedIssuer in the suite's
+ * TrustedIssuersRegistry (and in the EcosystemTrustedIssuersRegistry for PermissionOracle) for
+ * the relevant claim topics.
  */
 @Service
 @Transactional
@@ -51,19 +54,16 @@ public class ClaimIssuanceService {
     private final OnchainIdentityRepository identityRepository;
     private final OnchainClaimRepository claimRepository;
     private final Erc3643DeploymentService deploymentService;
-    private final ClaimSigningService claimSigningService;
     private final ApplicationEventPublisher eventPublisher;
 
     public ClaimIssuanceService(
             OnchainIdentityRepository identityRepository,
             OnchainClaimRepository claimRepository,
             Erc3643DeploymentService deploymentService,
-            ClaimSigningService claimSigningService,
             ApplicationEventPublisher eventPublisher) {
         this.identityRepository = identityRepository;
         this.claimRepository = claimRepository;
         this.deploymentService = deploymentService;
-        this.claimSigningService = claimSigningService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -146,41 +146,110 @@ public class ClaimIssuanceService {
     }
 
     /**
-     * Revokes a claim: marks it as revoked in the database and submits an on-chain revocation.
+     * Revokes a claim: submits {@code ONCHAINID.removeClaim} and the issuer-level
+     * {@code ClaimIssuer.revokeClaimBySignature}, and records both intents.
      *
      * <p>After revocation the investor will fail the compliance check for this claim topic
-     * and transfers will be blocked until a new valid claim is issued.
+     * and transfers will be blocked until a new valid claim is issued. Removal alone is
+     * reversible (a CLAIM key on the identity can re-add the original signature); the issuer-level
+     * step makes it final — see {@link Erc3643DeploymentService#revokeClaimAtIssuer}.
+     *
+     * <p>Idempotent: each step is skipped once its tx is submitted (or confirmed), and the issuer
+     * step also reads {@code isClaimRevoked} on chain first. Calling this again on an
+     * already-removed claim retries only a missing or failed issuer-level step. Emits
+     * {@link ClaimRevokedEvent} whenever something was submitted.
      *
      * @param claimId ID of the {@link OnchainClaim} to revoke
      * @param actorId   ID of the user revoking the claim (for audit)
      * @param actorRole role of the user revoking the claim (for audit)
      */
     public void revokeClaim(UUID identityId, UUID claimId, UUID actorId, String actorRole) {
-        log.info("Revoking claim={}", claimId);
-
         OnchainClaim claim = claimRepository.findByIdAndOnchainIdentityId(claimId, identityId)
             .orElseThrow(() -> new EntityNotFoundException("OnchainClaim", claimId));
+        revoke(claim, actorId, actorRole, Map.of());
+    }
 
-        if (claim.getRevokedAt() != null) {
-            log.warn("Claim={} is already revoked at {}. Skipping.", claimId, claim.getRevokedAt());
-            return;
+    /**
+     * Revokes every confirmed KYC (1) / AML (2) claim of a legal entity on one chain, both at the
+     * identity and at the issuer. Expired claims are included: expiry is not enforced on chain.
+     *
+     * @return claims not yet fully revoked on chain (issuance or a revocation step still
+     *         unconfirmed, or an issuer-level step that threw) — the caller retries until this is 0
+     * @throws RuntimeException if a {@code removeClaim} submission fails
+     */
+    public int revokeComplianceClaims(UUID legalEntityId, UUID chainConfigId, UUID actorId, String actorRole,
+                                      Map<String, Object> auditDetails) {
+        OnchainIdentity identity = identityRepository
+            .findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId).orElse(null);
+        if (identity == null) {
+            return 0;
         }
-        if (claim.getRevocationTxHash() != null) {
-            log.warn("Claim={} already has a revocation tx={} awaiting confirmation. Skipping.",
-                    claimId, claim.getRevocationTxHash());
-            return;
+        int unresolved = 0;
+        for (OnchainClaim claim : claimRepository.findByOnchainIdentityId(identity.getId())) {
+            if (claim.getTopic() != CLAIM_TOPIC_KYC && claim.getTopic() != CLAIM_TOPIC_AML) {
+                continue;
+            }
+            if (!claim.isConfirmed()) {
+                if (claim.getTxHash() != null) {
+                    // addClaim still in flight: removeClaim would revert on a missing claim; retry
+                    // once it confirms (the issuer-level step alone would also do, but needs the
+                    // same retry for the removal anyway).
+                    unresolved++;
+                }
+                continue;
+            }
+            boolean issuerStepSettled = revoke(claim, actorId, actorRole, auditDetails);
+            // Done only once both steps are confirmed on chain (or the issuer step is not applicable).
+            boolean removalConfirmed = claim.getRevokedAt() != null;
+            boolean issuerPending = claim.getIssuerRevocationTxHash() != null && claim.getIssuerRevokedAt() == null;
+            if (!issuerStepSettled || !removalConfirmed || issuerPending) {
+                unresolved++;
+            }
+        }
+        return unresolved;
+    }
+
+    /** @return whether the issuer-level step is done or not applicable (no retry needed). */
+    private boolean revoke(OnchainClaim claim, UUID actorId, String actorRole, Map<String, Object> auditDetails) {
+        UUID claimId = claim.getId();
+        String removalTx = null;
+        if (claim.getRevokedAt() == null && claim.getRevocationTxHash() == null) {
+            // revokedAt remains chain-derived and is therefore only set after final confirmation.
+            // revocationTxHash is the fail-closed intent marker: getActiveClaims excludes the claim as
+            // soon as removeClaim is submitted, including while a reorged transaction awaits a new
+            // canonical verdict. Only a confirmed failed receipt clears that marker.
+            log.info("Revoking claim={}", claimId);
+            removalTx = deploymentService.revokeKycClaim(claimId);
+            claim.setRevocationTxHash(removalTx);
         }
 
-        // revokedAt remains chain-derived and is therefore only set after final confirmation.
-        // revocationTxHash is the fail-closed intent marker: getActiveClaims excludes the claim as
-        // soon as removeClaim is submitted, including while a reorged transaction awaits a new
-        // canonical verdict. Only a confirmed failed receipt clears that marker.
-        String txHash = deploymentService.revokeKycClaim(claimId);
+        String issuerTx = null;
+        boolean issuerStepSettled = true;
+        if (claim.getIssuerRevocationTxHash() == null && claim.getIssuerRevokedAt() == null) {
+            try {
+                issuerTx = deploymentService.revokeClaimAtIssuer(claimId);
+                claim.setIssuerRevocationTxHash(issuerTx);
+            } catch (RuntimeException e) {
+                // removeClaim (if any) is already submitted; keep it and let the caller retry the
+                // issuer step — the removal alone already fails closed in getActiveClaims.
+                issuerStepSettled = false;
+                log.error("Issuer-level revocation of claim={} failed; the issuer still vouches for its "
+                        + "signature until retried: {}", claimId, e.getMessage(), e);
+            }
+        }
 
-        claim.setRevocationTxHash(txHash);
+        if (removalTx == null && issuerTx == null) {
+            log.info("Claim={} needs no further revocation step (revokedAt={}, removalTx={}, issuerTx={})",
+                    claimId, claim.getRevokedAt(), claim.getRevocationTxHash(), claim.getIssuerRevocationTxHash());
+            return issuerStepSettled;
+        }
         claimRepository.save(claim);
 
-        eventPublisher.publishEvent(new ClaimRevokedEvent(claimId, actorId, actorRole, java.util.Map.of()));
+        Map<String, Object> details = new java.util.LinkedHashMap<>(auditDetails);
+        if (removalTx != null) details.put("removeClaimTx", removalTx);
+        if (issuerTx != null) details.put("revokeClaimBySignatureTx", issuerTx);
+        eventPublisher.publishEvent(new ClaimRevokedEvent(claimId, actorId, actorRole, details));
+        return issuerStepSettled;
     }
 
     /**
@@ -229,8 +298,10 @@ public class ClaimIssuanceService {
         String identityAddress = identity.getIdentityAddress();
         if (identityAddress != null && !identityAddress.startsWith("0x-PENDING")) {
             try {
+                // Same signer + ClaimIssuer contract as the submitted addClaim, so the stored issuer
+                // and signature are the ones on chain (removeClaim / revokeClaimBySignature key on them).
                 ClaimSigningService.SignedClaim signed =
-                        claimSigningService.signClaim(chainConfigId, identityAddress, topic, expiresAt);
+                        deploymentService.signClaim(chainConfigId, identityAddress, topic, expiresAt);
                 claim.setIssuerAddress(signed.issuerAddress());
                 claim.setClaimData(signed.claimData());
                 claim.setClaimSignature(signed.claimSignature());

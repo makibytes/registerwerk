@@ -37,6 +37,7 @@ contract EwpgRepoFacilityTest is Test {
 
     bytes32 borrowPermission;
     bytes32 configurePermission;
+    bytes32 pricePermission;
     uint256 topicKyc;
 
     uint256 constant PRICE_PER_UNIT = 100e6; // 100.00 in payment-token base units per collateral unit
@@ -52,14 +53,14 @@ contract EwpgRepoFacilityTest is Test {
 
         paymentToken = new MockStablecoin("USD Coin", "USDC", 6);
         collateralToken = new MockStablecoin("Demo Bond Units", "BOND", 0);
-        facility = new EwpgRepoFacility(oracle, paymentToken);
+        orgId = new MockOnchainId();
+        kycIssuer = new MockClaimIssuer();
+        facility = new EwpgRepoFacility(oracle, paymentToken, address(orgId));
 
         borrowPermission = facility.BORROW();
         configurePermission = facility.CONFIGURE();
+        pricePermission = facility.PRICE();
         topicKyc = facility.TOPIC_KYC();
-
-        orgId = new MockOnchainId();
-        kycIssuer = new MockClaimIssuer();
 
         vm.startPrank(operator);
         orgRegistry.registerOrg(address(orgId), 276);
@@ -68,6 +69,7 @@ contract EwpgRepoFacilityTest is Test {
         orgRegistry.addMember(address(orgId), alice, roles, "");
         permissions.grantToOrg(address(orgId), borrowPermission);
         permissions.grantToOrg(address(orgId), configurePermission);
+        permissions.grantToOrg(address(orgId), pricePermission);
         uint256[] memory topics = new uint256[](1);
         topics[0] = topicKyc;
         tir.addTrustedIssuer(address(kycIssuer), topics);
@@ -364,9 +366,7 @@ contract EwpgRepoFacilityTest is Test {
 
     function test_setCollateralConfig_revertsForNonOperatorCaller() public {
         vm.prank(mallory);
-        vm.expectRevert(
-            abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, mallory, configurePermission)
-        );
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, mallory, address(orgId)));
         facility.setCollateralConfig(address(collateralToken), 1, 1, 2, 0, true);
     }
 
@@ -374,5 +374,120 @@ contract EwpgRepoFacilityTest is Test {
         vm.prank(alice);
         vm.expectRevert(EwpgRepoFacility.InvalidThresholds.selector);
         facility.setCollateralConfig(address(collateralToken), 1e6, 8000, 7000, 0, true); // maxLtv >= liqThreshold
+    }
+
+    function test_setCollateralConfig_revertsWhenThresholdTimesBonusReachesOne() public {
+        // 9500 × 1.06 = 1.007 ≥ 1: a position just past the threshold could not cover
+        // debt + bonus, so liquidating it would book bad debt against the lenders.
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoFacility.InvalidThresholds.selector);
+        facility.setCollateralConfig(address(collateralToken), 1e6, 9000, 9500, 600, true);
+
+        vm.prank(alice); // 9500 × 1.05 = 0.9975 < 1 is accepted
+        facility.setCollateralConfig(address(collateralToken), 1e6, 9000, 9500, 500, true);
+    }
+
+    function test_constructor_revertsForZeroOperatorOrg() public {
+        vm.expectRevert(RegisterwerkGated.ZeroOperatingOrg.selector);
+        new EwpgRepoFacility(oracle, paymentToken, address(0));
+    }
+
+    // ── T2-06: instance binding ──────────────────────────────────────────────
+
+    function _otherOrgMember() internal returns (address bob, MockOnchainId otherOrg) {
+        bob = address(0xB0B);
+        otherOrg = new MockOnchainId();
+        vm.startPrank(operator);
+        orgRegistry.registerOrg(address(otherOrg), 276);
+        bytes32[] memory roles = new bytes32[](1);
+        roles[0] = keccak256("TRADER");
+        orgRegistry.addMember(address(otherOrg), bob, roles, "");
+        permissions.grantToOrg(address(otherOrg), configurePermission);
+        permissions.grantToOrg(address(otherOrg), pricePermission);
+        vm.stopPrank();
+    }
+
+    function test_otherOrgWithSameSlugGrants_cannotConfigureOrPrice() public {
+        (address bob, MockOnchainId otherOrg) = _otherOrgMember();
+        assertTrue(oracle.hasPermission(bob, configurePermission), "bob's org holds the slug grant");
+        assertEq(oracle.orgOf(bob), address(otherOrg));
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, bob, address(orgId)));
+        facility.setCollateralConfig(address(collateralToken), 1e6, 7000, 8000, 500, true);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, bob, address(orgId)));
+        facility.updatePrice(address(collateralToken), 1e6);
+    }
+
+    // ── T2-07: price pushing is its own code ─────────────────────────────────
+
+    function test_updatePrice_requiresPriceCode_notConfigure() public {
+        vm.prank(operator);
+        permissions.revokeFromOrg(address(orgId), pricePermission);
+
+        vm.prank(alice); // still holds configure, which no longer suffices for a price mark
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, alice, pricePermission));
+        facility.updatePrice(address(collateralToken), 90e6);
+    }
+
+    function test_priceOnlyHolder_cannotReconfigureCollateral() public {
+        vm.prank(operator);
+        permissions.revokeFromOrg(address(orgId), configurePermission);
+
+        vm.prank(alice);
+        facility.updatePrice(address(collateralToken), 90e6);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, alice, configurePermission));
+        facility.setCollateralConfig(address(collateralToken), 90e6, 7000, 8000, 500, true);
+    }
+
+    // ── T2-14 (B2-08): residual collateral after a full-close liquidation ───
+
+    function test_liquidate_residualCollateralIsClaimable() public {
+        // Ported from the phase-2 PoC `test_facility_residualCollateralStranded`: before the
+        // fix the 9 residual units had no exit (repay reverts NoOutstandingDebt).
+        vm.prank(lender1);
+        facility.deposit(1_000_000e6);
+        vm.prank(alice);
+        facility.pledgeAndBorrow(address(collateralToken), 100, 7_000e6);
+        vm.prank(alice);
+        facility.updatePrice(address(collateralToken), 80e6);
+        vm.prank(liquidator);
+        facility.liquidate(alice, address(collateralToken));
+
+        (uint256 residual, uint256 scaledDebt) = facility.positions(alice, address(collateralToken));
+        assertEq(residual, 9);
+        assertEq(scaledDebt, 0);
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoFacility.NoOutstandingDebt.selector);
+        facility.repay(address(collateralToken), 1);
+
+        uint256 before = collateralToken.balanceOf(alice);
+        vm.prank(alice);
+        uint256 claimed = facility.claimCollateral(address(collateralToken));
+        assertEq(claimed, 9);
+        assertEq(collateralToken.balanceOf(alice), before + 9);
+        (residual,) = facility.positions(alice, address(collateralToken));
+        assertEq(residual, 0);
+        assertEq(collateralToken.balanceOf(address(facility)), 0, "nothing stranded");
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoFacility.ZeroAmount.selector);
+        facility.claimCollateral(address(collateralToken));
+    }
+
+    function test_claimCollateral_revertsWhileDebtOutstanding() public {
+        vm.prank(lender1);
+        facility.deposit(1_000_000e6);
+        vm.prank(alice);
+        facility.pledgeAndBorrow(address(collateralToken), 100, 7_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoFacility.OutstandingDebt.selector);
+        facility.claimCollateral(address(collateralToken));
     }
 }

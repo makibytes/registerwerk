@@ -12,6 +12,8 @@ import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.indexer.api.TokenTransfer;
+import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import de.makibytes.registerwerk.lending.api.LendingMarketRepository;
 import de.makibytes.registerwerk.lending.api.LendingMarketStatus;
 import de.makibytes.registerwerk.lending.api.LendingMarketRegistrar;
@@ -32,6 +34,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -54,6 +57,18 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
             "DEMO-FD-001", "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65",
             "DEMO-WI-001", "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc");
 
+    /**
+     * The synthetic Green Bond holder wallets {@code DemoDataSeeder} writes into both the register
+     * and the indexed transfer history, keyed lower-case, by the demo entity that owns them.
+     * {@link #updateHoldingWallet} moves those register rows onto the funded Anvil accounts, so
+     * the seeded transfers must follow — otherwise the holder sync finds finalized balances on
+     * wallets with no register row and blocks the asset (review phase 2 veto N2).
+     */
+    static final Map<String, String> SEEDED_GREEN_BOND_WALLETS = Map.of(
+            "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b", "DEMO-NI-001",
+            "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c", "DEMO-RK-001",
+            "0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d", "DEMO-AF-001");
+
     @Value("${registerwerk.lending.local-demo-addresses-file:}")
     private String addressesFile;
 
@@ -75,6 +90,7 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
     private final LendingMarketRepository markets;
     private final LendingMarketRegistrar marketRegistrar;
     private final ContractAddressConfig contractAddresses;
+    private final TokenTransferRepository tokenTransfers;
 
     public LocalLendingDemoSeeder(
             AssetRepository assets,
@@ -88,7 +104,8 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
             OrgMemberWalletRepository memberWallets,
             LendingMarketRepository markets,
             LendingMarketRegistrar marketRegistrar,
-            ContractAddressConfig contractAddresses) {
+            ContractAddressConfig contractAddresses,
+            TokenTransferRepository tokenTransfers) {
         this.assets = assets;
         this.deployments = deployments;
         this.holders = holders;
@@ -101,6 +118,7 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         this.markets = markets;
         this.marketRegistrar = marketRegistrar;
         this.contractAddresses = contractAddresses;
+        this.tokenTransfers = tokenTransfers;
     }
 
     @Override
@@ -166,6 +184,7 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         updateHoldingWallet(greenBond, "DEMO-NI-001");
         updateHoldingWallet(greenBond, "DEMO-RK-001");
         updateHoldingWallet(greenBond, "DEMO-AF-001");
+        remapSeededTransferWallets(greenBond);
         updateHoldingWallet(infraNote, "DEMO-RK-001");
         updateHoldingWallet(infraNote, "DEMO-FD-001");
         updateHoldingWallet(infraNote, "DEMO-WI-001");
@@ -276,6 +295,37 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
                         "Demo holding is missing: " + entityNumber + "/" + asset.getAssetNumber()));
         holding.setWalletAddress(COMPANY_WALLETS.get(entityNumber));
         holders.save(holding);
+    }
+
+    /**
+     * Re-points the seeded Green Bond transfer history from the synthetic wallets to the same
+     * entities' Anvil wallets (the ones {@link #updateHoldingWallet} put on the register), so the
+     * holder sync reconciles instead of blocking. Keyed on the fixed synthetic addresses rather
+     * than on the holding's previous wallet, so it also repairs volumes seeded before this fix.
+     */
+    void remapSeededTransferWallets(Asset asset) {
+        int remapped = 0;
+        for (TokenTransfer t : tokenTransfers.findByAssetIdOrderByOccurredAtDesc(
+                asset.getId(), org.springframework.data.domain.Pageable.unpaged())) {
+            String from = companyWalletFor(t.getFromAddress());
+            String to = companyWalletFor(t.getToAddress());
+            if (from != null) t.setFromAddress(from);
+            if (to != null) t.setToAddress(to);
+            if (from != null || to != null) {
+                tokenTransfers.save(t);
+                remapped++;
+            }
+        }
+        if (remapped > 0) {
+            log.info("Re-pointed {} seeded transfer(s) of {} onto the demo companies' Anvil wallets",
+                    remapped, asset.getAssetNumber());
+        }
+    }
+
+    private static String companyWalletFor(String seededWallet) {
+        if (seededWallet == null) return null;
+        String entityNumber = SEEDED_GREEN_BOND_WALLETS.get(seededWallet.toLowerCase(Locale.ROOT));
+        return entityNumber == null ? null : COMPANY_WALLETS.get(entityNumber);
     }
 
     private void registerFreshMarket(ChainConfig chain, Asset asset, String marketAddress) {

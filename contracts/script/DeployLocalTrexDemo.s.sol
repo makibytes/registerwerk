@@ -38,6 +38,11 @@ contract DeployLocalTrexDemo is Script {
             "\n",
             "DEMO_ERC3643_TOKEN=",
             vm.toString(token),
+            "\n",
+            // Demo suite's trusted ONCHAINID ClaimIssuer (MANAGEMENT key = deployer); the backend's
+            // registerwerk.contracts.claim-issuer.<chain> must point at a ClaimIssuer like this (T2-21).
+            "DEMO_CLAIM_ISSUER=",
+            vm.toString(address(issuer)),
             "\n"
         );
         vm.writeFile(vm.envOr("LOCAL_TREX_OUTPUT", string("/output/trex.env")), output);

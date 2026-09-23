@@ -70,6 +70,12 @@ public class ContractAddressConfig {
     /** EcosystemTrustedIssuersRegistry address per chain identifier. */
     private Map<String, String> ecosystemTir = new HashMap<>();
 
+    /** ONCHAINID {@code ClaimIssuer} contract per chain identifier — the {@code _issuer} of every
+     *  backend-issued KYC/AML claim and the trusted issuer of new T-REX suites. Its MANAGEMENT key
+     *  must be the chain's registry signer (deploy via {@code script/DeployClaimIssuer.s.sol}).
+     *  An EOA cannot be used: {@code Identity.addClaim} calls {@code isClaimValid} on the issuer. */
+    private Map<String, String> claimIssuer = new HashMap<>();
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -198,6 +204,15 @@ public class ContractAddressConfig {
         return require(ecosystemTir, chainIdentifier, "EcosystemTrustedIssuersRegistry");
     }
 
+    /**
+     * Returns the ONCHAINID ClaimIssuer contract address for the given chain identifier.
+     *
+     * @throws IllegalStateException if no address is configured for the identifier
+     */
+    public String requireClaimIssuer(String chainIdentifier) {
+        return require(claimIssuer, chainIdentifier, "ClaimIssuer");
+    }
+
     private String require(Map<String, String> map, String key, String contractName) {
         // Normalise: "ETHEREUM_TESTNET" → "ethereum-testnet"
         String normalized = key.toLowerCase().replace('_', '-');
@@ -250,4 +265,7 @@ public class ContractAddressConfig {
 
     public Map<String, String> getEcosystemTir() { return ecosystemTir; }
     public void setEcosystemTir(Map<String, String> m) { this.ecosystemTir = m; }
+
+    public Map<String, String> getClaimIssuer() { return claimIssuer; }
+    public void setClaimIssuer(Map<String, String> m) { this.claimIssuer = m; }
 }

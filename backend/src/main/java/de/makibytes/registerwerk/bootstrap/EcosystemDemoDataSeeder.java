@@ -64,10 +64,14 @@ import java.util.UUID;
  * directly rather than simulating the async chain-confirmation flow.
  *
  * <p>{@code repo-markets} is seeded as a fourth listing alongside the original three: it
- * intentionally reuses {@code repo-facility}'s already-registered {@code repo-facility.borrow}/
- * {@code repo-facility.configure} permission codes at the contract level (same
- * {@link de.makibytes.registerwerk.orgidentity.api.PermissionDefinition} rows, no re-grant
- * needed), so its own manifest's {@code requiredPermissions} only lists the codes genuinely new
+ * intentionally reuses only {@code repo-facility}'s already-registered {@code repo-facility.borrow}
+ * permission code at the contract level (same
+ * {@link de.makibytes.registerwerk.orgidentity.api.PermissionDefinition} row, no re-grant
+ * needed). Market administration uses its own codes ({@code repo-markets.configure},
+ * {@code .reconcile}, {@code .override-price}, {@code .push-price}, plus
+ * {@code .create-market}/{@code .curate-vault}), separate from the legacy facility's
+ * {@code repo-facility.configure}/{@code repo-facility.price}. Its own manifest's
+ * {@code requiredPermissions} therefore lists only the codes genuinely new
  * to it — {@code seedDapp}'s unconditional insert would otherwise violate
  * {@code permission_definition.code}'s uniqueness constraint on the second listing. See
  * {@code repo-markets.manifest.json}'s description for the full rationale.
@@ -514,9 +518,13 @@ public class EcosystemDemoDataSeeder implements ApplicationRunner, Ordered {
 
         paymentRail("erc7573-dvp", "ERC-7573 DvP Settlement", PaymentRailType.ERC7573_DVP, "EUR", null,
                 "Atomic delivery-versus-payment: lock the asset or payment leg in the operator's "
-                + "DvpSettlement contract, settle both legs in a single transaction.",
+                + "DvpSettlement contract (trade id derived from locker and client reference); the "
+                + "counterparty settles both legs in a single transaction against the hash of the "
+                + "agreed terms.",
                 null, null, null, false, null, false,
-                walletAddress(deriveDemoKeyPair("dvp-settlement")), chain);
+                // Demo address of the reviewed deployment (derived trade ids, terms-hash settle,
+                // forceCancel); the pre-review one is paused and no longer a catalog rail.
+                walletAddress(deriveDemoKeyPair("dvp-settlement-v2")), chain);
     }
 
     private void paymentRail(String code, String displayName, PaymentRailType type, String currency,

@@ -59,7 +59,8 @@ class CorporateActionProposalFlowTest {
 
     private CorporateActionProposalFlowTest init() {
         service = new CorporateActionService(repository, entryRepository, holderRepository, settlementWriter,
-                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate);
+                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
+                org.mockito.Mockito.mock(RegisterFreshnessGate.class));
         return this;
     }
 

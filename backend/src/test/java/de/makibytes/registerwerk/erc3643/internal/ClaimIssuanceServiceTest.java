@@ -33,7 +33,6 @@ class ClaimIssuanceServiceTest {
     @Mock OnchainIdentityRepository identityRepository;
     @Mock OnchainClaimRepository claimRepository;
     @Mock Erc3643DeploymentService deploymentService;
-    @Mock ClaimSigningService claimSigningService;
     @Mock ApplicationEventPublisher eventPublisher;
 
     private ClaimIssuanceService service;
@@ -44,7 +43,7 @@ class ClaimIssuanceServiceTest {
     @BeforeEach
     void setUp() {
         service = new ClaimIssuanceService(identityRepository, claimRepository, deploymentService,
-                claimSigningService, eventPublisher);
+                eventPublisher);
     }
 
     private OnchainIdentity identity() {
@@ -70,6 +69,27 @@ class ClaimIssuanceServiceTest {
         assertThat(saved.getTxHash()).isEqualTo("0xissuetx");
         assertThat(saved.isConfirmed()).isFalse();
         verify(claimRepository).save(any(OnchainClaim.class));
+    }
+
+    @Test
+    @DisplayName("T2-21: the stored claim carries the ClaimIssuer contract (not the signer EOA) as issuer")
+    void issueKycClaim_recordsClaimIssuerContractAsIssuer() {
+        OnchainIdentity identity = identity();
+        identity.setIdentityAddress("0x00000000000000000000000000000000000000aa");
+        String claimIssuer = "0x00000000000000000000000000000000000000c1";
+        when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
+                .thenReturn(Optional.of(identity));
+        when(deploymentService.issueKycClaim(identityId, ClaimIssuanceService.CLAIM_TOPIC_KYC, null))
+                .thenReturn("0xissuetx");
+        when(deploymentService.signClaim(chainConfigId, identity.getIdentityAddress(),
+                ClaimIssuanceService.CLAIM_TOPIC_KYC, null))
+                .thenReturn(new ClaimSigningService.SignedClaim("0xdata", "0xsig", claimIssuer));
+        when(claimRepository.save(any(OnchainClaim.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OnchainClaim saved = service.issueKycClaim(legalEntityId, chainConfigId, null, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(saved.getIssuerAddress()).isEqualTo(claimIssuer);
+        assertThat(saved.getClaimSignature()).isEqualTo("0xsig");
     }
 
     @Test
@@ -199,6 +219,105 @@ class ClaimIssuanceServiceTest {
         claim.setId(UUID.randomUUID());
         claim.setOnchainIdentityId(identityId);
         claim.setConfirmed(true);
+        return claim;
+    }
+
+    // ── T2-19: removal is paired with issuer-level revocation ─────────────────────────────
+
+    @Test
+    @DisplayName("revokeClaim also revokes at the issuer and audits both tx hashes")
+    void revokeClaim_alsoRevokesAtIssuer() {
+        UUID claimId = UUID.randomUUID();
+        OnchainClaim claim = new OnchainClaim();
+        claim.setId(claimId);
+        claim.setOnchainIdentityId(identityId);
+        when(claimRepository.findByIdAndOnchainIdentityId(claimId, identityId)).thenReturn(Optional.of(claim));
+        when(deploymentService.revokeKycClaim(claimId)).thenReturn("0xremovetx");
+        when(deploymentService.revokeClaimAtIssuer(claimId)).thenReturn("0xissuertx");
+
+        service.revokeClaim(identityId, claimId, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(claim.getRevocationTxHash()).isEqualTo("0xremovetx");
+        assertThat(claim.getIssuerRevocationTxHash()).isEqualTo("0xissuertx");
+        ArgumentCaptor<de.makibytes.registerwerk.erc3643.events.ClaimRevokedEvent> event =
+                ArgumentCaptor.forClass(de.makibytes.registerwerk.erc3643.events.ClaimRevokedEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().payload())
+                .containsEntry("removeClaimTx", "0xremovetx")
+                .containsEntry("revokeClaimBySignatureTx", "0xissuertx");
+    }
+
+    @Test
+    @DisplayName("revokeClaim on an already-removed claim retries only the missing issuer-level step")
+    void revokeClaim_retriesOnlyIssuerStep() {
+        UUID claimId = UUID.randomUUID();
+        OnchainClaim claim = new OnchainClaim();
+        claim.setId(claimId);
+        claim.setOnchainIdentityId(identityId);
+        claim.setRevokedAt(Instant.now());
+        claim.setRevocationTxHash("0xremovetx");
+        when(claimRepository.findByIdAndOnchainIdentityId(claimId, identityId)).thenReturn(Optional.of(claim));
+        when(deploymentService.revokeClaimAtIssuer(claimId)).thenReturn("0xissuertx");
+
+        service.revokeClaim(identityId, claimId, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        verify(deploymentService, never()).revokeKycClaim(any());
+        assertThat(claim.getIssuerRevocationTxHash()).isEqualTo("0xissuertx");
+        verify(claimRepository).save(claim);
+    }
+
+    @Test
+    @DisplayName("revokeComplianceClaims revokes confirmed KYC/AML claims only and reports unconfirmed steps")
+    void revokeComplianceClaims_revokesKycAndAmlOnly() {
+        OnchainIdentity identity = identity();
+        when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
+                .thenReturn(Optional.of(identity));
+        OnchainClaim kyc = claim(ClaimIssuanceService.CLAIM_TOPIC_KYC, true);
+        OnchainClaim aml = claim(ClaimIssuanceService.CLAIM_TOPIC_AML, true);
+        aml.setExpiresAt(Instant.now().minusSeconds(3600)); // expired off-chain, still valid on chain
+        OnchainClaim accreditation = claim(ClaimIssuanceService.CLAIM_TOPIC_ACCREDITATION, true);
+        when(claimRepository.findByOnchainIdentityId(identityId)).thenReturn(List.of(kyc, aml, accreditation));
+        when(deploymentService.revokeKycClaim(any())).thenReturn("0xremovetx");
+        when(deploymentService.revokeClaimAtIssuer(any())).thenReturn("0xissuertx");
+
+        int unresolved = service.revokeComplianceClaims(legalEntityId, chainConfigId, null, "SYSTEM",
+                java.util.Map.of("trigger", "KYC_EXPIRED"));
+
+        verify(deploymentService).revokeKycClaim(kyc.getId());
+        verify(deploymentService).revokeKycClaim(aml.getId());
+        verify(deploymentService, never()).revokeKycClaim(accreditation.getId());
+        verify(deploymentService).revokeClaimAtIssuer(kyc.getId());
+        verify(deploymentService).revokeClaimAtIssuer(aml.getId());
+        // both submitted, neither confirmed yet
+        assertThat(unresolved).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("revokeComplianceClaims reports 0 once removal and issuer revocation are confirmed")
+    void revokeComplianceClaims_doneWhenConfirmed() {
+        when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
+                .thenReturn(Optional.of(identity()));
+        OnchainClaim kyc = claim(ClaimIssuanceService.CLAIM_TOPIC_KYC, true);
+        kyc.setRevocationTxHash("0xremovetx");
+        kyc.setRevokedAt(Instant.now());
+        kyc.setIssuerRevocationTxHash("0xissuertx");
+        kyc.setIssuerRevokedAt(Instant.now());
+        when(claimRepository.findByOnchainIdentityId(identityId)).thenReturn(List.of(kyc));
+
+        assertThat(service.revokeComplianceClaims(legalEntityId, chainConfigId, null, "SYSTEM",
+                java.util.Map.of())).isZero();
+        verify(deploymentService, never()).revokeKycClaim(any());
+        verify(deploymentService, never()).revokeClaimAtIssuer(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    private OnchainClaim claim(long topic, boolean confirmed) {
+        OnchainClaim claim = new OnchainClaim();
+        claim.setId(UUID.randomUUID());
+        claim.setOnchainIdentityId(identityId);
+        claim.setTopic(topic);
+        claim.setConfirmed(confirmed);
+        claim.setTxHash("0xaddtx");
         return claim;
     }
 }

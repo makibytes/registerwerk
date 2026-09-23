@@ -22,6 +22,10 @@ spring:
     port: 3025
 
 registerwerk:
+  sync:
+    # HolderSyncScheduler actually activates now (its old @ConditionalOnProperty compared against
+    # a regex literal and never matched). Keep it off in ITs; tests call the sync explicitly.
+    auto-refresh-interval-minutes: 0
   screening:
     open-sanctions:
       # Keep the production adapter bean (and therefore fail-closed gate semantics) active, but

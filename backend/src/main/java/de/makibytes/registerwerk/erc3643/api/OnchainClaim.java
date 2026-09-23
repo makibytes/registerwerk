@@ -86,6 +86,18 @@ public class OnchainClaim {
     @Column(name = "revocation_block_hash", length = 128)
     private String revocationBlockHash;
 
+    /** Transaction hash of a submitted issuer-level {@code ClaimIssuer.revokeClaimBySignature}
+     *  call. {@code removeClaim} alone is reversible (the issuer still vouches for the signature),
+     *  so revocation pairs both steps. {@code null} with {@link #revocationTxHash} set means the
+     *  issuer step was not applicable (EOA issuer, already revoked) or is still to be retried. A
+     *  confirmed failed receipt clears it so the next revocation pass resubmits. */
+    @Column(name = "issuer_revocation_tx_hash", length = 80)
+    private String issuerRevocationTxHash;
+
+    /** Set once {@link #issuerRevocationTxHash} is confirmed on chain. */
+    @Column(name = "issuer_revoked_at")
+    private Instant issuerRevokedAt;
+
     /**
      * Hex-encoded ABI-encoded claim data bytes (topic + issuer + data payload).
      * Stored so the registry can reconstruct or verify the claim off-chain.
@@ -155,6 +167,12 @@ public class OnchainClaim {
 
     public String getRevocationBlockHash() { return revocationBlockHash; }
     public void setRevocationBlockHash(String revocationBlockHash) { this.revocationBlockHash = revocationBlockHash; }
+
+    public String getIssuerRevocationTxHash() { return issuerRevocationTxHash; }
+    public void setIssuerRevocationTxHash(String issuerRevocationTxHash) { this.issuerRevocationTxHash = issuerRevocationTxHash; }
+
+    public Instant getIssuerRevokedAt() { return issuerRevokedAt; }
+    public void setIssuerRevokedAt(Instant issuerRevokedAt) { this.issuerRevokedAt = issuerRevokedAt; }
 
     public String getClaimData() { return claimData; }
     public void setClaimData(String claimData) { this.claimData = claimData; }

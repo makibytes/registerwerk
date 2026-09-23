@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.asset.web.dto;
 
 import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.asset.api.HolderSyncStatus;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
@@ -12,6 +13,7 @@ import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -42,5 +44,10 @@ public record AssetResponse(
     Set<ClientCategory> targetMarketCategories,
     KnowledgeExperienceLevel targetMarketMinExperience,
     BigDecimal minInvestmentAmount,
-    BigDecimal maxHoldingAmount
+    BigDecimal maxHoldingAmount,
+    // T2-18: register reconciliation state, rendered as the operator asset-detail banner.
+    HolderSyncStatus holderSyncStatus,
+    String holderSyncBlockedReason,
+    List<String> holderSyncUnmappedWallets,
+    Instant lastSuccessfulHolderSyncAt
 ) {}

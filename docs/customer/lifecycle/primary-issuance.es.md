@@ -113,7 +113,7 @@ La tercera merece atención. La **entrega contra pago** elimina el riesgo más a
 
 ??? note "Para especialistas: la entrega contra pago, y lo que no prueba"
 
-    `DvpSettlement.sol` implementa un esquema al estilo ERC-7573. Ambas patas quedan bloqueadas contra un hash; revelar el secreto liquida ambas o ninguna. `EwpgBondDesk` muestra la misma forma de «token y pago en la misma transacción».
+    `DvpSettlement.sol` implementa un esquema al estilo ERC-7573. Una parte bloquea su pata en depósito en garantía; la contraparte liquida después ambas patas en una sola transacción, o la operación expira y el depósito se devuelve. Al liquidar, su cliente entrega una huella de los términos pactados (partes, importes, tokens, vencimiento): si lo bloqueado difiere en cualquier detalle, no se mueve nada. La liquidación también se detiene mientras cualquiera de las partes esté congelada por los controles de cumplimiento del token. `EwpgBondDesk` muestra la misma forma de «token y pago en la misma transacción».
 
     Dos matices honestos:
 

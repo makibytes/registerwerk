@@ -25,6 +25,7 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
 
 interface LoanRow extends LendingPosition {
   marketLabel: string;
+  surplusDisplay: string;
   healthFactorDisplay: string;
   healthFactorSeverity: 'ok' | 'warn' | 'danger' | 'none';
 }
@@ -67,6 +68,13 @@ interface LoanRow extends LendingPosition {
         <p class="error-text" role="alert">{{ claimError }}</p>
       }
 
+      @if (hasAnySurplus) {
+        <p class="hint-text" role="status">
+          A liquidation sold your collateral in whole units for more than the debt it closed. The
+          difference is yours: use "Claim … surplus" to receive it in your wallet.
+        </p>
+      }
+
       <rw-data-table
         [columns]="columns"
         [rows]="rows"
@@ -95,6 +103,12 @@ interface LoanRow extends LendingPosition {
           <button mat-stroked-button type="button" [disabled]="claimingKey === rowKey(row)" (click)="claimCollateral(row)">
             <mat-icon>move_down</mat-icon>
             @if (claimingKey === rowKey(row)) { Claiming… } @else { Claim collateral }
+          </button>
+        }
+        @if (hasClaimableSurplus(row)) {
+          <button mat-stroked-button type="button" [disabled]="claimingSurplusKey === rowKey(row)" (click)="claimSurplus(row)">
+            <mat-icon>savings</mat-icon>
+            @if (claimingSurplusKey === rowKey(row)) { Claiming… } @else { Claim {{ row.surplusDisplay }} surplus }
           </button>
         }
       </ng-template>
@@ -190,6 +204,7 @@ export class OpenLoansComponent implements OnInit {
   collateralReleaseBlocker: string | null = null;
   repayKeepCollateral = false;
   claimingKey: string | null = null;
+  claimingSurplusKey: string | null = null;
   claimError: string | null = null;
   collateralAction: 'add' | 'withdraw' = 'add';
   collateralAmount = 0;
@@ -205,6 +220,7 @@ export class OpenLoansComponent implements OnInit {
     { key: 'collateralAmount', header: 'Collateral', cell: (r: LoanRow) => r.collateralAmount, type: 'number' },
     { key: 'currentDebt', header: 'Debt', cell: (r: LoanRow) => this.formatDebt(r) },
     { key: 'healthFactorDisplay', header: 'Health factor', cell: (r: LoanRow) => r.healthFactorDisplay },
+    { key: 'surplusDisplay', header: 'Claimable surplus', cell: (r: LoanRow) => r.surplusDisplay },
     { key: 'status', header: 'Status', cell: (r: LoanRow) => r.status, type: 'badge' },
   ];
 
@@ -254,6 +270,10 @@ export class OpenLoansComponent implements OnInit {
     return {
       ...position,
       marketLabel: market?.collateralAssetName ?? market?.marketAddress ?? position.marketId,
+      surplusDisplay: BigInt(position.liquidationSurplus ?? '0') > 0n
+        ? Number(formatTokenUnits(BigInt(position.liquidationSurplus), market?.loanTokenDecimals ?? 6))
+          .toLocaleString(undefined, { maximumFractionDigits: market?.loanTokenDecimals ?? 6 })
+        : '—',
       healthFactorDisplay: position.healthFactorReliable === false
         ? 'Unavailable (stale price)'
         : hfRaw !== null ? hfRaw.toFixed(2) : '—',
@@ -293,6 +313,51 @@ export class OpenLoansComponent implements OnInit {
 
   rowKey(row: LoanRow): string {
     return `${row.marketId}:${row.walletAddress.toLowerCase()}`;
+  }
+
+  /** A liquidation credited loan-token cash to this wallet (`surplusOf`). */
+  hasClaimableSurplus(row: LoanRow): boolean {
+    return BigInt(row.liquidationSurplus ?? '0') > 0n;
+  }
+
+  get hasAnySurplus(): boolean {
+    return this.rows.some((row) => this.hasClaimableSurplus(row));
+  }
+
+  async claimSurplus(row: LoanRow): Promise<void> {
+    const market = this.marketsById.get(row.marketId);
+    if (!market || this.claimingSurplusKey) {
+      if (!market) this.claimError = 'Market details are unavailable. Reload the page and try again.';
+      return;
+    }
+    this.claimingSurplusKey = this.rowKey(row);
+    this.claimError = null;
+    this.cdr.markForCheck();
+
+    try {
+      if (!this.wallet.isConnected()) await this.wallet.connect();
+      if (this.wallet.address()?.toLowerCase() !== row.walletAddress.toLowerCase()) {
+        throw new Error(`Connect the wallet that owns this position (${row.walletAddress}) before claiming.`);
+      }
+      const hash = await this.wallet.writeContract({
+        address: market.marketAddress as Address,
+        abi: repoMarketAbi,
+        functionName: 'claimLiquidationSurplus',
+        args: [],
+      });
+      await this.wallet.waitForTransaction(hash);
+      this.snackBar.open(
+        `Claimed ${row.surplusDisplay} liquidation surplus. Tx: ${hash.slice(0, 10)}…${hash.slice(-6)}`,
+        'Dismiss',
+        { duration: 6000 },
+      );
+      this.load();
+    } catch (err: unknown) {
+      this.claimError = err instanceof Error ? err.message : 'Claiming the liquidation surplus failed.';
+    } finally {
+      this.claimingSurplusKey = null;
+      this.cdr.markForCheck();
+    }
   }
 
   /** Debt is closed but collateral is still held — after a debt-only repayment or a liquidation. */

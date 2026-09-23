@@ -36,6 +36,8 @@ import java.util.UUID;
 public class LendingMarketService implements de.makibytes.registerwerk.lending.api.LendingMarketRegistrar {
 
     private static final Logger log = LoggerFactory.getLogger(LendingMarketService.class);
+    private static final BigInteger BPS = BigInteger.valueOf(10_000);
+    private static final BigInteger UINT256_MAX = BigInteger.TWO.pow(256).subtract(BigInteger.ONE);
 
     private final LendingMarketRepository marketRepository;
     private final AssetRepository assetRepository;
@@ -75,10 +77,47 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
      *                        borrowing directly on-chain via {@code setBorrowPaused}, with no
      *                        corresponding backend write path). A chain-read failure is treated
      *                        as {@code PAUSED}; lending discovery must fail closed.
+     * @param riskParametersLegacy the deployed market does not meet today's construction checks
+     *                        (see {@link #riskParametersSound}; its oracle is not quoted in its loan
+     *                        token; or it predates the instance binding). Such a market was
+     *                        registered before those checks existed and stays listed so borrowers
+     *                        can still repay, claim and withdraw, but new borrowing and supply
+     *                        must not be offered. A chain-read failure counts as legacy (fail
+     *                        closed). Always false for a RETIRED market, which is never read.
+     * @param operatorOrg     the org operating the market on-chain ({@code operatorOrg()}); null
+     *                        for a legacy market or when the read failed.
+     * @param treasury        the market's fixed reserve recipient ({@code treasury()}); null as
+     *                        for {@code operatorOrg}.
      */
     public record MarketView(
             LendingMarket market, Jurisdiction jurisdiction, String collateralAssetName, String collateralIsin,
-            Boolean micarApplicable, DefiInteropModel defiInteropModel, LendingMarketStatus effectiveStatus) {}
+            Boolean micarApplicable, DefiInteropModel defiInteropModel, LendingMarketStatus effectiveStatus,
+            boolean riskParametersLegacy, String operatorOrg, String treasury) {}
+
+    /** On-chain facts about a market's risk construction and operating binding — see {@link MarketView}. */
+    private record OnchainBinding(boolean riskParametersLegacy, String operatorOrg, String treasury) {}
+
+    /**
+     * Mirrors {@code EwpgRepoMarket}'s construction check: {@code lltv × (1 + bonus)} must stay
+     * strictly below 1 and, unless the oracle opts out with {@code type(uint256).max}, within
+     * {@code 1 − maxDeviation}. Otherwise liquidating a position just below health factor 1
+     * after one in-tolerance oracle move cannot pay the liquidation bonus and leaves bad debt.
+     */
+    static boolean riskParametersSound(Integer lltvBps, Integer liquidationBonusBps, BigInteger oracleMaxDeviationBps) {
+        if (lltvBps == null || liquidationBonusBps == null || oracleMaxDeviationBps == null) {
+            return false;
+        }
+        BigInteger incentiveAdjustedLltv = BigInteger.valueOf(lltvBps)
+                .multiply(BPS.add(BigInteger.valueOf(liquidationBonusBps)));
+        if (incentiveAdjustedLltv.compareTo(BPS.multiply(BPS)) >= 0) {
+            return false;
+        }
+        if (oracleMaxDeviationBps.equals(UINT256_MAX)) {
+            return true;
+        }
+        return oracleMaxDeviationBps.compareTo(BPS) < 0
+                && incentiveAdjustedLltv.compareTo(BPS.multiply(BPS.subtract(oracleMaxDeviationBps))) <= 0;
+    }
 
     @Override
     public void registerVerifiedMarket(UUID chainConfigId, String marketAddress, String vaultAddress,
@@ -111,6 +150,17 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         if (parameters.maxLtvBps() <= 0 || parameters.maxLtvBps() >= parameters.lltvBps()) {
             throw new IllegalArgumentException("Deployed market has invalid max-LTV/liquidation-LTV parameters");
         }
+        if (parameters.oracleQuoteToken() == null
+                || !parameters.oracleQuoteToken().equalsIgnoreCase(parameters.loanTokenAddress())) {
+            throw new IllegalArgumentException(
+                    "Deployed market's price oracle is not quoted in the market's loan token");
+        }
+        if (!riskParametersSound(parameters.lltvBps(), parameters.liquidationBonusBps(),
+                parameters.oracleMaxDeviationBps())) {
+            throw new IllegalArgumentException(
+                    "Deployed market's liquidation LTV and bonus exceed the oracle's deviation haircut: "
+                            + "lltv × (1 + bonus) must be at most 1 − maxDeviation");
+        }
 
         LendingMarket market = new LendingMarket();
         market.setChainConfigId(chainConfigId);
@@ -135,7 +185,9 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         eventPublisher.publishEvent(new LendingMarketRegisteredEvent(market.getId(), actorId, actorRole,
                 Map.of("marketAddress", marketAddress,
                         "maxLtvBps", parameters.maxLtvBps(),
-                        "lltvBps", parameters.lltvBps())));
+                        "lltvBps", parameters.lltvBps(),
+                        "operatorOrg", parameters.operatorOrg(),
+                        "treasury", parameters.treasury())));
 
         return toView(market);
     }
@@ -229,21 +281,63 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
 
     private MarketView toView(LendingMarket market) {
         LendingMarketStatus effectiveStatus = resolveEffectiveStatus(market);
+        OnchainBinding binding = resolveOnchainBinding(market);
         if (market.getCollateralAssetId() == null) {
-            return new MarketView(market, null, null, null, null, null, effectiveStatus);
+            return view(market, null, null, null, null, null, effectiveStatus, binding);
         }
         Optional<Asset> asset = assetRepository.findById(market.getCollateralAssetId());
         return asset
                 .map(a -> {
                     Jurisdiction jurisdiction = a.getJurisdiction();
                     if (jurisdiction == null) {
-                        return new MarketView(market, null, a.getName(), a.getIsin(), null, null, effectiveStatus);
+                        return view(market, null, a.getName(), a.getIsin(), null, null, effectiveStatus, binding);
                     }
                     var compliance = jurisdictionConfig.getProfile(jurisdiction).compliance();
-                    return new MarketView(market, jurisdiction, a.getName(), a.getIsin(),
-                            compliance.micarApplicable(), compliance.defiInteropModel(), effectiveStatus);
+                    return view(market, jurisdiction, a.getName(), a.getIsin(),
+                            compliance.micarApplicable(), compliance.defiInteropModel(), effectiveStatus, binding);
                 })
-                .orElseGet(() -> new MarketView(market, null, null, null, null, null, effectiveStatus));
+                .orElseGet(() -> view(market, null, null, null, null, null, effectiveStatus, binding));
+    }
+
+    private static MarketView view(
+            LendingMarket market, Jurisdiction jurisdiction, String collateralAssetName, String collateralIsin,
+            Boolean micarApplicable, DefiInteropModel defiInteropModel, LendingMarketStatus effectiveStatus,
+            OnchainBinding binding) {
+        return new MarketView(market, jurisdiction, collateralAssetName, collateralIsin, micarApplicable,
+                defiInteropModel, effectiveStatus, binding.riskParametersLegacy(), binding.operatorOrg(),
+                binding.treasury());
+    }
+
+    /**
+     * Live read of the facts behind {@link MarketView#riskParametersLegacy} plus the market's
+     * operating org and treasury. The stored LLTV/bonus are immutable on-chain; the oracle's
+     * deviation cap is read live because an oracle deployed before it became decrease-only could
+     * have raised it after the market was created. Any read failure (including a market or
+     * oracle predating these getters) counts as legacy.
+     */
+    private OnchainBinding resolveOnchainBinding(LendingMarket market) {
+        if (market.getStatus() == LendingMarketStatus.RETIRED) {
+            return new OnchainBinding(false, null, null);
+        }
+        String operatorOrg = null;
+        String treasury = null;
+        boolean legacy = true;
+        try {
+            String chainIdentifier = resolveChainIdentifier(market.getChainConfigId());
+            String quoteToken = onchainReader.oracleQuoteToken(chainIdentifier, market.getPriceOracleAddress());
+            BigInteger maxDeviationBps =
+                    onchainReader.oracleMaxDeviationBps(chainIdentifier, market.getPriceOracleAddress());
+            operatorOrg = onchainReader.operatorOrg(chainIdentifier, market.getMarketAddress());
+            treasury = onchainReader.treasury(chainIdentifier, market.getMarketAddress());
+            legacy = operatorOrg == null
+                    || quoteToken == null
+                    || !quoteToken.equalsIgnoreCase(market.getLoanTokenAddress())
+                    || !riskParametersSound(market.getLltvBps(), market.getLiquidationBonusBps(), maxDeviationBps);
+        } catch (RuntimeException e) {
+            log.warn("Risk-parameter read failed for market {}; treating it as legacy: {}",
+                    market.getMarketAddress(), e.getMessage());
+        }
+        return new OnchainBinding(legacy, operatorOrg, treasury);
     }
 
     /**

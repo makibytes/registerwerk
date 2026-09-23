@@ -1,13 +1,17 @@
 package de.makibytes.registerwerk.asset.web;
 
 import de.makibytes.registerwerk.asset.internal.GasSponsorshipService;
+import de.makibytes.registerwerk.asset.internal.GasSponsorshipVoucherService;
+import de.makibytes.registerwerk.asset.web.dto.GasSponsorshipOnchainStatusResponse;
 import de.makibytes.registerwerk.asset.web.dto.GasSponsorshipPolicyCreateRequest;
 import de.makibytes.registerwerk.asset.web.dto.GasSponsorshipPolicyResponse;
 import de.makibytes.registerwerk.deployment.api.GasSponsorshipPolicy;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,9 +28,12 @@ import java.util.UUID;
 public class GasSponsorshipController {
 
     private final GasSponsorshipService gasSponsorshipService;
+    private final GasSponsorshipVoucherService voucherService;
 
-    public GasSponsorshipController(GasSponsorshipService gasSponsorshipService) {
+    public GasSponsorshipController(GasSponsorshipService gasSponsorshipService,
+                                    GasSponsorshipVoucherService voucherService) {
         this.gasSponsorshipService = gasSponsorshipService;
+        this.voucherService = voucherService;
     }
 
     /** Creates (or replaces) the sponsorship policy for one specific asset deployment. */
@@ -45,8 +52,9 @@ public class GasSponsorshipController {
 
     /** Deactivates a gas-sponsorship policy (deployment-scoped or issuer-default). */
     @DeleteMapping("/gas-sponsorship/{policyId}")
-    public ResponseEntity<Void> deactivate(@PathVariable UUID policyId) {
-        gasSponsorshipService.deactivate(policyId);
+    public ResponseEntity<Void> deactivate(@PathVariable UUID policyId, Authentication auth) {
+        gasSponsorshipService.deactivate(policyId, SecurityUtils.extractUserId(auth),
+            SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.noContent().build();
     }
 
@@ -79,6 +87,35 @@ public class GasSponsorshipController {
         return gasSponsorshipService.resolveEffectivePolicy(depId)
             .map(policy -> ResponseEntity.ok(toResponse(policy)))
             .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * The effective policy's on-chain state on {@code EwpgPaymaster} (balance, reserved,
+     * active flag, funder, voucher signer). Always 200: {@code status} says when no policy applies,
+     * the deployment has no chain, or no paymaster is configured for its chain.
+     */
+    @GetMapping("/assets/{assetId}/deployments/{depId}/gas-sponsorship/onchain")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') and @deploymentAccessChecker.belongsToAsset(#depId, #assetId)")
+    public ResponseEntity<GasSponsorshipOnchainStatusResponse> getOnchainStatus(
+            @PathVariable UUID assetId,
+            @PathVariable UUID depId) {
+        var s = voucherService.onchainStatus(depId);
+        return ResponseEntity.ok(new GasSponsorshipOnchainStatusResponse(
+            s.status().name(), s.policyRowId(), s.configured(), s.paymaster(), s.chainIdentifier(), s.policyId(),
+            s.registered(), s.active(), s.funder(), s.signer(), str(s.balanceWei()),
+            str(s.reservedWei()), str(s.orgBudgetCapWei()), s.error()));
+    }
+
+    /** Address each on-chain policy must register as its voucher signer (null when disabled). */
+    @GetMapping("/gas-sponsorship/voucher-signer")
+    public ResponseEntity<java.util.Map<String, String>> getVoucherSigner() {
+        java.util.Map<String, String> body = new java.util.HashMap<>();
+        body.put("address", voucherService.voucherSignerAddress());
+        return ResponseEntity.ok(body);
+    }
+
+    private static String str(java.math.BigInteger v) {
+        return v == null ? null : v.toString();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

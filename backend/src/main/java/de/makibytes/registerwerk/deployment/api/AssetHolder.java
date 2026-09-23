@@ -52,6 +52,11 @@ public class AssetHolder {
     @Column(name = "chain_derived", nullable = false)
     private boolean chainDerived = false;
 
+    /** {@link HolderKind#NOMINEE_POOL} for a pool contract's register row (T2-18). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "holder_kind", nullable = false, length = 20)
+    private HolderKind holderKind = HolderKind.INVESTOR;
+
     @Column(name = "acquisition_date")
     private LocalDate acquisitionDate;
 
@@ -126,6 +131,9 @@ public class AssetHolder {
 
     public boolean isChainDerived() { return chainDerived; }
     public void setChainDerived(boolean chainDerived) { this.chainDerived = chainDerived; }
+
+    public HolderKind getHolderKind() { return holderKind; }
+    public void setHolderKind(HolderKind holderKind) { this.holderKind = holderKind; }
 
     public LocalDate getAcquisitionDate() { return acquisitionDate; }
     public void setAcquisitionDate(LocalDate acquisitionDate) { this.acquisitionDate = acquisitionDate; }

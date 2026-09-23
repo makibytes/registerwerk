@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettledEvent;
@@ -69,6 +70,11 @@ class CorporateActionSettlementWriter {
 
             Instant settledAt = Instant.now();
             entryRepository.findByCorporateActionId(corporateActionId).forEach(entry -> {
+                // T2-18: a nominee-pool entry is held until PARK-T2-18 decides who is entitled —
+                // it must not be recorded as paid (nor count as realized income downstream).
+                if (entry.getPayoutStatus() == CorporateActionEntry.PayoutStatus.HELD_LOOK_THROUGH) {
+                    return;
+                }
                 entry.setSettlementTxHash(txHash);
                 entry.setSettledAt(settledAt);
                 entryRepository.save(entry);

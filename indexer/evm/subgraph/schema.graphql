@@ -278,6 +278,8 @@ type RepoMarket @entity(immutable: false) {
   factoryReportedCollateralToken: Bytes!
   factoryReportedLltvBps: BigInt!
   factoryReportedPriceOracle: Bytes!
+  factoryReportedOperatorOrg: Bytes # from MarketOperatorSet; null for markets from a factory that predates it
+  factoryReportedTreasury: Bytes    # from MarketOperatorSet; receives protocol fees
   observedAtBlock: BigInt!
   observedAtTimestamp: BigInt!
   observedInTx: Bytes!
@@ -285,7 +287,7 @@ type RepoMarket @entity(immutable: false) {
 }
 
 """
-A single EwpgRepoMarket lifecycle event. eventType differentiates the seven possible kinds;
+A single EwpgRepoMarket lifecycle event. eventType differentiates the nine possible kinds;
 field semantics vary accordingly:
   - SUPPLIED / WITHDRAWN: actor = lender, amount = underlying amount, scaledAmount = scaled shares
   - BORROWED: actor = borrower, amount = borrowAmount, collateralAmount = pledged collateral
@@ -294,7 +296,12 @@ field semantics vary accordingly:
     collateralAmount = collateralSeized
   - BAD_DEBT_RECOGNIZED: actor = borrower, amount = writtenOffDebt,
     collateralAmount = lossToDepositors
-  - COLLATERAL_RECONCILED: actor = borrower, collateralAmount = newCollateral
+  - COLLATERAL_RECONCILED: actor = borrower, amount = previousCollateral,
+    collateralAmount = newCollateral, forcedTransferRef = the operator-supplied reference of the
+    forced transfer that moved the collateral (zero when none was given)
+  - LIQUIDATION_SURPLUS_CREDITED: actor = borrower, amount = loan-token surplus credited to the
+    borrower's claimable balance after a liquidation
+  - SURPLUS_CLAIMED: actor = borrower, amount = claimable surplus paid out to the borrower
 The backend may query the most recent event for operational context after debt reaches zero.
 This row alone must not create a durable REPAID, LIQUIDATED, or bad-debt classification.
 """
@@ -302,12 +309,13 @@ type RepoMarketEvent @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
   projectionStatus: ProjectionStatus!
   market: RepoMarket!
-  eventType: String!             # 'SUPPLIED' | 'WITHDRAWN' | 'BORROWED' | 'REPAID' | 'LIQUIDATED' | 'BAD_DEBT_RECOGNIZED' | 'COLLATERAL_RECONCILED'
+  eventType: String!             # 'SUPPLIED' | 'WITHDRAWN' | 'BORROWED' | 'REPAID' | 'LIQUIDATED' | 'BAD_DEBT_RECOGNIZED' | 'COLLATERAL_RECONCILED' | 'LIQUIDATION_SURPLUS_CREDITED' | 'SURPLUS_CLAIMED'
   actor: Bytes!
   liquidator: Bytes              # only populated for LIQUIDATED
   amount: BigInt
   scaledAmount: BigInt           # emitted by SUPPLIED / WITHDRAWN; never inferred
   collateralAmount: BigInt
+  forcedTransferRef: Bytes       # only populated for COLLATERAL_RECONCILED
   blockNumber: BigInt!
   blockTimestamp: BigInt!
   transactionHash: Bytes!
@@ -345,6 +353,8 @@ type RepoVaultMarketAllocation @entity(immutable: false) {
   market: Bytes!
   enabled: Boolean!
   cap: BigInt!
+  pendingCap: BigInt             # submitted add/cap-increase awaiting its timelock; null when none observed
+  pendingValidAt: BigInt         # unix time from which the pending change can be accepted
   netAllocationCashFlow: BigInt!
   projectionStatus: ProjectionStatus!
   lastUpdatedBlock: BigInt!
@@ -355,7 +365,8 @@ type RepoVaultMarketAllocation @entity(immutable: false) {
 type RepoVaultEvent @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
   vault: RepoVault!
-  eventType: String!             # market/allocation/deposit/withdraw/share-transfer event kind
+  eventType: String!             # market/allocation/deposit/withdraw/share-transfer event kind, incl.
+                                 # 'MARKET_ADD_SUBMITTED' | 'CAP_INCREASE_SUBMITTED' | 'PENDING_REVOKED'
   market: Bytes
   actor: Bytes
   receiver: Bytes
@@ -366,6 +377,7 @@ type RepoVaultEvent @entity(immutable: true) {
   assets: BigInt
   shares: BigInt
   cap: BigInt
+  validAt: BigInt                # only for *_SUBMITTED: earliest acceptance time (unix seconds)
   projectionStatus: ProjectionStatus!
   blockNumber: BigInt!
   blockTimestamp: BigInt!
@@ -383,16 +395,21 @@ type RepoVaultEvent @entity(immutable: true) {
 # settlement evidence.
 
 """
-A single DvpSettlement lifecycle event. eventType differentiates the five possible kinds;
+A single DvpSettlement lifecycle event. eventType differentiates the six possible kinds;
 field semantics vary accordingly:
   - LEG_LOCKED: seller/buyer/assetToken/assetAmount/paymentToken/paymentAmount/lockedLeg/expiry all populated
   - TRADE_SETTLED / TRADE_CANCELLED: only tradeId populated (TRADE_CANCELLED also sets actor = caller)
+  - TRADE_FORCE_CANCELLED: tradeId, forcedDestination (recipient of the escrowed leg named in a
+    legal order) and legalBasis populated; the operator released the leg instead of the locker
   - PAUSED / UNPAUSED: only actor populated (the operator wallet that called it)
+tradeId is contract-derived, keccak256(abi.encode(chainid, settlement, locker, clientRef)): it is
+namespaced by the locking party, so it is unique per settlement deployment and chain but is not
+a cross-chain identifier, and the counterparty's clientRef is not recoverable from it.
 """
 type DvpSettlementEvent @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
   projectionStatus: ProjectionStatus!
-  eventType: String!             # 'LEG_LOCKED' | 'TRADE_SETTLED' | 'TRADE_CANCELLED' | 'PAUSED' | 'UNPAUSED'
+  eventType: String!             # 'LEG_LOCKED' | 'TRADE_SETTLED' | 'TRADE_CANCELLED' | 'TRADE_FORCE_CANCELLED' | 'PAUSED' | 'UNPAUSED'
   tradeId: Bytes
   actor: Bytes
   seller: Bytes
@@ -403,6 +420,8 @@ type DvpSettlementEvent @entity(immutable: true) {
   paymentAmount: BigInt
   lockedLeg: String               # 'ASSET' | 'PAYMENT', only for LEG_LOCKED
   expiry: BigInt
+  forcedDestination: Bytes       # only for TRADE_FORCE_CANCELLED
+  legalBasis: String             # only for TRADE_FORCE_CANCELLED
   blockNumber: BigInt!
   blockTimestamp: BigInt!
   transactionHash: Bytes!
@@ -410,21 +429,29 @@ type DvpSettlementEvent @entity(immutable: true) {
 }
 
 """
-A single EwpgBondDesk lifecycle event. eventType differentiates the five possible kinds:
+A single EwpgBondDesk lifecycle event. eventType differentiates the eight possible kinds:
   - SUBSCRIBED: actor = investor, amount = bond units, paidOrPrincipal = payment-token cost
   - COUPON_PAID: actor = holder, period = coupon period, paidOrPrincipal = amount paid
+  - COUPON_WITHHELD: actor = frozen holder, period = coupon period, paidOrPrincipal = amount
+    withheld (no cash moved; it stays in the treasury until released)
+  - WITHHELD_RELEASED: actor = holder, period, paidOrPrincipal = amount paid,
+    forcedDestination = recipient named in the legal order, legalBasis
   - REDEEMED: actor = holder, amount = bond units burned, paidOrPrincipal = principal paid
+  - FORCED_REDEMPTION: actor = frozen holder, amount = bond units burned, paidOrPrincipal =
+    principal paid to forcedDestination under legalBasis
   - PAUSED / UNPAUSED: actor = the org wallet that called it
 """
 type BondDeskEvent @entity(immutable: true) {
   id: ID!                        # {txHash}-{logIndex}
   projectionStatus: ProjectionStatus!
   desk: Bytes!                   # EwpgBondDesk contract address
-  eventType: String!             # 'SUBSCRIBED' | 'COUPON_PAID' | 'REDEEMED' | 'PAUSED' | 'UNPAUSED'
+  eventType: String!             # 'SUBSCRIBED' | 'COUPON_PAID' | 'COUPON_WITHHELD' | 'WITHHELD_RELEASED' | 'REDEEMED' | 'FORCED_REDEMPTION' | 'PAUSED' | 'UNPAUSED'
   actor: Bytes!
   amount: BigInt
   paidOrPrincipal: BigInt
-  period: BigInt                 # only populated for COUPON_PAID
+  period: BigInt                 # only populated for COUPON_PAID / COUPON_WITHHELD / WITHHELD_RELEASED
+  forcedDestination: Bytes       # only populated for WITHHELD_RELEASED / FORCED_REDEMPTION
+  legalBasis: String             # only populated for WITHHELD_RELEASED / FORCED_REDEMPTION
   blockNumber: BigInt!
   blockTimestamp: BigInt!
   transactionHash: Bytes!

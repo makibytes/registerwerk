@@ -51,6 +51,44 @@ Gli ID di autorizzazione sono `keccak256("<your-slug>.<action>")`. Lo slug del t
 nomi: i manifest che dichiarano autorizzazioni al di fuori di `<slug>.*` vengono rifiutati, a meno che il codice
 non esista già come autorizzazione della piattaforma.
 
+### Vincolare un'istanza alla sua organizzazione operatrice { #binding-an-instance-to-its-operating-org }
+
+Le concessioni di autorizzazioni valgono **per l'intera organizzazione**: una concessione di
+`loandesk.sweep` consente ai portafogli dell'organizzazione di eseguire quell'azione su *ogni*
+istanza distribuita della dApp, compresi desk, vault o mercati gestiti da un'altra organizzazione.
+L'autorizzazione dello slug dice *che cosa* può fare un'organizzazione; non dice *di chi* è
+l'istanza. Un'istanza di dApp che detiene valori o la configurazione di un'organizzazione deve quindi
+vincolarsi a tale organizzazione e proteggere le sue funzioni privilegiate con
+`requiresOrgPermission`:
+
+```solidity
+contract LoanDesk is RegisterwerkGated {
+    bytes32 public constant SWEEP = keccak256("loandesk.sweep");
+    address public immutable operatorOrg;
+
+    constructor(IPermissionOracle oracle_, address operatorOrg_) RegisterwerkGated(oracle_) {
+        _requireOrg(operatorOrg_); // reverts ZeroOperatingOrg()
+        operatorOrg = operatorOrg_;
+    }
+
+    function sweep() external requiresOrgPermission(operatorOrg, SWEEP) { /* ... */ }
+}
+```
+
+- `requiresOrgPermission(address org, bytes32 permission)` — il portafoglio del chiamante deve essere
+  vincolato a `org` (verificato per primo; revert con `WrongOperatingOrg(wallet, expectedOrg)`)
+  **e** detenere `permission` (revert con `PermissionDenied`). `org == address(0)` non corrisponde mai.
+- `_checkOrgPermission(wallet, org, permission)` — lo stesso controllo come funzione interna, per le
+  istanze la cui organizzazione operatrice viene determinata all'interno della funzione (ad esempio
+  per asset).
+- `_requireOrg(org)` — guardia per costruttore/setter che esegue il revert con `ZeroOperatingOrg()`.
+
+Usare il vincolo per ogni azione che sposta fondi o inventario dell'istanza o ne modifica la
+configurazione. Solo le azioni che la dApp apre deliberatamente ai membri di altre organizzazioni
+restano su un semplice `requiresPermission`. Esporre l'organizzazione vincolata come getter pubblico
+(`operatorOrg()`), così che operatori e consumatori vedano chi gestisce un'istanza attestata. Non è
+necessaria alcuna modifica al PermissionRegistry: le concessioni restano per slug.
+
 Un esempio minimo ed eseguibile si trova in `contracts/test/ecosystem/SampleGatedDapp.t.sol`. Per due dApp di
 riferimento completamente confezionate e pronte per il mercato — inclusa un'integrazione ERC-3643 (T-REX) reale —
 vedere [Esempio di riferimento dApps](#reference-example-dapps) di seguito.
@@ -139,6 +177,21 @@ pagamento, la controparte regola entrambe le gambe atomicamente, oppure lo scamb
 blocco lo recupera. Consulta il suo NatSpec per l'avvertenza sul deposito a garanzia ERC-3643 (i token T-REX
 richiedono che l'ONCHAINID del contratto di regolamento sia verificato nel registro delle identità prima di poter
 essere depositati a garanzia — bloccare invece la gamba di pagamento aggira questo problema per i security token).
+
+Gli identificativi degli scambi sono derivati, non scelti: `lockAsset`/`lockPayment` ricevono la
+`clientRef` propria di chi blocca (ad esempio un identificativo RFQ) e restituiscono
+`tradeId = keccak256(abi.encode(chainid, dvp, locker, clientRef))` (disponibile anche tramite
+`tradeIdFor(locker, clientRef)`), quindi nessuno può occupare l'identificativo di uno scambio che
+un'altra parte sta per bloccare. La controparte regola con `settle(tradeId, expectedTermsHash)`, dove
+`expectedTermsHash` è `hashTerms(seller, buyer, assetToken, assetAmount, paymentToken, paymentAmount,
+lockedLeg, expiry)` calcolato a partire dalla **propria registrazione dell'accordo concluso**. Non
+rileggere l'hash da `termsHashOf(tradeId)` per inoltrarlo: restituisce solo ciò che ha memorizzato chi
+ha bloccato. Se le condizioni memorizzate differiscono, `settle` fallisce con `TermsMismatch` e non
+sposta nulla. `settle` fallisce anche con `PartyFrozen` finché il token dell'asset (se risponde a
+`isFrozen(address)`, come T-REX) segnala il venditore o l'acquirente come congelato; il deposito a
+garanzia resta allora dov'è finché il congelamento non viene revocato, lo scambio non viene annullato
+o l'operatore non lo libera in base a un ordine legale con `forceCancel(tradeId, to, legalBasis)`
+(evento `TradeForceCancelled`).
 
 ## Flusso di lavoro di pubblicazione { #publication-workflow }
 
@@ -251,6 +304,11 @@ intestatario/omnibus, vincolato da `secondary-market.trade` + l'argomento di att
 ogni operazione tramite il `DvpSettlement` non modificato e senza gate riportato sopra, e le sue esecuzioni (fills)
 fungono anche da feed di prezzo per `EwpgRepoFacility.updatePrice`. Test:
 `contracts/test/examples/CompliantSecondaryMarket.t.sol`.
+  Ogni istanza del desk è vincolata alla propria organizzazione operativa (`operatorOrg`, un argomento
+  del costruttore): un'altra organizzazione nominee con la stessa autorizzazione
+  `secondary-market.trade` fallisce con `WrongOperatingOrg` su questa istanza.
+  `reclaimExpired(tradeId)` restituisce al pool un deposito di inventario scaduto e non regolato,
+  poiché è il contratto del desk ad aver effettuato il blocco.
 - `contracts/src/examples/StablecoinAmm.sol` — un prodotto minimo costante AMM limitato alle sole coppie stablecoin
 , deliberatamente **non** `RegisterwerkGated` (vedere il suo NatSpec per perché).
 Test: `contracts/test/examples/StablecoinAmm.t.sol`.

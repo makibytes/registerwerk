@@ -36,11 +36,18 @@ interface IEwpgRepoMarket {
     function liquidate(address borrower, uint256 maxRepayAmount) external returns (uint256, uint256);
     function debtOf(address borrower) external view returns (uint256);
     function positions(address borrower) external view returns (uint256 collateralAmount, uint256 scaledDebt);
+    function surplusOf(address borrower) external view returns (uint256);
+    function claimLiquidationSurplus() external returns (uint256);
 }
 
 /// @dev Minimal settable price feed with the `IRepoOracle` shape (that interface file is ^0.8.36).
 contract SettableRepoOracle {
     mapping(address => uint256) public prices;
+    address public immutable quoteToken;
+
+    constructor(address quoteToken_) {
+        quoteToken = quoteToken_;
+    }
 
     function setPrice(address asset, uint256 p) external {
         prices[asset] = p;
@@ -50,8 +57,9 @@ contract SettableRepoOracle {
         return (prices[asset], block.timestamp);
     }
 
+    /// @dev 15%: the 80% LLTV × 1.05 bonus below must fit under 1 − maxDeviation.
     function maxDeviationBps() external pure returns (uint256) {
-        return 2000;
+        return 1500;
     }
 }
 
@@ -94,7 +102,7 @@ contract EwpgRepoMarketTrexCollateralTest is Test {
         tir = new EcosystemTrustedIssuersRegistry(operator);
         ecosystemOracle = new PermissionOracle(operator, orgRegistry, permissions, tir);
         loanToken = new MockStablecoin("AllUnity Euro", "AUEUR", 6);
-        navOracle = new SettableRepoOracle();
+        navOracle = new SettableRepoOracle(address(loanToken));
 
         // ── T-REX collateral token (KYC topic only, no compliance modules) ──────
         trex = TrexSuiteDeployer.deploy(operator);
@@ -133,11 +141,14 @@ contract EwpgRepoMarketTrexCollateralTest is Test {
         );
         identityRegistry = bond.identityRegistry();
 
+        // Static-field MarketParams struct: its ABI encoding is the flat field list.
         market = IEwpgRepoMarket(
             vm.deployCode(
                 "EwpgRepoMarket.sol:EwpgRepoMarket",
                 abi.encode(
                     address(ecosystemOracle),
+                    address(new MockOnchainId()), // operatorOrg
+                    operator, // treasury
                     address(loanToken),
                     address(bond),
                     address(navOracle),
@@ -254,8 +265,9 @@ contract EwpgRepoMarketTrexCollateralTest is Test {
     // ── liquidation with a frozen borrower ───────────────────────────────────
 
     /// @dev Price 80: HF = 100*80*0.8/7000 = 0.914 < 0.95, so one call closes the full debt;
-    ///      seize = 7000*1.05/80 = 91 units, leaving a 9-unit residual. On HEAD that residual was
-    ///      pushed to the frozen borrower and the whole liquidation reverted.
+    ///      units = ceil(7000*1.05/80) = 92, leaving an 8-unit residual plus a cash surplus
+    ///      (92*80/1.05 − 7000). Neither is pushed to the frozen borrower, which would revert
+    ///      the whole liquidation.
     function test_liquidate_fullClose_doesNotRevertForFrozenBorrower() public {
         navOracle.setPrice(address(bond), 80e6);
         _freezeAlice(true);
@@ -265,17 +277,21 @@ contract EwpgRepoMarketTrexCollateralTest is Test {
         (uint256 debtRepaid, uint256 seized) = market.liquidate(alice, debt);
 
         assertEq(debtRepaid, debt);
-        assertEq(seized, 91);
-        assertEq(bond.balanceOf(liquidator), 91);
+        assertEq(seized, 92);
+        assertEq(bond.balanceOf(liquidator), 92);
         (uint256 collateral, uint256 scaledDebt) = market.positions(alice);
         assertEq(scaledDebt, 0);
-        assertEq(collateral, 9, "residual credited to the position");
-        assertEq(bond.balanceOf(address(market)), 9);
+        assertEq(collateral, 8, "residual credited to the position");
+        assertEq(bond.balanceOf(address(market)), 8);
+        uint256 surplus = market.surplusOf(alice);
+        assertEq(surplus, (92 * uint256(80e6) * 10_000 + 10_499) / 10_500 - debt, "surplus credited, not pushed");
 
         _freezeAlice(false);
         vm.prank(alice);
-        assertEq(market.claimCollateral(), 9);
-        assertEq(bond.balanceOf(alice), 909);
+        assertEq(market.claimCollateral(), 8);
+        assertEq(bond.balanceOf(alice), 908);
+        vm.prank(alice);
+        assertEq(market.claimLiquidationSurplus(), surplus);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

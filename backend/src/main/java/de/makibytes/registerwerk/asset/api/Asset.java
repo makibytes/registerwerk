@@ -137,6 +137,31 @@ public class Asset {
     private Instant lastHolderSyncTime;
 
     /**
+     * Whether the chain-derived register reconciles (T2-18). {@code BLOCKED} means the last holder
+     * sync found finalized positive balances on wallets with no holder row (typically a pool
+     * contract — lending market, DvP escrow, desk — that has no nominee-pool row yet), so the
+     * register is stale; corporate-action snapshots and settlement confirmation refuse while it
+     * is. Written only by bulk updates in {@code HolderSyncStatusPortImpl}, never by a
+     * read-modify-write of this entity, so it neither bumps nor races {@link #version}. The four
+     * sync columns are {@code insertable/updatable = false} for the same reason: an unrelated
+     * lifecycle save of a stale copy of this entity must never overwrite a concurrent BLOCKED
+     * with the OK it loaded (inserts take the column defaults).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "holder_sync_status", nullable = false, length = 16, insertable = false, updatable = false)
+    private HolderSyncStatus holderSyncStatus = HolderSyncStatus.OK;
+
+    @Column(name = "holder_sync_blocked_reason", insertable = false, updatable = false)
+    private String holderSyncBlockedReason;
+
+    /** Comma-separated lower-cased wallet addresses behind a {@code BLOCKED} status. */
+    @Column(name = "holder_sync_unmapped_wallets", insertable = false, updatable = false)
+    private String holderSyncUnmappedWallets;
+
+    @Column(name = "last_successful_holder_sync_at", insertable = false, updatable = false)
+    private Instant lastSuccessfulHolderSyncAt;
+
+    /**
      * MiFID II target market (product governance) — which client categories this asset may be
      * distributed to. Empty means unrestricted (backward-compatible default: existing assets and
      * demo data predate this field and must not suddenly become un-subscribable). Checked by
@@ -245,6 +270,15 @@ public class Asset {
 
     public Instant getLastHolderSyncTime() { return lastHolderSyncTime; }
     public void setLastHolderSyncTime(Instant lastHolderSyncTime) { this.lastHolderSyncTime = lastHolderSyncTime; }
+
+    public HolderSyncStatus getHolderSyncStatus() { return holderSyncStatus; }
+    public void setHolderSyncStatus(HolderSyncStatus holderSyncStatus) { this.holderSyncStatus = holderSyncStatus; }
+    public String getHolderSyncBlockedReason() { return holderSyncBlockedReason; }
+    public void setHolderSyncBlockedReason(String holderSyncBlockedReason) { this.holderSyncBlockedReason = holderSyncBlockedReason; }
+    public String getHolderSyncUnmappedWallets() { return holderSyncUnmappedWallets; }
+    public void setHolderSyncUnmappedWallets(String holderSyncUnmappedWallets) { this.holderSyncUnmappedWallets = holderSyncUnmappedWallets; }
+    public Instant getLastSuccessfulHolderSyncAt() { return lastSuccessfulHolderSyncAt; }
+    public void setLastSuccessfulHolderSyncAt(Instant lastSuccessfulHolderSyncAt) { this.lastSuccessfulHolderSyncAt = lastSuccessfulHolderSyncAt; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

@@ -4,7 +4,6 @@ import de.makibytes.registerwerk.asset.internal.HolderService;
 import de.makibytes.registerwerk.asset.internal.LiveHolderService;
 import de.makibytes.registerwerk.blockchain.api.WhitelistService;
 import de.makibytes.registerwerk.externalref.ExternalRefApi;
-import de.makibytes.registerwerk.indexer.IndexerApi;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.customer.api.ExternalReferenceSubjectType;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
@@ -27,7 +26,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -43,7 +41,6 @@ public class HolderController {
     private final HolderService holderService;
     private final LiveHolderService liveHolderService;
     private final WhitelistService whitelistService;
-    private final IndexerApi holderDataService;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final HolderMapper holderMapper;
     private final ExternalRefApi companyExternalReferenceService;
@@ -52,14 +49,12 @@ public class HolderController {
             HolderService holderService,
             LiveHolderService liveHolderService,
             WhitelistService whitelistService,
-            IndexerApi holderDataService,
             AssetDeploymentRepository assetDeploymentRepository,
             HolderMapper holderMapper,
             ExternalRefApi companyExternalReferenceService) {
         this.holderService = holderService;
         this.liveHolderService = liveHolderService;
         this.whitelistService = whitelistService;
-        this.holderDataService = holderDataService;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.holderMapper = holderMapper;
         this.companyExternalReferenceService = companyExternalReferenceService;
@@ -232,31 +227,8 @@ public class HolderController {
         return ResponseEntity.ok(liveHolders);
     }
 
-    /**
-     * Manually refresh holder data from blockchain for a specific asset.
-     * Only the asset owner (issuer) or registry admin can trigger this.
-     *
-     * <p>Path: POST /api/v1/assets/{assetId}/holders/refresh
-     */
-    @PostMapping("/refresh")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
-    public ResponseEntity<Map<String, Object>> refreshAssetHolders(
-            @PathVariable UUID assetId,
-            Authentication auth) {
-        try {
-            holderDataService.manualRefreshIssuance(assetId.toString());
-            return ResponseEntity.ok(Map.of(
-                "status", "success",
-                "message", "Holder data refresh initiated for asset " + assetId
-            ));
-        } catch (Exception e) {
-            log.error("Failed to refresh holders for asset {}: {}", assetId, e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
-                "status", "error",
-                "message", "Failed to refresh holder data: " + e.getMessage()
-            ));
-        }
-    }
+    // POST /refresh (manual holder sync) lives in indexer.web.HolderSyncController (T2-18): an
+    // asset -> indexer dependency here would close a module cycle with indexer -> lending -> asset.
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

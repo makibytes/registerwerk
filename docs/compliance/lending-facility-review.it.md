@@ -41,6 +41,36 @@ I risultati sono classificati **P0** (è necessario correggere o ottenere l'appr
 
 ---
 
+## Revisione di fase 2 (2026-09) — parametri di rischio per i nuovi mercati { #phase-2-review-2026-09-risk-parameters-for-new-markets }
+
+Questa sezione sostituisce le indicazioni sui parametri riportate più sotto, dove differiscono.
+
+- **Limite di deviazione.** `RegisterwerkNavOracle` limita ora il movimento cumulato per asset
+  entro una finestra di deviazione (un giorno per impostazione predefinita), non solo il passo
+  rispetto alla quotazione precedente. `setMaxDeviationBps` può solo **ridurre** il limite; un
+  limite più alto richiede un nuovo oracolo e nuovi mercati. A ciascun asset può essere assegnata
+  una propria org di invio (`setAssetPusher`); in assenza di assegnazione invia solo l'org
+  operatrice dell'oracolo.
+- **LLTV e bonus.** Scegliere `lltvBps × (1 + liquidationBonusBps) ≤ 1 − maxDeviationBps`
+  dell'oracolo del mercato. Il costruttore del mercato e la registrazione nel backend rifiutano
+  altri valori. Con la tolleranza predefinita del 20 % e un bonus del 5 %, la LLTV è al massimo
+  del 76,19 %; la demo usa il 75 % e il 74 %.
+- **Valuta di quotazione.** Distribuire un oracolo per token di prestito; un mercato rifiuta un
+  oracolo quotato in un altro token.
+- **Finestra di tolleranza.** Una liquidazione su una quotazione non aggiornata (entro
+  `liquidationGracePeriodSeconds`) è limitata a un close factor del 50 % per chiamata.
+- **Unità intere.** Le liquidazioni vendono unità di garanzia intere, arrotondate per eccesso; la
+  parte del pagamento oltre il debito spetta al mutuatario come eccedenza in contanti
+  riscuotibile.
+- **Riconciliazione (rilievo 5).** `reconcileCollateral` richiede ora `repo-markets.reconcile`,
+  detenuto dall'org operatrice del mercato, ed è limitata dalla garanzia di cui è stata
+  effettivamente osservata l'uscita dal mercato. La configurazione del mercato usa
+  `repo-markets.configure`; le riserve vanno solo alla tesoreria fissa del mercato.
+
+I mercati già registrati che non superano questi controlli sono contrassegnati come
+`riskParametersLegacy`: rimborso, riscossione e prelievo restano disponibili, nuovi prestiti e
+nuovi depositi non vengono offerti.
+
 ## P0 — è necessario correggere o ottenere l'approvazione prima della produzione { #p0-must-fix-or-get-sign-off-before-production }
 
 ### 1. Interruttore automatico per la deviazione del prezzo dell'oracolo (risolto) { #1-oracle-price-deviation-circuit-breaker-fixed }
@@ -94,6 +124,9 @@ restrizioni sulla reipotecazione che un semplice prestito garantito in contanti 
 | `LU_CSSF` | CSSF | Regole CSSF su custode/depositario in materia di reipotecazione | Non esaminato |
 | `FR_AMF` | AMF | Restrizioni CMF sul teneur de compte-conservation | Non esaminato |
 | `LI_TVTG` | FMA | Segregazione della custodia del token-container ai sensi del TVTG | Non esaminato |
+| Lato prestatore (tutte le giurisdizioni) | BaFin / autorità nazionale competente | AML/KYC dei fornitori di liquidità; MiCAR art. 50 (nessun interesse sugli EMT); autorizzazione CASP o attività di raccolta depositi ai sensi del KWG per `EwpgRepoMarket.supply` / quote di `EwpgRepoVault` | Non esaminato — sospeso (PARK-T2-20) |
+
+`EwpgRepoMarket.supply`/`withdraw` e l'`EwpgRepoVault` ERC-4626 (con quote trasferibili) non sono limitati da permessi né da claim, quindi qualsiasi wallet può depositare stablecoin e ottenere rendimento. Se questo lato prestatore sia un'attività regolamentata dell'operatore e se su depositi di EMT possa essere pagato un rendimento è sospeso in attesa del parere legale (PARK-T2-20). L'impostazione predefinita raccomandata è limitare il deposito con `repo-markets.supply` più un claim AML, lasciando i prelievi aperti ai fornitori esistenti. Fino alla decisione, il portale clienti non presenta più Supply & Earn come privo di KYC e indica che l'idoneità lato prestatore è in revisione legale.
 
 **Nessun ulteriore irrobustimento del contratto può sostituire questo punto.** Questo risultato viene riportato
 invariato — è esplicitamente fuori ambito per un passaggio di conformità limitato al codice e richiede un

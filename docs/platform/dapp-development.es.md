@@ -50,6 +50,42 @@ Los identificadores de permiso son `keccak256("<your-slug>.<action>")`. Su slug 
 espacio de nombres: los manifiestos que declaran permisos fuera de `<slug>.*` se rechazan a menos
 que el código ya exista como permiso de la plataforma.
 
+### Vincular una instancia a su organización operadora { #binding-an-instance-to-its-operating-org }
+
+Las concesiones de permisos son **de toda la organización**: una concesión de `loandesk.sweep`
+permite a los monederos de la organización ejecutar esa acción en *cualquier* instancia desplegada
+de la dApp, incluidos desks, vaults o mercados operados por otra organización. El permiso del slug
+indica *qué* puede hacer una organización; no indica *de quién* es la instancia. Por ello, una
+instancia de dApp que custodia valores o configuración de una organización debe vincularse a esa
+organización y proteger sus funciones privilegiadas con `requiresOrgPermission`:
+
+```solidity
+contract LoanDesk is RegisterwerkGated {
+    bytes32 public constant SWEEP = keccak256("loandesk.sweep");
+    address public immutable operatorOrg;
+
+    constructor(IPermissionOracle oracle_, address operatorOrg_) RegisterwerkGated(oracle_) {
+        _requireOrg(operatorOrg_); // reverts ZeroOperatingOrg()
+        operatorOrg = operatorOrg_;
+    }
+
+    function sweep() external requiresOrgPermission(operatorOrg, SWEEP) { /* ... */ }
+}
+```
+
+- `requiresOrgPermission(address org, bytes32 permission)` — el monedero de quien llama debe estar
+  vinculado a `org` (se comprueba primero; revierte con `WrongOperatingOrg(wallet, expectedOrg)`)
+  **y** poseer `permission` (revierte con `PermissionDenied`). `org == address(0)` nunca coincide.
+- `_checkOrgPermission(wallet, org, permission)` — la misma comprobación como función interna, para
+  instancias cuya organización operadora se determina dentro de la función (por ejemplo, por activo).
+- `_requireOrg(org)` — guarda para constructor/setter que revierte con `ZeroOperatingOrg()`.
+
+Use la vinculación para toda acción que mueva fondos o inventario de la instancia o cambie su
+configuración. Solo las acciones que la dApp abre deliberadamente a miembros de otras
+organizaciones permanecen en `requiresPermission` simple. Exponga la organización vinculada como getter público (`operatorOrg()`)
+para que operadores y consumidores vean quién opera una instancia atestiguada. No hace falta ningún
+cambio en PermissionRegistry: las concesiones siguen siendo por slug.
+
 Un ejemplo mínimo ejecutable se encuentra en `contracts/test/ecosystem/SampleGatedDapp.t.sol`. Para
 dos dApps de referencia completamente empaquetadas y listas para el mercado — incluida una
 integración real con ERC-3643 (T-REX) — consulte [dApps de ejemplo de referencia](#reference-example-dapps)
@@ -144,6 +180,21 @@ Consulte su NatSpec para la advertencia sobre el depósito en garantía de ERC-3
 T-REX exigen que el ONCHAINID del contrato de liquidación esté verificado en el registro de
 identidad antes de poder depositarse en garantía — bloquear en su lugar la pata de pago evita
 este requisito para los valores tokenizados).
+
+Los identificadores de operación se derivan, no se eligen: `lockAsset`/`lockPayment` reciben la
+`clientRef` propia de quien bloquea (por ejemplo, un identificador de RFQ) y devuelven
+`tradeId = keccak256(abi.encode(chainid, dvp, locker, clientRef))` (también disponible como
+`tradeIdFor(locker, clientRef)`), de modo que nadie puede ocupar el identificador de una operación
+que otra parte está a punto de bloquear. La contraparte liquida con
+`settle(tradeId, expectedTermsHash)`, donde `expectedTermsHash` es `hashTerms(seller, buyer,
+assetToken, assetAmount, paymentToken, paymentAmount, lockedLeg, expiry)` calculado a partir de **su
+propio registro del acuerdo pactado**. No lea el hash de `termsHashOf(tradeId)` para reenviarlo: eso
+solo repite lo que almacenó quien bloqueó. Si los términos almacenados difieren, `settle` revierte
+con `TermsMismatch` y no mueve nada. `settle` también revierte con `PartyFrozen` mientras el token
+del activo (si responde a `isFrozen(address)`, como T-REX) indique que el vendedor o el comprador
+están congelados; el depósito en garantía permanece entonces en su sitio hasta que se levante la
+congelación, se cancele la operación o el operador lo libere en virtud de una orden legal con
+`forceCancel(tradeId, to, legalBasis)` (evento `TradeForceCancelled`).
 
 ## Flujo de trabajo de publicación { #publication-workflow }
 
@@ -264,6 +315,10 @@ en vivo):
   liquida cada operación a través del `DvpSettlement` anterior, sin modificar y sin
   restricciones, y sus ejecuciones sirven a la vez como fuente de precios para
   `EwpgRepoFacility.updatePrice`. Pruebas: `contracts/test/examples/CompliantSecondaryMarket.t.sol`.
+  Cada instancia de la mesa está vinculada a su organización operadora (`operatorOrg`, un argumento
+  del constructor): otra organización nominee con la misma concesión `secondary-market.trade`
+  revierte con `WrongOperatingOrg` en esta instancia. `reclaimExpired(tradeId)` devuelve al pool un
+  depósito de inventario expirado y no liquidado, ya que el contrato de la mesa es quien bloqueó.
 - `contracts/src/examples/StablecoinAmm.sol` — un AMM mínimo de producto constante restringido a
   pares exclusivamente de stablecoins, deliberadamente **no** `RegisterwerkGated` (véase su
   NatSpec para saber por qué). Pruebas: `contracts/test/examples/StablecoinAmm.t.sol`.

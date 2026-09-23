@@ -52,6 +52,42 @@ Permission-IDs sind `keccak256("<ihr-slug>.<aktion>")`. Ihr Marktplatz-Slug ist 
 Manifeste, die Berechtigungen außerhalb von `<slug>.*` deklarieren, werden abgelehnt, es sei denn,
 der Code existiert bereits als Plattformberechtigung.
 
+### Eine Instanz an ihre betreibende Organisation binden { #binding-an-instance-to-its-operating-org }
+
+Berechtigungen gelten **organisationsweit**: Eine Gewährung von `loandesk.sweep` erlaubt den Wallets
+der Organisation diese Aktion auf *jeder* bereitgestellten Instanz der dApp, einschließlich Desks,
+Vaults oder Märkten, die eine andere Organisation betreibt. Die Slug-Berechtigung sagt, *was* eine
+Organisation tun darf, aber nicht, *wessen* Instanz es ist. Eine dApp-Instanz, die Werte oder
+Konfiguration einer Organisation hält, muss sich deshalb an diese Organisation binden und ihre
+privilegierten Funktionen mit `requiresOrgPermission` absichern:
+
+```solidity
+contract LoanDesk is RegisterwerkGated {
+    bytes32 public constant SWEEP = keccak256("loandesk.sweep");
+    address public immutable operatorOrg;
+
+    constructor(IPermissionOracle oracle_, address operatorOrg_) RegisterwerkGated(oracle_) {
+        _requireOrg(operatorOrg_); // reverts ZeroOperatingOrg()
+        operatorOrg = operatorOrg_;
+    }
+
+    function sweep() external requiresOrgPermission(operatorOrg, SWEEP) { /* ... */ }
+}
+```
+
+- `requiresOrgPermission(address org, bytes32 permission)` — die Wallet des Aufrufers muss an
+  `org` gebunden sein (wird zuerst geprüft, revertiert mit `WrongOperatingOrg(wallet, expectedOrg)`)
+  **und** `permission` besitzen (revertiert mit `PermissionDenied`). `org == address(0)` passt nie.
+- `_checkOrgPermission(wallet, org, permission)` — dieselbe Prüfung als interne Funktion, für
+  Instanzen, deren betreibende Organisation erst in der Funktion ermittelt wird (z. B. pro Asset).
+- `_requireOrg(org)` — Guard für Konstruktor/Setter, revertiert mit `ZeroOperatingOrg()`.
+
+Verwenden Sie die Bindung für jede Aktion, die Mittel oder Bestände der Instanz bewegt oder ihre
+Konfiguration ändert. Nur Aktionen, die die dApp bewusst für Mitglieder anderer Organisationen
+öffnet, bleiben bei einfachem `requiresPermission`. Stellen Sie die gebundene Organisation als öffentlichen Getter
+(`operatorOrg()`) bereit, damit Betreiber und Konsumenten sehen, wer eine bescheinigte Instanz
+betreibt. Eine Änderung an der PermissionRegistry ist nicht nötig: Gewährungen bleiben pro Slug.
+
 Ein minimal lauffähiges Beispiel liegt in `contracts/test/ecosystem/SampleGatedDapp.t.sol`. Zwei
 vollständig verpackte, marktreife Referenz-dApps — einschließlich einer echten ERC-3643-(T-REX)-
 Integration — finden Sie unten unter [Referenz-Beispiel-dApps](#reference-example-dapps).
@@ -145,6 +181,21 @@ beide Seiten atomar, oder der Handel läuft ab und die sperrende Partei erhält 
 zurück. Siehe die NatSpec für den ERC-3643-Escrow-Vorbehalt (T-REX-Token erfordern, dass die
 ONCHAINID des Abwicklungsvertrags im Identitätsregister verifiziert ist, bevor sie treuhänderisch
 verwahrt werden können — die Sperrung der Zahlungsseite umgeht dies bei Wertpapier-Token).
+
+Handels-IDs werden abgeleitet, nicht gewählt: `lockAsset`/`lockPayment` erhalten die eigene
+`clientRef` der sperrenden Partei (z. B. eine RFQ-ID) und geben `tradeId = keccak256(abi.encode(chainid,
+dvp, locker, clientRef))` zurück (auch über `tradeIdFor(locker, clientRef)` abrufbar). Niemand kann
+also die ID eines Handels besetzen, den eine andere Partei gleich sperren will. Die Gegenpartei
+wickelt mit `settle(tradeId, expectedTermsHash)` ab. `expectedTermsHash` ist `hashTerms(seller, buyer,
+assetToken, assetAmount, paymentToken, paymentAmount, lockedLeg, expiry)`, berechnet aus **ihrer
+eigenen Aufzeichnung des vereinbarten Geschäfts**. Lesen Sie den Hash nicht aus `termsHashOf(tradeId)`
+zurück, um ihn weiterzureichen: Das gibt nur wieder, was die sperrende Partei gespeichert hat.
+Weichen die gespeicherten Konditionen ab, bricht `settle` mit `TermsMismatch` ab und bewegt nichts.
+`settle` bricht außerdem mit `PartyFrozen` ab, solange der Asset-Token (sofern er `isFrozen(address)`
+beantwortet, wie T-REX) Verkäufer oder Käufer als eingefroren meldet. Die Hinterlegung bleibt dann
+bestehen, bis die Sperre aufgehoben, der Handel storniert oder die Hinterlegung vom Betreiber auf
+behördliche oder gerichtliche Anordnung mit `forceCancel(tradeId, to, legalBasis)` freigegeben wird
+(Ereignis `TradeForceCancelled`).
 
 ## Veröffentlichungsworkflow { #publication-workflow }
 
@@ -264,6 +315,11 @@ als Live-Marktplatzeinträge gesät):
   über den oben genannten unveränderten, ungated `DvpSettlement` ab, und seine Abschlüsse dienen
   zugleich als Preisfeed für `EwpgRepoFacility.updatePrice`. Tests:
   `contracts/test/examples/CompliantSecondaryMarket.t.sol`.
+  Jede Schalterinstanz ist an ihre betreibende Organisation gebunden (`operatorOrg`, ein
+  Konstruktorargument): Eine andere Nominee-Organisation mit derselben Berechtigung
+  `secondary-market.trade` scheitert an dieser Instanz mit `WrongOperatingOrg`.
+  `reclaimExpired(tradeId)` führt eine abgelaufene, nicht abgewickelte Bestandshinterlegung in den
+  Pool zurück, da der Schaltervertrag die sperrende Partei ist.
 - `contracts/src/examples/StablecoinAmm.sol` — ein minimales Constant-Product-AMM, beschränkt auf
   reine Stablecoin-Paare, bewusst **nicht** `RegisterwerkGated` (siehe die NatSpec für den Grund).
   Tests: `contracts/test/examples/StablecoinAmm.t.sol`.

@@ -46,6 +46,34 @@ akzeptable MVP-Grenze oder erfordert eine größere Designänderung, als im Umfa
 
 ---
 
+## Phase-2-Überprüfung (2026-09) — Risikoparameter für neue Märkte { #phase-2-review-2026-09-risk-parameters-for-new-markets }
+
+Dies ersetzt die Parameterhinweise unten, wo sie abweichen.
+
+- **Abweichungsgrenze.** `RegisterwerkNavOracle` begrenzt jetzt die kumulierte Bewegung je Asset
+  innerhalb eines Abweichungsfensters (Standard: ein Tag), nicht nur den Schritt zur vorherigen
+  Marke. `setMaxDeviationBps` kann die Grenze nur **senken**; eine höhere Grenze erfordert ein
+  neues Oracle und neue Märkte. Jedem Asset kann eine eigene Pusher-Org zugewiesen werden
+  (`setAssetPusher`); ohne Zuweisung pusht nur die Betreiber-Org des Oracles.
+- **LLTV und Bonus.** Wählen Sie `lltvBps × (1 + liquidationBonusBps) ≤ 1 − maxDeviationBps` des
+  Oracles des Markts. Der Marktkonstruktor und die Backend-Registrierung lehnen andere Werte ab.
+  Bei der Standardtoleranz von 20 % und 5 % Bonus beträgt die LLTV höchstens 76,19 %; die Demo
+  verwendet 75 % und 74 %.
+- **Quotierungswährung.** Deployen Sie ein Oracle je Darlehenstoken; ein Markt lehnt ein Oracle
+  ab, das in einem anderen Token quotiert.
+- **Kulanzfenster.** Eine Liquidation auf einer veralteten Marke (innerhalb von
+  `liquidationGracePeriodSeconds`) ist je Aufruf auf einen Close Factor von 50 % begrenzt.
+- **Ganze Einheiten.** Liquidationen verkaufen ganze Sicherheitseinheiten, aufgerundet; der Teil
+  der Zahlung über der Schuld steht dem Kreditnehmer als abrufbarer Barüberschuss zu.
+- **Abstimmung (Befund 5).** `reconcileCollateral` erfordert jetzt `repo-markets.reconcile`,
+  gehalten von der Betreiber-Org des Markts, und ist durch die tatsächlich beobachtet aus dem
+  Markt abgeflossenen Sicherheiten begrenzt. Die Marktkonfiguration verwendet
+  `repo-markets.configure`; Reserven gehen nur an die feste Treasury des Markts.
+
+Bereits registrierte Märkte, die diese Prüfungen nicht bestehen, werden als
+`riskParametersLegacy` gekennzeichnet: Rückzahlung, Abruf und Abhebung bleiben verfügbar, neue
+Kreditaufnahme und neue Einlagen werden nicht angeboten.
+
 ## P0 — muss behoben werden oder vor der Produktion freigegeben werden { #p0-must-fix-or-get-sign-off-before-production }
 
 ### 1. Leistungsschalter für Oracle-Preisabweichung (behoben) { #1-oracle-price-deviation-circuit-breaker-fixed }
@@ -100,6 +128,9 @@ auslöst.
 | `LU_CSSF` | CSSF | CSSF-Depotbank-/Verwahrstellenregeln zur Weiterverpfändung | Ungeprüft |
 | `FR_AMF` | AMF | CMF-Beschränkungen für den teneur de compte-conservation | Ungeprüft |
 | `LI_TVTG` | FMA | TVTG-Verwahrungstrennung für Token-Container | Ungeprüft |
+| Kreditgeberseite (alle Jurisdiktionen) | BaFin / nationale zuständige Behörde | AML/KYC der Einleger; MiCAR Art. 50 (keine Zinsen auf EMTs); CASP-Zulassung bzw. KWG-Einlagengeschäft für `EwpgRepoMarket.supply` / `EwpgRepoVault`-Anteile | Ungeprüft — zurückgestellt (PARK-T2-20) |
+
+`EwpgRepoMarket.supply`/`withdraw` und der ERC-4626-`EwpgRepoVault` (mit übertragbaren Anteilen) sind weder über Berechtigungen noch über Claims beschränkt, sodass jede Wallet Stablecoins einlegen und Rendite erzielen kann. Ob diese Kreditgeberseite eine regulierte Tätigkeit des Betreibers ist und ob auf EMT-Einlagen überhaupt Rendite gezahlt werden darf, ist für die Rechtsberatung zurückgestellt (PARK-T2-20). Empfohlener Standard ist, das Einlegen an `repo-markets.supply` plus einen AML-Claim zu knüpfen, während Auszahlungen für bestehende Einleger offen bleiben. Bis zur Entscheidung beschreibt das Kundenportal Supply & Earn nicht mehr als „ohne KYC“, sondern weist darauf hin, dass die Zulässigkeit auf Kreditgeberseite rechtlich geprüft wird.
 
 **Keine weitere Vertragshärtung ersetzt dies.** Dieser Befund wird unverändert fortgeführt – er liegt
 ausdrücklich außerhalb des Anwendungsbereichs einer rein codebasierten Compliance-Prüfung und erfordert

@@ -47,12 +47,20 @@ import "../ecosystem/interfaces/IPermissionOracle.sol";
 ///      auditable — a reserve factor is a natural, isolated extension for a production
 ///      deployment. Liquidation is full-close-factor only (an unhealthy position is repaid
 ///      in full by the liquidator in one call) for tractability; partial liquidation is a
-///      possible future refinement.
+///      possible future refinement. A full close caps the seizure at the debt plus bonus, so
+///      any collateral beyond that stays credited to the (now debt-free) position and the
+///      borrower takes it out with {claimCollateral} — it is never pushed to the borrower
+///      inside {liquidate}, so a borrower whose token eligibility lapsed cannot block it.
+///
+///      Operator functions are bound to this instance's {operatorOrg}: a same-slug grant held
+///      by another org does not reach them. Price marks use their own `repo-facility.price`
+///      code, so a routine price pusher does not also hold `repo-facility.configure`.
 contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     bytes32 public constant BORROW = keccak256("repo-facility.borrow");
     bytes32 public constant CONFIGURE = keccak256("repo-facility.configure");
+    bytes32 public constant PRICE = keccak256("repo-facility.price");
     uint256 public constant TOPIC_KYC = 1;
 
     uint256 private constant WAD = 1e18;
@@ -66,6 +74,11 @@ contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
 
     /// @notice The stablecoin lenders supply and borrowers draw against pledged collateral.
     IERC20 public immutable paymentToken;
+
+    /// @notice The org operating this instance. {setCollateralConfig} and {updatePrice}
+    ///         require the caller's wallet to be bound to this org (see
+    ///         {RegisterwerkGated-requiresOrgPermission}).
+    address public immutable operatorOrg;
 
     struct CollateralConfig {
         uint256 pricePerUnit; // paymentToken base units per 1 collateral unit
@@ -113,6 +126,7 @@ contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
         uint256 debtRepaid,
         uint256 collateralSeized
     );
+    event CollateralClaimed(address indexed borrower, address indexed collateralToken, uint256 amount);
 
     error ZeroAddress();
     error ZeroAmount();
@@ -123,10 +137,13 @@ contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
     error PositionHealthy(address borrower, address collateralToken);
     error NoOutstandingDebt();
     error InsufficientShares();
+    error OutstandingDebt();
 
-    constructor(IPermissionOracle oracle_, IERC20 paymentToken_) RegisterwerkGated(oracle_) {
+    constructor(IPermissionOracle oracle_, IERC20 paymentToken_, address operatorOrg_) RegisterwerkGated(oracle_) {
         if (address(paymentToken_) == address(0)) revert ZeroAddress();
+        _requireOrg(operatorOrg_);
         paymentToken = paymentToken_;
+        operatorOrg = operatorOrg_;
         lastAccrualTimestamp = block.timestamp;
     }
 
@@ -167,7 +184,10 @@ contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
 
     /// @notice Enables (or updates) a collateral asset. `maxLtvBps` must be strictly below
     ///         `liquidationThresholdBps`, which must not exceed 100%, so a freshly-originated
-    ///         position always starts healthy with room before liquidation.
+    ///         position always starts healthy with room before liquidation. In addition
+    ///         `liquidationThresholdBps × (1 + liquidationBonusBps)` must stay below 100%: a
+    ///         position that just crossed the threshold must still cover debt plus bonus, or
+    ///         liquidating it would hand the shortfall to the lenders as bad debt.
     function setCollateralConfig(
         address token,
         uint256 pricePerUnit,
@@ -175,10 +195,14 @@ contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
         uint256 liquidationThresholdBps,
         uint256 liquidationBonusBps,
         bool enabled
-    ) external requiresPermission(CONFIGURE) {
+    ) external requiresOrgPermission(operatorOrg, CONFIGURE) {
         if (token == address(0)) revert ZeroAddress();
         if (enabled && pricePerUnit == 0) revert ZeroAmount();
-        if (maxLtvBps >= liquidationThresholdBps || liquidationThresholdBps > BPS_DENOMINATOR) {
+        if (
+            maxLtvBps >= liquidationThresholdBps || liquidationThresholdBps > BPS_DENOMINATOR
+                || liquidationThresholdBps * (BPS_DENOMINATOR + liquidationBonusBps)
+                    >= BPS_DENOMINATOR * BPS_DENOMINATOR
+        ) {
             revert InvalidThresholds();
         }
         collateralConfigs[token] =
@@ -188,8 +212,8 @@ contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
 
     /// @notice Pushes a fresh price mark for an already-enabled collateral asset — e.g. from
     ///         an operator NAV feed or the last executed fill on a {CompliantSecondaryMarket}
-    ///         desk trading the same token.
-    function updatePrice(address token, uint256 pricePerUnit) external requiresPermission(CONFIGURE) {
+    ///         desk trading the same token. Uses its own `repo-facility.price` code.
+    function updatePrice(address token, uint256 pricePerUnit) external requiresOrgPermission(operatorOrg, PRICE) {
         CollateralConfig storage cfg = collateralConfigs[token];
         if (!cfg.enabled) revert CollateralNotEnabled(token);
         if (pricePerUnit == 0) revert ZeroAmount();
@@ -267,10 +291,26 @@ contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
         emit Repaid(msg.sender, collateralToken, repayAmount, collateralReturned);
     }
 
+    /// @notice Releases the collateral of a zero-debt position — what a full-close {liquidate}
+    ///         leaves credited after seizing debt plus bonus, since {repay} reverts once there
+    ///         is no debt. Not gated by {RegisterwerkGated}, like {repay}: the token's own
+    ///         transfer checks gate the transfer back to the caller.
+    function claimCollateral(address collateralToken) external nonReentrant returns (uint256 amount) {
+        Position storage pos = positions[msg.sender][collateralToken];
+        if (pos.scaledDebt != 0) revert OutstandingDebt();
+        amount = pos.collateralAmount;
+        if (amount == 0) revert ZeroAmount();
+
+        pos.collateralAmount = 0;
+        IERC20(collateralToken).safeTransfer(msg.sender, amount);
+        emit CollateralClaimed(msg.sender, collateralToken, amount);
+    }
+
     /// @notice Permissionless liquidation of an under-collateralized position (health factor
     ///         below 1.0): the caller repays the position's full outstanding debt and
     ///         receives its collateral plus the configured liquidation bonus, capped at the
-    ///         collateral actually held. Not gated by {RegisterwerkGated} — see the
+    ///         collateral actually held. Collateral beyond the seizure stays credited to the
+    ///         position for {claimCollateral}. Not gated by {RegisterwerkGated} — see the
     ///         contract-level NatSpec for why an unverified caller cannot actually succeed.
     function liquidate(address borrower, address collateralToken)
         external

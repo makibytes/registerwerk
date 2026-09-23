@@ -121,6 +121,13 @@ async function verifyCustomer() {
       await assertVisualFoundation(page, `customer ${path}`);
     }
 
+    // PARK-T2-20 interim: the lender side must not be advertised as KYC-free while it is under legal review.
+    await visit(page, customerUrl, '/lending/supply', 'Lender-side eligibility is under legal review');
+    for (const path of ['/lending', '/lending/supply']) {
+      await visit(page, customerUrl, path, path === '/lending' ? 'Securities-backed Lending' : 'Supply & Earn');
+      assert.ok(!/no KYC/i.test(await page.locator('body').innerText()), `${path} must not advertise "no KYC"`);
+    }
+
     await visit(page, customerUrl, '/repo-desk', 'Repo Desk');
     await page.locator('[aria-label="Repo Desk summary"]').waitFor({ state: 'visible' });
     assert.equal(await page.locator('[aria-label="Repo Desk summary"] > div').count(), 4);

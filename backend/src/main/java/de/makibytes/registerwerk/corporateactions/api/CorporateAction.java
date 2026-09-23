@@ -30,9 +30,14 @@ public class CorporateAction {
      *  {@code ANNOUNCED}, joining the existing pipeline unchanged) or rejects it (→
      *  {@code REJECTED}, terminal — distinct from {@code CANCELLED}, which means "was live, then
      *  killed"). System-raised COUPON/REDEMPTION skip {@code PROPOSED} entirely and start at
-     *  {@code ANNOUNCED} exactly as before. */
+     *  {@code ANNOUNCED} exactly as before.
+     *
+     *  <p>{@code SNAPSHOT_BLOCKED} (T2-18): the record date was reached but the asset's register was
+     *  not reconciled (holder sync BLOCKED, or last successful sync before the record date), so the
+     *  entitlement snapshot was refused instead of being taken from a stale register. The daily
+     *  job retries it; the reason is in {@code snapshotBlockedReason}. */
     public enum Status {
-        PROPOSED, ANNOUNCED, RECORD_DATE_SET, COMPUTED, AWAITING_SETTLEMENT, SETTLED, CLOSED, CANCELLED, REJECTED
+        PROPOSED, ANNOUNCED, SNAPSHOT_BLOCKED, RECORD_DATE_SET, COMPUTED, AWAITING_SETTLEMENT, SETTLED, CLOSED, CANCELLED, REJECTED
     }
 
     @Id
@@ -127,6 +132,10 @@ public class CorporateAction {
     @Column(name = "notes")
     private String notes;
 
+    /** Why the record-date snapshot is refused while {@code status = SNAPSHOT_BLOCKED}; cleared once taken. */
+    @Column(name = "snapshot_blocked_reason")
+    private String snapshotBlockedReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -186,6 +195,8 @@ public class CorporateAction {
     public void setIssuerAttestationRef(String v) { this.issuerAttestationRef = v; }
     public String getNotes() { return notes; }
     public void setNotes(String v) { this.notes = v; }
+    public String getSnapshotBlockedReason() { return snapshotBlockedReason; }
+    public void setSnapshotBlockedReason(String v) { this.snapshotBlockedReason = v; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }
