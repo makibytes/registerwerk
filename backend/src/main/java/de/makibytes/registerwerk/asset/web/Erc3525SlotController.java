@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.blockchain.web.dto.CreateSlotRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.ForcedValueTransferRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.FreezeTokenRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.MintIntoSlotRequest;
+import de.makibytes.registerwerk.blockchain.web.dto.SftHolderRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.TxSubmissionResponse;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.SecurityUtils;
@@ -108,6 +109,44 @@ public class Erc3525SlotController {
     public ResponseEntity<TxSubmissionResponse> unfreezeToken(
             @PathVariable UUID depId, @PathVariable BigInteger tokenId, Authentication auth) {
         UUID txId = erc3525AdminService.unfreezeToken(depId, tokenId,
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
+    }
+
+    // ── Holder (address) controls ────────────────────────────────────────────
+    // Same step-up policy as TokenAdminController's /whitelist and /freeze (none — reversible).
+
+    @PostMapping("/holders/whitelist")
+    public ResponseEntity<TxSubmissionResponse> whitelistHolder(
+            @PathVariable UUID depId, @Valid @RequestBody SftHolderRequest request, Authentication auth) {
+        UUID txId = erc3525AdminService.whitelistAddress(depId, request.address(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
+    }
+
+    @PostMapping("/holders/unwhitelist")
+    public ResponseEntity<TxSubmissionResponse> unwhitelistHolder(
+            @PathVariable UUID depId, @Valid @RequestBody SftHolderRequest request, Authentication auth) {
+        UUID txId = erc3525AdminService.unwhitelistAddress(depId, request.address(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
+    }
+
+    @PostMapping("/holders/freeze")
+    public ResponseEntity<TxSubmissionResponse> freezeHolder(
+            @PathVariable UUID depId, @Valid @RequestBody SftHolderRequest request, Authentication auth) {
+        if (request.reason() == null || request.reason().isBlank()) {
+            throw new IllegalArgumentException("reason is required to freeze an address");
+        }
+        UUID txId = erc3525AdminService.freezeAddress(depId, request.address(), request.reason(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
+    }
+
+    @PostMapping("/holders/unfreeze")
+    public ResponseEntity<TxSubmissionResponse> unfreezeHolder(
+            @PathVariable UUID depId, @Valid @RequestBody SftHolderRequest request, Authentication auth) {
+        UUID txId = erc3525AdminService.unfreezeAddress(depId, request.address(),
                 SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }

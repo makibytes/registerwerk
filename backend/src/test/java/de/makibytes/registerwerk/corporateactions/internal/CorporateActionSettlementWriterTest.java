@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettledEvent;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementBlockedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -93,5 +94,21 @@ class CorporateActionSettlementWriterTest {
         writer.markSettled(id, "tx-hash");
 
         verify(events, org.mockito.Mockito.never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("a blocked settlement stays AWAITING_SETTLEMENT, notes the reason once and audits it once")
+    void blockedSettlement_notesReasonIdempotently() {
+        UUID id = UUID.randomUUID();
+        CorporateAction ca = actionAwaitingSettlement(id);
+        ca.setNotes("Auto-created from coupon_payment id=x");
+
+        writer.recordSettlementBlocked(id, "rate fixing not wired");
+        writer.recordSettlementBlocked(id, "rate fixing not wired");
+
+        assertThat(ca.getStatus()).isEqualTo(CorporateAction.Status.AWAITING_SETTLEMENT);
+        assertThat(ca.getNotes())
+                .isEqualTo("Auto-created from coupon_payment id=x | settlement blocked: rate fixing not wired");
+        verify(events).publishEvent(new CorporateActionSettlementBlockedEvent(id, "rate fixing not wired"));
     }
 }

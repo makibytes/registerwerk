@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.erc3643.internal;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopic;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopicRepository;
@@ -13,6 +15,7 @@ import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistryRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643SuiteRepository;
+import de.makibytes.registerwerk.shared.Iso3166;
 import jakarta.transaction.Transactional;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -44,6 +47,7 @@ public class IdentityRegistryService {
     private final DurableEvmTransactionGateway evmTransactions;
     private final BlockchainTransactionService blockchainTransactionService;
     private final ApplicationEventPublisher eventPublisher;
+    private final LegalEntityRepository legalEntityRepo;
 
     public IdentityRegistryService(Erc3643IdentityRegistryRepository registryRepo,
                                    Erc3643SuiteRepository suiteRepo,
@@ -52,7 +56,8 @@ public class IdentityRegistryService {
                                     OnChainIdService onChainIdService,
                                     DurableEvmTransactionGateway evmTransactions,
                                     BlockchainTransactionService blockchainTransactionService,
-                                    ApplicationEventPublisher eventPublisher) {
+                                    ApplicationEventPublisher eventPublisher,
+                                    LegalEntityRepository legalEntityRepo) {
         this.registryRepo = registryRepo;
         this.suiteRepo = suiteRepo;
         this.claimTopicRepo = claimTopicRepo;
@@ -61,6 +66,7 @@ public class IdentityRegistryService {
         this.evmTransactions = evmTransactions;
         this.blockchainTransactionService = blockchainTransactionService;
         this.eventPublisher = eventPublisher;
+        this.legalEntityRepo = legalEntityRepo;
     }
 
     /**
@@ -73,7 +79,9 @@ public class IdentityRegistryService {
      * @param walletAddress  investor's on-chain wallet address (checksummed or lowercase)
      * @param legalEntityId  investor's legal entity UUID
      * @param chainConfigId  chain_config row ID (determines which chain ONCHAINID is deployed on)
-     * @param countryCode    ISO-3166-1 numeric country code; null if unknown
+     * @param countryCode    ISO-3166-1 numeric country code; when null it defaults to the legal
+     *                       entity's KYC registration country, and registration is refused if
+     *                       neither yields a code in 1..999
      * @param actorId        ID of the user registering the investor (for audit)
      * @param actorRole      role of the user registering the investor (for audit)
      * @return persisted registry entry
@@ -88,6 +96,7 @@ public class IdentityRegistryService {
                                                      String actorRole) {
         suiteRepo.findById(suiteId)
                 .orElseThrow(() -> new IllegalArgumentException("Suite not found: " + suiteId));
+        short country = resolveCountry(countryCode, legalEntityId);
 
         // Ensure ONCHAINID exists for this entity on the target chain
         OnchainIdentity identity = onChainIdService.getOrCreate(legalEntityId, chainConfigId, actorId, actorRole);
@@ -104,8 +113,6 @@ public class IdentityRegistryService {
                                 "AssetDeployment not found for suite " + suite.getId()));
                 String identityAddr = identity.getIdentityAddress() != null
                         ? identity.getIdentityAddress() : "0x0000000000000000000000000000000000000000";
-                short country = countryCode != null ? countryCode : 0;
-
                 Function fn = new Function(
                         "registerIdentity",
                         java.util.Arrays.asList(
@@ -138,7 +145,7 @@ public class IdentityRegistryService {
                 entry.setSuiteId(suiteId);
                 entry.setWalletAddress(walletAddress.toLowerCase());
                 entry.setOnchainIdentityId(identity.getId());
-                entry.setCountryCode(countryCode);
+                entry.setCountryCode(country);
                 entry.setRegisteredByTx(txHash);
                 entry.setChainConfigId(chainConfigId);
                 Erc3643IdentityRegistry saved = registryRepo.save(entry);
@@ -155,12 +162,31 @@ public class IdentityRegistryService {
         entry.setSuiteId(suiteId);
         entry.setWalletAddress(walletAddress.toLowerCase());
         entry.setOnchainIdentityId(identity.getId());
-        entry.setCountryCode(countryCode);
+        entry.setCountryCode(country);
         entry.setChainConfigId(chainConfigId);
         Erc3643IdentityRegistry saved = registryRepo.save(entry);
         eventPublisher.publishEvent(new InvestorRegisteredEvent(suiteId, actorId, actorRole,
                 java.util.Map.of("walletAddress", walletAddress, "legalEntityId", legalEntityId.toString())));
         return saved;
+    }
+
+    /**
+     * Country 0 means "unknown" on-chain, and the compliance module rejects such a recipient
+     * whenever any country is blocked — so never register one. Falls back to the legal entity's
+     * KYC registration country (ISO alpha-2 → numeric) when the caller supplied none.
+     */
+    private short resolveCountry(Short countryCode, UUID legalEntityId) {
+        Integer resolved = countryCode != null
+                ? Integer.valueOf(countryCode)
+                : legalEntityRepo.findById(legalEntityId)
+                        .map(LegalEntity::getRegistrationCountry)
+                        .flatMap(Iso3166::numericFromAlpha2)
+                        .orElse(null);
+        if (resolved == null || resolved < 1 || resolved > 999) {
+            throw new IllegalArgumentException("countryCode must be an ISO 3166-1 numeric code from 1 to 999"
+                    + (countryCode == null ? " (none given and the legal entity has no known registration country)" : ""));
+        }
+        return resolved.shortValue();
     }
 
     /**

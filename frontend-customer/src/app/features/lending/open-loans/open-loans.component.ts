@@ -8,12 +8,18 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { PageHeaderComponent, DataTableComponent, TableColumn, AsyncSectionStatus } from '@registerwerk/ui';
 import { LendingService } from '../../../core/api/lending.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
-import { erc20Abi, repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
+import {
+  erc20Abi,
+  repoMarketAbi,
+  trexEligibilityAbi,
+  trexIdentityRegistryAbi,
+} from '../../../core/wallet/abi/repo-market.abi';
 import { LendingMarket, LendingPosition } from '../../../core/models';
 import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
 
@@ -35,6 +41,7 @@ interface LoanRow extends LendingPosition {
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
+    MatCheckboxModule,
     MatDialogModule,
     MatSnackBarModule,
     PageHeaderComponent,
@@ -54,6 +61,10 @@ interface LoanRow extends LendingPosition {
           <mat-icon>info_outline</mat-icon>
           Market details are temporarily unavailable; repayment is disabled until you retry.
         </p>
+      }
+
+      @if (claimError) {
+        <p class="error-text" role="alert">{{ claimError }}</p>
       }
 
       <rw-data-table
@@ -80,6 +91,11 @@ interface LoanRow extends LendingPosition {
             <mat-icon>move_up</mat-icon>
             Withdraw excess
           </button>
+        } @else if (hasClaimableCollateral(row)) {
+          <button mat-stroked-button type="button" [disabled]="claimingKey === rowKey(row)" (click)="claimCollateral(row)">
+            <mat-icon>move_down</mat-icon>
+            @if (claimingKey === rowKey(row)) { Claiming… } @else { Claim collateral }
+          </button>
         }
       </ng-template>
 
@@ -92,6 +108,21 @@ interface LoanRow extends LendingPosition {
             <input matInput type="number" [min]="minimumAmount(data.row)" [step]="minimumAmount(data.row)"
                    [max]="outstandingAmount(data.row)" [(ngModel)]="repayAmount" />
           </mat-form-field>
+          @if (collateralReleaseBlocker) {
+            <p class="warning-text" role="status">
+              <mat-icon>info_outline</mat-icon>
+              {{ collateralReleaseBlocker }}
+            </p>
+            <mat-checkbox [(ngModel)]="repayKeepCollateral" [disabled]="repaying">
+              Repay without withdrawing collateral
+            </mat-checkbox>
+            @if (repayKeepCollateral) {
+              <p class="hint-text">
+                Your collateral stays pledged. Once the loan is fully repaid and the collateral token
+                accepts your wallet again, use "Claim collateral" to take it back.
+              </p>
+            }
+          }
           @if (repayError) {
             <p class="error-text">{{ repayError }}</p>
           }
@@ -137,7 +168,8 @@ interface LoanRow extends LendingPosition {
     .full-width { width: 100%; margin-top: 8px; }
     .error-text { color: #dc2626; font-size: 12.5px; }
     .warning-text { display: flex; align-items: center; gap: 7px; color: var(--rw-text-warning); font-size: 12px; }
-    .warning-text mat-icon { font-size: 16px; height: 16px; width: 16px; }
+    .warning-text mat-icon { font-size: 16px; height: 16px; width: 16px; flex-shrink: 0; }
+    .hint-text { color: var(--rw-text-secondary); font-size: 12px; }
   `],
 })
 export class OpenLoansComponent implements OnInit {
@@ -154,6 +186,11 @@ export class OpenLoansComponent implements OnInit {
   repayAmount = 0;
   repaying = false;
   repayError: string | null = null;
+  /** Why the collateral token would refuse to return collateral to this wallet, if it would. */
+  collateralReleaseBlocker: string | null = null;
+  repayKeepCollateral = false;
+  claimingKey: string | null = null;
+  claimError: string | null = null;
   collateralAction: 'add' | 'withdraw' = 'add';
   collateralAmount = 0;
   managingCollateral = false;
@@ -245,7 +282,110 @@ export class OpenLoansComponent implements OnInit {
   openRepay(row: LoanRow, template: TemplateRef<{ $implicit: LoanRow }>): void {
     this.repayAmount = this.outstandingAmount(row);
     this.repayError = null;
+    this.collateralReleaseBlocker = null;
+    this.repayKeepCollateral = false;
     this.dialog.open(template, { width: '420px', data: { row } });
+    // Only possible with a connected wallet; otherwise confirmRepay() checks after connecting.
+    if (this.wallet.isConnected()) {
+      void this.detectCollateralReleaseBlocker(row);
+    }
+  }
+
+  rowKey(row: LoanRow): string {
+    return `${row.marketId}:${row.walletAddress.toLowerCase()}`;
+  }
+
+  /** Debt is closed but collateral is still held — after a debt-only repayment or a liquidation. */
+  hasClaimableCollateral(row: LoanRow): boolean {
+    return BigInt(row.currentDebt) === 0n && BigInt(row.collateralAmount) > 0n;
+  }
+
+  /**
+   * Checks whether the collateral token would refuse to deliver collateral to the loan's wallet
+   * (paused token, frozen wallet, or wallet no longer verified — T-REX rules). If so, offers the
+   * debt-only repayment and selects it. Returns true when a blocker was found. Tokens that do not
+   * expose these reads (non-T-REX collateral) are treated as unblocked.
+   */
+  private async detectCollateralReleaseBlocker(row: LoanRow): Promise<boolean> {
+    const market = this.marketsById.get(row.marketId);
+    if (!market) return false;
+    const blocker = await this.collateralReleaseBlockerFor(
+      market.collateralTokenAddress as Address,
+      row.walletAddress as Address,
+    );
+    this.collateralReleaseBlocker = blocker;
+    if (blocker) this.repayKeepCollateral = true;
+    this.cdr.markForCheck();
+    return blocker !== null;
+  }
+
+  private async collateralReleaseBlockerFor(token: Address, holder: Address): Promise<string | null> {
+    try {
+      const [paused, frozen, registry] = await Promise.all([
+        this.wallet.readContract<boolean>({ address: token, abi: trexEligibilityAbi, functionName: 'paused' }),
+        this.wallet.readContract<boolean>({
+          address: token, abi: trexEligibilityAbi, functionName: 'isFrozen', args: [holder],
+        }),
+        this.wallet.readContract<Address>({ address: token, abi: trexEligibilityAbi, functionName: 'identityRegistry' }),
+      ]);
+      if (paused) {
+        return 'The collateral token is paused, so the market cannot return collateral to you right now.';
+      }
+      if (frozen) {
+        return 'Your wallet is frozen on the collateral token, so it cannot receive the collateral back.';
+      }
+      const verified = await this.wallet.readContract<boolean>({
+        address: registry, abi: trexIdentityRegistryAbi, functionName: 'isVerified', args: [holder],
+      });
+      if (!verified) {
+        return 'Your wallet is no longer a verified holder of the collateral token (for example, expired KYC), '
+          + 'so it cannot receive the collateral back.';
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async claimCollateral(row: LoanRow): Promise<void> {
+    const market = this.marketsById.get(row.marketId);
+    if (!market || this.claimingKey) {
+      if (!market) this.claimError = 'Market details are unavailable. Reload the page and try again.';
+      return;
+    }
+    this.claimingKey = this.rowKey(row);
+    this.claimError = null;
+    this.cdr.markForCheck();
+
+    try {
+      if (!this.wallet.isConnected()) await this.wallet.connect();
+      if (this.wallet.address()?.toLowerCase() !== row.walletAddress.toLowerCase()) {
+        throw new Error(`Connect the wallet that owns this position (${row.walletAddress}) before claiming.`);
+      }
+      const blocker = await this.collateralReleaseBlockerFor(
+        market.collateralTokenAddress as Address,
+        row.walletAddress as Address,
+      );
+      if (blocker) throw new Error(`${blocker} Try again once this is resolved.`);
+      const hash = await this.wallet.writeContract({
+        address: market.marketAddress as Address,
+        abi: repoMarketAbi,
+        functionName: 'claimCollateral',
+        args: [],
+      });
+      await this.wallet.waitForTransaction(hash);
+      this.snackBar.open(
+        `Claimed ${row.collateralAmount} collateral units. Tx: ${hash.slice(0, 10)}…${hash.slice(-6)}`,
+        'Dismiss',
+        { duration: 6000 },
+      );
+      this.load();
+    } catch (err: unknown) {
+      this.claimError = err instanceof Error ? err.message : 'Claiming collateral failed.';
+    } finally {
+      this.claimingKey = null;
+      this.cdr.markForCheck();
+    }
   }
 
   openCollateral(
@@ -344,11 +484,17 @@ export class OpenLoansComponent implements OnInit {
       if (this.wallet.address()?.toLowerCase() !== row.walletAddress.toLowerCase()) {
         throw new Error(`Connect the wallet that owns this loan (${row.walletAddress}) before repaying.`);
       }
+      // The wallet may only have been connected just now, so the dialog could not check yet.
+      // Stop and let the user confirm the debt-only option instead of sending a doomed repay.
+      if (!this.collateralReleaseBlocker && await this.detectCollateralReleaseBlocker(row)) {
+        return;
+      }
       const repayAmountUnits = parseUnits(String(this.repayAmount), this.loanTokenDecimals(row));
+      const debtOnly = this.collateralReleaseBlocker !== null && this.repayKeepCollateral;
       const hash = await this.wallet.writeContract({
         address: market.marketAddress as Address,
         abi: repoMarketAbi,
-        functionName: 'repay',
+        functionName: debtOnly ? 'repayDebtOnly' : 'repay',
         args: [repayAmountUnits],
       });
       await this.wallet.waitForTransaction(hash);

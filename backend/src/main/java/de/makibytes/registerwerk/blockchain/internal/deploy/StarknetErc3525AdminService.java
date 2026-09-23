@@ -31,6 +31,10 @@ import java.util.concurrent.CompletableFuture;
  *   <li>{@code freeze_token(token_id: u256, reason: felt252)}</li>
  *   <li>{@code unfreeze_token(token_id: u256)}</li>
  *   <li>{@code forced_transfer_value(from_id: u256, to_id: u256, value: u256, legal_basis: felt252)}</li>
+ *   <li>{@code whitelist(account)} / {@code remove_from_whitelist(account)} — holder eligibility;
+ *       the compliant class requires a whitelisted recipient on {@code mint} and address-form
+ *       transfers, so a holder must be whitelisted before any value is minted to it</li>
+ *   <li>{@code freeze_address(account, reason: felt252)} / {@code unfreeze_address(account)}</li>
  * </ul>
  */
 @Service
@@ -148,6 +152,41 @@ public class StarknetErc3525AdminService {
                 dep.getNetwork(), dep.getContractAddress(), "forced_transfer_value",
                 concat(slotFelts(fromTokenId), slotFelts(toTokenId), slotFelts(value),
                        java.util.List.of(starknetTokenService.shortStringToFeltPublic(legalBasis))));
+    }
+
+    // ── Holder (address) operations ───────────────────────────────────────────
+
+    public CompletableFuture<String> whitelist(UUID deploymentId, String account) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        log.info("Starknet ERC-3525 whitelist={} on deployment={}", account, deploymentId);
+        return starknetTokenService.invokeContract(
+                dep.getNetwork(), dep.getContractAddress(), "whitelist",
+                java.util.List.of(StarknetTokenService.parseHexFelt(account)));
+    }
+
+    public CompletableFuture<String> removeFromWhitelist(UUID deploymentId, String account) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        log.info("Starknet ERC-3525 removeFromWhitelist={} on deployment={}", account, deploymentId);
+        return starknetTokenService.invokeContract(
+                dep.getNetwork(), dep.getContractAddress(), "remove_from_whitelist",
+                java.util.List.of(StarknetTokenService.parseHexFelt(account)));
+    }
+
+    public CompletableFuture<String> freezeAddress(UUID deploymentId, String account, String reason) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        log.info("Starknet ERC-3525 freezeAddress={} reason={} on deployment={}", account, reason, deploymentId);
+        return starknetTokenService.invokeContract(
+                dep.getNetwork(), dep.getContractAddress(), "freeze_address",
+                java.util.List.of(StarknetTokenService.parseHexFelt(account),
+                        starknetTokenService.shortStringToFeltPublic(reason)));
+    }
+
+    public CompletableFuture<String> unfreezeAddress(UUID deploymentId, String account) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        log.info("Starknet ERC-3525 unfreezeAddress={} on deployment={}", account, deploymentId);
+        return starknetTokenService.invokeContract(
+                dep.getNetwork(), dep.getContractAddress(), "unfreeze_address",
+                java.util.List.of(StarknetTokenService.parseHexFelt(account)));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

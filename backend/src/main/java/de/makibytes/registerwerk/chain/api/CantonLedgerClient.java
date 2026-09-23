@@ -10,10 +10,14 @@ import com.daml.ledger.api.v2.admin.PartyManagementServiceOuterClass;
 import com.daml.ledger.javaapi.data.Command;
 import com.daml.ledger.javaapi.data.CommandsSubmission;
 import com.daml.ledger.javaapi.data.CreatedEvent;
+import com.daml.ledger.javaapi.data.CumulativeFilter;
+import com.daml.ledger.javaapi.data.GetActiveContractsRequest;
+import com.daml.ledger.javaapi.data.GetActiveContractsResponse;
 import com.daml.ledger.javaapi.data.EventFormat;
 import com.daml.ledger.javaapi.data.Filter;
 import com.daml.ledger.javaapi.data.GetUpdatesRequest;
 import com.daml.ledger.javaapi.data.GetUpdatesResponse;
+import com.daml.ledger.javaapi.data.Text;
 import com.daml.ledger.javaapi.data.Transaction;
 import com.daml.ledger.javaapi.data.TransactionFormat;
 import com.daml.ledger.javaapi.data.TransactionShape;
@@ -116,6 +120,44 @@ public class CantonLedgerClient implements CantonLedgerEndpoint {
     }
 
     public record CommittedContract(String updateId, String contractId) {}
+
+    /**
+     * Looks up the currently active contract of {@code template} whose {@code assetId} field
+     * equals {@code assetId}, as visible to {@code party} at the current ledger end. Used to
+     * re-point a stored contract id that a consuming choice archived (a Registerwerk bond
+     * template recreates itself on every non-terminal lifecycle choice, so the id changes).
+     *
+     * @return the live contract id; empty when no active instance exists (e.g. after the
+     *         terminal {@code Redeem}/{@code EarlyCall} archived it)
+     * @throws IllegalStateException when more than one active instance matches — the caller
+     *         must not guess which one is authoritative
+     */
+    public Optional<String> findActiveContract(
+            String party,
+            com.daml.ledger.javaapi.data.Identifier template,
+            String assetId) {
+        long ledgerEnd = Long.parseLong(getLedgerEnd());
+        Filter templateFilter = new CumulativeFilter(
+                Map.of(), Map.of(template, Filter.Template.HIDE_CREATED_EVENT_BLOB), Optional.empty());
+        // verbose=true so the create arguments carry field labels (looked up by name below).
+        EventFormat events = new EventFormat(Map.of(party, templateFilter), Optional.empty(), true);
+        var request = new GetActiveContractsRequest(events, ledgerEnd).toProto();
+        List<String> matches = new java.util.ArrayList<>();
+        StateServiceGrpc.newBlockingStub(channel).getActiveContracts(request).forEachRemaining(proto ->
+                GetActiveContractsResponse.fromProto(proto).getContractEntry()
+                        .map(entry -> entry.getCreatedEvent())
+                        .filter(event -> event.getTemplateId().getModuleName().equals(template.getModuleName())
+                                && event.getTemplateId().getEntityName().equals(template.getEntityName()))
+                        .filter(event -> event.getArguments().getFieldsMap().get("assetId") instanceof Text text
+                                && assetId.equals(text.getValue()))
+                        .ifPresent(event -> matches.add(event.getContractId())));
+        if (matches.size() > 1) {
+            throw new IllegalStateException("Canton ACS holds " + matches.size() + " active "
+                    + template.getModuleName() + ":" + template.getEntityName()
+                    + " contracts for assetId=" + assetId + "; expected at most one");
+        }
+        return matches.stream().findFirst();
+    }
 
     /** Allocates a locally hosted party through the current Ledger API v2 admin service. */
     public String allocateParty(String partyIdHint) {

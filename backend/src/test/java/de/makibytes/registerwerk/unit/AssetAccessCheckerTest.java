@@ -67,7 +67,7 @@ class AssetAccessCheckerTest {
         BlockchainTransactionView txView = new BlockchainTransactionView(
                 TX_ID, null, "SUCCESS", null, null, null, null,
                 DEP_ID, ASSET_ID, null, null, null, null, null, null,
-                Instant.now(), null, null, null, null);
+                Instant.now(), null, null, null, null, null);
         when(blockchainApi.findTransaction(TX_ID)).thenReturn(Optional.of(txView));
     }
 

@@ -137,7 +137,7 @@ class AssetDeploymentServiceTest {
                 assetDeploymentRepository, assetRepository, eventPublisher, tokenDeploymentPort,
                 erc3643DeploymentPort, blockchainClientRegistry, evmContractService, completionWriter,
                 txProperties, chainConfigRepository, finalityResolver, restClientBuilder,
-                chainEffectRecorder, walletSigner, solanaFinalityReader);
+                chainEffectRecorder, walletSigner, solanaFinalityReader, false);
     }
 
     @AfterEach
@@ -370,6 +370,65 @@ class AssetDeploymentServiceTest {
                 assetId, Chain.STARKNET, Network.TESTNET, UUID.randomUUID()))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Starknet does not support token standard");
+    }
+
+    @Test
+    @DisplayName("deploy should refuse STARKNET_ERC3525 on mainnet while compliance controls are pending (T1-03)")
+    void deploy_shouldRejectStarknetErc3525OnMainnet() {
+        UUID assetId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.STARKNET_ERC3525);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> assetDeploymentService.deploy(
+                assetId, Chain.STARKNET, Network.MAINNET, UUID.randomUUID()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Starknet ERC-3525 is not available on MAINNET")
+                .hasMessageContaining("compliance controls pending");
+
+        verify(assetDeploymentRepository, never()).save(any());
+        verify(tokenDeploymentPort, never()).deploy(any(), any(), any(), any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("deploy should allow STARKNET_ERC3525 on mainnet only with the explicit opt-out property")
+    void deploy_shouldAllowStarknetErc3525OnMainnetWithOptOut() {
+        AssetDeploymentService optedOut = new AssetDeploymentService(
+                assetDeploymentRepository, assetRepository, eventPublisher, tokenDeploymentPort,
+                erc3643DeploymentPort, blockchainClientRegistry, evmContractService, completionWriter,
+                txProperties, chainConfigRepository,
+                new EvmFinalityResolver(chainConfigRepository, txProperties), restClientBuilder,
+                chainEffectRecorder, walletSigner, solanaFinalityReader, true);
+        when(chainConfigRepository.findByIdentifierStartingWith("STARKNET_")).thenAnswer(invocation -> {
+            ChainConfig config = new ChainConfig();
+            config.setId(UUID.randomUUID());
+            config.setIdentifier("STARKNET_MAINNET");
+            config.setNetworkType(ChainConfig.NetworkType.MAINNET);
+            config.setEnabled(true);
+            return List.of(config);
+        });
+        UUID assetId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.STARKNET_ERC3525);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
+            AssetDeployment dep = invocation.getArgument(0);
+            dep.setId(UUID.randomUUID());
+            return dep;
+        });
+        when(tokenDeploymentPort.deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC3525),
+                eq(Chain.STARKNET), eq(Network.MAINNET), any()))
+                .thenReturn(new CompletableFuture<>());
+
+        AssetDeployment result = optedOut.deploy(
+                assetId, Chain.STARKNET, Network.MAINNET, UUID.randomUUID());
+
+        assertThat(result.getNetwork()).isEqualTo(Network.MAINNET);
+        verify(tokenDeploymentPort).deploy(eq(assetId), eq(TokenStandard.STARKNET_ERC3525),
+                eq(Chain.STARKNET), eq(Network.MAINNET), eq("configured-owner"));
     }
 
     @Test

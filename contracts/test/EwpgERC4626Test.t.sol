@@ -126,6 +126,7 @@ contract EwpgERC4626Test is Test {
         vm.startPrank(registry);
         AssetTokenFactoryBootstrap.configure(factory, registry);
         vm.stopPrank();
+        vm.prank(registry);
         address vaultAddr = factory.deployVault(4, "Fund A", "FA", ASSET_ID, address(usdc));
         assertFalse(vaultAddr == address(0));
         EwpgERC4626 deployed = EwpgERC4626(vaultAddr);
@@ -139,6 +140,7 @@ contract EwpgERC4626Test is Test {
         AssetTokenFactoryBootstrap.configure(factory, registry);
         vm.stopPrank();
         vm.expectRevert();
+        vm.prank(registry);
         factory.deployToken(4, "Fund", "F", ASSET_ID);
     }
 
@@ -195,5 +197,65 @@ contract EwpgERC4626Test is Test {
         vm.expectRevert(); // ERC4626ExceededMaxMint
         vault.mint(1001e6, alice);
         vm.stopPrank();
+    }
+
+    // ── Regression T1-06: cash legs of frozen payers / receivers ──────────────
+
+    function _frozenPayerSetup() internal returns (address frozen, address nominee) {
+        frozen = makeAddr("frozenPayer");
+        nominee = makeAddr("nominee");
+        usdc.transfer(frozen, 1000e6);
+        vm.startPrank(registry);
+        vault.whitelist(nominee);
+        vault.setNavPerShare(1e18, block.timestamp, bytes32(0));
+        vault.freezeAddress(frozen, "sanctions");
+        vm.stopPrank();
+    }
+
+    function test_frozenPayerCannotFundNominee() public {
+        (address frozen, address nominee) = _frozenPayerSetup();
+        vm.startPrank(frozen);
+        usdc.approve(address(vault), 1000e6);
+        vm.expectRevert("EwpgERC4626: payer is frozen");
+        vault.deposit(1000e6, nominee);
+        vm.expectRevert("EwpgERC4626: payer is frozen");
+        vault.mint(1000e6, nominee);
+        vm.stopPrank();
+    }
+
+    function test_nomineeCannotRedeemCashToFrozenAddress() public {
+        (address frozen, address nominee) = _frozenPayerSetup();
+        usdc.transfer(nominee, 1000e6);
+        vm.startPrank(nominee);
+        usdc.approve(address(vault), 1000e6);
+        vault.deposit(1000e6, nominee);
+        vm.expectRevert("EwpgERC4626: receiver is frozen");
+        vault.redeem(1000e6, frozen, nominee);
+        vm.expectRevert("EwpgERC4626: receiver is frozen");
+        vault.withdraw(1000e6, frozen, nominee);
+        vm.stopPrank();
+        assertEq(usdc.balanceOf(frozen), 1000e6);
+    }
+
+    function test_frozenSpenderCannotRedeemForOwner() public {
+        (address frozen,) = _frozenPayerSetup();
+        vm.startPrank(alice);
+        usdc.approve(address(vault), 1000e6);
+        vault.deposit(1000e6, alice);
+        vault.approve(frozen, 1000e6);
+        vm.stopPrank();
+        vm.prank(frozen);
+        vm.expectRevert("EwpgERC4626: caller is frozen");
+        vault.redeem(1000e6, alice, alice);
+    }
+
+    function test_selfFundedDepositAndRedeemStillWork() public {
+        _frozenPayerSetup();
+        vm.startPrank(alice);
+        usdc.approve(address(vault), 1000e6);
+        vault.deposit(1000e6, alice);
+        vault.redeem(1000e6, alice, alice);
+        vm.stopPrank();
+        assertEq(usdc.balanceOf(alice), 100_000e6);
     }
 }

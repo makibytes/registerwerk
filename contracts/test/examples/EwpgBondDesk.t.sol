@@ -210,6 +210,9 @@ contract EwpgBondDeskTest is Test {
 
         vm.startPrank(operator);
         IOwnable2Step(address(bond)).acceptOwnership(); // see IOwnable2Step NatSpec
+        // EwpgComplianceModule config is owner-gated per compliance, and the compliance's
+        // ownership is 2-step exactly like the token's.
+        IOwnable2Step(complianceAddr).acceptOwnership();
         IAgentRole(address(bond)).addAgent(address(desk));
         bond.unpause(); // T-REX tokens always deploy paused; operator is a token agent
         vm.stopPrank();

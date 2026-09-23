@@ -40,6 +40,7 @@ const requiredEconomicEvents = {
     'DepositRequestFulfilled(indexed uint256,uint256,uint256,uint256)',
     'RedeemRequestFulfilled(indexed uint256,uint256,uint256,uint256)',
     'RequestCancelled(indexed uint256,indexed address)',
+    'ForcedRequestCancelled(indexed uint256,indexed address,string)',
   ],
   EwpgRepoMarket: [
     'Supplied(indexed address,uint256,uint256)',

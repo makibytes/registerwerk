@@ -47,10 +47,42 @@ contract AssetTokenFactoryTest is Test {
     }
 
     // -------------------------------------------------------------------------
+    // Access control — T1-17 front-running regression
+    // -------------------------------------------------------------------------
+
+    function test_deployToken_revertsForNonRegistryCaller() public {
+        vm.prank(makeAddr("squatter"));
+        vm.expectRevert("AssetTokenFactory: only registry");
+        factory.deployToken(0, "My Token", "MTK", ASSET_ID);
+    }
+
+    function test_deployVault_revertsForNonRegistryCaller() public {
+        vm.prank(makeAddr("squatter"));
+        vm.expectRevert("AssetTokenFactory: only registry");
+        factory.deployVault(4, "My Vault", "MVLT", ASSET_ID, address(underlying));
+    }
+
+    /// A third party replaying the registry's exact calldata can no longer occupy the
+    /// CREATE2 address, so the registry's own issuance still lands at predictAddress.
+    function test_frontRunWithIdenticalCalldata_cannotWedgeIssuance() public {
+        address predicted = factory.predictAddress(0, "My Token", "MTK", ASSET_ID, address(0));
+        vm.prank(makeAddr("squatter"));
+        (bool ok,) = address(factory)
+            .call(abi.encodeCall(AssetTokenFactory.deployToken, (uint8(0), "My Token", "MTK", ASSET_ID)));
+        assertFalse(ok);
+        assertEq(predicted.code.length, 0);
+
+        vm.prank(registryWallet);
+        address deployed = factory.deployToken(0, "My Token", "MTK", ASSET_ID);
+        assertEq(deployed, predicted);
+    }
+
+    // -------------------------------------------------------------------------
     // deployToken — ERC-20 (type 0)
     // -------------------------------------------------------------------------
 
     function test_deployERC20_succeeds() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(0, "My Token", "MTK", ASSET_ID);
         assertTrue(deployed != address(0));
         EwpgERC20 token = EwpgERC20(deployed);
@@ -63,6 +95,7 @@ contract AssetTokenFactoryTest is Test {
     function test_deployERC20_emitsTokenDeployedEvent() public {
         vm.expectEmit(true, true, false, false);
         emit AssetTokenFactory.TokenDeployed(ASSET_ID, 0, address(0));
+        vm.prank(registryWallet);
         factory.deployToken(0, "My Token", "MTK", ASSET_ID);
     }
 
@@ -71,6 +104,7 @@ contract AssetTokenFactoryTest is Test {
     // -------------------------------------------------------------------------
 
     function test_deployERC721_succeeds() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(1, "My NFT", "MNFT", ASSET_ID);
         assertTrue(deployed != address(0));
         EwpgERC721 token = EwpgERC721(deployed);
@@ -83,6 +117,7 @@ contract AssetTokenFactoryTest is Test {
     function test_deployERC721_emitsTokenDeployedEvent() public {
         vm.expectEmit(true, true, false, false);
         emit AssetTokenFactory.TokenDeployed(ASSET_ID, 1, address(0));
+        vm.prank(registryWallet);
         factory.deployToken(1, "My NFT", "MNFT", ASSET_ID);
     }
 
@@ -91,6 +126,7 @@ contract AssetTokenFactoryTest is Test {
     // -------------------------------------------------------------------------
 
     function test_deployERC1155_succeeds() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(2, "", "MTKM", ASSET_ID);
         assertTrue(deployed != address(0));
         EwpgERC1155 token = EwpgERC1155(deployed);
@@ -102,6 +138,7 @@ contract AssetTokenFactoryTest is Test {
     function test_deployERC1155_emitsTokenDeployedEvent() public {
         vm.expectEmit(true, true, false, false);
         emit AssetTokenFactory.TokenDeployed(ASSET_ID, 2, address(0));
+        vm.prank(registryWallet);
         factory.deployToken(2, "", "MTKM", ASSET_ID);
     }
 
@@ -114,6 +151,7 @@ contract AssetTokenFactoryTest is Test {
         // type instead. 4/5 (vault types) are also unsupported here since they must
         // go through deployVault, but 6 is unambiguously out of range for both.
         vm.expectRevert(unicode"AssetTokenFactory: unsupported token type — for ERC-4626/7540 use deployVault");
+        vm.prank(registryWallet);
         factory.deployToken(6, "X", "X", ASSET_ID);
     }
 
@@ -123,18 +161,21 @@ contract AssetTokenFactoryTest is Test {
 
     function test_predictAddress_matchesDeployedERC20() public {
         address predicted = factory.predictAddress(0, "My Token", "MTK", ASSET_ID, address(0));
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(0, "My Token", "MTK", ASSET_ID);
         assertEq(predicted, deployed);
     }
 
     function test_predictAddress_matchesDeployedERC721() public {
         address predicted = factory.predictAddress(1, "My NFT", "MNFT", ASSET_ID, address(0));
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(1, "My NFT", "MNFT", ASSET_ID);
         assertEq(predicted, deployed);
     }
 
     function test_predictAddress_matchesDeployedERC1155() public {
         address predicted = factory.predictAddress(2, "", "MTKM", ASSET_ID, address(0));
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(2, "", "MTKM", ASSET_ID);
         assertEq(predicted, deployed);
     }
@@ -152,18 +193,23 @@ contract AssetTokenFactoryTest is Test {
 
     function test_create2_determinism_erc20() public {
         address predicted = factory.predictAddress(0, "Token A", "TKA", ASSET_ID, address(0));
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(0, "Token A", "TKA", ASSET_ID);
         assertEq(predicted, deployed);
     }
 
     function test_create2_differentAssetIds_giveDifferentAddresses() public {
+        vm.prank(registryWallet);
         address addr1 = factory.deployToken(0, "Token A", "TKA", ASSET_ID);
+        vm.prank(registryWallet);
         address addr2 = factory.deployToken(0, "Token A", "TKA", ASSET_ID_2);
         assertTrue(addr1 != addr2);
     }
 
     function test_create2_differentTokenTypes_giveDifferentAddresses() public {
+        vm.prank(registryWallet);
         address erc20 = factory.deployToken(0, "Token A", "TKA", ASSET_ID);
+        vm.prank(registryWallet);
         address erc721 = factory.deployToken(1, "Token A", "TKA", ASSET_ID);
         assertTrue(erc20 != erc721);
     }
@@ -173,6 +219,7 @@ contract AssetTokenFactoryTest is Test {
     // -------------------------------------------------------------------------
 
     function test_deployedERC20_isMintableByRegistry() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(0, "My Token", "MTK", ASSET_ID);
         EwpgERC20 token = EwpgERC20(deployed);
         address alice = address(0xA);
@@ -186,6 +233,7 @@ contract AssetTokenFactoryTest is Test {
     }
 
     function test_deployedERC721_isMintableByRegistry() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(1, "My NFT", "MNFT", ASSET_ID);
         EwpgERC721 token = EwpgERC721(deployed);
         address alice = address(0xA);
@@ -199,6 +247,7 @@ contract AssetTokenFactoryTest is Test {
     }
 
     function test_deployedERC1155_isMintableByRegistry() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployToken(2, "", "MTKM", ASSET_ID);
         EwpgERC1155 token = EwpgERC1155(deployed);
         address alice = address(0xA);
@@ -216,6 +265,7 @@ contract AssetTokenFactoryTest is Test {
     // -------------------------------------------------------------------------
 
     function test_deployVault_erc4626_succeeds() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployVault(4, "My Vault", "MVLT", ASSET_ID, address(underlying));
         assertTrue(deployed != address(0));
         EwpgERC4626 vault = EwpgERC4626(deployed);
@@ -229,10 +279,12 @@ contract AssetTokenFactoryTest is Test {
     function test_deployVault_erc4626_emitsVaultDeployedEvent() public {
         vm.expectEmit(true, true, false, true);
         emit AssetTokenFactory.VaultDeployed(ASSET_ID, 4, address(0), address(underlying));
+        vm.prank(registryWallet);
         factory.deployVault(4, "My Vault", "MVLT", ASSET_ID, address(underlying));
     }
 
     function test_deployVault_erc4626_isMintableByRegistry() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployVault(4, "My Vault", "MVLT", ASSET_ID, address(underlying));
         EwpgERC4626 vault = EwpgERC4626(deployed);
         address alice = address(0xA);
@@ -254,6 +306,7 @@ contract AssetTokenFactoryTest is Test {
     // -------------------------------------------------------------------------
 
     function test_deployVault_erc7540_succeeds() public {
+        vm.prank(registryWallet);
         address deployed = factory.deployVault(5, "My Async Vault", "MAVLT", ASSET_ID, address(underlying));
         assertTrue(deployed != address(0));
         EwpgERC7540 vault = EwpgERC7540(deployed);
@@ -267,6 +320,7 @@ contract AssetTokenFactoryTest is Test {
     function test_deployVault_erc7540_emitsVaultDeployedEvent() public {
         vm.expectEmit(true, true, false, true);
         emit AssetTokenFactory.VaultDeployed(ASSET_ID, 5, address(0), address(underlying));
+        vm.prank(registryWallet);
         factory.deployVault(5, "My Async Vault", "MAVLT", ASSET_ID, address(underlying));
     }
 
@@ -276,11 +330,13 @@ contract AssetTokenFactoryTest is Test {
 
     function test_deployVault_revertsForZeroUnderlyingAsset() public {
         vm.expectRevert("AssetTokenFactory: zero underlying asset");
+        vm.prank(registryWallet);
         factory.deployVault(4, "My Vault", "MVLT", ASSET_ID, address(0));
     }
 
     function test_deployVault_revertsForUnsupportedType() public {
         vm.expectRevert(unicode"AssetTokenFactory: unsupported vault type — use 4 (ERC4626) or 5 (ERC7540)");
+        vm.prank(registryWallet);
         factory.deployVault(0, "My Vault", "MVLT", ASSET_ID, address(underlying));
     }
 
@@ -290,12 +346,14 @@ contract AssetTokenFactoryTest is Test {
 
     function test_predictAddress_matchesDeployedERC4626() public {
         address predicted = factory.predictAddress(4, "My Vault", "MVLT", ASSET_ID, address(underlying));
+        vm.prank(registryWallet);
         address deployed = factory.deployVault(4, "My Vault", "MVLT", ASSET_ID, address(underlying));
         assertEq(predicted, deployed);
     }
 
     function test_predictAddress_matchesDeployedERC7540() public {
         address predicted = factory.predictAddress(5, "My Async Vault", "MAVLT", ASSET_ID, address(underlying));
+        vm.prank(registryWallet);
         address deployed = factory.deployVault(5, "My Async Vault", "MAVLT", ASSET_ID, address(underlying));
         assertEq(predicted, deployed);
     }

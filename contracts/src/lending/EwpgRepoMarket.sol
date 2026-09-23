@@ -23,9 +23,19 @@ import "./oracle/IRepoOracle.sol";
 ///
 ///         Same asymmetric gating as `EwpgRepoFacility`: the lender side ({supply}/{withdraw})
 ///         is open to any stablecoin holder, the borrower side ({pledgeAndBorrow}) requires
-///         `repo-facility.borrow` plus a KYC claim, and {repay}/{liquidate} are intentionally
-///         ungated at this layer — the collateral token's own T-REX identity-registry check is
-///         the real, sufficient compliance gate on any transfer out.
+///         `repo-facility.borrow` plus a KYC claim, and {repay}/{repayDebtOnly}/
+///         {claimCollateral}/{liquidate} are intentionally ungated at this layer — the collateral
+///         token's own T-REX identity-registry check is the real, sufficient compliance gate on
+///         any transfer out.
+///
+///         Debt repayment and collateral release are separable: {repay} does both in one call,
+///         but a borrower whose collateral-token eligibility has lapsed (KYC expiry, country
+///         change, wallet freeze, token pause) cannot receive collateral, so {repay} reverts for
+///         them. {repayDebtOnly} lets that borrower still de-risk — it reduces the debt and
+///         leaves the collateral pledged — and {claimCollateral} releases the collateral of a
+///         zero-debt position once the token lets it move again. For the same reason a
+///         full-close {liquidate} credits any residual collateral to the position instead of
+///         pushing it to the borrower, so a frozen borrower cannot block the liquidation.
 ///
 /// @dev A handful of values fixed forever at construction, mirroring Morpho Blue's "a market is
 ///      just its immutable parameters": {loanToken}, {collateralToken}, {maxLtvBps}, {lltvBps},
@@ -130,8 +140,9 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     /// @notice Underlying-token reserves accumulated for the protocol, withdrawable by the
     ///         operator via {withdrawReserves}.
     uint256 public totalReserves;
-    /// @notice When true, new borrowing is blocked; {repay}/{liquidate} remain available on
-    ///         principle — reducing risk should never be blocked by an emergency pause.
+    /// @notice When true, new borrowing is blocked; {repay}/{repayDebtOnly}/{claimCollateral}/
+    ///         {liquidate} remain available on principle — reducing risk should never be
+    ///         blocked by an emergency pause.
     bool public borrowPaused;
 
     struct Position {
@@ -191,6 +202,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     error InsufficientShares();
     error InsufficientReserves();
     error ReconciliationWouldIncreaseCollateral();
+    error OutstandingDebt();
 
     constructor(
         IPermissionOracle oracle_,
@@ -446,6 +458,45 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         emit Repaid(msg.sender, actualRepayAmount, collateralReturned);
     }
 
+    /// @notice Repays up to `repayAmount` (capped to the current outstanding debt) and keeps all
+    ///         collateral pledged. Needs no collateral-token transfer, so it works while the
+    ///         borrower is frozen or no longer verified on {collateralToken}, or while that token
+    ///         is paused — situations in which {repay} reverts and the position could otherwise
+    ///         only be liquidated. Once the debt reaches zero, {claimCollateral} releases the
+    ///         collateral. Not gated by {RegisterwerkGated}, like {repay}.
+    /// @dev Emits {Repaid} with `collateralReturned == 0`, so existing event consumers keep
+    ///      working without a new event type.
+    function repayDebtOnly(uint256 repayAmount) external nonReentrant returns (uint256 actualRepayAmount) {
+        _accrue();
+        Position storage pos = positions[msg.sender];
+        uint256 currentDebt = Math.mulDiv(pos.scaledDebt, borrowIndex, WAD);
+        if (currentDebt == 0) revert NoOutstandingDebt();
+
+        uint256 residualScaledDebt;
+        (residualScaledDebt, actualRepayAmount) = _residualDebtAfterPayment(pos.scaledDebt, currentDebt, repayAmount);
+        totalScaledDebt -= pos.scaledDebt - residualScaledDebt;
+        pos.scaledDebt = residualScaledDebt;
+
+        loanToken.safeTransferFrom(msg.sender, address(this), actualRepayAmount);
+        emit Repaid(msg.sender, actualRepayAmount, 0);
+    }
+
+    /// @notice Releases all collateral still held for the caller's position. Allowed only when
+    ///         the position has no outstanding debt — after {repayDebtOnly} closed it, or after a
+    ///         full-close {liquidate} credited the residual. Not gated by {RegisterwerkGated}: a
+    ///         zero-debt position carries no pool risk, and {collateralToken} still enforces the
+    ///         recipient's eligibility on the transfer itself.
+    function claimCollateral() external nonReentrant returns (uint256 amount) {
+        Position storage pos = positions[msg.sender];
+        if (pos.scaledDebt != 0) revert OutstandingDebt();
+        amount = pos.collateralAmount;
+        if (amount == 0) revert ZeroAmount();
+
+        pos.collateralAmount = 0;
+        collateralToken.safeTransfer(msg.sender, amount);
+        emit CollateralWithdrawn(msg.sender, amount, 0);
+    }
+
     /// @notice Liquidation of an under-collateralized position (health factor below 1.0, or
     ///         below the stale-grace-period threshold — see {_currentPriceForLiquidation}): the
     ///         caller repays up to {CLOSE_FACTOR_BPS} of the position's outstanding debt (capped
@@ -455,6 +506,10 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     ///         collateral plus the configured liquidation bonus. May be called repeatedly while
     ///         the position remains unhealthy. Not gated by {RegisterwerkGated} — see the
     ///         contract-level NatSpec for why an unverified caller cannot actually succeed.
+    ///         When a call closes the debt completely, any collateral beyond the liquidator's
+    ///         entitlement stays credited to the position; the borrower takes it out with
+    ///         {claimCollateral}. It is not pushed to the borrower here, because a push to a
+    ///         frozen or no-longer-verified borrower would revert the whole liquidation.
     function liquidate(address borrower, uint256 maxRepayAmount)
         external
         nonReentrant
@@ -467,15 +522,10 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
 
         (uint256 pricePerUnit, uint256 requestedRepay) =
             _liquidationPaymentLimit(pos, borrower, currentDebt, maxRepayAmount);
-        uint256 residualCollateral;
-        (debtRepaid, collateralSeized, residualCollateral) =
-            _applyLiquidationPayment(pos, currentDebt, requestedRepay, pricePerUnit);
+        (debtRepaid, collateralSeized) = _applyLiquidationPayment(pos, currentDebt, requestedRepay, pricePerUnit);
 
         loanToken.safeTransferFrom(msg.sender, address(this), debtRepaid);
         collateralToken.safeTransfer(msg.sender, collateralSeized);
-        if (residualCollateral > 0) {
-            collateralToken.safeTransfer(borrower, residualCollateral);
-        }
         emit Liquidated(borrower, msg.sender, debtRepaid, collateralSeized);
 
         if (pos.collateralAmount == 0 && pos.scaledDebt > 0) {
@@ -556,14 +606,14 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     }
 
     /// @dev Applies conservative debt-share rounding and collateral accounting for liquidation.
-    ///      Returns residual collateral separately so the external function can transfer it only
-    ///      after all state effects are committed.
+    ///      Collateral left over after a full close stays in `pos.collateralAmount` for
+    ///      {claimCollateral} (see {liquidate}).
     function _applyLiquidationPayment(
         Position storage pos,
         uint256 currentDebt,
         uint256 requestedRepay,
         uint256 pricePerUnit
-    ) private returns (uint256 debtRepaid, uint256 collateralSeized, uint256 residualCollateral) {
+    ) private returns (uint256 debtRepaid, uint256 collateralSeized) {
         uint256 collateralBefore = pos.collateralAmount;
         (uint256 residualScaledDebt, uint256 actualRepayAmount) =
             _residualDebtAfterPayment(pos.scaledDebt, currentDebt, requestedRepay);
@@ -579,13 +629,6 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         pos.scaledDebt = residualScaledDebt;
         totalScaledDebt -= scaledRepaid;
         pos.collateralAmount = collateralBefore - collateralSeized;
-
-        if (residualScaledDebt == 0 && pos.collateralAmount > 0) {
-            // Once debt is fully closed, any collateral beyond the liquidator's entitlement must
-            // leave custody as well; otherwise the borrower has no remaining function to claim it.
-            residualCollateral = pos.collateralAmount;
-            pos.collateralAmount = 0;
-        }
     }
 
     /// @dev Computes a conservative residual scaled debt for a requested asset payment. Partial

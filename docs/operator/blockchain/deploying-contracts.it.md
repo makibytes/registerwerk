@@ -74,6 +74,24 @@ forge script script/Deploy.s.sol \
 - L'indirizzo viene memorizzato come `PENDING` in `asset_deployment` immediatamente
 - La distribuzione è idempotente: la riesecuzione della stessa distribuzione produrrà lo stesso indirizzo
 
+Poiché salt e initcode derivano da calldata pubblici, nelle factory distribuite prima che
+`deployToken`/`deployVault` fossero riservate al registro chiunque può riprodurre per primo i
+calldata del registro e far fallire la transazione del registro stesso (`CREATE2 failed`). Il
+backend verifica quindi `predictAddress` prima dell'invio e di nuovo dopo un revert: se a
+quell'indirizzo esiste già un contratto e i suoi `assetId()` e `registry()` corrispondono, adotta
+quel contratto e la relativa transazione di creazione invece di fallire. Se il contratto non è
+nostro (ad esempio perché l'autorità del registro è stata trasferita), il deployment fallisce con
+un errore che indica l'indirizzo.
+
+!!! note "Introduzione della factory riservata al registro"
+    `registryWallet` è immutabile e il `bindFactory` di ogni deployer può essere chiamato una sola
+    volta, quindi la restrizione vale solo per una nuova generazione di factory. Per ogni chain:
+    distribuire i sei deployer e una nuova `AssetTokenFactory` (`script/Deploy.s.sol` /
+    `DeployL2.s.sol` / `DeployTestnet.s.sol`), quindi aggiornare
+    `registerwerk.contracts.asset-token-factory.<chain>` e riavviare il backend. I token esistenti
+    mantengono i loro indirizzi (salvati in `asset_deployment`); le vecchie factory ancora attive
+    restano protette dal controllo di adozione del backend descritto sopra.
+
 ## Aggiornamento dei moduli di conformità { #upgrading-compliance-modules }
 
 ```bash

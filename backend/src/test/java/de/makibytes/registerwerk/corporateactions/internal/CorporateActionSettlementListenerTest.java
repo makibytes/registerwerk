@@ -193,4 +193,34 @@ class CorporateActionSettlementListenerTest {
 
         verify(cantonBondOperations, timeout(1000)).redeem(eq(deploymentId), any(), any());
     }
+
+    @Test
+    @DisplayName("floating-rate COUPON is not auto-dispatched (FixRate is not wired) and is flagged for the operator")
+    void floatingCoupon_isBlockedWithOperatorVisibleReason() {
+        actionOfType(CorporateAction.ActionType.COUPON);
+        when(corporateActionRepository.findTokenStandardByCorpAction(corporateActionId)).thenReturn("DAML_BOND_FLOATING");
+
+        listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
+                corporateActionId, assetId, CorporateAction.ActionType.COUPON));
+
+        verify(cantonBondOperations, never()).payCoupon(any(), any(), any(), any());
+        verify(settlementWriter).recordSettlementBlocked(
+                corporateActionId, CorporateActionSettlementListener.FLOATING_COUPON_BLOCKED_REASON);
+        verify(settlementWriter, never()).markSettled(any(), any());
+    }
+
+    @Test
+    @DisplayName("floating-rate REDEMPTION still dispatches Redeem (needs no rate fixing)")
+    void floatingRedemption_stillDispatches() {
+        actionOfType(CorporateAction.ActionType.REDEMPTION);
+        when(corporateActionRepository.findTokenStandardByCorpAction(corporateActionId)).thenReturn("DAML_BOND_FLOATING");
+        when(cantonBondOperations.redeem(eq(deploymentId), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture("tx-redeem-frn"));
+
+        listener.onSettlementRequested(new CorporateActionSettlementRequestedEvent(
+                corporateActionId, assetId, CorporateAction.ActionType.REDEMPTION));
+
+        verify(cantonBondOperations, timeout(1000)).redeem(eq(deploymentId), any(), any());
+        verify(settlementWriter, never()).recordSettlementBlocked(any(), any());
+    }
 }

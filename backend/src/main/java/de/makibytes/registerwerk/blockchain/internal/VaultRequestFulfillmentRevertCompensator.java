@@ -17,7 +17,8 @@ import java.util.UUID;
 /**
  * The INVERSE_FLIP compensator for {@code VAULT_REQUEST_RESOLVED} — undoes a {@link VaultRequest}
  * whose confirming {@code fulfillDepositRequest}/{@code fulfillRedeemRequest}/{@code
- * cancelDepositRequest}/{@code cancelRedeemRequest} block was later retracted. Handles both
+ * cancelDepositRequest}/{@code cancelRedeemRequest}/{@code forceCancel*Request} block was later
+ * retracted. Handles both
  * outcomes with one compensator (rather than one per action, unlike the erc3643 identity-registry
  * pair) because a {@link VaultRequest} can only ever be in one terminal state at a time — the
  * branch below just asks which one it currently is and undoes that.
@@ -63,7 +64,7 @@ class VaultRequestFulfillmentRevertCompensator implements ChainEffectCompensator
         }
         String currentTxHash = switch (request.getRequestStatus()) {
             case FULFILLED -> request.getFulfilledTx();
-            case CANCELLED -> request.getCancelledTx();
+            case CANCELLED, FORCE_CANCELLED -> request.getCancelledTx();
             case PENDING -> null;
         };
         if (!effect.chainConfigId().equals(request.getChainConfigId())
@@ -84,8 +85,21 @@ class VaultRequestFulfillmentRevertCompensator implements ChainEffectCompensator
                 request.setFulfilledTx(null);
                 request.setFulfilledAt(null);
                 request.setNavAtFulfill(null);
+                request.setReviewNote(null);
+                // The executed leg came from the (now retracted) *Fulfilled event; the requested
+                // leg came from the request event and stays.
+                if (request.getRequestType() == de.makibytes.registerwerk.deployment.api.VaultRequestType.DEPOSIT) {
+                    request.setShareAmount(null);
+                } else {
+                    request.setAssetAmount(null);
+                }
             }
             case CANCELLED -> request.setCancelledTx(null);
+            case FORCE_CANCELLED -> {
+                request.setCancelledTx(null);
+                request.setForcedToAddr(null);
+                request.setLegalBasis(null);
+            }
             case PENDING -> throw new IllegalStateException(
                     "VaultRequest " + id + " is PENDING here despite the PENDING check above — unreachable");
         }

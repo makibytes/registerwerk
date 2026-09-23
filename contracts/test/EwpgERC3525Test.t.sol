@@ -357,6 +357,155 @@ contract EwpgERC3525Test is Test {
         token.balanceOf(tokenId);
     }
 
+    // ── Value allowances across ownership changes (T1-01) ───────────────────
+
+    function test_valueAllowance_clearedByForcedTransfer() public {
+        address thief2 = makeAddr("thief2");
+        vm.startPrank(registry);
+        token.whitelist(thief2);
+        token.whitelist(mallory);
+        uint256 id = token.mint(mallory, SLOT_BONDS, 1_000_000e6);
+        vm.stopPrank();
+        vm.prank(mallory);
+        token.approve(id, thief2, type(uint256).max);
+
+        vm.startPrank(registry);
+        vm.expectEmit(true, true, false, true);
+        emit IERC3525.ApprovalValue(id, address(0), 0);
+        token.forcedTransfer(mallory, alice, id, unicode"court order §24");
+        token.freezeAddress(mallory, "fraud");
+        vm.stopPrank();
+
+        assertEq(token.ownerOf(id), alice);
+        assertEq(token.allowance(id, thief2), 0);
+        vm.prank(thief2);
+        vm.expectRevert("ERC3525: insufficient value allowance");
+        token.transferFrom(id, thief2, 1_000_000e6);
+        assertEq(token.balanceOf(id), 1_000_000e6);
+    }
+
+    function test_valueAllowance_clearedBySale() public {
+        uint256 id = _mintWholeToken();
+        vm.prank(alice);
+        token.approve(id, mallory, 1000e18);
+        vm.prank(alice);
+        token.transferFrom(alice, bob, id);
+
+        assertEq(token.allowance(id, mallory), 0);
+        vm.prank(mallory);
+        vm.expectRevert("ERC3525: insufficient value allowance");
+        token.transferFrom(id, bob, 1000e18);
+    }
+
+    function test_valueAllowance_grantedByNewOwnerWorks() public {
+        uint256 id = _mintWholeToken();
+        vm.prank(alice);
+        token.approve(id, bob, 1000e18);
+        vm.prank(alice);
+        token.transferFrom(alice, bob, id);
+
+        // New owner grants a fresh allowance under the new epoch.
+        address delegate = makeAddr("delegate");
+        vm.prank(registry);
+        token.whitelist(delegate);
+        vm.prank(bob);
+        token.approve(id, delegate, 400e18);
+        assertEq(token.allowance(id, delegate), 400e18);
+        vm.prank(delegate);
+        uint256 newId = token.transferFrom(id, delegate, 400e18);
+        assertEq(token.balanceOf(newId), 400e18);
+        assertEq(token.allowance(id, delegate), 0);
+    }
+
+    /// Parity with Cairo `compliant_value_move`: an allowance granted before the operator was
+    /// frozen must not stay spendable between two non-frozen parties.
+    function test_valueAllowance_notSpendableByFrozenOperator() public {
+        uint256 id = _mintWholeToken();
+        vm.prank(registry);
+        uint256 bobId = token.mint(bob, SLOT_BONDS, 1);
+        vm.prank(alice);
+        token.approve(id, mallory, 300);
+        vm.prank(registry);
+        token.freezeAddress(mallory, "sanctions");
+
+        vm.prank(mallory);
+        vm.expectRevert("EwpgERC3525: caller address is frozen");
+        token.transferFrom(id, bobId, 100);
+        vm.prank(mallory);
+        vm.expectRevert("EwpgERC3525: caller address is frozen");
+        token.transferFrom(id, bob, 100);
+        assertEq(token.allowance(id, mallory), 300);
+
+        vm.prank(registry);
+        token.unfreezeAddress(mallory);
+        vm.prank(mallory);
+        token.transferFrom(id, bobId, 100);
+        assertEq(token.balanceOf(bobId), 101);
+        assertEq(token.allowance(id, mallory), 200);
+    }
+
+    function test_approve_revertsWhileTokenFrozen() public {
+        uint256 id = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeToken(id, "stolen key");
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: token is frozen");
+        token.approve(id, bob, 100);
+        assertEq(token.allowance(id, bob), 0);
+    }
+
+    function test_approve_revertsWhileOwnerFrozen() public {
+        uint256 id = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeAddress(alice, "stolen key");
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: owner address is frozen");
+        token.approve(id, bob, 100);
+    }
+
+    function test_approve_revertsForFrozenOperatorOrPaused() public {
+        uint256 id = _mintWholeToken();
+        vm.prank(registry);
+        token.freezeAddress(bob, "sanctions");
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: operator address is frozen");
+        token.approve(id, bob, 100);
+
+        vm.prank(registry);
+        token.pauseSlot(SLOT_BONDS);
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: slot is paused");
+        token.approve(id, mallory, 100);
+
+        vm.startPrank(registry);
+        token.unpauseSlot(SLOT_BONDS);
+        token.pause();
+        vm.stopPrank();
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: global transfers are paused");
+        token.approve(id, mallory, 100);
+    }
+
+    // ── Token-to-token recipient whitelist (T1-02) ──────────────────────────
+
+    function test_transferValueToToken_revertsForDewhitelistedRecipient() public {
+        vm.startPrank(registry);
+        uint256 a = token.mint(alice, SLOT_BONDS, 500e6);
+        uint256 b = token.mint(bob, SLOT_BONDS, 1);
+        token.removeFromWhitelist(bob);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: recipient not whitelisted");
+        token.transferFrom(a, b, 500e6);
+        assertEq(token.balanceOf(b), 1);
+
+        // A registry correction still reaches the position.
+        vm.prank(registry);
+        token.forcedTransferValue(a, b, 500e6, unicode"BaFin §24");
+        assertEq(token.balanceOf(b), 500e6 + 1);
+    }
+
     // ── Slot metadata ─────────────────────────────────────────────────────────
 
     function test_setSlotMetadataHash_emitsEvent() public {
@@ -385,6 +534,7 @@ contract EwpgERC3525Test is Test {
         vm.startPrank(registry);
         AssetTokenFactoryBootstrap.configure(factory, registry);
         vm.stopPrank();
+        vm.prank(registry);
         address tokenAddr = factory.deployToken(3, "Bond", "BND", ASSET_ID);
         assertFalse(tokenAddr == address(0));
         EwpgERC3525 deployed = EwpgERC3525(tokenAddr);

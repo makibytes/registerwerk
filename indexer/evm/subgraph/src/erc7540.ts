@@ -5,6 +5,7 @@ import {
   DepositRequestFulfilled as DepositRequestFulfilledEvent,
   RedeemRequestFulfilled as RedeemRequestFulfilledEvent,
   RequestCancelled as RequestCancelledEvent,
+  ForcedRequestCancelled as ForcedRequestCancelledEvent,
   AddressFrozen,
   AddressUnfrozen,
 } from '../generated/templates/EwpgERC7540/EwpgERC7540'
@@ -280,6 +281,40 @@ export function handleRequestCancelled(event: RequestCancelledEvent): void {
   )
   lifecycle.actor = event.params.by
   lifecycle.owner = request.owner
+  lifecycle.save()
+}
+
+/**
+ * Registry force-cancel on a legal basis: the escrow (underlying for a deposit request, shares for
+ * a redeem request) went to `to`. Share movements are also projected via the accompanying Transfer.
+ */
+export function handleForcedRequestCancelled(event: ForcedRequestCancelledEvent): void {
+  let vaultAddress = event.address.toHexString()
+  let id = requestId(vaultAddress, event.params.requestId)
+  let request = AsyncVaultRequest.load(id)
+  if (request == null) request = createIncompleteRequest(vaultAddress, event.params.requestId)
+  if (request.status != 'PENDING') request.projectionStatus = INCOMPLETE
+  request.status = 'FORCE_CANCELLED'
+  request.cancelledBy = event.transaction.from
+  request.forcedDestination = event.params.to
+  request.legalBasis = event.params.legalBasis
+  request.completedAtBlock = event.block.number
+  request.completedAtTimestamp = event.block.timestamp
+  request.save()
+
+  let lifecycle = newLifecycleEvent(
+    eventId(event.transaction.hash, event.logIndex),
+    request as AsyncVaultRequest,
+    'FORCE_CANCELLED',
+    event.block.number,
+    event.block.timestamp,
+    event.transaction.hash,
+    event.logIndex,
+  )
+  lifecycle.actor = event.transaction.from
+  lifecycle.owner = request.owner
+  lifecycle.forcedDestination = event.params.to
+  lifecycle.legalBasis = event.params.legalBasis
   lifecycle.save()
 }
 

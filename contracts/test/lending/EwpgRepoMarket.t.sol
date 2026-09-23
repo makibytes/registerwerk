@@ -399,6 +399,83 @@ contract EwpgRepoMarketTest is Test {
         assertEq(market.debtOf(alice), 0);
     }
 
+    // ── repayDebtOnly / claimCollateral ──────────────────────────────────────
+
+    function test_repayDebtOnly_partialKeepsAllCollateralPledged() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        vm.prank(alice);
+        uint256 paid = market.repayDebtOnly(3_000e6);
+
+        assertApproxEqAbs(paid, 3_000e6, 1);
+        assertApproxEqAbs(market.debtOf(alice), 4_000e6, 1);
+        (uint256 collateral,) = market.positions(alice);
+        assertEq(collateral, 100);
+        assertEq(collateralToken.balanceOf(alice), 900);
+    }
+
+    function test_repayDebtOnly_isNotEcosystemGated() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        vm.prank(operator);
+        permissions.revokeFromOrg(address(orgId), borrowPermission);
+
+        vm.prank(alice);
+        market.repayDebtOnly(7_000e6);
+        assertEq(market.debtOf(alice), 0);
+    }
+
+    function test_repayDebtOnly_revertsWithoutDebt() public {
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoMarket.NoOutstandingDebt.selector);
+        market.repayDebtOnly(1e6);
+    }
+
+    function test_claimCollateral_revertsWhileDebtOutstanding() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+        vm.prank(alice);
+        market.repayDebtOnly(1_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoMarket.OutstandingDebt.selector);
+        market.claimCollateral();
+    }
+
+    function test_claimCollateral_revertsWithNothingToClaim() public {
+        vm.prank(alice);
+        vm.expectRevert(EwpgRepoMarket.ZeroAmount.selector);
+        market.claimCollateral();
+    }
+
+    function test_repayDebtOnly_thenClaimCollateral_releasesEverything() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+        vm.warp(block.timestamp + 30 days);
+        loanToken.mint(alice, 1_000e6); // cover accrued interest
+
+        vm.prank(alice);
+        market.repayDebtOnly(type(uint256).max);
+        assertEq(market.totalScaledDebt(), 0);
+
+        vm.expectEmit(true, false, false, true);
+        emit EwpgRepoMarket.CollateralWithdrawn(alice, 100, 0);
+        vm.prank(alice);
+        assertEq(market.claimCollateral(), 100);
+        assertEq(collateralToken.balanceOf(alice), 1_000);
+        assertEq(collateralToken.balanceOf(address(market)), 0);
+    }
+
     // ── liquidation (partial / close-factor) ────────────────────────────────
 
     function test_liquidate_revertsForHealthyPosition() public {
@@ -477,6 +554,30 @@ contract EwpgRepoMarketTest is Test {
 
         assertEq(debtRepaid, debtBefore, "a severely underwater position closes fully in one call");
         assertEq(market.debtOf(alice), 0);
+    }
+
+    function test_liquidate_fullClose_creditsResidualCollateralForClaim() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        // HF = 100*80*0.8/7000 = 0.914 < 0.95 -> full close; seize = 7000*1.05/80 = 91 units.
+        vm.prank(alice);
+        navOracle.pushPrice(address(collateralToken), 80e6);
+
+        vm.prank(liquidator);
+        (, uint256 seized) = market.liquidate(alice, 7_000e6);
+
+        assertEq(seized, 91);
+        (uint256 collateral, uint256 scaledDebt) = market.positions(alice);
+        assertEq(scaledDebt, 0);
+        assertEq(collateral, 9, "residual stays credited, not pushed");
+        assertEq(collateralToken.balanceOf(alice), 900);
+
+        vm.prank(alice);
+        assertEq(market.claimCollateral(), 9);
+        assertEq(collateralToken.balanceOf(alice), 909);
     }
 
     function test_liquidate_isPermissionlessAtEcosystemLayer() public {

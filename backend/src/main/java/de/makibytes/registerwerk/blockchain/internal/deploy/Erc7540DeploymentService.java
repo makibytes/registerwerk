@@ -15,19 +15,10 @@ import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.web3j.abi.TypeReference;
-import org.web3j.abi.datatypes.Address;
-import org.web3j.abi.datatypes.Function;
-import org.web3j.abi.datatypes.Utf8String;
-import org.web3j.abi.datatypes.generated.Bytes32;
-import org.web3j.abi.datatypes.generated.Uint8;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.math.BigInteger;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -45,13 +36,11 @@ public class Erc7540DeploymentService {
 
     private static final BigInteger TOKEN_TYPE_ERC7540 = BigInteger.valueOf(5);
 
-    private static final String VAULT_DEPLOYED_TOPIC =
-            "0x" + org.web3j.crypto.Hash.sha3String("VaultDeployed(bytes32,uint8,address,address)");
-
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
     private final ContractAddressConfig contractAddressConfig;
     private final AssetLookupPort assetLookupPort;
+    private final EvmFactoryDeploymentSupport factoryDeploymentSupport;
     private final AssetVaultStateRepository vaultStateRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
 
@@ -60,7 +49,9 @@ public class Erc7540DeploymentService {
                                     ContractAddressConfig contractAddressConfig,
                                     AssetLookupPort assetLookupPort,
                                     AssetVaultStateRepository vaultStateRepository,
-                                    AssetDeploymentRepository assetDeploymentRepository) {
+                                    AssetDeploymentRepository assetDeploymentRepository,
+                                    EvmFactoryDeploymentSupport factoryDeploymentSupport) {
+        this.factoryDeploymentSupport = factoryDeploymentSupport;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
@@ -89,27 +80,12 @@ public class Erc7540DeploymentService {
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
             EvmSigner signer = evmContractService.signer(chain);
 
-            Function deployVault = new Function(
-                    "deployVault",
-                    Arrays.asList(
-                            new Uint8(TOKEN_TYPE_ERC7540),
-                            new Utf8String(asset.name()),
-                            new Utf8String(EvmUtils.tokenSymbol(asset)),
-                            new Bytes32(Erc20DeploymentService.uuidToBytes32(assetId)),
-                            new Address(underlyingAddress)
-                    ),
-                    Collections.singletonList(new TypeReference<Address>() {})
-            );
-
-            TransactionReceipt receipt = evmContractService.send(
-                    evmContractService.chainConfigId(chain), web3j, signer, factoryAddress, deployVault);
-            String vaultAddress = EvmUtils.extractIndexedAddress(receipt, VAULT_DEPLOYED_TOPIC, 3)
-                    .orElseThrow(() -> new RuntimeException(
-                            "VaultDeployed event not found in receipt: " + receipt.getTransactionHash()));
-            log.info("ERC-7540 vault deployed: assetId={} → vaultAddress={} tx={}",
-                    assetId, vaultAddress, receipt.getTransactionHash());
-
-            return new TokenDeploymentResult(receipt.getTransactionHash(), vaultAddress);
+            // Idempotent: adopts our contract if it already sits at predictAddress (T1-17).
+            TokenDeploymentResult result = factoryDeploymentSupport.deploy(chain, web3j, signer, factoryAddress,
+                    TOKEN_TYPE_ERC7540, asset.name(), EvmUtils.tokenSymbol(asset), assetId, underlyingAddress);
+            log.info("ERC-7540 deployed: assetId={} → vaultAddress={} tx={}",
+                    assetId, result.contractAddress(), result.txHash());
+            return result;
         });
     }
 

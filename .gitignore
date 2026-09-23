@@ -59,6 +59,7 @@ contracts/cairo/.snfoundry_cache/
 
 # Daml
 daml/.daml/
+daml/test/.daml/
 
 # Graph Node subgraph (codegen output)
 indexer/evm/subgraph/generated/

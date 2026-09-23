@@ -446,6 +446,37 @@ public class EvmContractService {
         }
     }
 
+    /**
+     * Pre-flight: runs {@code function} as an {@code eth_call} from the chain's default signer
+     * (the account a subsequent {@code submit} would send from) and reports whether it would
+     * revert. Only a UX/pre-check aid — the on-chain execution stays authoritative.
+     *
+     * @return the revert reason (the RPC error message, which carries the contract's
+     *         {@code require} string) if the call would revert; empty if it would succeed or the
+     *         simulation itself could not be run (node unreachable, non-revert RPC error)
+     */
+    public Optional<String> simulateRevert(UUID chainConfigId, String contractAddress, Function function) {
+        try {
+            Web3j web3j = evmClient(chainConfigId);
+            String from = signer(chainConfigId).address();
+            EthCall result = web3j.ethCall(
+                    Transaction.createEthCallTransaction(from, contractAddress, FunctionEncoder.encode(function)),
+                    DefaultBlockParameterName.LATEST).send();
+            if (result.hasError()) {
+                String message = result.getError().getMessage();
+                return message != null && message.toLowerCase(java.util.Locale.ROOT).contains("revert")
+                        ? Optional.of(message) : Optional.empty();
+            }
+            if (result.isReverted()) {
+                return Optional.of(String.valueOf(result.getRevertReason()));
+            }
+            return Optional.empty();
+        } catch (Exception e) {
+            log.debug("Pre-flight simulation of {} on {} unavailable: {}", function.getName(), contractAddress, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /** Either a legacy (type-0) gasPrice or an EIP-1559 (type-2) fee pair — never both. */

@@ -37,6 +37,20 @@ export const repoMarketAbi = [
   },
   {
     type: 'function',
+    name: 'repayDebtOnly',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'repayAmount', type: 'uint256' }],
+    outputs: [{ name: 'actualRepayAmount', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'claimCollateral',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [{ name: 'amount', type: 'uint256' }],
+  },
+  {
+    type: 'function',
     name: 'addCollateral',
     stateMutability: 'nonpayable',
     inputs: [{ name: 'amount', type: 'uint256' }],
@@ -168,5 +182,45 @@ export const erc20Abi = [
     stateMutability: 'view',
     inputs: [],
     outputs: [{ type: 'uint8' }],
+  },
+] as const;
+
+/**
+ * ERC-3643 (T-REX) eligibility reads on the collateral token, used to tell in advance whether the
+ * market can hand collateral back to a wallet: T-REX `transfer` reverts while the token is paused,
+ * the recipient is frozen, or the recipient is no longer verified in the identity registry.
+ */
+export const trexEligibilityAbi = [
+  {
+    type: 'function',
+    name: 'paused',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'isFrozen',
+    stateMutability: 'view',
+    inputs: [{ name: 'userAddress', type: 'address' }],
+    outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'identityRegistry',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+] as const;
+
+/** T-REX identity registry: `isVerified` is the recipient check inside T-REX `transfer`. */
+export const trexIdentityRegistryAbi = [
+  {
+    type: 'function',
+    name: 'isVerified',
+    stateMutability: 'view',
+    inputs: [{ name: 'userAddress', type: 'address' }],
+    outputs: [{ type: 'bool' }],
   },
 ] as const;

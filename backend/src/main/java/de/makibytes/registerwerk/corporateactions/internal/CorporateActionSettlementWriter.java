@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettledEvent;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementBlockedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
 import org.slf4j.Logger;
@@ -87,5 +88,23 @@ class CorporateActionSettlementWriter {
 
             events.publishEvent(new CorporateActionSettledEvent(corporateActionId, actorId, actorRole, txHash));
         }, () -> log.warn("CorporateAction disappeared before settlement could be recorded: id={}", corporateActionId));
+    }
+
+    /**
+     * Records that automated settlement was deliberately not dispatched: appends {@code reason}
+     * to the operator-visible notes (once — a redelivered settlement event does not duplicate it)
+     * and audits it. The status stays {@code AWAITING_SETTLEMENT}.
+     */
+    @Transactional
+    void recordSettlementBlocked(UUID corporateActionId, String reason) {
+        corporateActionRepository.findById(corporateActionId).ifPresent(ca -> {
+            String note = "settlement blocked: " + reason;
+            if (ca.getNotes() != null && ca.getNotes().contains(note)) {
+                return;
+            }
+            ca.setNotes((ca.getNotes() != null ? ca.getNotes() + " | " : "") + note);
+            corporateActionRepository.save(ca);
+            events.publishEvent(new CorporateActionSettlementBlockedEvent(corporateActionId, reason));
+        });
     }
 }

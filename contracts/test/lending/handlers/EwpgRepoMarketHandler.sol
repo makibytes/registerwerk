@@ -7,7 +7,8 @@ import "../../../src/lending/oracle/RegisterwerkNavOracle.sol";
 import "../../../src/examples/MockStablecoin.sol";
 
 /// @notice Bounded-random actor driving {EwpgRepoMarket} through its full lifecycle
-///         (supply/withdraw/pledgeAndBorrow/repay/liquidate/price moves) for
+///         (supply/withdraw/pledgeAndBorrow/repay/repayDebtOnly/claimCollateral/liquidate/price
+///         moves) for
 ///         `EwpgRepoMarket.invariant.t.sol` .
 ///
 /// @dev Borrowers are a small FIXED set pre-authorized (KYC + `repo-facility.borrow`) by the
@@ -100,6 +101,26 @@ contract EwpgRepoMarketHandler is Test {
         loanToken.approve(address(market), type(uint256).max);
         try market.repay(repayAmount) {} catch {}
         vm.stopPrank();
+    }
+
+    function repayDebtOnly(uint256 borrowerSeed, uint256 repayAmount) public {
+        address borrower = borrowers[borrowerSeed % borrowers.length];
+        uint256 debt = market.debtOf(borrower);
+        if (debt == 0) return;
+        repayAmount = bound(repayAmount, 1, debt);
+        loanToken.mint(borrower, repayAmount);
+        vm.startPrank(borrower);
+        loanToken.approve(address(market), type(uint256).max);
+        try market.repayDebtOnly(repayAmount) {} catch {}
+        vm.stopPrank();
+    }
+
+    /// @dev Zero-debt positions with credited collateral arise from {repayDebtOnly} and from
+    ///      full-close liquidations; this is the only way that collateral leaves custody.
+    function claimCollateral(uint256 borrowerSeed) public {
+        address borrower = borrowers[borrowerSeed % borrowers.length];
+        vm.prank(borrower);
+        try market.claimCollateral() {} catch {}
     }
 
     function liquidate(uint256 borrowerSeed, uint256 liquidatorSeed, uint256 maxRepayAmount) public {

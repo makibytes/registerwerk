@@ -223,13 +223,15 @@ type AsyncVaultRequest @entity(immutable: false) {
   vault: Token!
   requestId: BigInt!
   requestType: String!           # 'DEPOSIT' | 'REDEEM' | 'UNKNOWN'
-  status: String!                # 'PENDING' | 'FULFILLED' | 'CANCELLED'
+  status: String!                # 'PENDING' | 'FULFILLED' | 'CANCELLED' | 'FORCE_CANCELLED'
   controller: Bytes
   owner: Bytes
   assets: BigInt
   shares: BigInt
   navAtFulfill: BigInt
   cancelledBy: Bytes
+  forcedDestination: Bytes       # escrow recipient of a registry force-cancel
+  legalBasis: String             # legal basis stated for a registry force-cancel
   requestedAtBlock: BigInt
   requestedAtTimestamp: BigInt
   completedAtBlock: BigInt
@@ -244,13 +246,15 @@ type AsyncVaultRequestEvent @entity(immutable: true) {
   request: AsyncVaultRequest!
   vault: Token!
   requestId: BigInt!
-  eventKind: String!             # 'REQUESTED' | 'FULFILLED' | 'CANCELLED'
+  eventKind: String!             # 'REQUESTED' | 'FULFILLED' | 'CANCELLED' | 'FORCE_CANCELLED'
   requestType: String!           # type known from the request event, otherwise 'UNKNOWN'
   actor: Bytes                   # controller on request; cancelling account on cancellation
   owner: Bytes
   assets: BigInt
   shares: BigInt
   navAtFulfill: BigInt
+  forcedDestination: Bytes
+  legalBasis: String
   projectionStatus: ProjectionStatus!
   blockNumber: BigInt!
   blockTimestamp: BigInt!

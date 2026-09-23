@@ -80,6 +80,13 @@ Le backend provisionne automatiquement ces sujets lors de la création d'une nou
 
 Lorsqu'un investisseur est intégré, le backend déploie un contrat ONCHAINID pour lui et l'enregistre dans le registre d'identité. Cela se produit automatiquement lorsque vous ajoutez un investisseur à la liste blanche via l'interface de l'opérateur.
 
+Chaque enregistrement exige un pays au format numérique ISO 3166-1. La boîte de dialogue de
+l'opérateur le préremplit à partir du pays d'enregistrement KYC de l'entité juridique, et l'API
+rejette un pays manquant ou le pays `0`. Dès qu'un pays est bloqué pour un jeton,
+`EwpgComplianceModule` rejette les transferts vers un portefeuille (wallet) dont le pays enregistré
+est `0`. Le tableau du registre d'identité signale ces portefeuilles par **Country missing** (pays
+manquant). Corrigez-les avec `updateCountry(address,uint16)` sur l'Identity Registry.
+
 Pour vérifier que l'ONCHAINID d'un investisseur est enregistré :
 
 ```bash
@@ -155,6 +162,65 @@ cast send $COUNTRY_RESTRICT_MODULE \
   $TOKEN_ADDRESS "[840,156]" \
   --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY
 ```
+
+### EwpgComplianceModule (module propre à Registerwerk)
+
+`EwpgComplianceModule` réunit le nombre maximal d'investisseurs, le solde maximal par investisseur,
+les pays bloqués, le délai minimal entre transferts (cooldown) et l'exemption des pools de
+nominees. Tous ses paramètres sont stockés par contrat `ModularCompliance`. Ses setters prennent
+cette adresse de conformité comme premier argument, par exemple
+`setMaxInvestors(address compliance, uint256)`.
+
+- **Qui peut le configurer.** Seul le propriétaire du contrat de conformité peut appeler un
+  setter, ou la conformité elle-même via `callModuleFunction`. Tout autre appelant échoue avec
+  `CallerNotComplianceAdmin`. T-REX transfère la propriété en deux étapes : après le déploiement
+  d'une suite, le portefeuille du registre n'est donc que propriétaire *en attente*. Le backend
+  appelle `acceptOwnership()` sur la conformité au moment du déploiement. Si cette étape a échoué,
+  il la rejoue avant la modification suivante d'un module de conformité.
+- **Ajout depuis le backend.** Le backend lie le module, envoie les setters et relit le résultat
+  avec `getConfig(address)` et `isCountryBlocked(address,uint16)`. Il n'écrit la ligne en base
+  que lorsque chaque valeur est on-chain. Si la configuration échoue, il délie le module et
+  signale l'erreur.
+- **« Investisseur » signifie ONCHAINID.** Les soldes et le nombre d'investisseurs sont cumulés
+  par identité : plusieurs portefeuilles liés à un même ONCHAINID partagent un plafond de solde et
+  comptent pour un seul investisseur. Les transferts entre deux portefeuilles de la même identité
+  sont toujours autorisés.
+- **Pays inconnu.** Tant qu'au moins un pays est bloqué, un destinataire sans pays enregistré
+  (`0`) est rejeté.
+
+#### Migrer une suite en production vers le module corrigé
+
+Les contrats déployés avant ce correctif utilisent l'ancien module. Dans celui-ci, **n'importe
+qui** peut modifier les paramètres, et les limites s'appliquent par portefeuille et non par
+identité. Le module n'est pas évolutif (upgradeable) : chaque suite en production doit donc passer
+à un module nouvellement déployé.
+
+1. Déployer le nouvel `EwpgComplianceModule`.
+2. En tant que propriétaire de la conformité (appelez d'abord `acceptOwnership()` si vous n'êtes
+   encore que propriétaire en attente), exécuter `addModule(newModule)` sur la
+   `ModularCompliance` de la suite.
+3. Configurer le nouveau module à partir des valeurs enregistrées en base
+   (`erc3643_compliance_module`) : `setMaxInvestors`, `setMaxBalance`, `setTransferCooldown`,
+   `blockCountry` et `setNomineePool`. Ne recopiez pas les valeurs de l'état on-chain de l'ancien
+   module : n'importe qui a pu les modifier.
+4. Reprendre les titulaires existants :
+   `syncHolders(compliance, wallets)` avec chaque portefeuille de `erc3643_identity_registry` pour
+   la suite (ainsi que tout autre portefeuille de titulaire connu de l'indexeur). L'appel est
+   idempotent : il peut être exécuté par lots et relancé sans risque.
+5. Comparer `getConfig(compliance)` à la base, y compris le nombre d'investisseurs par rapport au
+   nombre d'ONCHAINID distincts ayant un solde positif.
+6. Exécuter `removeModule(oldModule)` sur la conformité.
+
+!!! warning "Un ancien module ne peut pas être lié depuis le backend"
+    Après avoir lié un module, le backend relit la configuration avec `getConfig(address)`. Un
+    module déployé avant ce correctif ne possède pas `getConfig` : son ajout depuis le backend est
+    donc toujours annulé. Ne réessayez pas : redéployez `EwpgComplianceModule` et liez la nouvelle
+    instance.
+
+Tant qu'une suite n'est pas migrée, déclenchez une alerte pour tout écart entre
+`isCountryBlocked` / les limites de l'ancien module et la base. Signalez également aux opérateurs,
+comme tâche `updateCountry`, chaque entrée du registre d'identité ayant le pays `0`, vérifiée
+on-chain avec `investorCountry(wallet)`.
 
 ## Étape 7 — Rôles d'agent
 

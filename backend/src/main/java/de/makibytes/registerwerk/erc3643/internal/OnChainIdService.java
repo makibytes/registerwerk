@@ -1,7 +1,6 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
 import de.makibytes.registerwerk.erc3643.events.OnchainIdentityDeployedEvent;
-import de.makibytes.registerwerk.erc3643.events.OnchainIdentityLinkedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
@@ -53,7 +52,6 @@ public class OnChainIdService {
     private final OnchainIdentityRepository identityRepository;
     private final OnchainClaimRepository claimRepository;
     private final ChainConfigRepository chainConfigRepository;
-    private final Erc3643DeploymentService deploymentService;
     private final ApplicationEventPublisher eventPublisher;
     private final EvmContractService evmContractService;
     private final DurableEvmTransactionGateway evmTransactions;
@@ -64,7 +62,6 @@ public class OnChainIdService {
             OnchainIdentityRepository identityRepository,
             OnchainClaimRepository claimRepository,
             ChainConfigRepository chainConfigRepository,
-            Erc3643DeploymentService deploymentService,
             ApplicationEventPublisher eventPublisher,
             EvmContractService evmContractService,
             DurableEvmTransactionGateway evmTransactions,
@@ -73,7 +70,6 @@ public class OnChainIdService {
         this.identityRepository = identityRepository;
         this.claimRepository = claimRepository;
         this.chainConfigRepository = chainConfigRepository;
-        this.deploymentService = deploymentService;
         this.eventPublisher = eventPublisher;
         this.evmContractService = evmContractService;
         this.evmTransactions = evmTransactions;
@@ -196,30 +192,6 @@ public class OnChainIdService {
     @Transactional(readOnly = true)
     public List<OnchainIdentity> getIdentities(UUID legalEntityId) {
         return identityRepository.findByLegalEntityId(legalEntityId);
-    }
-
-    /**
-     * Links an ONCHAINID identity to a T-REX token by registering the investor's wallet
-     * in the suite's IdentityRegistry.
-     *
-     * <p>This must be called before the investor can receive or transfer tokens.
-     *
-     * @param onchainIdentityId ID of the ONCHAINID identity record
-     * @param suiteId           ID of the ERC-3643 suite
-     * @param walletAddress     investor's EVM wallet address
-     */
-    public void linkIdentityToToken(UUID onchainIdentityId, UUID suiteId, String walletAddress) {
-        log.info(
-            "Linking ONCHAINID identity={} to suite={} for wallet={}",
-            onchainIdentityId, suiteId, walletAddress);
-
-        OnchainIdentity identity = identityRepository.findById(onchainIdentityId)
-            .orElseThrow(() -> new EntityNotFoundException("OnchainIdentity", onchainIdentityId));
-
-        deploymentService.registerInvestorIdentity(
-            identity.getLegalEntityId(), suiteId, walletAddress, onchainIdentityId);
-
-        eventPublisher.publishEvent(new OnchainIdentityLinkedEvent(onchainIdentityId, null, "REGISTRY_ADMIN", java.util.Map.of()));
     }
 
     /**

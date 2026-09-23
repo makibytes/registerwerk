@@ -41,6 +41,14 @@ pub trait IEwpgERC3525Admin<TState> {
     fn freeze_token(ref self: TState, token_id: u256, reason: felt252);
     fn unfreeze_token(ref self: TState, token_id: u256);
     fn is_token_frozen(self: @TState, token_id: u256) -> bool;
+
+    // ── Holder whitelist + address freeze (KYC; AWG §17, GwG §40) ─────────────
+    fn whitelist(ref self: TState, account: ContractAddress);
+    fn remove_from_whitelist(ref self: TState, account: ContractAddress);
+    fn is_whitelisted(self: @TState, account: ContractAddress) -> bool;
+    fn freeze_address(ref self: TState, account: ContractAddress, reason: felt252);
+    fn unfreeze_address(ref self: TState, account: ContractAddress);
+    fn is_frozen(self: @TState, account: ContractAddress) -> bool;
     fn forced_transfer_value(ref self: TState, from_token_id: u256, to_token_id: u256, value: u256, legal_basis: felt252);
     fn force_burn_value(ref self: TState, token_id: u256, value: u256, legal_basis: felt252);
 

@@ -5,23 +5,14 @@ import de.makibytes.registerwerk.blockchain.api.EvmUtils;
 import de.makibytes.registerwerk.blockchain.api.TokenDeploymentResult;
 
 import java.math.BigInteger;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.web3j.abi.TypeReference;
-import org.web3j.abi.datatypes.Address;
-import org.web3j.abi.datatypes.Function;
-import org.web3j.abi.datatypes.Utf8String;
-import org.web3j.abi.datatypes.generated.Bytes32;
-import org.web3j.abi.datatypes.generated.Uint8;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
@@ -43,21 +34,18 @@ public class Erc20DeploymentService {
     /** AssetTokenFactory constant: ERC-20 type. */
     private static final BigInteger TOKEN_TYPE_ERC20 = java.math.BigInteger.ZERO;
 
-    /**
-     * keccak256("TokenDeployed(bytes32,uint8,address)") — used to find the event in receipt logs.
-     */
-    private static final String TOKEN_DEPLOYED_TOPIC =
-            "0x" + org.web3j.crypto.Hash.sha3String("TokenDeployed(bytes32,uint8,address)");
-
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final EvmContractService evmContractService;
     private final ContractAddressConfig contractAddressConfig;
     private final AssetLookupPort assetLookupPort;
+    private final EvmFactoryDeploymentSupport factoryDeploymentSupport;
 
     public Erc20DeploymentService(BlockchainClientRegistry blockchainClientRegistry,
                                    EvmContractService evmContractService,
                                    ContractAddressConfig contractAddressConfig,
-                                   AssetLookupPort assetLookupPort) {
+                                   AssetLookupPort assetLookupPort,
+                                   EvmFactoryDeploymentSupport factoryDeploymentSupport) {
+        this.factoryDeploymentSupport = factoryDeploymentSupport;
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.evmContractService = evmContractService;
         this.contractAddressConfig = contractAddressConfig;
@@ -90,30 +78,12 @@ public class Erc20DeploymentService {
             Web3j web3j = blockchainClientRegistry.getEvmClient(chain);
             EvmSigner signer = evmContractService.signer(chain);
 
-            // Encode assetId UUID as bytes32
-            byte[] assetIdBytes = uuidToBytes32(assetId);
-
-            Function deployToken = new Function(
-                    "deployToken",
-                    Arrays.asList(
-                            new Uint8(TOKEN_TYPE_ERC20),
-                            new Utf8String(asset.name()),
-                            new Utf8String(EvmUtils.tokenSymbol(asset)),
-                            new Bytes32(assetIdBytes)
-                    ),
-                    Collections.singletonList(new TypeReference<Address>() {})
-            );
-
-            TransactionReceipt receipt = evmContractService.send(
-                    evmContractService.chainConfigId(chain), web3j, signer, factoryAddress, deployToken);
-
-            String tokenAddress = EvmUtils.extractIndexedAddress(receipt, TOKEN_DEPLOYED_TOPIC, 3)
-                    .orElseThrow(() -> new RuntimeException(
-                            "TokenDeployed event not found in receipt: " + receipt.getTransactionHash()));
+            // Idempotent: adopts our contract if it already sits at predictAddress (T1-17).
+            TokenDeploymentResult result = factoryDeploymentSupport.deploy(chain, web3j, signer, factoryAddress,
+                    TOKEN_TYPE_ERC20, asset.name(), EvmUtils.tokenSymbol(asset), assetId, null);
             log.info("ERC-20 deployed: assetId={} → tokenAddress={} tx={}",
-                    assetId, tokenAddress, receipt.getTransactionHash());
-
-            return new TokenDeploymentResult(receipt.getTransactionHash(), tokenAddress);
+                    assetId, result.contractAddress(), result.txHash());
+            return result;
         });
     }
 

@@ -25,7 +25,17 @@ export interface TxRecord {
   opsNote: string | null;
   opsReviewedAt: string | null;
   opsReviewedBy: string | null;
+  /** Verified outcome of a confidential forced transfer / forced burn (backend
+   *  ConfidentialForcedOpVerifier). SUCCESS alone does not mean the correction was executed:
+   *  the FHE select moves 0 on insufficient balance. Null while pending or not applicable. */
+  executionOutcome: ConfidentialForcedOpOutcome | null;
 }
+
+export type ConfidentialForcedOpOutcome =
+  | 'EXECUTED'
+  | 'NOT_EXECUTED_INSUFFICIENT_BALANCE'
+  | 'UNVERIFIED_DECRYPT_FAILED'
+  | 'UNVERIFIED_INCONSISTENT';
 
 export interface TxPage {
   content: TxRecord[];

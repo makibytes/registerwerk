@@ -34,6 +34,11 @@ class CorporateActionSettlementListener {
 
     private static final Logger log = LoggerFactory.getLogger(CorporateActionSettlementListener.class);
 
+    static final String FLOATING_COUPON_BLOCKED_REASON =
+            "automated coupon settlement is disabled for floating-rate Canton bonds because rate "
+            + "fixing (FixRate) is not wired in the backend; settle manually after the period's "
+            + "fixing has been recorded on-ledger";
+
     private final CorporateActionRepository corporateActionRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
     private final CantonBondOperations cantonBondOperations;
@@ -80,7 +85,7 @@ class CorporateActionSettlementListener {
 
         switch (standard) {
             case "DAML_BOND_FIXED", "DAML_BOND_FLOATING", "DAML_BOND_ZERO" ->
-                dispatchCanton(ca);
+                dispatchCanton(ca, standard);
 
             case "ERC3525" ->
                 log.info("ERC-3525 coupon settlement for assetId={} requires on-chain coupon distributor — " +
@@ -106,7 +111,7 @@ class CorporateActionSettlementListener {
      * supported token standard has an on-chain split primitive; it always settles via the
      * operator's manual {@code mark-settled}), not an oversight.
      */
-    private void dispatchCanton(CorporateAction ca) {
+    private void dispatchCanton(CorporateAction ca, String standard) {
         Optional<AssetDeployment> deployment = resolveCantonDeployment(ca.getAssetId());
         if (deployment.isEmpty()) {
             log.warn("No Canton deployment found for assetId={}; settlement remains AWAITING_SETTLEMENT.",
@@ -114,6 +119,19 @@ class CorporateActionSettlementListener {
             return;
         }
         UUID deploymentId = deployment.get().getId();
+
+        // Interim guard (floating-rate fixing is parked): nothing in the backend exercises
+        // FixRate, so PayCoupon on a FloatingRateBond would only fail the ledger's "rate must be
+        // fixed" assertion (or, after one manual fixing, reuse it for every later period). Leave
+        // the coupon with the operator instead, with the reason on the action itself.
+        if ("DAML_BOND_FLOATING".equals(standard)
+                && (ca.getActionType() == CorporateAction.ActionType.COUPON
+                    || ca.getActionType() == CorporateAction.ActionType.INTEREST_PAYMENT)) {
+            log.warn("Floating-rate Canton coupon not auto-dispatched: corporateActionId={} remains "
+                    + "AWAITING_SETTLEMENT for operator review.", ca.getId());
+            settlementWriter.recordSettlementBlocked(ca.getId(), FLOATING_COUPON_BLOCKED_REASON);
+            return;
+        }
 
         switch (ca.getActionType()) {
             case COUPON, INTEREST_PAYMENT -> dispatchCantonCoupon(ca, deploymentId);

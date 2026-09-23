@@ -94,6 +94,10 @@ public class CorrectionCapabilityService {
             "pause-slot", "Pause / unpause a slot", true, "Reversible in place, halts transfers within the slot.");
     private static final CorrectionCapability FREEZE_TOKEN = new CorrectionCapability(
             "freeze-token", "Freeze / unfreeze a specific token", true, "Reversible in place, per-token freeze.");
+    private static final CorrectionCapability FREEZE_HOLDER = new CorrectionCapability(
+            "freeze-holder", "Freeze / unfreeze a holder address", true,
+            "AWG §17, GwG §40, MiCAR Art. 36 — blocks every value movement from, to or by the address "
+                    + "(/holders/freeze); reversible in place.");
     private static final CorrectionCapability FORCED_VALUE_TRANSFER = new CorrectionCapability(
             "forced-value-transfer", "Forced value transfer between tokens", false,
             "Moves slot value between tokens under agent authority — book an opposite transfer to correct.");
@@ -102,6 +106,11 @@ public class CorrectionCapabilityService {
     private static final CorrectionCapability CANCEL_DEPOSIT_REQUEST = new CorrectionCapability(
             "cancel-deposit-request", "Cancel a pending deposit request", true,
             "Reversible in place — withdraws a not-yet-fulfilled deposit request before NAV strike.");
+    private static final CorrectionCapability FORCE_CANCEL_VAULT_REQUEST = new CorrectionCapability(
+            "force-cancel", "Force-cancel a pending request (compliance hold release)", false,
+            "Registry cancels a pending deposit/redeem request on a stated legal basis and moves its "
+                    + "escrow to a destination named per case (e.g. under a court order for a frozen investor). "
+                    + "Step-up + 4-eyes. Not undoable in place — the escrow has left the vault.");
 
     // ── SPL Token-2022 (SolanaTokenAdminController, Permanent Delegate) ──────
     private static final CorrectionCapability FREEZE_SPL = new CorrectionCapability(
@@ -164,13 +173,13 @@ public class CorrectionCapabilityService {
             case CONF_ERC3643 -> List.of(
                     PAUSE_CONFIDENTIAL, FREEZE_CONFIDENTIAL, FORCED_TRANSFER_CONFIDENTIAL, FORCE_BURN_CONFIDENTIAL);
             case ERC3525, STARKNET_ERC3525 ->
-                    List.of(PAUSE_SLOT, FREEZE_TOKEN, FORCED_VALUE_TRANSFER);
+                    List.of(PAUSE_SLOT, FREEZE_TOKEN, FREEZE_HOLDER, FORCED_VALUE_TRANSFER);
             // ERC-4626 (sync vault) has no forced-correction endpoint today — only NAV strike
             // and deposit-cap, neither of which corrects a wrongful transfer/mint/burn.
             case ERC4626 -> List.of();
-            // ERC-7540 (async vault): only the deposit-request cancel is actually wired up
-            // (VaultController never calls Erc7540AdminService.cancelRedeemRequest).
-            case ERC7540 -> List.of(CANCEL_DEPOSIT_REQUEST);
+            // ERC-7540 (async vault): request cancel (refund to payer / shares back to owner) and
+            // the registry force-cancel under a legal basis (VaultController).
+            case ERC7540 -> List.of(CANCEL_DEPOSIT_REQUEST, FORCE_CANCEL_VAULT_REQUEST);
             // CIP-0056 standardizes interfaces and registry/wallet workflows; it does not define
             // universal issuer-admin choices. A registry-specific adapter is required before any
             // CANTON_TOKEN correction can be advertised safely.

@@ -27,7 +27,7 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
 
     uint256 private _navPerShare;     // fixed-point 1e18; 0 = not yet struck
     uint256 private _depositCap;      // 0 = unlimited
-    bool private _inForceOp;
+    bool internal _inForceOp;
     uint256 private _strikeCounter;
 
     // ── Events ────────────────────────────────────────────────────────────────
@@ -132,7 +132,46 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
         return _convertToShares(maxAssets, Math.Rounding.Floor);
     }
 
+    // ── Cash-leg compliance ───────────────────────────────────────────────────
+    //
+    // _update only sees the SHARE legs. The underlying cash leg is invisible to
+    // it: OZ deposit()/mint() pull from msg.sender, withdraw()/redeem() pay the
+    // receiver. Without these checks a frozen address can fund shares for a
+    // whitelisted nominee and have the nominee redeem the cash straight back
+    // to it. Whether third-party payers/receivers are permitted at all is a
+    // parked policy question; this only enforces the address freeze.
+
+    function deposit(uint256 assets, address receiver) public virtual override returns (uint256) {
+        require(!isFrozen(msg.sender), "EwpgERC4626: payer is frozen");
+        return super.deposit(assets, receiver);
+    }
+
+    function mint(uint256 shares, address receiver) public virtual override returns (uint256) {
+        require(!isFrozen(msg.sender), "EwpgERC4626: payer is frozen");
+        return super.mint(shares, receiver);
+    }
+
+    function withdraw(uint256 assets, address receiver, address owner) public virtual override returns (uint256) {
+        _requireCashReceiverNotFrozen(receiver);
+        return super.withdraw(assets, receiver, owner);
+    }
+
+    function redeem(uint256 shares, address receiver, address owner) public virtual override returns (uint256) {
+        _requireCashReceiverNotFrozen(receiver);
+        return super.redeem(shares, receiver, owner);
+    }
+
+    function _requireCashReceiverNotFrozen(address receiver) private view {
+        require(!isFrozen(receiver), "EwpgERC4626: receiver is frozen");
+        require(!isFrozen(msg.sender), "EwpgERC4626: caller is frozen");
+    }
+
     // ── Forced transfer — eWpG §24 Berichtigung ───────────────────────────────
+
+    /// @dev Hook run before every forced operation on `account`'s shares.
+    ///      EwpgERC7540 uses it to keep vault self-custody (escrowed redemption
+    ///      shares) out of reach of forced operations.
+    function _beforeForceOp(address account) internal view virtual {}
 
     function forcedTransfer(
         address from,
@@ -140,6 +179,7 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
         uint256 value,
         string calldata legalBasis
     ) external onlyRegistry {
+        _beforeForceOp(from);
         _inForceOp = true;
         _transfer(from, to, value);
         _inForceOp = false;
@@ -152,6 +192,7 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
         uint256 value,
         string calldata legalBasis
     ) external onlyRegistry {
+        _beforeForceOp(owner);
         _approve(owner, spender, value);
         emit ForcedApprove(owner, spender, value, legalBasis);
     }
@@ -163,6 +204,7 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
         uint256 value,
         string calldata legalBasis
     ) external onlyRegistry {
+        _beforeForceOp(from);
         _inForceOp = true;
         _burn(from, value);
         _inForceOp = false;

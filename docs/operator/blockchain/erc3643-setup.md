@@ -80,6 +80,12 @@ The backend automatically provisions these topics when creating a new T-REX issu
 
 When an investor is onboarded, the backend deploys an ONCHAINID contract for them and registers it in the Identity Registry. This happens automatically when you whitelist an investor via the operator frontend.
 
+Every registration needs an ISO 3166-1 numeric country. The operator dialog prefills it from the
+legal entity's KYC registration country, and the API rejects a missing country or country `0`.
+When any country is blocked for a token, `EwpgComplianceModule` rejects transfers to a wallet
+whose registered country is `0`. The identity-registry table flags such wallets as **Country
+missing**. Fix them with `updateCountry(address,uint16)` on the Identity Registry.
+
 To verify an investor's ONCHAINID is registered:
 
 ```bash
@@ -155,6 +161,58 @@ cast send $COUNTRY_RESTRICT_MODULE \
   $TOKEN_ADDRESS "[840,156]" \
   --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY
 ```
+
+### EwpgComplianceModule (Registerwerk's own module)
+
+`EwpgComplianceModule` combines max investors, max balance per investor, blocked countries,
+transfer cooldown and the nominee-pool exemption. All of its settings are stored per
+`ModularCompliance` contract. Its setters take that compliance address as the first argument,
+for example `setMaxInvestors(address compliance, uint256)`.
+
+- **Who may configure it.** Only the owner of the compliance contract may call a setter, or the
+  compliance itself through `callModuleFunction`. Any other caller reverts with
+  `CallerNotComplianceAdmin`. T-REX transfers ownership in two steps, so after a suite is
+  deployed the registry wallet is only the *pending* owner. The backend calls
+  `acceptOwnership()` on the compliance at deploy time. If that step failed, it calls it again
+  before the next compliance-module change.
+- **Adding it from the backend.** The backend binds the module, sends the setters, and reads the
+  result back with `getConfig(address)` and `isCountryBlocked(address,uint16)`. It writes the
+  database row only when every value is on-chain. If configuration fails, it unbinds the module
+  again and reports the error.
+- **"Investor" means ONCHAINID.** Balances and the investor count are added up per identity, so
+  several wallets bound to one ONCHAINID share one balance cap and count as one investor.
+  Transfers between two wallets of the same identity are always allowed.
+- **Unknown country.** While at least one country is blocked, a recipient with no country on file
+  (`0`) is rejected.
+
+#### Migrating a live suite to the fixed module
+
+Contracts deployed before this fix run the old module. In that module **anyone** can change the
+settings, and limits apply per wallet instead of per identity. The module is not upgradeable,
+so each live suite must switch to a newly deployed module.
+
+1. Deploy the new `EwpgComplianceModule`.
+2. As the compliance owner (call `acceptOwnership()` first if you are still only the pending
+   owner), run `addModule(newModule)` on the suite's `ModularCompliance`.
+3. Configure the new module from the values recorded in the database (`erc3643_compliance_module`):
+   `setMaxInvestors`, `setMaxBalance`, `setTransferCooldown`, `blockCountry` and `setNomineePool`.
+   Do not copy values from the old module's on-chain state, because anyone may have changed it.
+4. Backfill existing holders:
+   `syncHolders(compliance, wallets)` with every wallet in `erc3643_identity_registry` for the
+   suite (plus any other holder wallet the indexer knows). The call is idempotent, so it can be
+   run in batches and re-run safely.
+5. Check `getConfig(compliance)` against the database, including the investor count against the
+   number of distinct ONCHAINIDs with a positive balance.
+6. Run `removeModule(oldModule)` on the compliance.
+
+!!! warning "A legacy module cannot be bound from the backend"
+    The backend reads the configuration back with `getConfig(address)` after binding a module.
+    A module deployed before this fix has no `getConfig`, so adding it from the backend always
+    rolls back. Do not retry: redeploy `EwpgComplianceModule` and bind the new deployment.
+
+Until a suite is migrated, alert on any difference between the old module's `isCountryBlocked` /
+limits and the database. Also report every identity-registry entry with country `0`, checked
+against `investorCountry(wallet)` on-chain, to operators as an `updateCountry` task.
 
 ## Step 7 — Agent roles
 

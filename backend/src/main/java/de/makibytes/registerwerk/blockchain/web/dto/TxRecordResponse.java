@@ -27,7 +27,8 @@ public record TxRecordResponse(
         Instant completedAt,
         String opsNote,
         Instant opsReviewedAt,
-        UUID opsReviewedBy
+        UUID opsReviewedBy,
+        String executionOutcome
 ) {
     public static TxRecordResponse from(BlockchainTransactionView tx) {
         return new TxRecordResponse(
@@ -37,6 +38,7 @@ public record TxRecordResponse(
                 tx.actorName(), tx.actorRole(), tx.params(),
                 tx.gasUsed(), tx.blockNumber(), tx.errorMessage(),
                 tx.createdAt(), tx.completedAt(),
-                tx.opsNote(), tx.opsReviewedAt(), tx.opsReviewedBy());
+                tx.opsNote(), tx.opsReviewedAt(), tx.opsReviewedBy(),
+                tx.executionOutcome());
     }
 }

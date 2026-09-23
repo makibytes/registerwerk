@@ -241,6 +241,19 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         return super.transferFrom(fromTokenId, to, value);
     }
 
+    /// @dev A frozen or paused position must not be able to delegate value either: an allowance
+    ///      granted now would be spendable the moment the freeze/pause is lifted.
+    function approve(uint256 tokenId, address operator, uint256 value)
+        public payable virtual override
+    {
+        require(!isPaused(), "EwpgERC3525: global transfers are paused");
+        require(!_slots[slotOf(tokenId)].paused, "EwpgERC3525: slot is paused");
+        require(!_frozenTokens[tokenId], "EwpgERC3525: token is frozen");
+        require(!isFrozen(ownerOf(tokenId)), "EwpgERC3525: owner address is frozen");
+        require(!isFrozen(operator), "EwpgERC3525: operator address is frozen");
+        super.approve(tokenId, operator, value);
+    }
+
     /// @dev ERC-3525 token IDs are ERC-721 NFTs. Guard ownership moves independently from
     ///      value transfers so transferring the whole token cannot bypass the series or holder
     ///      controls below. Mint and burn retain their existing zero-address semantics; their
@@ -270,6 +283,16 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
             address toOwner = ownerOf(toTokenId);
             require(!isFrozen(fromOwner), "EwpgERC3525: source address is frozen");
             require(!isFrozen(toOwner), "EwpgERC3525: destination address is frozen");
+            // An allowance holder acting on a position must not be frozen themselves: approve()
+            // blocks new allowances to frozen operators, but one granted before the freeze would
+            // otherwise stay spendable (parity with Cairo `compliant_value_move`).
+            require(!isFrozen(msg.sender), "EwpgERC3525: caller address is frozen");
+            // Token-to-token transfers must re-check the recipient: the owner of an existing
+            // destination token may have been removed from the whitelist since it was minted.
+            // `burn` uses from == to and the address form mints to an already-checked `to`.
+            if (fromTokenId != toTokenId) {
+                require(isWhitelisted(toOwner), "EwpgERC3525: recipient not whitelisted");
+            }
         }
         super._transferValue(fromTokenId, toTokenId, value);
     }

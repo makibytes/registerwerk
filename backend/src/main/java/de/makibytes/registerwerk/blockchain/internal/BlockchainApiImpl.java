@@ -66,6 +66,7 @@ class BlockchainApiImpl implements BlockchainApi {
                 tx.getActorName(), tx.getActorRole(), tx.getParams(),
                 tx.getGasUsed(), tx.getBlockNumber(), tx.getErrorMessage(),
                 tx.getCreatedAt(), tx.getCompletedAt(),
-                tx.getOpsNote(), tx.getOpsReviewedAt(), tx.getOpsReviewedBy());
+                tx.getOpsNote(), tx.getOpsReviewedAt(), tx.getOpsReviewedBy(),
+                tx.getExecutionOutcome());
     }
 }

@@ -26,6 +26,11 @@ public interface Erc3525AdminPort {
     UUID unfreezeToken(UUID deploymentId, BigInteger tokenId, UUID actorId, String actorRole);
     UUID forcedValueTransfer(UUID deploymentId, BigInteger fromTokenId, BigInteger toTokenId,
                              BigInteger value, String legalBasis, UUID actorId, String actorRole);
+    /** Holder-level controls (EwpgCompliance on EVM, the compliant Cairo class on Starknet). */
+    UUID whitelistAddress(UUID deploymentId, String address, UUID actorId, String actorRole);
+    UUID unwhitelistAddress(UUID deploymentId, String address, UUID actorId, String actorRole);
+    UUID freezeAddress(UUID deploymentId, String address, String reason, UUID actorId, String actorRole);
+    UUID unfreezeAddress(UUID deploymentId, String address, UUID actorId, String actorRole);
     UUID forceBurnValue(UUID deploymentId, BigInteger tokenId, BigInteger value, String legalBasis,
                         UUID actorId, String actorRole);
     void recordCouponPayment(UUID assetId, BigInteger slotId, int periodNo,

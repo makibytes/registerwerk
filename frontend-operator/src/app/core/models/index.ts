@@ -66,12 +66,35 @@ export interface VaultRequest {
   requestType: 'DEPOSIT' | 'REDEEM';
   controllerAddr: string;
   ownerAddr: string;
+  /** Who funded a deposit request — cancel refunds go here. */
+  payerAddr?: string;
   assetAmount?: string;
   shareAmount?: string;
-  requestStatus: 'PENDING' | 'FULFILLED' | 'CANCELLED';
+  requestStatus: 'PENDING' | 'FULFILLED' | 'CANCELLED' | 'FORCE_CANCELLED';
   requestedAt: string;
   fulfilledAt?: string;
+  fulfilledTx?: string;
+  cancelledTx?: string;
+  /** Executed NAV, read from the on-chain fulfilment event once confirmed. */
   navAtFulfill?: number;
+  forcedToAddr?: string;
+  legalBasis?: string;
+  /** Set when a confirmed resolution could not be reconciled with its on-chain event. */
+  reviewNote?: string;
+  /** A fulfil/cancel tx was submitted and is not yet final. */
+  awaitingConfirmation: boolean;
+  /** Owner or refund recipient frozen / under Sperrvermerk — fulfil and cancel are refused. */
+  complianceHold: boolean;
+  complianceHoldReason?: string;
+}
+
+/** GET /deployments/{id}/vault-state — confirmed strikes only. */
+export interface VaultStateSummary {
+  assetId: string;
+  latestNavPerShare?: number;
+  latestNavStrikeAt?: string;
+  depositCap?: string;
+  minSettlementDelay?: number;
 }
 
 // ── ERC-3525 slot ─────────────────────────────────────────────────────────────

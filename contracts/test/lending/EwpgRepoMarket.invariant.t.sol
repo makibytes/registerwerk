@@ -106,6 +106,17 @@ contract EwpgRepoMarketInvariantTest is Test {
         assertEq(collateralToken.balanceOf(address(market)), sumPositions);
     }
 
+    /// @notice Debt is never left without collateral backing it: collateral only leaves a
+    ///         position with outstanding debt via {liquidate} (which writes off any debt left
+    ///         once collateral is exhausted) or via LTV-checked paths. {claimCollateral} and the
+    ///         credited liquidation residual only ever apply to zero-debt positions.
+    function invariant_noDebtWithoutCollateral() public view {
+        for (uint256 i = 0; i < NUM_BORROWERS; i++) {
+            (uint256 collateralAmount, uint256 scaledDebt) = market.positions(handler.borrowers(i));
+            if (scaledDebt > 0) assertGt(collateralAmount, 0, "debt without collateral");
+        }
+    }
+
     /// @notice The pool's core accounting identity: idle cash plus outstanding debt must always
     ///         equal what depositors (plus the protocol's own reserves) are owed. This must
     ///         continue to hold through the bad-debt write-off path — a write-off

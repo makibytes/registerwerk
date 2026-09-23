@@ -58,6 +58,15 @@
   },
   {
     "type": "event",
+    "name": "ForcedRequestCancelled",
+    "inputs": [
+      { "name": "requestId",  "type": "uint256", "indexed": true },
+      { "name": "to",         "type": "address", "indexed": true },
+      { "name": "legalBasis", "type": "string",  "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
     "name": "AddressFrozen",
     "inputs": [
       { "name": "account", "type": "address", "indexed": true },

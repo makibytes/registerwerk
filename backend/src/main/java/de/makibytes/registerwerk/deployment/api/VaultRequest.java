@@ -77,6 +77,35 @@ public class VaultRequest {
     @Column(name = "confirmed", nullable = false)
     private boolean confirmed = false;
 
+    /** Who funded a deposit request ({@code depositRequestPayer}); cancel refunds go here. Null
+     *  for redeem requests and for vaults deployed before the payer was recorded on-chain. */
+    @Column(name = "payer_addr", length = 80)
+    private String payerAddr;
+
+    /** Exact occurrence of the {@code DepositRequested}/{@code RedeemRequested} log this row was
+     *  ingested from — see {@code VaultRequestIngestionService}. */
+    @Column(name = "requested_tx", length = 80)
+    private String requestedTx;
+
+    @Column(name = "requested_block_number")
+    private Long requestedBlockNumber;
+
+    @Column(name = "requested_block_hash", length = 128)
+    private String requestedBlockHash;
+
+    /** Escrow destination of a registry force-cancel ({@link VaultRequestStatus#FORCE_CANCELLED}).
+     *  Set together with {@link #cancelledTx} when the force-cancel is submitted. */
+    @Column(name = "forced_to_addr", length = 80)
+    private String forcedToAddr;
+
+    @Column(name = "legal_basis", length = 1000)
+    private String legalBasis;
+
+    /** Non-null when a confirmed resolution could not be reconciled with its on-chain event
+     *  (e.g. a fulfil receipt without a matching {@code *Fulfilled} log) and needs a human. */
+    @Column(name = "review_note", length = 500)
+    private String reviewNote;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -106,6 +135,7 @@ public class VaultRequest {
     public void setRequestStatus(VaultRequestStatus requestStatus) { this.requestStatus = requestStatus; }
 
     public Instant getRequestedAt() { return requestedAt; }
+    public void setRequestedAt(Instant requestedAt) { this.requestedAt = requestedAt; }
 
     public Instant getFulfilledAt() { return fulfilledAt; }
     public void setFulfilledAt(Instant fulfilledAt) { this.fulfilledAt = fulfilledAt; }
@@ -130,4 +160,25 @@ public class VaultRequest {
 
     public boolean isConfirmed() { return confirmed; }
     public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }
+
+    public String getPayerAddr() { return payerAddr; }
+    public void setPayerAddr(String payerAddr) { this.payerAddr = payerAddr; }
+
+    public String getRequestedTx() { return requestedTx; }
+    public void setRequestedTx(String requestedTx) { this.requestedTx = requestedTx; }
+
+    public Long getRequestedBlockNumber() { return requestedBlockNumber; }
+    public void setRequestedBlockNumber(Long requestedBlockNumber) { this.requestedBlockNumber = requestedBlockNumber; }
+
+    public String getRequestedBlockHash() { return requestedBlockHash; }
+    public void setRequestedBlockHash(String requestedBlockHash) { this.requestedBlockHash = requestedBlockHash; }
+
+    public String getForcedToAddr() { return forcedToAddr; }
+    public void setForcedToAddr(String forcedToAddr) { this.forcedToAddr = forcedToAddr; }
+
+    public String getLegalBasis() { return legalBasis; }
+    public void setLegalBasis(String legalBasis) { this.legalBasis = legalBasis; }
+
+    public String getReviewNote() { return reviewNote; }
+    public void setReviewNote(String reviewNote) { this.reviewNote = reviewNote; }
 }

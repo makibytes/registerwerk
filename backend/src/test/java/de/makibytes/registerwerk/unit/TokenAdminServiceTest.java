@@ -198,6 +198,19 @@ class TokenAdminServiceTest {
                 .hasMessageContaining("forceBurnSingle");
     }
 
+    @Test
+    @DisplayName("forced ops can never target ERC-7540 vault custody: vault standards are refused before submission")
+    void forceBurn_rejectsErc7540VaultCustody() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.ERC7540);
+
+        assertThatThrownBy(() -> tokenAdminService.forceBurn(
+                dep.getId(), dep.getContractAddress().toUpperCase().replace("0X", "0x"), BigInteger.TEN,
+                "Court order", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Erc7540AdminService");
+    }
+
     // ── confidentialForceBurn ────────────────────────────────────────────────
 
     @Test

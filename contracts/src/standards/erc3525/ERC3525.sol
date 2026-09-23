@@ -21,7 +21,11 @@ abstract contract ERC3525 is ERC721, IERC3525 {
 
     uint256 private _nextTokenId;
     mapping(uint256 => TokenData) private _tokenData;
-    mapping(uint256 => mapping(address => uint256)) private _valueApprovals;
+    // Value allowances are scoped to an approval epoch per token. Any ownership change
+    // (transfer, forced transfer, burn) bumps the epoch, so allowances granted by a
+    // previous owner become unreachable in O(1) without iterating over operators.
+    mapping(uint256 => uint256) private _approvalEpoch;
+    mapping(uint256 => mapping(uint256 => mapping(address => uint256))) private _valueApprovals;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -53,7 +57,7 @@ abstract contract ERC3525 is ERC721, IERC3525 {
     function allowance(uint256 tokenId, address operator)
         public view virtual override returns (uint256)
     {
-        return _valueApprovals[tokenId][operator];
+        return _valueApprovals[tokenId][_approvalEpoch[tokenId]][operator];
     }
 
     // ── Approval ──────────────────────────────────────────────────────────────
@@ -64,7 +68,7 @@ abstract contract ERC3525 is ERC721, IERC3525 {
         address owner = ownerOf(tokenId);
         require(msg.sender == owner || isApprovedForAll(owner, msg.sender),
                 "ERC3525: caller is not owner nor approved-for-all");
-        _valueApprovals[tokenId][operator] = value;
+        _valueApprovals[tokenId][_approvalEpoch[tokenId]][operator] = value;
         emit ApprovalValue(tokenId, operator, value);
     }
 
@@ -94,6 +98,21 @@ abstract contract ERC3525 is ERC721, IERC3525 {
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /// @dev Invalidates all value allowances whenever a token leaves its current owner
+    ///      (transfer, forced transfer or burn); allowances are granted by an owner and
+    ///      must not survive that owner. `ApprovalValue(tokenId, address(0), 0)` is a
+    ///      reset marker so indexers can drop every stale allowance for `tokenId`.
+    function _update(address to, uint256 tokenId, address auth)
+        internal virtual override returns (address)
+    {
+        address from = _ownerOf(tokenId);
+        if (from != address(0) && from != to) {
+            ++_approvalEpoch[tokenId];
+            emit ApprovalValue(tokenId, address(0), 0);
+        }
+        return super._update(to, tokenId, auth);
+    }
 
     function _mintToken(address to, uint256 slot, uint256 value)
         internal virtual returns (uint256 tokenId)
@@ -131,9 +150,10 @@ abstract contract ERC3525 is ERC721, IERC3525 {
     function _requireSenderApproved(uint256 tokenId, uint256 value) internal {
         address owner = ownerOf(tokenId);
         if (msg.sender != owner && !isApprovedForAll(owner, msg.sender)) {
-            require(_valueApprovals[tokenId][msg.sender] >= value,
+            uint256 epoch = _approvalEpoch[tokenId];
+            require(_valueApprovals[tokenId][epoch][msg.sender] >= value,
                     "ERC3525: insufficient value allowance");
-            _valueApprovals[tokenId][msg.sender] -= value;
+            _valueApprovals[tokenId][epoch][msg.sender] -= value;
         }
     }
 }

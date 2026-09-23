@@ -1,6 +1,6 @@
-import { ChangeDetectorRef, Component, OnInit, Input, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, Input, ViewChild, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { MatTabsModule } from '@angular/material/tabs';
+import { MatTabGroup, MatTabsModule } from '@angular/material/tabs';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -50,6 +50,7 @@ import { AddClaimTopicDialogComponent, AddClaimTopicData } from './add-claim-top
 import { TransactionService, TxRecord } from '../../../core/api/transaction.service';
 import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../../shared/components/address-picker-dialog.component';
 import { ConfidentialViewerPanelComponent } from '../../../shared/components/confidential-viewer-panel/confidential-viewer-panel.component';
+import { countryByNumeric } from '../../../shared/iso3166';
 import { AuthService } from '../../../core/auth/auth.service';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 
@@ -133,6 +134,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
 
     table { width: 100%; }
 
+    .outcome-badge { font-weight: 600; font-size: 12px; }
     .mint-form {
       max-width: 480px;
       display: flex;
@@ -838,7 +840,16 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                   <ng-container matColumnDef="wallet"><th mat-header-cell *matHeaderCellDef>Wallet</th><td mat-cell *matCellDef="let e"><app-address [address]="e.walletAddress" /></td></ng-container>
                   <ng-container matColumnDef="entity"><th mat-header-cell *matHeaderCellDef>Entity</th><td mat-cell *matCellDef="let e">{{ e.entityName || '—' }}</td></ng-container>
                   <ng-container matColumnDef="identity"><th mat-header-cell *matHeaderCellDef>ONCHAINID</th><td mat-cell *matCellDef="let e"><app-address [address]="e.identityAddress" /></td></ng-container>
-                  <ng-container matColumnDef="country"><th mat-header-cell *matHeaderCellDef>Country</th><td mat-cell *matCellDef="let e">{{ e.countryCode || '—' }}</td></ng-container>
+                  <ng-container matColumnDef="country"><th mat-header-cell *matHeaderCellDef>Country</th><td mat-cell *matCellDef="let e">
+                    @if (e.countryCode) {
+                      {{ countryLabel(e.countryCode) }}
+                    } @else {
+                      <span style="display:inline-flex;align-items:center;gap:4px;color:var(--rw-text-warning)"
+                            matTooltip="No country on file: while this token blocks any country, the compliance module rejects transfers to this wallet. Update the country on-chain (updateCountry).">
+                        <mat-icon style="font-size:18px;width:18px;height:18px">warning</mat-icon>Country missing
+                      </span>
+                    }
+                  </td></ng-container>
                   <ng-container matColumnDef="verified">
                     <th mat-header-cell *matHeaderCellDef>Verified</th>
                     <td mat-cell *matCellDef="let e">
@@ -1112,6 +1123,50 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                       </span>
                     </td>
                   </ng-container>
+                  <!-- Verified outcome of confidential forced ops: a SUCCESS tx may have moved 0
+                       (all-or-nothing FHE select), so the correction history shows what the
+                       backend decrypted, not just that the tx did not revert. -->
+                  <ng-container matColumnDef="outcome">
+                    <th mat-header-cell *matHeaderCellDef>Outcome</th>
+                    <td mat-cell *matCellDef="let tx">
+                      @if (isConfidentialForcedOp(tx)) {
+                        @switch (tx.executionOutcome) {
+                          @case ('EXECUTED') {
+                            <span class="outcome-badge" style="color:var(--rw-text-success)">Executed</span>
+                          }
+                          @case ('NOT_EXECUTED_INSUFFICIENT_BALANCE') {
+                            <span class="outcome-badge" style="color:var(--rw-text-danger)"
+                                  matTooltip="The holder's encrypted balance was below the ordered amount; the contract moved 0.">
+                              Not executed — insufficient balance
+                            </span>
+                          }
+                          @case ('UNVERIFIED_DECRYPT_FAILED') {
+                            <span class="outcome-badge" style="color:var(--rw-text-warning)"
+                                  matTooltip="The moved amount could not be decrypted; verify manually.">
+                              Unverified — decrypt failed
+                            </span>
+                          }
+                          @case ('UNVERIFIED_INCONSISTENT') {
+                            <span class="outcome-badge" style="color:var(--rw-text-warning)"
+                                  matTooltip="The receipt did not match the ordered correction; verify manually.">
+                              Unverified — inconsistent
+                            </span>
+                          }
+                          @default {
+                            @if (tx.status === 'SUCCESS') {
+                              <span class="outcome-badge" style="color:var(--rw-text-info)">Verifying…</span>
+                            } @else { — }
+                          }
+                        }
+                        @if (canMutate && tx.executionOutcome && tx.executionOutcome !== 'EXECUTED') {
+                          <button type="button" mat-button color="primary" (click)="reissueForcedOp(tx)"
+                                  matTooltip="Prefill the Compliance form with this correction so it can be re-issued with a corrected amount">
+                            <mat-icon>replay</mat-icon> Re-issue
+                          </button>
+                        }
+                      } @else { — }
+                    </td>
+                  </ng-container>
                   <ng-container matColumnDef="actor">
                     <th mat-header-cell *matHeaderCellDef>Actor</th>
                     <td mat-cell *matCellDef="let tx">{{ tx.actorName || '—' }}</td>
@@ -1250,6 +1305,11 @@ export class AssetDetailComponent implements OnInit {
   claimTopics: ClaimTopic[] = [];
 
   readonly irColumns = ['wallet', 'entity', 'identity', 'country', 'verified', 'actions'];
+
+  countryLabel(code: number): string {
+    const c = countryByNumeric(code);
+    return c ? `${c.name} (${code})` : String(code);
+  }
   readonly issuerColumns = ['address', 'topics', 'added', 'actions'];
 
   // ── Admin / regulatory action fields ─────────────────────────────────────
@@ -1547,7 +1607,36 @@ export class AssetDetailComponent implements OnInit {
 
   txHistory: TxRecord[] = [];
   txHistoryLoading = false;
-  readonly txColumns = ['method', 'status', 'actor', 'created', 'block'];
+  readonly txColumns = ['method', 'status', 'outcome', 'actor', 'created', 'block'];
+
+  @ViewChild(MatTabGroup) private tabGroup?: MatTabGroup;
+
+  isConfidentialForcedOp(tx: TxRecord): boolean {
+    return tx.methodName === 'confidentialForcedTransfer' || tx.methodName === 'confidentialForceBurn';
+  }
+
+  /** Prefills the Compliance tab's forced-transfer / force-burn form from a correction that did
+   *  not execute. The amount is left empty on purpose: the ordered amount already failed, so the
+   *  operator must enter the corrected amount (and it goes through step-up + 4-eyes again). */
+  reissueForcedOp(tx: TxRecord): void {
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    if (tx.methodName === 'confidentialForcedTransfer') {
+      this.forceFrom = str(tx.params['from']);
+      this.forceTo = str(tx.params['to']);
+      this.forceAmount = '';
+      this.forceReason = str(tx.params['legalBasis']);
+    } else {
+      this.forceBurnFrom = str(tx.params['from']);
+      this.forceBurnAmount = '';
+      this.forceBurnLegalBasis = str(tx.params['legalBasis']);
+    }
+    const idx = this.tabGroup?._tabs.toArray().findIndex((t) => t.textLabel === 'Compliance') ?? -1;
+    if (this.tabGroup && idx >= 0) this.tabGroup.selectedIndex = idx;
+    this.snackBar.open(
+      `Correction prefilled (ordered ${str(tx.params['amount']) || '?'} was not executed) — enter the corrected amount.`,
+      'OK', { duration: 5000 });
+    this.cdr.markForCheck();
+  }
 
   loadTxHistory(): void {
     const depId = this.primaryDeploymentId;

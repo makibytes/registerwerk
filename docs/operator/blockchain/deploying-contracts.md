@@ -74,6 +74,22 @@ forge script script/Deploy.s.sol \
 - The address is stored as `PENDING` in `asset_deployment` immediately
 - Deployment is idempotent — re-running the same deploy will produce the same address
 
+Because the salt and initcode are derived from public calldata, factories deployed before
+`deployToken`/`deployVault` became registry-only let anyone replay the registry's calldata first
+and make the registry's own transaction revert (`CREATE2 failed`). The backend therefore checks
+`predictAddress` before sending and again after a revert: if a contract already sits there and its
+`assetId()` and `registry()` match, it adopts that contract and its creating transaction instead of
+failing. If the contract there is not ours (for example, the registry authority was handed over),
+the deployment fails with an error naming the address.
+
+!!! note "Rolling out the registry-only factory"
+    `registryWallet` is immutable and each deployer's `bindFactory` is one-shot, so the
+    restriction only applies to a new factory generation. Per chain: deploy the six deployers and
+    a new `AssetTokenFactory` (`script/Deploy.s.sol` / `DeployL2.s.sol` / `DeployTestnet.s.sol`),
+    then update `registerwerk.contracts.asset-token-factory.<chain>` and restart the backend.
+    Existing tokens keep their addresses (they are stored in `asset_deployment`); live old
+    factories stay protected by the backend adoption check above.
+
 ## Upgrading compliance modules
 
 ```bash

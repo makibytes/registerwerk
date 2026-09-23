@@ -25,5 +25,7 @@ public record BlockchainTransactionView(
         Instant completedAt,
         String opsNote,
         Instant opsReviewedAt,
-        UUID opsReviewedBy
+        UUID opsReviewedBy,
+        /** Verified outcome of a confidential forced op (see {@code ConfidentialForcedOpVerifier}); null otherwise. */
+        String executionOutcome
 ) {}

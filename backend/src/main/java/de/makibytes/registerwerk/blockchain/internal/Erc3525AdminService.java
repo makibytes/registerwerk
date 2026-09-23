@@ -16,6 +16,7 @@ import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetErc3525AdminService;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +46,7 @@ import java.util.UUID;
  * <ul>
  *   <li>Slot-level: pause/unpause an entire bond series, set supply cap, anchor metadata hash.</li>
  *   <li>Token-level: freeze/unfreeze a specific holding, force value transfer (§24), force burn (§26).</li>
+ *   <li>Holder-level: whitelist / remove from whitelist, freeze / unfreeze an address.</li>
  * </ul>
  *
  * All write operations submit on-chain transactions, record them via {@link
@@ -68,6 +70,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
     private final BlockchainTransactionService txService;
     private final ApplicationEventPublisher eventPublisher;
     private final StarknetErc3525AdminService starknetErc3525AdminService;
+    private final HolderBlockGate holderBlockGate;
 
     public Erc3525AdminService(
             AssetDeploymentRepository deploymentRepository,
@@ -77,7 +80,8 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
             de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway durableTransactions,
             BlockchainTransactionService txService,
             ApplicationEventPublisher eventPublisher,
-            StarknetErc3525AdminService starknetErc3525AdminService) {
+            StarknetErc3525AdminService starknetErc3525AdminService,
+            HolderBlockGate holderBlockGate) {
         this.deploymentRepository = deploymentRepository;
         this.slotRepository = slotRepository;
         this.tokenUnitRepository = tokenUnitRepository;
@@ -86,6 +90,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
         this.txService = txService;
         this.eventPublisher = eventPublisher;
         this.starknetErc3525AdminService = starknetErc3525AdminService;
+        this.holderBlockGate = holderBlockGate;
     }
 
     // ── Slot-level operations ─────────────────────────────────────────────────
@@ -194,6 +199,11 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
                 "setSlotMetadataHash", Map.of("slotId", slotId.toString()), actorId, actorRole);
     }
 
+    /**
+     * Mints into a slot. EVM only: there is no Starknet mint path in the backend yet. Any future
+     * one must {@link #whitelistAddress whitelist} the recipient first — the compliant Cairo
+     * class reverts {@code mint} to a non-whitelisted address, exactly like EwpgERC3525.sol.
+     */
     public UUID mintIntoSlot(UUID deploymentId, BigInteger slotId, String toAddress, BigInteger value,
                               UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
@@ -276,6 +286,68 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
                         "value", value.toString(), "legalBasis", legalBasis), actorId, actorRole);
     }
 
+    // ── Holder-level operations ───────────────────────────────────────────────
+
+    /** Adds {@code address} to the token's holder whitelist — required before minting to it or
+     *  moving value into a new position it would own. */
+    public UUID whitelistAddress(UUID deploymentId, String address, UUID actorId, String actorRole) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        requireHolderAddress(dep, address);
+        requireNotBlocked(address);
+        log.info("ERC-3525 whitelist={} on deployment={}", address, deploymentId);
+        Map<String, Object> params = Map.of("address", address);
+        if (isStarknet(dep)) {
+            return recordStarknetInvoke(dep, starknetErc3525AdminService.whitelist(deploymentId, address),
+                    "whitelist", params, actorId, actorRole);
+        }
+        return submitEvm(dep, new Function("whitelist",
+                Collections.singletonList(new Address(address)), Collections.emptyList()),
+                "whitelist", params, actorId, actorRole);
+    }
+
+    public UUID unwhitelistAddress(UUID deploymentId, String address, UUID actorId, String actorRole) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        requireHolderAddress(dep, address);
+        log.info("ERC-3525 removeFromWhitelist={} on deployment={}", address, deploymentId);
+        Map<String, Object> params = Map.of("address", address);
+        if (isStarknet(dep)) {
+            return recordStarknetInvoke(dep, starknetErc3525AdminService.removeFromWhitelist(deploymentId, address),
+                    "removeFromWhitelist", params, actorId, actorRole);
+        }
+        return submitEvm(dep, new Function("removeFromWhitelist",
+                Collections.singletonList(new Address(address)), Collections.emptyList()),
+                "removeFromWhitelist", params, actorId, actorRole);
+    }
+
+    /** AWG §17, GwG §40 — blocks every value movement from, to or by {@code address}. */
+    public UUID freezeAddress(UUID deploymentId, String address, String reason, UUID actorId, String actorRole) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        requireHolderAddress(dep, address);
+        log.info("ERC-3525 freezeAddress={} reason={} on deployment={}", address, reason, deploymentId);
+        Map<String, Object> params = Map.of("address", address, "reason", reason);
+        if (isStarknet(dep)) {
+            return recordStarknetInvoke(dep, starknetErc3525AdminService.freezeAddress(deploymentId, address, reason),
+                    "freezeAddress", params, actorId, actorRole);
+        }
+        return submitEvm(dep, new Function("freezeAddress",
+                Arrays.asList(new Address(address), new Utf8String(reason)), Collections.emptyList()),
+                "freezeAddress", params, actorId, actorRole);
+    }
+
+    public UUID unfreezeAddress(UUID deploymentId, String address, UUID actorId, String actorRole) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        requireHolderAddress(dep, address);
+        log.info("ERC-3525 unfreezeAddress={} on deployment={}", address, deploymentId);
+        Map<String, Object> params = Map.of("address", address);
+        if (isStarknet(dep)) {
+            return recordStarknetInvoke(dep, starknetErc3525AdminService.unfreezeAddress(deploymentId, address),
+                    "unfreezeAddress", params, actorId, actorRole);
+        }
+        return submitEvm(dep, new Function("unfreezeAddress",
+                Collections.singletonList(new Address(address)), Collections.emptyList()),
+                "unfreezeAddress", params, actorId, actorRole);
+    }
+
     public UUID forceBurnValue(UUID deploymentId, BigInteger tokenId, BigInteger value, String legalBasis,
                                 UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
@@ -330,6 +402,32 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
             throw new IllegalStateException("ERC-3525 contract not yet deployed: deploymentId=" + deploymentId);
         }
         return dep;
+    }
+
+    /** EVM holders are 20-byte addresses; Starknet holders are felt252 contract addresses. */
+    private boolean isValidHolderAddress(AssetDeployment dep, String address) {
+        if (address == null) {
+            return false;
+        }
+        return isStarknet(dep)
+                ? address.matches("^0x[0-9a-fA-F]{1,64}$")
+                : address.matches("^0x[0-9a-fA-F]{40}$");
+    }
+
+    private void requireHolderAddress(AssetDeployment dep, String address) {
+        if (!isValidHolderAddress(dep, address)) {
+            throw new IllegalArgumentException("Not a valid " + (isStarknet(dep) ? "Starknet" : "EVM")
+                    + " holder address: " + address);
+        }
+    }
+
+    /** §16 eWpG Sperrvermerk — same rule as {@code TokenAdminService.whitelist}. */
+    private void requireNotBlocked(String address) {
+        if (holderBlockGate.isBlocked(null, address)) {
+            throw new de.makibytes.registerwerk.shared.ComplianceGateException(
+                    "Wallet " + address + " is subject to an active §16 eWpG Sperrvermerk "
+                    + "(legal block) — operation refused.");
+        }
     }
 
     private boolean isStarknet(AssetDeployment dep) {

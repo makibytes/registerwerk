@@ -11,7 +11,6 @@ import de.makibytes.registerwerk.erc3643.api.OnchainClaim;
 import de.makibytes.registerwerk.erc3643.api.OnchainClaimRepository;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
-import de.makibytes.registerwerk.erc3643.internal.Erc3643DeploymentService;
 import de.makibytes.registerwerk.erc3643.internal.OnChainIdService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,7 +38,6 @@ class OnChainIdServiceTest {
     @Mock private OnchainIdentityRepository identityRepository;
     @Mock private OnchainClaimRepository claimRepository;
     @Mock private ChainConfigRepository chainConfigRepository;
-    @Mock private Erc3643DeploymentService deploymentService;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private EvmContractService evmContractService;
     @Mock private DurableEvmTransactionGateway evmTransactions;

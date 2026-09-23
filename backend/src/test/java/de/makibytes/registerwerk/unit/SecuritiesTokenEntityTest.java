@@ -185,7 +185,8 @@ class SecuritiesTokenEntityTest {
     void vaultRequestType_andStatus_enumValues() {
         assertThat(VaultRequestType.values()).containsExactlyInAnyOrder(VaultRequestType.DEPOSIT, VaultRequestType.REDEEM);
         assertThat(VaultRequestStatus.values()).containsExactlyInAnyOrder(
-                VaultRequestStatus.PENDING, VaultRequestStatus.FULFILLED, VaultRequestStatus.CANCELLED);
+                VaultRequestStatus.PENDING, VaultRequestStatus.FULFILLED, VaultRequestStatus.CANCELLED,
+                VaultRequestStatus.FORCE_CANCELLED);
     }
 
     @Test

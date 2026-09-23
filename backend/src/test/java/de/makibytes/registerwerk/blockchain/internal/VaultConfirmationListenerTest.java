@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
+import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.deployment.api.AssetVaultState;
 import de.makibytes.registerwerk.deployment.api.AssetVaultStateRepository;
 import de.makibytes.registerwerk.deployment.api.VaultNavStrike;
@@ -19,6 +20,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.web3j.abi.EventEncoder;
+import org.web3j.abi.TypeEncoder;
+import org.web3j.abi.datatypes.generated.Uint256;
+import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.Request;
+import org.web3j.protocol.core.methods.response.EthGetTransactionReceipt;
+import org.web3j.protocol.core.methods.response.Log;
+import org.web3j.protocol.core.methods.response.TransactionReceipt;
+import org.web3j.utils.Numeric;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -29,6 +39,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +55,7 @@ class VaultConfirmationListenerTest {
     @Mock private BlockchainTransactionService blockchainTransactionService;
     @Mock private ChainEffectRecorder chainEffectRecorder;
     @Mock private de.makibytes.registerwerk.shared.IsolatedTransactionExecutor isolatedTransactions;
+    @Mock private EvmContractService evmContractService;
 
     private VaultConfirmationListener listener;
     private final UUID chainConfigId = UUID.randomUUID();
@@ -52,7 +65,7 @@ class VaultConfirmationListenerTest {
     void setUp() {
         listener = new VaultConfirmationListener(
                 navStrikeRepository, vaultRequestRepository, vaultStateRepository,
-                blockchainTransactionService, chainEffectRecorder, isolatedTransactions);
+                blockchainTransactionService, chainEffectRecorder, isolatedTransactions, evmContractService);
         org.mockito.Mockito.doAnswer(invocation -> {
             invocation.getArgument(0, de.makibytes.registerwerk.shared.IsolatedTransactionExecutor.Work.class).run();
             return null;
@@ -151,15 +164,46 @@ class VaultConfirmationListenerTest {
         return request;
     }
 
+    private static final String VAULT = "0x0000000000000000000000000000000000000001";
+
+    /** A {@code RedeemRequestFulfilled(requestId, shares, assets, navAtFulfill)} log emitted by {@link #VAULT}. */
+    private static Log redeemFulfilledLog(BigInteger requestId, BigInteger shares, BigInteger assets, BigInteger nav) {
+        Log log = new Log();
+        log.setAddress(VAULT);
+        log.setTopics(List.of(EventEncoder.encode(Erc7540Events.REDEEM_FULFILLED),
+                Numeric.toHexStringWithPrefixZeroPadded(requestId, 64)));
+        log.setData("0x" + TypeEncoder.encode(new Uint256(shares)) + TypeEncoder.encode(new Uint256(assets))
+                + TypeEncoder.encode(new Uint256(nav)));
+        return log;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void stubReceipt(String txHash, List<Log> logs) throws Exception {
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setTransactionHash(txHash);
+        receipt.setTo(VAULT);
+        receipt.setLogs(logs);
+        EthGetTransactionReceipt response = new EthGetTransactionReceipt();
+        response.setResult(receipt);
+        Request<?, EthGetTransactionReceipt> request = mock(Request.class);
+        when(request.send()).thenReturn(response);
+        Web3j web3j = mock(Web3j.class);
+        doReturn(request).when(web3j).ethGetTransactionReceipt(txHash);
+        when(evmContractService.evmClient(chainConfigId)).thenReturn(web3j);
+    }
+
     @Test
     @DisplayName("a confirmed fulfilment tx flips the request to FULFILLED and journals VAULT_REQUEST_RESOLVED")
-    void confirmedFulfillment_flipsAndJournals() {
+    void confirmedFulfillment_flipsAndJournals() throws Exception {
         VaultRequest request = request(UUID.randomUUID());
         request.setFulfilledTx("0xfulfiltx");
         when(vaultRequestRepository.findByFulfilledTxIsNotNullAndConfirmedFalse()).thenReturn(List.of(request));
         when(blockchainTransactionService.isConfirmedFailure("0xfulfiltx")).thenReturn(false);
         when(blockchainTransactionService.confirmedLocation("0xfulfiltx"))
                 .thenReturn(Optional.of(new BlockchainTransactionService.ConfirmedTxLocation(chainConfigId, 300L, "0xblock300")));
+        stubReceipt("0xfulfiltx", List.of(redeemFulfilledLog(BigInteger.TEN,
+                new BigInteger("100000000000000000000"), new BigInteger("105000000"),
+                new BigInteger("1050000000000000000"))));
 
         listener.resolvePending();
 
@@ -171,6 +215,67 @@ class VaultConfirmationListenerTest {
         ArgumentCaptor<ChainEffectDescriptor> effectCaptor = ArgumentCaptor.forClass(ChainEffectDescriptor.class);
         verify(chainEffectRecorder).recordFinalized(effectCaptor.capture());
         assertThat(effectCaptor.getValue().effectType()).isEqualTo("VAULT_REQUEST_RESOLVED");
+    }
+
+    @Test
+    @DisplayName("T1-08: the executed NAV/shares/assets come from the fulfilment event, not the operator-typed NAV")
+    void confirmedFulfillment_recordsOnChainNavNotTypedNav() throws Exception {
+        VaultRequest request = request(UUID.randomUUID());
+        request.setFulfilledTx("0xfulfiltx");
+        request.setNavAtFulfill(new BigDecimal("1.00")); // what an operator typed (legacy clients)
+        when(vaultRequestRepository.findByFulfilledTxIsNotNullAndConfirmedFalse()).thenReturn(List.of(request));
+        when(blockchainTransactionService.isConfirmedFailure("0xfulfiltx")).thenReturn(false);
+        when(blockchainTransactionService.confirmedLocation("0xfulfiltx"))
+                .thenReturn(Optional.of(new BlockchainTransactionService.ConfirmedTxLocation(chainConfigId, 300L, "0xblock300")));
+        Log otherRequest = redeemFulfilledLog(BigInteger.ONE, BigInteger.ONE, BigInteger.ONE, BigInteger.ONE);
+        stubReceipt("0xfulfiltx", List.of(otherRequest, redeemFulfilledLog(BigInteger.TEN,
+                new BigInteger("100000000000000000000"), new BigInteger("105000000"),
+                new BigInteger("1050000000000000000"))));
+
+        listener.resolvePending();
+
+        assertThat(request.getNavAtFulfill()).isEqualByComparingTo("1.05");
+        assertThat(request.getShareAmount()).isEqualTo(new BigInteger("100000000000000000000"));
+        assertThat(request.getAssetAmount()).isEqualTo(new BigInteger("105000000"));
+        assertThat(request.getReviewNote()).isNull();
+    }
+
+    @Test
+    @DisplayName("T1-08: a confirmed fulfilment without its *Fulfilled event is flagged for review, NAV left unknown")
+    void confirmedFulfillmentWithoutEvent_flaggedForReview() throws Exception {
+        VaultRequest request = request(UUID.randomUUID());
+        request.setFulfilledTx("0xfulfiltx");
+        request.setNavAtFulfill(new BigDecimal("1.00"));
+        when(vaultRequestRepository.findByFulfilledTxIsNotNullAndConfirmedFalse()).thenReturn(List.of(request));
+        when(blockchainTransactionService.isConfirmedFailure("0xfulfiltx")).thenReturn(false);
+        when(blockchainTransactionService.confirmedLocation("0xfulfiltx"))
+                .thenReturn(Optional.of(new BlockchainTransactionService.ConfirmedTxLocation(chainConfigId, 300L, "0xblock300")));
+        stubReceipt("0xfulfiltx", List.of());
+
+        listener.resolvePending();
+
+        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.FULFILLED);
+        assertThat(request.getNavAtFulfill()).isNull();
+        assertThat(request.getReviewNote()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("a confirmed force-cancel tx flips the request to FORCE_CANCELLED")
+    void confirmedForceCancel_flipsToForceCancelled() {
+        VaultRequest request = request(UUID.randomUUID());
+        request.setCancelledTx("0xforcetx");
+        request.setForcedToAddr("0x00000000000000000000000000000000000000ee");
+        request.setLegalBasis("court order");
+        when(vaultRequestRepository.findByCancelledTxIsNotNullAndConfirmedFalse()).thenReturn(List.of(request));
+        when(blockchainTransactionService.isConfirmedFailure("0xforcetx")).thenReturn(false);
+        when(blockchainTransactionService.confirmedLocation("0xforcetx"))
+                .thenReturn(Optional.of(new BlockchainTransactionService.ConfirmedTxLocation(chainConfigId, 401L, "0xblock401")));
+
+        listener.resolvePending();
+
+        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.FORCE_CANCELLED);
+        assertThat(request.isConfirmed()).isTrue();
+        verify(chainEffectRecorder).recordFinalized(any());
     }
 
     @Test

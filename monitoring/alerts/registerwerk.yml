@@ -151,6 +151,31 @@ groups:
           summary: "Confidential reconciliation hasn't run in over an hour"
           description: "reconcileAll() runs every 5 minutes but no-ops silently if the Zama relayer sidecar isn't configured — this usually means that."
 
+      # ── ERC-7540 vault request ingestion ────────────────────────────────────
+      # VaultRequestIngestionService: investors request straight on the vault, so a stalled
+      # ingestion means their requests never reach the operator fulfil/cancel queue.
+      - alert: VaultRequestIngestionLagging
+        expr: |
+          registerwerk_vault_request_ingest_lag_blocks{job="registerwerk-backend"} > 5000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ERC-7540 vault request ingestion is lagging"
+          description: "{{ $value }} finalized blocks not yet scanned for at least one ERC-7540 vault — new deposit/redeem requests are missing from the operator queue. Check vault_request_ingest_cursor.last_error and RPC health."
+
+      # The lag gauge freezes while the chain head is unreadable (a caught-up vault stays at 0
+      # during a full RPC outage), so ingestion failures get their own signal.
+      - alert: VaultRequestIngestionFailing
+        expr: |
+          registerwerk_vault_request_ingest_failing_deployments{job="registerwerk-backend"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ERC-7540 vault request ingestion is failing"
+          description: "{{ $value }} ERC-7540 vault(s) failed every ingestion run for 15m — new deposit/redeem requests are not reaching the operator queue. Check vault_request_ingest_cursor.last_error and RPC health."
+
       # ── OrgIdentity onchain reconciliation ──────────────────────────────────
       # OrgChainReconciliationService / PermissionChainReconciliationService — no dedicated
       # table either; reset-then-recount-per-sweep gauges, same rationale as above.

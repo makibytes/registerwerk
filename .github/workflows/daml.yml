@@ -42,7 +42,8 @@ jobs:
       - name: Build
         run: dpm build
 
-      # daml.yaml has no `test-declarations`/scripts wired yet — see build.sh, which only
-      # builds the DAR and generates Java bindings. Bond template test coverage lives in
-      # backend/src/test/java against the generated Java bindings, not as Daml Script tests
-      # here. Tracked separately from this CI gap, not invented as part of it.
+      # Daml Script tests live in a separate package (daml/test) so the production DAR takes
+      # no daml-script dependency; it data-depends on the DAR built above.
+      - name: Daml Script tests
+        working-directory: daml/test
+        run: dpm test

@@ -10,10 +10,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.abi.datatypes.generated.Uint256;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
@@ -119,21 +121,69 @@ public class Erc3643LifecycleService {
      * operators must not be left believing an action succeeded when it never reached the chain.
      */
     private void sendToSuite(Erc3643Suite suite, String contractAddress, Function fn) {
+        requireContractAddress(suite, contractAddress, fn);
+        SuiteChain chain = suiteChain(suite);
+        evmContractService.send(chain.chainConfigId(), chain.web3j(), chain.signer(), contractAddress, fn);
+    }
+
+    /** Read-only {@code eth_call} counterpart of {@link #sendToSuite}. */
+    private List<Type> callSuite(Erc3643Suite suite, String contractAddress, Function fn) {
+        requireContractAddress(suite, contractAddress, fn);
+        return evmContractService.call(suiteChain(suite).web3j(), contractAddress, fn);
+    }
+
+    private static void requireContractAddress(Erc3643Suite suite, String contractAddress, Function fn) {
         if (contractAddress == null || contractAddress.isBlank()
                 || contractAddress.startsWith("0x-PENDING")) {
             throw new IllegalStateException("Suite " + suite.getId()
                     + " has no contract address for " + fn.getName() + " — cannot submit on-chain call");
         }
+    }
+
+    private record SuiteChain(UUID chainConfigId, Web3j web3j, EvmSigner signer) {}
+
+    private SuiteChain suiteChain(Erc3643Suite suite) {
         AssetDeployment dep = deploymentRepository.findById(suite.getAssetDeploymentId())
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment",
                         suite.getAssetDeploymentId()));
         ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        org.web3j.protocol.Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
-        de.makibytes.registerwerk.wallet.api.EvmSigner signer = evmContractService.signer(descriptor);
+        Web3j web3j = blockchainClientRegistry.getEvmClient(descriptor);
+        EvmSigner signer = evmContractService.signer(descriptor);
         if (dep.getChainConfigId() == null) {
             throw new IllegalStateException("EVM deployment is missing chainConfigId: " + dep.getId());
         }
-        evmContractService.send(dep.getChainConfigId(), web3j, signer, contractAddress, fn);
+        return new SuiteChain(dep.getChainConfigId(), web3j, signer);
+    }
+
+    /**
+     * T-REX suite ownership is 2-step ({@code OwnableOnceNext2StepUpgradeable}, whose one-step
+     * {@code firstCall} path is never enabled): after {@code deployTREXSuite} the registry wallet
+     * is only the <i>pending</i> owner of the token, IdentityRegistry, TrustedIssuersRegistry,
+     * ClaimTopicsRegistry and ModularCompliance — the accepted owner is still the inner
+     * TREXFactory. Until accepted, every {@code onlyOwner} call reverts: compliance
+     * {@code addModule}/{@code removeModule} and {@code EwpgComplianceModule}'s setters, TIR
+     * {@code addTrustedIssuer}/{@code removeTrustedIssuer}, CTR {@code addClaimTopic}.
+     * {@code Erc3643DeploymentService} accepts all five at deploy time (best effort); this lazily
+     * covers suites deployed before that, or where that step failed.
+     *
+     * @return true if ownership had to be accepted now
+     */
+    private boolean ensureOwnership(Erc3643Suite suite, String contract, String role) {
+        List<Type> out = callSuite(suite, contract, new Function("owner", List.of(),
+                List.of(new TypeReference<Address>() {})));
+        String owner = ((Address) out.get(0)).getValue();
+        String signer = suiteChain(suite).signer().address();
+        if (owner.equalsIgnoreCase(signer)) {
+            return false;
+        }
+        log.info("Accepting pending ownership of {}={} for suite={} (current owner={})",
+                role, contract, suite.getId(), owner);
+        sendToSuite(suite, contract, new Function("acceptOwnership", List.of(), List.of()));
+        return true;
+    }
+
+    private boolean ensureComplianceOwnership(Erc3643Suite suite) {
+        return ensureOwnership(suite, suite.getComplianceAddress(), "compliance");
     }
 
     /**
@@ -185,15 +235,36 @@ public class Erc3643LifecycleService {
             moduleType, moduleAddress, suiteId);
 
         Erc3643Suite suite = requireSuite(suiteId);
+        boolean ownershipAccepted = ensureComplianceOwnership(suite);
 
-        // IModularCompliance.addModule(address moduleToAdd)
+        // IModularCompliance.addModule(address moduleToAdd). EwpgComplianceModule's setters
+        // require the compliance to be bound, so bind first, then configure — and unbind again
+        // if configuring fails, so an operator-visible error never leaves a module enforcing
+        // no limits on-chain while the DB has no record of it.
         Function fn = new Function(
                 "addModule",
                 List.of(new Address(moduleAddress)),
                 List.of()
         );
         sendToSuite(suite, suite.getComplianceAddress(), fn);
-        configureComplianceModule(suite, moduleAddress, params);
+        try {
+            configureComplianceModule(suite, moduleAddress, params);
+            verifyComplianceModuleConfig(suite, moduleAddress, params);
+        } catch (RuntimeException configureFailure) {
+            log.error("Configuring compliance module={} on suite={} failed — unbinding it again",
+                    moduleAddress, suiteId, configureFailure);
+            try {
+                sendToSuite(suite, suite.getComplianceAddress(), new Function(
+                        "removeModule", List.of(new Address(moduleAddress)), List.of()));
+            } catch (RuntimeException rollbackFailure) {
+                configureFailure.addSuppressed(rollbackFailure);
+                log.error("Unbinding compliance module={} from suite={} failed too — it is bound on-chain "
+                        + "without its configured limits; remove it manually", moduleAddress, suiteId,
+                        rollbackFailure);
+            }
+            throw new IllegalStateException("Compliance module configuration failed and the module was "
+                    + "unbound again: " + configureFailure.getMessage(), configureFailure);
+        }
 
         Erc3643ComplianceModule module = new Erc3643ComplianceModule();
         module.setSuiteId(suiteId);
@@ -221,7 +292,8 @@ public class Erc3643LifecycleService {
         Erc3643ComplianceModule saved = complianceModuleRepository.save(module);
 
         eventPublisher.publishEvent(new ComplianceModuleAddedEvent(suiteId, actorId, actorRole,
-                Map.of("moduleAddress", moduleAddress, "moduleType", moduleType)));
+                Map.of("moduleAddress", moduleAddress, "moduleType", moduleType,
+                        "complianceOwnershipAccepted", ownershipAccepted)));
     }
 
     private static void validateComplianceModule(
@@ -293,6 +365,7 @@ public class Erc3643LifecycleService {
 
         // IModularCompliance.removeModule(address moduleToRemove)
         Erc3643Suite suite2 = requireSuite(suiteId);
+        ensureComplianceOwnership(suite2);
         Function fnRemove = new Function(
                 "removeModule",
                 List.of(new Address(module.getModuleAddress())),
@@ -321,6 +394,8 @@ public class Erc3643LifecycleService {
             issuerAddress, claimTopics, suiteId);
 
         Erc3643Suite suiteForIssuer = requireSuite(suiteId);
+        boolean ownershipAccepted = ensureOwnership(suiteForIssuer,
+                suiteForIssuer.getTrustedIssuersRegistry(), "trustedIssuersRegistry");
 
         // ITrustedIssuersRegistry.addTrustedIssuer(address _trustedIssuer, uint256[] claimTopics)
         List<Uint256> topicList = claimTopics.stream()
@@ -342,7 +417,8 @@ public class Erc3643LifecycleService {
         Erc3643TrustedIssuer saved = trustedIssuerRepository.save(issuer);
 
         eventPublisher.publishEvent(new TrustedIssuerAddedEvent(suiteId, actorId, actorRole,
-                Map.of("issuerAddress", issuerAddress, "claimTopics", claimTopics)));
+                Map.of("issuerAddress", issuerAddress, "claimTopics", claimTopics,
+                        "tirOwnershipAccepted", ownershipAccepted)));
     }
 
     /**
@@ -366,6 +442,8 @@ public class Erc3643LifecycleService {
 
         // ITrustedIssuersRegistry.removeTrustedIssuer(address _trustedIssuer)
         Erc3643Suite suiteForRemoveIssuer = requireSuite(suiteId);
+        boolean ownershipAccepted = ensureOwnership(suiteForRemoveIssuer,
+                suiteForRemoveIssuer.getTrustedIssuersRegistry(), "trustedIssuersRegistry");
         Function fnRemoveIssuer = new Function(
                 "removeTrustedIssuer",
                 List.of(new Address(issuer.getIssuerAddress())),
@@ -377,7 +455,8 @@ public class Erc3643LifecycleService {
         trustedIssuerRepository.save(issuer);
 
         eventPublisher.publishEvent(new TrustedIssuerRemovedEvent(suiteId, actorId, actorRole,
-                Map.of("issuerId", issuerId, "issuerAddress", issuer.getIssuerAddress())));
+                Map.of("issuerId", issuerId, "issuerAddress", issuer.getIssuerAddress(),
+                        "tirOwnershipAccepted", ownershipAccepted)));
     }
 
     /**
@@ -394,6 +473,8 @@ public class Erc3643LifecycleService {
         log.info("Adding required claim topic={} ({}) to suite={}", topic, label, suiteId);
 
         Erc3643Suite suiteForTopic = requireSuite(suiteId);
+        boolean ownershipAccepted = ensureOwnership(suiteForTopic,
+                suiteForTopic.getClaimTopicsRegistry(), "claimTopicsRegistry");
 
         // IClaimTopicsRegistry.addClaimTopic(uint256 claimTopic)
         Function fnAddTopic = new Function(
@@ -410,7 +491,7 @@ public class Erc3643LifecycleService {
         Erc3643ClaimTopic saved = claimTopicRepository.save(claimTopic);
 
         eventPublisher.publishEvent(new ClaimTopicAddedEvent(suiteId, actorId, actorRole,
-                Map.of("topic", topic, "label", label)));
+                Map.of("topic", topic, "label", label, "ctrOwnershipAccepted", ownershipAccepted)));
     }
 
     /**
@@ -689,31 +770,88 @@ public class Erc3643LifecycleService {
 
     /**
      * Sends on-chain configuration calls to a newly added compliance module.
-     * Each recognised param key maps to one EwpgModularCompliance setter.
      */
     private void configureComplianceModule(Erc3643Suite suite, String moduleAddress,
                                            Map<String, Object> params) {
+        for (Function fn : complianceModuleConfigCalls(suite.getComplianceAddress(), params)) {
+            sendToSuite(suite, moduleAddress, fn);
+        }
+    }
+
+    /**
+     * Builds the {@code EwpgComplianceModule} setter calls for {@code params}; each recognised
+     * key maps to one setter. Every setter is keyed by the compliance contract it configures —
+     * {@code setMaxInvestors(address compliance, uint256)} etc. — and is only accepted from that
+     * compliance's owner (the registry wallet).
+     */
+    static List<Function> complianceModuleConfigCalls(String complianceAddress, Map<String, Object> params) {
+        Address compliance = new Address(complianceAddress);
+        List<Function> calls = new java.util.ArrayList<>();
         if (params.containsKey("maxInvestors")) {
             int v = ((Number) params.get("maxInvestors")).intValue();
-            sendToSuite(suite, moduleAddress, new Function("setMaxInvestors",
-                    List.of(new Uint256(java.math.BigInteger.valueOf(v))), List.of()));
+            calls.add(new Function("setMaxInvestors",
+                    List.of(compliance, new Uint256(java.math.BigInteger.valueOf(v))), List.of()));
         }
         if (params.containsKey("maxBalance")) {
             java.math.BigInteger v = new java.math.BigInteger(params.get("maxBalance").toString());
-            sendToSuite(suite, moduleAddress, new Function("setMaxBalance",
-                    List.of(new Uint256(v)), List.of()));
+            calls.add(new Function("setMaxBalance", List.of(compliance, new Uint256(v)), List.of()));
         }
         if (params.containsKey("transferCooldown")) {
             int v = ((Number) params.get("transferCooldown")).intValue();
-            sendToSuite(suite, moduleAddress, new Function("setTransferCooldown",
-                    List.of(new Uint256(java.math.BigInteger.valueOf(v))), List.of()));
+            calls.add(new Function("setTransferCooldown",
+                    List.of(compliance, new Uint256(java.math.BigInteger.valueOf(v))), List.of()));
         }
-        if (params.containsKey("blockedCountries") && params.get("blockedCountries") instanceof List<?> rawList) {
-            for (Object entry : rawList) {
-                int country = ((Number) entry).intValue();
-                sendToSuite(suite, moduleAddress, new Function("blockCountry",
-                        List.of(new Uint16(java.math.BigInteger.valueOf(country & 0xFFFF))), List.of()));
+        for (int country : blockedCountries(params)) {
+            calls.add(new Function("blockCountry",
+                    List.of(compliance, new Uint16(java.math.BigInteger.valueOf(country))), List.of()));
+        }
+        return calls;
+    }
+
+    private static List<Integer> blockedCountries(Map<String, Object> params) {
+        if (params.get("blockedCountries") instanceof List<?> rawList) {
+            return rawList.stream().map(entry -> ((Number) entry).intValue()).toList();
+        }
+        return List.of();
+    }
+
+    /**
+     * Reads the module's config for this compliance back after configuring it and fails if any
+     * configured value did not land — so the DB row is only written for limits that are
+     * actually enforced on-chain.
+     */
+    private void verifyComplianceModuleConfig(Erc3643Suite suite, String moduleAddress,
+                                              Map<String, Object> params) {
+        Address compliance = new Address(suite.getComplianceAddress());
+        // getConfig(address) → (maxInvestors, maxBalancePerInvestor, transferCooldownSeconds,
+        //                       blockedCountryCount, investorCount)
+        List<Type> cfg = callSuite(suite, moduleAddress, new Function("getConfig", List.of(compliance),
+                List.of(new TypeReference<Uint256>() {}, new TypeReference<Uint256>() {},
+                        new TypeReference<Uint256>() {}, new TypeReference<Uint256>() {},
+                        new TypeReference<Uint256>() {})));
+        requireReadBack(params, "maxInvestors", cfg.get(0));
+        requireReadBack(params, "maxBalance", cfg.get(1));
+        requireReadBack(params, "transferCooldown", cfg.get(2));
+        for (int country : blockedCountries(params)) {
+            List<Type> blocked = callSuite(suite, moduleAddress, new Function("isCountryBlocked",
+                    List.of(compliance, new Uint16(java.math.BigInteger.valueOf(country))),
+                    List.of(new TypeReference<Bool>() {})));
+            if (!((Bool) blocked.get(0)).getValue()) {
+                throw new IllegalStateException("Read-back mismatch: country " + country
+                        + " is not blocked on-chain");
             }
+        }
+    }
+
+    private static void requireReadBack(Map<String, Object> params, String key, Type onChain) {
+        if (!params.containsKey(key)) {
+            return;
+        }
+        java.math.BigInteger expected = new java.math.BigInteger(params.get(key).toString());
+        java.math.BigInteger actual = ((Uint256) onChain).getValue();
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException("Read-back mismatch for " + key + ": expected " + expected
+                    + ", on-chain " + actual);
         }
     }
 

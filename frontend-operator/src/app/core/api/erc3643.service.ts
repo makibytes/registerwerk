@@ -77,7 +77,7 @@ export class Erc3643Service {
   }
 
   registerInvestor(assetId: string, deploymentId: string, body: {
-    walletAddress: string; legalEntityId: string; chainConfigId: string; countryCode?: number;
+    walletAddress: string; legalEntityId: string; chainConfigId: string; countryCode: number;
   }): Observable<IdentityRegistryEntry> {
     return this.http.post<IdentityRegistryEntry>(`${this.suiteUrl(assetId, deploymentId)}/identity-registry`, body);
   }

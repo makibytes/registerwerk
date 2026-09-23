@@ -74,6 +74,25 @@ forge script script/Deploy.s.sol \
 - L'adresse est stockée immédiatement sous `PENDING` dans `asset_deployment`
 - Le déploiement est idempotent : réexécuter le même déploiement produira la même adresse
 
+Comme le sel et l'initcode sont dérivés de calldata publiques, les factories déployées avant que
+`deployToken`/`deployVault` ne soient réservées au registre permettent à n'importe qui de rejouer
+en premier les calldata du registre et de faire échouer la transaction du registre lui-même
+(`CREATE2 failed`). Le backend vérifie donc `predictAddress` avant l'envoi puis à nouveau après un
+revert : si un contrat se trouve déjà à cette adresse et que ses `assetId()` et `registry()`
+correspondent, il adopte ce contrat et sa transaction de création au lieu d'échouer. Si le contrat
+présent ne nous appartient pas (par exemple parce que l'autorité du registre a été transférée), le
+déploiement échoue avec une erreur indiquant l'adresse.
+
+!!! note "Déploiement de la factory réservée au registre"
+    `registryWallet` est immuable et le `bindFactory` de chaque deployer ne peut être appelé
+    qu'une fois : la restriction ne s'applique donc qu'à une nouvelle génération de factory. Pour
+    chaque chaîne : déployer les six deployers et une nouvelle `AssetTokenFactory`
+    (`script/Deploy.s.sol` / `DeployL2.s.sol` / `DeployTestnet.s.sol`), puis mettre à jour
+    `registerwerk.contracts.asset-token-factory.<chain>` et redémarrer le backend. Les jetons
+    existants conservent leurs adresses (elles sont stockées dans `asset_deployment`) ; les
+    anciennes factories encore actives restent protégées par le contrôle d'adoption du backend
+    décrit ci-dessus.
+
 ## Mise à niveau des modules de conformité
 
 ```bash

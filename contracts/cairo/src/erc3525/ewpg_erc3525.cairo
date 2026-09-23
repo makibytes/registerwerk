@@ -3,7 +3,8 @@
 // Self-contained implementation of the EIP-3525 surface declared in
 // interface.cairo, extended with the Registerwerk regulatory controls:
 //   - Slot-level pause / supply cap (bond series management)
-//   - Token-level freeze (AWG §17 / GwG §40 sanctions freeze)
+//   - Holder whitelist (KYC-gated recipients, mirrors EwpgERC20)
+//   - Token-level and address-level freeze (AWG §17 / GwG §40 sanctions freeze)
 //   - Forced value transfer (eWpG §24 Berichtigung)
 //   - Force burn value (eWpG §26 Einziehung)
 //   - Global pause (MiCAR Art. 36)
@@ -18,8 +19,11 @@
 //   - ERC-721 operator approvals are intentionally not implemented in v1;
 //     whole-token transfer_from is owner-only. Value-level approvals
 //     (approve_value / transfer_value_from) cover the EIP-3525 delegation case.
-//   - Forced operations bypass pause/slot-pause/freeze by design — they execute
-//     BaFin / court orders and are gated to the registry wallet.
+//   - Forced operations bypass pause/slot-pause/freeze/whitelist by design — they
+//     execute BaFin / court orders and are gated to the registry wallet.
+//   - Value allowances are scoped to a per-token approval epoch that is bumped on
+//     every ownership change, so allowances granted by a previous owner can never be
+//     spent against the new owner (parity with the Solidity ERC3525._update fix).
 
 use starknet::ContractAddress;
 
@@ -82,6 +86,31 @@ pub struct TokenUnfrozen {
 }
 
 #[derive(Drop, starknet::Event)]
+pub struct Whitelisted {
+    #[key]
+    pub account: ContractAddress,
+}
+
+#[derive(Drop, starknet::Event)]
+pub struct RemovedFromWhitelist {
+    #[key]
+    pub account: ContractAddress,
+}
+
+#[derive(Drop, starknet::Event)]
+pub struct AddressFrozen {
+    #[key]
+    pub account: ContractAddress,
+    pub reason: felt252,
+}
+
+#[derive(Drop, starknet::Event)]
+pub struct AddressUnfrozen {
+    #[key]
+    pub account: ContractAddress,
+}
+
+#[derive(Drop, starknet::Event)]
 pub struct ForcedValueTransfer {
     pub from_token_id: u256,
     pub to_token_id: u256,
@@ -140,7 +169,8 @@ pub mod EwpgERC3525 {
     use super::{
         Transfer, TransferValue, ApprovalValue, SlotPaused, SlotUnpaused, SlotSupplyCapSet,
         TokenFrozen, TokenUnfrozen, ForcedValueTransfer, ForcedValueBurn, SlotMetadataHashSet,
-        GlobalPaused, GlobalUnpaused, RegistryTransferStarted, RegistryTransferred,
+        GlobalPaused, GlobalUnpaused, RegistryTransferStarted, RegistryTransferred, Whitelisted,
+        RemovedFromWhitelist, AddressFrozen, AddressUnfrozen,
     };
 
     #[storage]
@@ -160,8 +190,11 @@ pub mod EwpgERC3525 {
         token_slot: Map<u256, u256>,
         token_value: Map<u256, u256>,
         token_owner: Map<u256, ContractAddress>,
-        // Value-level allowances per EIP-3525: (token_id, operator) -> value
-        value_allowances: Map<(u256, ContractAddress), u256>,
+        // Value-level allowances per EIP-3525: (token_id, approval_epoch, operator) -> value.
+        // The epoch is bumped on every ownership change, which invalidates all allowances
+        // granted by the previous owner in O(1).
+        approval_epoch: Map<u256, u64>,
+        value_allowances: Map<(u256, u64, ContractAddress), u256>,
         // Compliance state
         global_paused: bool,
         slot_paused: Map<u256, bool>,
@@ -169,6 +202,8 @@ pub mod EwpgERC3525 {
         slot_total_minted: Map<u256, u256>,
         slot_metadata_hash: Map<u256, felt252>,
         token_frozen: Map<u256, bool>,
+        whitelisted: Map<ContractAddress, bool>,
+        frozen_address: Map<ContractAddress, bool>,
         // ERC-721 balance tracking
         balance: Map<ContractAddress, u256>,
     }
@@ -191,6 +226,10 @@ pub mod EwpgERC3525 {
         GlobalUnpaused: GlobalUnpaused,
         RegistryTransferStarted: RegistryTransferStarted,
         RegistryTransferred: RegistryTransferred,
+        Whitelisted: Whitelisted,
+        RemovedFromWhitelist: RemovedFromWhitelist,
+        AddressFrozen: AddressFrozen,
+        AddressUnfrozen: AddressUnfrozen,
     }
 
     #[constructor]
@@ -248,7 +287,17 @@ pub mod EwpgERC3525 {
             assert!(get_caller_address() == owner, "EwpgERC3525: caller is not the owner");
             assert!(!to.is_zero(), "EwpgERC3525: transfer to zero address");
             self.require_token_transferable(token_id);
+            assert!(!self.frozen_address.read(from), "EwpgERC3525: source address is frozen");
+            self.require_eligible_recipient(to);
 
+            if from != to {
+                // Allowances are granted by an owner and must not survive that owner.
+                // `ApprovalValue(token_id, 0, 0)` is a reset marker for indexers.
+                self.approval_epoch.write(token_id, self.approval_epoch.read(token_id) + 1);
+                self.emit(Event::ApprovalValue(ApprovalValue {
+                    token_id, operator: Zero::zero(), value: 0_u256,
+                }));
+            }
             self.token_owner.write(token_id, to);
             self.balance.write(from, self.balance.read(from) - 1_u256);
             self.balance.write(to, self.balance.read(to) + 1_u256);
@@ -266,7 +315,7 @@ pub mod EwpgERC3525 {
         }
 
         fn allowance(self: @ContractState, token_id: u256, operator: ContractAddress) -> u256 {
-            self.value_allowances.read((token_id, operator))
+            self.value_allowances.read((token_id, self.approval_epoch.read(token_id), operator))
         }
 
         fn approve_value(
@@ -276,7 +325,13 @@ pub mod EwpgERC3525 {
             assert!(!owner.is_zero(), "EwpgERC3525: invalid token id");
             assert!(get_caller_address() == owner, "EwpgERC3525: caller is not the owner");
             assert!(!operator.is_zero(), "EwpgERC3525: zero operator address");
-            self.value_allowances.write((token_id, operator), value);
+            // A frozen or paused position must not be able to delegate value either: an
+            // allowance granted now would be spendable the moment the freeze/pause is lifted.
+            self.require_token_transferable(token_id);
+            assert!(!self.frozen_address.read(owner), "EwpgERC3525: owner address is frozen");
+            assert!(!self.frozen_address.read(operator), "EwpgERC3525: operator address is frozen");
+            let epoch = self.approval_epoch.read(token_id);
+            self.value_allowances.write((token_id, epoch, operator), value);
             self.emit(Event::ApprovalValue(ApprovalValue { token_id, operator, value }));
         }
 
@@ -289,9 +344,7 @@ pub mod EwpgERC3525 {
             let owner = self.token_owner.read(from_token_id);
             assert!(!owner.is_zero(), "EwpgERC3525: invalid token id");
             if caller != owner {
-                let current = self.value_allowances.read((from_token_id, caller));
-                assert!(current >= value, "EwpgERC3525: insufficient value allowance");
-                self.value_allowances.write((from_token_id, caller), current - value);
+                self.spend_value_allowance(from_token_id, caller, value);
             }
             self.compliant_value_move(from_token_id, to_token_id, value);
         }
@@ -306,10 +359,9 @@ pub mod EwpgERC3525 {
             assert!(!owner.is_zero(), "EwpgERC3525: invalid token id");
             assert!(!to.is_zero(), "EwpgERC3525: transfer to zero address");
             if caller != owner {
-                let current = self.value_allowances.read((from_token_id, caller));
-                assert!(current >= value, "EwpgERC3525: insufficient value allowance");
-                self.value_allowances.write((from_token_id, caller), current - value);
+                self.spend_value_allowance(from_token_id, caller, value);
             }
+            self.require_eligible_recipient(to);
             let slot = self.token_slot.read(from_token_id);
             let new_token_id = self.create_token(to, slot);
             self.compliant_value_move(from_token_id, new_token_id, value);
@@ -324,6 +376,7 @@ pub mod EwpgERC3525 {
         fn mint(ref self: ContractState, to: ContractAddress, slot: u256, value: u256) -> u256 {
             self.only_registry();
             assert!(!to.is_zero(), "EwpgERC3525: mint to zero address");
+            self.require_eligible_recipient(to);
             assert!(!self.global_paused.read(), "EwpgERC3525: transfers are paused");
             assert!(!self.slot_paused.read(slot), "EwpgERC3525: slot is paused");
 
@@ -396,6 +449,42 @@ pub mod EwpgERC3525 {
 
         fn is_token_frozen(self: @ContractState, token_id: u256) -> bool {
             self.token_frozen.read(token_id)
+        }
+
+        // ── Holder whitelist + address freeze (mirrors EwpgERC20) ────────────
+
+        fn whitelist(ref self: ContractState, account: ContractAddress) {
+            self.only_registry();
+            assert!(!account.is_zero(), "EwpgERC3525: zero address");
+            self.whitelisted.write(account, true);
+            self.emit(Event::Whitelisted(Whitelisted { account }));
+        }
+
+        fn remove_from_whitelist(ref self: ContractState, account: ContractAddress) {
+            self.only_registry();
+            self.whitelisted.write(account, false);
+            self.emit(Event::RemovedFromWhitelist(RemovedFromWhitelist { account }));
+        }
+
+        fn is_whitelisted(self: @ContractState, account: ContractAddress) -> bool {
+            self.whitelisted.read(account)
+        }
+
+        fn freeze_address(ref self: ContractState, account: ContractAddress, reason: felt252) {
+            self.only_registry();
+            assert!(!account.is_zero(), "EwpgERC3525: zero address");
+            self.frozen_address.write(account, true);
+            self.emit(Event::AddressFrozen(AddressFrozen { account, reason }));
+        }
+
+        fn unfreeze_address(ref self: ContractState, account: ContractAddress) {
+            self.only_registry();
+            self.frozen_address.write(account, false);
+            self.emit(Event::AddressUnfrozen(AddressUnfrozen { account }));
+        }
+
+        fn is_frozen(self: @ContractState, account: ContractAddress) -> bool {
+            self.frozen_address.read(account)
         }
 
         // Forced value transfer — eWpG §24. Bypasses pause/slot-pause/freeze.
@@ -522,6 +611,22 @@ pub mod EwpgERC3525 {
             assert!(!self.token_frozen.read(token_id), "EwpgERC3525: token is frozen");
         }
 
+        /// A normal (non-forced) recipient must be whitelisted and not address-frozen.
+        fn require_eligible_recipient(self: @ContractState, to: ContractAddress) {
+            assert!(!self.frozen_address.read(to), "EwpgERC3525: recipient is frozen");
+            assert!(self.whitelisted.read(to), "EwpgERC3525: recipient not whitelisted");
+        }
+
+        /// Spends `value` of `operator`'s allowance on `token_id` in the current approval epoch.
+        fn spend_value_allowance(
+            ref self: ContractState, token_id: u256, operator: ContractAddress, value: u256,
+        ) {
+            let key = (token_id, self.approval_epoch.read(token_id), operator);
+            let current = self.value_allowances.read(key);
+            assert!(current >= value, "EwpgERC3525: insufficient value allowance");
+            self.value_allowances.write(key, current - value);
+        }
+
         /// Compliance-checked value movement between two existing same-slot tokens.
         fn compliant_value_move(
             ref self: ContractState, from_token_id: u256, to_token_id: u256, value: u256,
@@ -536,6 +641,22 @@ pub mod EwpgERC3525 {
             );
             self.require_token_transferable(from_token_id);
             assert!(!self.token_frozen.read(to_token_id), "EwpgERC3525: token is frozen");
+            let from_owner = self.token_owner.read(from_token_id);
+            let to_owner = self.token_owner.read(to_token_id);
+            assert!(!self.frozen_address.read(from_owner), "EwpgERC3525: source address is frozen");
+            assert!(
+                !self.frozen_address.read(to_owner), "EwpgERC3525: destination address is frozen",
+            );
+            // An allowance holder acting on a position must not be frozen themselves.
+            assert!(
+                !self.frozen_address.read(get_caller_address()),
+                "EwpgERC3525: caller address is frozen",
+            );
+            // Re-check the recipient: the owner of an existing destination token may have been
+            // removed from the whitelist since it was minted.
+            if from_token_id != to_token_id {
+                assert!(self.whitelisted.read(to_owner), "EwpgERC3525: recipient not whitelisted");
+            }
 
             let from_balance = self.token_value.read(from_token_id);
             assert!(from_balance >= value, "EwpgERC3525: insufficient value");

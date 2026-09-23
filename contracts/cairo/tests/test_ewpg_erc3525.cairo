@@ -22,6 +22,11 @@ fn investor_b() -> ContractAddress {
     0xb2.try_into().unwrap()
 }
 
+/// Never whitelisted by `deploy_token`.
+fn investor_c() -> ContractAddress {
+    0xc3.try_into().unwrap()
+}
+
 fn slot_2026() -> u256 {
     2026_u256
 }
@@ -35,11 +40,13 @@ fn deploy_token() -> (IERC3525Dispatcher, IEwpgERC3525AdminDispatcher, ContractA
     // (name, symbol, value_decimals, registry, asset_id.low, asset_id.high)
     let calldata = array!['RW Bond 2026', 'RWB26', 18, registry().into(), 0x42, 0];
     let (address, _) = contract.deploy(@calldata).unwrap();
-    (
-        IERC3525Dispatcher { contract_address: address },
-        IEwpgERC3525AdminDispatcher { contract_address: address },
-        address,
-    )
+    let admin = IEwpgERC3525AdminDispatcher { contract_address: address };
+    // KYC-onboard the two standard investors; investor_c() stays off the whitelist.
+    start_cheat_caller_address(address, registry());
+    admin.whitelist(investor_a());
+    admin.whitelist(investor_b());
+    stop_cheat_caller_address(address);
+    (IERC3525Dispatcher { contract_address: address }, admin, address)
 }
 
 /// Mints a token with `value` in `slot` to `to`, acting as the registry.
@@ -266,4 +273,227 @@ fn test_stranger_cannot_accept_handover() {
 
     start_cheat_caller_address(address, investor_a());
     admin.accept_registry();
+}
+
+// ── Holder whitelist + address freeze (T1-03) ─────────────────────────────────
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: recipient not whitelisted")]
+fn test_mint_to_non_whitelisted_reverts() {
+    let (_, admin, address) = deploy_token();
+    mint_as_registry(admin, address, investor_c(), slot_2026(), 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: recipient not whitelisted")]
+fn test_whole_token_transfer_to_non_whitelisted_reverts() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+
+    start_cheat_caller_address(address, investor_a());
+    token.transfer_from(investor_a(), investor_c(), token_id);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: recipient not whitelisted")]
+fn test_transfer_value_to_non_whitelisted_reverts() {
+    let (token, admin, address) = deploy_token();
+    let from_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+
+    start_cheat_caller_address(address, investor_a());
+    token.transfer_value_to(from_id, investor_c(), 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: recipient not whitelisted")]
+fn test_value_into_dewhitelisted_holder_reverts() {
+    let (token, admin, address) = deploy_token();
+    let from_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    let to_id = mint_as_registry(admin, address, investor_b(), slot_2026(), 0_u256);
+    start_cheat_caller_address(address, registry());
+    admin.remove_from_whitelist(investor_b());
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.transfer_value_from(from_id, to_id, 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: recipient is frozen")]
+fn test_frozen_address_cannot_receive_new_token() {
+    let (token, admin, address) = deploy_token();
+    let from_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_address(investor_b(), 'GwG40');
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.transfer_value_to(from_id, investor_b(), 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: destination address is frozen")]
+fn test_frozen_owner_of_existing_token_cannot_receive_value() {
+    let (token, admin, address) = deploy_token();
+    let from_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    let to_id = mint_as_registry(admin, address, investor_b(), slot_2026(), 0_u256);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_address(investor_b(), 'GwG40');
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.transfer_value_from(from_id, to_id, 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: source address is frozen")]
+fn test_frozen_owner_cannot_send_value() {
+    let (token, admin, address) = deploy_token();
+    let from_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    let to_id = mint_as_registry(admin, address, investor_b(), slot_2026(), 0_u256);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_address(investor_a(), 'AWG17');
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.transfer_value_from(from_id, to_id, 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: caller address is frozen")]
+fn test_frozen_operator_cannot_spend_allowance() {
+    let (token, admin, address) = deploy_token();
+    let from_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    let to_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 0_u256);
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(from_id, investor_b(), 500_u256);
+    stop_cheat_caller_address(address);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_address(investor_b(), 'AWG17');
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_b());
+    token.transfer_value_from(from_id, to_id, 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: caller is not registry")]
+fn test_only_registry_can_whitelist() {
+    let (_, admin, address) = deploy_token();
+    start_cheat_caller_address(address, investor_a());
+    admin.whitelist(investor_c());
+}
+
+#[test]
+fn test_whitelist_and_freeze_views() {
+    let (_, admin, address) = deploy_token();
+    assert!(admin.is_whitelisted(investor_a()), "fixture whitelisted");
+    assert!(!admin.is_whitelisted(investor_c()), "c not whitelisted");
+    start_cheat_caller_address(address, registry());
+    admin.freeze_address(investor_a(), 'GwG40');
+    assert!(admin.is_frozen(investor_a()), "frozen");
+    admin.unfreeze_address(investor_a());
+    admin.remove_from_whitelist(investor_a());
+    stop_cheat_caller_address(address);
+    assert!(!admin.is_frozen(investor_a()), "unfrozen");
+    assert!(!admin.is_whitelisted(investor_a()), "removed");
+}
+
+#[test]
+fn test_forced_value_transfer_bypasses_address_freeze_and_whitelist() {
+    let (token, admin, address) = deploy_token();
+    let from_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    let to_id = mint_as_registry(admin, address, investor_b(), slot_2026(), 0_u256);
+
+    start_cheat_caller_address(address, registry());
+    admin.freeze_address(investor_a(), 'GwG40');
+    admin.remove_from_whitelist(investor_b());
+    admin.forced_transfer_value(from_id, to_id, 1000_u256, 'BaFin-Az-2026-003');
+    stop_cheat_caller_address(address);
+
+    assert!(token.balance_of_token(to_id) == 1000_u256, "forced value");
+}
+
+// ── Value allowances do not survive an ownership change (T1-03 / T1-01 parity) ─
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: insufficient value allowance")]
+fn test_stale_allowance_after_whole_token_transfer_reverts() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    let sink_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 0_u256);
+
+    // investor_a grants an operator allowance and then sells the whole token.
+    let operator: ContractAddress = 0xd4.try_into().unwrap();
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, operator, 1000_u256);
+    token.transfer_from(investor_a(), investor_b(), token_id);
+    stop_cheat_caller_address(address);
+
+    assert!(token.allowance(token_id, operator) == 0_u256, "allowance reset on sale");
+    // The previous owner's operator tries to drain the new owner's position.
+    start_cheat_caller_address(address, operator);
+    token.transfer_value_from(token_id, sink_id, 1000_u256);
+}
+
+#[test]
+fn test_new_owner_can_grant_fresh_allowance_after_transfer() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    let to_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 0_u256);
+    let operator: ContractAddress = 0xd4.try_into().unwrap();
+
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, operator, 1000_u256);
+    token.transfer_from(investor_a(), investor_b(), token_id);
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_b());
+    token.approve_value(token_id, operator, 300_u256);
+    stop_cheat_caller_address(address);
+    assert!(token.allowance(token_id, operator) == 300_u256, "fresh allowance");
+
+    start_cheat_caller_address(address, operator);
+    token.transfer_value_from(token_id, to_id, 300_u256);
+    stop_cheat_caller_address(address);
+    assert!(token.balance_of_token(to_id) == 300_u256, "spent fresh allowance");
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: token is frozen")]
+fn test_approve_value_while_token_frozen_reverts() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_token(token_id, 'GwG40');
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, investor_b(), 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: owner address is frozen")]
+fn test_approve_value_while_owner_frozen_reverts() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_address(investor_a(), 'GwG40');
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, investor_b(), 1_u256);
+}
+
+#[test]
+#[should_panic(expected: "EwpgERC3525: transfers are paused")]
+fn test_approve_value_while_paused_reverts() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    start_cheat_caller_address(address, registry());
+    admin.pause();
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, investor_b(), 1_u256);
 }

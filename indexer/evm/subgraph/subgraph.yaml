@@ -422,6 +422,8 @@ templates:
           handler: handleRedeemRequestFulfilled
         - event: RequestCancelled(indexed uint256,indexed address)
           handler: handleRequestCancelled
+        - event: ForcedRequestCancelled(indexed uint256,indexed address,string)
+          handler: handleForcedRequestCancelled
         - event: AddressFrozen(indexed address,string)
           handler: handleAddressFrozen
         - event: AddressUnfrozen(indexed address)

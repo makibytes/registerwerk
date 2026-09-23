@@ -39,7 +39,6 @@ import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.abi.TypeReference;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
@@ -49,6 +48,7 @@ import org.web3j.utils.Numeric;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -190,6 +190,7 @@ public class Erc3643DeploymentService {
 
             Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deployment.getId());
             Erc3643Suite saved = suiteRepository.save(suite);
+            acceptSuiteOwnership(chainConfigId, web3j, signer, saved);
             seedDefaultClaimTopics(saved.getId());
 
             eventPublisher.publishEvent(new Erc3643SuiteDeployedEvent(saved.getId(), actorId, "REGISTRY_ADMIN", java.util.Map.of()));
@@ -252,6 +253,7 @@ public class Erc3643DeploymentService {
             Erc3643Suite saved = suiteRepository.save(suite);
             saved.setFactoryTxHash(receipt.getTransactionHash());
             suiteRepository.save(saved);
+            acceptSuiteOwnership(chainConfig.getId(), web3j, signer, saved);
             seedDefaultClaimTopics(saved.getId());
 
             eventPublisher.publishEvent(new Erc3643SuiteDeployedEvent(
@@ -261,71 +263,41 @@ public class Erc3643DeploymentService {
         });
     }
 
+    /**
+     * {@code TREXFactory.deployTREXSuite} only makes the registry wallet the <i>pending</i> owner of
+     * the suite's token, IdentityRegistry, TrustedIssuersRegistry, ClaimTopicsRegistry and
+     * ModularCompliance (T-REX {@code OwnableOnceNext2StepUpgradeable}); until each is accepted,
+     * its {@code onlyOwner} functions revert — e.g. {@code addModule} and every
+     * {@code EwpgComplianceModule} setter, {@code addTrustedIssuer}/{@code removeTrustedIssuer},
+     * {@code addClaimTopic}, token/IR {@code addAgent}. (The IdentityRegistryStorage is not
+     * transferred by the factory at all.) Best effort per contract: the suite already exists
+     * on-chain at this point, so a failure here must not fail the deployment —
+     * {@code Erc3643LifecycleService} accepts a still-pending ownership before its first
+     * owner-only call on that contract.
+     */
+    void acceptSuiteOwnership(UUID chainConfigId, Web3j web3j, EvmSigner signer, Erc3643Suite suite) {
+        Map<String, String> contracts = new LinkedHashMap<>();
+        contracts.put("token", suite.getTokenAddress());
+        contracts.put("identityRegistry", suite.getIdentityRegistryAddress());
+        contracts.put("trustedIssuersRegistry", suite.getTrustedIssuersRegistry());
+        contracts.put("claimTopicsRegistry", suite.getClaimTopicsRegistry());
+        contracts.put("compliance", suite.getComplianceAddress());
+        contracts.forEach((role, address) -> {
+            try {
+                evmContractService.send(chainConfigId, web3j, signer, address,
+                        new Function("acceptOwnership", Collections.emptyList(), Collections.emptyList()));
+            } catch (RuntimeException e) {
+                log.error("Accepting ownership of {}={} for suite={} failed; it will be retried before "
+                        + "the first owner-only call on it", role, address, suite.getId(), e);
+            }
+        });
+    }
+
     // Confidential ERC-3643 deployment is handled by ConfidentialErc3643Service (a real,
     // Web3j-backed implementation), routed via Erc3643DeploymentPortImpl.deployConfidential —
     // not here. An earlier, permanently-unreachable duplicate of this method used to sit in
     // this class throwing "not yet supported"; it was dead code (the port never called it) and
     // its message was stale even before removal.
-
-    /**
-     * Register an investor wallet with the T-REX IdentityRegistry.
-     * This is required before the investor can hold or receive tokens.
-     *
-     * <p>Calls {@code IIdentityRegistry.registerIdentity(wallet, identityAddress, countryCode)}
-     * via Web3j using the registry backend wallet (which must hold the agent role).
-     *
-     * @param holderId          ID of the legal entity (holder)
-     * @param suiteId           ID of the ERC-3643 suite whose registry to update
-     * @param walletAddress     investor's EVM wallet address
-     * @param onchainIdentityId ID of the ONCHAINID record to link
-     */
-    public void registerInvestorIdentity(
-            UUID holderId, UUID suiteId, String walletAddress, UUID onchainIdentityId) {
-        log.info("Registering identity for holder={} in suite={}, wallet={}",
-            holderId, suiteId, walletAddress);
-
-        Erc3643Suite suite = suiteRepository.findById(suiteId)
-            .orElseThrow(() -> new EntityNotFoundException("Erc3643Suite", suiteId));
-
-        identityRepository.findById(onchainIdentityId)
-            .orElseThrow(() -> new EntityNotFoundException("OnchainIdentity", onchainIdentityId));
-
-        if (suite.getIdentityRegistryAddress() == null
-                || suite.getIdentityRegistryAddress().startsWith("0x-PENDING")) {
-            log.warn("registerInvestorIdentity: identity registry not yet deployed for suite={}",
-                    suiteId);
-            return;
-        }
-
-        OnchainIdentity identity = identityRepository.findById(onchainIdentityId)
-                .orElseThrow(() -> new EntityNotFoundException("OnchainIdentity", onchainIdentityId));
-        String identityAddress = identity.getIdentityAddress() != null
-                ? identity.getIdentityAddress() : "0x0000000000000000000000000000000000000000";
-
-        AssetDeployment dep = deploymentRepository.findById(suite.getAssetDeploymentId())
-                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment",
-                        suite.getAssetDeploymentId()));
-        ChainDescriptor descriptor = new ChainDescriptor(dep.getChain(), dep.getNetwork());
-        Web3j web3j = clientRegistry.getEvmClient(descriptor);
-        EvmSigner signer = evmContractService.signer(descriptor);
-
-        // IIdentityRegistry.registerIdentity(address _userAddress, address _identity, uint16 _country)
-        Function fn = new Function(
-                "registerIdentity",
-                Arrays.asList(
-                        new Address(walletAddress),
-                        new Address(identityAddress),
-                        new Uint16(java.math.BigInteger.ZERO) // default country 0
-                ),
-                Collections.emptyList()
-        );
-        if (dep.getChainConfigId() == null) {
-            throw new IllegalStateException("EVM deployment is missing chainConfigId: " + dep.getId());
-        }
-        evmContractService.send(dep.getChainConfigId(), web3j, signer,
-                suite.getIdentityRegistryAddress(), fn);
-        log.info("registerInvestorIdentity: registered wallet={} in suite={}", walletAddress, suiteId);
-    }
 
     /**
      * Issue a KYC claim to an investor's ONCHAINID contract.

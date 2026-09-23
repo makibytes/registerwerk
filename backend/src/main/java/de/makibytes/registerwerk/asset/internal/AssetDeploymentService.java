@@ -34,6 +34,7 @@ import de.makibytes.registerwerk.asset.api.AssetRepository;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -87,6 +88,7 @@ public class AssetDeploymentService {
     private final ChainEffectRecorder chainEffectRecorder;
     private final WalletSigner walletSigner;
     private final SolanaFinalityReader solanaFinalityReader;
+    private final boolean allowNonCompliantStarknetErc3525;
 
     public AssetDeploymentService(
             AssetDeploymentRepository assetDeploymentRepository,
@@ -103,7 +105,9 @@ public class AssetDeploymentService {
             RestClient.Builder restClientBuilder,
             ChainEffectRecorder chainEffectRecorder,
             WalletSigner walletSigner,
-            SolanaFinalityReader solanaFinalityReader) {
+            SolanaFinalityReader solanaFinalityReader,
+            @Value("${registerwerk.starknet.erc3525.allow-non-compliant:false}")
+            boolean allowNonCompliantStarknetErc3525) {
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
@@ -119,6 +123,7 @@ public class AssetDeploymentService {
         this.chainEffectRecorder = chainEffectRecorder;
         this.walletSigner = walletSigner;
         this.solanaFinalityReader = solanaFinalityReader;
+        this.allowNonCompliantStarknetErc3525 = allowNonCompliantStarknetErc3525;
     }
 
     /**
@@ -130,6 +135,7 @@ public class AssetDeploymentService {
             .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
         TokenStandard standard = asset.getTokenStandard();
         validateDeploymentSupport(chain, standard);
+        validateStarknetErc3525Gate(standard, network);
         ChainConfig chainConfig = resolveEnabledChainConfig(chain, network);
         String ownerAddress = walletSigner.chainAddressForWallet(chainConfig.getId());
         if (ownerAddress == null || ownerAddress.isBlank()) {
@@ -245,6 +251,27 @@ public class AssetDeploymentService {
         if (!supported) {
             throw new UnsupportedOperationException(
                     displayName(chain) + " does not support token standard " + standard);
+        }
+    }
+
+    /**
+     * Interim gate (review finding T1-03): the Cairo ERC-3525 class currently configured via
+     * {@code registerwerk.chains.starknet.erc3525-class-hash} may be a build without holder
+     * whitelist / address freeze. The admin surface for those controls is wired
+     * ({@code Erc3525AdminService} holder endpoints → {@code StarknetErc3525AdminService}), but
+     * deployed Cairo classes are not upgradeable, so new mainnet issuances stay refused until
+     * the compliant class is verifiably the one declared. Testnet (incl. devnet
+     * demo data) stays available; an operator can opt out explicitly with
+     * {@code registerwerk.starknet.erc3525.allow-non-compliant=true}.
+     */
+    private void validateStarknetErc3525Gate(TokenStandard standard, Network network) {
+        if (standard == TokenStandard.STARKNET_ERC3525
+                && network != Network.TESTNET
+                && !allowNonCompliantStarknetErc3525) {
+            throw new UnsupportedOperationException(
+                    "Starknet ERC-3525 is not available on " + network
+                            + " (compliance controls pending: holder whitelist and address freeze)."
+                            + " Only testnet deployments are allowed.");
         }
     }
 

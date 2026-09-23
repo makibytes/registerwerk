@@ -99,6 +99,21 @@ public class BlockchainTransaction {
     @Column(name = "ops_reviewed_by")
     private UUID opsReviewedBy;
 
+    /**
+     * Verified business outcome of a confidential forced operation, written by
+     * {@code ConfidentialForcedOpVerifier}. {@link #status} SUCCESS only says the transaction did
+     * not revert; a confidential forcedTransfer/confidentialBurn with insufficient balance moves 0
+     * and still succeeds. Null while not applicable or still being verified.
+     */
+    @Column(name = "execution_outcome", length = 40)
+    private String executionOutcome;
+
+    @Column(name = "execution_outcome_attempts", nullable = false)
+    private int executionOutcomeAttempts;
+
+    @Column(name = "execution_outcome_checked_at")
+    private Instant executionOutcomeCheckedAt;
+
     // ── Getters & Setters ──────────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -164,4 +179,13 @@ public class BlockchainTransaction {
 
     public UUID getOpsReviewedBy() { return opsReviewedBy; }
     public void setOpsReviewedBy(UUID opsReviewedBy) { this.opsReviewedBy = opsReviewedBy; }
+
+    public String getExecutionOutcome() { return executionOutcome; }
+    public void setExecutionOutcome(String executionOutcome) { this.executionOutcome = executionOutcome; }
+
+    public int getExecutionOutcomeAttempts() { return executionOutcomeAttempts; }
+    public void setExecutionOutcomeAttempts(int executionOutcomeAttempts) { this.executionOutcomeAttempts = executionOutcomeAttempts; }
+
+    public Instant getExecutionOutcomeCheckedAt() { return executionOutcomeCheckedAt; }
+    public void setExecutionOutcomeCheckedAt(Instant executionOutcomeCheckedAt) { this.executionOutcomeCheckedAt = executionOutcomeCheckedAt; }
 }

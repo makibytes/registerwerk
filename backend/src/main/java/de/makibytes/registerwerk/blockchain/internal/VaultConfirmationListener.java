@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
+import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.deployment.api.AssetVaultState;
 import de.makibytes.registerwerk.deployment.api.AssetVaultStateRepository;
 import de.makibytes.registerwerk.deployment.api.VaultNavStrike;
@@ -17,7 +18,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.web3j.protocol.core.methods.response.Log;
+import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
+import java.io.IOException;
+import java.math.BigInteger;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -39,6 +44,11 @@ import java.util.UUID;
  * {@link VaultRequestFulfillmentRevertCompensator}). Deposit caps control which future deposits
  * the vault accepts and are therefore journaled too; their pre-image is retained so a retraction
  * can restore the last canonical cap without guessing.
+ *
+ * <p>A confirmed fulfilment records what the chain actually executed — NAV, shares and assets
+ * decoded from the receipt's {@code DepositRequestFulfilled}/{@code RedeemRequestFulfilled} event
+ * — never a value typed by the operator (review finding T1-08). A confirmed cancel with a forced
+ * destination becomes {@code FORCE_CANCELLED}.
  */
 @Component
 class VaultConfirmationListener {
@@ -51,6 +61,7 @@ class VaultConfirmationListener {
     private final BlockchainTransactionService blockchainTransactionService;
     private final ChainEffectRecorder chainEffectRecorder;
     private final IsolatedTransactionExecutor isolatedTransactions;
+    private final EvmContractService evmContractService;
 
     VaultConfirmationListener(
             VaultNavStrikeRepository navStrikeRepository,
@@ -58,13 +69,15 @@ class VaultConfirmationListener {
             AssetVaultStateRepository vaultStateRepository,
             BlockchainTransactionService blockchainTransactionService,
             ChainEffectRecorder chainEffectRecorder,
-            IsolatedTransactionExecutor isolatedTransactions) {
+            IsolatedTransactionExecutor isolatedTransactions,
+            EvmContractService evmContractService) {
         this.navStrikeRepository = navStrikeRepository;
         this.vaultRequestRepository = vaultRequestRepository;
         this.vaultStateRepository = vaultStateRepository;
         this.blockchainTransactionService = blockchainTransactionService;
         this.chainEffectRecorder = chainEffectRecorder;
         this.isolatedTransactions = isolatedTransactions;
+        this.evmContractService = evmContractService;
     }
 
     @SchedulerLock(name = "vaultConfirmationListener", lockAtMostFor = "PT1M", lockAtLeastFor = "PT20S")
@@ -150,7 +163,7 @@ class VaultConfirmationListener {
                 CompensationCategory.INVERSE_FLIP));
     }
 
-    private void resolveFulfillment(VaultRequest request) {
+    private void resolveFulfillment(VaultRequest request) throws IOException {
         String txHash = request.getFulfilledTx();
         if (blockchainTransactionService.isConfirmedFailure(txHash)) {
             log.warn("VaultRequest={} fulfil tx={} failed on-chain; clearing so it can be resubmitted.",
@@ -164,6 +177,21 @@ class VaultConfirmationListener {
                 blockchainTransactionService.confirmedLocation(txHash);
         if (location.isEmpty()) {
             return;
+        }
+        // Throws (→ retried next tick) if the receipt cannot be fetched; empty only if the
+        // receipt genuinely has no matching event.
+        Optional<Erc7540Events.Fulfilment> executed =
+                executedFulfilment(location.get().chainConfigId(), txHash, request.getRequestId());
+        if (executed.isPresent()) {
+            VaultRequestIngestionService.applyFulfilment(request, executed.get());
+            request.setReviewNote(null);
+        } else {
+            log.error("VaultRequest={} fulfil tx={} confirmed but its receipt carries no *RequestFulfilled "
+                    + "event for request={} — executed NAV/amounts unknown; flagged for review.",
+                    request.getId(), txHash, request.getRequestId());
+            request.setNavAtFulfill(null);
+            request.setReviewNote("Fulfil tx confirmed without a matching *RequestFulfilled event — "
+                    + "executed NAV/amounts could not be reconciled");
         }
         request.setRequestStatus(VaultRequestStatus.FULFILLED);
         request.setFulfilledAt(Instant.now());
@@ -186,6 +214,8 @@ class VaultConfirmationListener {
             log.warn("VaultRequest={} cancel tx={} failed on-chain; clearing so it can be resubmitted.",
                     request.getId(), txHash);
             request.setCancelledTx(null);
+            request.setForcedToAddr(null);
+            request.setLegalBasis(null);
             vaultRequestRepository.save(request);
             return;
         }
@@ -194,7 +224,9 @@ class VaultConfirmationListener {
         if (location.isEmpty()) {
             return;
         }
-        request.setRequestStatus(VaultRequestStatus.CANCELLED);
+        // forcedToAddr is only ever set by Erc7540AdminService#forceCancelRequest.
+        request.setRequestStatus(request.getForcedToAddr() != null
+                ? VaultRequestStatus.FORCE_CANCELLED : VaultRequestStatus.CANCELLED);
         request.setConfirmed(true);
         request.setChainConfigId(location.get().chainConfigId());
         request.setBlockNumber(location.get().blockNumber());
@@ -253,6 +285,25 @@ class VaultConfirmationListener {
                 null, "blockchain", VaultDepositCapRevertCompensator.EFFECT_TYPE,
                 "AssetVaultState", state.getAssetId(), state.getAssetId(), CompensationCategory.INVERSE_FLIP,
                 beforeState, afterState, null, null));
+    }
+
+    /** The {@code *RequestFulfilled} event for {@code requestId} emitted by the vault the tx was
+     *  sent to. */
+    private Optional<Erc7540Events.Fulfilment> executedFulfilment(UUID chainConfigId, String txHash,
+                                                                 BigInteger requestId) throws IOException {
+        TransactionReceipt receipt = evmContractService.evmClient(chainConfigId)
+                .ethGetTransactionReceipt(txHash).send().getTransactionReceipt()
+                .orElseThrow(() -> new IllegalStateException("Receipt for confirmed tx " + txHash + " unavailable"));
+        for (Log l : receipt.getLogs()) {
+            if (receipt.getTo() != null && !receipt.getTo().equalsIgnoreCase(l.getAddress())) {
+                continue;
+            }
+            Optional<Erc7540Events.Fulfilment> fulfilment = Erc7540Events.fulfilment(l, requestId);
+            if (fulfilment.isPresent()) {
+                return fulfilment;
+            }
+        }
+        return Optional.empty();
     }
 
     private static boolean hasCanonicalConfirmation(VaultNavStrike strike) {

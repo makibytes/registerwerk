@@ -1,8 +1,8 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { VaultNavStrike, VaultRequest } from '../models';
+import { VaultNavStrike, VaultRequest, VaultStateSummary } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class VaultService {
@@ -26,10 +26,35 @@ export class VaultService {
     return this.http.get<VaultRequest[]>(`${this.base}/deployments/${deploymentId}/vault-requests`, { params });
   }
 
-  fulfillRequest(deploymentId: string, requestId: string, navAtFulfill: number): Observable<{ txId: string }> {
+  /** Confirmed vault state — the NAV a fulfilment settles at. */
+  getVaultState(deploymentId: string): Observable<VaultStateSummary> {
+    return this.http.get<VaultStateSummary>(`${this.base}/deployments/${deploymentId}/vault-state`);
+  }
+
+  /** Settles at the NAV currently struck on-chain; the executed NAV is recorded from the event. */
+  fulfillRequest(deploymentId: string, requestId: string): Observable<{ txId: string }> {
     return this.http.post<{ txId: string }>(
       `${this.base}/deployments/${deploymentId}/vault-requests/${requestId}/fulfill`,
-      { navAtFulfill }
+      {}
+    );
+  }
+
+  /** Registry force-cancel on a legal basis (step-up + 4-eyes: VAULT_REQUEST_FORCE_CANCEL). */
+  forceCancelRequest(
+    deploymentId: string,
+    requestId: string,
+    body: { to: string; legalBasis: string },
+    stepUpToken: string,
+    dualControlToken: string,
+  ): Observable<{ txId: string }> {
+    const headers = new HttpHeaders({
+      Authorization: `Bearer ${stepUpToken}`,
+      'X-Dual-Control-Token': dualControlToken,
+    });
+    return this.http.post<{ txId: string }>(
+      `${this.base}/deployments/${deploymentId}/vault-requests/${requestId}/force-cancel`,
+      body,
+      { headers }
     );
   }
 

@@ -1,0 +1,15 @@
+# Daml Script tests for the bond templates. Kept as a separate package so the production
+# DAR (../daml.yaml) does not take a daml-script dependency — that would change its package
+# contents and upgrade surface. Build the main package first: `cd .. && dpm build`.
+sdk-version: 3.5.2
+name: registerwerk-canton-tests
+version: 0.1.0
+source: daml
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
+data-dependencies:
+  - ../.daml/dist/registerwerk-canton-0.1.0.dar
+build-options:
+  - --target=2.1

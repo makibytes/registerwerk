@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.erc3643.web.dto;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
@@ -14,6 +16,10 @@ public record RegisterInvestorRequest(
     @NotNull UUID legalEntityId,
     /** UUID of the chain_config row (identifies which chain the ONCHAINID is on). */
     @NotNull UUID chainConfigId,
-    /** ISO-3166-1 numeric country code (optional; used for country-restriction compliance). */
-    Short countryCode
+    /**
+     * ISO-3166-1 numeric country code (required). Registered on-chain and enforced by the
+     * compliance module's country block list, which rejects a recipient with country 0 while
+     * any country is blocked — so an investor must never be registered without one.
+     */
+    @NotNull @Min(1) @Max(999) Short countryCode
 ) {}

@@ -28,8 +28,18 @@ contract AssetTokenFactory {
         registryWallet = registryWallet_;
     }
 
-    function configureDeployer(uint8 tokenType, address deployer) external {
+    /// @dev Deployment is restricted to the registry wallet (T1-17). The salt is
+    ///      `keccak(assetId, tokenType)` and the initcode is fully determined by public
+    ///      calldata, so an open `deployToken`/`deployVault` let anyone front-run the
+    ///      registry's transaction with identical arguments and make its CREATE2 revert.
+    ///      Factories deployed before this change remain permissionless; the backend
+    ///      tolerates that by adopting a matching contract already at `predictAddress`.
+    modifier onlyRegistry() {
         require(msg.sender == registryWallet, "AssetTokenFactory: only registry");
+        _;
+    }
+
+    function configureDeployer(uint8 tokenType, address deployer) external onlyRegistry {
         require(tokenType <= TOKEN_TYPE_ERC7540, "AssetTokenFactory: unsupported token type");
         require(address(deployers[tokenType]) == address(0), "AssetTokenFactory: deployer already configured");
         require(deployer != address(0) && deployer.code.length > 0, "AssetTokenFactory: invalid deployer");
@@ -39,6 +49,7 @@ contract AssetTokenFactory {
 
     function deployToken(uint8 tokenType, string calldata name, string calldata symbol, bytes32 assetId)
         external
+        onlyRegistry
         returns (address tokenAddress)
     {
         if (tokenType > TOKEN_TYPE_ERC3525) {
@@ -56,7 +67,7 @@ contract AssetTokenFactory {
         string calldata symbol,
         bytes32 assetId,
         address underlyingAsset
-    ) external returns (address vaultAddress) {
+    ) external onlyRegistry returns (address vaultAddress) {
         require(underlyingAsset != address(0), "AssetTokenFactory: zero underlying asset");
         if (tokenType < TOKEN_TYPE_ERC4626 || tokenType > TOKEN_TYPE_ERC7540) {
             revert(unicode"AssetTokenFactory: unsupported vault type — use 4 (ERC4626) or 5 (ERC7540)");

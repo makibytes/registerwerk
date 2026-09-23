@@ -35,8 +35,19 @@ contract ConfidentialERC3643Test is Test {
     function setUp() public {
         initialViewers.push(operatorViewer);
         initialViewers.push(auditorViewer);
+        // Deploy through an external self-call: forge's dynamic test linking rewrites an inline
+        // `try new ...` into vm.deployCode, whose revert the try/catch cannot catch.
+        try this.deployToken() returns (ConfidentialERC3643 deployed) {
+            token = deployed;
+            fhevmAvailable = true;
+        } catch {
+            fhevmAvailable = false;
+        }
+    }
+
+    function deployToken() external returns (ConfidentialERC3643) {
         vm.prank(owner);
-        try new ConfidentialERC3643(
+        return new ConfidentialERC3643(
             assetId,
             "Confidential Security Token",
             "cSEC",
@@ -45,12 +56,7 @@ contract ConfidentialERC3643Test is Test {
             address(0x10),  // identity registry (stub)
             address(0x11),  // compliance (stub)
             owner
-        ) returns (ConfidentialERC3643 deployed) {
-            token = deployed;
-            fhevmAvailable = true;
-        } catch {
-            fhevmAvailable = false;
-        }
+        );
     }
 
     modifier onFhevm() {

@@ -4,6 +4,8 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopicRepository;
@@ -11,16 +13,19 @@ import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistry;
 import de.makibytes.registerwerk.erc3643.api.Erc3643IdentityRegistryRepository;
 import de.makibytes.registerwerk.erc3643.api.Erc3643Suite;
 import de.makibytes.registerwerk.erc3643.api.Erc3643SuiteRepository;
+import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
 import de.makibytes.registerwerk.erc3643.events.InvestorRemovedEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.generated.Uint16;
 
 import java.util.Map;
 import java.util.Optional;
@@ -55,6 +60,7 @@ class IdentityRegistryServiceTest {
     @Mock private DurableEvmTransactionGateway evmTransactions;
     @Mock private BlockchainTransactionService blockchainTransactionService;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private LegalEntityRepository legalEntityRepo;
 
     private IdentityRegistryService service;
 
@@ -68,7 +74,7 @@ class IdentityRegistryServiceTest {
     void setUp() {
         service = new IdentityRegistryService(registryRepo, suiteRepo, claimTopicRepo, deploymentRepo,
                 onChainIdService, evmTransactions,
-                blockchainTransactionService, eventPublisher);
+                blockchainTransactionService, eventPublisher, legalEntityRepo);
     }
 
     private Erc3643IdentityRegistry entry() {
@@ -189,5 +195,70 @@ class IdentityRegistryServiceTest {
         assertThat(entry.getRemovedAt()).isNotNull();
         verify(evmTransactions, never()).submit(any(UUID.class), anyString(), any(Function.class), any());
         verify(blockchainTransactionService, never()).record(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    // ── registerInvestor: country is mandatory (T1-13) ─────────────────────
+
+    private static final String WALLET = "0x1234567890123456789012345678901234567890";
+
+    private void stubOnchainIdentity(UUID legalEntityId) {
+        OnchainIdentity identity = new OnchainIdentity();
+        ReflectionTestUtils.setField(identity, "id", UUID.randomUUID());
+        identity.setIdentityAddress("0x00000000000000000000000000000000000000aa");
+        when(onChainIdService.getOrCreate(eq(legalEntityId), eq(chainConfigId), any(), any())).thenReturn(identity);
+    }
+
+    private LegalEntity legalEntity(UUID id, String registrationCountry) {
+        LegalEntity e = new LegalEntity();
+        ReflectionTestUtils.setField(e, "id", id);
+        e.setRegistrationCountry(registrationCountry);
+        return e;
+    }
+
+    @Test
+    @DisplayName("registerInvestor defaults a missing country to the entity's KYC registration country (DE -> 276)")
+    void registerInvestor_defaultsCountryFromKyc() {
+        UUID legalEntityId = UUID.randomUUID();
+        when(suiteRepo.findById(suiteId)).thenReturn(Optional.of(deployedSuite()));
+        when(deploymentRepo.findById(deploymentId)).thenReturn(Optional.of(deployment()));
+        when(legalEntityRepo.findById(legalEntityId)).thenReturn(Optional.of(legalEntity(legalEntityId, "DE")));
+        stubOnchainIdentity(legalEntityId);
+        when(evmTransactions.submit(eq(chainConfigId), eq("0xregistry"), any(Function.class), any()))
+                .thenReturn("0xregistertx");
+        when(registryRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Erc3643IdentityRegistry saved = service.registerInvestor(
+                suiteId, WALLET, legalEntityId, chainConfigId, null, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        ArgumentCaptor<Function> fn = ArgumentCaptor.forClass(Function.class);
+        verify(evmTransactions).submit(eq(chainConfigId), eq("0xregistry"), fn.capture(), any());
+        assertThat(((Uint16) fn.getValue().getInputParameters().get(2)).getValue().intValue()).isEqualTo(276);
+        assertThat(saved.getCountryCode()).isEqualTo((short) 276);
+    }
+
+    @Test
+    @DisplayName("registerInvestor refuses when no country is given and KYC has none — never registers country 0")
+    void registerInvestor_refusesUnknownCountry() {
+        UUID legalEntityId = UUID.randomUUID();
+        when(suiteRepo.findById(suiteId)).thenReturn(Optional.of(deployedSuite()));
+        when(legalEntityRepo.findById(legalEntityId)).thenReturn(Optional.of(legalEntity(legalEntityId, null)));
+
+        assertThatThrownBy(() -> service.registerInvestor(
+                suiteId, WALLET, legalEntityId, chainConfigId, null, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("countryCode");
+        verify(evmTransactions, never()).submit(any(UUID.class), anyString(), any(Function.class), any());
+        verify(registryRepo, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("registerInvestor refuses an explicit country 0")
+    void registerInvestor_refusesCountryZero() {
+        when(suiteRepo.findById(suiteId)).thenReturn(Optional.of(deployedSuite()));
+
+        assertThatThrownBy(() -> service.registerInvestor(
+                suiteId, WALLET, UUID.randomUUID(), chainConfigId, (short) 0, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(evmTransactions, never()).submit(any(UUID.class), anyString(), any(Function.class), any());
     }
 }

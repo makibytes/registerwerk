@@ -4,6 +4,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,6 +22,10 @@ public interface BlockchainTransactionRepository extends JpaRepository<Blockchai
     Page<BlockchainTransaction> findByActorNameOrderByCreatedAtDesc(String actorName, Pageable pageable);
 
     Page<BlockchainTransaction> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    /** Confirmed confidential forced operations whose on-chain outcome is not yet verified. */
+    List<BlockchainTransaction> findByMethodNameInAndStatusAndExecutionOutcomeIsNull(
+            Collection<String> methodNames, BlockchainTransaction.Status status);
 
     Page<BlockchainTransaction> findByStatusOrderByCreatedAtDesc(BlockchainTransaction.Status status, Pageable pageable);
 }

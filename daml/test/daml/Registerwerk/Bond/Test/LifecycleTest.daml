@@ -1,0 +1,86 @@
+-- | Contract-id lifecycle of the bond templates, as the backend drives it
+-- (`CantonBondService`): every non-terminal choice is consuming and recreates the
+-- instrument, so each exercise must target the id returned by the previous one.
+module Registerwerk.Bond.Test.LifecycleTest where
+
+import Daml.Script
+import DA.Date (date, Month(..))
+import Registerwerk.Bond.Types
+import Registerwerk.Bond.FixedBond (FixedRateBond(..))
+import Registerwerk.Bond.FixedBond qualified as FixedBond
+import Registerwerk.Bond.FloatingBond (FloatingRateBond(..), FixRate(..))
+import Registerwerk.Bond.FloatingBond qualified as FloatingBond
+
+bondTerms : Text -> EwpgBondTerms
+bondTerms assetId = EwpgBondTerms with
+  assetId
+  faceValue = 1000.0
+  currencyIso = "EUR"
+  issueDate = date 2026 Jun 30
+  maturityDate = date 2029 Jun 30
+  dayCount = ActActIcma
+  paymentFrequency = Annual
+  callable = False
+  callSchedule = []
+
+-- | PayCoupon twice, then Redeem, each on the id returned by the previous choice; the
+-- original id is archived after the first coupon.
+fixedBondCouponsThenRedeem : Script ()
+fixedBondCouponsThenRedeem = script do
+  registry <- allocateParty "Registry"
+  let assetId = "11111111-1111-1111-1111-111111111111"
+  c0 <- submit registry do
+    createCmd FixedRateBond with
+      assetId
+      registryAdmin = registry
+      issuer = registry
+      regulatorObserver = registry
+      terms = bondTerms assetId
+      couponRate = 0.05
+      status = "ACTIVE"
+
+  c1 <- submit registry do
+    exerciseCmd c0 FixedBond.PayCoupon with
+      paymentDate = date 2027 Jun 30; amountPerUnit = 50.0; txRef = "coupon-1"
+  submitMustFail registry do
+    exerciseCmd c0 FixedBond.PayCoupon with
+      paymentDate = date 2028 Jun 30; amountPerUnit = 50.0; txRef = "stale-id"
+  c2 <- submit registry do
+    exerciseCmd c1 FixedBond.PayCoupon with
+      paymentDate = date 2028 Jun 30; amountPerUnit = 50.0; txRef = "coupon-2"
+
+  active <- query @FixedRateBond registry
+  assertMsg "exactly one live instrument, under the latest id" (map fst active == [c2])
+
+  submit registry do
+    exerciseCmd c2 FixedBond.Redeem with redemptionDate = date 2029 Jun 30
+  remaining <- query @FixedRateBond registry
+  assertMsg "Redeem archives the instrument" (null remaining)
+
+-- | FixRate is consuming too: the coupon must be exercised on FixRate's result.
+floatingBondFixThenCoupon : Script ()
+floatingBondFixThenCoupon = script do
+  registry <- allocateParty "Registry"
+  let assetId = "22222222-2222-2222-2222-222222222222"
+  c0 <- submit registry do
+    createCmd FloatingRateBond with
+      assetId
+      registryAdmin = registry
+      issuer = registry
+      regulatorObserver = registry
+      terms = bondTerms assetId
+      referenceRate = "EURIBOR_3M"
+      spread = 0.01
+      latestFixedRate = None
+      status = "ACTIVE"
+
+  c1 <- submit registry do
+    exerciseCmd c0 FixRate with fixingDate = date 2027 Jun 28; rate = 0.031
+  submitMustFail registry do
+    exerciseCmd c0 FloatingBond.PayCoupon with
+      paymentDate = date 2027 Jun 30; amountPerUnit = 41.0; txRef = "stale-id"
+  c2 <- submit registry do
+    exerciseCmd c1 FloatingBond.PayCoupon with
+      paymentDate = date 2027 Jun 30; amountPerUnit = 41.0; txRef = "coupon-1"
+  submit registry do
+    exerciseCmd c2 FloatingBond.Redeem with redemptionDate = date 2029 Jun 30

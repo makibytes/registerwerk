@@ -13,6 +13,8 @@ import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetSlot;
 import de.makibytes.registerwerk.deployment.api.AssetSlotRepository;
 import de.makibytes.registerwerk.deployment.api.AssetTokenUnitRepository;
+import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,6 +55,7 @@ class Erc3525AdminServiceTest {
     @Mock private BlockchainTransactionService txService;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private StarknetErc3525AdminService starknetErc3525AdminService;
+    @Mock private HolderBlockGate holderBlockGate;
 
     private Erc3525AdminService service;
 
@@ -65,7 +68,7 @@ class Erc3525AdminServiceTest {
     void setUp() {
         service = new Erc3525AdminService(
                 deploymentRepository, slotRepository, tokenUnitRepository, couponPaymentRepository,
-                evmTransactions, txService, eventPublisher, starknetErc3525AdminService);
+                evmTransactions, txService, eventPublisher, starknetErc3525AdminService, holderBlockGate);
     }
 
     private AssetDeployment deployment(Chain chain) {
@@ -159,5 +162,82 @@ class Erc3525AdminServiceTest {
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().methodName()).isEqualTo("forcedTransferValue");
         assertThat(captor.getValue().actorId()).isEqualTo(ACTOR_ID);
+    }
+
+    // ── Holder-level controls (veto note 3: the compliant Cairo class requires whitelisted
+    //    recipients, so the backend must be able to whitelist/freeze on Starknet) ──────────
+
+    private static final String STARK_HOLDER =
+            "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7";
+    private static final String EVM_HOLDER = "0x00000000000000000000000000000000000000a1";
+
+    @Test
+    @DisplayName("Starknet: whitelist/unwhitelist/freeze/unfreeze route to the Cairo admin service and audit")
+    void holderControls_starknet_routeAndAudit() {
+        AssetDeployment dep = deployment(Chain.STARKNET);
+        when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
+        when(starknetErc3525AdminService.whitelist(DEPLOYMENT_ID, STARK_HOLDER))
+                .thenReturn(CompletableFuture.completedFuture("0xwl"));
+        when(starknetErc3525AdminService.removeFromWhitelist(DEPLOYMENT_ID, STARK_HOLDER))
+                .thenReturn(CompletableFuture.completedFuture("0xuwl"));
+        when(starknetErc3525AdminService.freezeAddress(DEPLOYMENT_ID, STARK_HOLDER, "sanctions"))
+                .thenReturn(CompletableFuture.completedFuture("0xfz"));
+        when(starknetErc3525AdminService.unfreezeAddress(DEPLOYMENT_ID, STARK_HOLDER))
+                .thenReturn(CompletableFuture.completedFuture("0xufz"));
+        when(txService.record(anyString(), anyString(), eq(DEPLOYMENT_ID), eq(ASSET_ID),
+                anyString(), anyString(), eq("0xdeployed"), any())).thenReturn(UUID.randomUUID());
+
+        service.whitelistAddress(DEPLOYMENT_ID, STARK_HOLDER, ACTOR_ID, "REGISTRY_ADMIN");
+        service.unwhitelistAddress(DEPLOYMENT_ID, STARK_HOLDER, ACTOR_ID, "REGISTRY_ADMIN");
+        service.freezeAddress(DEPLOYMENT_ID, STARK_HOLDER, "sanctions", ACTOR_ID, "REGISTRY_ADMIN");
+        service.unfreezeAddress(DEPLOYMENT_ID, STARK_HOLDER, ACTOR_ID, "REGISTRY_ADMIN");
+
+        verify(txService).record(eq("0xwl"), eq("whitelist"), any(), any(), anyString(), anyString(), any(), any());
+        verify(txService).record(eq("0xuwl"), eq("removeFromWhitelist"), any(), any(), anyString(), anyString(), any(), any());
+        verify(txService).record(eq("0xfz"), eq("freezeAddress"), any(), any(), anyString(), anyString(), any(), any());
+        verify(txService).record(eq("0xufz"), eq("unfreezeAddress"), any(), any(), anyString(), anyString(), any(), any());
+        verify(eventPublisher, org.mockito.Mockito.times(4)).publishEvent(any(TokenAdminActionEvent.class));
+        verify(evmTransactions, never()).submit(any(), anyString(), any(Function.class), any());
+    }
+
+    @Test
+    @DisplayName("EVM: freezeAddress submits EwpgCompliance.freezeAddress(address,string)")
+    void freezeAddress_evm_submits() {
+        AssetDeployment dep = deployment(Chain.ETHEREUM);
+        when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
+        when(evmTransactions.submit(eq(dep.getChainConfigId()), eq("0xdeployed"), any(Function.class), any()))
+                .thenReturn("0xtx");
+
+        service.freezeAddress(DEPLOYMENT_ID, EVM_HOLDER, "sanctions", ACTOR_ID, "REGISTRY_ADMIN");
+
+        ArgumentCaptor<Function> fn = ArgumentCaptor.forClass(Function.class);
+        verify(evmTransactions).submit(any(), any(), fn.capture(), any());
+        assertThat(fn.getValue().getName()).isEqualTo("freezeAddress");
+        verify(starknetErc3525AdminService, never()).freezeAddress(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("whitelisting a Sperrvermerk'd wallet or a malformed address is refused before any chain call")
+    void whitelist_refusesBlockedOrMalformedAddress() {
+        AssetDeployment dep = deployment(Chain.STARKNET);
+        when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
+        when(holderBlockGate.isBlocked(null, STARK_HOLDER)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.whitelistAddress(DEPLOYMENT_ID, STARK_HOLDER, ACTOR_ID, "REGISTRY_ADMIN"))
+                .isInstanceOf(ComplianceGateException.class);
+        assertThatThrownBy(() -> service.whitelistAddress(DEPLOYMENT_ID, "not-an-address", ACTOR_ID, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(starknetErc3525AdminService, never()).whitelist(any(), any());
+    }
+
+    @Test
+    @DisplayName("EVM: a Starknet-length felt address is rejected for an EVM deployment")
+    void freezeAddress_evm_rejectsFeltAddress() {
+        AssetDeployment dep = deployment(Chain.ETHEREUM);
+        when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
+
+        assertThatThrownBy(() -> service.freezeAddress(DEPLOYMENT_ID, STARK_HOLDER, "x", ACTOR_ID, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(evmTransactions, never()).submit(any(), anyString(), any(Function.class), any());
     }
 }

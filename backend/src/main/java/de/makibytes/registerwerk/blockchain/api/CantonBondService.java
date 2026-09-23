@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.blockchain.api;
 
-import com.daml.ledger.javaapi.data.Command;
 import com.daml.ledger.javaapi.data.Bool;
 import com.daml.ledger.javaapi.data.CreateCommand;
 import com.daml.ledger.javaapi.data.DamlEnum;
@@ -21,10 +20,12 @@ import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import de.makibytes.registerwerk.deployment.api.BondStatus;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.blockchain.events.CantonBondCalledEvent;
+import de.makibytes.registerwerk.blockchain.events.CantonBondContractIdRepairedEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonBondCreatedEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonBondRedeemedEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonCouponPaidEvent;
 import de.makibytes.registerwerk.blockchain.events.CantonFloatingRateFixedEvent;
+import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
@@ -34,7 +35,9 @@ import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.wallet.api.WalletStorage.CantonContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -43,6 +46,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
@@ -192,8 +196,7 @@ public class CantonBondService implements CantonBondOperations {
                     f("amountPerUnit", new Numeric(amountPerUnit)),
                     f("txRef",         new Text(deploymentId + "-coupon-" + paymentDate.getEpochSecond())));
 
-            Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "PayCoupon", args);
-            String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
+            String updateId = exerciseRecreating(dep, client, ctx, "PayCoupon", args);
 
             LocalDate pd = LocalDate.ofInstant(paymentDate, ZoneOffset.UTC);
             eventPublisher.publishEvent(new CantonCouponPaidEvent(deploymentId, actorId, pd, amountPerUnit, updateId));
@@ -212,8 +215,7 @@ public class CantonBondService implements CantonBondOperations {
                     f("fixingDate", date(fixingDate)),
                     f("rate",       new Numeric(rate)));
 
-            Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "FixRate", args);
-            String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
+            String updateId = exerciseRecreating(dep, client, ctx, "FixRate", args);
 
             eventPublisher.publishEvent(new CantonFloatingRateFixedEvent(deploymentId, actorId, rate, fixingDate));
             return updateId;
@@ -227,8 +229,7 @@ public class CantonBondService implements CantonBondOperations {
             CantonContext ctx = resolveContext(dep);
 
             DamlRecord args = rec(f("redemptionDate", date(maturityDate)));
-            Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "Redeem", args);
-            String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
+            String updateId = exerciseTerminal(dep, client, ctx, "Redeem", args);
 
             bondTermsRepository.findById(dep.getAssetId()).ifPresent(bt -> {
                 bt.setBondStatus(BondStatus.REDEEMED);
@@ -250,8 +251,7 @@ public class CantonBondService implements CantonBondOperations {
                     f("callDate",  date(callDate)),
                     f("callPrice", new Numeric(callPrice)));
 
-            Command cmd = new ExerciseCommand(bondTemplateId(dep), dep.getContractAddress(), "EarlyCall", args);
-            String updateId = client.submitAndWait(ctx.partyId(), List.of(cmd));
+            String updateId = exerciseTerminal(dep, client, ctx, "EarlyCall", args);
 
             bondTermsRepository.findById(dep.getAssetId()).ifPresent(bt -> {
                 bt.setBondStatus(BondStatus.CALLED);
@@ -260,6 +260,145 @@ public class CantonBondService implements CantonBondOperations {
             eventPublisher.publishEvent(new CantonBondCalledEvent(deploymentId, actorId, callDate, callPrice));
             return updateId;
         });
+    }
+
+    // ── Contract-id tracking ──────────────────────────────────────────────────
+
+    /**
+     * Exercises a consuming choice that archives the bond and recreates it ({@code PayCoupon},
+     * {@code FixRate}; also {@code SuspendInstrument}/{@code ResumeInstrument} once wired) and
+     * re-points the deployment at the successor contract. Every Daml choice is consuming by
+     * default, so without this the stored id went stale after the first coupon and every later
+     * coupon, redemption and call failed with CONTRACT_NOT_FOUND. The templates are deliberately
+     * left unchanged (making the choices nonconsuming would split package ids against live
+     * contracts); the backend follows the id instead.
+     */
+    private String exerciseRecreating(
+            AssetDeployment dep, CantonLedgerClient client, CantonContext ctx, String choice, DamlRecord args) {
+        Identifier template = bondTemplateId(dep);
+        CantonLedgerClient.CommittedContract committed = exerciseWithRepair(dep, client, ctx, template,
+                cid -> client.submitAndWaitForCreatedContract(
+                        ctx.partyId(), List.of(new ExerciseCommand(template, cid, choice, args)), template));
+        // If this save fails after the ledger commit, the next exercise self-heals via the ACS.
+        dep.setContractAddress(committed.contractId());
+        assetDeploymentRepository.save(dep);
+        return committed.updateId();
+    }
+
+    /** Exercises a terminal choice ({@code Redeem}, {@code EarlyCall}) that archives the bond
+     *  without a successor; the stored id is kept and {@link BondStatus} records the end state. */
+    private String exerciseTerminal(
+            AssetDeployment dep, CantonLedgerClient client, CantonContext ctx, String choice, DamlRecord args) {
+        Identifier template = bondTemplateId(dep);
+        return exerciseWithRepair(dep, client, ctx, template, cid -> client.submitAndWait(
+                ctx.partyId(), List.of(new ExerciseCommand(template, cid, choice, args))));
+    }
+
+    /** Runs {@code exercise} on the stored id; on CONTRACT_NOT_FOUND resolves the live id from
+     *  the ACS once, persists it and retries once. Any other failure propagates unchanged. */
+    private <T> T exerciseWithRepair(
+            AssetDeployment dep, CantonLedgerClient client, CantonContext ctx, Identifier template,
+            Function<String, T> exercise) {
+        String stored = dep.getContractAddress();
+        try {
+            return exercise.apply(stored);
+        } catch (RuntimeException e) {
+            if (!isContractNotFound(e)) {
+                throw e;
+            }
+            log.warn("Canton bond contract {} not found for deploymentId={}; resolving the live contract from the ACS",
+                    stored, dep.getId());
+            Optional<String> live = repairContractId(dep, client, ctx.partyId(), template, "CONTRACT_NOT_FOUND");
+            if (live.isEmpty() || live.get().equals(stored)) {
+                throw e;
+            }
+            return exercise.apply(live.get());
+        }
+    }
+
+    /**
+     * Looks up the active contract for the deployment's asset and, if it differs from the stored
+     * id, persists it and records a {@link CantonBondContractIdRepairedEvent}.
+     *
+     * @return the live contract id, or empty when no active contract exists
+     */
+    private Optional<String> repairContractId(
+            AssetDeployment dep, CantonLedgerClient client, String party, Identifier template, String trigger) {
+        Optional<String> live = client.findActiveContract(party, template, dep.getAssetId().toString());
+        live.filter(cid -> !cid.equals(dep.getContractAddress())).ifPresent(cid -> {
+            String previous = dep.getContractAddress();
+            dep.setContractAddress(cid);
+            assetDeploymentRepository.save(dep);
+            eventPublisher.publishEvent(new CantonBondContractIdRepairedEvent(dep.getId(), previous, cid, trigger));
+            log.warn("Repaired Canton bond contract id: deploymentId={} {} -> {} (trigger={})",
+                    dep.getId(), previous, cid, trigger);
+        });
+        return live;
+    }
+
+    private static boolean isContractNotFound(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t.getMessage() != null && t.getMessage().contains("CONTRACT_NOT_FOUND")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * One-time backfill on every boot: re-points each confirmed Canton bond deployment whose
+     * stored id was archived by an earlier consuming choice (deployments that paid a coupon or
+     * fixed a rate before contract-id tracking existed). Runs through the per-chain submission
+     * executor so it cannot race a queued lifecycle exercise. Failures are logged per deployment
+     * and never block startup; the on-demand CONTRACT_NOT_FOUND self-heal remains as backstop.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void reconcileContractIdsOnStartup() {
+        for (Network network : Network.values()) {
+            List<AssetDeployment> deployments;
+            try {
+                deployments = assetDeploymentRepository.findByChainAndNetwork(Chain.CANTON, network);
+            } catch (RuntimeException e) {
+                log.warn("Canton contract-id reconciliation skipped for {}: {}", network, e.getMessage());
+                continue;
+            }
+            deployments.stream()
+                    .filter(dep -> dep.getDeploymentStatus() == AssetDeployment.DeploymentStatus.CONFIRMED)
+                    .filter(dep -> dep.getContractAddress() != null && !dep.getContractAddress().isBlank())
+                    .filter(this::isBondDeployment)
+                    .forEach(dep -> reconcileContractId(dep.getId()));
+        }
+    }
+
+    CompletableFuture<Optional<String>> reconcileContractId(UUID deploymentId) {
+        try {
+            return submitOnDeployment(deploymentId, dep -> {
+                CantonContext ctx = resolveContext(dep);
+                Optional<String> live = repairContractId(
+                        dep, resolveClient(dep.getNetwork()), ctx.partyId(), bondTemplateId(dep), "STARTUP");
+                if (live.isEmpty()) {
+                    log.info("No active Canton bond contract for deploymentId={} (terminal choice exercised or not visible)",
+                            deploymentId);
+                }
+                return live;
+            }).exceptionally(ex -> {
+                log.warn("Canton contract-id reconciliation failed for deploymentId={}: {}",
+                        deploymentId, ex.getMessage());
+                return Optional.empty();
+            });
+        } catch (RuntimeException e) {
+            log.warn("Canton contract-id reconciliation skipped for deploymentId={}: {}", deploymentId, e.getMessage());
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+    }
+
+    private boolean isBondDeployment(AssetDeployment dep) {
+        return assetLookupPort.findById(dep.getAssetId())
+                .map(asset -> switch (asset.tokenStandard()) {
+                    case DAML_BOND_FIXED, DAML_BOND_FLOATING, DAML_BOND_ZERO -> true;
+                    default -> false;
+                })
+                .orElse(false);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -297,10 +436,11 @@ public class CantonBondService implements CantonBondOperations {
 
     private <T> CompletableFuture<T> submitOnDeployment(
             UUID deploymentId, Function<AssetDeployment, T> submission) {
-        AssetDeployment deployment = loadDeployment(deploymentId);
-        ChainConfig chain = requireDeploymentChain(deployment);
+        ChainConfig chain = requireDeploymentChain(loadDeployment(deploymentId));
+        // Reload inside the serialized submission: a queued exercise must see the contract id
+        // persisted by the exercise that ran before it, not the one current at enqueue time.
         return CompletableFuture.supplyAsync(() -> submissions.execute(
-                chain.getId(), () -> submission.apply(deployment)));
+                chain.getId(), () -> submission.apply(loadDeployment(deploymentId))));
     }
 
     private ChainConfig requireChainConfig(Network network) {

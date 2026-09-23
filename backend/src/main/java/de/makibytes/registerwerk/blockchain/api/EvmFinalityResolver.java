@@ -84,6 +84,33 @@ public class EvmFinalityResolver {
         };
     }
 
+    /**
+     * The highest block number that is FINALIZED on {@code chain} right now under its configured
+     * model — the upper bound for a log scanner that must only ever ingest final history (see
+     * {@code VaultRequestIngestionService}). Empty when the chain cannot tell yet (a
+     * {@code TAG_BASED} node without a {@code finalized} tag, or a head shallower than the
+     * required depth).
+     */
+    public java.util.Optional<Long> finalizedHead(ChainConfig chain, Web3j web3j) throws IOException {
+        if (chain == null || chain.getIdentifier() == null) {
+            throw new IllegalArgumentException("Canonical chain configuration is required");
+        }
+        ChainConfig.FinalityModel model = chain.getFinalityModel() != null
+                ? chain.getFinalityModel() : ChainConfig.FinalityModel.DEPTH_BASED;
+        return switch (model) {
+            case INSTANT -> java.util.Optional.of(web3j.ethBlockNumber().send().getBlockNumber().longValueExact());
+            case TAG_BASED -> EvmUtils.finalizedBlockNumber(web3j);
+            case DEPTH_BASED -> {
+                long head = web3j.ethBlockNumber().send().getBlockNumber().longValueExact();
+                // Same depth rule as EvmUtils.finalityOf: block b is FINALIZED once
+                // depthOf(head, b) >= requiredConfirmations.
+                int required = txProperties.confirmationsFor(chainNameFrom(chain.getIdentifier()));
+                long finalized = head - Math.max(0, required - 1);
+                yield finalized >= 0 ? java.util.Optional.of(finalized) : java.util.Optional.empty();
+            }
+        };
+    }
+
     /** {@code <CHAIN>_<NETWORK>} → {@code CHAIN}, matching {@code Chain} enum names so
      *  {@link BlockchainTxProperties#confirmationsFor}/{@code #safeConfirmationsFor} stay the
      *  single source of confirmation-depth policy. Mirrors {@code

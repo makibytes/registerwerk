@@ -90,6 +90,23 @@ class VaultRequestFulfillmentRevertCompensatorTest {
     }
 
     @Test
+    void revertsForceCancelledRequestToPendingAndClearsDestination() {
+        VaultRequest request = request(VaultRequestStatus.FORCE_CANCELLED);
+        request.setCancelledTx("0xtxhash");
+        request.setForcedToAddr("0x00000000000000000000000000000000000000ee");
+        request.setLegalBasis("court order");
+        when(vaultRequestRepository.findById(id)).thenReturn(Optional.of(request));
+
+        CompensationOutcome outcome = compensator.compensate(effect());
+
+        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
+        assertThat(request.getCancelledTx()).isNull();
+        assertThat(request.getForcedToAddr()).isNull();
+        assertThat(request.getLegalBasis()).isNull();
+        assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
+    }
+
+    @Test
     void revertsCancelledRequestToPending() {
         VaultRequest request = request(VaultRequestStatus.CANCELLED);
         request.setCancelledTx("0xtxhash");
