@@ -61,6 +61,22 @@ describe('RegisterTransferService', () => {
         req.flush({});
     });
 
+    it('recordOnchainHandover() forwards the deployment id and the explicit attestation for non-EVM chains', () => {
+        service.recordOnchainHandover('transfer-1', 'sig', 'step-up-jwt', 'dual-control-jwt',
+            { deploymentId: 'dep-1', attested: true }).subscribe();
+
+        const req = httpMock.expectOne(`${base}/transfer-1/onchain-handover`);
+        expect(req.request.body).toEqual({ txHash: 'sig', deploymentId: 'dep-1', attested: true });
+        req.flush({});
+    });
+
+    it('initiate() forwards the successor on-chain address used to verify EVM handovers', () => {
+        service.initiate('asset-1', 'S', undefined, 'r', 'user-1', '0x' + 'ab'.repeat(20)).subscribe();
+        const req = httpMock.expectOne(base);
+        expect(req.request.body.successorOnchainAddress).toBe('0x' + 'ab'.repeat(20));
+        req.flush({});
+    });
+
     it('complete() POSTs to the complete sub-path with step-up + dual-control headers', () => {
         service.complete('transfer-1', 'step-up-jwt', 'dual-control-jwt').subscribe();
 

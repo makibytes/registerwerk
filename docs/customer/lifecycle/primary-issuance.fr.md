@@ -81,6 +81,36 @@ Chaque investisseur admis devient un **titulaire** — une ligne du registre. Au
 
 Un même actif peut porter les deux formes simultanément — le registre parle alors d'une position `MIXED`.
 
+
+!!! info "Les inscriptions sont faites par l'opérateur"
+    Une inscription, et toute modification d'un attribut du §17(2), est effectuée par l'opérateur du registre sur la base d'une instruction enregistrée : **qui l'a donnée** (titulaire, bénéficiaire, tribunal, administrateur d'insolvabilité, modification des conditions par l'émetteur) et une **référence**. L'émetteur ne modifie pas le registre ; il dépose une *demande* que l'opérateur exécute ou rejette. Retirer un droit ou une restriction exige une action explicite et un second approbateur, et les valeurs avant et après sont conservées.
+
+---
+
+## Souscriptions : de l'ordre au registre
+
+Les investisseurs souscrivent via le portail ; le registre n'est plus alimenté en saisissant des positions dans une boîte de dialogue. Un ordre traverse ces états :
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    SUBMITTED --> ALLOCATED: allocate
+    ALLOCATED --> PAYMENT_CONFIRMED: accepted and paid
+    PAYMENT_CONFIRMED --> SETTLED: settle
+    ALLOCATED --> LAPSED: not paid in time
+    ALLOCATED --> RELEASED: released
+    SUBMITTED --> REJECTED: reject
+```
+
+1. **Soumettre.** Tout investisseur intégré peut passer un ordre tant que l'actif est ouvert à la souscription (`APPROVED` ou `ISSUED`) et que l'investisseur se situe dans le marché cible MiFID.
+2. **Allouer.** L'émetteur ou l'opérateur alloue, en totalité ou de façon réduite. Les allocations comptent contre la taille de l'émission et contre la détention maximale de l'investisseur **avec ses autres allocations ouvertes** ; deux allocations parallèles ne peuvent donc pas passer chacune sous le plafond.
+3. **Accepter.** L'investisseur accepte l'allocation. Rien n'est encore inscrit au registre. Pour une obligation, le montant dû (unités allouées × valeur nominale × prix d'émission), une référence de paiement et une échéance de paiement sont affichés — 10 jours ouvrés TARGET par défaut. Une allocation non payée à temps **devient caduque** et libère sa capacité ; l'émetteur ou l'opérateur peut aussi la **libérer**.
+4. **Confirmer le paiement.** L'émetteur ou l'opérateur confirme la réception des fonds ([step-up](../../compliance/step-up-mfa.md) requis). Un paiement insuffisant est refusé ; un trop-perçu est accepté et affiché comme *remboursement dû*.
+5. **Régler.** Avant toute écriture, les mêmes contrôles que pour le règlement d'une transaction sont rejoués : KYC approuvé, aucune correspondance de sanctions non résolue, aucun [Sperrvermerk](holding.md), registre non gelé pour un transfert, finalité de la chaîne, marché cible et plafond de détention. Ensuite les unités sont émises. Si l'actif est **déployé**, les unités sont créées sur le portefeuille de l'investisseur et la synchronisation des titulaires les inscrit au registre une fois le transfert indexé. Sinon le registre est crédité directement ; une seconde souscription sur le même portefeuille augmente l'inscription existante.
+
+!!! note "Points ouverts"
+    Un standard de jeton sans création automatique laisse l'ordre à *paiement confirmé* : un opérateur émet les unités. Pour les actifs sans conditions d'obligation, l'opérateur saisit le montant reçu ; il n'y a pas de prix calculé. Pour les inscriptions collectives, l'investisseur, et non un dépositaire, est inscrit comme titulaire — cette question n'est pas encore tranchée.
+
 ---
 
 ## 3. Créer les titres

@@ -2,6 +2,11 @@ package de.makibytes.registerwerk.asset.web.dto;
 
 import de.makibytes.registerwerk.deployment.api.DayCountConvention;
 import de.makibytes.registerwerk.deployment.api.PaymentFrequency;
+import de.makibytes.registerwerk.deployment.api.schedule.BusinessDayConvention;
+import de.makibytes.registerwerk.deployment.api.schedule.HolidayCalendar;
+import de.makibytes.registerwerk.deployment.api.schedule.StubRule;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.DecimalMin;
@@ -26,10 +31,17 @@ import java.util.List;
  * @param couponRate        Fixed annual coupon rate (null for floating and zero-coupon bonds).
  * @param referenceRate     Reference rate code for floating bonds (e.g. "EURIBOR_3M").
  * @param spread            Spread over reference rate for floating bonds.
- * @param dayCount          Day-count convention.
+ * @param dayCount          Day-count convention (default ACT/ACT-ICMA).
  * @param paymentFrequency  Coupon payment frequency.
  * @param callable          Whether the bond is callable.
  * @param callSchedule      Optional list of call dates and call prices.
+ * @param businessDayConvention payment-date adjustment (default MODIFIED_FOLLOWING).
+ * @param holidayCalendar   business-day calendar (default TARGET2).
+ * @param recordDateOffsetBd record date = payment date minus this many business days (default 1).
+ * @param announcementLeadBd announcement = record date minus this many business days (default 5).
+ * @param interestGraceDays calendar days before an unpaid coupon counts as missed (default 30).
+ * @param principalGraceDays calendar days before unpaid principal counts as a default (default 7).
+ * @param stubRule          irregular-period placement (default SHORT_FIRST).
  */
 public record BondTermsRequest(
         @NotNull @Positive @Digits(integer = 20, fraction = 18)
@@ -53,7 +65,6 @@ public record BondTermsRequest(
         @Digits(integer = 2, fraction = 8)
         BigDecimal spread,
 
-        @NotNull
         DayCountConvention dayCount,
 
         @NotNull
@@ -62,7 +73,25 @@ public record BondTermsRequest(
         boolean callable,
 
         @Valid @Size(max = 100)
-        List<CallScheduleEntry> callSchedule
+        List<CallScheduleEntry> callSchedule,
+
+        BusinessDayConvention businessDayConvention,
+
+        HolidayCalendar holidayCalendar,
+
+        @Min(0) @Max(10)
+        Integer recordDateOffsetBd,
+
+        @Min(0) @Max(30)
+        Integer announcementLeadBd,
+
+        @Min(0) @Max(365)
+        Integer interestGraceDays,
+
+        @Min(0) @Max(365)
+        Integer principalGraceDays,
+
+        StubRule stubRule
 ) {
     public record CallScheduleEntry(
             @NotNull LocalDate callDate,

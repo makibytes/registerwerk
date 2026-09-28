@@ -26,6 +26,7 @@ public interface AssetMapper {
     @Mapping(target = "holderSyncBlockedReason", ignore = true)
     @Mapping(target = "holderSyncUnmappedWallets", ignore = true)
     @Mapping(target = "lastSuccessfulHolderSyncAt", ignore = true)
+    @Mapping(target = "holderSyncOffchainRows", ignore = true)
     @Mapping(target = "targetMarketCategories", ignore = true)
     @Mapping(target = "targetMarketMinExperience", ignore = true)
     @Mapping(target = "minInvestmentAmount", ignore = true)

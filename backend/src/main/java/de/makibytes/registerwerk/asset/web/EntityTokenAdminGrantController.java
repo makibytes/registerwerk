@@ -19,7 +19,8 @@ import java.util.UUID;
 
 /**
  * Entity-wide ASSET_TOKEN_ADMIN grant management — a grant here has {@code assetId = null}
- * and applies across every asset where the entity is issuer or holder, present and future.
+ * and applies across every asset the entity issues, present and future (not assets it merely
+ * holds — T3-21).
  * See {@code AssetTokenAdminGrantController} for the (more common) asset-scoped variant.
  * All state-mutating operations require REGISTRY_ADMIN + step-up + 4-eyes.
  */

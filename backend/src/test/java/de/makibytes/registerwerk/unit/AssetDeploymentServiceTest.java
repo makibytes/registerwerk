@@ -229,6 +229,24 @@ class AssetDeploymentServiceTest {
     }
 
     @Test
+    @DisplayName("T3-19: a second deploy is refused while a PENDING or CONFIRMED row exists for (asset, chain)")
+    void secondDeployRefusedWhilePending() {
+        UUID assetId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.ERC20);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(assetDeploymentRepository.existsByAssetIdAndChainConfigIdAndDeploymentStatusIn(eq(assetId), any(), any()))
+                .thenReturn(true);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> assetDeploymentService.deploy(
+                        assetId, Chain.ARBITRUM, Network.TESTNET, UUID.randomUUID()))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
+                .hasMessageContaining("already has a pending or confirmed deployment");
+        verify(assetDeploymentRepository, org.mockito.Mockito.never()).save(any(AssetDeployment.class));
+    }
+
+    @Test
     @DisplayName("deploy should allow confidential tokens on real Zama-coprocessor chains (Ethereum, Base)")
     void deploy_shouldAllowConfidentialTokensOnFhevmChains() {
         // FHEVM_CHAINS previously listed FHENIX/INCO — separate, non-Zama FHE stacks that

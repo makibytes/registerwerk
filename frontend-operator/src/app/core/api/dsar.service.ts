@@ -17,19 +17,21 @@ export class DsarService {
   /**
    * Marks an erasure request as completed, irreversibly tombstoning the entity's user PII.
    * Dual control: requires both the initiator's step-up token and a
-   * second approver's dual-control token.
+   * second approver's dual-control token. While the entity still has active register holdings the
+   * server requires `retainedNoticeChannel` (the channel kept for statutory §19 eWpG notices).
    */
   complete(
     id: string,
     note: string,
     stepUpToken: string,
     dualControlToken: string,
+    retainedNoticeChannel?: string,
   ): Observable<ErasureRequestView> {
     const headers = new HttpHeaders({
       Authorization: `Bearer ${stepUpToken}`,
       'X-Dual-Control-Token': dualControlToken,
     });
-    return this.http.post<ErasureRequestView>(`${this.base}/${id}/complete`, { note }, { headers });
+    return this.http.post<ErasureRequestView>(`${this.base}/${id}/complete`, { note, retainedNoticeChannel }, { headers });
   }
 
   /** Rejects an erasure request (e.g. statutory retention still applies), with a note. */

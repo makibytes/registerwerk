@@ -108,10 +108,40 @@ import { AddressComponent } from '../../../shared/components/address.component';
                 @if (o.status === 'SUBMITTED') {
                   <button mat-stroked-button type="button" [disabled]="!!actingOn" (click)="cancel(o)">Cancel</button>
                 }
-                @if (o.status === 'ALLOCATED') {
-                  <button mat-flat-button color="primary" type="button" [disabled]="!!actingOn" (click)="confirm(o)">
-                    Confirm ({{ o.allocatedAmount | number:'1.0-2' }})
+                @if (o.status === 'ALLOCATED' && !o.acceptedAt) {
+                  <button mat-flat-button color="primary" type="button" [disabled]="!!actingOn" (click)="accept(o)">
+                    Accept allocation ({{ o.allocatedAmount | number:'1.0-2' }})
                   </button>
+                }
+                @if (o.status === 'ALLOCATED' && o.acceptedAt) {
+                  <div class="payment-instructions">
+                    <strong>Payment due</strong>
+                    @if (o.amountDue !== null) {
+                      <span>{{ o.amountDue | number:'1.2-2' }} {{ o.paymentCurrency }}</span>
+                    } @else {
+                      <span>Amount as instructed by your issuer</span>
+                    }
+                    <span>Reference: <code>{{ paymentReference(o) }}</code></span>
+                    @if (o.allocationExpiresAt) {
+                      <span>Pay by {{ o.allocationExpiresAt | date:'mediumDate' }}, otherwise the allocation lapses.</span>
+                    }
+                  </div>
+                }
+                @if (o.status === 'PAYMENT_CONFIRMED') {
+                  <span class="order-note">Payment received — your issuer is entering the position on the register.</span>
+                }
+                @if (o.status === 'SETTLED') {
+                  <span class="order-note">Settled — the position is on the register.
+                    @if (o.refundDue && o.refundDue > 0) { A refund of {{ o.refundDue | number:'1.2-2' }} {{ o.paymentCurrency }} is due to you. }
+                  </span>
+                }
+                @if (o.status === 'LAPSED') {
+                  <span class="order-note warn">Lapsed — no payment was received within the payment window.</span>
+                }
+                @if (o.status === 'RELEASED') {
+                  <span class="order-note warn" [title]="o.releaseReason ?? ''">Released by the issuer{{ o.releaseReason ? ' — ' + o.releaseReason : '' }}.
+                    @if (o.refundDue && o.refundDue > 0) { Your payment of {{ o.refundDue | number:'1.2-2' }} {{ o.paymentCurrency }} will be refunded. }
+                  </span>
                 }
                 @if (o.status === 'REJECTED' && o.rejectionReason) {
                   <span class="rejection-reason" [title]="o.rejectionReason">Rejected — {{ o.rejectionReason }}</span>
@@ -138,6 +168,9 @@ import { AddressComponent } from '../../../shared/components/address.component';
     .submit-form mat-form-field { flex: 1; min-width: 200px; }
     code { word-break: break-all; font-size: 12px; }
     .actions-cell { display: flex; gap: 8px; justify-content: flex-end; }
+    .payment-instructions { display: flex; flex-direction: column; gap: 2px; font-size: 12px; text-align: right; }
+    .order-note { font-size: 12px; color: var(--rw-text-secondary); max-width: 300px; text-align: right; }
+    .order-note.warn { color: var(--rw-text-danger); }
     .rejection-reason { font-size: 12px; color: var(--rw-text-danger); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .empty-row { text-align: center; padding: 32px; color: var(--rw-text-muted); }
     .table-card { overflow-x: auto; }
@@ -226,19 +259,24 @@ export class OrdersComponent implements OnInit {
     });
   }
 
-  confirm(order: SubscriptionOrder): void {
+  /** The reference the investor puts on the bank transfer so the issuer can match it to the order. */
+  paymentReference(order: SubscriptionOrder): string {
+    return 'SUB-' + order.id.slice(0, 8).toUpperCase();
+  }
+
+  accept(order: SubscriptionOrder): void {
     if (this.actingOn) return;
     this.actingOn = order.id;
-    this.orderService.confirm(order.id).subscribe({
+    this.orderService.accept(order.id).subscribe({
       next: () => {
         this.actingOn = null;
-        this.snackBar.open('Order confirmed — position added to your holdings.', 'Dismiss', { duration: 5000 });
+        this.snackBar.open('Allocation accepted — please pay by the stated deadline. The position is entered once payment is confirmed.', 'Dismiss', { duration: 7000 });
         this.cdr.markForCheck();
         this.load();
       },
       error: (err) => {
         this.actingOn = null;
-        this.snackBar.open(err?.error?.message ?? 'Failed to confirm order.', 'Dismiss', { duration: 5000 });
+        this.snackBar.open(err?.error?.message ?? 'Failed to accept the allocation.', 'Dismiss', { duration: 5000 });
         this.cdr.markForCheck();
       },
     });

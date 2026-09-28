@@ -45,7 +45,7 @@ public class RegisterTransferController {
             @RequestBody @Valid RegisterTransferDtos.TransferInitiateRequest request, Authentication auth) {
         RegisterTransfer created = transferService.initiate(
                 request.assetId(), request.successorName(), request.successorIdentifier(),
-                request.reason(), SecurityUtils.extractUserId(auth));
+                request.reason(), SecurityUtils.extractUserId(auth), request.successorOnchainAddress());
         return ResponseEntity.status(201).body(created);
     }
 
@@ -63,7 +63,8 @@ public class RegisterTransferController {
     public RegisterTransfer recordOnchainHandover(
             @PathVariable UUID transferId,
             @RequestBody @Valid RegisterTransferDtos.OnchainHandoverRequest request, Authentication auth) {
-        return transferService.recordOnchainHandover(transferId, request.txHash(), SecurityUtils.extractUserId(auth));
+        return transferService.recordOnchainHandover(transferId, request.deploymentId(), request.txHash(),
+                Boolean.TRUE.equals(request.attested()), SecurityUtils.extractUserId(auth));
     }
 
     @PostMapping("/{transferId}/complete")

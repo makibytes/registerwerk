@@ -43,6 +43,9 @@ class HolderDataServiceTest {
     @Mock private AssetHolderRepository assetHolderRepository;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private HolderSyncStatusPort holderSyncStatusPort;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetLookupPort assetLookupPort;
+    @Mock private de.makibytes.registerwerk.chain.api.ChainConfigRepository chainConfigRepository;
+    @Mock private de.makibytes.registerwerk.indexer.internal.GraphNodeClient graphNodeClient;
 
     private HolderDataService service;
 
@@ -52,7 +55,13 @@ class HolderDataServiceTest {
     @BeforeEach
     void setUp() {
         service = new HolderDataService(deploymentRepository, tokenTransferRepository, assetHolderRepository, eventPublisher,
-                holderSyncStatusPort);
+                holderSyncStatusPort, assetLookupPort, chainConfigRepository, graphNodeClient);
+    }
+
+    private void givenStandard(de.makibytes.registerwerk.deployment.api.TokenStandard standard) {
+        when(assetLookupPort.findById(assetId)).thenReturn(java.util.Optional.of(
+                new de.makibytes.registerwerk.deployment.api.AssetLookupPort.AssetInfo(
+                        assetId, "A", null, standard, null, null, null, null, "ISSUED")));
     }
 
     private void givenTransfers(TokenTransfer... transfers) {
@@ -365,5 +374,170 @@ class HolderDataServiceTest {
         assertThat(manualRow.getNominalAmount()).isEqualByComparingTo("42");
         verify(assetHolderRepository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    private TokenTransfer transferNoAmount(String from, String to) {
+        TokenTransfer t = transfer(from, to, "1", Instant.parse("2026-01-01T00:00:00Z"));
+        t.setAmount(null);
+        return t;
+    }
+
+    private AssetHolder removedHolder(String wallet) {
+        AssetHolder h = holder(wallet, "0");
+        h.setRemovedAt(Instant.parse("2026-02-01T00:00:00Z"));
+        return h;
+    }
+
+    @Test
+    @DisplayName("T3-17: a balance on a wallet whose only entry is removed BLOCKS the sync and never writes the closed row")
+    void removedRowWithBalanceBlocksSync() {
+        givenTransfers(transfer("0x0000000000000000000000000000000000000000", "0xaaa1", "500",
+                Instant.parse("2026-01-01T00:00:00Z")));
+        AssetHolder removed = removedHolder("0xaaa1");
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(removed)));
+        when(holderSyncStatusPort.markBlocked(eq(assetId), any(), eq(List.of("0xaaa1")), any())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(UnmappedHolderIdentityException.class)
+                .hasMessageContaining("closed register entry");
+        verify(assetHolderRepository, never()).save(any());
+        assertThat(removed.getNominalAmount()).isEqualByComparingTo("0");
+        verify(holderSyncStatusPort, never()).markReconciled(any(), any());
+    }
+
+    @Test
+    @DisplayName("T3-17: with an active row and a removed history row for the same wallet, only the active row is updated")
+    void reentryAfterRemovalUpdatesOnlyTheActiveRow() {
+        givenTransfers(transfer("0x0000000000000000000000000000000000000000", "0xAAA1", "500",
+                Instant.parse("2026-01-01T00:00:00Z")));
+        AssetHolder removed = removedHolder("0xaaa1");
+        AssetHolder active = holder("0xaaa1", "0");
+        // removed row listed last: a single wallet-keyed map would let it shadow the active row
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(active, removed)));
+        when(assetHolderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.syncHoldersFromBlockchain(assetId);
+
+        assertThat(active.getNominalAmount()).isEqualByComparingTo("500");
+        assertThat(active.isChainDerived()).isTrue();
+        assertThat(removed.getNominalAmount()).isEqualByComparingTo("0");
+        verify(assetHolderRepository, never()).save(removed);
+    }
+
+    @Test
+    @DisplayName("T3-09: active non-chain-derived rows with a positive nominal are counted as off-chain rows, not BLOCKED")
+    void syncReportsOffchainRowsOnDeployedAsset() {
+        givenTransfers(transfer("0x0000000000000000000000000000000000000000", "0xaaa1", "500",
+                Instant.parse("2026-01-01T00:00:00Z")));
+        AssetHolder chain = holder("0xaaa1", "500");
+        chain.setChainDerived(true);
+        AssetHolder manual = holder("0xbbb2", "40");
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(chain, manual)));
+
+        service.syncHoldersFromBlockchain(assetId);
+
+        verify(holderSyncStatusPort).recordOffchainRows(assetId, 1);
+        verify(holderSyncStatusPort, never()).markBlocked(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("T3-20: a fungible transfer without amount BLOCKS instead of counting as 1")
+    void nullAmountOnFungibleBlocks() {
+        givenStandard(de.makibytes.registerwerk.deployment.api.TokenStandard.ERC20);
+        givenTransfers(transferNoAmount("0x0000000000000000000000000000000000000000", "0xaaa1"));
+        when(holderSyncStatusPort.markBlocked(eq(assetId), any(), any(), any())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(UnmappedHolderIdentityException.class)
+                .hasMessageContaining("without amount");
+        verify(assetHolderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("T3-20: an ERC-721 transfer without amount counts as one unit")
+    void erc721NullAmountCountsOne() {
+        givenStandard(de.makibytes.registerwerk.deployment.api.TokenStandard.ERC721);
+        givenTransfers(transferNoAmount("0x0000000000000000000000000000000000000000", "0xaaa1"));
+        AssetHolder h = holder("0xaaa1", "0");
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(h)));
+        when(assetHolderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.syncHoldersFromBlockchain(assetId);
+
+        assertThat(h.getNominalAmount()).isEqualByComparingTo("1");
+    }
+
+    private void givenErc3525Deployment(de.makibytes.registerwerk.chain.api.ChainConfig chain) {
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setChainConfigId(UUID.randomUUID());
+        deployment.setContractAddress("0xToken");
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment));
+        when(chainConfigRepository.findById(deployment.getChainConfigId())).thenReturn(java.util.Optional.of(chain));
+        givenStandard(de.makibytes.registerwerk.deployment.api.TokenStandard.ERC3525);
+    }
+
+    private de.makibytes.registerwerk.chain.api.ChainConfig graphChain() {
+        de.makibytes.registerwerk.chain.api.ChainConfig chain = new de.makibytes.registerwerk.chain.api.ChainConfig();
+        org.springframework.test.util.ReflectionTestUtils.setField(chain, "graphNodeUrl", "http://graph");
+        org.springframework.test.util.ReflectionTestUtils.setField(chain, "graphSubgraphName", "registerwerk");
+        return chain;
+    }
+
+    @Test
+    @DisplayName("T3-20: ERC-3525 nominal is the sum of slot VALUES per owner, not the number of token ids")
+    void erc3525NominalFromSlotValues() {
+        var chain = graphChain();
+        givenErc3525Deployment(chain);
+        when(graphNodeClient.fetchErc3525OwnerSlotBalances(chain, "0xToken")).thenReturn(List.of(
+                new de.makibytes.registerwerk.indexer.internal.GraphNodeClient.Erc3525OwnerSlotBalance(
+                        "0xAAA1", "1", new java.math.BigInteger("1000"), "EVENT_DERIVED"),
+                new de.makibytes.registerwerk.indexer.internal.GraphNodeClient.Erc3525OwnerSlotBalance(
+                        "0xaaa1", "2", new java.math.BigInteger("250"), "EVENT_DERIVED")));
+        AssetHolder h = holder("0xaaa1", "2");
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(h)));
+        when(assetHolderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.syncHoldersFromBlockchain(assetId);
+
+        assertThat(h.getNominalAmount()).isEqualByComparingTo("1250");
+        verify(tokenTransferRepository, never()).findByDeploymentIdAndFinalityStatusOrderByOccurredAtDesc(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("N10: an unindexed ERC-3525 deployment does not zero previously chain-derived holders")
+    void erc3525UnindexedChainDoesNotZeroHolders() {
+        var chain = new de.makibytes.registerwerk.chain.api.ChainConfig(); // no Graph Node configured
+        givenErc3525Deployment(chain);
+        AssetHolder h = holder("0xaaa1", "500");
+        h.setChainDerived(true);
+        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(h)));
+
+        service.syncHoldersFromBlockchain(assetId);
+
+        assertThat(h.getNominalAmount()).isEqualByComparingTo("500");
+        verify(assetHolderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("T3-20: an INCOMPLETE ERC-3525 projection BLOCKS the sync")
+    void erc3525IncompleteProjectionBlocks() {
+        var chain = graphChain();
+        givenErc3525Deployment(chain);
+        when(graphNodeClient.fetchErc3525OwnerSlotBalances(chain, "0xToken")).thenReturn(List.of(
+                new de.makibytes.registerwerk.indexer.internal.GraphNodeClient.Erc3525OwnerSlotBalance(
+                        "0xaaa1", "1", new java.math.BigInteger("1000"), "INCOMPLETE")));
+        when(holderSyncStatusPort.markBlocked(eq(assetId), any(), any(), any())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(UnmappedHolderIdentityException.class)
+                .hasMessageContaining("projection incomplete");
+        verify(assetHolderRepository, never()).save(any());
     }
 }

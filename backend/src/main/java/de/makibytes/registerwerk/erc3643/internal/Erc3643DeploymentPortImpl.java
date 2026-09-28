@@ -25,8 +25,14 @@ public class Erc3643DeploymentPortImpl implements Erc3643DeploymentPort {
     }
 
     @Override
-    public CompletableFuture<TokenDeploymentResult> deployStandard(UUID assetId, ChainDescriptor chain, String ownerAddress) {
-        return erc3643DeploymentService.deploy(assetId, chain, ownerAddress);
+    public CompletableFuture<TokenDeploymentResult> deployStandard(UUID deploymentId, UUID assetId,
+                                                                   ChainDescriptor chain, String ownerAddress) {
+        return erc3643DeploymentService.deploy(deploymentId, assetId, chain, ownerAddress);
+    }
+
+    @Override
+    public void recordSuiteForDeployment(UUID deploymentId) {
+        erc3643DeploymentService.recordSuiteForDeployment(deploymentId);
     }
 
     @Override

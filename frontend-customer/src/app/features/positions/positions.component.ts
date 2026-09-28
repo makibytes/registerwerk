@@ -76,9 +76,10 @@ interface PositionRow {
             <mat-option [value]="y">{{ y }}</mat-option>
           }
         </mat-select>
-        <button type="button" mat-stroked-button [disabled]="downloadingTaxCertificate" (click)="downloadTaxCertificate()">
+        <button type="button" mat-stroked-button [disabled]="downloadingTaxCertificate" (click)="downloadTaxCertificate()"
+                matTooltip="Annual statement of settled coupon, interest and dividend income per currency. Informational only - not a tax certificate (§ 45a EStG); no tax is withheld and principal repayments are excluded.">
           <mat-icon>receipt_long</mat-icon>
-          @if (downloadingTaxCertificate) { Preparing… } @else { Download Tax Certificate }
+          @if (downloadingTaxCertificate) { Preparing… } @else { Download income statement }
         </button>
       </app-page-header>
 
@@ -138,7 +139,12 @@ interface PositionRow {
           <mat-icon>description</mat-icon>
           Statement
         </a>
-        @if (row.registerDoc) {
+        @if (row.registerDoc?.transferredTo) {
+          <span class="transferred-note" matTooltip="This registrar no longer administers the register - request documents from the successor.">
+            <mat-icon>swap_horiz</mat-icon>
+            Register transferred to {{ row.registerDoc!.transferredTo }}@if (row.registerDoc!.transferredAt) { on {{ row.registerDoc!.transferredAt | date:'dd MMM yyyy' }} }
+          </span>
+        } @else if (row.registerDoc) {
           <button
             mat-stroked-button
             type="button"
@@ -172,6 +178,8 @@ interface PositionRow {
     </div>
   `,
   styles: [`
+    .transferred-note { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--rw-text-secondary); }
+    .transferred-note mat-icon { font-size: 16px; width: 16px; height: 16px; }
     .tax-year-select {
       width: 90px;
       margin: 0 4px;
@@ -401,14 +409,14 @@ export class PositionsComponent implements OnInit {
     this.downloadingTaxCertificate = true;
     this.taxService.downloadMyTaxCertificate(this.taxCertificateYear).subscribe({
       next: (pdf) => {
-        downloadBlob(pdf, `steuerbescheinigung-${this.taxCertificateYear}.pdf`);
+        downloadBlob(pdf, `Ertragsaufstellung-${this.taxCertificateYear}.pdf`);
         this.downloadingTaxCertificate = false;
         this.cdr.markForCheck();
       },
       error: () => {
         this.downloadingTaxCertificate = false;
         this.cdr.markForCheck();
-        this.snackBar.open('The tax certificate could not be downloaded.', 'Dismiss', { duration: 5000 });
+        this.snackBar.open('The income statement could not be downloaded.', 'Dismiss', { duration: 5000 });
       },
     });
   }

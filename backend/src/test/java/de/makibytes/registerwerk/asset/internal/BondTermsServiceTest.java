@@ -36,9 +36,10 @@ class BondTermsServiceTest {
     @Mock AssetRepository assetRepository;
     @Mock AssetBondTermsRepository termsRepository;
     @Mock ApplicationEventPublisher events;
+    @Mock CouponScheduleService couponScheduleService;
 
     private BondTermsService service() {
-        return new BondTermsService(assetRepository, termsRepository, events);
+        return new BondTermsService(assetRepository, termsRepository, events, couponScheduleService);
     }
 
     private BondTermsRequest request() {
@@ -48,7 +49,48 @@ class BondTermsServiceTest {
                 new BigDecimal("-0.001"), DayCountConvention.ACT_360,
                 PaymentFrequency.QUARTERLY, true,
                 List.of(new BondTermsRequest.CallScheduleEntry(
-                        issue.plusYears(2), new BigDecimal("100"))));
+                        issue.plusYears(2), new BigDecimal("100"))),
+                null, null, null, null, null, null, null);
+    }
+
+    @Test
+    void bondTermsUpsertRefusedAfterIssue() {
+        UUID assetId = UUID.randomUUID();
+        Asset issued = new Asset();
+        issued.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(issued));
+
+        assertThatThrownBy(() -> service().upsert(assetId, request(), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
+                .hasMessageContaining("terms-amendments");
+        verify(termsRepository, never()).save(any());
+        verify(couponScheduleService, never()).regenerate(any(), any(), any(), any());
+    }
+
+    @Test
+    void upsertAppliesIcmaTarget2DefaultsAndRegeneratesSchedule() {
+        UUID assetId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(new Asset()));
+        when(termsRepository.findById(assetId)).thenReturn(Optional.empty());
+        when(termsRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        BondTermsRequest r = request();
+        BondTermsRequest noDayCount = new BondTermsRequest(r.faceValue(), r.currencyIso(), r.issueDate(),
+                r.maturityDate(), r.couponRate(), null, null, null, r.paymentFrequency(), false, null,
+                null, null, null, null, null, null, null);
+
+        AssetBondTerms result = service().upsert(assetId, noDayCount, actorId, "REGISTRY_ADMIN");
+
+        assertThat(result.getDayCount()).isEqualTo(DayCountConvention.ACT_ACT_ICMA);
+        assertThat(result.getBusinessDayConvention())
+                .isEqualTo(de.makibytes.registerwerk.deployment.api.schedule.BusinessDayConvention.MODIFIED_FOLLOWING);
+        assertThat(result.getHolidayCalendar())
+                .isEqualTo(de.makibytes.registerwerk.deployment.api.schedule.HolidayCalendar.TARGET2);
+        assertThat(result.getRecordDateOffsetBd()).isEqualTo(1);
+        assertThat(result.getAnnouncementLeadBd()).isEqualTo(5);
+        assertThat(result.getInterestGraceDays()).isEqualTo(30);
+        assertThat(result.getPrincipalGraceDays()).isEqualTo(7);
+        verify(couponScheduleService).regenerate(assetId, actorId, "REGISTRY_ADMIN", CouponScheduleService.TRIGGER_BOND_TERMS);
     }
 
     @Test

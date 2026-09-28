@@ -52,7 +52,9 @@ public class AdminErasureRequestController {
             @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         UUID operatorId = SecurityUtils.extractUserId(auth);
         String note = req != null ? req.note() : null;
-        return ResponseEntity.ok(ErasureRequestResponse.from(erasureService.complete(id, operatorId, note, approverId)));
+        String retainedNoticeChannel = req != null ? req.retainedNoticeChannel() : null;
+        return ResponseEntity.ok(ErasureRequestResponse.from(
+                erasureService.complete(id, operatorId, note, approverId, retainedNoticeChannel)));
     }
 
     /** Lower-risk than {@link #complete}: no data is touched, so single-approver step-up suffices. */

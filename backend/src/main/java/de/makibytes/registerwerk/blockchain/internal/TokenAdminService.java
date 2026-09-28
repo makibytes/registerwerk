@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
+import de.makibytes.registerwerk.shared.RegisterFreeze;
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 
 import java.math.BigInteger;
@@ -65,6 +66,7 @@ import de.makibytes.registerwerk.travelrule.api.TravelRuleGate;
 public class TokenAdminService implements TokenAdminPort {
 
     private static final Logger log = LoggerFactory.getLogger(TokenAdminService.class);
+    private static final UUID SYSTEM_ACTOR = new UUID(0L, 0L);
 
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetLookupPort assetLookupPort;
@@ -129,7 +131,23 @@ public class TokenAdminService implements TokenAdminPort {
                 Map.of("address", walletAddress, "reason", reason, "legalBasis", legalBasis), actorId, actorRole);
     }
 
+    /**
+     * Manual unfreeze. Refused while an ACTIVE §16 eWpG Sperrvermerk covers the wallet (T3-16):
+     * a court-ordered freeze is lifted by lifting the block (4-eyes, audited), which the
+     * Sperrvermerk sync listener propagates via {@link #unfreezeAfterBlockLift}.
+     */
     public UUID unfreezeAddress(UUID deploymentId, String walletAddress, UUID actorId, String actorRole) {
+        requireNotBlocked(walletAddress);
+        return doUnfreezeAddress(deploymentId, walletAddress, actorId, actorRole);
+    }
+
+    /** {@inheritDoc} Always runs as the SYSTEM actor; skips the block check by design. */
+    @Override
+    public UUID unfreezeAfterBlockLift(UUID deploymentId, String walletAddress) {
+        return doUnfreezeAddress(deploymentId, walletAddress, SYSTEM_ACTOR, "SYSTEM");
+    }
+
+    private UUID doUnfreezeAddress(UUID deploymentId, String walletAddress, UUID actorId, String actorRole) {
         log.info("ADMIN unfreezeAddress={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
@@ -171,6 +189,7 @@ public class TokenAdminService implements TokenAdminPort {
         log.info("ADMIN forcedTransfer from={} to={} value={} on deployment={}", from, to, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "forcedTransfer");
         if (asset.tokenStandard() == TokenStandard.ERC1155) {
             throw new IllegalArgumentException(
                     "forcedTransfer is not available for ERC-1155 tokens (it would only target token id 0) "
@@ -200,6 +219,7 @@ public class TokenAdminService implements TokenAdminPort {
         log.info("ADMIN forcedTransferSingle id={} amount={} on deployment={}", id, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "forcedTransferSingle");
         requireNotBlocked(from);
         requireNotBlocked(to);
         travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
@@ -223,6 +243,7 @@ public class TokenAdminService implements TokenAdminPort {
         log.info("ADMIN forcedApprove owner={} spender={} value={} on deployment={}", owner, spender, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "forcedApprove");
         requireNotBlocked(owner);
         Function fn = new Function(
                 forcedApproveMethodName(asset.tokenStandard()),
@@ -241,6 +262,7 @@ public class TokenAdminService implements TokenAdminPort {
         log.info("ADMIN forceBurn from={} value={} on deployment={}", from, value, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "forceBurn");
         if (asset.tokenStandard() == TokenStandard.ERC1155) {
             throw new IllegalArgumentException(
                     "forceBurn is not available for ERC-1155 tokens (it would only target token id 0) "
@@ -263,6 +285,7 @@ public class TokenAdminService implements TokenAdminPort {
         log.info("ADMIN forceBurnSingle id={} amount={} on deployment={}", id, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "forceBurnSingle");
         if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forceBurnSingle is only available for ERC-1155 tokens");
         }
@@ -376,6 +399,8 @@ public class TokenAdminService implements TokenAdminPort {
         log.info("ADMIN confidentialAddViewer={} on deployment={}", viewerAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireConfidentialToken(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "confidentialMint");
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "confidentialForceBurn");
         Function fn = new Function("addViewer",
                 Collections.singletonList(new Address(viewerAddress)), Collections.emptyList());
         return submitAdmin(dep, asset, fn, "confidentialAddViewer", Map.of("viewer", viewerAddress), actorId, actorRole);
@@ -441,6 +466,10 @@ public class TokenAdminService implements TokenAdminPort {
                                              UUID actorId, String actorRole) {
         log.info("ADMIN confidentialSetAddressFrozen={} frozen={} on deployment={}",
                 walletAddress, frozen, deploymentId);
+        if (!frozen) {
+            // Same rule as unfreezeAddress (T3-16): no manual release under an ACTIVE Sperrvermerk.
+            requireNotBlocked(walletAddress);
+        }
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
         Function fn = new Function("setAddressFrozen",
@@ -464,6 +493,7 @@ public class TokenAdminService implements TokenAdminPort {
         log.info("ADMIN confidentialForcedTransfer from={} to={} on deployment={}", from, to, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireConfidentialErc3643Token(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "confidentialForcedTransfer");
         if (!zamaRelayerClient.isConfigured()) {
             throw new IllegalStateException(
                     "Confidential forced-transfer requires a configured Zama relayer sidecar "
@@ -503,10 +533,12 @@ public class TokenAdminService implements TokenAdminPort {
 
     // ── Standard issuance (issuer minting/burning) ────────────────────────────
 
+    @Override
     public UUID mint(UUID deploymentId, String toAddress, BigInteger amount, UUID actorId, String actorRole) {
         log.info("Issuer MINT to={} amount={} on deployment={}", toAddress, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "mint");
         requireNotBlocked(toAddress);
         Function fn = new Function("mint",
                 Arrays.asList(new Address(toAddress), new Uint256(amount)),
@@ -519,6 +551,10 @@ public class TokenAdminService implements TokenAdminPort {
         log.info("Issuer BURN from={} amount={} on deployment={}", fromAddress, amount, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        RegisterFreeze.requireOpen(asset.status(), asset.id(), "regularBurn");
+        // EwpgERC20.burn(from, amount) burns from ANY address, so this is as much a §26
+        // Einziehung as forceBurn and gets the same Sperrvermerk gate (T3-01).
+        requireNotBlocked(fromAddress);
         Function fn = new Function("burn",
                 Arrays.asList(new Address(fromAddress), new Uint256(amount)),
                 Collections.emptyList());

@@ -67,4 +67,13 @@ class HolderBlockGateImplTest {
 
         assertThat(gate.isBlocked(null, wallet)).isFalse();
     }
+
+    @Test
+    @DisplayName("checksum-cased wallet argument matches the normalised stored block (T3-15)")
+    void blocked_whenChecksumWalletMatchesNormalisedBlock() {
+        when(holderBlockRepository.findByWalletAddressAndStatus("0x" + "ab".repeat(20), HolderBlock.Status.ACTIVE))
+                .thenReturn(List.of(new HolderBlock()));
+
+        assertThat(gate.isBlocked(null, " 0x" + "AB".repeat(20) + " ")).isTrue();
+    }
 }

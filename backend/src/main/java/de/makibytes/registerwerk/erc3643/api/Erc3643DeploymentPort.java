@@ -14,9 +14,18 @@ import java.util.concurrent.CompletableFuture;
 public interface Erc3643DeploymentPort {
 
     /**
-     * Deploys a standard T-REX (ERC-3643) suite of six contracts for the given asset.
+     * Deploys (or adopts an earlier attempt's) standard T-REX (ERC-3643) suite of six contracts for
+     * the given {@code asset_deployment} row. The result carries a null contract address while the
+     * suite tx is still unmined; the row then stays PENDING with the tx hash (T3-19).
      */
-    CompletableFuture<TokenDeploymentResult> deployStandard(UUID assetId, ChainDescriptor chain, String ownerAddress);
+    CompletableFuture<TokenDeploymentResult> deployStandard(UUID deploymentId, UUID assetId,
+                                                            ChainDescriptor chain, String ownerAddress);
+
+    /**
+     * Persists the suite record of a standard ERC-3643 deployment that was confirmed by the
+     * confirmation poll rather than by the deploy call itself (receipt wait timed out). Idempotent.
+     */
+    void recordSuiteForDeployment(UUID deploymentId);
 
     /**
      * Deploys a Confidential ERC-3643 (Zama fhEVM + T-REX) suite for the given asset.

@@ -87,13 +87,12 @@ description: Projet de registre des activités de traitement au titre de l'art. 
 | **Conservation** | Durée d'emploi + 2 ans |
 | **Mesures de sécurité** | Hachage du mot de passe BCrypt ; JWT (courte durée de vie, 8 h) ; MFA pour les opérations sensibles |
 
-## 7. Déclarations réglementaires (MiFIR, DAC8, Steuerbescheinigung)
-
+## 7. Déclarations réglementaires (MiFIR, DAC8, Ertragsaufstellung) { #7-regulatory-reporting-mifir-dac8-steuerbescheinigung }
 | Champ | Valeur |
 |---|---|
 | **Finalité** | Déclaration obligatoire des transactions aux autorités compétentes |
 | **Base juridique** | Obligation légale (art. 6(1)(c)) — MiFIR art. 26, DAC8, EStG §43 |
-| **Catégories de données** | Nom de l'investisseur, numéro fiscal, avoirs, transactions, IBAN (pour Steuerbescheinigung) |
+| **Catégories de données** | Nom de l'investisseur, numéro fiscal, avoirs, transactions, IBAN (pour l'Ertragsaufstellung) |
 | **Destinataires** | BaFin (DE), AMF (FR), CSSF (LU), FMA (LI), BZSt (DAC8/CARF), DGFiP (FR), ACD (LU) |
 | **Conservation** | 7 ans (MiFIR) ; 10 ans (eWpG) |
 | **Mesures de sécurité** | PDF signés PAdES-B-LT ; SFTP vers les portails des autorités ; accusés de réception de soumission |

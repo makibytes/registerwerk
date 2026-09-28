@@ -50,6 +50,23 @@ public class RegisterTransfer {
     @Column(name = "onchain_tx_hash", length = 66)
     private String onchainTxHash;
 
+    /** Asset status before the export froze the register ({@code TRANSFER_PENDING}); restored on cancel. */
+    @Column(name = "previous_asset_status", length = 30)
+    private String previousAssetStatus;
+
+    /** SHA-256 over the register content only (no export timestamp); re-checked at completion. */
+    @Column(name = "register_content_hash", length = 66)
+    private String registerContentHash;
+
+    /** Successor's on-chain registry/owner address; EVM handovers are verified against it. */
+    @Column(name = "successor_onchain_address", length = 42)
+    private String successorOnchainAddress;
+
+    /** Per-deployment handover records: deploymentId, chain, txHash, verified, method, ... */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "onchain_handovers", nullable = false)
+    private java.util.List<Map<String, Object>> onchainHandovers = new java.util.ArrayList<>();
+
     @Column(name = "initiated_by")
     private UUID initiatedBy;
 
@@ -82,6 +99,14 @@ public class RegisterTransfer {
     public void setExportManifest(Map<String, Object> exportManifest) { this.exportManifest = exportManifest; }
     public String getOnchainTxHash() { return onchainTxHash; }
     public void setOnchainTxHash(String onchainTxHash) { this.onchainTxHash = onchainTxHash; }
+    public String getPreviousAssetStatus() { return previousAssetStatus; }
+    public void setPreviousAssetStatus(String previousAssetStatus) { this.previousAssetStatus = previousAssetStatus; }
+    public String getRegisterContentHash() { return registerContentHash; }
+    public void setRegisterContentHash(String registerContentHash) { this.registerContentHash = registerContentHash; }
+    public String getSuccessorOnchainAddress() { return successorOnchainAddress; }
+    public void setSuccessorOnchainAddress(String successorOnchainAddress) { this.successorOnchainAddress = successorOnchainAddress; }
+    public java.util.List<Map<String, Object>> getOnchainHandovers() { return onchainHandovers; }
+    public void setOnchainHandovers(java.util.List<Map<String, Object>> onchainHandovers) { this.onchainHandovers = onchainHandovers; }
     public UUID getInitiatedBy() { return initiatedBy; }
     public void setInitiatedBy(UUID initiatedBy) { this.initiatedBy = initiatedBy; }
     public Instant getInitiatedAt() { return initiatedAt; }

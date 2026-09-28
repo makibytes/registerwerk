@@ -79,6 +79,7 @@ Comportamento attuale:
 2. Il completamento sostituisce i valori nome/e-mail `AppUser` selezionati, cancella l'hash della password e disabilita l'utente.
 3. La copertura relativa a `NaturalPerson`, documenti KYC, partecipazioni, transazioni e altri dati collegati è incompleta; nessun DEK viene distrutto perché la crittografia DEK per record non è implementata.
 4. Vengono emessi eventi di richiesta/risoluzione, ma ciò da solo non dimostra la cancellazione completa né la gestione legale della richiesta.
+5. Finché l'entità ha ancora posizioni attive nel registro, il completamento richiede che l'operatore indichi il **canale di notifica conservato** per gli estratti legali del §19 eWpG; viene salvato sulla richiesta e nell'evento di audit. Un estratto del §19 non può più essere inviato via e-mail a un utente cancellato o disabilitato: viene registrato come `FAILED` (`NO_LAWFUL_CHANNEL`), genera un alert di audit e non viene ritentato. La politica per tali titolari (canale di conservazione) è una decisione aperta.
 
 ---
 

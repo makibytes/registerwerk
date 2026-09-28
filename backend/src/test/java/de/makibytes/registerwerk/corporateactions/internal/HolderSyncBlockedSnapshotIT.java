@@ -97,7 +97,7 @@ class HolderSyncBlockedSnapshotIT {
                 INSERT INTO corporate_action (id, asset_id, action_type, status, record_date, payment_date,
                                               amount_per_unit, currency, initiated_by)
                 VALUES (?, ?, 'COUPON', 'ANNOUNCED', ?, ?, 0.05, 'EUR', ?)
-                """, caId, assetId, LocalDate.now(), LocalDate.now().plusDays(10), UUID.randomUUID());
+                """, caId, assetId, LocalDate.now().minusDays(2), LocalDate.now().plusDays(10), UUID.randomUUID());
 
         // 1. No nominee-pool row for the market → the register is BLOCKED, persisted, not just logged.
         assertThatThrownBy(() -> holderDataService.syncHoldersFromBlockchain(assetId))
@@ -153,7 +153,7 @@ class HolderSyncBlockedSnapshotIT {
                 INSERT INTO token_transfer
                   (asset_id, deployment_id, chain_config_id, contract_address, from_address, to_address,
                    amount, event_type, tx_hash, occurred_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now() - interval '3 days')
                 """, assetId, deploymentId, chainConfigId, contract, from, to, new BigDecimal(amount), type,
                 "0x" + UUID.randomUUID().toString().replace("-", ""));
     }

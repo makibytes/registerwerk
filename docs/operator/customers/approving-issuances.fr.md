@@ -53,6 +53,32 @@ Pour une obligation : valeur nominale, devise, dates d'émission et d'échéance
 
     **Convention de décompte des jours.** Peu glamour, et cela change le montant d'argent qui se déplace. Confirmez qu'elle correspond à la term sheet plutôt que de le supposer.
 
+### Conventions du calendrier des coupons
+
+L'enregistrement des conditions de l'obligation génère le calendrier des coupons à partir duquel travaillent les tâches d'opérations sur titres. Les conventions suivent la pratique ICMA ; chacune est définie dans les conditions, avec les valeurs par défaut suivantes :
+
+| Paramètre | Par défaut | Effet |
+|---|---|---|
+| Décompte des jours | ACT/ACT (ICMA) | Une période régulière court exactement 1/fréquence ; une première période courte court ses jours réels rapportés à la période régulière notionnelle. ACT/360, ACT/365 (fixe), 30/360 et 30E/360 sont disponibles. |
+| Calendrier | Rétropolé depuis l'échéance, première période courte | Les dates régulières sont comptées à rebours depuis l'échéance ; une période irrégulière se place au début. Si l'échéance est une fin de mois, chaque date de coupon est une fin de mois. |
+| Convention de jour ouvré | Modified Following | Une date de paiement tombant un jour non ouvré passe au jour ouvré suivant, sauf si cela fait changer de mois — alors au précédent. Le calcul des intérêts utilise toujours les dates non ajustées. |
+| Calendrier des jours fériés | TARGET2 | Week-ends, 1er janvier, Vendredi saint, lundi de Pâques, 1er mai, 25 et 26 décembre. |
+| Date d'enregistrement | 1 jour ouvré avant le paiement | Les porteurs inscrits au registre à la fin de ce jour reçoivent le coupon. |
+| Annonce | 5 jours ouvrés avant la date d'enregistrement | Moment où le coupon est annoncé. |
+| Délais de grâce | 30 jours intérêts, 7 jours principal | Durée pendant laquelle un montant impayé après la date de paiement est seulement en retard. |
+
+Le coupon par unité est valeur nominale × taux du coupon × fraction de décompte, conservé sans arrondi ; seul le droit de chaque porteur est arrondi. Un coupon variable n'a pas de montant avant la fixation de son taux et n'est pas annoncé avant. Seules les dates de paiement futures sont générées : des conditions saisies tardivement ne créent pas de coupons antidatés. Le calendrier apparaît dans l'onglet **Corporate Actions** de l'actif.
+
+### Comment les coupons et le remboursement sont déclenchés
+
+- **Annonce.** Le coupon (et le remboursement final) est déclenché automatiquement à sa *date d'annonce*, et non à la date de paiement, afin de laisser le temps d'attester et de confirmer avant le paiement. Le remboursement suit la même règle : date de paiement = échéance ajustée selon la convention de jour ouvré.
+- **Date d'enregistrement.** Les droits sont fixés à la **fin de la date d'enregistrement** (Europe/Berlin), d'après le registre tel qu'il était alors. Les transferts postérieurs ne les modifient pas. Pour les actifs déployés sur une chaîne, l'instantané attend que le registre soit réconcilié au-delà de la date d'enregistrement et est refusé (« unmapped at record date ») si un wallet détenant des unités à ce moment n'a pas d'entrée au registre. Une date d'enregistrement proposée ou approuvée pour un dividende, un split ou un rachat doit rester à venir (au plus tôt le jour ouvré suivant).
+- **Arrondi.** Le droit de chaque porteur est arrondi à la plus petite unité de la devise (half-even) ; la confirmation indique le total versé et la différence d'arrondi.
+- **En retard, manqué, défaut.** Un montant impayé après la date de paiement apparaît d'abord comme **OVERDUE** (opérateurs uniquement ; les clients voient « paiement en attente »). Ce n'est qu'après le délai de grâce (30 jours intérêts, 7 jours principal) qu'un coupon devient **MISSED** et une obligation **DEFAULTED**. Un règlement efface chacun de ces états : un remboursement réglé met l'obligation à **REDEEMED**, un rachat réglé à **CALLED**, un coupon réglé est **PAID**.
+- **Double contrôle.** L'émetteur atteste ; un opérateur confirme. Un opérateur ne peut jamais attester en tant qu'émetteur : la voie opérateur est *Override attestation* (step-up et motif, audité séparément), y compris en impersonation. Une proposition doit être approuvée par une autre personne que son auteur.
+- **Droits retenus.** Les droits des pools de nominees (look-through) ne sont pas versés et maintiennent ouverte une action réglée, signalée « held entitlements outstanding », jusqu'à leur résolution.
+- **Ordre des tâches.** 05:30 coupons, 05:45 remboursements, 06:00 transitions quotidiennes (Europe/Berlin) : une action déclenchée le matin est traitée dans la même exécution.
+
 ### Chaîne et standard
 
 La norme de jeton correspond-elle à ce qui est revendiqué ?
@@ -73,6 +99,8 @@ Confirmez également que réseau principal ou réseau de test correspond bien à
 === "Approuver"
 
     Le statut devient `APPROVED`. **Les conditions sont verrouillées.** L'émetteur peut désormais déployer.
+
+    Les conditions ne peuvent être définies en bloc (avec step-up) que jusqu'à l'émission, et l'ISIN, la devise, le montant d'émission, la valeur unitaire et les dates ne sont plus modifiables par le formulaire d'édition une fois l'actif approuvé. Les changements ultérieurs sont des **amendements** : *Modifier l'actif → Amend terms* exige la base juridique, le step-up et un second opérateur, consigne chaque valeur avant/après dans le journal d'audit et régénère les coupons futurs pas encore annoncés. Les coupons payés ou déjà annoncés ne sont jamais réécrits. La valeur nominale, le coupon et l'échéance d'une obligation Canton déployée ne peuvent pas être amendés ici — ils sont fixés dans l'instrument du ledger.
 
     Enregistrez la raison pour laquelle vous avez approuvé. Le journal d'audit indique que vous l'avez fait, pas ce qui vous a satisfait.
 
@@ -101,6 +129,19 @@ Vous serez impliqué à nouveau lorsque les investisseurs auront besoin d'être 
     L'approbation d'une opération sur titres (OST) pour le règlement nécessite [quatre yeux](../../compliance/step-up-mfa.md).
 
     Payer la mauvaise liste de détenteurs est l'erreur catastrophique classique dans l'administration des valeurs mobilières, et il est très difficile de l'inverser. Assurez-vous que votre rotation compte réellement deux personnes disponibles lorsque les dates de coupon tombent — un contrôle à quatre yeux que personne ne peut satisfaire un vendredi après-midi est un contrôle qui finit par être contourné.
+
+
+### Ordres de souscription et inscriptions au registre
+
+Les investisseurs souscrivent via le portail. Vous (ou l'émetteur) traitez la file dans l'onglet **Subscription orders** de l'actif :
+
+1. **Allouer**, en totalité ou de façon réduite. La taille de l'émission et la détention maximale de l'investisseur (y compris ses autres allocations ouvertes) sont vérifiées sous verrou ; des allocations parallèles ne peuvent donc pas dépasser.
+2. Attendez que l'investisseur **accepte**. L'allocation porte alors une échéance de paiement (10 jours ouvrés TARGET par défaut). Si elle n'est pas payée à temps, un traitement planifié la marque **caduque** et libère la capacité.
+3. **Confirmez le paiement** lorsque les fonds sont sur le compte ([step-up](../../compliance/step-up-mfa.md)). Pour une obligation, le montant dû est unités allouées × valeur nominale × prix d'émission : un paiement insuffisant est refusé, un trop-perçu est enregistré comme *remboursement dû* — le remboursement lui-même est un paiement manuel. Pour les actifs sans conditions d'obligation, vous saisissez le montant reçu.
+4. **Régler.** KYC, filtrage des sanctions, Sperrvermerk, gel du registre, finalité, marché cible et plafond de détention sont revérifiés. Sur un actif ERC-20 ou ERC-3643 déployé, les unités sont créées et la synchronisation des titulaires les inscrit au registre une fois le transfert indexé ; pour les autres standards déployés, l'ordre reste *payé* jusqu'à ce que vous émettiez les unités à la main. Sans déploiement, le registre est crédité directement.
+5. **Libérer** rend une allocation avec un motif ; sur un ordre payé, le paiement est marqué comme remboursement dû.
+
+Les inscriptions au registre relèvent de vous, pas de l'émetteur. Dans l'onglet **Holders** de l'actif, *Add register entry* et *Change §17(2) attributes* exigent chacun une instruction (qui, et une référence) ; un champ vide signifie aucun changement, retirer un droit demande sa propre case et un second approbateur. Les émetteurs demandent par *demandes de modification*, que vous exécutez (quatre yeux) ou rejetez. Sur un actif déployé, une inscription manuelle n'est qu'un rattachement de portefeuille avec nominal 0.
 
 ---
 

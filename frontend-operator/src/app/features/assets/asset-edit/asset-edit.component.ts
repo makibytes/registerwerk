@@ -10,8 +10,16 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { AssetService } from '../../../core/api/asset.service';
-import { Asset } from '../../../core/models';
+import { BondService } from '../../../core/api/bond.service';
+import { Asset, AssetBondTerms, TermsAmendment } from '../../../core/models';
+import { StepUpDialogComponent } from '../../../shared/components/step-up/step-up-dialog.component';
+import { AmendTermsDialogComponent } from './amend-terms-dialog.component';
+
+/** Economic fields: fixed once the asset is approved; changed only via a 4-eyes amendment. */
+const ECONOMIC_FIELDS = ['isin', 'currency', 'issueSize', 'denomination', 'issueDate', 'maturityDate'] as const;
+const LOCKED_STATUSES: Asset['status'][] = ['APPROVED', 'ISSUED', 'SUSPENDED', 'REDEEMED', 'TRANSFER_PENDING', 'TRANSFERRED_OUT'];
 
 @Component({
   selector: 'app-asset-edit',
@@ -27,6 +35,7 @@ import { Asset } from '../../../core/models';
     MatProgressSpinnerModule,
     MatDividerModule,
     MatSnackBarModule,
+    MatDialogModule,
   ],
   styles: [`
     .back-row { margin-bottom: 12px; }
@@ -52,6 +61,12 @@ import { Asset } from '../../../core/models';
     }
 
     .spinner-wrap { display: flex; justify-content: center; padding: 40px; }
+    .locked-note {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 10px 12px; margin-bottom: 16px; border-radius: var(--rw-radius-sm);
+      background: var(--rw-surface-soft); color: var(--rw-text-secondary); font-size: .8125rem;
+    }
+    .locked-note span { flex: 1 1 260px; }
     .request-error { display: grid; justify-items: center; gap: 12px; padding: 40px 20px; color: var(--rw-text-danger); text-align: center; }
   `],
   template: `
@@ -76,10 +91,20 @@ import { Asset } from '../../../core/models';
         <mat-card-header>
           <mat-icon mat-card-avatar>edit</mat-icon>
           <mat-card-title>Edit Asset</mat-card-title>
-          <mat-card-subtitle>Operator — all fields editable</mat-card-subtitle>
+          <mat-card-subtitle>{{ termsLocked ? 'Economic terms locked after approval' : 'Operator — all fields editable' }}</mat-card-subtitle>
         </mat-card-header>
 
         <mat-card-content>
+          @if (termsLocked) {
+            <div class="locked-note" role="note">
+              <mat-icon aria-hidden="true">lock</mat-icon>
+              <span>ISIN, currency, issue size, denomination and dates are fixed once an asset is approved.
+                Changes need an amendment with a legal basis and a second operator's approval.</span>
+              <button type="button" mat-stroked-button [disabled]="submitting" (click)="amendTerms()">
+                <mat-icon>gavel</mat-icon> Amend terms
+              </button>
+            </div>
+          }
           <form [formGroup]="form" (ngSubmit)="submit()">
             <div class="form-grid">
               <mat-form-field appearance="outline" class="full-span">
@@ -204,10 +229,15 @@ export class AssetEditComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
+  private readonly bondService = inject(BondService);
 
   loading = true;
   submitting = false;
   loadError = false;
+  termsLocked = false;
+  private asset: Asset | null = null;
+  private bondTerms: AssetBondTerms | null = null;
 
   readonly form = this.fb.group({
     name: ['', Validators.required],
@@ -249,6 +279,17 @@ export class AssetEditComponent implements OnInit {
           issueDate: asset.issueDate ?? '',
           maturityDate: asset.maturityDate ?? '',
         });
+        this.asset = asset;
+        this.termsLocked = LOCKED_STATUSES.includes(asset.status);
+        for (const field of ECONOMIC_FIELDS) {
+          if (this.termsLocked) this.form.controls[field].disable();
+          else this.form.controls[field].enable();
+        }
+        // Bond terms (if any) feed the amendment dialog's face value / coupon fields.
+        this.bondService.getBondTerms(this.id).subscribe({
+          next: (terms) => { this.bondTerms = terms; },
+          error: () => { this.bondTerms = null; },
+        });
         this.loading = false;
         this.loadError = false;
         this.cdr.markForCheck();
@@ -279,6 +320,38 @@ export class AssetEditComponent implements OnInit {
         this.snackBar.open(err?.error?.message ?? 'Failed to save the asset.', 'Dismiss', { duration: 5000 });
         this.cdr.markForCheck();
       },
+    });
+  }
+
+  amendTerms(): void {
+    if (!this.asset) return;
+    this.dialog.open(AmendTermsDialogComponent, {
+      data: { asset: this.asset, bondTerms: this.bondTerms },
+      width: '640px',
+      maxWidth: '95vw',
+    }).afterClosed().subscribe((body: TermsAmendment | undefined) => {
+      if (!body) return;
+      this.dialog.open(StepUpDialogComponent, {
+        data: { requireDualControl: true, reason: `Amend the terms of ${this.asset?.name ?? 'this asset'}`, action: 'TERMS_AMENDMENT' },
+        width: '500px',
+        disableClose: true,
+      }).afterClosed().subscribe((result) => {
+        if (!result) return;
+        this.submitting = true;
+        this.cdr.markForCheck();
+        this.bondService.amendTerms(this.id, body, result.stepUpToken, result.dualControlToken).subscribe({
+          next: () => {
+            this.submitting = false;
+            this.snackBar.open('Terms amended.', 'Dismiss', { duration: 5000 });
+            this.loadAsset();
+          },
+          error: (err) => {
+            this.submitting = false;
+            this.snackBar.open(err?.error?.message ?? 'The amendment was refused.', 'Dismiss', { duration: 6000 });
+            this.cdr.markForCheck();
+          },
+        });
+      });
     });
   }
 

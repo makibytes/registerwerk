@@ -45,6 +45,10 @@ public class ErasureRequest {
     @Column(name = "resolution_note", columnDefinition = "text")
     private String resolutionNote;
 
+    /** T3-14: the notice channel retained for statutory §19 notices when the entity still has active holdings. */
+    @Column(name = "retained_notice_channel", columnDefinition = "text")
+    private String retainedNoticeChannel;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -73,4 +77,6 @@ public class ErasureRequest {
 
     public String getResolutionNote() { return resolutionNote; }
     public void setResolutionNote(String resolutionNote) { this.resolutionNote = resolutionNote; }
+    public String getRetainedNoticeChannel() { return retainedNoticeChannel; }
+    public void setRetainedNoticeChannel(String retainedNoticeChannel) { this.retainedNoticeChannel = retainedNoticeChannel; }
 }

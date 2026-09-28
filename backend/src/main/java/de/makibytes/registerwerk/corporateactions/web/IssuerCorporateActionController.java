@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.corporateactions.web.dto.ProposeCorporateAction
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +31,11 @@ import java.util.UUID;
  * endpoints: that class carries a class-level {@code hasRole('REGISTRY_ADMIN')}, and mixing
  * surfaces there is exactly how its existing {@code /confirmation} endpoints' role-widening
  * became easy to misread as "REGISTRY_ADMIN-only" at a glance.
+ *
+ * <p>Two-party control (T3-12): these are the issuer's half. A non-impersonating REGISTRY_ADMIN
+ * may list but not propose, withdraw or attest here; an admin impersonating the issuer may propose
+ * and withdraw (recorded as {@code REGISTRY_ADMIN_IMPERSONATING}) but never attest — operators
+ * attest only via the audited {@code override-attestation} on {@code CorporateActionAdminController}.
  *
  * <p>Base path: {@code /api/v1/assets/{assetId}/corporate-actions}
  */
@@ -55,8 +61,9 @@ public class IssuerCorporateActionController {
     @PostMapping
     public ResponseEntity<CorporateActionView> propose(
             @PathVariable UUID assetId, @Valid @RequestBody ProposeCorporateActionRequest request, Authentication auth) {
+        refuseNonImpersonatingOperator(auth);
         CorporateAction proposed = corporateActionService.propose(assetId, request,
-                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "ISSUER"));
+                SecurityUtils.extractUserId(auth), issuerSideRole(auth));
         return ResponseEntity.ok(CorporateActionView.of(proposed));
     }
 
@@ -64,6 +71,7 @@ public class IssuerCorporateActionController {
     @PostMapping("/{corporateActionId}/withdraw")
     public ResponseEntity<CorporateActionView> withdraw(
             @PathVariable UUID assetId, @PathVariable UUID corporateActionId, Authentication auth) {
+        refuseNonImpersonatingOperator(auth);
         CorporateAction withdrawn = corporateActionService.withdrawProposal(
                 assetId, corporateActionId, SecurityUtils.extractUserId(auth));
         return ResponseEntity.ok(CorporateActionView.of(withdrawn));
@@ -79,7 +87,30 @@ public class IssuerCorporateActionController {
             @PathVariable UUID assetId, @PathVariable UUID corporateActionId,
             @Valid @RequestBody IssuerAttestationRequest request, Authentication auth) {
         CorporateAction attested = corporateActionService.attestSettlementAsIssuer(assetId, corporateActionId,
-                request.attestationReference(), SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "ISSUER"));
+                request.attestationReference(), SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "ISSUER"),
+                isOperator(auth));
         return ResponseEntity.ok(CorporateActionView.of(attested));
+    }
+
+    /** REGISTRY_ADMIN, or an admin impersonating the issuer (JWT {@code imp}). */
+    static boolean isOperator(Authentication auth) {
+        return hasRegistryAdminRole(auth) || SecurityUtils.isImpersonatingAdmin(auth);
+    }
+
+    private static boolean hasRegistryAdminRole(Authentication auth) {
+        return auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_REGISTRY_ADMIN".equals(a.getAuthority()));
+    }
+
+    private static void refuseNonImpersonatingOperator(Authentication auth) {
+        if (hasRegistryAdminRole(auth) && !SecurityUtils.isImpersonatingAdmin(auth)) {
+            throw new AccessDeniedException("Operators do not propose or withdraw an issuer's corporate action — "
+                    + "impersonate the issuer to act on its behalf.");
+        }
+    }
+
+    private static String issuerSideRole(Authentication auth) {
+        return SecurityUtils.isImpersonatingAdmin(auth)
+                ? "REGISTRY_ADMIN_IMPERSONATING" : SecurityUtils.primaryRole(auth, "ISSUER");
     }
 }

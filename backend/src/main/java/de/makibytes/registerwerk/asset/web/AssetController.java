@@ -21,6 +21,8 @@ import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.asset.web.AssetMapper;
 import de.makibytes.registerwerk.asset.web.DeploymentMapper;
 import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -234,11 +236,21 @@ public class AssetController {
         return ResponseEntity.noContent().build();
     }
 
-    /** Redeems an asset (ISSUED/SUSPENDED → REDEEMED). */
+    /**
+     * Redeems an asset (ISSUED/SUSPENDED → REDEEMED), which burns every paid holder on-chain.
+     * T3-01: REGISTRY_ADMIN only (the issuer lost this endpoint), step-up + 4-eyes, with a stated
+     * legal basis and reference; the service refuses while holders are unpaid (see
+     * {@code AssetLifecycleService#redeem}).
+     */
     @PostMapping("/{id}/redeem")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#id, authentication)")
-    public ResponseEntity<Void> redeemAsset(@PathVariable UUID id, Authentication auth) {
-        assetLifecycleService.redeem(id, extractActorId(auth));
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ASSET_REDEMPTION")
+    public ResponseEntity<Void> redeemAsset(
+            @PathVariable UUID id,
+            @RequestBody @Valid RedeemRequest request,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
+            Authentication auth) {
+        assetLifecycleService.redeem(id, request.legalBasis(), request.reference(), extractActorId(auth), approverId);
         return ResponseEntity.noContent().build();
     }
 
@@ -310,7 +322,8 @@ public class AssetController {
                 asset.getHolderSyncStatus(),
                 asset.getHolderSyncBlockedReason(),
                 splitWallets(asset.getHolderSyncUnmappedWallets()),
-                asset.getLastSuccessfulHolderSyncAt()
+                asset.getLastSuccessfulHolderSyncAt(),
+                asset.getHolderSyncOffchainRows()
         );
     }
 

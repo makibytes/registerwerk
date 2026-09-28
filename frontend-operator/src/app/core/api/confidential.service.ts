@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 
 /** Mirrors the backend's `ConfidentialContextResponse` — everything `FheClientService` needs to
  *  talk to Zama's relayer directly for a given confidential deployment. */
@@ -56,9 +57,11 @@ export class ConfidentialService {
       `${this.base}/${assetId}/deployments/${depId}/admin/confidential-add-viewer`, { viewerAddress });
   }
 
-  removeViewer(assetId: string, depId: string, viewerAddress: string): Observable<{ txId: string }> {
+  /** Step-up + 4-eyes (`CONFIDENTIAL_VIEWER_REVOKE`, T3-21). */
+  removeViewer(assetId: string, depId: string, viewerAddress: string, tokens: DualControlTokens): Observable<{ txId: string }> {
     return this.http.post<{ txId: string }>(
-      `${this.base}/${assetId}/deployments/${depId}/admin/confidential-remove-viewer`, { viewerAddress });
+      `${this.base}/${assetId}/deployments/${depId}/admin/confidential-remove-viewer`, { viewerAddress },
+      { headers: dualControlHeaders(tokens) });
   }
 
   // ── ERC-3643-family admin actions (ConfidentialERC3643 — CONF_ERC3643 only) ──────────────
@@ -73,10 +76,12 @@ export class ConfidentialService {
       `${this.base}/${assetId}/deployments/${depId}/admin/confidential-unpause`, {});
   }
 
-  setAddressFrozen(assetId: string, depId: string, address: string, frozen: boolean): Observable<{ txId: string }> {
+  /** Unfreeze (`frozen=false`) needs step-up + 4-eyes tokens (`UNFREEZE`, T3-16); freeze does not. */
+  setAddressFrozen(assetId: string, depId: string, address: string, frozen: boolean, tokens?: DualControlTokens): Observable<{ txId: string }> {
     const action = frozen ? 'confidential-freeze' : 'confidential-unfreeze';
     return this.http.post<{ txId: string }>(
-      `${this.base}/${assetId}/deployments/${depId}/admin/${action}`, { address });
+      `${this.base}/${assetId}/deployments/${depId}/admin/${action}`, { address },
+      tokens ? { headers: dualControlHeaders(tokens) } : {});
   }
 
   forceBurn(assetId: string, depId: string, body: { from: string; value: string; legalBasis: string }): Observable<{ txId: string }> {

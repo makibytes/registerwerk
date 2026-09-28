@@ -82,6 +82,7 @@ Comportamiento actual:
 2. La finalización reemplaza los valores de nombre/correo electrónico de `AppUser` seleccionados, borra el hash de la contraseña y deshabilita el usuario.
 3. La cobertura de `NaturalPerson`, documentos KYC, tenencias, transacciones y otros datos vinculados está incompleta; no se destruye ningún DEK porque no se implementa el cifrado DEK por registro.
 4. Se emiten eventos de solicitud/resolución, pero esto por sí solo no prueba el borrado completo o el manejo legal de la solicitud.
+5. Mientras la entidad conserve posiciones activas en el registro, la finalización exige que el operador indique el **canal de notificación conservado** para los extractos legales del §19 eWpG; se guarda en la solicitud y en el evento de auditoría. Un extracto del §19 ya no puede enviarse por correo a un usuario borrado o deshabilitado: se registra como `FAILED` (`NO_LAWFUL_CHANNEL`), genera una alerta de auditoría y no se reintenta. La política para esos titulares (canal de conservación) es una decisión abierta.
 
 ---
 

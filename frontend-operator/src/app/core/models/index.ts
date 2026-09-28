@@ -35,7 +35,47 @@ export interface AssetBondTerms {
   paymentFrequency: PaymentFrequency;
   callable: boolean;
   callSchedule?: CallEntry[];
-  bondStatus: 'ACTIVE' | 'MATURED' | 'CALLED' | 'DEFAULTED' | 'REDEEMED';
+  bondStatus: 'ACTIVE' | 'MATURED' | 'OVERDUE' | 'CALLED' | 'DEFAULTED' | 'REDEEMED';
+  // Schedule conventions — backend defaults: ICMA / TARGET2.
+  businessDayConvention?: BusinessDayConvention;
+  holidayCalendar?: 'TARGET2';
+  recordDateOffsetBd?: number;
+  announcementLeadBd?: number;
+  interestGraceDays?: number;
+  principalGraceDays?: number;
+  stubRule?: 'SHORT_FIRST';
+}
+
+export type BusinessDayConvention = 'MODIFIED_FOLLOWING' | 'FOLLOWING' | 'PRECEDING' | 'NONE';
+
+/** One row of `GET /assets/{id}/bond-terms/schedule`. `amountPerUnit` is null for an unfixed floating coupon. */
+export interface CouponScheduleEntry {
+  periodNo: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  announcementDate: string | null;
+  recordDate: string | null;
+  paymentDate: string;
+  dayCountFraction: number | null;
+  amountPerUnit: number | null;
+  couponStatus: 'SCHEDULED' | 'OVERDUE' | 'PAID' | 'MISSED';
+  paidDate: string | null;
+  scheduleVersion: number;
+}
+
+/** Body of `POST /assets/{id}/terms-amendments` — only the fields sent are amended. */
+export interface TermsAmendment {
+  isin?: string;
+  currency?: string;
+  issueSize?: number;
+  denomination?: number;
+  issueDate?: string;
+  maturityDate?: string;
+  minInvestmentAmount?: number;
+  maxHoldingAmount?: number;
+  faceValue?: number;
+  couponRate?: number;
+  legalReference: string;
 }
 
 // ── Vault state ───────────────────────────────────────────────────────────────
@@ -142,6 +182,8 @@ export interface RegisterInspectionRequest {
   decidedBy: string | null;
   decidedAt: string | null;
   fulfilledAt: string | null;
+  /** True only when the claimed basis was checked against the register (issuer / active holder). */
+  claimVerified?: boolean;
   createdAt: string;
 }
 
@@ -156,12 +198,32 @@ export interface RegisterTransfer {
   reason: string;
   status: TransferStatus;
   exportHash: string | null;
+  /** Hash over the register content only (no export timestamp) - re-checked at completion. */
+  registerContentHash?: string | null;
+  successorOnchainAddress?: string | null;
+  /** Asset status before the export froze the register (TRANSFER_PENDING). */
+  previousAssetStatus?: string | null;
+  onchainHandovers?: RegisterTransferDeploymentHandover[];
   onchainTxHash: string | null;
+  operatorAttestation?: string | null;
+  beneficiaryConsentRef?: string | null;
   initiatedBy: string | null;
   initiatedAt: string;
   exportedAt: string | null;
   completedAt: string | null;
   updatedAt: string;
+}
+
+/** Per-deployment on-chain handover record: EVM = verified against registry()/owner(), else operator-attested. */
+export interface RegisterTransferDeploymentHandover {
+  deploymentId: string;
+  chain: string | null;
+  contractAddress?: string | null;
+  txHash: string;
+  verified: boolean;
+  method: string;
+  observedController?: string;
+  recordedAt?: string;
 }
 
 /** Investor-side counterpart to {@link RegisterTransfer}: moves one holding to a successor
@@ -214,6 +276,10 @@ export interface CorporateAction {
   dualControlApproverId?: string;
   dualControlApprovedAt?: string;
   notes?: string;
+  /** Sum of unrounded minus rounded payable entitlements (T3-05). */
+  roundingResidual?: number | null;
+  /** SETTLED but nominee-pool entitlements are unresolved, so the action is not closed (T3-02). */
+  heldOutstanding?: boolean;
   /** Why the record-date snapshot is refused while status is SNAPSHOT_BLOCKED (register not reconciled). */
   snapshotBlockedReason?: string | null;
   createdAt: string;
@@ -427,7 +493,7 @@ export interface Asset {
   isin?: string;
   tokenStandard: TokenStandard;
   onchainLevel: 'NONE' | 'SIMPLE' | 'CONTROL';
-  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEEMED' | 'TRANSFERRED_OUT';
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEEMED' | 'TRANSFER_PENDING' | 'TRANSFERRED_OUT';
   jurisdiction?: Jurisdiction;
   totalSupply?: number;
   decimals?: number;
@@ -447,6 +513,8 @@ export interface Asset {
   holderSyncStatus?: 'OK' | 'BLOCKED';
   holderSyncBlockedReason?: string | null;
   holderSyncUnmappedWallets?: string[];
+  /** T3-09: active register entries on this deployed asset that the chain does not back. */
+  holderSyncOffchainRows?: number;
   lastSuccessfulHolderSyncAt?: string | null;
 }
 
@@ -628,7 +696,10 @@ export interface ChainDriftEvent {
   resolutionNotes: string | null;
 }
 
-export type SubscriptionOrderStatus = 'SUBMITTED' | 'ALLOCATED' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
+/** CONFIRMED is the legacy (pre-payment-flow) state; new orders end in SETTLED, LAPSED or RELEASED. */
+export type SubscriptionOrderStatus =
+  'SUBMITTED' | 'ALLOCATED' | 'PAYMENT_CONFIRMED' | 'SETTLED' | 'CONFIRMED'
+  | 'REJECTED' | 'CANCELLED' | 'LAPSED' | 'RELEASED';
 
 export interface SubscriptionOrder {
   id: string;
@@ -644,6 +715,19 @@ export interface SubscriptionOrder {
   confirmedAt: string | null;
   resultingHolderId: string | null;
   rejectionReason: string | null;
+  acceptedAt: string | null;
+  allocationExpiresAt: string | null;
+  amountDue: number | null;
+  paymentCurrency: string | null;
+  paidAmount: number | null;
+  refundDue: number | null;
+  paymentReference: string | null;
+  paymentValueDate: string | null;
+  paymentConfirmedAt: string | null;
+  settledAt: string | null;
+  settlementTxId: string | null;
+  lapsedAt: string | null;
+  releaseReason: string | null;
 }
 
 export interface PageResponse<T> {
@@ -1105,6 +1189,7 @@ export interface ErasureRequestView {
   reviewedBy: string | null;
   reviewedAt: string | null;
   resolutionNote: string | null;
+  retainedNoticeChannel?: string | null;
 }
 
 // ─── Ecosystem org identity ──────────────────────────────────────────────────

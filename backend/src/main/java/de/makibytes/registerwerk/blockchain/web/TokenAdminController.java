@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.deployment.api.ForcedOpTargetGuard;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonBurnRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonForceTransferRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonFreezeHoldingRequest;
@@ -66,7 +67,7 @@ import jakarta.validation.Valid;
  *   POST .../pause                    — suspend all transfers
  *   POST .../unpause                  — resume transfers
  *   POST .../freeze                   — freeze specific address
- *   POST .../unfreeze                 — lift address freeze
+ *   POST .../unfreeze                 — lift address freeze (step-up + 4-eyes; refused under a Sperrvermerk)
  *   POST .../whitelist                — add address to on-chain whitelist
  *   POST .../unwhitelist              — remove address from on-chain whitelist
  *   POST .../forced-transfer          — BaFin/court-ordered transfer (step-up + 4-eyes)
@@ -88,16 +89,19 @@ public class TokenAdminController {
     private final CantonTokenOperations cantonTokenService;
     private final AssetDeploymentPort deploymentPort;
     private final CorrectionCapabilityService correctionCapabilityService;
+    private final ForcedOpTargetGuard targetGuard;
 
     public TokenAdminController(
             TokenAdminService adminService,
             CantonTokenOperations cantonTokenService,
             AssetDeploymentPort deploymentPort,
-            CorrectionCapabilityService correctionCapabilityService) {
+            CorrectionCapabilityService correctionCapabilityService,
+            ForcedOpTargetGuard targetGuard) {
         this.adminService       = adminService;
         this.cantonTokenService = cantonTokenService;
         this.deploymentPort     = deploymentPort;
         this.correctionCapabilityService = correctionCapabilityService;
+        this.targetGuard = targetGuard;
     }
 
     /**
@@ -142,7 +146,12 @@ public class TokenAdminController {
                 request.legalBasis() != null ? request.legalBasis() : "", actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    /**
+     * Manual unfreeze — step-up + 4-eyes (T3-16), and refused by the service while an ACTIVE §16
+     * eWpG Sperrvermerk covers the address; a court-ordered freeze ends by lifting the block.
+     */
     @PostMapping("/unfreeze")
+    @RequiresStepUp(requireSecondApprover = true, reason = "UNFREEZE")
     public ResponseEntity<TxSubmissionResponse> unfreeze(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid UnfreezeRequest request, Authentication auth) {
@@ -174,6 +183,7 @@ public class TokenAdminController {
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForcedTransferRequest request, Authentication auth) {
         log.info("ADMIN forcedTransfer from={} to={} on deployment={} by actor={}", request.from(), request.to(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.from(), auth);
         return accepted(adminService.forcedTransfer(depId, request.from(), request.to(), request.value(), request.legalBasis(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
@@ -186,6 +196,7 @@ public class TokenAdminController {
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForcedTransferSingleRequest request, Authentication auth) {
         log.info("ADMIN forcedTransferSingle id={} amount={} on deployment={} by actor={}", request.id(), request.amount(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.from(), auth);
         return accepted(adminService.forcedTransferSingle(depId, request.from(), request.to(), request.id(), request.amount(), request.legalBasis(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
@@ -198,6 +209,7 @@ public class TokenAdminController {
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForcedApproveRequest request, Authentication auth) {
         log.info("ADMIN forcedApprove owner={} spender={} on deployment={} by actor={}", request.owner(), request.spender(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.owner(), auth);
         return accepted(adminService.forcedApprove(depId, request.owner(), request.spender(), request.value(), request.legalBasis(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
@@ -210,6 +222,7 @@ public class TokenAdminController {
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForceBurnRequest request, Authentication auth) {
         log.info("ADMIN forceBurn from={} value={} on deployment={} by actor={}", request.from(), request.value(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.from(), auth);
         return accepted(adminService.forceBurn(depId, request.from(), request.value(), request.legalBasis(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
@@ -222,6 +235,7 @@ public class TokenAdminController {
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForceBurnSingleRequest request, Authentication auth) {
         log.info("ADMIN forceBurnSingle id={} amount={} on deployment={} by actor={}", request.id(), request.amount(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.from(), auth);
         return accepted(adminService.forceBurnSingle(depId, request.from(), request.id(), request.amount(), request.legalBasis(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
@@ -240,6 +254,7 @@ public class TokenAdminController {
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ForceBurnRequest request, Authentication auth) {
         log.info("ADMIN confidentialForceBurn from={} on deployment={} by actor={}", request.from(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.from(), auth);
         return accepted(adminService.confidentialForceBurn(depId, request.from(), request.value(), request.legalBasis(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
@@ -273,8 +288,9 @@ public class TokenAdminController {
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
-    /** Confidential-ERC-3643 equivalent of {@link #unfreeze} . */
+    /** Confidential-ERC-3643 equivalent of {@link #unfreeze} (same step-up + 4-eyes + block check). */
     @PostMapping("/confidential-unfreeze")
+    @RequiresStepUp(requireSecondApprover = true, reason = "UNFREEZE")
     public ResponseEntity<TxSubmissionResponse> confidentialUnfreeze(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid UnfreezeRequest request, Authentication auth) {
@@ -297,6 +313,7 @@ public class TokenAdminController {
             @RequestBody @Valid ForcedTransferRequest request, Authentication auth) {
         log.info("ADMIN confidentialForcedTransfer from={} to={} on deployment={} by actor={}",
                 request.from(), request.to(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.from(), auth);
         return accepted(adminService.confidentialForcedTransfer(depId, request.from(), request.to(), request.value(),
                 request.legalBasis(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
@@ -325,7 +342,7 @@ public class TokenAdminController {
     @PostMapping("/confidential-remove-viewer")
     @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
             "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
-    @RequiresStepUp(reason = "CONFIDENTIAL_VIEWER_REVOKE")
+    @RequiresStepUp(requireSecondApprover = true, reason = "CONFIDENTIAL_VIEWER_REVOKE")
     public ResponseEntity<TxSubmissionResponse> confidentialRemoveViewer(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid ConfidentialViewerRequest request, Authentication auth) {
@@ -369,8 +386,13 @@ public class TokenAdminController {
         return cantonAccepted(updateId);
     }
 
-    /** Unfreezes a Canton holding. */
+    /**
+     * Unfreezes a Canton holding — step-up + 4-eyes like every other unfreeze (T3-16). The request
+     * names only a holding contract id, which the reserved Canton adapter cannot resolve to an
+     * owner party, so no Sperrvermerk check is possible here; the second approver must verify it.
+     */
     @PostMapping("/unfreeze-holding")
+    @RequiresStepUp(requireSecondApprover = true, reason = "UNFREEZE")
     public ResponseEntity<CantonUpdateResponse> unfreezeHolding(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid CantonFreezeHoldingRequest request, Authentication auth) {

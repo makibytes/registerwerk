@@ -30,4 +30,33 @@ describe('IssuanceService', () => {
         expect(req.request.method).toBe('GET');
         req.flush([{ walletAddress: '0xabc', tokenBalance: 10, isWhitelisted: true }]);
     });
+
+    it('burn() sends the operator approval token and the step-up bearer (T3-01)', () => {
+        service.burn('asset-1', 'dep-1', { fromAddress: '0xabc', amount: '5' },
+            { approvalToken: 'approver-jwt', stepUpToken: 'stepup-jwt' }).subscribe();
+
+        const req = httpMock.expectOne(`${base}/asset-1/deployments/dep-1/issuer/burn`);
+        expect(req.request.method).toBe('POST');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('approver-jwt');
+        expect(req.request.headers.get('Authorization')).toBe('Bearer stepup-jwt');
+        req.flush({ txId: 'tx-1' });
+    });
+
+    it('burn() without a step-up token leaves Authorization to the interceptor (Entra claims challenge)', () => {
+        service.burn('asset-1', 'dep-1', { fromAddress: '0xabc', amount: '5' },
+            { approvalToken: 'approver-jwt' }).subscribe();
+
+        const req = httpMock.expectOne(`${base}/asset-1/deployments/dep-1/issuer/burn`);
+        expect(req.request.headers.has('Authorization')).toBe(false);
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('approver-jwt');
+        req.flush({ txId: 'tx-1' });
+    });
+
+    it('stepUp() requests a token scoped to the action', () => {
+        service.stepUp('123456', 'ISSUER_BURN_EWG26').subscribe();
+
+        const req = httpMock.expectOne(`${environment.apiUrl}/auth/step-up`);
+        expect(req.request.body).toEqual({ code: '123456', method: 'TOTP', action: 'ISSUER_BURN_EWG26' });
+        req.flush({ stepUpToken: 'x' });
+    });
 });

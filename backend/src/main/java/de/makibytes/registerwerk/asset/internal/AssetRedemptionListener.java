@@ -2,23 +2,31 @@ package de.makibytes.registerwerk.asset.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.RedemptionReadinessPort;
 import de.makibytes.registerwerk.asset.events.AssetRedeemedEvent;
+import de.makibytes.registerwerk.asset.events.AssetRedemptionIncompleteEvent;
 import de.makibytes.registerwerk.blockchain.api.TokenAdminPort;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.HolderKind;
+import de.makibytes.registerwerk.shared.AddressNormalizer;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -36,6 +44,12 @@ import java.util.UUID;
  * second burn here would double-redeem them, so Canton is deliberately excluded); every other
  * standard (Solana, Starknet, Stellar) has no wired admin port yet and is logged for manual
  * operator follow-up rather than silently doing nothing.
+ *
+ * <p>T3-01: {@link HolderKind#NOMINEE_POOL} entries are never burnt (a pool contract's internal
+ * accounting would break). For a bond, only wallets whose entry in the settled REDEMPTION/CALL
+ * action is PAYABLE and settled are burnt — a holder who was not paid keeps their tokens. Every
+ * active holder left unburnt (pool, unpaid, failed burn, no automated path) is logged at ERROR
+ * and reported in one {@link AssetRedemptionIncompleteEvent} for operator follow-up.
  */
 @Component
 class AssetRedemptionListener {
@@ -53,15 +67,21 @@ class AssetRedemptionListener {
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetHolderRepository holderRepository;
     private final TokenAdminPort tokenAdminPort;
+    private final RedemptionReadinessPort redemptionReadiness;
+    private final ApplicationEventPublisher eventPublisher;
 
     AssetRedemptionListener(AssetRepository assetRepository,
                             AssetDeploymentRepository deploymentRepository,
                             AssetHolderRepository holderRepository,
-                            TokenAdminPort tokenAdminPort) {
+                            TokenAdminPort tokenAdminPort,
+                            RedemptionReadinessPort redemptionReadiness,
+                            ApplicationEventPublisher eventPublisher) {
         this.assetRepository = assetRepository;
         this.deploymentRepository = deploymentRepository;
         this.holderRepository = holderRepository;
         this.tokenAdminPort = tokenAdminPort;
+        this.redemptionReadiness = redemptionReadiness;
+        this.eventPublisher = eventPublisher;
     }
 
     @ApplicationModuleListener
@@ -80,6 +100,15 @@ class AssetRedemptionListener {
         }
 
         if (!AUTOMATED_STANDARDS.contains(asset.getTokenStandard())) {
+            if (!asset.getTokenStandard().name().startsWith("DAML")) {
+                List<Map<String, Object>> left = new ArrayList<>();
+                for (AssetHolder holder : holderRepository.findActiveByAssetId(event.assetId())) {
+                    if (holder.getNominalAmount() != null && holder.getNominalAmount().signum() > 0) {
+                        left.add(unburnt(holder, "NO_AUTOMATED_BURN"));
+                    }
+                }
+                reportIncomplete(event, left);
+            }
             log.warn("Asset {} (standard={}) redeemed — no automated on-chain burn is wired for this "
                             + "standard yet; an operator must manually retire holder balances (ERC-3643: "
                             + "Erc3643Controller forced-burn; DAML bonds redeem via their own corporate-action "
@@ -94,10 +123,27 @@ class AssetRedemptionListener {
         List<AssetHolder> holders = holderRepository.findActiveByAssetId(event.assetId());
         String legalBasis = "eWpG §26 Einziehung — Redemption of " + asset.getAssetNumber();
 
+        // Bonds: only holders paid in the settled REDEMPTION/CALL are burnt (null = not a bond).
+        Set<String> paidWallets = null;
+        if (event.retirementActionId() != null) {
+            paidWallets = redemptionReadiness.settledRetirementAction(event.assetId())
+                    .map(RedemptionReadinessPort.SettledRetirement::paidWallets)
+                    .orElse(Set.of());
+        }
+
+        List<Map<String, Object>> left = new ArrayList<>();
         int dispatched = 0;
         for (AssetHolder holder : holders) {
             BigDecimal nominal = holder.getNominalAmount();
             if (nominal == null || nominal.signum() <= 0) {
+                continue;
+            }
+            if (holder.getHolderKind() == HolderKind.NOMINEE_POOL) {
+                left.add(unburnt(holder, "NOMINEE_POOL"));
+                continue;
+            }
+            if (paidWallets != null && !paidWallets.contains(AddressNormalizer.normalize(holder.getWalletAddress()))) {
+                left.add(unburnt(holder, "NOT_PAID_IN_SETTLED_REDEMPTION"));
                 continue;
             }
             try {
@@ -120,8 +166,32 @@ class AssetRedemptionListener {
             } catch (Exception e) {
                 log.error("Redemption burn failed for asset={} holder wallet={}: {}",
                         event.assetId(), holder.getWalletAddress(), e.getMessage());
+                left.add(unburnt(holder, "BURN_FAILED: " + e.getMessage()));
             }
         }
         log.info("Asset {} redemption: dispatched {} of {} holder burns.", event.assetId(), dispatched, holders.size());
+        reportIncomplete(event, left);
+    }
+
+    private static Map<String, Object> unburnt(AssetHolder holder, String reason) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("walletAddress", String.valueOf(holder.getWalletAddress()));
+        m.put("nominal", holder.getNominalAmount().toPlainString());
+        m.put("reason", reason);
+        return m;
+    }
+
+    private void reportIncomplete(AssetRedeemedEvent event, List<Map<String, Object>> left) {
+        if (left.isEmpty()) {
+            return;
+        }
+        log.error("REDEMPTION INCOMPLETE: asset={} is REDEEMED but {} active register entr(y/ies) keep live "
+                + "tokens on-chain — operator follow-up required: {}", event.assetId(), left.size(), left);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("unburnt", left);
+        if (event.retirementActionId() != null) {
+            details.put("retirementCorporateActionId", event.retirementActionId().toString());
+        }
+        eventPublisher.publishEvent(new AssetRedemptionIncompleteEvent(event.assetId(), details));
     }
 }

@@ -36,6 +36,7 @@ class CorporateActionSettlementWriterTest {
     @Mock private CorporateActionRepository corporateActionRepository;
     @Mock private CorporateActionEntryRepository entryRepository;
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository bondTermsRepository;
     @Mock private ApplicationEventPublisher events;
 
     private CorporateActionSettlementWriter writer;
@@ -43,7 +44,8 @@ class CorporateActionSettlementWriterTest {
     @BeforeEach
     void setUp() {
         writer = new CorporateActionSettlementWriter(
-                corporateActionRepository, entryRepository, couponPaymentRepository, events);
+                corporateActionRepository, entryRepository, couponPaymentRepository, bondTermsRepository,
+                CorporateActionTestSupport.systemRegisterClock(), events);
         lenient().when(entryRepository.findByCorporateActionId(any())).thenReturn(List.of());
     }
 
@@ -128,5 +130,59 @@ class CorporateActionSettlementWriterTest {
         assertThat(ca.getNotes())
                 .isEqualTo("Auto-created from coupon_payment id=x | settlement blocked: rate fixing not wired");
         verify(events).publishEvent(new CorporateActionSettlementBlockedEvent(id, "rate fixing not wired"));
+    }
+
+    private de.makibytes.registerwerk.deployment.api.AssetBondTerms bondIn(
+            de.makibytes.registerwerk.deployment.api.BondStatus status, UUID assetId) {
+        var terms = new de.makibytes.registerwerk.deployment.api.AssetBondTerms();
+        terms.setAssetId(assetId);
+        terms.setBondStatus(status);
+        when(bondTermsRepository.findById(assetId)).thenReturn(Optional.of(terms));
+        return terms;
+    }
+
+    @Test
+    @DisplayName("T3-05: a settled REDEMPTION clears a DEFAULTED bond to REDEEMED")
+    void settledRedemptionRedeemsDefaultedBond() {
+        UUID id = UUID.randomUUID();
+        CorporateAction ca = actionAwaitingSettlement(id);
+        ca.setActionType(CorporateAction.ActionType.REDEMPTION);
+        ca.setAssetId(UUID.randomUUID());
+        var terms = bondIn(de.makibytes.registerwerk.deployment.api.BondStatus.DEFAULTED, ca.getAssetId());
+
+        writer.markSettled(id, "tx");
+
+        assertThat(terms.getBondStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.BondStatus.REDEEMED);
+    }
+
+    @Test
+    @DisplayName("T3-05: a settled CALL retires the bond (CALLED)")
+    void settledCallRetiresBond() {
+        UUID id = UUID.randomUUID();
+        CorporateAction ca = actionAwaitingSettlement(id);
+        ca.setActionType(CorporateAction.ActionType.CALL);
+        ca.setAssetId(UUID.randomUUID());
+        var terms = bondIn(de.makibytes.registerwerk.deployment.api.BondStatus.ACTIVE, ca.getAssetId());
+
+        writer.markSettled(id, "tx");
+
+        assertThat(terms.getBondStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.BondStatus.CALLED);
+    }
+
+    @Test
+    @DisplayName("T3-05: an OVERDUE/MISSED coupon that settles becomes PAID")
+    void settledCouponClearsOverdue() {
+        UUID id = UUID.randomUUID();
+        CorporateAction ca = actionAwaitingSettlement(id);
+        ca.setActionType(CorporateAction.ActionType.COUPON);
+        UUID paymentId = UUID.randomUUID();
+        ca.setCouponPaymentId(paymentId);
+        var payment = new de.makibytes.registerwerk.deployment.api.AssetCouponPayment();
+        payment.setCouponStatus(de.makibytes.registerwerk.deployment.api.CouponStatus.OVERDUE);
+        when(couponPaymentRepository.findById(paymentId)).thenReturn(Optional.of(payment));
+
+        writer.markSettled(id, "tx");
+
+        assertThat(payment.getCouponStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.CouponStatus.PAID);
     }
 }

@@ -31,6 +31,7 @@ import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
 import de.makibytes.registerwerk.erc3643.internal.Erc3643LifecycleService;
 import de.makibytes.registerwerk.erc3643.internal.IdentityRegistryService;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.deployment.api.ForcedOpTargetGuard;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.api.AsyncDataStatus;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
@@ -63,6 +64,7 @@ public class Erc3643Controller {
     private final Erc3643TrustedIssuerRepository trustedIssuerRepo;
     private final Erc3643ClaimTopicRepository claimTopicRepo;
     private final BlockchainApi blockchainApi;
+    private final ForcedOpTargetGuard targetGuard;
 
     public Erc3643Controller(Erc3643LifecycleService lifecycleService,
                              IdentityRegistryService identityRegistryService,
@@ -70,7 +72,8 @@ public class Erc3643Controller {
                              LegalEntityRepository entityRepo,
                              Erc3643TrustedIssuerRepository trustedIssuerRepo,
                              Erc3643ClaimTopicRepository claimTopicRepo,
-                             BlockchainApi blockchainApi) {
+                             BlockchainApi blockchainApi,
+                             ForcedOpTargetGuard targetGuard) {
         this.lifecycleService = lifecycleService;
         this.identityRegistryService = identityRegistryService;
         this.identityRepo = identityRepo;
@@ -78,6 +81,7 @@ public class Erc3643Controller {
         this.trustedIssuerRepo = trustedIssuerRepo;
         this.claimTopicRepo = claimTopicRepo;
         this.blockchainApi = blockchainApi;
+        this.targetGuard = targetGuard;
     }
 
     // ── Suite ─────────────────────────────────────────────────────────────────
@@ -297,6 +301,7 @@ public class Erc3643Controller {
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody @Valid Erc3643AgentRequests.ForcedTransfer body, Authentication auth) {
         log.info("POST forced-transfer on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, body.from(), auth);
         UUID suiteId = resolveSuiteId(assetId, deploymentId);
         UUID txId = lifecycleService.forcedTransfer(suiteId, body.from(), body.to(),
                 body.amount(), body.reason().trim(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
@@ -310,6 +315,7 @@ public class Erc3643Controller {
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody @Valid Erc3643AgentRequests.ForcedApprove body, Authentication auth) {
         log.info("POST forced-approve on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, body.owner(), auth);
         UUID suiteId = resolveSuiteId(assetId, deploymentId);
         UUID txId = lifecycleService.forcedApprove(suiteId, body.owner(), body.spender(),
                 body.amount(), body.reason().trim(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
@@ -326,8 +332,10 @@ public class Erc3643Controller {
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    /** Step-up + 4-eyes (T3-16); the service refuses while an ACTIVE Sperrvermerk covers the address. */
     @PostMapping("/{deploymentId}/unfreeze")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "UNFREEZE")
     public ResponseEntity<TxSubmissionResponse> unfreezeAddress(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody @Valid Erc3643AgentRequests.Address body, Authentication auth) {
@@ -347,8 +355,10 @@ public class Erc3643Controller {
                 resolveSuiteId(assetId, deploymentId), request.address(), request.amount(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    /** Step-up + 4-eyes (T3-16); the service refuses while an ACTIVE Sperrvermerk covers the address. */
     @PostMapping("/{deploymentId}/unfreeze-partial")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "UNFREEZE")
     public ResponseEntity<TxSubmissionResponse> unfreezePartialTokens(
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody @Valid FreezePartialRequest request, Authentication auth) {
@@ -381,6 +391,7 @@ public class Erc3643Controller {
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody @Valid Erc3643AgentRequests.ForceBurn body, Authentication auth) {
         log.info("POST force-burn on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, body.from(), auth);
         UUID suiteId = resolveSuiteId(assetId, deploymentId);
         UUID txId = lifecycleService.forceBurn(suiteId, body.from(),
                 body.amount(), body.legalBasis().trim(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
@@ -394,6 +405,7 @@ public class Erc3643Controller {
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody @Valid Erc3643AgentRequests.BatchTransfer body, Authentication auth) {
         log.info("POST batch-forced-transfer on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        targetGuard.requireHolderWalletsForGrantee(assetId, body.froms(), auth);
         return accepted(lifecycleService.batchForcedTransfer(resolveSuiteId(assetId, deploymentId),
                 body.froms(), body.tos(), body.amounts(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
@@ -416,6 +428,7 @@ public class Erc3643Controller {
             @PathVariable UUID assetId, @PathVariable UUID deploymentId,
             @RequestBody @Valid Erc3643AgentRequests.BatchAmounts body, Authentication auth) {
         log.info("POST batch-burn on deploymentId={} by actor={}", deploymentId, actorName(auth));
+        targetGuard.requireHolderWalletsForGrantee(assetId, body.addresses(), auth);
         return accepted(lifecycleService.batchBurn(resolveSuiteId(assetId, deploymentId), body.addresses(), body.amounts(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }

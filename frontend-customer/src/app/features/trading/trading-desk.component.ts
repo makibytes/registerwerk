@@ -340,14 +340,28 @@ interface BuyForm {
                   <mat-card-subtitle>Publish inventory to the executable simulated venue and choose accepted payment options.</mat-card-subtitle>
                 </mat-card-header>
                 <mat-card-content>
+                  @if (hasNonListableHoldings) {
+                    <p class="hint" role="note">
+                      Holdings of chain-deployed assets cannot be listed here: settlement on this venue only
+                      changes the register, not the token contract. On-chain settlement is not available yet.
+                    </p>
+                  }
+                  @if (hasSimulatedHoldings) {
+                    <p class="hint" role="note">
+                      Simulated settlement: trades in chain-deployed assets only change the register, not the
+                      token contract (demo mode).
+                    </p>
+                  }
                   <div class="form-grid">
                     <mat-form-field appearance="outline" class="span-2">
                       <mat-label>Held asset</mat-label>
                       <mat-select [(ngModel)]="sellForm.holderId">
                         @for (holding of sellableHoldings; track holding.holderId) {
-                          <mat-option [value]="holding.holderId">
-                            {{ holding.assetName }} · {{ holding.availableQuantity | number:'1.0-4' }} available
-                          </mat-option>
+                          @if (holding.listable) {
+                            <mat-option [value]="holding.holderId">
+                              {{ holding.assetName }} · {{ holding.availableQuantity | number:'1.0-4' }} available{{ holding.simulatedOffchainSettlement ? ' (simulated settlement)' : '' }}
+                            </mat-option>
+                          }
                         }
                       </mat-select>
                     </mat-form-field>
@@ -688,6 +702,7 @@ interface BuyForm {
     </ng-template>
   `,
   styles: [`
+    .hint { margin: 0 0 12px; font-size: 13px; color: var(--rw-text-secondary); }
     .page-container { max-width: 1320px; margin: 0 auto; padding: 32px 24px; }
     .page-header { margin-bottom: 20px; }
     .page-header h1 { margin: 0; font-size: 21px; font-weight: 700; color: var(--rw-text-primary); letter-spacing: -0.4px; }
@@ -766,6 +781,14 @@ export class TradingDeskComponent implements OnInit {
   venues: TradingVenue[] = [];
   offers: TradingOffer[] = [];
   sellableHoldings: SellableHolding[] = [];
+
+  get hasNonListableHoldings(): boolean {
+    return this.sellableHoldings.some((h) => !h.listable);
+  }
+
+  get hasSimulatedHoldings(): boolean {
+    return this.sellableHoldings.some((h) => h.listable && h.simulatedOffchainSettlement);
+  }
   companyListings: TradeListing[] = [];
   history: TradeExecution[] = [];
   settings: CompanyTraderSettings = {
@@ -893,7 +916,7 @@ export class TradingDeskComponent implements OnInit {
 
   submitSell(): void {
     if (this.mutating) return;
-    const holding = this.sellableHoldings.find((candidate) => candidate.holderId === this.sellForm.holderId);
+    const holding = this.sellableHoldings.find((candidate) => candidate.holderId === this.sellForm.holderId && candidate.listable);
     const quantity = this.sellForm.quantity;
     const pricePerUnit = this.sellForm.pricePerUnit;
     if (!holding || quantity === null || !Number.isFinite(quantity) || quantity <= 0

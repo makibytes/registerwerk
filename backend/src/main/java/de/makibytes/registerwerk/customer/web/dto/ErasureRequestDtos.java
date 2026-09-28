@@ -20,15 +20,25 @@ public final class ErasureRequestDtos {
             Instant dueAt,
             UUID reviewedBy,
             Instant reviewedAt,
-            String resolutionNote) {
+            String resolutionNote,
+            String retainedNoticeChannel) {
 
         public static ErasureRequestResponse from(ErasureRequest r) {
             return new ErasureRequestResponse(
                     r.getId(), r.getEntityId(), r.getRequestedByUserId(), r.getStatus().name(),
-                    r.getRequestedAt(), r.getDueAt(), r.getReviewedBy(), r.getReviewedAt(), r.getResolutionNote());
+                    r.getRequestedAt(), r.getDueAt(), r.getReviewedBy(), r.getReviewedAt(), r.getResolutionNote(),
+                    r.getRetainedNoticeChannel());
         }
     }
 
     /** Operator's resolution note for completing/rejecting a request. */
-    public record ResolveErasureRequest(@Size(max = 2000) String note) {}
+    public record ResolveErasureRequest(
+            @Size(max = 2000) String note,
+            /** Required on completion when the entity still has active register holdings (T3-14). */
+            @Size(max = 500) String retainedNoticeChannel) {
+
+        public ResolveErasureRequest(String note) {
+            this(note, null);
+        }
+    }
 }

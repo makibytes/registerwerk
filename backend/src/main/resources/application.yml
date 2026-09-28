@@ -586,6 +586,10 @@ registerwerk:
     release-approved: ${REGISTERWERK_REPO_DESK_RELEASE_APPROVED:false}
   trading:
     enabled: ${REGISTERWERK_TRADING_ENABLED:true}
+    # T3-09: list/settle chain-deployed assets on the simulated venue without an on-chain leg.
+    # Keep false outside a demo: the holder sync would reset the seller to its on-chain balance
+    # while the buyer's off-chain row stays, so the register would exceed the supply.
+    offchain-settlement-on-deployed-assets: ${REGISTERWERK_TRADING_OFFCHAIN_SETTLEMENT_ON_DEPLOYED_ASSETS:false}
     venues:
       simulated:
         enabled: ${REGISTERWERK_TRADING_VENUE_SIMULATED_ENABLED:true}
@@ -641,6 +645,15 @@ registerwerk:
         username: ${REGISTERWERK_REPORTING_SFTP_FR_USER:}
         private-key-path: ${REGISTERWERK_REPORTING_SFTP_FR_KEY:}
         remote-dir: ${REGISTERWERK_REPORTING_SFTP_FR_DIR:/incoming/mifir/}
+  register:
+    # T3-05/T3-06: the zone the register's calendar days are counted in — "today" for the
+    # corporate-action jobs, their cron triggers, and the record-date cut-off (entitlements are
+    # fixed as of the END of the record date in this zone, not in the JVM's zone, which is UTC in
+    # containers).
+    time-zone: ${REGISTER_TIME_ZONE:Europe/Berlin}
+    # A chain-deployed register is snapshotted only after a successful holder sync at least this
+    # long after the record-date cut-off, so the indexer has provably seen the chain past it.
+    snapshot-sync-margin: ${REGISTER_SNAPSHOT_SYNC_MARGIN:PT30M}
   sync:
     # Auto-refresh interval in minutes for holder data sync from blockchain (0 = disabled)
     auto-refresh-interval-minutes: ${SYNC_INTERVAL_MINUTES:15}

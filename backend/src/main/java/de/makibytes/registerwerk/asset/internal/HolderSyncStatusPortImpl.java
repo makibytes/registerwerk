@@ -16,7 +16,9 @@ import java.util.UUID;
 /**
  * Persists holder-sync reconciliation state on {@code asset} (T2-18) and exposes
  * {@code registerwerk_holder_sync_blocked_assets} — the live count of BLOCKED assets that
- * {@code monitoring/alerts/registerwerk.yml#HolderSyncBlocked} fires on.
+ * {@code monitoring/alerts/registerwerk.yml#HolderSyncBlocked} fires on — plus
+ * {@code registerwerk_register_offchain_rows_on_deployed_asset} (T3-09), the number of active
+ * register entries on deployed assets that the chain does not back.
  *
  * <p>Joins the caller's transaction ({@code HolderDataService} runs with
  * {@code noRollbackFor = UnmappedHolderIdentityException}), so a BLOCKED write survives the
@@ -33,6 +35,17 @@ class HolderSyncStatusPortImpl implements HolderSyncStatusPort {
                         assetRepository, repo -> repo.countByHolderSyncStatus(HolderSyncStatus.BLOCKED))
                 .description("Assets whose chain-derived register is BLOCKED (unmapped wallets, stale register)")
                 .register(meterRegistry);
+        Gauge.builder("registerwerk_register_offchain_rows_on_deployed_asset",
+                        assetRepository, AssetRepository::sumHolderSyncOffchainRows)
+                .description("Active register entries with a positive nominal on deployed assets that are "
+                        + "not chain-derived (off-chain settlement / manual rows the chain does not back)")
+                .register(meterRegistry);
+    }
+
+    @Override
+    @Transactional
+    public void recordOffchainRows(UUID assetId, int count) {
+        assetRepository.updateHolderSyncOffchainRows(assetId, count);
     }
 
     @Override

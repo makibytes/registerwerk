@@ -1,5 +1,9 @@
 package de.makibytes.registerwerk.unit;
 
+import static org.mockito.Mockito.verify;
+
+import static org.mockito.Mockito.never;
+
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
@@ -27,6 +31,7 @@ import org.web3j.crypto.Credentials;
 import org.web3j.crypto.ECKeyPair;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -530,5 +535,99 @@ class TokenAdminServiceTest {
                 dep.getId(), from, to, BigInteger.TEN, "Court order", UUID.randomUUID(), "REGISTRY_ADMIN"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Sperrvermerk");
+    }
+
+    // ── Review phase 3 (K1): issuer burn + unfreeze under a Sperrvermerk ──────
+
+    @Test
+    @DisplayName("regularBurnRefusesBlockedWallet: issuer burn is a §26 Einziehung and honours the Sperrvermerk (T3-01)")
+    void regularBurnRefusesBlockedWallet() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.ERC20);
+        String from = "0x" + "3".repeat(40);
+        when(holderBlockGate.isBlocked(null, from)).thenReturn(true);
+
+        assertThatThrownBy(() -> tokenAdminService.regularBurn(
+                dep.getId(), from, BigInteger.TEN, UUID.randomUUID(), "ISSUER"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Sperrvermerk");
+        verify(durableTransactions, never()).submit(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("manualUnfreezeRefusedWhileBlocked: plaintext unfreeze refused under an ACTIVE block (T3-16)")
+    void manualUnfreezeRefusedWhileBlocked() {
+        String wallet = "0x" + "4".repeat(40);
+        when(holderBlockGate.isBlocked(null, wallet)).thenReturn(true);
+
+        assertThatThrownBy(() -> tokenAdminService.unfreezeAddress(
+                UUID.randomUUID(), wallet, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Sperrvermerk");
+        verify(durableTransactions, never()).submit(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("manualUnfreezeRefusedWhileBlocked: confidential unfreeze refused under an ACTIVE block (T3-16)")
+    void confidentialUnfreezeRefusedWhileBlocked() {
+        String wallet = "0x" + "5".repeat(40);
+        when(holderBlockGate.isBlocked(null, wallet)).thenReturn(true);
+
+        assertThatThrownBy(() -> tokenAdminService.confidentialSetAddressFrozen(
+                UUID.randomUUID(), wallet, false, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Sperrvermerk");
+        verify(durableTransactions, never()).submit(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("unfreezeAfterBlockLift submits as SYSTEM without consulting the block gate")
+    void unfreezeAfterBlockLiftBypassesGate() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.ERC20);
+        String wallet = "0x" + "6".repeat(40);
+        when(durableTransactions.submit(any(), any(), any(), any())).thenReturn("0xhash");
+
+        tokenAdminService.unfreezeAfterBlockLift(dep.getId(), wallet);
+
+        verify(durableTransactions).submit(any(), any(), any(), any());
+        verify(holderBlockGate, never()).isBlocked(any(), any());
+    }
+
+    @Test
+    @DisplayName("T3-07: mint / burn / forced operations refused while the register is frozen (TRANSFER_PENDING) or transferred out")
+    void mintAndForcedOperationsRefusedWhileRegisterFrozen() {
+        for (String status : List.of("TRANSFER_PENDING", "TRANSFERRED_OUT")) {
+            UUID assetId = UUID.randomUUID();
+            UUID depId = UUID.randomUUID();
+            AssetDeployment dep = new AssetDeployment();
+            dep.setId(depId);
+            dep.setAssetId(assetId);
+            dep.setChainConfigId(UUID.randomUUID());
+            dep.setChain(Chain.ETHEREUM);
+            dep.setNetwork(Network.TESTNET);
+            dep.setContractAddress("0x" + "a".repeat(40));
+            dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+            when(deploymentRepository.findById(depId)).thenReturn(Optional.of(dep));
+            when(assetLookupPort.findById(assetId)).thenReturn(Optional.of(new AssetLookupPort.AssetInfo(
+                    assetId, "Test Asset", null, TokenStandard.ERC20, null, null, null, "AST-001", status)));
+            String w1 = "0x" + "1".repeat(40);
+            String w2 = "0x" + "2".repeat(40);
+
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> tokenAdminService.mint(
+                            depId, w1, BigInteger.TEN, UUID.randomUUID(), "ISSUER"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
+                    .hasMessageContaining(status);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> tokenAdminService.regularBurn(
+                            depId, w1, BigInteger.TEN, UUID.randomUUID(), "ISSUER"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> tokenAdminService.forcedTransfer(
+                            depId, w1, w2, BigInteger.TEN, "Court order", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> tokenAdminService.forceBurn(
+                            depId, w1, BigInteger.TEN, "Court order", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+            verify(durableTransactions, never()).submit(any(), any(), any(), any());
+        }
     }
 }

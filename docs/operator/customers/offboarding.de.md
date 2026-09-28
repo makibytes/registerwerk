@@ -73,6 +73,13 @@ stateDiagram-v2
 
 **Complete.**
 
+!!! warning "Zwischen Export und Abschluss ist das Register eingefroren"
+    Der erste **Export** setzt das Asset auf `TRANSFER_PENDING` (der bisherige Status wird gemerkt). Bis die Übertragung abgeschlossen oder abgebrochen ist, werden Handel, Mint/Burn und erzwungene Operationen, die Verarbeitung von Kapitalmaßnahmen (auch der Tagesjobs), Primärzeichnungen und Registeränderungen abgelehnt; der Holder-Sync läuft weiter, damit Abweichungen auffallen. Ein **Abbruch** stellt den bisherigen Status wieder her. Kapitalmaßnahmen mit Zahltag heute oder später müssen *vor* dem Export abgewickelt oder storniert werden.
+
+    Der Export enthält einen **Registerinhalts-Hash**, der nur das Register umfasst (Assetdaten, Inhaber mit ihren §17(2)-Merkmalen, aktive Inhabersperren, Anleihebedingungen und Kuponplan, Hash des Term Sheets, offene Kapitalmaßnahmen und Zeichnungsaufträge) — nicht den Export-Zeitstempel. Der **Abschluss** berechnet ihn neu und wird abgelehnt, wenn sich seit dem Export etwas geändert hat; die geänderten Bereiche werden genannt, dann erneut exportieren. Das Paket identifiziert Inhaber über die interne Entitätsnummer und die LEI; Klarnamen und Adressen sind nicht enthalten (offene Grundsatzentscheidung).
+
+    Die On-Chain-Kontrolle wird **je Deployment** erfasst. Bei EVM-Deployments liest die Plattform `registry()`/`owner()` und verlangt die bei der Einleitung angegebene Nachfolger-Adresse; andere Chains erfordern vorerst eine ausdrückliche Bestätigung durch den Betreiber (Chain-Verifikation folgt). Die Übertragung gilt erst als *übergeben*, wenn jedes Deployment erfasst ist. Nach dem Abschluss ist das Asset `TRANSFERRED_OUT`: Registerauszüge, Einsichten und Downloads werden mit „Register übertragen an …“ abgelehnt.
+
 !!! danger "Die beiden Teilschritte lassen sich nicht atomar machen"
     Der Export des Registers und die Übertragung der On-Chain-Kontrolle laufen auf unterschiedlichen Systemen. Es gibt keine Transaktion, die beides umfasst.
 
@@ -90,6 +97,12 @@ stateDiagram-v2
 Ein Anleger, ein Bestand, zu einem anderen Registerführer. Gleicher Ablauf – initiieren, Ziel festlegen, mit Hash exportieren, die On-Chain-Übertragung aufzeichnen, abschließen – beschränkt auf einen einzelnen Inhaber statt das gesamte Asset.
 
 Das gibt es, weil ein Anleger ohne diese Möglichkeit nur durch Verkauf aus einem Register aussteigen könnte. Einen Bestand ohne Verkauf verschieben zu können, ist ein echter Teil des Anlegerschutzes, keine Annehmlichkeit.
+
+!!! note "Die Übergabe wird geprüft, nicht vorausgesetzt"
+    - Das **Ziel** kann nur im Status *eingeleitet* gesetzt werden; nach dem Export beschreiben Paket und Hash dieses Ziel. Zum Ändern abbrechen und neu beginnen.
+    - Die **On-Chain-Übertragung** wird gegen den indexierten, finalisierten Transfer geprüft: Die Transaktion muss genau den Nominalbetrag des Inhabers von dessen Wallet an die Zielwallet auf einem Deployment des Wertpapiers bewegen. Ist der Transfer noch nicht indexiert, wird der Schritt abgelehnt; nach Finalisierung erneut versuchen. Hat das Wertpapier kein indexiertes Deployment (Off-Chain-Register, derzeit Solana und Canton), ist stattdessen eine **Operator-Bestätigung** erforderlich.
+    - Zum **Abschließen** braucht die Zielwallet einen aktiven Registereintrag (z. B. einen Nominee-Pool-Eintrag der Nachfolgeregisterführung). Sonst blockiert der nächste Holder-Sync das gesamte Wertpapier.
+    - Das Exportpaket enthält die Inhalte des Eintrags nach § 17 Abs. 2 eWpG (Eintragsart, Inhaberreferenz, Verbraucherkennzeichen, Rechte Dritter, Verfügungsbeschränkungen, Hinweis zur Geschäftsfähigkeit) und die aktiven rechtlichen Sperren. Ein Eintrag mit Rechten Dritter oder Verfügungsbeschränkungen wird nur mit einer **Zustimmungsreferenz des Berechtigten** migriert.
 
 ---
 

@@ -106,13 +106,67 @@ class IssuerCorporateActionControllerTest {
         CorporateAction attested = new CorporateAction();
         attested.setAssetId(assetId);
         attested.setStatus(CorporateAction.Status.ANNOUNCED);
-        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), eq("SEPA-REF-1"), eq(actorId), any()))
+        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), eq("SEPA-REF-1"), eq(actorId), any(), eq(false)))
                 .thenReturn(attested);
 
         ResponseEntity<de.makibytes.registerwerk.corporateactions.web.dto.CorporateActionView> response =
                 controller.attestSettlement(assetId, actionId, request, authAs(actorId));
 
         assertThat(response.getBody()).isNotNull();
-        verify(service).attestSettlementAsIssuer(assetId, actionId, "SEPA-REF-1", actorId, "ISSUER");
+        verify(service).attestSettlementAsIssuer(assetId, actionId, "SEPA-REF-1", actorId, "ISSUER", false);
+    }
+
+    private static Authentication adminAuth(boolean impersonating) {
+        org.springframework.security.oauth2.jwt.Jwt.Builder jwt = org.springframework.security.oauth2.jwt.Jwt.withTokenValue("t")
+                .header("alg", "HS256").subject(UUID.randomUUID().toString())
+                .claim("roles", List.of(impersonating ? "ISSUER" : "REGISTRY_ADMIN"));
+        if (impersonating) {
+            jwt.claim("imp", true);
+        }
+        var authorities = List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority(
+                impersonating ? "ROLE_ISSUER" : "ROLE_REGISTRY_ADMIN"));
+        return new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(jwt.build(), null, authorities);
+    }
+
+    @Test
+    @DisplayName("T3-12 operatorCannotAttestAsIssuer: a REGISTRY_ADMIN's attest call is flagged as operator")
+    void operatorCannotAttestAsIssuer() {
+        UUID assetId = UUID.randomUUID();
+        UUID actionId = UUID.randomUUID();
+        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), any(), any(), any(), eq(true)))
+                .thenThrow(new org.springframework.security.access.AccessDeniedException("operators"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.attestSettlement(assetId, actionId,
+                new IssuerAttestationRequest("ref", true), adminAuth(false)))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("T3-12 impersonatingAdminCannotAttest: the imp claim marks the caller as operator")
+    void impersonatingAdminCannotAttest() {
+        UUID assetId = UUID.randomUUID();
+        UUID actionId = UUID.randomUUID();
+        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), any(), any(), any(), eq(true)))
+                .thenThrow(new org.springframework.security.access.AccessDeniedException("operators"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.attestSettlement(assetId, actionId,
+                new IssuerAttestationRequest("ref", true), adminAuth(true)))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("T3-12: a non-impersonating operator cannot propose or withdraw; an impersonating admin proposes as REGISTRY_ADMIN_IMPERSONATING")
+    void operatorProposeRefusedImpersonationRecorded() {
+        UUID assetId = UUID.randomUUID();
+        ProposeCorporateActionRequest request = mock(ProposeCorporateActionRequest.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.propose(assetId, request, adminAuth(false)))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.withdraw(assetId, UUID.randomUUID(), adminAuth(false)))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        when(service.propose(eq(assetId), eq(request), any(), eq("REGISTRY_ADMIN_IMPERSONATING")))
+                .thenReturn(new CorporateAction());
+        controller.propose(assetId, request, adminAuth(true));
+        verify(service).propose(eq(assetId), eq(request), any(), eq("REGISTRY_ADMIN_IMPERSONATING"));
     }
 }

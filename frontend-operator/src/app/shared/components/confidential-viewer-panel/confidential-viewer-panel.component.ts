@@ -9,6 +9,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatDialog } from '@angular/material/dialog';
 import { numberToHex } from 'viem';
 import { firstValueFrom } from 'rxjs';
 import { ConfidentialService, ConfidentialContext, ReconciliationReport } from '../../../core/api/confidential.service';
@@ -16,6 +17,8 @@ import { TransactionService } from '../../../core/api/transaction.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { AddressComponent } from '../address.component';
+import { StepUpDialogComponent, StepUpDialogResult } from '../step-up/step-up-dialog.component';
+import { DualControlTokens } from '../../../core/api/dual-control-headers';
 
 /** Minimal ABI fragment for reading a confidential balance handle. */
 const CONFIDENTIAL_BALANCE_ABI = [
@@ -164,6 +167,7 @@ export class ConfidentialViewerPanelComponent {
   private readonly confidentialService = inject(ConfidentialService);
   private readonly txService = inject(TransactionService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
   protected readonly walletService = inject(WalletService);
   private readonly fheService = inject(FheClientService);
 
@@ -256,11 +260,24 @@ export class ConfidentialViewerPanelComponent {
     });
   }
 
+  /** T3-21: revoking a viewer is 4-eyes (`CONFIDENTIAL_VIEWER_REVOKE`). */
   removeViewer(): void {
     if (!this.viewerAddress) return;
+    this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: true, reason: 'Remove confidential viewer', action: 'CONFIDENTIAL_VIEWER_REVOKE' },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (result?.stepUpToken && result.dualControlToken) {
+        this.submitRemoveViewer({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
+      }
+    });
+  }
+
+  private submitRemoveViewer(tokens: DualControlTokens): void {
     this.viewerActionLoading = true;
     this.cdr.markForCheck();
-    this.confidentialService.removeViewer(this.assetId, this.deploymentId, this.viewerAddress).subscribe({
+    this.confidentialService.removeViewer(this.assetId, this.deploymentId, this.viewerAddress, tokens).subscribe({
       next: (r) => {
         this.txService.track(r.txId, 'Remove confidential viewer');
         this.viewerAddress = '';

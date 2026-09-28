@@ -83,6 +83,7 @@ anchored to those statutes, not to a literal rendering of the German original.
 | default (failure to pay) | Zahlungsausfall | défaut de paiement | inadempimento | impago / incumplimiento |
 | suspension | Aussetzung | suspension | sospensione | suspensión |
 | tax certificate | Steuerbescheinigung | attestation fiscale | certificazione fiscale | certificado fiscal |
+| income statement (informational, not a tax certificate) | Ertragsaufstellung | relevé de revenus | prospetto dei proventi | extracto de rendimientos |
 
 !!! warning "Kapitalmaßnahme, not 'Unternehmensaktion'"
     "Corporate action" has an established German term. A literal translation reads as a

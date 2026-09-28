@@ -21,7 +21,8 @@ export class SubscriptionOrderService {
     return this.http.post<SubscriptionOrder>(`${this.base}/orders/${orderId}/cancel`, {});
   }
 
-  confirm(orderId: string): Observable<SubscriptionOrder> {
-    return this.http.post<SubscriptionOrder>(`${this.base}/orders/${orderId}/confirm`, {});
+  /** Accepts the allocation. This does not enter the register: payment and settlement follow. */
+  accept(orderId: string): Observable<SubscriptionOrder> {
+    return this.http.post<SubscriptionOrder>(`${this.base}/orders/${orderId}/accept`, {});
   }
 }

@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.registertransfer.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.RegisterFreezeGuard;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
@@ -30,11 +31,10 @@ import java.util.UUID;
 /**
  * Handles §10 eWpG register inspection requests.
  *
- * <p>Decision logic follows §10(2) eWpRV: a Berechtigter (issuer, holder, or —
- * in single entry — a beneficiary in whose favour a right is recorded) always
- * has a legitimate interest and is approved automatically. Any other applicant
- * (LEGITIMATE_INTEREST) is left REQUESTED for an operator to review, since the
- * operator must weigh the asserted interest.
+ * <p>Decision logic follows §10(2) eWpRV: a Berechtigter (issuer of the asset, or a holder with
+ * an active holding) has a legitimate interest and is approved automatically - but only when the
+ * claim is verified against the register (T3-11). Any other claim, including a self-declared
+ * beneficiary or LEGITIMATE_INTEREST, is left REQUESTED for an operator to review.
  *
  * <p>Fulfilling an approved request renders the disclosed register extract and
  * records its SHA-256 hash, so the operator retains tamper-evident proof of
@@ -75,8 +75,9 @@ public class RegisterInspectionService {
     public RegisterInspectionRequest submit(
             UUID assetId, UUID requesterEntityId, String requesterName, String requesterEmail,
             InspectionLegalBasis legalBasis, String statedInterest) {
-        assetRepository.findById(assetId)
+        Asset asset = assetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown asset " + assetId));
+        RegisterFreezeGuard.requireAdministeredHere(asset, "Register inspection");
 
         RegisterInspectionRequest request = new RegisterInspectionRequest();
         request.setAssetId(assetId);
@@ -86,10 +87,13 @@ public class RegisterInspectionService {
         request.setLegalBasis(legalBasis);
         request.setStatedInterest(statedInterest);
 
-        boolean autoApproved = isAlwaysEntitled(legalBasis);
+        // T3-11: only a claim that can be checked against the register is auto-approved. The basis
+        // is otherwise kept as claimed for the operator, flagged claimVerified=false.
+        boolean autoApproved = isVerifiedClaim(asset, requesterEntityId, legalBasis);
+        request.setClaimVerified(autoApproved);
         if (autoApproved) {
             request.setStatus(InspectionStatus.APPROVED);
-            request.setDecisionReason("Berechtigter — legitimate interest presumed (§10(2) eWpRV)");
+            request.setDecisionReason("Berechtigter (verified against the register) — legitimate interest presumed (§10(2) eWpRV)");
             request.setDecidedAt(Instant.now());
         } else {
             request.setStatus(InspectionStatus.REQUESTED);
@@ -151,6 +155,7 @@ public class RegisterInspectionService {
 
         // Hard floor: a §10 disclosure, once handed to the requester, cannot be un-disclosed —
         // same reasoning as RegisterTransferService.export()'s REGISTER_EXTRACT_EXPORT gate.
+        RegisterFreezeGuard.requireAdministeredHere(asset, "Register inspection");
         finalityGate.require(GatedOperation.REGISTER_INSPECTION_FULFIL, request.getAssetId(),
                 asset.getTokenStandard(), FinalityLevel.FINALIZED);
 
@@ -159,7 +164,7 @@ public class RegisterInspectionService {
                 .findActiveByAssetId(request.getAssetId(), Pageable.unpaged()).getContent();
 
         byte[] pdf = extractRenderer.render(asset, holders, request.getLegalBasis(),
-                request.getRequesterName());
+                request.getRequesterName(), request.getRequesterEntityId(), request.isClaimVerified());
 
         request.setContentHash(sha256Hex(pdf));
         request.setStatus(InspectionStatus.FULFILLED);
@@ -175,10 +180,24 @@ public class RegisterInspectionService {
         return requestRepository.findByAssetIdOrderByCreatedAtDesc(assetId, pageable);
     }
 
-    private boolean isAlwaysEntitled(InspectionLegalBasis basis) {
-        return basis == InspectionLegalBasis.ISSUER
-                || basis == InspectionLegalBasis.HOLDER
-                || basis == InspectionLegalBasis.BENEFICIARY;
+    /**
+     * ISSUER iff the requester is the asset's issuer; HOLDER iff it has an active holding; BENEFICIARY
+     * (a recorded third-party right) cannot be verified mechanically and is never auto-approved.
+     */
+    private boolean isVerifiedClaim(Asset asset, UUID requesterEntityId, InspectionLegalBasis basis) {
+        if (requesterEntityId == null) {
+            return false;
+        }
+        return switch (basis) {
+            case ISSUER -> requesterEntityId.equals(asset.getIssuerId());
+            case HOLDER -> {
+                // A mapping row with nominal 0 (unsynced mint, fully sold position) is no holding.
+                java.math.BigDecimal held = holderRepository
+                        .sumActiveNominalByInvestorIdAndAssetId(requesterEntityId, asset.getId());
+                yield held != null && held.signum() > 0;
+            }
+            default -> false;
+        };
     }
 
     private RegisterInspectionRequest load(UUID requestId) {

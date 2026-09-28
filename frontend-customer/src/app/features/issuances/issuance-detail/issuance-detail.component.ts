@@ -16,7 +16,8 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { firstValueFrom } from 'rxjs';
+import { Observable, firstValueFrom, map, of, switchMap } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
 import { numberToHex } from 'viem';
 import { IssuanceService } from '../../../core/api/issuance.service';
 import { TransactionService } from '../../../core/api/transaction.service';
@@ -160,7 +161,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
               @if (asset.status === 'ISSUED') {
                 <button type="button" mat-raised-button color="primary" (click)="openAddHolder()">
                   <mat-icon>person_add</mat-icon>
-                  Add Holder
+                  Request Holder Entry
                 </button>
               }
               @if (isIssuer) {
@@ -283,7 +284,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                 <div><span class="bt-label">Day count</span><span class="bt-value">{{ formatEnum(bondTerms.dayCount) }}</span></div>
                 <div><span class="bt-label">Issue price</span><span class="bt-value">{{ bondTerms.issuePrice | percent:'1.0-2' }} of face value</span></div>
                 <div><span class="bt-label">Callable</span><span class="bt-value">{{ bondTerms.callable ? 'Yes' : 'No' }}</span></div>
-                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus }}</span></div>
+                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus === 'OVERDUE' ? 'Payment pending' : bondTerms.bondStatus }}</span></div>
               </div>
               @if (bondTerms.callable && bondTerms.callSchedule && bondTerms.callSchedule.length > 0) {
                 <div class="call-schedule">
@@ -342,9 +343,14 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                         <button mat-button type="button" (click)="withdrawProposal(a)">Withdraw</button>
                       }
                       @if (isPreSettlement(a) && !a.issuerAttestedAt) {
-                        <button mat-button type="button" color="primary" (click)="openAttestDialog(a)">
-                          Attest settlement
-                        </button>
+                        @if (auth.isImpersonating()) {
+                          <span class="dimmed"
+                                matTooltip="Operators cannot attest as the issuer. Use the operator console's override-attestation instead.">Operator override required</span>
+                        } @else {
+                          <button mat-button type="button" color="primary" (click)="openAttestDialog(a)">
+                            Attest settlement
+                          </button>
+                        }
                       }
                     </td>
                   </ng-container>
@@ -973,7 +979,7 @@ export class IssuanceDetailComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly issuanceService = inject(IssuanceService);
-  private readonly auth = inject(AuthService);
+  readonly auth = inject(AuthService);
   private readonly erc3643Service = inject(Erc3643Service);
   private readonly txService = inject(TransactionService);
   private readonly dialog = inject(MatDialog);
@@ -1489,10 +1495,9 @@ export class IssuanceDetailComponent implements OnInit {
       data: { assetId: this.asset.id },
     });
 
-    ref.afterClosed().subscribe((result: AssetHolder | undefined) => {
+    ref.afterClosed().subscribe((result: unknown) => {
       if (result) {
-        this.holders = [...this.holders, result];
-        this.snackBar.open('Holder added successfully.', 'OK', { duration: 3000 });
+        this.snackBar.open('Request sent. The registry operator will review and execute it.', 'OK', { duration: 5000 });
       }
     });
   }
@@ -1558,19 +1563,38 @@ export class IssuanceDetailComponent implements OnInit {
   onBurn(action: BurnAction): void {
     if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
     this.tokenActionInProgress = true;
-    this.issuanceService.burn(this.asset.id, this.deployments[0].id, {
-      fromAddress: action.fromWallet ?? '',
-      amount: action.amount.toString(),
-    }).subscribe({
+    const assetId = this.asset.id;
+    const depId = this.deployments[0].id;
+    const body = { fromAddress: action.fromWallet, amount: action.amount.toString() };
+    // T3-01: step-up (built-in sign-in: TOTP → scoped token) + the operator's 4-eyes approval token.
+    const stepUp$: Observable<string | undefined> = action.totpCode
+      ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_BURN_EWG26').pipe(map(r => r.stepUpToken))
+      : of(undefined);
+    stepUp$.pipe(
+      switchMap(stepUpToken =>
+        this.issuanceService.burn(assetId, depId, body, { approvalToken: action.approvalToken, stepUpToken })),
+    ).subscribe({
       next: (r) => {
         this.tokenActionInProgress = false;
         this.txService.track(r.txId, `Burn ${action.amount} tokens`);
+        this.cdr.markForCheck();
       },
-      error: () => {
+      error: (err: HttpErrorResponse) => {
         this.tokenActionInProgress = false;
-        this.snackBar.open('Burn failed.', 'Close', { duration: 5000 });
+        this.snackBar.open(this.burnErrorMessage(err), 'Close', { duration: 8000 });
+        this.cdr.markForCheck();
       },
     });
+  }
+
+  private burnErrorMessage(err: HttpErrorResponse): string {
+    switch (err?.status) {
+      case 400: return 'Burn refused: the wallet is not an active holder of this asset.';
+      case 403: return 'Burn needs an ASSET_TOKEN_ADMIN grant, a valid authenticator code and a current '
+        + 'operator approval token for ISSUER_BURN_EWG26.';
+      case 409: return err.error?.message ?? 'Burn refused: the wallet is under a legal block (Sperrvermerk).';
+      default: return 'Burn failed.';
+    }
   }
 
   onForceTransfer(action: ForceTransferAction): void {

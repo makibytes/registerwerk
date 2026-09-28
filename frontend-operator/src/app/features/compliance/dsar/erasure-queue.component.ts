@@ -90,6 +90,14 @@ type ResolveMode = 'complete' | 'reject';
               : 'e.g. all fields under statutory retention (GwG §8 / HGB §257)' }}">
           </textarea>
         </mat-form-field>
+        @if (resolveMode === 'complete') {
+          <mat-form-field appearance="outline">
+            <mat-label>Retained notice channel (§19 eWpG)</mat-label>
+            <input matInput [(ngModel)]="retainedNoticeChannel"
+                   placeholder="e.g. registered post to the address held by the issuer" />
+            <mat-hint>Required while the entity still has active register holdings - the erased e-mail can no longer receive statutory notices.</mat-hint>
+          </mat-form-field>
+        }
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
         <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
@@ -117,6 +125,7 @@ export class ErasureQueueComponent implements OnInit {
   activeRequest: ErasureRequestView | null = null;
   resolveMode: ResolveMode = 'complete';
   resolutionNote = '';
+  retainedNoticeChannel = '';
 
   readonly columns: TableColumn[] = [
     {
@@ -186,6 +195,7 @@ export class ErasureQueueComponent implements OnInit {
     this.activeRequest = req;
     this.resolveMode = mode;
     this.resolutionNote = '';
+    this.retainedNoticeChannel = '';
     this.dialog.open(this.resolveDialogTpl, { width: '480px' });
   }
 
@@ -195,6 +205,7 @@ export class ErasureQueueComponent implements OnInit {
     this.dialog.closeAll();
 
     const note = this.resolutionNote.trim();
+    const retainedNoticeChannel = this.retainedNoticeChannel.trim() || undefined;
     const isComplete = this.resolveMode === 'complete';
 
     this.dialog
@@ -219,7 +230,7 @@ export class ErasureQueueComponent implements OnInit {
         if (isComplete && !result.dualControlToken) return;
 
         const action$ = isComplete
-          ? this.dsarService.complete(req.id, note, result.stepUpToken, result.dualControlToken!)
+          ? this.dsarService.complete(req.id, note, result.stepUpToken, result.dualControlToken!, retainedNoticeChannel)
           : this.dsarService.reject(req.id, note, result.stepUpToken);
 
         action$.subscribe({
@@ -235,7 +246,7 @@ export class ErasureQueueComponent implements OnInit {
             this.snackBar.open(
               err?.error?.message ?? 'Failed to resolve erasure request.',
               'Dismiss',
-              { duration: 6000 },
+              { duration: 10000 },
             );
           },
         });

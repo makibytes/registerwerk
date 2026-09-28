@@ -64,6 +64,10 @@ public class RegisterStatement {
     @Column(name = "delivery_error")
     private String deliveryError;
 
+    /** Machine-readable failure class; {@code NO_LAWFUL_CHANNEL} (GDPR erasure) is never retried. */
+    @Column(name = "delivery_error_code", length = 40)
+    private String deliveryErrorCode;
+
     @Column(name = "issued_at", nullable = false)
     private Instant issuedAt = Instant.now();
 
@@ -95,6 +99,8 @@ public class RegisterStatement {
     public void setDeliveryChannel(String deliveryChannel) { this.deliveryChannel = deliveryChannel; }
     public String getDeliveryError() { return deliveryError; }
     public void setDeliveryError(String deliveryError) { this.deliveryError = deliveryError; }
+    public String getDeliveryErrorCode() { return deliveryErrorCode; }
+    public void setDeliveryErrorCode(String deliveryErrorCode) { this.deliveryErrorCode = deliveryErrorCode; }
     public Instant getIssuedAt() { return issuedAt; }
     public void setIssuedAt(Instant issuedAt) { this.issuedAt = issuedAt; }
     public Instant getDeliveredAt() { return deliveredAt; }

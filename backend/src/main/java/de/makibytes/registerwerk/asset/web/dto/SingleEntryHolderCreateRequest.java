@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.asset.web.dto;
 
+import de.makibytes.registerwerk.asset.internal.InstructingParty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -18,5 +19,7 @@ public record SingleEntryHolderCreateRequest(
     boolean isConsumer,
     String thirdPartyRights,
     String disposalRestrictions,
-    String legalCapacityNote
+    String legalCapacityNote,
+    @NotNull InstructingParty instructingParty,
+    @NotBlank String instructionReference
 ) {}

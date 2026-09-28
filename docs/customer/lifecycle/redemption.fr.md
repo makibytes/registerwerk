@@ -1,6 +1,6 @@
 ---
 title: 6. Opérations sur titres et remboursement
-description: Coupons, dates d'enregistrement, attestations fiscales — et comment un titre est finalement remboursé puis détruit.
+description: Coupons, dates d'enregistrement, relevés de revenus — et comment un titre est finalement remboursé puis détruit.
 ---
 
 # Étape 6 — Opérations sur titres et remboursement
@@ -95,14 +95,14 @@ Seul un sous-ensemble peut réellement être créé aujourd'hui — le reste est
 
 ---
 
-## Attestations fiscales
+## Relevé de revenus (pas une attestation fiscale) { #tax-certificates }
 
-Pour les titulaires allemands, les revenus d'un titre sont imposables, et le titulaire a besoin d'une **Steuerbescheinigung** — une attestation fiscale indiquant ce qu'il a perçu au cours d'une année donnée.
+Pour les titulaires allemands, les revenus d'un titre sont imposables. Registerwerk fournit chaque année un **Ertragsaufstellung** (relevé de revenus) indiquant ce qui a été versé au titulaire — mais ce n'est **pas une Steuerbescheinigung** au sens du § 45a EStG.
 
-Registerwerk la produit à partir des lignes d'opérations sur titres : pour chaque investisseur, l'ensemble des droits de l'exercice, agrégés.
+Il est produit à partir des lignes d'opérations sur titres réglées : pour chaque investisseur, les droits à coupon, intérêts et dividendes de l'année civile, regroupés **par devise** (des montants en devises différentes ne sont jamais additionnés). Les remboursements de capital (remboursement, rachat, remboursement partiel) et les appels de fonds ne sont **pas des revenus** et sont exclus ; les plus-values de cession ou de remboursement ne sont pas déterminées, car le registre ne contient pas les prix de revient.
 
-!!! warning "Elle indique ce qui a été payé, pas ce qui est dû"
-    L'attestation est un relevé factuel des distributions issues de ce registre. Ce n'est pas un conseil fiscal, elle ne tient pas compte de revenus perçus ailleurs et ne calcule l'impôt de personne. Les obligations de retenue à la source dépendent de la résidence et du statut du titulaire, et relèvent de la responsabilité de l'émetteur et du titulaire.
+!!! warning "Il indique ce qui a été payé, pas ce qui est dû"
+    Le relevé est un état factuel des distributions brutes issues de ce registre. Ce n'est pas un conseil fiscal, il ne tient pas compte de revenus perçus ailleurs et ne calcule l'impôt de personne. **Registerwerk ne retient ni Kapitalertragsteuer ni Solidaritätszuschlag** — les coupons sont versés bruts et le relevé l'indique (retenu : 0,00). Savoir si le teneur de registre agit comme agent payeur qui retient et atteste est une décision de principe encore ouverte ; d'ici là, titulaires et émetteurs restent responsables de la retenue et de la déclaration.
 
 ---
 
@@ -135,7 +135,7 @@ stateDiagram-v2
 
 ### Lorsque le remboursement n'a pas lieu
 
-La date de paiement passe et rien n'est réglé. C'est un **défaut de paiement**, et c'est un événement réel que la plateforme détecte plutôt qu'elle ne l'ignore : les opérations de remboursement dont la date de paiement est dépassée sans règlement sont signalées, tout comme les coupons manqués.
+Le paiement n'est pas réglé à la date prévue. La plateforme ne parle pas immédiatement de défaut : le paiement apparaît d'abord comme **paiement en attente** (en retard) pendant le délai de grâce — 30 jours pour les intérêts, 7 jours pour le principal par défaut. Ce n'est que s'il reste impayé ensuite que le coupon est signalé **manqué** et l'obligation **en défaut**. Si le paiement est réglé à un moment quelconque, le signal est effacé et l'obligation est marquée remboursée (ou le coupon payé).
 
 Registerwerk lève le drapeau. Il ne peut pas faire exécuter une créance — cela relève du représentant de la masse, des titulaires et des tribunaux.
 

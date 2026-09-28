@@ -14,6 +14,10 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.RedemptionReadinessPort;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.HolderKind;
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
 import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.BondStatus;
@@ -23,6 +27,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -43,14 +48,20 @@ public class AssetLifecycleService {
     private final AssetRepository assetRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final AssetBondTermsRepository bondTermsRepository;
+    private final AssetHolderRepository holderRepository;
+    private final RedemptionReadinessPort redemptionReadiness;
 
     public AssetLifecycleService(
             AssetRepository assetRepository,
             ApplicationEventPublisher eventPublisher,
-            AssetBondTermsRepository bondTermsRepository) {
+            AssetBondTermsRepository bondTermsRepository,
+            AssetHolderRepository holderRepository,
+            RedemptionReadinessPort redemptionReadiness) {
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
         this.bondTermsRepository = bondTermsRepository;
+        this.holderRepository = holderRepository;
+        this.redemptionReadiness = redemptionReadiness;
     }
 
     /** Submits a DRAFT asset for approval → PENDING_APPROVAL. */
@@ -130,14 +141,55 @@ public class AssetLifecycleService {
      * which {@link AssetRedemptionListener} uses to dispatch the actual on-chain burn/retire for
      * standards it can automate — this method itself only owns the DB status transition and,
      * for bonds, reconciling {@link BondStatus}.
+     *
+     * <p>T3-01: redemption burns every holder, so it must never run ahead of the payout. The
+     * endpoint is REGISTRY_ADMIN + step-up + 4-eyes; this method refuses (409) while
+     * <ul>
+     *   <li>any corporate action is still in flight,</li>
+     *   <li>an active {@link HolderKind#NOMINEE_POOL} entry holds units (pools must be unwound
+     *       first — burning a pool contract breaks its internal accounting),</li>
+     *   <li>for bonds: no REDEMPTION/CALL action has settled — including a DEFAULTED bond, whose
+     *       status is never silently overwritten with REDEEMED.</li>
+     * </ul>
+     * Non-bond assets have no corporate action to point at; the stated {@code legalBasis}
+     * (e.g. eWpG §26 Einziehung) and {@code reference} plus the second approver are the record.
      */
     @CacheEvict(value = "assets", key = "#assetId")
-    public void redeem(UUID assetId, UUID actorId) {
+    public void redeem(UUID assetId, String legalBasis, String reference, UUID actorId, UUID dualControlApproverId) {
         Asset asset = assetRepository.findById(assetId)
             .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
         if (asset.getStatus() != AssetStatus.ISSUED && asset.getStatus() != AssetStatus.SUSPENDED) {
             throw new InvalidStateTransitionException("Asset",
                 asset.getStatus().name(), AssetStatus.REDEEMED.name());
+        }
+        if (legalBasis == null || legalBasis.isBlank() || reference == null || reference.isBlank()) {
+            throw new IllegalArgumentException("Redemption requires a legal basis and a reference.");
+        }
+        if (redemptionReadiness.hasOpenCorporateAction(assetId)) {
+            throw new IllegalStateException("Asset " + assetId + " has a corporate action in progress — "
+                    + "settle or cancel it before redeeming.");
+        }
+        boolean poolHoldsUnits = holderRepository.findActiveByAssetId(assetId).stream()
+                .filter(h -> h.getHolderKind() == HolderKind.NOMINEE_POOL)
+                .map(AssetHolder::getNominalAmount)
+                .anyMatch(n -> n != null && n.signum() > 0);
+        if (poolHoldsUnits) {
+            throw new IllegalStateException("Asset " + assetId + " still has units in a nominee pool "
+                    + "(lending market, DvP escrow, desk or facility) — unwind the pools before redeeming.");
+        }
+        Optional<AssetBondTerms> bondTerms = bondTermsRepository.findById(assetId);
+        UUID retirementActionId = null;
+        if (bondTerms.isPresent()) {
+            Optional<RedemptionReadinessPort.SettledRetirement> retirement =
+                    redemptionReadiness.settledRetirementAction(assetId);
+            if (retirement.isEmpty()) {
+                throw new IllegalStateException(bondTerms.get().getBondStatus() == BondStatus.DEFAULTED
+                        ? "Bond " + assetId + " is DEFAULTED and no redemption has been settled — it cannot be "
+                                + "marked REDEEMED."
+                        : "Bond " + assetId + " has no settled REDEMPTION or CALL corporate action — "
+                                + "holders must be paid out before the asset is redeemed.");
+            }
+            retirementActionId = retirement.get().corporateActionId();
         }
         asset.setStatus(AssetStatus.REDEEMED);
         assetRepository.save(asset);
@@ -146,14 +198,16 @@ public class AssetLifecycleService {
         // reconciliation between them — a bond could show Asset.REDEEMED while its own
         // BondStatus stayed ACTIVE (or vice-versa via CantonBondOperations.redeem). Keep them
         // in sync from whichever side redeems first.
-        bondTermsRepository.findById(assetId).ifPresent(terms -> {
-            if (terms.getBondStatus() != BondStatus.REDEEMED) {
+        bondTerms.ifPresent(terms -> {
+            // A called bond stays CALLED (T3-05: the settled CALL already retired it).
+            if (terms.getBondStatus() != BondStatus.REDEEMED && terms.getBondStatus() != BondStatus.CALLED) {
                 terms.setBondStatus(BondStatus.REDEEMED);
                 bondTermsRepository.save(terms);
             }
         });
 
-        eventPublisher.publishEvent(new AssetRedeemedEvent(assetId, actorId, null));
+        eventPublisher.publishEvent(new AssetRedeemedEvent(assetId, actorId, "REGISTRY_ADMIN",
+                legalBasis.trim(), reference.trim(), dualControlApproverId, retirementActionId));
         log.info("Asset redeemed: id={}", assetId);
     }
 

@@ -43,6 +43,10 @@ import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.abi.TypeReference;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.DefaultBlockParameterName;
+import org.web3j.protocol.core.methods.request.EthFilter;
+import org.web3j.protocol.core.methods.response.EthLog;
+import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
 
@@ -141,97 +145,42 @@ public class Erc3643DeploymentService {
     }
 
     /**
-     * Deploy a full T-REX suite for the given asset deployment.
+     * Deploys (or adopts) the full T-REX suite for one {@code asset_deployment} row (T3-19).
      *
-     * <p>Steps (when contract wrappers are available):
+     * <p>The row is looked up by its id — an asset can have several rows for the same chain
+     * (earlier FAILED attempts), so a lookup by (asset, chainConfig) is ambiguous. The factory's
+     * suite for this asset is deterministic ({@code salt = "registerwerk-" + assetId}) and the
+     * factory refuses a second suite per assetId, so a lost response (receipt wait timed out, RPC
+     * dropped) used to leave an orphan suite on chain and the asset undeployable. Now:
      * <ol>
-     *   <li>Resolve the {@code ChainConfig} for this deployment</li>
-     *   <li>Build {@code TokenDetails} and {@code ClaimDetails} from the asset config</li>
-     *   <li>Encode and submit the {@code deployTREXSuite} transaction via Web3j</li>
-     *   <li>Wait for receipt and extract deployed contract addresses from events</li>
-     *   <li>Save {@link Erc3643Suite} record</li>
-     *   <li>Confirm the {@link AssetDeployment} as CONFIRMED</li>
+     *   <li>before sending, and after any send/receipt failure, {@code getSuiteAddresses(salt)} is
+     *       checked; an existing suite is adopted when its token reports our {@code assetId()},
+     *       has our signer as agent and is owned by us or (pending acceptance) by the inner
+     *       TREXFactory — otherwise it fails loudly;</li>
+     *   <li>the broadcast tx hash is persisted on the deployment row before waiting for the
+     *       receipt, and a receipt that does not arrive in time leaves the row PENDING with that
+     *       hash, so {@code AssetDeploymentService.pollPendingDeploymentConfirmations} confirms
+     *       it and then calls {@link #recordSuiteForDeployment} to persist the suite.</li>
      * </ol>
      *
-     * @param assetId       ID of the asset to deploy
-     * @param chainConfigId ID of the chain configuration to deploy on
-     * @param actorId       ID of the user initiating the deployment (for audit)
-     * @return future resolving to the saved {@link Erc3643Suite}
-     */
-    public CompletableFuture<Erc3643Suite> deploy(UUID assetId, UUID chainConfigId, UUID actorId) {
-        log.info("Deploying ERC-3643 suite for asset={} on chainConfig={}", assetId, chainConfigId);
-
-        AssetDeployment deployment = deploymentRepository
-                .findByAssetIdAndChainConfigId(assetId, chainConfigId)
-                .orElseThrow(() -> new EntityNotFoundException(
-                        "AssetDeployment not found for asset=" + assetId + " and chainConfig=" + chainConfigId));
-
-        return CompletableFuture.supplyAsync(() -> {
-            ChainConfig chainConfig = chainConfigRepository.findById(chainConfigId)
-                    .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
-
-            String factoryAddress = contractAddressConfig.requireTrexFactory(chainConfig.getIdentifier());
-            Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
-            EvmSigner signer = evmContractService.signer(chainConfigId);
-
-            // CREATE2 salt: deterministic per asset
-            String salt = "registerwerk-" + assetId.toString();
-
-            // Encode assetId as bytes32
-            byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
-
-            AssetLookupPort.AssetInfo assetInfo = assetLookupPort.findById(assetId)
-                    .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
-            String assetName = assetInfo.name();
-            String assetSymbol = deriveSymbol(assetName);
-
-            // Fails closed before broadcasting: a suite without a ClaimIssuer contract as trusted
-            // issuer could never have a verified holder (T2-21).
-            String claimIssuer = contractAddressConfig.requireClaimIssuer(chainConfig.getIdentifier());
-            Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, signer.address(), claimIssuer,
-                    assetName, assetSymbol);
-            evmContractService.send(chainConfigId, web3j, signer, factoryAddress, fn);
-
-            Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deployment.getId());
-            Erc3643Suite saved = suiteRepository.save(suite);
-            acceptSuiteOwnership(chainConfigId, web3j, signer, saved);
-            seedDefaultClaimTopics(saved.getId());
-
-            eventPublisher.publishEvent(new Erc3643SuiteDeployedEvent(saved.getId(), actorId, "REGISTRY_ADMIN", java.util.Map.of()));
-
-            return saved;
-        });
-    }
-
-    /**
-     * Deploy a full T-REX suite for the given asset deployment.
-     * Overload accepting a {@link ChainDescriptor} for backwards compatibility with
-     * {@link de.makibytes.registerwerk.application.asset.AssetDeploymentService}.
-     *
-     * @param assetId   ID of the asset to deploy
-     * @param chain     legacy chain descriptor
+     * @param deploymentId  the PENDING {@code asset_deployment} row this suite belongs to
+     * @param assetId       asset being deployed (must match the row)
+     * @param chain         chain descriptor (used only for legacy rows without chain_config_id)
      * @param ownerAddress  registry backend wallet address
-     * @return future resolving to the deployment tx hash and the deployed suite's token address
+     * @return future resolving to the deployment tx hash and — once the suite is known — its token
+     *         address (null while the tx is still unmined)
      */
     public CompletableFuture<TokenDeploymentResult> deploy(
-            UUID assetId, ChainDescriptor chain, String ownerAddress) {
-        log.info("Deploying ERC-3643 suite for asset={} on chain={}", assetId, chain);
-        // Resolve by stable chain prefix + network type: testnet identifiers are network-specific
-        // (for example ETHEREUM_SEPOLIA), so CHAIN_TESTNET is not a valid general lookup key.
+            UUID deploymentId, UUID assetId, ChainDescriptor chain, String ownerAddress) {
+        log.info("Deploying ERC-3643 suite for asset={} deployment={} on chain={}", assetId, deploymentId, chain);
         return CompletableFuture.supplyAsync(() -> {
-            ChainConfig chainConfig = chainConfigRepository
-                    .findByIdentifierStartingWith(chain.chain().name() + "_").stream()
-                    .filter(ChainConfig::isEnabled)
-                    .filter(c -> c.getNetworkType().name().equals(chain.network().name()))
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException(
-                            "No enabled ChainConfig found for descriptor=" + chain));
-
-            AssetDeployment deployment = deploymentRepository
-                    .findByAssetIdAndChainConfigId(assetId, chainConfig.getId())
-                    .orElseThrow(() -> new EntityNotFoundException(
-                            "AssetDeployment not found for asset=" + assetId
-                                    + " and chainConfig=" + chainConfig.getId()));
+            AssetDeployment deployment = deploymentRepository.findById(deploymentId)
+                    .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+            if (!assetId.equals(deployment.getAssetId())) {
+                throw new IllegalStateException("AssetDeployment " + deploymentId + " belongs to asset "
+                        + deployment.getAssetId() + ", not " + assetId);
+            }
+            ChainConfig chainConfig = resolveChainConfig(deployment, chain);
 
             String factoryAddress = contractAddressConfig.requireTrexFactory(chainConfig.getIdentifier());
             Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
@@ -241,31 +190,233 @@ public class Erc3643DeploymentService {
                 throw new IllegalStateException(
                         "ERC-3643 owner must match the configured chain signer");
             }
-            String salt = "registerwerk-" + assetId;
+            String salt = suiteSalt(assetId);
             byte[] assetIdBytes = EvmUtils.uuidToBytes32(assetId);
+
+            Optional<AdoptedSuite> existing = adoptExistingSuite(web3j, signer, factoryAddress, salt,
+                    assetIdBytes, assetId, deploymentId, null);
+            if (existing.isPresent()) {
+                return finishDeployment(chainConfig.getId(), web3j, signer, existing.get());
+            }
+
             AssetLookupPort.AssetInfo assetInfo = assetLookupPort.findById(assetId)
                     .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
+            // Fails closed before broadcasting: a suite without a ClaimIssuer contract as trusted
+            // issuer could never have a verified holder (T2-21).
             String claimIssuer = contractAddressConfig.requireClaimIssuer(chainConfig.getIdentifier());
             Function fn = buildDeployEwpgSuiteFunction(assetIdBytes, salt, ownerAddress, claimIssuer,
                     assetInfo.name(), deriveSymbol(assetInfo.name()));
-            TransactionReceipt receipt = evmContractService.send(
-                    chainConfig.getId(), web3j, signer, factoryAddress, fn);
+            String txHash = evmContractService.submit(chainConfig.getId(), web3j, signer, factoryAddress, fn);
+            recordBroadcastTx(deploymentId, txHash);
 
-            // send() already waits for a mined, non-reverted receipt (throws otherwise), so the
-            // suite genuinely exists on-chain now — resolve its real addresses via the factory's
-            // own getSuiteAddresses(salt) view call rather than parsing event-log topics.
-            Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deployment.getId());
-            Erc3643Suite saved = suiteRepository.save(suite);
-            saved.setFactoryTxHash(receipt.getTransactionHash());
-            suiteRepository.save(saved);
-            acceptSuiteOwnership(chainConfig.getId(), web3j, signer, saved);
-            seedDefaultClaimTopics(saved.getId());
+            TransactionReceipt receipt;
+            try {
+                receipt = evmContractService.waitForReceipt(web3j, txHash);
+            } catch (Exception notMined) {
+                // Not mined within the wait (or the receipt RPC failed): the tx may still land.
+                // Adopt if it already has; otherwise stay PENDING with the persisted hash.
+                Optional<AdoptedSuite> adopted = adoptAfterFailure(web3j, signer, factoryAddress, salt,
+                        assetIdBytes, assetId, deploymentId, txHash, notMined);
+                if (adopted.isPresent()) {
+                    return finishDeployment(chainConfig.getId(), web3j, signer, adopted.get());
+                }
+                log.warn("ERC-3643 suite tx={} for deployment={} not mined yet ({}); leaving it PENDING for "
+                        + "the confirmation poll", txHash, deploymentId, notMined.getMessage());
+                return TokenDeploymentResult.txOnly(txHash);
+            }
+            if (!receipt.isStatusOK()) {
+                RuntimeException reverted = new RuntimeException("Transaction reverted on-chain: tx="
+                        + receipt.getTransactionHash() + " status=" + receipt.getStatus());
+                // e.g. "assetId already deployed" because an earlier attempt's tx did land.
+                return adoptAfterFailure(web3j, signer, factoryAddress, salt, assetIdBytes, assetId,
+                        deploymentId, null, reverted)
+                        .map(adopted -> finishDeployment(chainConfig.getId(), web3j, signer, adopted))
+                        .orElseThrow(() -> reverted);
+            }
 
-            eventPublisher.publishEvent(new Erc3643SuiteDeployedEvent(
-                    saved.getId(), null, "SYSTEM", java.util.Map.of()));
-
-            return new TokenDeploymentResult(receipt.getTransactionHash(), saved.getTokenAddress());
+            // The tx is mined and successful, so the suite exists — resolve its real addresses via
+            // the factory's own getSuiteAddresses(salt) view call rather than parsing event-log topics.
+            Erc3643Suite suite = resolveDeployedSuite(web3j, factoryAddress, salt, deploymentId);
+            return finishDeployment(chainConfig.getId(), web3j, signer,
+                    new AdoptedSuite(suite, receipt.getTransactionHash()));
         });
+    }
+
+    /**
+     * Persists the suite of a deployment the confirmation poll has just CONFIRMED when the deploy
+     * flow could not (receipt wait timed out, T3-19). Idempotent: a no-op when the suite row exists.
+     * Verifies the on-chain suite exactly like adoption does.
+     */
+    public void recordSuiteForDeployment(UUID deploymentId) {
+        if (suiteRepository.findByAssetDeploymentId(deploymentId).isPresent()) {
+            return;
+        }
+        AssetDeployment deployment = deploymentRepository.findById(deploymentId)
+                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+        ChainConfig chainConfig = resolveChainConfig(deployment,
+                new ChainDescriptor(deployment.getChain(), deployment.getNetwork()));
+        String factoryAddress = contractAddressConfig.requireTrexFactory(chainConfig.getIdentifier());
+        Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainConfig.getIdentifier());
+        EvmSigner signer = evmContractService.signer(chainConfig.getId());
+        UUID assetId = deployment.getAssetId();
+        AdoptedSuite adopted = adoptExistingSuite(web3j, signer, factoryAddress, suiteSalt(assetId),
+                EvmUtils.uuidToBytes32(assetId), assetId, deploymentId, deployment.getDeployedByTx())
+                .orElseThrow(() -> new IllegalStateException("Deployment " + deploymentId
+                        + " is confirmed but the factory reports no suite for asset " + assetId));
+        finishDeployment(chainConfig.getId(), web3j, signer, adopted);
+    }
+
+    /** A suite found on chain (adopted or freshly deployed) with its creating transaction. */
+    record AdoptedSuite(Erc3643Suite suite, String txHash) {}
+
+    private static String suiteSalt(UUID assetId) {
+        return "registerwerk-" + assetId;
+    }
+
+    private ChainConfig resolveChainConfig(AssetDeployment deployment, ChainDescriptor chain) {
+        if (deployment.getChainConfigId() != null) {
+            return chainConfigRepository.findById(deployment.getChainConfigId())
+                    .orElseThrow(() -> new EntityNotFoundException("ChainConfig", deployment.getChainConfigId()));
+        }
+        // Legacy rows: resolve by stable chain prefix + network type (testnet identifiers are
+        // network-specific, e.g. ETHEREUM_SEPOLIA).
+        return chainConfigRepository
+                .findByIdentifierStartingWith(chain.chain().name() + "_").stream()
+                .filter(ChainConfig::isEnabled)
+                .filter(c -> c.getNetworkType().name().equals(chain.network().name()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "No enabled ChainConfig found for descriptor=" + chain));
+    }
+
+    /**
+     * Persists the broadcast hash before the receipt wait, so a slow tx is picked up by the
+     * confirmation poll instead of being lost with the response (T3-19).
+     */
+    private void recordBroadcastTx(UUID deploymentId, String txHash) {
+        deploymentRepository.findById(deploymentId).ifPresent(deployment -> {
+            if (deployment.getDeploymentStatus() == AssetDeployment.DeploymentStatus.PENDING
+                    && deployment.getDeployedByTx() == null) {
+                deployment.setDeployedByTx(txHash);
+                deploymentRepository.save(deployment);
+            }
+        });
+    }
+
+    private Optional<AdoptedSuite> adoptAfterFailure(Web3j web3j, EvmSigner signer, String factoryAddress,
+                                                     String salt, byte[] assetIdBytes, UUID assetId,
+                                                     UUID deploymentId, String knownTxHash,
+                                                     Exception failure) {
+        try {
+            return adoptExistingSuite(web3j, signer, factoryAddress, salt, assetIdBytes, assetId,
+                    deploymentId, knownTxHash);
+        } catch (RuntimeException recheckFailure) {
+            recheckFailure.addSuppressed(failure);
+            throw recheckFailure;
+        }
+    }
+
+    /**
+     * Looks for this asset's suite under its deterministic salt and, if present, verifies it is
+     * ours before adopting it: the token's {@code assetId()} must be ours, our signer must be a
+     * token agent (set by {@code deployEwpgSuite}'s tokenAgents), and the token must be owned by
+     * our signer or — ownership not yet accepted — by the inner TREXFactory. A mismatch fails
+     * loudly: the slot is taken by something we did not deploy.
+     *
+     * @param knownTxHash the creating tx when already known; otherwise located via the factory's
+     *                    {@code EwpgSuiteDeployed} log (filtered by assetId and token)
+     */
+    private Optional<AdoptedSuite> adoptExistingSuite(Web3j web3j, EvmSigner signer, String factoryAddress,
+                                                      String salt, byte[] assetIdBytes, UUID assetId,
+                                                      UUID deploymentId, String knownTxHash) {
+        Erc3643Suite suite;
+        try {
+            suite = resolveDeployedSuite(web3j, factoryAddress, salt, deploymentId);
+        } catch (SuiteNotDeployedException notYet) {
+            return Optional.empty();
+        }
+        String token = suite.getTokenAddress();
+        byte[] onChainAssetId = (byte[]) singleValue(web3j, token,
+                new Function("assetId", List.of(), List.of(new TypeReference<Bytes32>() {})));
+        Object isAgent = singleValue(web3j, token, new Function("isAgent",
+                List.of(new Address(signer.address())), List.of(new TypeReference<org.web3j.abi.datatypes.Bool>() {})));
+        String owner = (String) singleValue(web3j, token,
+                new Function("owner", List.of(), List.of(new TypeReference<Address>() {})));
+        String innerFactory = (String) singleValue(web3j, factoryAddress,
+                new Function("trexFactory", List.of(), List.of(new TypeReference<Address>() {})));
+        boolean ownedByUs = signer.address().equalsIgnoreCase(owner) || innerFactory.equalsIgnoreCase(owner);
+        if (!Arrays.equals(onChainAssetId, assetIdBytes) || !Boolean.TRUE.equals(isAgent) || !ownedByUs) {
+            throw new IllegalStateException("A T-REX suite already exists under salt " + salt + " (token "
+                    + token + ") but it is not ours (assetId=" + Numeric.toHexString(onChainAssetId)
+                    + ", signer agent=" + isAgent + ", owner=" + owner + ", expected signer "
+                    + signer.address() + "). Asset " + assetId + " cannot be deployed on factory "
+                    + factoryAddress + " until this is resolved.");
+        }
+        String txHash = knownTxHash != null && !knownTxHash.isBlank() ? knownTxHash
+                : findSuiteCreationTx(web3j, factoryAddress, assetIdBytes, token)
+                        .orElseThrow(() -> new IllegalStateException("Suite token " + token + " for asset "
+                                + assetId + " exists and is ours, but its creating transaction could not be "
+                                + "located via EwpgSuiteDeployed on " + factoryAddress + " (RPC log range "
+                                + "limit?). Retry against an archive-capable RPC."));
+        log.warn("Adopting existing ERC-3643 suite for asset={} deployment={} token={} tx={} — created by an "
+                + "earlier attempt whose response was lost", assetId, deploymentId, token, txHash);
+        return Optional.of(new AdoptedSuite(suite, txHash));
+    }
+
+    private Object singleValue(Web3j web3j, String contract, Function fn) {
+        List<Type> out = evmContractService.call(web3j, contract, fn);
+        if (out.isEmpty()) {
+            throw new IllegalStateException(fn.getName() + "() returned no value at " + contract);
+        }
+        return out.getFirst().getValue();
+    }
+
+    private Optional<String> findSuiteCreationTx(Web3j web3j, String factoryAddress, byte[] assetIdBytes,
+                                                 String tokenAddress) {
+        EthFilter filter = new EthFilter(DefaultBlockParameterName.EARLIEST,
+                DefaultBlockParameterName.LATEST, factoryAddress)
+                .addSingleTopic(REGISTERWERK_SUITE_DEPLOYED_TOPIC)
+                .addSingleTopic(Numeric.toHexString(assetIdBytes));
+        EthLog logs;
+        try {
+            logs = web3j.ethGetLogs(filter).send();
+        } catch (java.io.IOException e) {
+            log.warn("eth_getLogs failed while locating the suite creation tx for {}: {}", tokenAddress, e.getMessage());
+            return Optional.empty();
+        }
+        if (logs.hasError() || logs.getLogs() == null) {
+            return Optional.empty();
+        }
+        String wanted = Numeric.cleanHexPrefix(tokenAddress).toLowerCase(java.util.Locale.ROOT);
+        for (EthLog.LogResult<?> result : logs.getLogs()) {
+            if (result.get() instanceof Log entry && entry.getTopics() != null && entry.getTopics().size() > 2
+                    && entry.getTopics().get(2).toLowerCase(java.util.Locale.ROOT).endsWith(wanted)) {
+                return Optional.ofNullable(entry.getTransactionHash());
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Persists (once) the suite, accepts ownership, seeds the claim topics and audits the
+     * deployment. Idempotent per deployment: an existing suite row is returned as is.
+     */
+    private TokenDeploymentResult finishDeployment(UUID chainConfigId, Web3j web3j, EvmSigner signer,
+                                                   AdoptedSuite found) {
+        UUID deploymentId = found.suite().getAssetDeploymentId();
+        Optional<Erc3643Suite> recorded = suiteRepository.findByAssetDeploymentId(deploymentId);
+        if (recorded.isPresent()) {
+            return new TokenDeploymentResult(found.txHash(), recorded.get().getTokenAddress());
+        }
+        Erc3643Suite suite = found.suite();
+        suite.setFactoryTxHash(found.txHash());
+        Erc3643Suite saved = suiteRepository.save(suite);
+        acceptSuiteOwnership(chainConfigId, web3j, signer, saved);
+        seedDefaultClaimTopics(saved.getId());
+
+        eventPublisher.publishEvent(new Erc3643SuiteDeployedEvent(
+                saved.getId(), null, "SYSTEM", java.util.Map.of()));
+        return new TokenDeploymentResult(found.txHash(), saved.getTokenAddress());
     }
 
     /**
@@ -646,7 +797,7 @@ public class Erc3643DeploymentService {
      * #6). Requires the deploying tx to already be mined and successful (callers only reach
      * this after {@code EvmContractService.send()} returns, which itself throws on revert).
      *
-     * @throws IllegalStateException if the factory reports no token deployed for this salt
+     * @throws SuiteNotDeployedException if the factory reports no token deployed for this salt
      */
     private Erc3643Suite resolveDeployedSuite(
             Web3j web3j, String factoryAddress, String salt, UUID deploymentId) {
@@ -662,7 +813,7 @@ public class Erc3643DeploymentService {
 
         String tokenAddress = (String) result.get(0).getValue();
         if (ZERO_ADDRESS.equalsIgnoreCase(tokenAddress)) {
-            throw new IllegalStateException(
+            throw new SuiteNotDeployedException(
                     "EwpgTREXFactory.getSuiteAddresses(" + salt + ") returned no token — "
                             + "suite was not actually deployed under this salt");
         }
@@ -677,6 +828,13 @@ public class Erc3643DeploymentService {
         suite.setClaimTopicsRegistry((String) result.get(4).getValue());
         suite.setComplianceAddress((String) result.get(5).getValue());
         return suite;
+    }
+
+    /** No suite exists under the salt (yet). */
+    static final class SuiteNotDeployedException extends IllegalStateException {
+        SuiteNotDeployedException(String message) {
+            super(message);
+        }
     }
 
     /**

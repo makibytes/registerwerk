@@ -53,6 +53,32 @@ Per un'obbligazione: valore nominale, valuta, date di emissione e scadenza, tass
 
     **Convenzione di calcolo giorni.** Poco appariscente, ma cambia quanto denaro si muove. Verifica che corrisponda al term sheet invece di darlo per scontato.
 
+### Convenzioni del piano cedole { #coupon-schedule-conventions }
+
+Il salvataggio dei termini dell'obbligazione genera il piano cedole da cui lavorano i processi delle operazioni sul capitale. Le convenzioni seguono la prassi ICMA; ciascuna è impostata nei termini, con questi valori predefiniti:
+
+| Impostazione | Predefinito | Effetto |
+|---|---|---|
+| Conteggio dei giorni | ACT/ACT (ICMA) | Un periodo regolare matura esattamente 1/frequenza; un primo periodo breve matura i suoi giorni effettivi rispetto al periodo regolare nozionale. Sono disponibili ACT/360, ACT/365 (fisso), 30/360 e 30E/360. |
+| Piano | A ritroso dalla scadenza, primo periodo breve | Le date regolari si contano a ritroso dalla scadenza; un periodo irregolare va all'inizio. Se la scadenza è un fine mese, ogni data cedola è un fine mese. |
+| Convenzione giorno lavorativo | Modified Following | Una data di pagamento in un giorno non lavorativo passa al giorno lavorativo successivo, salvo che ciò cambi mese: allora al precedente. Il rateo usa sempre le date non rettificate. |
+| Calendario festività | TARGET2 | Fine settimana, 1° gennaio, Venerdì santo, Lunedì dell'Angelo, 1° maggio, 25 e 26 dicembre. |
+| Data di registrazione | 1 giorno lavorativo prima del pagamento | Chi risulta nel registro alla fine di quel giorno riceve la cedola. |
+| Annuncio | 5 giorni lavorativi prima della data di registrazione | Quando la cedola viene annunciata. |
+| Periodi di grazia | 30 giorni interessi, 7 giorni capitale | Per quanto tempo dopo la data di pagamento un importo non pagato è solo scaduto. |
+
+La cedola per unità è valore nominale × tasso cedolare × frazione di giorni, senza arrotondamento; si arrotonda solo il diritto di ciascun detentore. Una cedola variabile non ha importo finché il tasso non è fissato e non viene annunciata prima. Si generano solo date di pagamento future, quindi termini inseriti in ritardo non creano cedole retrodatate. Il piano compare nella scheda **Corporate Actions** dell'asset.
+
+### Come vengono generate le cedole e il rimborso
+
+- **Annuncio.** La cedola (e il rimborso finale) viene generata automaticamente alla sua *data di annuncio*, non alla data di pagamento, così resta il tempo per attestare e confermare prima del pagamento. Il rimborso segue la stessa regola: data di pagamento = scadenza adeguata secondo la convenzione dei giorni lavorativi.
+- **Record date.** I diritti sono fissati alla **fine della record date** (Europe/Berlin), in base al registro com'era allora. I trasferimenti successivi non li modificano. Per gli asset su chain, lo snapshot attende che il registro sia riconciliato oltre la record date e viene rifiutato («unmapped at record date») se un wallet con unità in quel momento non ha una voce nel registro. La record date di un dividendo, split o richiamo deve essere ancora futura alla proposta e all'approvazione (al più presto il giorno lavorativo successivo).
+- **Arrotondamento.** Il diritto di ciascun detentore è arrotondato alla più piccola unità della valuta (half-even); la conferma mostra il totale pagato e la differenza di arrotondamento.
+- **Scaduto, mancato, default.** Un importo non pagato oltre la data di pagamento appare prima come **OVERDUE** (solo operatori; i clienti vedono «pagamento in sospeso»). Solo dopo il periodo di tolleranza (30 giorni interessi, 7 giorni capitale) una cedola diventa **MISSED** e un'obbligazione **DEFAULTED**. Il regolamento cancella ognuno di questi stati: un rimborso regolato porta l'obbligazione a **REDEEMED**, un richiamo regolato a **CALLED**, una cedola regolata è **PAID**.
+- **Doppio controllo.** L'emittente attesta; un operatore conferma. Un operatore non può mai attestare come emittente: la via per l'operatore è *Override attestation* (step-up e motivazione, verificata separatamente), anche durante l'impersonificazione. Una proposta deve essere approvata da una persona diversa dal proponente.
+- **Diritti trattenuti.** I diritti dei pool di nominee (look-through) non vengono pagati e tengono aperta un'azione regolata, segnalata «held entitlements outstanding», finché non sono risolti.
+- **Ordine dei job.** 05:30 cedole, 05:45 rimborsi, 06:00 transizioni giornaliere (Europe/Berlin): un'azione generata al mattino viene elaborata nella stessa esecuzione.
+
 ### Catena e standard { #chain-and-standard }
 
 Lo standard del token si adatta a ciò che viene affermato?
@@ -73,6 +99,8 @@ Conferma anche che mainnet rispetto a testnet era ciò che intendeva l'emittente
 === "Approva"
 
     Lo stato diventa `APPROVED`. **I termini si bloccano.** L'emittente può ora distribuire il contratto.
+
+    I termini si possono impostare in blocco (con step-up) solo fino all'emissione, e ISIN, valuta, importo di emissione, taglio e date non sono più modificabili dal modulo di modifica dopo l'approvazione. Le modifiche successive sono **emendamenti**: *Modifica asset → Amend terms* richiede la base giuridica, lo step-up e un secondo operatore, registra ogni valore prima/dopo nella pista di controllo e rigenera le cedole future non ancora annunciate. Le cedole pagate o già annunciate non vengono mai riscritte. Valore nominale, cedola e scadenza di un'obbligazione Canton distribuita non si possono emendare qui: sono fissati nello strumento del ledger.
 
     Registra il motivo per cui hai approvato. La pista di controllo registra che l'hai fatto, non ciò che ti ha convinto.
 
@@ -101,6 +129,19 @@ Sarai coinvolto di nuovo quando gli investitori avranno bisogno di onboarding, e
     Approvare un'operazione societaria per il regolamento richiede il [principio dei quattro occhi](../../compliance/step-up-mfa.md).
 
     Pagare l'elenco titolari sbagliato è l'errore catastrofico classico nell'amministrazione titoli, ed è molto difficile da invertire. Assicurati che la tua rotazione abbia davvero due persone disponibili quando cadono le date cedola: un controllo a quattro occhi che nessuno può soddisfare un venerdì pomeriggio è un controllo che finisce per essere aggirato.
+
+
+### Ordini di sottoscrizione e iscrizioni a registro
+
+Gli investitori sottoscrivono tramite il portale. Lei (o l'emittente) gestisce la coda nella scheda **Subscription orders** dell'attività:
+
+1. **Assegnare**, per intero o in misura ridotta. La dimensione dell'emissione e il massimo detenibile dall'investitore (comprese le sue altre assegnazioni aperte) sono verificati sotto blocco, quindi assegnazioni parallele non possono eccedere.
+2. Attendere che l'investitore **accetti**. L'assegnazione ha allora un termine di pagamento (per impostazione predefinita 10 giorni lavorativi TARGET). Se non viene pagata in tempo, un processo pianificato la segna come **decaduta** e libera la capacità.
+3. **Confermare il pagamento** quando il denaro è sul conto ([step-up](../../compliance/step-up-mfa.md)). Per un'obbligazione l'importo dovuto è unità assegnate × valore nominale × prezzo di emissione: un pagamento insufficiente viene rifiutato, uno eccedente registrato come *rimborso dovuto* — il rimborso stesso è un pagamento manuale. Per le attività senza condizioni obbligazionarie inserisce l'importo ricevuto.
+4. **Regolare.** KYC, screening sanzioni, Sperrvermerk, congelamento del registro, finalità, mercato di riferimento e limite di detenzione vengono ricontrollati. Su un'attività ERC-20 o ERC-3643 distribuita le unità vengono coniate e la sincronizzazione dei titolari le accredita nel registro quando il trasferimento è indicizzato; per gli altri standard distribuiti l'ordine resta *pagato* finché non emette le unità a mano. Senza distribuzione il registro viene accreditato direttamente.
+5. **Rilasciare** restituisce un'assegnazione con una motivazione; su un ordine pagato il pagamento è segnato come rimborso dovuto.
+
+Le iscrizioni a registro spettano a lei, non all'emittente. Nella scheda **Holders** dell'attività, *Add register entry* e *Change §17(2) attributes* richiedono ciascuna un'istruzione (chi, e un riferimento); un campo vuoto significa nessuna modifica, rimuovere un diritto richiede la propria casella e un secondo approvatore. Gli emittenti richiedono tramite *richieste di modifica*, che lei esegue (quattro occhi) o rifiuta. Su un'attività distribuita un'iscrizione manuale è solo un collegamento di wallet con nominale 0.
 
 ---
 

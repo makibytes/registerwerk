@@ -14,17 +14,23 @@ import java.util.UUID;
  * action ({@code HolderService.updateNominalAmount}/{@code updateSingleEntryAttributes}), which
  * have no broader operation to correlate with.
  */
-public record HolderRegisterChangedEvent(UUID holderId, UUID actorId, String actorRole, UUID correlationId)
+public record HolderRegisterChangedEvent(UUID holderId, UUID actorId, String actorRole, UUID correlationId,
+                                   Map<String, Object> details)
         implements AuditableEvent {
 
+    public HolderRegisterChangedEvent(UUID holderId, UUID actorId, String actorRole, UUID correlationId) {
+        this(holderId, actorId, actorRole, correlationId, Map.of());
+    }
+
     public HolderRegisterChangedEvent(UUID holderId, UUID actorId, String actorRole) {
-        this(holderId, actorId, actorRole, null);
+        this(holderId, actorId, actorRole, null, Map.of());
     }
 
     public String eventType()   { return "HOLDER_REGISTER_CHANGED"; }
     public String subjectType() { return "AssetHolder"; }
     public UUID   subjectId()   { return holderId; }
-    public Map<String, Object> payload() { return Map.of(); }
+    /** T3-13: instructing party/reference and before/after values for operator-executed changes. */
+    public Map<String, Object> payload() { return details != null ? details : Map.of(); }
 
     @Override
     public UUID correlationId() { return correlationId; }

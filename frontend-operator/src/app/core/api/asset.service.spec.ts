@@ -81,7 +81,7 @@ describe('AssetService', () => {
         req.flush({});
     });
 
-    it('approveAsset() / issueAsset() / suspendAsset() / reactivateAsset() / redeemAsset() hit their lifecycle sub-paths with empty bodies', () => {
+    it('approveAsset() / issueAsset() / suspendAsset() / reactivateAsset() hit their lifecycle sub-paths with empty bodies', () => {
         service.approveAsset('a-1').subscribe();
         expect(httpMock.expectOne(`${base}/a-1/approve`).request.method).toBe('POST');
 
@@ -94,9 +94,6 @@ describe('AssetService', () => {
         service.reactivateAsset('a-1').subscribe();
         expect(httpMock.expectOne(`${base}/a-1/reactivate`).request.method).toBe('POST');
 
-        service.redeemAsset('a-1').subscribe();
-        expect(httpMock.expectOne(`${base}/a-1/redeem`).request.method).toBe('POST');
-
         httpMock.match(() => true).forEach(req => req.flush({}));
     });
 
@@ -107,11 +104,25 @@ describe('AssetService', () => {
         expect(mintReq.request.body).toEqual({ toAddress: '0xabc', amount: 100 });
         mintReq.flush({ txId: 'tx-1' });
 
-        service.burn('a-1', 'd-1', { fromAddress: '0xabc', amount: 50 }).subscribe();
+        service.burn('a-1', 'd-1', { fromAddress: '0xabc', amount: 50 },
+          { stepUpToken: 'su', dualControlToken: 'dc' }).subscribe();
         const burnReq = httpMock.expectOne(`${base}/a-1/deployments/d-1/issuer/burn`);
         expect(burnReq.request.method).toBe('POST');
         expect(burnReq.request.body).toEqual({ fromAddress: '0xabc', amount: 50 });
+        expect(burnReq.request.headers.get('Authorization')).toBe('Bearer su');
+        expect(burnReq.request.headers.get('X-Dual-Control-Token')).toBe('dc');
         burnReq.flush({ txId: 'tx-2' });
+    });
+
+    it('redeemAsset() sends legal basis + reference with step-up and dual-control headers (T3-01)', () => {
+        service.redeemAsset('a-1', { legalBasis: 'eWpG §26', reference: 'CA-7' },
+          { stepUpToken: 'su', dualControlToken: 'dc' }).subscribe();
+        const req = httpMock.expectOne(`${base}/a-1/redeem`);
+        expect(req.request.method).toBe('POST');
+        expect(req.request.body).toEqual({ legalBasis: 'eWpG §26', reference: 'CA-7' });
+        expect(req.request.headers.get('Authorization')).toBe('Bearer su');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('dc');
+        req.flush({});
     });
 
     it('uploadDocument() sends a multipart FormData body with file and documentType', () => {

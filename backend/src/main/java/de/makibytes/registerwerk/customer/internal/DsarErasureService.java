@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.customer.internal;
 
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
+import de.makibytes.registerwerk.customer.api.ActiveHoldingsPort;
 import de.makibytes.registerwerk.customer.api.ErasureRequest;
 import de.makibytes.registerwerk.customer.api.ErasureRequestRepository;
 import de.makibytes.registerwerk.customer.api.ErasureRequestStatus;
@@ -42,9 +43,11 @@ public class DsarErasureService {
     private final ErasureRequestRepository repository;
     private final AppUserRepository userRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final ActiveHoldingsPort activeHoldingsPort;
 
     public DsarErasureService(ErasureRequestRepository repository, AppUserRepository userRepository,
-                               ApplicationEventPublisher eventPublisher) {
+                               ApplicationEventPublisher eventPublisher, ActiveHoldingsPort activeHoldingsPort) {
+        this.activeHoldingsPort = activeHoldingsPort;
         this.repository = repository;
         this.userRepository = userRepository;
         this.eventPublisher = eventPublisher;
@@ -98,6 +101,17 @@ public class DsarErasureService {
      * fully intact.
      */
     public ErasureRequest complete(UUID requestId, UUID operatorId, String note, UUID approverId) {
+        return complete(requestId, operatorId, note, approverId, null);
+    }
+
+    /**
+     * T3-14: while the entity still has active register holdings the operator must name the notice
+     * channel that is retained for the statutory §19 eWpG notices (the tombstoned contact data can no
+     * longer serve as one); the choice is recorded on the request and in the audit event. Completion
+     * is not otherwise blocked - the retention-channel policy itself is a parked decision.
+     */
+    public ErasureRequest complete(UUID requestId, UUID operatorId, String note, UUID approverId,
+                                   String retainedNoticeChannel) {
         ErasureRequest req = repository.findById(requestId)
                 .orElseThrow(() -> new EntityNotFoundException("ErasureRequest", requestId));
         if (req.getStatus() == ErasureRequestStatus.COMPLETED || req.getStatus() == ErasureRequestStatus.REJECTED) {
@@ -106,6 +120,14 @@ public class DsarErasureService {
             // one already REJECTED, i.e. explicitly NOT to be erased) must not be tombstoned as
             // a side effect of a call that is about to fail anyway.
             throw new IllegalStateException("Erasure request " + requestId + " is already resolved");
+        }
+        boolean hasHoldings = activeHoldingsPort.hasActiveHoldings(req.getEntityId());
+        if (hasHoldings && (retainedNoticeChannel == null || retainedNoticeChannel.isBlank())) {
+            throw new IllegalArgumentException("The entity still has active register holdings: state the retained "
+                    + "notice channel (retainedNoticeChannel) that serves the statutory §19 eWpG notices after erasure.");
+        }
+        if (retainedNoticeChannel != null && !retainedNoticeChannel.isBlank()) {
+            req.setRetainedNoticeChannel(retainedNoticeChannel.trim());
         }
         int erasedCount = 0;
         for (AppUser user : userRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(req.getEntityId())) {
@@ -148,6 +170,7 @@ public class DsarErasureService {
         details.put("erasureRequestId", requestId.toString());
         details.put("resolution", target.name());
         if (note != null && !note.isBlank()) details.put("note", note);
+        if (req.getRetainedNoticeChannel() != null) details.put("retainedNoticeChannel", req.getRetainedNoticeChannel());
         eventPublisher.publishEvent(
                 new DsarErasureResolvedEvent(req.getEntityId(), operatorId, "REGISTRY_ADMIN", approverId, details));
         log.info("DSAR erasure request {} resolved as {} by {}", requestId, target, operatorId);

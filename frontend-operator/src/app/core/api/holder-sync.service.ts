@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
@@ -33,7 +33,11 @@ export class HolderSyncService {
       { walletAddress, poolKind, investorId: investorId || null });
   }
 
-  mapWalletToInvestor(assetId: string, walletAddress: string, investorId: string): Observable<unknown> {
-    return this.http.post(`${this.base}/${assetId}/holders`, { investorId, walletAddress });
+  /** A wallet mapping (nominal 0) is a register entry: operator-only, step-up, recorded instruction (T3-13). */
+  mapWalletToInvestor(assetId: string, walletAddress: string, investorId: string,
+                      instructingParty: string, instructionReference: string, stepUpToken: string): Observable<unknown> {
+    return this.http.post(`${this.base}/${assetId}/holders`,
+      { investorId, walletAddress, nominalAmount: 0, instructingParty, instructionReference },
+      { headers: new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` }) });
   }
 }

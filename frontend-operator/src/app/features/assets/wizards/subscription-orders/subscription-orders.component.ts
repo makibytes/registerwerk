@@ -9,22 +9,23 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../../../shared/components/step-up/step-up-dialog.component';
 import { SubscriptionOrderService } from '../../../../core/api/subscription-order.service';
 import { SubscriptionOrder } from '../../../../core/models';
 
-type DecisionMode = 'allocate' | 'reject';
+type DecisionMode = 'allocate' | 'reject' | 'payment' | 'release';
 
 /**
- * Issuer/operator queue for primary-market subscription orders — submit → allocate → confirm
- * (investor-side) / reject / cancel. Scoped per-asset, matching `SubscriptionOrderController`'s
- * `GET /assets/{assetId}/orders`.
+ * Issuer/operator queue for primary-market subscription orders — submit → allocate → investor
+ * accepts → confirm payment → settle (enters the register / mints), with reject / release / lapse as
+ * exits. Scoped per-asset, matching `SubscriptionOrderController`'s `GET /assets/{assetId}/orders`.
  */
 @Component({
   selector: 'app-subscription-orders',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, MatButtonModule, MatIconModule, MatDialogModule, MatFormFieldModule, MatInputModule, MatTooltipModule, DecimalPipe],
+  imports: [FormsModule, MatButtonModule, MatIconModule, MatDialogModule, MatFormFieldModule, MatInputModule, MatTooltipModule, DecimalPipe, DatePipe],
   template: `
     <div class="so-shell">
       <div class="so-header">
@@ -48,6 +49,7 @@ type DecisionMode = 'allocate' | 'reject';
             <span>Wallet</span>
             <span>Requested</span>
             <span>Allocated</span>
+            <span>Due / refund</span>
             <span>Status</span>
             <span></span>
           </div>
@@ -58,7 +60,14 @@ type DecisionMode = 'allocate' | 'reject';
               <span class="dimmed small mono">{{ o.walletAddress }}</span>
               <span>{{ o.requestedAmount | number:'1.0-2' }}</span>
               <span>{{ o.allocatedAmount !== null ? (o.allocatedAmount | number:'1.0-2') : '—' }}</span>
-              <span class="status-badge" [class]="o.status.toLowerCase()">{{ o.status }}</span>
+              <span class="dimmed small">
+                @if (o.amountDue !== null) { {{ o.amountDue | number:'1.2-2' }} {{ o.paymentCurrency }} }
+                @if (o.refundDue && o.refundDue > 0) { <br><strong class="refund">refund {{ o.refundDue | number:'1.2-2' }}</strong> }
+                @if (o.amountDue === null && !(o.refundDue && o.refundDue > 0)) { — }
+              </span>
+              <span class="status-badge" [class]="o.status.toLowerCase()">
+                {{ statusLabel(o) }}
+              </span>
               <div class="row-actions">
                 @if (o.status === 'SUBMITTED') {
                   <button type="button" mat-icon-button color="primary" matTooltip="Allocate" (click)="openDecisionDialog(o, 'allocate')">
@@ -67,6 +76,33 @@ type DecisionMode = 'allocate' | 'reject';
                   <button type="button" mat-icon-button color="warn" matTooltip="Reject" (click)="openDecisionDialog(o, 'reject')">
                     <mat-icon>cancel</mat-icon>
                   </button>
+                }
+                @if (o.status === 'ALLOCATED') {
+                  <button type="button" mat-icon-button color="primary" matTooltip="Confirm payment received"
+                          [disabled]="!o.acceptedAt" (click)="openDecisionDialog(o, 'payment')">
+                    <mat-icon>payments</mat-icon>
+                  </button>
+                  <button type="button" mat-icon-button color="warn" matTooltip="Release allocation" (click)="openDecisionDialog(o, 'release')">
+                    <mat-icon>undo</mat-icon>
+                  </button>
+                  <span class="dimmed small" [matTooltip]="o.acceptedAt ? 'Investor accepted' : 'Waiting for the investor to accept'">
+                    {{ o.acceptedAt ? 'accepted' : 'not accepted' }}
+                    @if (o.allocationExpiresAt) { · until {{ o.allocationExpiresAt | date:'shortDate' }} }
+                  </span>
+                }
+                @if (o.status === 'PAYMENT_CONFIRMED') {
+                  <button type="button" mat-icon-button color="primary" matTooltip="Settle: enter on the register (mint if deployed)" (click)="settle(o)">
+                    <mat-icon>verified</mat-icon>
+                  </button>
+                  <button type="button" mat-icon-button color="warn" matTooltip="Release and mark payment for refund" (click)="openDecisionDialog(o, 'release')">
+                    <mat-icon>undo</mat-icon>
+                  </button>
+                }
+                @if (o.status === 'SETTLED' && o.settlementTxId) {
+                  <span class="dimmed small" matTooltip="Mint transaction id">mint {{ o.settlementTxId.slice(0, 8) }}</span>
+                }
+                @if (o.status === 'RELEASED' && o.releaseReason) {
+                  <span class="dimmed small" [matTooltip]="o.releaseReason">Reason ⓘ</span>
                 }
                 @if (o.status === 'REJECTED' && o.rejectionReason) {
                   <span class="dimmed small" [matTooltip]="o.rejectionReason">Reason ⓘ</span>
@@ -79,7 +115,7 @@ type DecisionMode = 'allocate' | 'reject';
     </div>
 
     <ng-template #decisionDialogTpl>
-      <h2 mat-dialog-title>{{ decisionMode === 'allocate' ? 'Allocate' : 'Reject' }} Order</h2>
+      <h2 mat-dialog-title>{{ dialogTitle() }}</h2>
       <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:400px">
         @if (decisionMode === 'allocate') {
           <p class="dimmed small" style="margin:0">
@@ -90,6 +126,37 @@ type DecisionMode = 'allocate' | 'reject';
             <mat-label>Allocated amount</mat-label>
             <input matInput type="number" min="0" [(ngModel)]="allocatedAmount">
           </mat-form-field>
+        } @else if (decisionMode === 'payment') {
+          <p class="dimmed small" style="margin:0">
+            Allocated {{ activeOrder?.allocatedAmount | number:'1.0-2' }}.
+            @if (activeOrder?.amountDue !== null) {
+              Amount due: {{ activeOrder?.amountDue | number:'1.2-2' }} {{ activeOrder?.paymentCurrency }}. Underpayment is refused;
+              an overpayment is accepted and shown as refund due.
+            } @else {
+              No bond terms: the amount you enter is recorded as the amount due.
+            }
+          </p>
+          <mat-form-field appearance="outline">
+            <mat-label>Amount received</mat-label>
+            <input matInput type="number" min="0" [(ngModel)]="paidAmount">
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Payment reference</mat-label>
+            <input matInput [(ngModel)]="paymentReference">
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Value date (optional)</mat-label>
+            <input matInput type="date" [(ngModel)]="valueDate">
+          </mat-form-field>
+        } @else if (decisionMode === 'release') {
+          <p class="dimmed small" style="margin:0">
+            Gives the allocation back and frees its capacity.
+            @if (activeOrder?.status === 'PAYMENT_CONFIRMED') { The received payment is marked as refund due. }
+          </p>
+          <mat-form-field appearance="outline">
+            <mat-label>Reason</mat-label>
+            <textarea matInput rows="3" [(ngModel)]="rejectionReason"></textarea>
+          </mat-form-field>
         } @else {
           <mat-form-field appearance="outline">
             <mat-label>Rejection reason</mat-label>
@@ -99,10 +166,10 @@ type DecisionMode = 'allocate' | 'reject';
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
         <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
-        <button type="button" mat-raised-button [color]="decisionMode === 'allocate' ? 'primary' : 'warn'"
-                [disabled]="decisionMode === 'allocate' ? !allocatedAmount || allocatedAmount <= 0 : !rejectionReason.trim()"
+        <button type="button" mat-raised-button [color]="decisionMode === 'allocate' || decisionMode === 'payment' ? 'primary' : 'warn'"
+                [disabled]="!decisionValid()"
                 (click)="submitDecision()">
-          {{ decisionMode === 'allocate' ? 'Allocate' : 'Reject' }}
+          {{ dialogTitle() }}
         </button>
       </mat-dialog-actions>
     </ng-template>
@@ -121,7 +188,7 @@ type DecisionMode = 'allocate' | 'reject';
     .so-table { display: flex; flex-direction: column; }
     .so-row {
       display: grid;
-      grid-template-columns: 1fr 1.4fr 110px 110px 120px 90px;
+      grid-template-columns: 1fr 1.3fr 90px 90px 120px 130px minmax(150px, 1.2fr);
       gap: .5rem;
       align-items: center;
       padding: .625rem .5rem;
@@ -144,11 +211,16 @@ type DecisionMode = 'allocate' | 'reject';
       font-weight: 700;
       width: fit-content;
     }
-    .status-badge.submitted { background: rgba(245,158,11,.15); color: #f59e0b; }
-    .status-badge.allocated { background: rgba(96,165,250,.15); color: #60a5fa; }
-    .status-badge.confirmed { background: rgba(74,222,128,.15); color: #4ade80; }
-    .status-badge.rejected  { background: rgba(248,113,113,.15); color: #f87171; }
-    .status-badge.cancelled { background: rgba(148,163,184,.15); color: #94a3b8; }
+    .status-badge.submitted { background: var(--rw-pending-bg);  color: var(--rw-pending-fg); }
+    .status-badge.allocated { background: var(--rw-draft-bg);    color: var(--rw-draft-fg); }
+    .status-badge.confirmed { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+    .status-badge.payment_confirmed { background: var(--rw-issued-bg); color: var(--rw-issued-fg); }
+    .status-badge.settled   { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+    .status-badge.lapsed    { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
+    .status-badge.released  { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
+    .refund { color: var(--rw-text-warning); }
+    .status-badge.rejected  { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
+    .status-badge.cancelled { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
 
     .row-actions { display: flex; justify-content: flex-end; gap: 4px; align-items: center; }
   `],
@@ -169,6 +241,9 @@ export class SubscriptionOrdersComponent implements OnInit {
   decisionMode: DecisionMode = 'allocate';
   allocatedAmount: number | null = null;
   rejectionReason = '';
+  paidAmount: number | null = null;
+  paymentReference = '';
+  valueDate = '';
 
   ngOnInit(): void {
     this.load();
@@ -194,13 +269,90 @@ export class SubscriptionOrdersComponent implements OnInit {
     this.decisionMode = mode;
     this.allocatedAmount = order.requestedAmount;
     this.rejectionReason = '';
+    this.paidAmount = order.amountDue;
+    this.paymentReference = 'SUB-' + order.id.slice(0, 8).toUpperCase();
+    this.valueDate = '';
     this.dialog.open(this.decisionDialogTpl, { width: '480px' });
+  }
+
+  statusLabel(o: SubscriptionOrder): string {
+    return o.status === 'PAYMENT_CONFIRMED' ? 'PAID' : o.status;
+  }
+
+  dialogTitle(): string {
+    switch (this.decisionMode) {
+      case 'allocate': return 'Allocate';
+      case 'payment': return 'Confirm payment';
+      case 'release': return 'Release allocation';
+      default: return 'Reject';
+    }
+  }
+
+  decisionValid(): boolean {
+    switch (this.decisionMode) {
+      case 'allocate': return !!this.allocatedAmount && this.allocatedAmount > 0;
+      case 'payment': return !!this.paidAmount && this.paidAmount > 0 && !!this.paymentReference.trim();
+      default: return !!this.rejectionReason.trim();
+    }
+  }
+
+  /** Runs `run` with a single step-up token (TOTP) for the given backend `@RequiresStepUp` reason. */
+  private withStepUp(action: string, reason: string, run: (stepUpToken: string) => void): void {
+    this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: false, reason, action },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (result?.stepUpToken) run(result.stepUpToken);
+    });
+  }
+
+  settle(order: SubscriptionOrder): void {
+    this.withStepUp('SUBSCRIPTION_SETTLE', 'Settle subscription: enter the position on the register', (token) =>
+      this.service.settle(order.id, token).subscribe({
+        next: (o) => {
+          this.snackBar.open(o.settlementTxId
+            ? 'Settled — mint dispatched; the register is credited once the transfer is indexed.'
+            : 'Settled — position entered on the register.', 'Dismiss', { duration: 7000 });
+          this.load();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Settlement failed.', 'Dismiss', { duration: 9000 }),
+      }));
   }
 
   submitDecision(): void {
     const order = this.activeOrder;
     if (!order) return;
 
+    if (!this.decisionValid()) return;
+    if (this.decisionMode === 'payment') {
+      this.dialog.closeAll();
+      this.withStepUp('SUBSCRIPTION_PAYMENT_CONFIRM', 'Confirm the subscription payment was received', (token) =>
+        this.service.confirmPayment(order.id, {
+          paidAmount: this.paidAmount!, paymentReference: this.paymentReference.trim(),
+          valueDate: this.valueDate || undefined,
+        }, token).subscribe({
+          next: () => {
+            this.snackBar.open('Payment confirmed. Settle the order to enter the position.', 'Dismiss', { duration: 6000 });
+            this.load();
+          },
+          error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to confirm payment.', 'Dismiss', { duration: 8000 }),
+        }));
+      return;
+    }
+    if (this.decisionMode === 'release') {
+      const reason = this.rejectionReason.trim();
+      this.dialog.closeAll();
+      this.withStepUp('SUBSCRIPTION_RELEASE', 'Release the subscription allocation', (token) =>
+        this.service.release(order.id, reason, token).subscribe({
+          next: () => {
+            this.snackBar.open('Allocation released.', 'Dismiss', { duration: 5000 });
+            this.load();
+          },
+          error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to release allocation.', 'Dismiss', { duration: 6000 }),
+        }));
+      return;
+    }
     if (this.decisionMode === 'allocate') {
       if (!this.allocatedAmount || this.allocatedAmount <= 0) return;
       this.dialog.closeAll();

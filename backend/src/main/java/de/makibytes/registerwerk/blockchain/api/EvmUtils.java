@@ -259,14 +259,11 @@ public final class EvmUtils {
      * key). Solana (base58) and Stellar (base32) addresses are case-SENSITIVE by construction;
      * lowercasing those would corrupt them, so anything not starting with {@code 0x}/{@code 0X}
      * is returned unchanged (only trimmed).
+     *
+     * <p>Delegates to {@link de.makibytes.registerwerk.shared.AddressNormalizer}, which modules
+     * that must not depend on {@code blockchain} (e.g. {@code kyc}) use directly.
      */
     public static String normalizeAddress(String address) {
-        if (address == null) {
-            return null;
-        }
-        String trimmed = address.trim();
-        return trimmed.regionMatches(true, 0, "0x", 0, 2)
-                ? trimmed.toLowerCase(java.util.Locale.ROOT)
-                : trimmed;
+        return de.makibytes.registerwerk.shared.AddressNormalizer.normalize(address);
     }
 }

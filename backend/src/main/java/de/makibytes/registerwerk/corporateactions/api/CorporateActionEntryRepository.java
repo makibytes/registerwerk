@@ -14,6 +14,13 @@ public interface CorporateActionEntryRepository extends JpaRepository<CorporateA
 
     boolean existsByCorporateActionId(UUID corporateActionId);
 
+    /** T3-02: does the action carry a nominee-pool (HELD_LOOK_THROUGH) entry with a non-zero
+     *  entitlement? Such an entitlement has no resolution path yet (PARK-T2-18). */
+    @Query("SELECT CASE WHEN COUNT(e) > 0 THEN true ELSE false END FROM CorporateActionEntry e "
+            + "WHERE e.corporateActionId = :caId AND e.payoutStatus = 'HELD_LOOK_THROUGH' "
+            + "AND e.entitlementAmount IS NOT NULL AND e.entitlementAmount <> 0")
+    boolean existsHeldWithEntitlement(@Param("caId") UUID corporateActionId);
+
     /** An investor's settled entries within a date range — the input to Steuerbescheinigung /
      *  corporate-action confirmations. Only settled entries count as realized income. */
     @Query("SELECT e FROM CorporateActionEntry e WHERE e.investorId = :investorId "

@@ -43,7 +43,8 @@ public class PortfolioMigrationController {
     public ResponseEntity<PortfolioMigrationRequest> initiate(
             @RequestBody @Valid PortfolioMigrationDtos.MigrationInitiateRequest request, Authentication auth) {
         PortfolioMigrationRequest created = migrationService.initiate(
-                request.holderId(), request.reason(), SecurityUtils.extractUserId(auth));
+                request.holderId(), request.reason(), request.beneficiaryConsentRef(),
+                SecurityUtils.extractUserId(auth));
         return ResponseEntity.status(201).body(created);
     }
 
@@ -70,7 +71,8 @@ public class PortfolioMigrationController {
     public PortfolioMigrationRequest recordOnchainTransfer(
             @PathVariable UUID migrationId,
             @RequestBody @Valid PortfolioMigrationDtos.OnchainTransferRequest request, Authentication auth) {
-        return migrationService.recordOnchainTransfer(migrationId, request.txHash(), SecurityUtils.extractUserId(auth));
+        return migrationService.recordOnchainTransfer(migrationId, request.txHash(), request.operatorAttestation(),
+                request.beneficiaryConsentRef(), SecurityUtils.extractUserId(auth));
     }
 
     @PostMapping("/{migrationId}/complete")

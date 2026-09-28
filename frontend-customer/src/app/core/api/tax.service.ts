@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 /**
- * Tax certificate (Steuerbescheinigung) — wraps the existing, already-implemented
+ * Annual income statement (Ertragsaufstellung, informational - NOT a § 45a EStG tax certificate; T3-03) — wraps the existing, already-implemented
  * `corporateactions.web.SteuerbescheinigungController` (`GET /api/v1/me/tax-certificates/{year}`),
  * which had no frontend caller: the customer portal previously had no way to reach it despite
  * the backend already generating the PDF.

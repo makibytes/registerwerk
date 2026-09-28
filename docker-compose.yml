@@ -469,6 +469,10 @@ services:
       REGISTERWERK_CORS_ALLOWED_ORIGINS: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:-${OPERATOR_FRONTEND_URL:-http://localhost:44200},${CUSTOMER_FRONTEND_URL:-http://localhost:44201}}
       CUSTOMER_FRONTEND_URL: ${CUSTOMER_FRONTEND_URL:-http://localhost:44201}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      # T3-09: the simulated trading venue settles by rewriting register rows only (no on-chain
+      # leg yet). Off by default in application.yml; the demo stack, whose seeded assets are all
+      # chain-deployed, opts in and the trading desk shows a "simulated settlement" notice.
+      REGISTERWERK_TRADING_OFFCHAIN_SETTLEMENT_ON_DEPLOYED_ASSETS: ${REGISTERWERK_TRADING_OFFCHAIN_SETTLEMENT_ON_DEPLOYED_ASSETS:-true}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       # Repo/lending ships fail-closed in application.yml; the dev stack opts in so the
       # feature is exercisable locally. Both flags are required (LendingProductionReadinessCheck

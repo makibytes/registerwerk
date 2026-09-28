@@ -89,7 +89,7 @@ class SecuritiesTokenEntityTest {
 
     @Test
     void allBondStatuses_accessible() {
-        assertThat(BondStatus.values()).hasSize(5);
+        assertThat(BondStatus.values()).hasSize(6);
         assertThat(BondStatus.valueOf("CALLED")).isEqualTo(BondStatus.CALLED);
     }
 
@@ -263,7 +263,7 @@ class SecuritiesTokenEntityTest {
     @Test
     void couponStatus_enumValues() {
         assertThat(CouponStatus.values()).containsExactlyInAnyOrder(
-                CouponStatus.SCHEDULED, CouponStatus.PAID, CouponStatus.MISSED);
+                CouponStatus.SCHEDULED, CouponStatus.OVERDUE, CouponStatus.PAID, CouponStatus.MISSED);
     }
 
     @Test

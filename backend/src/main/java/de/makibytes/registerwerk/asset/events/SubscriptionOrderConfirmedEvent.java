@@ -5,7 +5,7 @@ import de.makibytes.registerwerk.audit.api.AuditableEvent;
 import java.util.Map;
 import java.util.UUID;
 
-/** Fired when the investor confirms an allocation — the position is entered on the same call. */
+/** Legacy (pre-T3-08): the investor confirmed an allocation and the position was entered on the same call. */
 public record SubscriptionOrderConfirmedEvent(UUID orderId, UUID actorId, String actorRole, Map<String, Object> details)
         implements AuditableEvent {
 

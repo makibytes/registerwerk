@@ -10,6 +10,13 @@ import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.RedemptionReadinessPort;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.HolderKind;
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,6 +47,12 @@ class AssetLifecycleServiceTest {
 
     @Mock
     private AssetBondTermsRepository bondTermsRepository;
+
+    @Mock
+    private AssetHolderRepository holderRepository;
+
+    @Mock
+    private RedemptionReadinessPort redemptionReadiness;
 
     @InjectMocks
     private AssetLifecycleService assetLifecycleService;
@@ -183,7 +197,7 @@ class AssetLifecycleServiceTest {
         when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
         when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        assetLifecycleService.redeem(asset.getId(), actorId);
+        assetLifecycleService.redeem(asset.getId(), "eWpG §26", "RES-1", actorId, UUID.randomUUID());
 
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.REDEEMED);
         verify(eventPublisher).publishEvent(any(Object.class));
@@ -200,10 +214,93 @@ class AssetLifecycleServiceTest {
         when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
         when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(bondTermsRepository.findById(asset.getId())).thenReturn(Optional.of(terms));
+        when(redemptionReadiness.settledRetirementAction(asset.getId())).thenReturn(Optional.of(
+                new RedemptionReadinessPort.SettledRetirement(UUID.randomUUID(), Set.of("0xaaa"))));
 
-        assetLifecycleService.redeem(asset.getId(), UUID.randomUUID());
+        assetLifecycleService.redeem(asset.getId(), "Final redemption", "CA-1", UUID.randomUUID(), UUID.randomUUID());
 
         assertThat(terms.getBondStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.BondStatus.REDEEMED);
         verify(bondTermsRepository).save(terms);
+    }
+
+    // ── redeem guards (review phase 3, T3-01) ─────────────────────────────────
+
+    private de.makibytes.registerwerk.deployment.api.AssetBondTerms bondTerms(UUID assetId,
+            de.makibytes.registerwerk.deployment.api.BondStatus status) {
+        de.makibytes.registerwerk.deployment.api.AssetBondTerms terms =
+                new de.makibytes.registerwerk.deployment.api.AssetBondTerms();
+        terms.setAssetId(assetId);
+        terms.setBondStatus(status);
+        return terms;
+    }
+
+    @Test
+    @DisplayName("redeemRefusedWithoutSettledRedemption: a bond without a settled REDEMPTION/CALL stays ISSUED")
+    void redeemRefusedWithoutSettledRedemption() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        when(bondTermsRepository.findById(asset.getId())).thenReturn(Optional.of(
+                bondTerms(asset.getId(), de.makibytes.registerwerk.deployment.api.BondStatus.ACTIVE)));
+        when(redemptionReadiness.settledRetirementAction(asset.getId())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> assetLifecycleService.redeem(asset.getId(), "eWpG §26", "REF", UUID.randomUUID(), null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("settled REDEMPTION");
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.ISSUED);
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
+    @DisplayName("a DEFAULTED bond is never silently overwritten with REDEEMED")
+    void redeemRefusesDefaultedBondWithoutSettledRedemption() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        de.makibytes.registerwerk.deployment.api.AssetBondTerms terms =
+                bondTerms(asset.getId(), de.makibytes.registerwerk.deployment.api.BondStatus.DEFAULTED);
+        when(bondTermsRepository.findById(asset.getId())).thenReturn(Optional.of(terms));
+        when(redemptionReadiness.settledRetirementAction(asset.getId())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> assetLifecycleService.redeem(asset.getId(), "eWpG §26", "REF", UUID.randomUUID(), null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("DEFAULTED");
+        assertThat(terms.getBondStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.BondStatus.DEFAULTED);
+    }
+
+    @Test
+    @DisplayName("redeemRefusedWhilePoolHoldsUnits: nominee pools must be unwound first")
+    void redeemRefusedWhilePoolHoldsUnits() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        AssetHolder pool = new AssetHolder();
+        pool.setHolderKind(HolderKind.NOMINEE_POOL);
+        pool.setNominalAmount(new BigDecimal("100"));
+        when(holderRepository.findActiveByAssetId(asset.getId())).thenReturn(List.of(pool));
+
+        assertThatThrownBy(() -> assetLifecycleService.redeem(asset.getId(), "eWpG §26", "REF", UUID.randomUUID(), null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("nominee pool");
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.ISSUED);
+    }
+
+    @Test
+    @DisplayName("redeem refused while a corporate action is in flight")
+    void redeemRefusedWhileCorporateActionOpen() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        when(redemptionReadiness.hasOpenCorporateAction(asset.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> assetLifecycleService.redeem(asset.getId(), "eWpG §26", "REF", UUID.randomUUID(), null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("corporate action");
+    }
+
+    @Test
+    @DisplayName("redeem requires a legal basis and reference")
+    void redeemRequiresLegalBasis() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> assetLifecycleService.redeem(asset.getId(), " ", "REF", UUID.randomUUID(), null))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

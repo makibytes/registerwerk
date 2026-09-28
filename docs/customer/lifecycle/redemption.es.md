@@ -1,6 +1,6 @@
 ---
 title: 6. Operaciones societarias y amortización
-description: Cupones, fechas de registro, certificados fiscales — y cómo un valor se amortiza finalmente y se destruye.
+description: Cupones, fechas de registro, extractos de rendimientos — y cómo un valor se amortiza finalmente y se destruye.
 ---
 
 # Etapa 6 — Operaciones societarias y amortización
@@ -95,14 +95,14 @@ Solo un subconjunto puede crearse hoy realmente — el resto está modelado (tie
 
 ---
 
-## Certificados fiscales
+## Extracto de rendimientos (no es un certificado fiscal) { #tax-certificates }
 
-Para los titulares alemanes, los rendimientos de un valor tributan, y el titular necesita una **Steuerbescheinigung** — un certificado fiscal que indique lo percibido en un año determinado.
+Para los titulares alemanes, los rendimientos de un valor tributan. Registerwerk ofrece cada año un **Ertragsaufstellung** (extracto de rendimientos) con lo abonado al titular en un año determinado, pero **no es una Steuerbescheinigung** en el sentido del § 45a EStG.
 
-Registerwerk lo genera a partir de las filas de operaciones societarias: para cada inversor, todos los derechos del ejercicio, agregados.
+Se genera a partir de las filas de operaciones societarias liquidadas: para cada inversor, los derechos de cupón, intereses y dividendos del año natural, agrupados **por divisa** (nunca se suman importes de divisas distintas). Las devoluciones de principal (amortización, llamada, amortización parcial) y los desembolsos exigidos **no son rendimientos** y se excluyen; las ganancias por transmisión o amortización no se determinan, porque el registro no conserva los costes de adquisición.
 
 !!! warning "Acredita lo que se pagó, no lo que se debe"
-    El certificado es una constancia fáctica de los repartos procedentes de este registro. No es asesoramiento fiscal, no tiene en cuenta rendimientos obtenidos en otros sitios y no calcula la deuda tributaria de nadie. Las obligaciones de retención dependen de la residencia y la condición del titular, y son responsabilidad del emisor y del titular.
+    El extracto es una constancia fáctica de los repartos brutos procedentes de este registro. No es asesoramiento fiscal, no tiene en cuenta rendimientos obtenidos en otros sitios y no calcula la deuda tributaria de nadie. **Registerwerk no retiene Kapitalertragsteuer ni Solidaritätszuschlag**: los cupones se pagan en bruto y el extracto lo indica (retenido: 0,00). Si el registrador actúa como agente de pagos que retiene y certifica es una decisión de fondo aún abierta; hasta entonces, titulares y emisores siguen siendo responsables de la retención y la declaración.
 
 ---
 
@@ -135,7 +135,7 @@ stateDiagram-v2
 
 ### Cuando la amortización no se produce
 
-Pasa la fecha de pago y no se liquida nada. Eso es un **impago**, y es un acontecimiento real que la plataforma detecta en lugar de ignorar: las operaciones de amortización cuya fecha de pago ha vencido sin liquidarse se señalan, igual que los cupones no atendidos.
+La fecha de pago pasa y nada se liquida. La plataforma no lo llama impago de inmediato: el pago aparece primero como **pago pendiente** (vencido) mientras corre el plazo de gracia — por defecto 30 días para intereses y 7 días para principal. Solo si sigue sin liquidarse después, el cupón se marca como **perdido** y el bono como **en impago**. Si el pago se liquida en cualquier momento, la marca se borra y el bono se marca como reembolsado (o el cupón como pagado).
 
 Registerwerk levanta la bandera. No puede exigir un crédito — eso corresponde al comisario del sindicato, a los titulares y a los tribunales.
 

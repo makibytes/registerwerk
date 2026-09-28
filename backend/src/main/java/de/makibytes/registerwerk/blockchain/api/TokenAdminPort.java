@@ -35,6 +35,15 @@ public interface TokenAdminPort {
                           String legalBasis, UUID actorId, String actorRole);
 
     /**
+     * Mints {@code amount} whole units to {@code toAddress} (ERC-20 family). Used by the primary
+     * subscription settlement (T3-08) when the subscribed asset has a confirmed deployment: the
+     * indexer sync then credits the register from the transfer.
+     *
+     * @return a blockchain-transaction tracking UUID (poll {@code GET /api/v1/transactions/{txId}})
+     */
+    UUID mint(UUID deploymentId, String toAddress, BigInteger amount, UUID actorId, String actorRole);
+
+    /**
      * Freezes {@code walletAddress} on the given (non-ERC-3643) token deployment — AWG §17,
      * GwG §40; MiCAR Art. 36. Exposed here so {@code erc3643.internal.SperrvermerkOnchainSyncListener}
      * can keep a §16 eWpG Sperrvermerk in sync with the on-chain frozen flag without importing
@@ -44,6 +53,11 @@ public interface TokenAdminPort {
     UUID freezeAddress(UUID deploymentId, String walletAddress, String reason, String legalBasis,
                         UUID actorId, String actorRole);
 
-    /** Lifts a freeze applied via {@link #freezeAddress}. */
-    UUID unfreezeAddress(UUID deploymentId, String walletAddress, UUID actorId, String actorRole);
+    /**
+     * Lifts a freeze applied via {@link #freezeAddress} after a §16 eWpG Sperrvermerk was lifted.
+     * For {@code SperrvermerkOnchainSyncListener} only: always runs as the SYSTEM actor and skips
+     * the Sperrvermerk check that the manual {@code unfreezeAddress} applies (T3-16) — the
+     * listener itself verifies that no other ACTIVE block still covers the wallet.
+     */
+    UUID unfreezeAfterBlockLift(UUID deploymentId, String walletAddress);
 }

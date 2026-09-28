@@ -171,4 +171,37 @@ class TokenAdminControllerIT {
         String payload = new String(java.util.Base64.getUrlDecoder().decode(parts[1]));
         assertThat(payload).contains("\"acr\":\"stepup\"");
     }
+
+    // ── Review phase 3 (K1): 4-eyes on unfreeze, issuer burn and redeem ──────
+
+    private int postWithStepUpOnly(String path, Object body) {
+        HttpHeaders h = new HttpHeaders();
+        h.setBearerAuth(stepUpToken); // acr=stepup, but no X-Dual-Control-Token
+        h.setContentType(MediaType.APPLICATION_JSON);
+        return rest.postForEntity(path, new HttpEntity<>(body, h), Map.class).getStatusCode().value();
+    }
+
+    @Test
+    @DisplayName("T3-16: manual unfreeze with step-up but without a second approver → 403")
+    void unfreeze_withoutSecondApprover_returns403() {
+        assertThat(postWithStepUpOnly(
+                "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/unfreeze",
+                Map.of("address", "0x" + "1".repeat(40)))).isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("T3-01: issuer burn with step-up but without a second approver → 403")
+    void issuerBurn_withoutSecondApprover_returns403() {
+        assertThat(postWithStepUpOnly(
+                "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/issuer/burn",
+                Map.of("fromAddress", "0x" + "1".repeat(40), "amount", 1))).isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("T3-01: redeem with step-up but without a second approver → 403")
+    void redeem_withoutSecondApprover_returns403() {
+        assertThat(postWithStepUpOnly(
+                "/api/v1/assets/00000000-0000-0000-0000-000000000001/redeem",
+                Map.of("legalBasis", "eWpG §26", "reference", "RES-1"))).isEqualTo(403);
+    }
 }

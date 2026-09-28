@@ -41,6 +41,7 @@ class Erc3643LifecycleServiceTest {
     @Mock private Erc3643ClaimTopicRepository claimTopicRepository;
     @Mock private Erc3643IdentityRegistryRepository identityRegistryRepository;
     @Mock private AssetDeploymentRepository deploymentRepository;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetLookupPort assetLookupPort;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private EvmContractService evmContractService;
     @Mock private BlockchainClientRegistry blockchainClientRegistry;
@@ -138,5 +139,52 @@ class Erc3643LifecycleServiceTest {
                 UUID.randomUUID(), "REGISTRY_ADMIN"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Sperrvermerk");
+    }
+
+    @Test
+    @DisplayName("manualUnfreezeRefusedWhileBlocked: ERC-3643 unfreeze and unfreeze-partial refused under an ACTIVE block (T3-16)")
+    void manualUnfreezeRefusedWhileBlocked() {
+        String wallet = "0x4444444444444444444444444444444444444444";
+        when(holderBlockGate.isBlocked(null, wallet)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.unfreezeAddress(UUID.randomUUID(), wallet, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Sperrvermerk");
+        assertThatThrownBy(() -> service.unfreezePartialTokens(UUID.randomUUID(), wallet,
+                new java.math.BigDecimal("5"), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Sperrvermerk");
+    }
+
+    @Test
+    @DisplayName("T3-07: forced transfer / force burn / batch mint refused while the register is frozen or transferred out")
+    void forcedOperationsRefusedWhileRegisterFrozen() {
+        for (String status : List.of("TRANSFER_PENDING", "TRANSFERRED_OUT")) {
+            UUID suiteId = UUID.randomUUID();
+            UUID deploymentId = UUID.randomUUID();
+            UUID assetId = UUID.randomUUID();
+            Erc3643Suite suite = new Erc3643Suite();
+            suite.setId(suiteId);
+            suite.setAssetDeploymentId(deploymentId);
+            AssetDeployment deployment = new AssetDeployment();
+            deployment.setAssetId(assetId);
+            when(suiteRepository.findById(suiteId)).thenReturn(Optional.of(suite));
+            when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+            when(assetLookupPort.findById(assetId)).thenReturn(Optional.of(
+                    new de.makibytes.registerwerk.deployment.api.AssetLookupPort.AssetInfo(
+                            assetId, "A", null, null, null, null, null, "A-1", status)));
+            String wallet = "0x5555555555555555555555555555555555555555";
+
+            assertThatThrownBy(() -> service.forcedTransfer(suiteId, wallet, wallet,
+                    new java.math.BigDecimal("1"), "why", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
+                    .hasMessageContaining(status);
+            assertThatThrownBy(() -> service.forceBurn(suiteId, wallet, new java.math.BigDecimal("1"), "why",
+                    UUID.randomUUID(), "REGISTRY_ADMIN"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+            assertThatThrownBy(() -> service.batchMint(suiteId, List.of(wallet),
+                    List.of(new java.math.BigDecimal("1")), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        }
     }
 }

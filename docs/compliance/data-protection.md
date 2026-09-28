@@ -82,6 +82,7 @@ Current behavior:
 2. Completion replaces selected `AppUser` name/email values, clears the password hash, and disables the user.
 3. `NaturalPerson`, KYC-document, holding, transaction, and other linked-data coverage is incomplete; no DEK is destroyed because per-record DEK encryption is not implemented.
 4. Request/resolution events are emitted, but this alone does not prove complete erasure or legal handling of the request.
+5. While the entity still has active register holdings, completion requires the operator to name the **retained notice channel** for the statutory §19 eWpG statements; it is stored on the request and in the audit event. A §19 statement can no longer be e-mailed to an erased or disabled user: it is recorded as `FAILED` (`NO_LAWFUL_CHANNEL`), raises an audit alert and is not retried. The policy for such holders (retention channel) is an open decision.
 
 ---
 

@@ -19,5 +19,13 @@ public record RegisterDocumentMetaResponse(
         EntryType entryType,
         String docType,
         String title,
-        boolean statutory
-) {}
+        boolean statutory,
+        /** Set once the register was handed to a successor registrar (T3-07): no download is offered. */
+        String transferredTo,
+        java.time.Instant transferredAt
+) {
+    public RegisterDocumentMetaResponse(UUID assetId, String isin, String assetName, Jurisdiction jurisdiction,
+                                        EntryType entryType, String docType, String title, boolean statutory) {
+        this(assetId, isin, assetName, jurisdiction, entryType, docType, title, statutory, null, null);
+    }
+}

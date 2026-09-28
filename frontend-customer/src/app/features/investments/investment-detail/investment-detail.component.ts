@@ -26,7 +26,7 @@ import { RegisterInspectionService } from '../../../core/api/register-inspection
 import { BondTermsService } from '../../../core/api/bond-terms.service';
 import { TokenHistoryService } from '../../../core/api/token-history.service';
 import { CorporateActionsService } from '../../../core/api/corporate-actions.service';
-import { AssetBondTerms, AssetDeployment, CorporateActionView, InspectionLegalBasis, InvestmentRecord, RegisterDocumentMeta, TokenTransferResponse } from '../../../core/models';
+import { AssetBondTerms, AssetDeployment, CorporateActionView, CouponScheduleEntry, InspectionLegalBasis, InvestmentRecord, RegisterDocumentMeta, TokenTransferResponse } from '../../../core/models';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { AuthService } from '../../../core/auth/auth.service';
@@ -225,12 +225,14 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
           <h2 mat-dialog-title>Request Register Inspection (§10 eWpG)</h2>
           <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
             <p style="margin:0;font-size:13px;color:var(--rw-text-secondary)">
-              Issuers, holders, and beneficiaries have a statutory right to inspect this asset's
-              register. Other applicants must state a legitimate interest for operator review.
+              Issuers and holders of this asset are approved automatically once the registry has verified
+              the claim against the register. Any other claim - including beneficiaries - and applicants
+              with a legitimate interest are reviewed by an operator. As a holder you see the restrictions
+              of your own entries only.
             </p>
             <mat-form-field appearance="outline">
               <mat-label>Your basis for inspection</mat-label>
-              <mat-select [(ngModel)]="inspectionForm.legalBasis">
+              <mat-select [(ngModel)]="inspectionForm.legalBasis" required>
                 <mat-option value="HOLDER">I am a holder of this asset</mat-option>
                 <mat-option value="ISSUER">I am the issuer of this asset</mat-option>
                 <mat-option value="BENEFICIARY">I am a beneficiary</mat-option>
@@ -247,7 +249,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
           <mat-dialog-actions style="justify-content:flex-end;gap:8px">
             <button mat-stroked-button type="button" mat-dialog-close>Cancel</button>
             <button mat-raised-button color="primary" type="button"
-                    [disabled]="submittingInspection || (inspectionForm.legalBasis === 'LEGITIMATE_INTEREST' && !inspectionForm.statedInterest.trim())"
+                    [disabled]="submittingInspection || !inspectionForm.legalBasis || (inspectionForm.legalBasis === 'LEGITIMATE_INTEREST' && !inspectionForm.statedInterest.trim())"
                     (click)="submitInspectionRequest()">
               <mat-icon>send</mat-icon>
               Submit
@@ -275,7 +277,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                 <div><span class="bt-label">Day count</span><span class="bt-value">{{ formatEnum(bondTerms.dayCount) }}</span></div>
                 <div><span class="bt-label">Issue price</span><span class="bt-value">{{ bondTerms.issuePrice | percent:'1.0-2' }} of face value</span></div>
                 <div><span class="bt-label">Callable</span><span class="bt-value">{{ bondTerms.callable ? 'Yes' : 'No' }}</span></div>
-                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus }}</span></div>
+                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus === 'OVERDUE' ? 'Payment pending' : bondTerms.bondStatus }}</span></div>
               </div>
               @if (bondTerms.callable && bondTerms.callSchedule && bondTerms.callSchedule.length > 0) {
                 <div class="call-schedule">
@@ -283,6 +285,24 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                   <ul class="call-schedule-list">
                     @for (entry of bondTerms.callSchedule; track $index) {
                       <li>{{ entry.callDate }} — {{ entry.callPrice | number:'1.0-4' }}% of face value</li>
+                    }
+                  </ul>
+                </div>
+              }
+              @if (upcomingCoupons.length > 0) {
+                <div class="call-schedule">
+                  <span class="bt-label">Upcoming coupons</span>
+                  <ul class="call-schedule-list">
+                    @for (c of upcomingCoupons; track c.periodNo) {
+                      <li>
+                        {{ c.paymentDate | date:'mediumDate' }} —
+                        @if (c.amountPerUnit != null) {
+                          {{ c.amountPerUnit | number:'1.2-6' }} {{ bondTerms.currencyIso }} per unit
+                        } @else {
+                          amount set when the reference rate is fixed
+                        }
+                        @if (c.recordDate) { <span class="coupon-record">(holders of record on {{ c.recordDate | date:'mediumDate' }})</span> }
+                      </li>
                     }
                   </ul>
                 </div>
@@ -708,6 +728,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     }
     .bond-terms-grid > div { display: flex; flex-direction: column; gap: 2px; }
     .bt-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--rw-text-secondary); }
+    .coupon-record { color: var(--rw-text-secondary); font-size: 12px; }
     .bt-value { font-size: 14px; color: var(--rw-text-primary); font-weight: 600; }
     .call-schedule { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
     .call-schedule-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--rw-text-primary); }
@@ -804,10 +825,12 @@ export class InvestmentDetailComponent implements OnInit {
   registerDocMeta: RegisterDocumentMeta | null = null;
   downloadingRegisterDoc = false;
   bondTerms: AssetBondTerms | null = null;
+  /** Next scheduled coupons (read-only, max. 4). */
+  upcomingCoupons: CouponScheduleEntry[] = [];
 
   @ViewChild('inspectionDialogTpl') inspectionDialogTpl!: TemplateRef<unknown>;
-  inspectionForm: { legalBasis: InspectionLegalBasis; statedInterest: string } =
-    { legalBasis: 'HOLDER', statedInterest: '' };
+  inspectionForm: { legalBasis: InspectionLegalBasis | ''; statedInterest: string } =
+    { legalBasis: '', statedInterest: '' };
   submittingInspection = false;
 
   showRegistrationForm = false;
@@ -889,6 +912,13 @@ export class InvestmentDetailComponent implements OnInit {
       next: (terms) => {
         this.bondTerms = terms;
         this.cdr.markForCheck();
+        this.bondTermsService.getCouponSchedule(assetId).subscribe({
+          next: (rows) => {
+            this.upcomingCoupons = rows.filter((r) => r.couponStatus === 'SCHEDULED' || r.couponStatus === 'OVERDUE').slice(0, 4);
+            this.cdr.markForCheck();
+          },
+          error: () => { /* schedule is supplementary; the terms card still renders */ },
+        });
       },
       error: () => {
         // 404 for the (common) case of a non-bond asset — no terms to show, not an error.
@@ -982,20 +1012,23 @@ export class InvestmentDetailComponent implements OnInit {
       },
       error: () => {
         this.downloadingRegisterDoc = false;
-        this.snackBar.open('Failed to generate the register document. Please try again.', 'Dismiss', { duration: 5000 });
+        this.snackBar.open('Failed to generate the register document. If the register was transferred to a successor registrar, request it there.', 'Dismiss', { duration: 6000 });
         this.cdr.markForCheck();
       },
     });
   }
 
   openInspectionDialog(): void {
-    this.inspectionForm = { legalBasis: 'HOLDER', statedInterest: '' };
+    // No preselected basis (T3-11): the applicant must make the claim consciously.
+    this.inspectionForm = { legalBasis: '', statedInterest: '' };
     this.dialog.open(this.inspectionDialogTpl, { width: '460px', maxWidth: '95vw' });
   }
 
   submitInspectionRequest(): void {
     if (!this.record || this.submittingInspection) return;
-    if (this.inspectionForm.legalBasis === 'LEGITIMATE_INTEREST' && !this.inspectionForm.statedInterest.trim()) return;
+    const legalBasis = this.inspectionForm.legalBasis;
+    if (!legalBasis) return;
+    if (legalBasis === 'LEGITIMATE_INTEREST' && !this.inspectionForm.statedInterest.trim()) return;
 
     this.submittingInspection = true;
     this.cdr.markForCheck();
@@ -1004,7 +1037,7 @@ export class InvestmentDetailComponent implements OnInit {
       this.record.assetId,
       this.authService.getUserName() ?? this.authService.getUserEmail() ?? 'Unknown requester',
       this.authService.getUserEmail() ?? '',
-      this.inspectionForm.legalBasis,
+      legalBasis,
       this.inspectionForm.statedInterest.trim() || undefined,
       this.authService.getEntityId() ?? undefined,
     ).subscribe({

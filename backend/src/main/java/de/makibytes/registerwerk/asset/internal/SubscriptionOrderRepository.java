@@ -16,16 +16,46 @@ public interface SubscriptionOrderRepository extends JpaRepository<SubscriptionO
 
     List<SubscriptionOrder> findByInvestorEntityIdOrderBySubmittedAtDesc(UUID investorEntityId);
 
+    List<SubscriptionOrder> findByAssetIdAndStatusIn(UUID assetId, java.util.Collection<SubscriptionOrder.Status> statuses);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT o FROM SubscriptionOrder o WHERE o.id = :id")
+    java.util.Optional<SubscriptionOrder> findByIdForUpdate(@Param("id") UUID id);
+
     /**
-     * Sum of everything already spoken for on this asset (ALLOCATED, pending investor
-     * confirmation, plus already-CONFIRMED) — used to enforce that new allocations don't push
-     * total allocations past {@code Asset.issueSize} when it's set.
+     * Sum of everything already spoken for on this asset (ALLOCATED, PAYMENT_CONFIRMED, SETTLED and
+     * the legacy CONFIRMED; LAPSED/RELEASED free their capacity again) — used to enforce that new
+     * allocations don't push total allocations past {@code Asset.issueSize} when it's set.
      */
     @Query("""
         select coalesce(sum(o.allocatedAmount), 0) from SubscriptionOrder o
         where o.assetId = :assetId and o.status in (
             de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.ALLOCATED,
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.PAYMENT_CONFIRMED,
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.SETTLED,
             de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.CONFIRMED)
         """)
     BigDecimal sumAllocated(@Param("assetId") UUID assetId);
+
+    /**
+     * The investor's allocations that are not (yet) in the register: ALLOCATED and PAYMENT_CONFIRMED.
+     * Added to the active holding for the holding-cap check, so parallel allocations cannot each pass
+     * the cap on their own (T3-08).
+     */
+    @Query("""
+        select coalesce(sum(o.allocatedAmount), 0) from SubscriptionOrder o
+        where o.assetId = :assetId and o.investorEntityId = :investorEntityId and o.status in (
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.ALLOCATED,
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.PAYMENT_CONFIRMED)
+        """)
+    BigDecimal sumOpenAllocatedForInvestor(@Param("assetId") UUID assetId,
+                                           @Param("investorEntityId") UUID investorEntityId);
+
+    @Query("""
+        select o from SubscriptionOrder o
+        where o.status = de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.ALLOCATED
+          and o.allocationExpiresAt is not null and o.allocationExpiresAt < :now
+        order by o.allocationExpiresAt
+        """)
+    List<SubscriptionOrder> findExpiredAllocations(@Param("now") java.time.Instant now, Pageable pageable);
 }

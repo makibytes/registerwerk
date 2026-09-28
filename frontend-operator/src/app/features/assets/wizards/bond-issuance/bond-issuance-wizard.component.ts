@@ -11,9 +11,11 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatIconModule } from '@angular/material/icon';
 import { MatStepperModule } from '@angular/material/stepper';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatDialog } from '@angular/material/dialog';
 import { CommonModule } from '@angular/common';
 import { BondService } from '../../../../core/api/bond.service';
 import { AssetService } from '../../../../core/api/asset.service';
+import { StepUpDialogComponent } from '../../../../shared/components/step-up/step-up-dialog.component';
 import {
   TokenStandard
 } from '../../../../core/models';
@@ -120,10 +122,11 @@ import {
               <mat-form-field appearance="outline">
                 <mat-label>Day count</mat-label>
                 <mat-select formControlName="dayCount">
-                  <mat-option value="ACT_360">ACT/360</mat-option>
-                  <mat-option value="ACT_365">ACT/365</mat-option>
                   <mat-option value="ACT_ACT_ICMA">ACT/ACT (ICMA)</mat-option>
-                  <mat-option value="THIRTY_360">30/360</mat-option>
+                  <mat-option value="ACT_360">ACT/360</mat-option>
+                  <mat-option value="ACT_365">ACT/365 (fixed)</mat-option>
+                  <mat-option value="THIRTY_360">30/360 (US bond basis)</mat-option>
+                  <mat-option value="THIRTY_E_360">30E/360 (Eurobond)</mat-option>
                 </mat-select>
               </mat-form-field>
 
@@ -133,8 +136,50 @@ import {
                   <mat-option value="ANNUAL">Annual</mat-option>
                   <mat-option value="SEMI_ANNUAL">Semi-annual</mat-option>
                   <mat-option value="QUARTERLY">Quarterly</mat-option>
+                  <mat-option value="MONTHLY">Monthly</mat-option>
                   <mat-option value="ZERO">Zero-coupon</mat-option>
                 </mat-select>
+              </mat-form-field>
+
+              <h3 class="sub-heading field-full">Coupon schedule conventions
+                <span class="heading-note">ICMA defaults — schedule rolled back from maturity, short first stub</span>
+              </h3>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Business-day convention</mat-label>
+                <mat-select formControlName="businessDayConvention">
+                  <mat-option value="MODIFIED_FOLLOWING">Modified Following</mat-option>
+                  <mat-option value="FOLLOWING">Following</mat-option>
+                  <mat-option value="PRECEDING">Preceding</mat-option>
+                  <mat-option value="NONE">None (unadjusted)</mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Holiday calendar</mat-label>
+                <mat-select formControlName="holidayCalendar">
+                  <mat-option value="TARGET2">TARGET2</mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Record date (business days before payment)</mat-label>
+                <input matInput type="number" min="0" max="10" formControlName="recordDateOffsetBd">
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Announcement lead (business days before record date)</mat-label>
+                <input matInput type="number" min="0" max="30" formControlName="announcementLeadBd">
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Interest grace period (calendar days)</mat-label>
+                <input matInput type="number" min="0" max="365" formControlName="interestGraceDays">
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Principal grace period (calendar days)</mat-label>
+                <input matInput type="number" min="0" max="365" formControlName="principalGraceDays">
               </mat-form-field>
 
               <div class="checkbox-row">
@@ -258,6 +303,10 @@ import {
                 <span class="review-label">Day count</span>
                 <span class="review-value mono">{{ termsForm.get('dayCount')?.value }}</span>
               </div>
+              <div class="review-row">
+                <span class="review-label">Schedule</span>
+                <span class="review-value mono">{{ termsForm.get('businessDayConvention')?.value }} · {{ termsForm.get('holidayCalendar')?.value }} · record −{{ termsForm.get('recordDateOffsetBd')?.value }} BD</span>
+              </div>
             </div>
 
             <div class="deploy-warning">
@@ -347,6 +396,16 @@ import {
       font-weight: 700;
       color: #e2e8f8;
       margin: 0 0 1.25rem;
+      display: flex;
+      align-items: baseline;
+      gap: .75rem;
+    }
+
+    .sub-heading {
+      font-size: .875rem;
+      font-weight: 700;
+      color: #e2e8f8;
+      margin: .5rem 0 .75rem;
       display: flex;
       align-items: baseline;
       gap: .75rem;
@@ -577,6 +636,7 @@ export class BondIssuanceWizardComponent {
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly fb = inject(FormBuilder);
+  private readonly dialog = inject(MatDialog);
 
   step = 0;
   deploying = false;
@@ -603,9 +663,15 @@ export class BondIssuanceWizardComponent {
     couponRate: [null],
     referenceRate: [null],
     spread: [null],
-    dayCount: ['ACT_360', Validators.required],
-    paymentFrequency: ['SEMI_ANNUAL', Validators.required],
+    dayCount: ['ACT_ACT_ICMA', Validators.required],
+    paymentFrequency: ['ANNUAL', Validators.required],
     callable: [false],
+    businessDayConvention: ['MODIFIED_FOLLOWING', Validators.required],
+    holidayCalendar: ['TARGET2', Validators.required],
+    recordDateOffsetBd: [1, [Validators.required, Validators.min(0), Validators.max(10)]],
+    announcementLeadBd: [5, [Validators.required, Validators.min(0), Validators.max(30)]],
+    interestGraceDays: [30, [Validators.required, Validators.min(0), Validators.max(365)]],
+    principalGraceDays: [7, [Validators.required, Validators.min(0), Validators.max(365)]],
   });
 
   get isFixed(): boolean { return this.selectedStandard === 'DAML_BOND_FIXED' || this.selectedStandard === 'ERC3525' || this.selectedStandard === 'SPL_2022_BOND' || this.selectedStandard === 'STARKNET_ERC3525'; }
@@ -644,15 +710,30 @@ export class BondIssuanceWizardComponent {
   deploy(): void {
     if (!this.selectedStandard) return;
     const assetId = this.route.snapshot.paramMap.get('id') ?? '';
-    this.deploying = true;
-    this.cdr.markForCheck();
-
+    const { assetName: _name, ...terms } = this.termsForm.value;
+    // The form takes rates in percent; the backend stores fractions (4 % → 0.04).
     const termsPayload = {
-      ...this.termsForm.value,
+      ...terms,
+      couponRate: terms.couponRate != null && terms.couponRate !== '' ? Number(terms.couponRate) / 100 : null,
+      spread: terms.spread != null && terms.spread !== '' ? Number(terms.spread) / 100 : null,
       callSchedule: this.callSchedule,
     };
 
-    this.bondService.saveBondTerms(assetId, termsPayload).subscribe({
+    const dialogRef = this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: false, reason: 'Set the bond terms and generate the coupon schedule', action: 'BOND_TERMS_UPSERT' },
+      width: '500px',
+      disableClose: true,
+    });
+    dialogRef.afterClosed().subscribe((result) => {
+      if (!result) return;
+      this.deploying = true;
+      this.cdr.markForCheck();
+      this.saveAndDeploy(assetId, termsPayload, result.stepUpToken);
+    });
+  }
+
+  private saveAndDeploy(assetId: string, termsPayload: Record<string, unknown>, stepUpToken: string): void {
+    this.bondService.saveBondTerms(assetId, termsPayload, stepUpToken).subscribe({
       next: () => {
         this.assetService.deployAsset(assetId, {
           chain: 'ETHEREUM', network: 'TESTNET', tokenStandard: this.selectedStandard!,

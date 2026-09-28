@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 import {
   Asset,
   AssetDeployment,
@@ -60,8 +61,9 @@ export class AssetService {
     return this.http.post<Asset>(`${this.base}/${id}/reactivate`, {});
   }
 
-  redeemAsset(id: string): Observable<Asset> {
-    return this.http.post<Asset>(`${this.base}/${id}/redeem`, {});
+  /** REGISTRY_ADMIN + step-up + 4-eyes (T3-01); refused (409) while holders are unpaid or pools hold units. */
+  redeemAsset(id: string, body: { legalBasis: string; reference: string }, tokens: DualControlTokens): Observable<Asset> {
+    return this.http.post<Asset>(`${this.base}/${id}/redeem`, body, { headers: dualControlHeaders(tokens) });
   }
 
   getDeployments(assetId: string): Observable<AssetDeployment[]> {
@@ -76,8 +78,10 @@ export class AssetService {
     return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${deploymentId}/issuer/mint`, body);
   }
 
-  burn(assetId: string, deploymentId: string, body: { fromAddress: string; amount: number }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${deploymentId}/issuer/burn`, body);
+  /** Burn from any address is a §26 Einziehung: step-up + 4-eyes (`ISSUER_BURN_EWG26`, T3-01). */
+  burn(assetId: string, deploymentId: string, body: { fromAddress: string; amount: number }, tokens: DualControlTokens): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${deploymentId}/issuer/burn`, body,
+      { headers: dualControlHeaders(tokens) });
   }
 
   listDocuments(assetId: string): Observable<AssetDocument[]> {

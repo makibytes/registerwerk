@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 
 export interface Erc3643Suite {
   id: string;
@@ -116,8 +117,10 @@ export class Erc3643Service {
     return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/freeze`, { address });
   }
 
-  unfreezeAddress(assetId: string, deploymentId: string, address: string): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unfreeze`, { address });
+  /** Step-up + 4-eyes (`UNFREEZE`, T3-16); refused while a Sperrvermerk is active on the address. */
+  unfreezeAddress(assetId: string, deploymentId: string, address: string, tokens: DualControlTokens): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unfreeze`, { address },
+      { headers: dualControlHeaders(tokens) });
   }
 
   pause(assetId: string, deploymentId: string): Observable<{ txId: string }> {
@@ -147,8 +150,10 @@ export class Erc3643Service {
     return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/freeze-partial`, body);
   }
 
-  unfreezePartial(assetId: string, deploymentId: string, body: { address: string; amount: string }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unfreeze-partial`, body);
+  /** Step-up + 4-eyes (`UNFREEZE`, T3-16); refused while a Sperrvermerk is active on the address. */
+  unfreezePartial(assetId: string, deploymentId: string, body: { address: string; amount: string }, tokens: DualControlTokens): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unfreeze-partial`, body,
+      { headers: dualControlHeaders(tokens) });
   }
 
   /** Backend carries `@RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")`. */

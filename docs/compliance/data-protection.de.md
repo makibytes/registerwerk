@@ -85,6 +85,7 @@ Aktuelles Verhalten:
 2. Der Abschluss ersetzt ausgewählte `AppUser`-Namens-/E-Mail-Werte, löscht den Passwort-Hash und deaktiviert den Nutzer.
 3. Die Abdeckung für `NaturalPerson`, KYC-Dokumente, Bestände, Transaktionen und andere verknüpfte Daten ist unvollständig; kein DEK wird zerstört, da eine DEK-Verschlüsselung pro Datensatz nicht implementiert ist.
 4. Anfrage-/Abschlussereignisse werden ausgegeben, dies allein beweist jedoch keine vollständige Löschung oder rechtskonforme Bearbeitung der Anfrage.
+5. Solange die Entität noch aktive Registerbestände hat, muss der Betreiber beim Abschluss den **beibehaltenen Benachrichtigungsweg** für die gesetzlichen §19-eWpG-Auszüge benennen; er wird an der Anfrage und im Audit-Ereignis gespeichert. Ein §19-Auszug kann nicht mehr an einen gelöschten oder deaktivierten Nutzer gemailt werden: Er wird als `FAILED` (`NO_LAWFUL_CHANNEL`) erfasst, löst einen Audit-Alarm aus und wird nicht wiederholt. Die Regelung für solche Inhaber (Aufbewahrungsweg) ist eine offene Entscheidung.
 
 ---
 

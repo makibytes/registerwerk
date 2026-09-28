@@ -73,6 +73,13 @@ stateDiagram-v2
 
 **Terminé.**
 
+!!! warning "Le registre est gelé entre l'exportation et l'achèvement"
+    La première **exportation** place l'actif en `TRANSFER_PENDING` (l'ancien statut est conservé). Tant que le transfert n'est ni terminé ni annulé, les échanges, le mint/burn et les opérations forcées, le traitement des opérations sur titres (y compris les tâches quotidiennes), les souscriptions primaires et les modifications du registre sont refusés ; la synchronisation des titulaires continue afin de détecter toute dérive. L'**annulation** rétablit le statut précédent. Les opérations sur titres dont la date de paiement est aujourd'hui ou ultérieure doivent être réglées ou annulées *avant* l'exportation.
+
+    L'exportation comporte un **hachage du contenu du registre** qui ne couvre que le registre (données de l'actif, titulaires avec leurs attributs §17(2), blocages de titulaires actifs, conditions de l'obligation et échéancier des coupons, hachage de la fiche de conditions, opérations sur titres et ordres de souscription ouverts) — pas l'horodatage de l'exportation. L'**achèvement** le recalcule et refuse si quoi que ce soit a changé depuis l'exportation, en nommant les sections modifiées ; il faut alors exporter de nouveau. Le paquet identifie les titulaires par leur numéro d'entité interne et leur LEI ; les noms et adresses en clair n'y figurent pas (décision de principe ouverte).
+
+    Le contrôle on-chain est enregistré **par déploiement**. Pour les déploiements EVM, la plateforme lit `registry()`/`owner()` et exige l'adresse du successeur indiquée à l'initiation ; les autres chaînes exigent pour l'instant une attestation explicite de l'opérateur (la vérification on-chain suivra). Le transfert n'est *remis* qu'une fois chaque déploiement enregistré. Après l'achèvement, l'actif est `TRANSFERRED_OUT` : relevés, consultations et téléchargements sont refusés avec « registre transféré à … ».
+
 !!! danger "Les deux volets ne peuvent pas être rendus atomiques"
     L'exportation du registre et le transfert du contrôle on-chain se produisent sur des systèmes différents. Il n'y a aucune transaction couvrant les deux.
 
@@ -90,6 +97,12 @@ stateDiagram-v2
 Un investisseur, un avoir, vers un autre registraire. Même forme — initier, définir la destination, exporter avec hachage, enregistrer le transfert on-chain, terminer — limitée à un seul détenteur plutôt qu'à l'ensemble de l'actif.
 
 Cela existe parce que sans cela, la seule sortie d'un investisseur d'un registre est de vendre. Pouvoir déplacer un avoir sans vente est un véritable élément de protection des investisseurs, et non une commodité.
+
+!!! note "Le transfert est vérifié, pas présumé"
+    - La **destination** ne peut être fixée que tant que la migration est *initiée* ; après l'export, le paquet et son hash décrivent cette destination. Pour la changer, annulez et recommencez.
+    - L'**enregistrement du transfert on-chain** est contrôlé par rapport au transfert indexé et finalisé : la transaction doit déplacer exactement le nominal du titulaire, de son wallet vers le wallet de destination, sur un déploiement du titre. Si le transfert n'est pas encore indexé, l'étape est refusée ; réessayez une fois qu'il est final. Si le titre n'a aucun déploiement indexé (registre off-chain, pour l'instant Solana et Canton), une **attestation de l'opérateur** est exigée à la place.
+    - Pour **finaliser**, le wallet de destination doit avoir une inscription active au registre (par exemple une inscription de pool nominee du teneur de registre successeur). Sinon, la prochaine synchronisation des titulaires bloquerait tout le titre.
+    - Le paquet d'export contient le contenu de l'inscription selon le § 17(2) eWpG (type d'inscription, référence du titulaire, indicateur consommateur, droits de tiers, restrictions de disposition, note de capacité juridique) et les blocages juridiques actifs. Une inscription avec des droits de tiers ou des restrictions de disposition ne migre qu'avec une **référence de consentement du bénéficiaire**.
 
 ---
 

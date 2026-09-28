@@ -23,7 +23,8 @@ public interface AssetHolderRepository extends JpaRepository<AssetHolder, UUID> 
 
     List<AssetHolder> findByAssetId(UUID assetId);
 
-    Optional<AssetHolder> findByAssetIdAndWalletAddress(UUID assetId, String walletAddress);
+    // No unfiltered findByAssetIdAndWalletAddress: since V11 idx_holder_wallet is unique over
+    // active rows only, so one wallet can have an active row plus removed history rows (T3-17).
 
     Optional<AssetHolder> findByIdAndAssetId(UUID id, UUID assetId);
 
@@ -31,7 +32,7 @@ public interface AssetHolderRepository extends JpaRepository<AssetHolder, UUID> 
     //
     // A removed holder must disappear from compliance/customer-facing listings (register
     // extracts, self-service statements, "my investments", eligibility/access checks). These are
-    // the ones nearly every caller should use; findByAssetId/findByAssetIdAndWalletAddress above
+    // the ones nearly every caller should use; findByAssetId above
     // stay unfiltered only for the two reconciliation/audit-facing call sites that documented
     // why they legitimately need every row.
 
@@ -52,6 +53,14 @@ public interface AssetHolderRepository extends JpaRepository<AssetHolder, UUID> 
     boolean existsActiveByAssetIdAndInvestorId(@Param("assetId") UUID assetId, @Param("investorId") UUID investorId);
 
     /** Resolves the caller's own active holding for a self-service register-document download. */
+    /**
+     * Total nominal over all of the investor's active rows on the asset (an investor may hold
+     * several wallets); 0 when none. Use this, not the single-row lookup, for caps and claims.
+     */
+    @Query("SELECT COALESCE(SUM(h.nominalAmount), 0) FROM AssetHolder h "
+            + "WHERE h.investorId = :investorId AND h.assetId = :assetId AND h.removedAt IS NULL")
+    java.math.BigDecimal sumActiveNominalByInvestorIdAndAssetId(@Param("investorId") UUID investorId, @Param("assetId") UUID assetId);
+
     @Query("SELECT h FROM AssetHolder h WHERE h.investorId = :investorId AND h.assetId = :assetId AND h.removedAt IS NULL")
     Optional<AssetHolder> findActiveByInvestorIdAndAssetId(@Param("investorId") UUID investorId, @Param("assetId") UUID assetId);
 
@@ -88,6 +97,8 @@ public interface AssetHolderRepository extends JpaRepository<AssetHolder, UUID> 
             + "WHERE h.entryType = de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL "
             + "AND h.isConsumer = true "
             + "AND h.removedAt IS NULL "
+            + "AND NOT EXISTS (SELECT 1 FROM Asset a WHERE a.id = h.assetId AND a.status = "
+            + "de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT) "
             + "AND (h.lastStatementAt IS NULL OR h.lastStatementAt <= :cutoff) "
             + "ORDER BY h.id")
     List<AssetHolder> findAnnualStatementDueFirst(
@@ -98,6 +109,8 @@ public interface AssetHolderRepository extends JpaRepository<AssetHolder, UUID> 
             + "WHERE h.entryType = de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL "
             + "AND h.isConsumer = true "
             + "AND h.removedAt IS NULL "
+            + "AND NOT EXISTS (SELECT 1 FROM Asset a WHERE a.id = h.assetId AND a.status = "
+            + "de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT) "
             + "AND (h.lastStatementAt IS NULL OR h.lastStatementAt <= :cutoff) "
             + "AND h.id > :afterId "
             + "ORDER BY h.id")

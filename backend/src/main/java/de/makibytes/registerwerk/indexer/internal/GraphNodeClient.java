@@ -18,10 +18,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.math.BigInteger;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -72,6 +74,24 @@ public class GraphNodeClient {
                 blockTimestamp
                 transactionHash
                 logIndex
+              }
+            }
+            """;
+
+    /** T3-20: ERC-3525 economic value per (owner, slot) — never the token-id count. */
+    private static final String ERC3525_OWNER_SLOT_BALANCES_QUERY = """
+            query($token: String!, $first: Int!, $skip: Int!) {
+              erc3525OwnerSlotBalances(
+                where: { token: $token }
+                orderBy: id
+                orderDirection: asc
+                first: $first
+                skip: $skip
+              ) {
+                owner
+                slot
+                value
+                projectionStatus
               }
             }
             """;
@@ -142,6 +162,20 @@ public class GraphNodeClient {
             String transactionHash,
             long logIndex
     ) {}
+
+    /**
+     * One {@code Erc3525OwnerSlotBalance} projection row (T3-20).
+     *
+     * @param owner            owner address as emitted (zero address for burned/incomplete positions)
+     * @param slot             ERC-3525 slot
+     * @param value            aggregated value of the owner's token ids in that slot (raw units)
+     * @param projectionStatus {@code EVENT_DERIVED} or {@code INCOMPLETE} (replay context missing)
+     */
+    public record Erc3525OwnerSlotBalance(String owner, String slot, BigInteger value, String projectionStatus) {
+        public boolean incomplete() {
+            return !"EVENT_DERIVED".equals(projectionStatus);
+        }
+    }
 
     /** 3 attempts, exponential backoff 300ms→1200ms — only for the HTTP call itself
      *  (transient network/connect/read failures); a GraphQL-level {@code errors} array or an
@@ -244,6 +278,74 @@ public class GraphNodeClient {
      */
     public List<GraphTransfer> fetchTransfers(ChainConfig chain, long fromBlock, int pageSize) {
         return fetchTransfers(chain, fromBlock, pageSize, 0);
+    }
+
+    /**
+     * Fetches every {@code Erc3525OwnerSlotBalance} of one ERC-3525 token (T3-20), paging through
+     * the projection. Unlike the transfer feed this is the subgraph's current aggregate, so the
+     * caller sums {@code value} per owner instead of netting transfers (an ERC-3525 transfer
+     * moves a token id, not an amount).
+     *
+     * @throws GraphNodeQueryException when the chain has no Graph Node configured, or on any
+     *         HTTP / GraphQL / parse failure — an empty result must mean "no positions"
+     */
+    public List<Erc3525OwnerSlotBalance> fetchErc3525OwnerSlotBalances(ChainConfig chain, String tokenAddress) {
+        if (chain.getGraphNodeUrl() == null || chain.getGraphSubgraphName() == null) {
+            throw new GraphNodeQueryException("ChainConfig " + chain.getIdentifier()
+                    + " has no graphNodeUrl or graphSubgraphName; the ERC-3525 value projection is unavailable");
+        }
+        List<Erc3525OwnerSlotBalance> all = new ArrayList<>();
+        for (int skip = 0; ; skip += ERC3525_PAGE_SIZE) {
+            Map<String, Object> requestBody = Map.of(
+                    "query", ERC3525_OWNER_SLOT_BALANCES_QUERY,
+                    "variables", Map.of(
+                            "token", tokenAddress.toLowerCase(Locale.ROOT),
+                            "first", ERC3525_PAGE_SIZE,
+                            "skip", skip));
+            List<Erc3525OwnerSlotBalance> page =
+                    parseOwnerSlotBalances(chain.getIdentifier(), postGraphQl(chain, requestBody));
+            all.addAll(page);
+            if (page.size() < ERC3525_PAGE_SIZE) {
+                return all;
+            }
+        }
+    }
+
+    private static final int ERC3525_PAGE_SIZE = 1_000;
+
+    private List<Erc3525OwnerSlotBalance> parseOwnerSlotBalances(String chainIdentifier, String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            throw new GraphNodeQueryException("Empty response body fetching ERC-3525 balances for chain " + chainIdentifier);
+        }
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode errors = root.path("errors");
+            if (!errors.isMissingNode() && errors.isArray() && !errors.isEmpty()) {
+                throw new GraphNodeQueryException("GraphQL errors for chain " + chainIdentifier + ": " + errors);
+            }
+            JsonNode rows = root.path("data").path("erc3525OwnerSlotBalances");
+            if (!rows.isArray()) {
+                throw new GraphNodeQueryException("Unexpected Graph Node response shape for chain "
+                        + chainIdentifier + "; 'data.erc3525OwnerSlotBalances' is not an array");
+            }
+            // Unlike a transfer page, a malformed balance row is fatal: skipping it would silently
+            // drop a holder's value from the register.
+            List<Erc3525OwnerSlotBalance> result = new ArrayList<>(rows.size());
+            for (JsonNode node : rows) {
+                String value = node.path("value").asText(null);
+                String owner = node.path("owner").asText(null);
+                if (value == null || owner == null) {
+                    throw new GraphNodeQueryException("Malformed ERC-3525 balance row for chain "
+                            + chainIdentifier + ": " + node);
+                }
+                result.add(new Erc3525OwnerSlotBalance(owner, node.path("slot").asText(null),
+                        new BigInteger(value), node.path("projectionStatus").asText(null)));
+            }
+            return result;
+        } catch (JacksonException | NumberFormatException e) {
+            throw new GraphNodeQueryException("Failed to parse ERC-3525 balances for chain "
+                    + chainIdentifier + ": " + e.getMessage(), e);
+        }
     }
 
     /**

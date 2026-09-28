@@ -17,7 +17,13 @@ public interface AssetDeploymentRepository extends JpaRepository<AssetDeployment
 
     List<AssetDeployment> findByAssetId(UUID assetId);
 
-    Optional<AssetDeployment> findByAssetIdAndChainConfigId(UUID assetId, UUID chainConfigId);
+    /**
+     * T3-19: whether a live deployment attempt exists for (asset, chain config). An asset may have
+     * several rows per chain (FAILED attempts), so there is deliberately no single-result lookup by
+     * that pair; deploy steps look rows up by id.
+     */
+    boolean existsByAssetIdAndChainConfigIdAndDeploymentStatusIn(
+            UUID assetId, UUID chainConfigId, java.util.Collection<AssetDeployment.DeploymentStatus> statuses);
 
     Optional<AssetDeployment> findByIdAndAssetId(UUID id, UUID assetId);
 

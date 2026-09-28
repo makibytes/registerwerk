@@ -19,6 +19,14 @@ public interface CorporateActionRepository extends JpaRepository<CorporateAction
 
     long countByStatus(CorporateAction.Status status);
 
+    /** T3-02: SETTLED actions kept open because nominee-pool entitlements are unresolved. */
+    long countByHeldOutstandingTrue();
+
+    /** T3-05: has a CALL for this asset settled (so the bond is retired, not redeemed at maturity)? */
+    @Query("SELECT CASE WHEN COUNT(ca) > 0 THEN true ELSE false END FROM CorporateAction ca "
+            + "WHERE ca.assetId = :assetId AND ca.actionType = 'CALL' AND ca.status IN ('SETTLED','CLOSED')")
+    boolean existsSettledCallForAsset(@Param("assetId") UUID assetId);
+
     /** Idempotency guard: has a corporate action already been created for this coupon payment? */
     boolean existsByCouponPaymentId(UUID couponPaymentId);
 
@@ -28,14 +36,16 @@ public interface CorporateActionRepository extends JpaRepository<CorporateAction
             + "WHERE ca.assetId = :assetId AND ca.actionType = 'REDEMPTION' AND ca.status <> 'CANCELLED'")
     boolean existsActiveRedemptionForAsset(@Param("assetId") UUID assetId);
 
-    /** REDEMPTION actions whose payment date has passed without settling — the bond-default
-     *  detection input for {@code BondMaturityJob}. */
+    /** REDEMPTION actions whose payment date has passed without settling — the OVERDUE/DEFAULTED
+     *  detection input for {@code BondMaturityJob}, which applies the bond's principal grace period
+     *  on top (T3-05). */
     @Query("SELECT ca FROM CorporateAction ca WHERE ca.assetId = :assetId AND ca.actionType = 'REDEMPTION' "
             + "AND ca.status NOT IN ('SETTLED','CLOSED','CANCELLED') AND ca.paymentDate < :today")
     List<CorporateAction> findOverdueRedemptions(@Param("assetId") UUID assetId, @Param("today") LocalDate today);
 
-    /** COUPON actions whose payment date has passed without settling — the missed-coupon
-     *  detection input for {@code CorporateActionService} (mirrors {@link #findOverdueRedemptions}). */
+    /** COUPON actions whose payment date has passed without settling — the OVERDUE/MISSED coupon
+     *  detection input for {@code CorporateActionService}, which applies the bond's interest grace
+     *  period on top (T3-05; mirrors {@link #findOverdueRedemptions}). */
     @Query("SELECT ca FROM CorporateAction ca WHERE ca.actionType = 'COUPON' AND ca.couponPaymentId IS NOT NULL "
             + "AND ca.status NOT IN ('SETTLED','CLOSED','CANCELLED') AND ca.paymentDate < :today")
     List<CorporateAction> findOverdueCoupons(@Param("today") LocalDate today);
@@ -55,14 +65,18 @@ public interface CorporateActionRepository extends JpaRepository<CorporateAction
      *
      * <p>Also excludes SNAPSHOT_BLOCKED (T2-18): with no entitlement snapshot there is nothing a
      * settlement could correctly pay.
+     *
+     * <p>Only COMPUTED qualifies (T3-06): the snapshot now runs strictly after the record date, so an
+     * action whose payment date equals its record date is still ANNOUNCED on the payment date — it
+     * must wait for its entitlements rather than dispatch with none.
      */
-    @Query("SELECT ca FROM CorporateAction ca WHERE ca.status NOT IN "
-            + "('PROPOSED','REJECTED','SNAPSHOT_BLOCKED','SETTLED','CLOSED','CANCELLED','AWAITING_SETTLEMENT') "
-            + "AND ca.paymentDate <= :date")
+    @Query("SELECT ca FROM CorporateAction ca WHERE ca.status = 'COMPUTED' AND ca.paymentDate <= :date")
     List<CorporateAction> findDueForSettlement(@Param("date") LocalDate date);
 
-    /** Includes SNAPSHOT_BLOCKED (T2-18): a refused snapshot is retried on every daily run. */
-    @Query("SELECT ca FROM CorporateAction ca WHERE ca.status IN ('ANNOUNCED','SNAPSHOT_BLOCKED') AND ca.recordDate <= :today")
+    /** Includes SNAPSHOT_BLOCKED (T2-18): a refused snapshot is retried on every daily run.
+     *  Strictly after the record date (T3-06): entitlements are fixed as of the END of the record
+     *  date, so the snapshot cannot be taken before that day is over. */
+    @Query("SELECT ca FROM CorporateAction ca WHERE ca.status IN ('ANNOUNCED','SNAPSHOT_BLOCKED') AND ca.recordDate < :today")
     List<CorporateAction> findReadyToCompute(@Param("today") LocalDate today);
 
     /** The operator's proposal review queue — every issuer-submitted proposal awaiting

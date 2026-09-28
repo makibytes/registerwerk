@@ -6,8 +6,11 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryReposi
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettledEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementBlockedEvent;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
+import de.makibytes.registerwerk.deployment.api.BondStatus;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -15,7 +18,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.time.LocalDate;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -37,15 +41,26 @@ class CorporateActionSettlementWriter {
     private final CorporateActionRepository corporateActionRepository;
     private final CorporateActionEntryRepository entryRepository;
     private final AssetCouponPaymentRepository couponPaymentRepository;
+    private final AssetBondTermsRepository bondTermsRepository;
+    private final RegisterClock registerClock;
     private final ApplicationEventPublisher events;
+
+    /** Bond states a settled REDEMPTION clears (T3-05) — an OVERDUE or even DEFAULTED bond that is
+     *  paid after all is REDEEMED, not left flagged. CALLED/REDEEMED are final and untouched. */
+    private static final Set<BondStatus> REDEEMABLE =
+            EnumSet.of(BondStatus.ACTIVE, BondStatus.MATURED, BondStatus.OVERDUE, BondStatus.DEFAULTED);
 
     CorporateActionSettlementWriter(CorporateActionRepository corporateActionRepository,
                                      CorporateActionEntryRepository entryRepository,
                                      AssetCouponPaymentRepository couponPaymentRepository,
+                                     AssetBondTermsRepository bondTermsRepository,
+                                     RegisterClock registerClock,
                                      ApplicationEventPublisher events) {
         this.corporateActionRepository = corporateActionRepository;
         this.entryRepository = entryRepository;
         this.couponPaymentRepository = couponPaymentRepository;
+        this.bondTermsRepository = bondTermsRepository;
+        this.registerClock = registerClock;
         this.events = events;
     }
 
@@ -82,18 +97,49 @@ class CorporateActionSettlementWriter {
 
             // AssetCouponPayment.couponStatus stayed SCHEDULED forever for coupons settled
             // through the CorporateAction pipeline — only the separate Erc3525AdminService path
-            // ever wrote PAID. Close that gap here, at the single settlement chokepoint.
+            // ever wrote PAID. Close that gap here, at the single settlement chokepoint. An
+            // OVERDUE (or MISSED) coupon that is paid after all becomes PAID too (T3-05).
             if (ca.getCouponPaymentId() != null) {
                 couponPaymentRepository.findById(ca.getCouponPaymentId()).ifPresent(payment -> {
                     payment.setCouponStatus(CouponStatus.PAID);
-                    payment.setPaidDate(LocalDate.now());
+                    payment.setPaidDate(registerClock.today());
                     payment.setTxRef(txHash);
                     couponPaymentRepository.save(payment);
                 });
             }
 
+            updateBondStatus(ca);
+
             events.publishEvent(new CorporateActionSettledEvent(corporateActionId, actorId, actorRole, txHash));
         }, () -> log.warn("CorporateAction disappeared before settlement could be recorded: id={}", corporateActionId));
+    }
+
+    /**
+     * T3-05: the settlement writer never touched the bond's status, so a paid redemption left the
+     * bond DEFAULTED and a settled CALL left it ACTIVE — and the maturity job later raised a second
+     * redemption for it. REDEMPTION → REDEEMED, CALL → CALLED. The asset status and the burn stay a
+     * separate, 4-eyes operator step ({@code POST /assets/{id}/redeem}, which requires this action).
+     */
+    private void updateBondStatus(CorporateAction ca) {
+        if (ca.getActionType() == null) {
+            return;
+        }
+        BondStatus target = switch (ca.getActionType()) {
+            case REDEMPTION -> BondStatus.REDEEMED;
+            case CALL -> BondStatus.CALLED;
+            default -> null;
+        };
+        if (target == null) {
+            return;
+        }
+        bondTermsRepository.findById(ca.getAssetId()).ifPresent(terms -> {
+            if (REDEEMABLE.contains(terms.getBondStatus())) {
+                log.info("Bond assetId={} {} → {} ({} action {} settled)", ca.getAssetId(),
+                        terms.getBondStatus(), target, ca.getActionType(), ca.getId());
+                terms.setBondStatus(target);
+                bondTermsRepository.save(terms);
+            }
+        });
     }
 
     /**

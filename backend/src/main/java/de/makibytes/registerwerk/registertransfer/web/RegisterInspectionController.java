@@ -2,7 +2,9 @@ package de.makibytes.registerwerk.registertransfer.web;
 
 import de.makibytes.registerwerk.registertransfer.api.RegisterInspectionRequest;
 import de.makibytes.registerwerk.registertransfer.internal.RegisterInspectionService;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.data.domain.Page;
@@ -40,9 +42,10 @@ public class RegisterInspectionController {
     @PostMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<RegisterInspectionRequest> submit(
-            @RequestBody @Valid RegisterTransferDtos.InspectionSubmitRequest request) {
+            @RequestBody @Valid RegisterTransferDtos.InspectionSubmitRequest request, Authentication auth) {
+        // T3-11: the requester identity comes from the token; a body-supplied requesterEntityId is ignored.
         RegisterInspectionRequest created = inspectionService.submit(
-                request.assetId(), request.requesterEntityId(), request.requesterName(),
+                request.assetId(), SecurityUtils.extractEntityId(auth), request.requesterName(),
                 request.requesterEmail(), request.legalBasis(), request.statedInterest());
         return ResponseEntity.status(201).body(created);
     }

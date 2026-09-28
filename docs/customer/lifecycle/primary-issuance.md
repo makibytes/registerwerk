@@ -81,6 +81,36 @@ Each admitted investor becomes a **holder** — a row in the register. Under §1
 
 A single asset may hold both forms at once — the register calls that a `MIXED` holding.
 
+
+!!! info "Register entries are made by the operator"
+    An entry, and any change to a §17(2) attribute, is made by the registry operator against a recorded instruction: **who instructed it** (holder, beneficiary, court, insolvency administrator, issuer terms change) and a **reference**. The issuer does not edit the register; it files a *request* that the operator executes or rejects. Removing a right or restriction needs an explicit action and a second approver, and the before and after values are kept.
+
+---
+
+## Subscriptions: from order to register
+
+Investors subscribe through the portal; the register is no longer filled by typing positions into a dialog. An order moves through these states:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    SUBMITTED --> ALLOCATED: allocate
+    ALLOCATED --> PAYMENT_CONFIRMED: accepted and paid
+    PAYMENT_CONFIRMED --> SETTLED: settle
+    ALLOCATED --> LAPSED: not paid in time
+    ALLOCATED --> RELEASED: released
+    SUBMITTED --> REJECTED: reject
+```
+
+1. **Submit.** Any onboarded investor can place an order while the asset is open for subscription (`APPROVED` or `ISSUED`), provided they are inside the asset's MiFID target market.
+2. **Allocate.** The issuer or operator allocates — fully, or scaled down. Allocations count against the issue size, and against the investor's maximum holding **together with their other open allocations**, so two parallel allocations cannot each slip under the cap.
+3. **Accept.** The investor accepts the allocation. Nothing is entered on the register yet. For a bond the amount due (allocated units × face value × issue price) and a payment reference are shown, with a payment deadline — by default 10 TARGET business days. An allocation that is not paid in time **lapses** and frees its capacity; the issuer or operator can also **release** it.
+4. **Confirm payment.** The issuer or operator confirms that the cash arrived ([step-up](../../compliance/step-up-mfa.md) required). An underpayment is refused; an overpayment is accepted and shown as *refund due*.
+5. **Settle.** Before anything is written, the same checks as for a trade settlement run again: KYC approved, no unresolved sanctions hit, no [Sperrvermerk](holding.md), register not frozen for a handover, chain finality, target market and holding cap. Then the units are issued. If the asset is **deployed**, the units are minted to the investor's wallet and the register is credited by the holder sync once the transfer is indexed. Otherwise the register is credited directly; a second subscription on the same wallet increases the existing entry.
+
+!!! note "Open points"
+    A token standard without an automated mint leaves the order at *payment confirmed* — an operator issues the units. For assets without bond terms the operator enters the amount received; there is no computed price. For collective entries the investor, not a custodian, is entered as holder — that question is not decided yet.
+
 ---
 
 ## 3. Mint

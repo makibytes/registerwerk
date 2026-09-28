@@ -60,6 +60,19 @@ describe('HolderBlockService', () => {
         req.flush({});
     });
 
+    it('create() normalises a checksum 0x wallet to the register form (T3-15)', () => {
+        const body: HolderBlockRequest = {
+            walletAddress: ' 0xAbCDef0000000000000000000000000000000001 ',
+            blockType: 'GERICHTSBESCHLUSS',
+            legalBasis: 'LG Frankfurt 2-04 O 1/26',
+        };
+        service.create(body, 'step-up-jwt', 'dual-control-jwt').subscribe();
+
+        const req = httpMock.expectOne(base);
+        expect(req.request.body.walletAddress).toBe('0xabcdef0000000000000000000000000000000001');
+        req.flush({});
+    });
+
     it('lift() POSTs the reason to the lift sub-path with step-up + dual-control headers', () => {
         service.lift('block-1', 'False positive cleared', 'step-up-jwt', 'dual-control-jwt').subscribe();
 

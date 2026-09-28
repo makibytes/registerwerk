@@ -2,7 +2,21 @@ package de.makibytes.registerwerk.registertransfer.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
+import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.asset.api.OpenSubscriptionOrdersPort;
+import de.makibytes.registerwerk.asset.api.RedemptionReadinessPort;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
+import de.makibytes.registerwerk.deployment.api.AssetCouponPayment;
+import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
+import de.makibytes.registerwerk.kyc.api.HolderBlock;
+import de.makibytes.registerwerk.kyc.api.HolderBlockRepository;
+import de.makibytes.registerwerk.shared.RegisterClock;
+import org.springframework.cache.CacheManager;
 import de.makibytes.registerwerk.audit.AuditApi;
 import de.makibytes.registerwerk.audit.api.AuditEventView;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -29,7 +43,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,7 +66,15 @@ import java.util.UUID;
  *
  * <p>The on-chain control handover (two-step registry transfer in the token
  * contracts) is a separate, already-existing mechanism; its transaction hash is
- * recorded here to link the two halves.
+ * recorded here per deployment to link the two halves.
+ *
+ * <p><b>Freeze (T3-07).</b> The first export sets the asset to {@link AssetStatus#TRANSFER_PENDING}
+ * (previous status kept on the transfer, restored by {@link #cancel}); trading, mint/burn/forced
+ * operations, corporate-action processing and register edits are refused until completion. The
+ * package carries a {@code registerContentHash} over the register content only - never over the
+ * export timestamp - and {@link #complete} recomputes it and refuses (409, naming the changed
+ * sections) when the register moved since the export, so the successor never receives a stale
+ * package. Holder sync keeps running while pending precisely so that drift is detected.
  */
 @Service
 public class RegisterTransferService {
@@ -65,6 +90,16 @@ public class RegisterTransferService {
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final FinalityGate finalityGate;
+    private final HolderBlockRepository blockRepository;
+    private final LegalEntityRepository entityRepository;
+    private final AssetBondTermsRepository bondTermsRepository;
+    private final AssetCouponPaymentRepository couponPaymentRepository;
+    private final AssetDocumentRepository documentRepository;
+    private final RedemptionReadinessPort corporateActionPort;
+    private final OpenSubscriptionOrdersPort subscriptionOrdersPort;
+    private final OnchainHandoverVerifier handoverVerifier;
+    private final RegisterClock registerClock;
+    private final CacheManager cacheManager;
 
     public RegisterTransferService(
             RegisterTransferRepository transferRepository,
@@ -74,7 +109,27 @@ public class RegisterTransferService {
             AuditApi auditApi,
             ObjectMapper objectMapper,
             ApplicationEventPublisher eventPublisher,
-            FinalityGate finalityGate) {
+            FinalityGate finalityGate,
+            HolderBlockRepository blockRepository,
+            LegalEntityRepository entityRepository,
+            AssetBondTermsRepository bondTermsRepository,
+            AssetCouponPaymentRepository couponPaymentRepository,
+            AssetDocumentRepository documentRepository,
+            RedemptionReadinessPort corporateActionPort,
+            OpenSubscriptionOrdersPort subscriptionOrdersPort,
+            OnchainHandoverVerifier handoverVerifier,
+            RegisterClock registerClock,
+            CacheManager cacheManager) {
+        this.blockRepository = blockRepository;
+        this.entityRepository = entityRepository;
+        this.bondTermsRepository = bondTermsRepository;
+        this.couponPaymentRepository = couponPaymentRepository;
+        this.documentRepository = documentRepository;
+        this.corporateActionPort = corporateActionPort;
+        this.subscriptionOrdersPort = subscriptionOrdersPort;
+        this.handoverVerifier = handoverVerifier;
+        this.registerClock = registerClock;
+        this.cacheManager = cacheManager;
         this.transferRepository = transferRepository;
         this.assetRepository = assetRepository;
         this.holderRepository = holderRepository;
@@ -85,13 +140,28 @@ public class RegisterTransferService {
         this.finalityGate = finalityGate;
     }
 
-    /** Initiates a transfer. Rejects a second concurrent transfer for the same asset. */
+    /** Initiates a transfer without a successor on-chain address (off-chain-only or non-EVM assets). */
     @Transactional
     public RegisterTransfer initiate(
             UUID assetId, String successorName, String successorIdentifier,
             String reason, UUID initiatedBy) {
-        assetRepository.findById(assetId)
+        return initiate(assetId, successorName, successorIdentifier, reason, initiatedBy, null);
+    }
+
+    /**
+     * Initiates a transfer. Rejects a second concurrent transfer for the same asset, and an asset
+     * already handed over. {@code successorOnchainAddress} is the successor registrar's address the
+     * EVM deployments' {@code registry()}/{@code owner()} must equal after the on-chain handover.
+     */
+    @Transactional
+    public RegisterTransfer initiate(
+            UUID assetId, String successorName, String successorIdentifier,
+            String reason, UUID initiatedBy, String successorOnchainAddress) {
+        Asset asset = assetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown asset " + assetId));
+        require(asset.getStatus() != AssetStatus.TRANSFERRED_OUT,
+                "The register of asset " + assetId + " was already transferred out");
+        String successorAddress = normaliseAddress(successorOnchainAddress);
         transferRepository.findFirstByAssetIdAndStatusNotInOrderByInitiatedAtDesc(
                 assetId, List.of(TransferStatus.COMPLETED, TransferStatus.CANCELLED))
                 .ifPresent(existing -> {
@@ -103,6 +173,7 @@ public class RegisterTransferService {
         transfer.setAssetId(assetId);
         transfer.setSuccessorName(successorName);
         transfer.setSuccessorIdentifier(successorIdentifier);
+        transfer.setSuccessorOnchainAddress(successorAddress);
         transfer.setReason(reason);
         transfer.setInitiatedBy(initiatedBy);
         transfer.setStatus(TransferStatus.INITIATED);
@@ -110,8 +181,20 @@ public class RegisterTransferService {
 
         eventPublisher.publishEvent(new RegisterTransferEvent(saved.getId(), "INITIATED", initiatedBy, "REGISTRY_ADMIN",
                 nullSafeMap("assetId", assetId, "successorName", successorName,
-                        "successorIdentifier", successorIdentifier, "reason", reason)));
+                        "successorIdentifier", successorIdentifier, "successorOnchainAddress", successorAddress,
+                        "reason", reason)));
         return saved;
+    }
+
+    private static String normaliseAddress(String address) {
+        if (address == null || address.isBlank()) {
+            return null;
+        }
+        String a = address.trim();
+        if (!a.matches("0x[0-9a-fA-F]{40}")) {
+            throw new IllegalArgumentException("successorOnchainAddress must be a 0x-prefixed 20-byte EVM address");
+        }
+        return a.toLowerCase(java.util.Locale.ROOT);
     }
 
     /**
@@ -127,6 +210,8 @@ public class RegisterTransferService {
 
         Asset asset = assetRepository.findById(transfer.getAssetId())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown asset " + transfer.getAssetId()));
+        require(asset.getStatus() != AssetStatus.TRANSFERRED_OUT,
+                "The register of asset " + asset.getId() + " was already transferred out");
 
         // Hard floor: the exported holder snapshot must reflect only FINALIZED register state — a
         // successor operator ingesting this package has no way to later distinguish "confirmed at
@@ -137,12 +222,27 @@ public class RegisterTransferService {
         finalityGate.require(GatedOperation.REGISTER_EXTRACT_EXPORT, transfer.getAssetId(), asset.getTokenStandard(),
                 FinalityLevel.FINALIZED);
 
+        // T3-07 interim default (who pays a CA whose record date precedes and payment date follows
+        // the handover is a parked policy question): settle or cancel such actions before handover.
+        LocalDate today = registerClock.today();
+        List<RedemptionReadinessPort.OpenAction> blocking = corporateActionPort.openActions(transfer.getAssetId()).stream()
+                .filter(a -> a.paymentDate() == null || !a.paymentDate().isBefore(today))
+                .toList();
+        require(blocking.isEmpty(), "Register handover refused: corporate action(s) "
+                + blocking.stream().map(a -> a.actionType() + " " + a.id() + " (payment "
+                        + (a.paymentDate() != null ? a.paymentDate() : "n/a") + ")").toList()
+                + " are still open - settle or cancel them before the handover");
+
+        RegisterContent content = computeContent(asset);
+
         Map<String, Object> manifest = new LinkedHashMap<>();
-        manifest.put("formatVersion", "1.0");
+        manifest.put("formatVersion", "1.1");
         manifest.put("standard", "eWpRV §20 register data transfer");
         manifest.put("exportedAt", Instant.now().toString());
-        manifest.put("asset", assetSnapshot(asset));
-        manifest.put("holders", holderSnapshots(transfer.getAssetId()));
+        // Hash of the register content only (no exportedAt) - recomputed and compared at complete().
+        manifest.put("registerContentHash", content.hash());
+        manifest.put("registerContentSections", content.sectionHashes());
+        manifest.putAll(content.sections());
         manifest.put("deployments", deploymentSnapshots(transfer.getAssetId()));
         manifest.put("auditTrail", auditSnapshots(transfer.getAssetId()));
 
@@ -153,33 +253,116 @@ public class RegisterTransferService {
             throw new IllegalStateException("Failed to serialise register export", e);
         }
 
+        // Freeze the register from the first export until complete()/cancel().
+        if (asset.getStatus() != AssetStatus.TRANSFER_PENDING) {
+            transfer.setPreviousAssetStatus(asset.getStatus() != null ? asset.getStatus().name() : null);
+            asset.setStatus(AssetStatus.TRANSFER_PENDING);
+            assetRepository.save(asset);
+            evictAssetCache(asset.getId());
+        }
+
         transfer.setExportManifest(manifest);
         transfer.setExportHash(sha256Hex(json));
+        transfer.setRegisterContentHash(content.hash());
         transfer.setStatus(TransferStatus.EXPORTED);
         transfer.setExportedAt(Instant.now());
         transfer.setUpdatedAt(Instant.now());
         transferRepository.save(transfer);
-        log.info("Exported register transfer {} for asset {} ({} bytes)",
-                transferId, transfer.getAssetId(), json.length);
+        log.info("Exported register transfer {} for asset {} ({} bytes, contentHash={})",
+                transferId, transfer.getAssetId(), json.length, content.hash());
 
         eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "EXPORTED", actorId, "REGISTRY_ADMIN",
-                nullSafeMap("assetId", transfer.getAssetId(), "exportHash", transfer.getExportHash(), "bytes", json.length)));
+                nullSafeMap("assetId", transfer.getAssetId(), "exportHash", transfer.getExportHash(),
+                        "registerContentHash", content.hash(), "bytes", json.length)));
         return json;
     }
 
-    /** Records the on-chain control handover transaction. */
+    /** Legacy single-transaction form: valid only for an asset with at most one deployment. */
     @Transactional
     public RegisterTransfer recordOnchainHandover(UUID transferId, String txHash, UUID actorId) {
+        return recordOnchainHandover(transferId, null, txHash, false, actorId);
+    }
+
+    /**
+     * Records the on-chain control handover of ONE deployment (T3-07). EVM deployments are verified
+     * against the chain: {@code registry()}/{@code owner()} must equal the successor address named at
+     * initiation (a mismatch or an unreadable chain refuses - fail closed). Other chains cannot be
+     * verified yet and need {@code attested=true} (an explicit operator attestation, on top of the
+     * 4-eyes step-up of the endpoint); chain verification for them follows in Phase 4. The transfer
+     * becomes HANDED_OVER once every deployment has a record. An asset without deployments has no
+     * on-chain half: call with neither deploymentId nor txHash.
+     */
+    @Transactional
+    public RegisterTransfer recordOnchainHandover(UUID transferId, UUID deploymentId, String txHash,
+                                                  boolean attested, UUID actorId) {
         RegisterTransfer transfer = load(transferId);
-        require(transfer.getStatus() == TransferStatus.EXPORTED,
+        require(transfer.getStatus() == TransferStatus.EXPORTED
+                        || transfer.getStatus() == TransferStatus.HANDED_OVER,
                 "Export must precede the on-chain handover");
-        transfer.setOnchainTxHash(txHash);
-        transfer.setStatus(TransferStatus.HANDED_OVER);
+
+        List<AssetDeployment> deployments = deploymentRepository.findByAssetId(transfer.getAssetId());
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("txHash", txHash);
+        if (deployments.isEmpty()) {
+            require(deploymentId == null, "Asset has no deployments");
+            transfer.setOnchainTxHash(txHash);
+            transfer.setStatus(TransferStatus.HANDED_OVER);
+        } else {
+            AssetDeployment dep;
+            if (deploymentId == null && deployments.size() == 1) {
+                dep = deployments.get(0);
+            } else {
+                require(deploymentId != null, "deploymentId is required: the asset has " + deployments.size() + " deployments");
+                dep = deployments.stream().filter(d -> deploymentId.equals(d.getId())).findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Deployment " + deploymentId + " does not belong to asset " + transfer.getAssetId()));
+            }
+            require(txHash != null && !txHash.isBlank(), "txHash is required for a deployment handover");
+
+            Map<String, Object> record = new LinkedHashMap<>();
+            record.put("deploymentId", dep.getId().toString());
+            record.put("chain", dep.getChain() != null ? dep.getChain().name() : null);
+            record.put("contractAddress", dep.getContractAddress());
+            record.put("txHash", txHash);
+            record.put("recordedAt", Instant.now().toString());
+            if (OnchainHandoverVerifier.isEvm(dep.getChain())) {
+                require(transfer.getSuccessorOnchainAddress() != null,
+                        "This EVM handover cannot be verified: no successorOnchainAddress was set at initiation");
+                OnchainHandoverVerifier.Observation obs = handoverVerifier.observeController(dep);
+                require(transfer.getSuccessorOnchainAddress().equalsIgnoreCase(obs.observed()),
+                        "On-chain handover NOT verified: " + obs.function() + "() of " + dep.getContractAddress()
+                                + " is " + obs.observed() + ", expected the successor "
+                                + transfer.getSuccessorOnchainAddress());
+                record.put("verified", true);
+                record.put("method", "RPC_" + obs.function().toUpperCase(java.util.Locale.ROOT));
+                record.put("observedController", obs.observed());
+            } else {
+                require(attested, "Chain " + dep.getChain() + " cannot be verified automatically yet: "
+                        + "confirm the handover explicitly (attested=true)");
+                record.put("verified", false);
+                record.put("method", "OPERATOR_ATTESTED");
+                record.put("attestedBy", actorId != null ? actorId.toString() : null);
+            }
+            List<Map<String, Object>> records = new ArrayList<>(transfer.getOnchainHandovers());
+            records.removeIf(r -> dep.getId().toString().equals(String.valueOf(r.get("deploymentId"))));
+            records.add(record);
+            transfer.setOnchainHandovers(records);
+            transfer.setOnchainTxHash(txHash);
+            event.put("deploymentId", dep.getId().toString());
+            event.put("verified", record.get("verified"));
+            event.put("method", record.get("method"));
+
+            Set<String> recorded = new HashSet<>();
+            records.forEach(r -> recorded.add(String.valueOf(r.get("deploymentId"))));
+            boolean all = deployments.stream().allMatch(d -> recorded.contains(d.getId().toString()));
+            transfer.setStatus(all ? TransferStatus.HANDED_OVER : TransferStatus.EXPORTED);
+        }
         transfer.setUpdatedAt(Instant.now());
         RegisterTransfer saved = transferRepository.save(transfer);
 
-        eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "HANDED_OVER", actorId, "REGISTRY_ADMIN",
-                Map.of("txHash", txHash)));
+        eventPublisher.publishEvent(new RegisterTransferEvent(transferId,
+                saved.getStatus() == TransferStatus.HANDED_OVER ? "HANDED_OVER" : "DEPLOYMENT_HANDED_OVER",
+                actorId, "REGISTRY_ADMIN", event));
         return saved;
     }
 
@@ -190,6 +373,9 @@ public class RegisterTransferService {
      * continuing to auto-raise and dispatch coupon/redemption corporate actions against an
      * asset whose register has already been handed over to a successor operator, risking
      * duplicate/parallel processing between the two registrars.
+     *
+     * <p>The register content is re-hashed first (T3-07): if anything the successor was given has
+     * changed since the export, completion is refused with the changed sections named - re-export.
      */
     @Transactional
     public RegisterTransfer complete(UUID transferId, UUID actorId) {
@@ -204,6 +390,7 @@ public class RegisterTransferService {
             // stop touching it), so the register state it hands off must be FINALIZED, not provisional.
             finalityGate.require(GatedOperation.REGISTER_TRANSFER_COMPLETE, transfer.getAssetId(),
                     asset.getTokenStandard(), FinalityLevel.FINALIZED);
+            requireRegisterUnchangedSinceExport(transfer, asset);
         }
 
         transfer.setStatus(TransferStatus.COMPLETED);
@@ -214,14 +401,43 @@ public class RegisterTransferService {
         if (asset != null) {
             asset.setStatus(AssetStatus.TRANSFERRED_OUT);
             assetRepository.save(asset);
+            evictAssetCache(asset.getId());
         } else {
             log.warn("Asset {} disappeared before it could be marked TRANSFERRED_OUT (transfer={})",
                     transfer.getAssetId(), transferId);
         }
 
         eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "COMPLETED", actorId, "REGISTRY_ADMIN",
-                nullSafeMap("assetId", transfer.getAssetId(), "successorName", transfer.getSuccessorName())));
+                nullSafeMap("assetId", transfer.getAssetId(), "successorName", transfer.getSuccessorName(),
+                        "registerContentHash", transfer.getRegisterContentHash())));
         return saved;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void requireRegisterUnchangedSinceExport(RegisterTransfer transfer, Asset asset) {
+        if (transfer.getRegisterContentHash() == null) {
+            return; // exported before content hashing existed - nothing to compare against
+        }
+        RegisterContent now = computeContent(asset);
+        if (now.hash().equals(transfer.getRegisterContentHash())) {
+            return;
+        }
+        Map<String, Object> stored = transfer.getExportManifest() != null
+                && transfer.getExportManifest().get("registerContentSections") instanceof Map<?, ?> m
+                ? (Map<String, Object>) m : Map.of();
+        List<String> changed = new ArrayList<>();
+        for (Map.Entry<String, String> e : now.sectionHashes().entrySet()) {
+            if (!e.getValue().equals(stored.get(e.getKey()))) {
+                changed.add(e.getKey());
+            }
+        }
+        for (String key : stored.keySet()) {
+            if (!now.sectionHashes().containsKey(key)) {
+                changed.add(key);
+            }
+        }
+        throw new IllegalStateException("Register changed since the export - completion refused; re-export first. "
+                + "Changed sections: " + (changed.isEmpty() ? "unknown" : changed));
     }
 
     @Transactional
@@ -235,9 +451,39 @@ public class RegisterTransferService {
         transfer.setUpdatedAt(Instant.now());
         RegisterTransfer saved = transferRepository.save(transfer);
 
+        // Lift the freeze set by export().
+        String restoredTo = null;
+        Asset asset = assetRepository.findById(transfer.getAssetId()).orElse(null);
+        if (asset != null && asset.getStatus() == AssetStatus.TRANSFER_PENDING) {
+            AssetStatus restore = AssetStatus.ISSUED;
+            if (transfer.getPreviousAssetStatus() != null) {
+                try {
+                    restore = AssetStatus.valueOf(transfer.getPreviousAssetStatus());
+                } catch (IllegalArgumentException ignored) {
+                    // unknown legacy value - fall back to ISSUED
+                }
+            }
+            asset.setStatus(restore);
+            assetRepository.save(asset);
+            evictAssetCache(asset.getId());
+            restoredTo = restore.name();
+        }
+
         eventPublisher.publishEvent(new RegisterTransferEvent(transferId, "CANCELLED", actorId, "REGISTRY_ADMIN",
-                nullSafeMap("assetId", transfer.getAssetId(), "reason", reason, "previousStatus", previousStatus)));
+                nullSafeMap("assetId", transfer.getAssetId(), "reason", reason, "previousStatus", previousStatus,
+                        "assetStatusRestoredTo", restoredTo)));
         return saved;
+    }
+
+    private void evictAssetCache(UUID assetId) {
+        try {
+            var cache = cacheManager != null ? cacheManager.getCache("assets") : null;
+            if (cache != null) {
+                cache.evict(assetId);
+            }
+        } catch (RuntimeException e) {
+            log.warn("Could not evict asset cache for {}: {}", assetId, e.getMessage());
+        }
     }
 
     @Transactional(readOnly = true)
@@ -247,25 +493,118 @@ public class RegisterTransferService {
 
     // ── Snapshot builders ──────────────────────────────────────────────────────
 
+    /** The register content handed to the successor plus its canonical hash (T3-07). */
+    record RegisterContent(Map<String, Object> sections, Map<String, String> sectionHashes, String hash) {}
+
+    /** Attributes that change on their own (jobs, status flow) and must not invalidate the package. */
+    private RegisterContent computeContent(Asset asset) {
+        UUID assetId = asset.getId();
+        Map<String, Object> sections = new LinkedHashMap<>();
+        sections.put("asset", assetSnapshot(asset));
+        List<AssetHolder> holders = holderRepository.findActiveByAssetId(assetId, Pageable.unpaged()).getContent();
+        sections.put("holders", holderSnapshots(holders));
+        sections.put("holderBlocks", blockSnapshots(assetId, holders));
+        sections.put("bondTerms", bondTermsSnapshot(assetId));
+        sections.put("termSheetDocumentHash", termSheetHash(assetId));
+        sections.put("openCorporateActions", corporateActionPort.openActions(assetId).stream()
+                .sorted(java.util.Comparator.comparing(a -> a.id().toString()))
+                .map(a -> {
+                    // status deliberately excluded from the hash-relevant projection
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", a.id());
+                    m.put("actionType", a.actionType());
+                    m.put("recordDate", a.recordDate());
+                    m.put("paymentDate", a.paymentDate());
+                    return m;
+                }).toList());
+        sections.put("openSubscriptionOrders", subscriptionOrdersPort.openOrders(assetId).stream()
+                .sorted(java.util.Comparator.comparing(o -> o.id().toString()))
+                .map(o -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", o.id());
+                    m.put("investorEntityId", o.investorEntityId());
+                    m.put("walletAddress", o.walletAddress());
+                    m.put("requestedAmount", o.requestedAmount() != null ? o.requestedAmount().toPlainString() : null);
+                    m.put("allocatedAmount", o.allocatedAmount() != null ? o.allocatedAmount().toPlainString() : null);
+                    m.put("status", o.status());
+                    return m;
+                }).toList());
+
+        Map<String, String> sectionHashes = new LinkedHashMap<>();
+        Map<String, Object> canonicalAll = new java.util.TreeMap<>();
+        for (Map.Entry<String, Object> e : sections.entrySet()) {
+            Object canon = canonical(e.getValue());
+            canonicalAll.put(e.getKey(), canon);
+            sectionHashes.put(e.getKey(), sha256Hex(toCanonicalBytes(canon)));
+        }
+        return new RegisterContent(sections, sectionHashes, sha256Hex(toCanonicalBytes(canonicalAll)));
+    }
+
+    /** Recursively sorts map keys and stringifies non-JSON scalars so equal content hashes equal. */
+    private static Object canonical(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sorted = new java.util.TreeMap<>();
+            map.forEach((k, v) -> sorted.put(String.valueOf(k), canonical(v)));
+            return sorted;
+        }
+        if (value instanceof Iterable<?> it) {
+            List<Object> out = new ArrayList<>();
+            it.forEach(v -> out.add(canonical(v)));
+            return out;
+        }
+        if (value == null || value instanceof String || value instanceof Boolean || value instanceof Integer
+                || value instanceof Long) {
+            return value;
+        }
+        if (value instanceof java.math.BigDecimal bd) {
+            return bd.stripTrailingZeros().toPlainString();
+        }
+        return String.valueOf(value);
+    }
+
+    private byte[] toCanonicalBytes(Object canonical) {
+        try {
+            return objectMapper.writeValueAsBytes(canonical);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to canonicalise register content", e);
+        }
+    }
+
     private Map<String, Object> assetSnapshot(Asset asset) {
+        // status is deliberately absent: export() itself flips it to TRANSFER_PENDING.
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", asset.getId());
         m.put("name", asset.getName());
         m.put("isin", asset.getIsin());
         m.put("entryType", asset.getEntryType() != null ? asset.getEntryType().name() : null);
+        m.put("tokenStandard", asset.getTokenStandard() != null ? asset.getTokenStandard().name() : null);
+        m.put("jurisdiction", asset.getJurisdiction() != null ? asset.getJurisdiction().name() : null);
+        m.put("currency", asset.getCurrency());
+        m.put("issueSize", asset.getIssueSize() != null ? asset.getIssueSize().toPlainString() : null);
+        m.put("denomination", asset.getDenomination() != null ? asset.getDenomination().toPlainString() : null);
+        m.put("issueDate", asset.getIssueDate());
+        m.put("maturityDate", asset.getMaturityDate());
+        LegalEntity issuer = asset.getIssuerId() != null ? entityRepository.findById(asset.getIssuerId()).orElse(null) : null;
+        m.put("issuerId", asset.getIssuerId());
+        m.put("issuerEntityNumber", issuer != null ? issuer.getEntityNumber() : null);
+        m.put("issuerLei", issuer != null ? issuer.getLeiCode() : null);
         return m;
     }
 
-    private List<Map<String, Object>> holderSnapshots(UUID assetId) {
+    private List<Map<String, Object>> holderSnapshots(List<AssetHolder> holders) {
         // The §20 eWpRV package hands the successor operator the *current* register to continue
         // maintaining; a removed holder is no longer a register entry (the audit trail, exported
         // separately by this same class, already preserves that history).
-        List<AssetHolder> holders = holderRepository.findActiveByAssetId(assetId, Pageable.unpaged()).getContent();
         List<Map<String, Object>> out = new ArrayList<>(holders.size());
         for (AssetHolder h : holders) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", h.getId());
             m.put("investorId", h.getInvestorId());
+            // Identity: stable internal number and LEI only. Clear names/addresses are a parked
+            // policy question (§20 package identity fields) and deliberately omitted.
+            LegalEntity investor = h.getInvestorId() != null ? entityRepository.findById(h.getInvestorId()).orElse(null) : null;
+            m.put("investorEntityNumber", investor != null ? investor.getEntityNumber() : null);
+            m.put("investorLei", investor != null ? investor.getLeiCode() : null);
             m.put("walletAddress", h.getWalletAddress());
             m.put("nominalAmount", h.getNominalAmount() != null ? h.getNominalAmount().toPlainString() : "0");
             m.put("entryType", h.getEntryType() != null ? h.getEntryType().name() : null);
@@ -276,7 +615,89 @@ public class RegisterTransferService {
             m.put("legalCapacityNote", h.getLegalCapacityNote());
             out.add(m);
         }
+        out.sort(java.util.Comparator.comparing(m -> String.valueOf(m.get("id"))));
         return out;
+    }
+
+    /** All ACTIVE HolderBlocks that bind this register: asset-scoped, entity-wide on a holder, or on a holder wallet. */
+    private List<Map<String, Object>> blockSnapshots(UUID assetId, List<AssetHolder> holders) {
+        Set<UUID> investors = new HashSet<>();
+        Set<String> wallets = new HashSet<>();
+        for (AssetHolder h : holders) {
+            if (h.getInvestorId() != null) investors.add(h.getInvestorId());
+            if (h.getWalletAddress() != null) wallets.add(h.getWalletAddress().toLowerCase(java.util.Locale.ROOT));
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (HolderBlock b : blockRepository.findByStatusOrderByCreatedAtDesc(HolderBlock.Status.ACTIVE)) {
+            boolean applies = assetId.equals(b.getAssetId())
+                    || (b.getEntityId() != null && investors.contains(b.getEntityId()) && b.getAssetId() == null)
+                    || (b.getWalletAddress() != null && wallets.contains(b.getWalletAddress().toLowerCase(java.util.Locale.ROOT))
+                    && b.getAssetId() == null);
+            if (!applies) {
+                continue;
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", b.getId());
+            m.put("blockType", b.getBlockType() != null ? b.getBlockType().name() : null);
+            m.put("assetId", b.getAssetId());
+            m.put("entityId", b.getEntityId());
+            m.put("walletAddress", b.getWalletAddress());
+            m.put("legalBasis", b.getLegalBasis());
+            m.put("courtRef", b.getCourtRef());
+            m.put("startsAt", b.getStartsAt());
+            m.put("expiresAt", b.getExpiresAt());
+            m.put("documentId", b.getDocumentId());
+            out.add(m);
+        }
+        out.sort(java.util.Comparator.comparing(m -> String.valueOf(m.get("id"))));
+        return out;
+    }
+
+    /** Bond terms and the coupon schedule; the time-driven statuses (bond/coupon) are excluded. */
+    private Map<String, Object> bondTermsSnapshot(UUID assetId) {
+        AssetBondTerms t = bondTermsRepository.findById(assetId).orElse(null);
+        if (t == null) {
+            return null;
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("faceValue", t.getFaceValue());
+        m.put("currencyIso", t.getCurrencyIso());
+        m.put("issueDate", t.getIssueDate());
+        m.put("maturityDate", t.getMaturityDate());
+        m.put("couponRate", t.getCouponRate());
+        m.put("referenceRate", t.getReferenceRate());
+        m.put("spread", t.getSpread());
+        m.put("issuePrice", t.getIssuePrice());
+        m.put("dayCount", t.getDayCount());
+        m.put("paymentFrequency", t.getPaymentFrequency());
+        m.put("callSchedule", t.getCallSchedule());
+        m.put("businessDayConvention", t.getBusinessDayConvention());
+        m.put("holidayCalendar", t.getHolidayCalendar());
+        m.put("recordDateOffsetBd", t.getRecordDateOffsetBd());
+        m.put("announcementLeadBd", t.getAnnouncementLeadBd());
+        m.put("interestGraceDays", t.getInterestGraceDays());
+        m.put("principalGraceDays", t.getPrincipalGraceDays());
+        m.put("stubRule", t.getStubRule());
+        List<Map<String, Object>> schedule = new ArrayList<>();
+        for (AssetCouponPayment p : couponPaymentRepository.findByAssetIdOrderByPeriodNo(assetId)) {
+            Map<String, Object> c = new LinkedHashMap<>();
+            c.put("periodNo", p.getPeriodNo());
+            c.put("scheduledDate", p.getScheduledDate());
+            c.put("periodStart", p.getPeriodStart());
+            c.put("periodEnd", p.getPeriodEnd());
+            c.put("recordDate", p.getRecordDate());
+            c.put("announcementDate", p.getAnnouncementDate());
+            c.put("amountPerUnit", p.getAmountPerUnit());
+            c.put("scheduleVersion", p.getScheduleVersion());
+            schedule.add(c);
+        }
+        m.put("couponSchedule", schedule);
+        return m;
+    }
+
+    private String termSheetHash(UUID assetId) {
+        return documentRepository.findByAssetIdAndDocumentTypeAndDeletedAtIsNull(assetId, AssetDocumentType.TERM_SHEET)
+                .stream().findFirst().map(d -> d.getContentHash()).orElse(null);
     }
 
     private List<Map<String, Object>> deploymentSnapshots(UUID assetId) {

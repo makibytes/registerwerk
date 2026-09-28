@@ -49,5 +49,7 @@ public record AssetResponse(
     HolderSyncStatus holderSyncStatus,
     String holderSyncBlockedReason,
     List<String> holderSyncUnmappedWallets,
-    Instant lastSuccessfulHolderSyncAt
+    Instant lastSuccessfulHolderSyncAt,
+    // T3-09: active register entries on this deployed asset that the chain does not back.
+    int holderSyncOffchainRows
 ) {}

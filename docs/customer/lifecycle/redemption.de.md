@@ -1,6 +1,6 @@
 ---
 title: 6. Kapitalmaßnahmen und Rückzahlung
-description: Kupons, Nachweisstichtage, Steuerbescheinigungen — und wie ein Wertpapier schließlich zurückgezahlt und vernichtet wird.
+description: Kupons, Nachweisstichtage, Ertragsaufstellungen — und wie ein Wertpapier schließlich zurückgezahlt und vernichtet wird.
 ---
 
 # Station 6 — Kapitalmaßnahmen und Rückzahlung
@@ -95,14 +95,14 @@ Nur eine Teilmenge lässt sich heute tatsächlich anlegen — der Rest ist model
 
 ---
 
-## Steuerbescheinigungen
+## Ertragsaufstellung (keine Steuerbescheinigung) { #tax-certificates }
 
-Für deutsche Inhaber sind Erträge aus einem Wertpapier steuerpflichtig, und der Inhaber braucht eine **Steuerbescheinigung** — ein Dokument darüber, was er in einem Jahr erhalten hat.
+Für deutsche Inhaber sind Erträge aus einem Wertpapier steuerpflichtig. Registerwerk stellt jährlich eine **Ertragsaufstellung** bereit, die ausweist, was dem Inhaber in einem Jahr gezahlt wurde — sie ist aber **keine Steuerbescheinigung** im Sinne des § 45a EStG.
 
-Registerwerk erzeugt sie aus den Einträgen der Kapitalmaßnahmen: für jeden Anleger alle Ansprüche des Steuerjahres, zusammengefasst.
+Sie wird aus den abgerechneten Einträgen der Kapitalmaßnahmen erzeugt: für jeden Anleger die Kupon-, Zins- und Dividendenansprüche des Kalenderjahres, **je Währung** gruppiert (Beträge in verschiedenen Währungen werden nie addiert). Kapitalrückzahlungen (Rückzahlung, Kündigung, Teilrückzahlung) und Einzahlungsaufforderungen sind **kein Ertrag** und ausgeschlossen; Veräußerungs- oder Einlösungsgewinne werden nicht ermittelt, weil das Register keine Anschaffungskosten führt.
 
 !!! warning "Sie weist aus, was gezahlt wurde, nicht was geschuldet wird"
-    Die Bescheinigung ist eine Tatsachenaufzeichnung über Ausschüttungen aus diesem Register. Sie ist keine Steuerberatung, berücksichtigt keine Einkünfte anderswo und berechnet niemandes Steuerschuld. Quellensteuerpflichten hängen von Ansässigkeit und Status des Inhabers ab und liegen in der Verantwortung von Emittent und Inhaber.
+    Die Aufstellung ist eine Tatsachenaufzeichnung über Brutto-Ausschüttungen aus diesem Register. Sie ist keine Steuerberatung, berücksichtigt keine Einkünfte anderswo und berechnet niemandes Steuerschuld. **Registerwerk behält weder Kapitalertragsteuer noch Solidaritätszuschlag ein** — Kupons werden brutto gezahlt, und die Aufstellung weist das aus (einbehalten: 0,00). Ob der Registerführer als auszahlende Stelle einbehält und bescheinigt, ist eine offene Grundsatzentscheidung; bis dahin bleiben Inhaber und Emittent für Einbehalt und Erklärung verantwortlich.
 
 ---
 
@@ -135,7 +135,7 @@ stateDiagram-v2
 
 ### Wenn die Rückzahlung ausbleibt
 
-Der Zahltag verstreicht, und nichts wird abgewickelt. Das ist ein **Zahlungsausfall**, und es ist ein reales Ereignis, das die Plattform erkennt statt zu ignorieren: Rückzahlungsmaßnahmen, deren Zahltag ohne Abwicklung verstrichen ist, werden markiert, ebenso ausgefallene Kupons.
+Der Zahltag verstreicht, und nichts wird abgewickelt. Die Plattform spricht nicht sofort von einem Ausfall: Die Zahlung erscheint zunächst als **Zahlung ausstehend** (überfällig), solange die Nachfrist läuft – standardmäßig 30 Tage für Zinsen, 7 Tage für Kapital. Nur wenn sie danach noch offen ist, wird der Kupon als **verpasst** und die Anleihe als **ausgefallen** markiert. Wird die Zahlung zu irgendeinem Zeitpunkt abgewickelt, fällt die Markierung weg, und die Anleihe gilt als zurückgezahlt (bzw. der Kupon als gezahlt).
 
 Registerwerk hebt die Hand. Es kann keinen Anspruch durchsetzen — das ist Sache des Treuhänders, der Inhaber und der Gerichte.
 

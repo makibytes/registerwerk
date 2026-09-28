@@ -6,7 +6,10 @@ import de.makibytes.registerwerk.asset.events.AssetApprovedEvent;
 import de.makibytes.registerwerk.asset.events.AssetRejectedEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderAllocatedEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderConfirmedEvent;
+import de.makibytes.registerwerk.asset.events.SubscriptionOrderLapsedEvent;
+import de.makibytes.registerwerk.asset.events.SubscriptionOrderPaymentConfirmedEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderRejectedEvent;
+import de.makibytes.registerwerk.asset.events.SubscriptionOrderSettledEvent;
 import de.makibytes.registerwerk.kyc.events.KycApprovedEvent;
 import de.makibytes.registerwerk.kyc.events.KycRejectedEvent;
 import de.makibytes.registerwerk.trading.api.TradeExecution;
@@ -85,6 +88,30 @@ class WebhookEventListener {
         UUID investorEntityId = investorEntityId(event.payload());
         if (investorEntityId == null) return;
         dispatchService.dispatch(investorEntityId, WebhookEventType.SUBSCRIPTION_ORDER_CONFIRMED,
+                stringify(event.payload()));
+    }
+
+    @ApplicationModuleListener
+    void on(SubscriptionOrderPaymentConfirmedEvent event) {
+        UUID investorEntityId = investorEntityId(event.payload());
+        if (investorEntityId == null) return;
+        dispatchService.dispatch(investorEntityId, WebhookEventType.SUBSCRIPTION_ORDER_PAYMENT_CONFIRMED,
+                stringify(event.payload()));
+    }
+
+    @ApplicationModuleListener
+    void on(SubscriptionOrderSettledEvent event) {
+        UUID investorEntityId = investorEntityId(event.payload());
+        if (investorEntityId == null) return;
+        dispatchService.dispatch(investorEntityId, WebhookEventType.SUBSCRIPTION_ORDER_SETTLED,
+                stringify(event.payload()));
+    }
+
+    @ApplicationModuleListener
+    void on(SubscriptionOrderLapsedEvent event) {
+        UUID investorEntityId = investorEntityId(event.payload());
+        if (investorEntityId == null) return;
+        dispatchService.dispatch(investorEntityId, WebhookEventType.SUBSCRIPTION_ORDER_LAPSED,
                 stringify(event.payload()));
     }
 

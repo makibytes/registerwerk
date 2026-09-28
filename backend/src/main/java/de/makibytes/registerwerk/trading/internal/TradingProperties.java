@@ -19,6 +19,15 @@ public class TradingProperties {
      *  PENDING forever with no signal that it needed attention. */
     private long pendingTimeoutHours = 72;
 
+    /**
+     * T3-09 interim guard: whether the simulated venue may list and settle an asset that has a
+     * CONFIRMED chain deployment. Settlement only rewrites the register rows (there is no on-chain
+     * leg yet — Phase 5), and the holder sync then resets the seller to its on-chain balance, so
+     * the register would exceed the supply. Default {@code false}; the demo stack turns it on and
+     * the trading desk then shows a "simulated settlement" notice.
+     */
+    private boolean offchainSettlementOnDeployedAssets = false;
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -33,6 +42,14 @@ public class TradingProperties {
 
     public void setPendingTimeoutHours(long pendingTimeoutHours) {
         this.pendingTimeoutHours = pendingTimeoutHours;
+    }
+
+    public boolean isOffchainSettlementOnDeployedAssets() {
+        return offchainSettlementOnDeployedAssets;
+    }
+
+    public void setOffchainSettlementOnDeployedAssets(boolean offchainSettlementOnDeployedAssets) {
+        this.offchainSettlementOnDeployedAssets = offchainSettlementOnDeployedAssets;
     }
 
     public Map<TradingVenueCode, VenueProperties> getVenues() {

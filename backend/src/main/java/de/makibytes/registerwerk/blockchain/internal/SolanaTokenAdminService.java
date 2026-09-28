@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.blockchain.internal;
 
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+import de.makibytes.registerwerk.shared.RegisterFreeze;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
@@ -63,18 +65,21 @@ public class SolanaTokenAdminService {
     private final WalletSigner walletSigner;
     private final ChainConfigRepository chainConfigRepository;
     private final ChainSubmissionExecutor submissions;
+    private final AssetLookupPort assetLookupPort;
 
     public SolanaTokenAdminService(
             AssetDeploymentRepository deploymentRepository,
             BlockchainClientRegistry clientRegistry,
             WalletSigner walletSigner,
             ChainConfigRepository chainConfigRepository,
-            ChainSubmissionExecutor submissions) {
+            ChainSubmissionExecutor submissions,
+            AssetLookupPort assetLookupPort) {
         this.deploymentRepository = deploymentRepository;
         this.clientRegistry       = clientRegistry;
         this.walletSigner         = walletSigner;
         this.chainConfigRepository = chainConfigRepository;
         this.submissions = submissions;
+        this.assetLookupPort = assetLookupPort;
     }
 
     // ── Forced transfer (eWpG §24) via Permanent Delegate ────────────────────
@@ -99,6 +104,7 @@ public class SolanaTokenAdminService {
                 deploymentId, fromTokenAccount, toTokenAccount, amount);
 
         AssetDeployment dep = requireDeployment(deploymentId);
+        requireRegisterOpen(dep, "permanentDelegateTransfer");
         return CompletableFuture.supplyAsync(() -> submissions.execute(
                 requireChainConfigId(dep), () -> {
             RpcClient client = solanaClient(dep);
@@ -139,6 +145,7 @@ public class SolanaTokenAdminService {
                 deploymentId, tokenAccount, amount);
 
         AssetDeployment dep = requireDeployment(deploymentId);
+        requireRegisterOpen(dep, "permanentDelegateBurn");
         return CompletableFuture.supplyAsync(() -> submissions.execute(
                 requireChainConfigId(dep), () -> {
             RpcClient client = solanaClient(dep);
@@ -189,6 +196,12 @@ public class SolanaTokenAdminService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Register freeze (transfer handover in progress): no holding-changing admin operation. */
+    private void requireRegisterOpen(AssetDeployment dep, String operation) {
+        assetLookupPort.findById(dep.getAssetId())
+                .ifPresent(a -> RegisterFreeze.requireOpen(a.status(), a.id(), operation));
+    }
 
     private AssetDeployment requireDeployment(UUID deploymentId) {
         AssetDeployment dep = deploymentRepository.findById(deploymentId)

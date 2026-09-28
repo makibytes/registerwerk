@@ -334,6 +334,87 @@ class RegisterStatementServiceTest {
         verify(emailPort, never()).sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString());
     }
 
+    private void wireUsers(AssetHolder h, AppUser... users) {
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        Asset asset = new Asset();
+        asset.setName("Test Bond");
+        when(assetRepository.findById(h.getAssetId())).thenReturn(Optional.of(asset));
+        LegalEntity investorEntity = new LegalEntity();
+        investorEntity.setId(h.getInvestorId());
+        when(entityRepository.findById(h.getInvestorId())).thenReturn(Optional.of(investorEntity));
+        when(userRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(h.getInvestorId()))
+                .thenReturn(List.of(users));
+        when(statementRepository.save(any(RegisterStatement.class))).thenAnswer(inv -> inv.getArgument(0));
+        stubDocumentProfile();
+    }
+
+    @Test
+    @DisplayName("T3-14: statement to an erased holder is FAILED (no lawful channel), not DELIVERED, and raises an alert event")
+    void statementToErasedHolderIsFailedNotDelivered() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+        AppUser erased = new AppUser();
+        erased.setEmail("erased-" + UUID.randomUUID() + "@erased.invalid");
+        erased.setEnabled(false);
+        wireUsers(h, erased);
+
+        Optional<RegisterStatement> result = newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getDeliveryStatus()).isEqualTo(DeliveryStatus.FAILED);
+        assertThat(result.get().getDeliveryErrorCode()).isEqualTo("NO_LAWFUL_CHANNEL");
+        assertThat(result.get().getDeliveryError()).contains("erasure");
+        verify(emailPort, never()).sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString());
+        verify(eventPublisher).publishEvent(any(
+                de.makibytes.registerwerk.registerstatement.events.RegisterStatementDeliveryFailedEvent.class));
+    }
+
+    @Test
+    @DisplayName("T3-14: a disabled user's address is ignored even when another (enabled) user exists")
+    void disabledUserEmailIgnored() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+        AppUser disabled = new AppUser();
+        disabled.setEmail("first@example.com");
+        disabled.setEnabled(false);
+        AppUser enabled = new AppUser();
+        enabled.setEmail("second@example.com");
+        enabled.setEnabled(true);
+        wireUsers(h, disabled, enabled);
+        when(emailPort.sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString())).thenReturn(true);
+
+        newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL);
+
+        verify(emailPort).sendHtmlWithPdf(eq("second@example.com"), anyString(), anyString(), any(), any(), anyString());
+        assertThat(RegisterStatementService.resolveEmail(List.of(disabled))).isNull();
+    }
+
+    @Test
+    @DisplayName("T3-14: retry skips statements that failed for lack of a lawful channel")
+    void retrySkipsNoLawfulChannel() {
+        RegisterStatement failed = new RegisterStatement();
+        failed.setDeliveryStatus(DeliveryStatus.FAILED);
+        failed.setDeliveryErrorCode("NO_LAWFUL_CHANNEL");
+        when(statementRepository.findByDeliveryStatus(DeliveryStatus.FAILED)).thenReturn(List.of(failed));
+
+        newService().retryFailedDeliveries();
+
+        verify(assetRepository, never()).findById(any());
+        verify(emailPort, never()).sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("T3-07: no statement is issued for an asset whose register was transferred out")
+    void annualStatementSkipsTransferredOut() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        Asset asset = new Asset();
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT);
+        when(assetRepository.findById(h.getAssetId())).thenReturn(Optional.of(asset));
+        when(entityRepository.findById(h.getInvestorId())).thenReturn(Optional.of(new LegalEntity()));
+
+        assertThat(newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL)).isEmpty();
+        verify(statementRepository, never()).save(any());
+    }
+
     @Test
     @DisplayName("renderForDownload logs an ON_DEMAND statement and dedupes same-day repeat downloads")
     void renderForDownloadLogsAndDedupesSameDay() {

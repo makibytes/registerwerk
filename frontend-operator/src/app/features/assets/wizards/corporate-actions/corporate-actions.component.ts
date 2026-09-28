@@ -50,7 +50,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
           <div class="ca-row header">
             <span>Type</span>
             <span>Status</span>
-            <span>Payment date</span>
+            <span>Announced / record / payment</span>
             <span class="right">Amount / unit</span>
             <span>Settlement progress</span>
             <span></span>
@@ -61,7 +61,20 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <span class="type-badge">{{ a.actionType.replace('_', ' ') }}</span>
               <span class="status-badge" [class]="a.status.toLowerCase()"
                     [matTooltip]="a.status === 'SNAPSHOT_BLOCKED' ? (a.snapshotBlockedReason ?? '') : ''">{{ a.status.replace('_', ' ') }}</span>
-              <span class="dimmed">{{ a.paymentDate ? (a.paymentDate | date:'dd MMM yyyy') : '—' }}</span>
+              <span class="dimmed">
+                {{ a.announcementDate ? (a.announcementDate | date:'dd MMM') : '—' }} /
+                {{ a.recordDate ? (a.recordDate | date:'dd MMM') : '—' }} /
+                {{ a.paymentDate ? (a.paymentDate | date:'dd MMM yyyy') : '—' }}
+                @if (a.heldOutstanding) {
+                  <span class="status-badge snapshot_blocked"
+                        matTooltip="Settled, but nominee-pool entitlements are held unresolved (PARK-T2-18) — the action stays open.">held entitlements outstanding</span>
+                }
+                @if (a.roundingResidual != null && a.roundingResidual !== 0) {
+                  <span class="mono" matTooltip="Unrounded minus rounded total (entitlements are rounded per holder to the currency's minor unit).">
+                    Δ {{ a.roundingResidual | number:'1.0-8' }}
+                  </span>
+                }
+              </span>
               <span class="right mono">
                 {{ a.amountPerUnit != null ? (a.amountPerUnit | number:'1.0-8') + ' ' + (a.currency ?? '') : '—' }}
               </span>

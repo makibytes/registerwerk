@@ -22,6 +22,27 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.blockchain.api.TokenAdminPort;
+import de.makibytes.registerwerk.customer.api.KycStatus;
+import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.erc3643.api.Erc3643MintPort;
+import de.makibytes.registerwerk.finality.api.FinalityGate;
+import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
+import de.makibytes.registerwerk.shared.RegisterClock;
+import org.mockito.ArgumentCaptor;
+import java.math.BigInteger;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.List;
 
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -31,6 +52,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,6 +67,13 @@ class SubscriptionOrderServiceTest {
     @Mock private AssetHolderRepository assetHolderRepository;
     @Mock private InvestorLimitService investorLimitService;
     @Mock private ApplicationEventPublisher events;
+    @Mock private AssetDeploymentRepository deploymentRepository;
+    @Mock private AssetBondTermsRepository bondTermsRepository;
+    @Mock private HolderBlockGate holderBlockGate;
+    @Mock private ScreeningGate screeningGate;
+    @Mock private FinalityGate finalityGate;
+    @Mock private TokenAdminPort tokenAdminPort;
+    @Mock private Erc3643MintPort erc3643MintPort;
 
     private SubscriptionOrderService service;
 
@@ -55,12 +85,22 @@ class SubscriptionOrderServiceTest {
     void setUp() {
         service = new SubscriptionOrderService(
                 repository, assetRepository, holderService, legalEntityRepository, suitabilityAssessmentRepository,
-                assetHolderRepository, investorLimitService, events);
+                assetHolderRepository, investorLimitService, events,
+                new RegisterClock(Clock.fixed(Instant.parse("2026-03-02T10:00:00Z"), ZoneOffset.UTC), ZoneId.of("Europe/Berlin")),
+                deploymentRepository, bondTermsRepository, holderBlockGate, screeningGate, finalityGate,
+                tokenAdminPort, erc3643MintPort);
         org.mockito.Mockito.lenient().when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // Target-market gate (Track 5-1): an unclassified investor against an unrestricted test
         // asset (no target market configured) so the gate is a no-op unless a test overrides it.
         org.mockito.Mockito.lenient().when(legalEntityRepository.findById(investorId))
                 .thenAnswer(inv -> Optional.of(unclassifiedInvestor()));
+    }
+
+    /** Stubs both lookups: allocate/settle lock the asset row (findByIdForUpdate), the rest read it plainly. */
+    private void stubAsset(Asset asset) {
+        asset.setId(assetId);
+        org.mockito.Mockito.lenient().when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        org.mockito.Mockito.lenient().when(assetRepository.findByIdForUpdate(assetId)).thenReturn(Optional.of(asset));
     }
 
     private LegalEntity unclassifiedInvestor() {
@@ -103,7 +143,7 @@ class SubscriptionOrderServiceTest {
     void submit_rejectsInvestorOutsideTargetMarket() {
         Asset restricted = approvedAsset();
         restricted.setTargetMarketCategories(java.util.Set.of(de.makibytes.registerwerk.customer.api.ClientCategory.PROFESSIONAL));
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(restricted));
+        stubAsset(restricted);
         // The default stub (setUp) returns an investor with no clientCategory set at all.
 
         assertThatThrownBy(() -> service.submit(assetId, investorId, "0xabc", new BigDecimal("1000"), actorId, "INVESTOR"))
@@ -116,7 +156,7 @@ class SubscriptionOrderServiceTest {
     void submit_allowsInvestorWithinTargetMarket() {
         Asset restricted = approvedAsset();
         restricted.setTargetMarketCategories(java.util.Set.of(de.makibytes.registerwerk.customer.api.ClientCategory.RETAIL));
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(restricted));
+        stubAsset(restricted);
         LegalEntity retailInvestor = new LegalEntity();
         retailInvestor.setId(investorId);
         retailInvestor.setClientCategory(de.makibytes.registerwerk.customer.api.ClientCategory.RETAIL);
@@ -143,7 +183,7 @@ class SubscriptionOrderServiceTest {
     void submit_draftAsset_rejected() {
         Asset draft = new Asset();
         draft.setStatus(AssetStatus.DRAFT);
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(draft));
+        stubAsset(draft);
 
         assertThatThrownBy(() -> service.submit(assetId, investorId, "0xabc", new BigDecimal("1000"), actorId, "INVESTOR"))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -167,7 +207,7 @@ class SubscriptionOrderServiceTest {
         SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
         Asset asset = approvedAsset(); // issueSize null -> no cap check
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        stubAsset(asset);
 
         SubscriptionOrder result = service.allocate(orderId, new BigDecimal("600"), actorId, "REGISTRY_ADMIN");
 
@@ -181,6 +221,7 @@ class SubscriptionOrderServiceTest {
         UUID orderId = UUID.randomUUID();
         SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
 
         assertThatThrownBy(() -> service.allocate(orderId, new BigDecimal("1001"), actorId, "REGISTRY_ADMIN"))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -193,6 +234,7 @@ class SubscriptionOrderServiceTest {
         SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
         order.setStatus(SubscriptionOrder.Status.CANCELLED);
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
 
         assertThatThrownBy(() -> service.allocate(orderId, new BigDecimal("500"), actorId, "REGISTRY_ADMIN"))
                 .isInstanceOf(InvalidStateTransitionException.class);
@@ -206,7 +248,7 @@ class SubscriptionOrderServiceTest {
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
         Asset capped = approvedAsset();
         capped.setIssueSize(new BigDecimal("1000"));
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(capped));
+        stubAsset(capped);
         when(repository.sumAllocated(assetId)).thenReturn(new BigDecimal("600")); // already allocated elsewhere
 
         assertThatThrownBy(() -> service.allocate(orderId, new BigDecimal("500"), actorId, "REGISTRY_ADMIN"))
@@ -222,7 +264,7 @@ class SubscriptionOrderServiceTest {
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
         Asset capped = approvedAsset();
         capped.setIssueSize(new BigDecimal("1000"));
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(capped));
+        stubAsset(capped);
         when(repository.sumAllocated(assetId)).thenReturn(new BigDecimal("600"));
 
         SubscriptionOrder result = service.allocate(orderId, new BigDecimal("400"), actorId, "REGISTRY_ADMIN");
@@ -237,11 +279,9 @@ class SubscriptionOrderServiceTest {
         SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
         Asset asset = approvedAsset();
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        stubAsset(asset);
         when(investorLimitService.effectiveMaxHolding(any(), eq(investorId))).thenReturn(new BigDecimal("500"));
-        AssetHolder existing = new AssetHolder();
-        existing.setNominalAmount(new BigDecimal("200"));
-        when(assetHolderRepository.findActiveByInvestorIdAndAssetId(investorId, assetId)).thenReturn(Optional.of(existing));
+        when(assetHolderRepository.sumActiveNominalByInvestorIdAndAssetId(investorId, assetId)).thenReturn(new BigDecimal("200"));
 
         assertThatThrownBy(() -> service.allocate(orderId, new BigDecimal("400"), actorId, "REGISTRY_ADMIN"))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -255,50 +295,341 @@ class SubscriptionOrderServiceTest {
         SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
         Asset asset = approvedAsset();
-        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        stubAsset(asset);
         when(investorLimitService.effectiveMaxHolding(any(), eq(investorId))).thenReturn(new BigDecimal("600"));
-        AssetHolder existing = new AssetHolder();
-        existing.setNominalAmount(new BigDecimal("200"));
-        when(assetHolderRepository.findActiveByInvestorIdAndAssetId(investorId, assetId)).thenReturn(Optional.of(existing));
+        when(assetHolderRepository.sumActiveNominalByInvestorIdAndAssetId(investorId, assetId)).thenReturn(new BigDecimal("200"));
 
         SubscriptionOrder result = service.allocate(orderId, new BigDecimal("400"), actorId, "REGISTRY_ADMIN");
 
         assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.ALLOCATED);
     }
 
-    // ── confirm ───────────────────────────────────────────────────────────────
+    // ── parallel allocations / expiry (T3-08) ─────────────────────────────────
 
     @Test
-    @DisplayName("confirm() enters the position via HolderService and links the resulting holder")
-    void confirm_allocatedOrder_createsHolder() {
+    @DisplayName("parallelAllocationsRespectHoldingCap: the investor's other open allocations count against the cap")
+    void parallelAllocationsRespectHoldingCap() {
         UUID orderId = UUID.randomUUID();
-        SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
-        order.setStatus(SubscriptionOrder.Status.ALLOCATED);
-        order.setAllocatedAmount(new BigDecimal("800"));
+        SubscriptionOrder order = submittedOrder(new BigDecimal("400"));
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
+        when(investorLimitService.effectiveMaxHolding(any(), eq(investorId))).thenReturn(new BigDecimal("500"));
+        // no holding yet, but 300 already allocated (unpaid) on another order of the same investor
+        when(repository.sumOpenAllocatedForInvestor(assetId, investorId)).thenReturn(new BigDecimal("300"));
 
-        UUID holderId = UUID.randomUUID();
-        AssetHolder holder = new AssetHolder();
-        holder.setId(holderId);
-        when(holderService.addHolder(assetId, investorId, "0xabc", new BigDecimal("800"), actorId, "INVESTOR"))
-                .thenReturn(holder);
-
-        SubscriptionOrder result = service.confirm(orderId, actorId, "INVESTOR");
-
-        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.CONFIRMED);
-        assertThat(result.getResultingHolderId()).isEqualTo(holderId);
-        assertThat(result.getConfirmedAt()).isNotNull();
+        assertThatThrownBy(() -> service.allocate(orderId, new BigDecimal("400"), actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("maximum");
+        // 200 fits: 0 + 300 + 200 = 500
+        assertThat(service.allocate(orderId, new BigDecimal("200"), actorId, "REGISTRY_ADMIN").getStatus())
+                .isEqualTo(SubscriptionOrder.Status.ALLOCATED);
     }
 
     @Test
-    @DisplayName("confirm() rejects an order that hasn't been allocated yet")
-    void confirm_notAllocated_rejected() {
+    @DisplayName("allocate() sets a payment deadline of N TARGET business days (end of day, Berlin)")
+    void allocate_setsPaymentDeadline() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = submittedOrder(new BigDecimal("400"));
+        when(repository.findById(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
+
+        SubscriptionOrder result = service.allocate(orderId, new BigDecimal("400"), actorId, "REGISTRY_ADMIN");
+
+        // clock: Mon 2026-03-02; +10 TARGET business days = Mon 2026-03-16; expires at the end of that day (Berlin, CET)
+        assertThat(result.getAllocationExpiresAt()).isEqualTo(Instant.parse("2026-03-16T23:00:00Z"));
+    }
+
+    @Test
+    @DisplayName("allocationLapsesAndReleasesCapacity: expired ALLOCATED orders become LAPSED")
+    void allocationLapsesAndReleasesCapacity() {
+        SubscriptionOrder order = allocatedOrder();
+        order.setAllocationExpiresAt(Instant.parse("2026-03-01T00:00:00Z"));
+        UUID id = UUID.randomUUID();
+        setId(order, id);
+        when(repository.findExpiredAllocations(any(), any())).thenReturn(List.of(order));
+        when(repository.findByIdForUpdate(id)).thenReturn(Optional.of(order));
+
+        int lapsed = service.lapseExpiredAllocations(Instant.parse("2026-03-02T10:00:00Z"), 100);
+
+        assertThat(lapsed).isEqualTo(1);
+        assertThat(order.getStatus()).isEqualTo(SubscriptionOrder.Status.LAPSED);
+        assertThat(order.getLapsedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("lapse skips an order that was paid in the meantime")
+    void lapseSkipsPaidOrder() {
+        SubscriptionOrder order = allocatedOrder();
+        order.setStatus(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
+        UUID id = UUID.randomUUID();
+        setId(order, id);
+        when(repository.findExpiredAllocations(any(), any())).thenReturn(List.of(order));
+        when(repository.findByIdForUpdate(id)).thenReturn(Optional.of(order));
+
+        assertThat(service.lapseExpiredAllocations(Instant.now(), 100)).isZero();
+        assertThat(order.getStatus()).isEqualTo(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
+    }
+
+    // ── accept ────────────────────────────────────────────────────────────────
+
+    private SubscriptionOrder allocatedOrder() {
+        SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
+        order.setStatus(SubscriptionOrder.Status.ALLOCATED);
+        order.setAllocatedAmount(new BigDecimal("800"));
+        order.setAllocationExpiresAt(Instant.now().plusSeconds(86_400));
+        return order;
+    }
+
+    private static void setId(SubscriptionOrder order, UUID id) {
+        org.springframework.test.util.ReflectionTestUtils.setField(order, "id", id);
+    }
+
+    @Test
+    @DisplayName("confirmNoLongerCreditsRegister: accepting an allocation does not touch the register")
+    void confirmNoLongerCreditsRegister() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = allocatedOrder();
+        when(repository.findById(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
+
+        SubscriptionOrder result = service.accept(orderId, actorId, "INVESTOR");
+
+        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.ALLOCATED);
+        assertThat(result.getAcceptedAt()).isNotNull();
+        org.mockito.Mockito.verifyNoInteractions(holderService, tokenAdminPort, erc3643MintPort);
+    }
+
+    @Test
+    @DisplayName("accept() rejects an order that hasn't been allocated yet")
+    void accept_notAllocated_rejected() {
         UUID orderId = UUID.randomUUID();
         SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
         when(repository.findById(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
 
-        assertThatThrownBy(() -> service.confirm(orderId, actorId, "INVESTOR"))
+        assertThatThrownBy(() -> service.accept(orderId, actorId, "INVESTOR"))
                 .isInstanceOf(InvalidStateTransitionException.class);
+    }
+
+    @Test
+    @DisplayName("accept() refuses an allocation past its payment deadline")
+    void accept_expired_rejected() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = allocatedOrder();
+        order.setAllocationExpiresAt(Instant.now().minusSeconds(60));
+        when(repository.findById(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
+
+        assertThatThrownBy(() -> service.accept(orderId, actorId, "INVESTOR"))
+                .isInstanceOf(InvalidStateTransitionException.class).hasMessageContaining("expired");
+    }
+
+    // ── confirmPayment ────────────────────────────────────────────────────────
+
+    private void stubBondTerms(String faceValue, String issuePrice) {
+        AssetBondTerms terms = new AssetBondTerms();
+        terms.setFaceValue(new BigDecimal(faceValue));
+        terms.setIssuePrice(new BigDecimal(issuePrice));
+        terms.setCurrencyIso("EUR");
+        when(bondTermsRepository.findById(assetId)).thenReturn(Optional.of(terms));
+    }
+
+    @Test
+    @DisplayName("confirmPayment(): requires the investor's acceptance first")
+    void confirmPayment_requiresAcceptance() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = allocatedOrder();
+        when(repository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
+
+        assertThatThrownBy(() -> service.confirmPayment(orderId, new BigDecimal("800"), "REF", null, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(InvalidStateTransitionException.class).hasMessageContaining("accepted");
+    }
+
+    @Test
+    @DisplayName("confirmPayment(): bond underpayment refused, overpayment accepted with refundDue")
+    void confirmPayment_bondAmountDue() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = allocatedOrder();
+        order.setAcceptedAt(Instant.now());
+        when(repository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
+        stubBondTerms("1000", "0.99"); // 800 x 1000 x 0.99 = 792000.00
+
+        assertThatThrownBy(() -> service.confirmPayment(orderId, new BigDecimal("791999.99"), "REF", null, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("underpayment");
+
+        SubscriptionOrder result = service.confirmPayment(orderId, new BigDecimal("792010.00"), "REF-1",
+                LocalDate.of(2026, 3, 2), actorId, "REGISTRY_ADMIN");
+        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
+        assertThat(result.getAmountDue()).isEqualByComparingTo("792000.00");
+        assertThat(result.getRefundDue()).isEqualByComparingTo("10.00");
+        assertThat(result.getPaymentConfirmedBy()).isEqualTo(actorId);
+    }
+
+    // ── settle ────────────────────────────────────────────────────────────────
+
+    private SubscriptionOrder paidOrder(UUID orderId) {
+        SubscriptionOrder order = allocatedOrder();
+        order.setAcceptedAt(Instant.now());
+        order.setStatus(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
+        when(repository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+        return order;
+    }
+
+    private LegalEntity investorWithKyc(KycStatus status) {
+        LegalEntity e = new LegalEntity();
+        e.setId(investorId);
+        e.setKycStatus(status);
+        when(legalEntityRepository.findById(investorId)).thenReturn(Optional.of(e));
+        return e;
+    }
+
+    @Test
+    @DisplayName("settleRequiresPaymentAndCompliance: unpaid order cannot settle")
+    void settle_requiresPayment() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = allocatedOrder(); // ALLOCATED, not paid
+        when(repository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(InvalidStateTransitionException.class);
+        verify(holderService, never()).creditPosition(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("settleRequiresPaymentAndCompliance: KYC, screening and Sperrvermerk each block settlement before any write")
+    void settle_complianceGates() {
+        UUID orderId = UUID.randomUUID();
+        paidOrder(orderId);
+        stubAsset(approvedAsset());
+        LegalEntity e = investorWithKyc(KycStatus.IN_PROGRESS);
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("KYC");
+
+        e.setKycStatus(KycStatus.APPROVED);
+        when(screeningGate.hasUnresolvedHit(investorId)).thenReturn(true);
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("screening");
+
+        when(screeningGate.hasUnresolvedHit(investorId)).thenReturn(false);
+        when(holderBlockGate.isBlocked(eq(investorId), any())).thenReturn(true);
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("Sperrvermerk");
+
+        verify(holderService, never()).creditPosition(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any());
+        verify(tokenAdminPort, never()).mint(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("settle() consults the finality gate")
+    void settle_finalityGate() {
+        UUID orderId = UUID.randomUUID();
+        paidOrder(orderId);
+        stubAsset(approvedAsset());
+        org.mockito.Mockito.doThrow(new IllegalStateException("chain quarantined"))
+                .when(finalityGate).require(any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("quarantined");
+    }
+
+    @Test
+    @DisplayName("settle() on an asset without deployment credits the register position")
+    void settle_offchainCreditsPosition() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        stubAsset(approvedAsset());
+        investorWithKyc(KycStatus.APPROVED);
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of());
+        UUID holderId = UUID.randomUUID();
+        AssetHolder holder = new AssetHolder();
+        holder.setId(holderId);
+        when(holderService.creditPosition(eq(assetId), eq(investorId), any(), eq(new BigDecimal("800")),
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any())).thenReturn(holder);
+
+        SubscriptionOrder result = service.settle(orderId, actorId, "REGISTRY_ADMIN");
+
+        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.SETTLED);
+        assertThat(result.getResultingHolderId()).isEqualTo(holderId);
+        assertThat(result.getSettledAt()).isNotNull();
+        verify(tokenAdminPort, never()).mint(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("settleOnDeployedAssetMintsNotInserts: a deployed ERC-20 gets a mapping row and a mint, no register credit")
+    void settleOnDeployedAssetMintsNotInserts() {
+        UUID orderId = UUID.randomUUID();
+        paidOrder(orderId);
+        Asset asset = approvedAsset();
+        asset.setTokenStandard(TokenStandard.ERC20);
+        stubAsset(asset);
+        investorWithKyc(KycStatus.APPROVED);
+        AssetDeployment dep = new AssetDeployment();
+        dep.setId(UUID.randomUUID());
+        dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(dep));
+        AssetHolder mapping = new AssetHolder();
+        mapping.setId(UUID.randomUUID());
+        when(holderService.ensureMappingRow(eq(assetId), eq(investorId), any(), any(), any(), any())).thenReturn(mapping);
+        UUID txId = UUID.randomUUID();
+        when(tokenAdminPort.mint(eq(dep.getId()), any(), eq(BigInteger.valueOf(800)), any(), any())).thenReturn(txId);
+
+        SubscriptionOrder result = service.settle(orderId, actorId, "REGISTRY_ADMIN");
+
+        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.SETTLED);
+        assertThat(result.getSettlementTxId()).isEqualTo(txId);
+        assertThat(result.getResultingHolderId()).isEqualTo(mapping.getId());
+        verify(holderService, never()).creditPosition(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("settle() on a deployed asset without an automated mint stays PAYMENT_CONFIRMED (honest refusal)")
+    void settle_deployedUnsupportedStandard() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        Asset asset = approvedAsset();
+        asset.setTokenStandard(TokenStandard.ERC1155);
+        stubAsset(asset);
+        investorWithKyc(KycStatus.APPROVED);
+        AssetDeployment dep = new AssetDeployment();
+        dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(dep));
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(InvalidStateTransitionException.class).hasMessageContaining("No automated mint");
+        assertThat(order.getStatus()).isEqualTo(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("settle() refuses a frozen register (T3-07/K5 guard)")
+    void settle_refusedWhileRegisterFrozen() {
+        UUID orderId = UUID.randomUUID();
+        paidOrder(orderId);
+        Asset frozen = approvedAsset();
+        frozen.setStatus(AssetStatus.TRANSFER_PENDING);
+        stubAsset(frozen);
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(InvalidStateTransitionException.class);
+    }
+
+    // ── release ───────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("release() gives an allocation back; a paid order gets its payment marked for refund")
+    void release_marksRefundForPaidOrder() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        order.setPaidAmount(new BigDecimal("792000"));
+
+        SubscriptionOrder result = service.release(orderId, "KYC expired", actorId, "REGISTRY_ADMIN");
+
+        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.RELEASED);
+        assertThat(result.getRefundDue()).isEqualByComparingTo("792000");
+        assertThat(result.getReleaseReason()).isEqualTo("KYC expired");
     }
 
     // ── reject / cancel ───────────────────────────────────────────────────────

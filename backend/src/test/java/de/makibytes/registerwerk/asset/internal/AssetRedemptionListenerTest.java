@@ -2,6 +2,13 @@ package de.makibytes.registerwerk.asset.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.RedemptionReadinessPort;
+import de.makibytes.registerwerk.asset.events.AssetRedemptionIncompleteEvent;
+import de.makibytes.registerwerk.deployment.api.HolderKind;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
+import java.util.Map;
+import java.util.Set;
 import de.makibytes.registerwerk.asset.events.AssetRedeemedEvent;
 import de.makibytes.registerwerk.blockchain.api.TokenAdminPort;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -23,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -37,6 +45,8 @@ class AssetRedemptionListenerTest {
     @Mock private AssetDeploymentRepository deploymentRepository;
     @Mock private AssetHolderRepository holderRepository;
     @Mock private TokenAdminPort tokenAdminPort;
+    @Mock private RedemptionReadinessPort redemptionReadiness;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private AssetRedemptionListener listener;
@@ -130,5 +140,57 @@ class AssetRedemptionListenerTest {
         listener.onAssetRedeemed(new AssetRedeemedEvent(assetId, UUID.randomUUID(), "REGISTRY_ADMIN"));
 
         verify(tokenAdminPort, never()).forceBurn(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("skipsNomineePoolAndUnsettledEntries: bond burns only paid holders; pool + unpaid reported (T3-01)")
+    void skipsNomineePoolAndUnsettledEntries() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        UUID caId = UUID.randomUUID();
+        Asset a = asset(assetId, TokenStandard.ERC20);
+        AssetDeployment dep = new AssetDeployment();
+        ReflectionTestUtils.setField(dep, "id", deploymentId);
+        AssetHolder pool = holder("0xpool", new BigDecimal("300"));
+        pool.setHolderKind(HolderKind.NOMINEE_POOL);
+
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(a));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(dep));
+        when(holderRepository.findActiveByAssetId(assetId)).thenReturn(List.of(
+                holder("0xPAID", new BigDecimal("500")),
+                holder("0xunpaid", new BigDecimal("200")),
+                pool));
+        when(redemptionReadiness.settledRetirementAction(assetId)).thenReturn(Optional.of(
+                new RedemptionReadinessPort.SettledRetirement(caId, Set.of("0xpaid"))));
+
+        listener.onAssetRedeemed(new AssetRedeemedEvent(assetId, UUID.randomUUID(), "REGISTRY_ADMIN",
+                "eWpG §26", "CA", UUID.randomUUID(), caId));
+
+        verify(tokenAdminPort).forceBurn(eq(deploymentId), eq("0xPAID"), eq(BigInteger.valueOf(500)),
+                any(String.class), any(UUID.class), eq("REGISTRY_ADMIN"));
+        verify(tokenAdminPort, never()).forceBurn(any(), eq("0xunpaid"), any(), any(), any(), any());
+        verify(tokenAdminPort, never()).forceBurn(any(), eq("0xpool"), any(), any(), any(), any());
+
+        ArgumentCaptor<AssetRedemptionIncompleteEvent> captor = ArgumentCaptor.forClass(AssetRedemptionIncompleteEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> unburnt = (List<Map<String, Object>>) captor.getValue().payload().get("unburnt");
+        assertThat(unburnt).extracting(m -> m.get("walletAddress")).containsExactlyInAnyOrder("0xunpaid", "0xpool");
+    }
+
+    @Test
+    @DisplayName("non-bond redemption with every holder burnt publishes no incomplete event")
+    void noIncompleteEventWhenAllBurnt() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = new AssetDeployment();
+        ReflectionTestUtils.setField(dep, "id", UUID.randomUUID());
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset(assetId, TokenStandard.ERC20)));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(dep));
+        when(holderRepository.findActiveByAssetId(assetId)).thenReturn(List.of(holder("0xaaa", BigDecimal.ONE)));
+
+        listener.onAssetRedeemed(new AssetRedeemedEvent(assetId, UUID.randomUUID(), "REGISTRY_ADMIN"));
+
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
+        verify(redemptionReadiness, never()).settledRetirementAction(any());
     }
 }

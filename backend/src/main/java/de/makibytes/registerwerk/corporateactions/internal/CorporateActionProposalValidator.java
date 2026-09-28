@@ -4,6 +4,10 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.web.dto.ProposeCorporateActionRequest;
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
 import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
+import de.makibytes.registerwerk.deployment.api.schedule.BusinessDayCalendar;
+import de.makibytes.registerwerk.deployment.api.schedule.HolidayCalendar;
+import de.makibytes.registerwerk.deployment.api.schedule.Target2Calendar;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -21,6 +25,12 @@ import java.util.UUID;
  * accepted this round — every other {@link CorporateAction.ActionType} is a "not yet supported"
  * rejection, not a silent fallthrough, so an issuer gets a clear reason rather than a confusing
  * validation failure on unrelated fields.
+ *
+ * <p>Record dates (T3-06): entitlements are fixed as of the end of the record date, so a record
+ * date must still be ahead — at least the next TARGET2 business day — when the proposal is made
+ * and again when an operator approves it ({@link #requireRecordDateAhead}). A past record date
+ * would otherwise be snapshotted from a register that has moved on since. A CALL's record date is
+ * the call date minus the bond's record-date offset (business days), like a coupon's.
  */
 @Component
 class CorporateActionProposalValidator {
@@ -29,9 +39,27 @@ class CorporateActionProposalValidator {
             Set.of(CorporateAction.ActionType.DIVIDEND, CorporateAction.ActionType.SPLIT, CorporateAction.ActionType.CALL);
 
     private final AssetBondTermsRepository bondTermsRepository;
+    private final RegisterClock registerClock;
 
-    CorporateActionProposalValidator(AssetBondTermsRepository bondTermsRepository) {
+    CorporateActionProposalValidator(AssetBondTermsRepository bondTermsRepository, RegisterClock registerClock) {
         this.bondTermsRepository = bondTermsRepository;
+        this.registerClock = registerClock;
+    }
+
+    /** The earliest acceptable record date: the next TARGET2 business day after {@code today}. */
+    static LocalDate earliestRecordDate(LocalDate today) {
+        return Target2Calendar.INSTANCE.addBusinessDays(today, 1);
+    }
+
+    /** @return null when acceptable, else the refusal message */
+    static String recordDateRefusal(LocalDate recordDate, LocalDate today) {
+        LocalDate earliest = earliestRecordDate(today);
+        if (recordDate != null && recordDate.isBefore(earliest)) {
+            return "Record date " + recordDate + " is not ahead: entitlements are fixed as of the end of the "
+                    + "record date, so it must be on or after " + earliest + " (the next business day). "
+                    + "Propose the action again with a later record date.";
+        }
+        return null;
     }
 
     /** @return a fully-populated (but not yet persisted) {@link CorporateAction} ready for
@@ -46,7 +74,7 @@ class CorporateActionProposalValidator {
         CorporateAction action = new CorporateAction();
         action.setAssetId(assetId);
         action.setActionType(request.actionType());
-        action.setAnnouncementDate(request.announcementDate() != null ? request.announcementDate() : LocalDate.now());
+        action.setAnnouncementDate(request.announcementDate() != null ? request.announcementDate() : registerClock.today());
         action.setNotes(request.notes());
 
         switch (request.actionType()) {
@@ -54,6 +82,10 @@ class CorporateActionProposalValidator {
             case SPLIT -> validateAndApplySplit(action, request);
             case CALL -> validateAndApplyCall(assetId, action, request);
             default -> throw new IllegalStateException("Unreachable — checked by PROPOSABLE_TYPES above");
+        }
+        String refusal = recordDateRefusal(action.getRecordDate(), registerClock.today());
+        if (refusal != null) {
+            throw new IllegalArgumentException(refusal);
         }
         return action;
     }
@@ -122,7 +154,9 @@ class CorporateActionProposalValidator {
             throw new IllegalArgumentException("Call date " + callDate + " is outside the bond's issue/maturity window");
         }
 
-        action.setRecordDate(callDate);
+        BusinessDayCalendar calendar = (terms.getHolidayCalendar() != null
+                ? terms.getHolidayCalendar() : HolidayCalendar.TARGET2).calendar();
+        action.setRecordDate(calendar.addBusinessDays(callDate, -terms.getRecordDateOffsetBd()));
         action.setPaymentDate(callDate);
         action.setAmountPerUnit(callPrice);
         action.setCurrency(terms.getCurrencyIso());

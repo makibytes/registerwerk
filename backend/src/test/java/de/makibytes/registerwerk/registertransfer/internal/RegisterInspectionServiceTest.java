@@ -31,8 +31,9 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for §10 eWpG register inspection requests. The core legal rule is
- * the §10(2) eWpRV auto-approval split: Berechtigte (ISSUER/HOLDER/BENEFICIARY)
- * are approved automatically, everyone else waits for operator review.
+ * the §10(2) eWpRV auto-approval split: Berechtigte are approved
+ * automatically only when the claim is verified against the register (T3-11: issuer of the asset,
+ * active holder); everyone else waits for operator review.
  */
 @ExtendWith(MockitoExtension.class)
 class RegisterInspectionServiceTest {
@@ -54,19 +55,117 @@ class RegisterInspectionServiceTest {
         lenient().when(requestRepository.save(any(RegisterInspectionRequest.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
+    private static Asset assetWithId() {
+        Asset a = new Asset();
+        a.setId(ASSET_ID);
+        return a;
+    }
+
     // ── submit — §10(2) eWpRV auto-approval split ────────────────────────────
 
-    @ParameterizedTest
-    @EnumSource(value = InspectionLegalBasis.class, names = {"ISSUER", "HOLDER", "BENEFICIARY"})
-    void submit_autoApprovesBerechtigte(InspectionLegalBasis basis) {
-        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(new Asset()));
+    @Test
+    void submit_autoApprovesVerifiedIssuer() {
+        UUID entity = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setIssuerId(entity);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
 
         RegisterInspectionRequest request = service.submit(
-                ASSET_ID, UUID.randomUUID(), "Jane Doe", "jane@example.com", basis, null);
+                ASSET_ID, entity, "Issuer AG", "i@example.com", InspectionLegalBasis.ISSUER, null);
 
         assertThat(request.getStatus()).isEqualTo(InspectionStatus.APPROVED);
+        assertThat(request.isClaimVerified()).isTrue();
         assertThat(request.getDecidedAt()).isNotNull();
         assertThat(request.getDecisionReason()).contains("Berechtigter");
+    }
+
+    @Test
+    void submit_autoApprovesVerifiedHolder() {
+        UUID entity = UUID.randomUUID();
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(assetWithId()));
+        when(holderRepository.sumActiveNominalByInvestorIdAndAssetId(entity, ASSET_ID))
+                .thenReturn(new java.math.BigDecimal("10"));
+
+        RegisterInspectionRequest request = service.submit(
+                ASSET_ID, entity, "Jane Doe", "jane@example.com", InspectionLegalBasis.HOLDER, null);
+
+        assertThat(request.getStatus()).isEqualTo(InspectionStatus.APPROVED);
+        assertThat(request.isClaimVerified()).isTrue();
+    }
+
+    @Test
+    void holderClaimWithZeroNominalIsNotAutoApproved() {
+        UUID entity = UUID.randomUUID();
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(assetWithId()));
+        when(holderRepository.sumActiveNominalByInvestorIdAndAssetId(entity, ASSET_ID))
+                .thenReturn(java.math.BigDecimal.ZERO);
+
+        RegisterInspectionRequest request = service.submit(
+                ASSET_ID, entity, "Zero", "z@example.com", InspectionLegalBasis.HOLDER, null);
+
+        assertThat(request.getStatus()).isEqualTo(InspectionStatus.REQUESTED);
+        assertThat(request.isClaimVerified()).isFalse();
+    }
+
+    @Test
+    void holderClaimWithoutHoldingIsNotAutoApproved() {
+        UUID entity = UUID.randomUUID();
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(assetWithId()));
+        when(holderRepository.sumActiveNominalByInvestorIdAndAssetId(entity, ASSET_ID)).thenReturn(java.math.BigDecimal.ZERO);
+
+        RegisterInspectionRequest request = service.submit(
+                ASSET_ID, entity, "Mallory", "m@example.com", InspectionLegalBasis.HOLDER, null);
+
+        assertThat(request.getStatus()).isEqualTo(InspectionStatus.REQUESTED);
+        assertThat(request.isClaimVerified()).isFalse();
+        assertThat(request.getLegalBasis()).isEqualTo(InspectionLegalBasis.HOLDER);
+        assertThat(request.getDecidedAt()).isNull();
+    }
+
+    @Test
+    void issuerClaimByAnotherEntityAndBeneficiaryClaimsAreNotAutoApproved() {
+        Asset asset = new Asset();
+        asset.setIssuerId(UUID.randomUUID());
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+
+        RegisterInspectionRequest issuer = service.submit(
+                ASSET_ID, UUID.randomUUID(), "Fake Issuer", null, InspectionLegalBasis.ISSUER, null);
+        RegisterInspectionRequest beneficiary = service.submit(
+                ASSET_ID, UUID.randomUUID(), "Beneficiary", null, InspectionLegalBasis.BENEFICIARY, null);
+        RegisterInspectionRequest noIdentity = service.submit(
+                ASSET_ID, null, "Anonymous", null, InspectionLegalBasis.ISSUER, null);
+
+        assertThat(issuer.getStatus()).isEqualTo(InspectionStatus.REQUESTED);
+        assertThat(beneficiary.getStatus()).isEqualTo(InspectionStatus.REQUESTED);
+        assertThat(noIdentity.getStatus()).isEqualTo(InspectionStatus.REQUESTED);
+        assertThat(issuer.isClaimVerified() || beneficiary.isClaimVerified() || noIdentity.isClaimVerified()).isFalse();
+    }
+
+    @Test
+    void submit_refusedForTransferredOutAsset() {
+        Asset asset = new Asset();
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> service.submit(ASSET_ID, UUID.randomUUID(), "X", null,
+                InspectionLegalBasis.LEGITIMATE_INTEREST, "why"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+    }
+
+    @Test
+    void inspectionRefusedForTransferredOut_onFulfil() {
+        UUID requestId = UUID.randomUUID();
+        RegisterInspectionRequest request = new RegisterInspectionRequest();
+        request.setAssetId(ASSET_ID);
+        request.setStatus(InspectionStatus.APPROVED);
+        when(requestRepository.findById(requestId)).thenReturn(Optional.of(request));
+        Asset asset = new Asset();
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> service.fulfil(requestId))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        verifyNoInteractions(extractRenderer);
     }
 
     @Test
@@ -84,9 +183,12 @@ class RegisterInspectionServiceTest {
 
     @Test
     void submit_autoApprovalPublishesAuditEvent() {
-        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(new Asset()));
+        UUID entity = UUID.randomUUID();
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(assetWithId()));
+        when(holderRepository.sumActiveNominalByInvestorIdAndAssetId(entity, ASSET_ID))
+                .thenReturn(new java.math.BigDecimal("10"));
 
-        service.submit(ASSET_ID, UUID.randomUUID(), "Jane Doe", "jane@example.com",
+        service.submit(ASSET_ID, entity, "Jane Doe", "jane@example.com",
                 InspectionLegalBasis.HOLDER, null);
 
         ArgumentCaptor<RegisterInspectionEvent> captor = ArgumentCaptor.forClass(RegisterInspectionEvent.class);
@@ -177,7 +279,7 @@ class RegisterInspectionServiceTest {
         when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(new Asset()));
         Page<de.makibytes.registerwerk.deployment.api.AssetHolder> holders = new PageImpl<>(List.of());
         when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any())).thenReturn(holders);
-        when(extractRenderer.render(any(), any(), eq(InspectionLegalBasis.HOLDER), eq("Jane Doe")))
+        when(extractRenderer.render(any(), any(), eq(InspectionLegalBasis.HOLDER), eq("Jane Doe"), any(), eq(false)))
                 .thenReturn("pdf-bytes".getBytes());
 
         byte[] pdf = service.fulfil(requestId);

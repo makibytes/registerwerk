@@ -3,16 +3,19 @@ package de.makibytes.registerwerk.corporateactions.internal;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.HolderSyncStatus;
+import de.makibytes.registerwerk.asset.api.RegisterFreezeGuard;
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import io.micrometer.core.instrument.Gauge;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,8 +25,9 @@ import java.util.UUID;
  * {@code HolderDataService}; a purely off-chain register is authoritative by itself.
  *
  * <p>Refused while the asset's holder sync is {@code BLOCKED}, or while its last successful sync
- * is missing or older than the start of the record date (in the same zone the daily job derives
- * "today" from). Also exposes {@code registerwerk_corporate_action_snapshot_blocked} for the
+ * is missing or earlier than the record-date cut-off — the END of the record date in the
+ * register's zone ({@link RegisterClock}, T3-06) — plus {@code registerwerk.register.snapshot-sync-margin}
+ * (default 30 min), so the indexer has provably looked at the chain past the cut-off. Also exposes {@code registerwerk_corporate_action_snapshot_blocked} for the
  * {@code CorporateActionSnapshotBlocked} alert.
  */
 @Component
@@ -31,21 +35,38 @@ class RegisterFreshnessGate {
 
     private final AssetRepository assetRepository;
     private final AssetDeploymentRepository deploymentRepository;
+    private final RegisterClock registerClock;
+    private final Duration syncMargin;
 
     RegisterFreshnessGate(AssetRepository assetRepository,
                           AssetDeploymentRepository deploymentRepository,
                           CorporateActionRepository corporateActionRepository,
-                          MeterRegistry meterRegistry) {
+                          MeterRegistry meterRegistry,
+                          RegisterClock registerClock,
+                          @Value("${registerwerk.register.snapshot-sync-margin:PT30M}") Duration syncMargin) {
         this.assetRepository = assetRepository;
         this.deploymentRepository = deploymentRepository;
+        this.registerClock = registerClock;
+        this.syncMargin = syncMargin;
         Gauge.builder("registerwerk_corporate_action_snapshot_blocked",
                         corporateActionRepository, repo -> repo.countByStatus(CorporateAction.Status.SNAPSHOT_BLOCKED))
                 .description("Corporate actions whose record-date snapshot is refused because the register is not reconciled")
                 .register(meterRegistry);
     }
 
+    /** T3-07: a register frozen for (or handed over in) a §§21/22 handover accepts no corporate-action work. */
+    boolean isRegisterFrozen(UUID assetId) {
+        return assetId != null && assetRepository.findById(assetId)
+                .map(a -> a.getStatus() != null && a.getStatus().isRegisterFrozen()).orElse(false);
+    }
+
+    /** @throws de.makibytes.registerwerk.shared.InvalidStateTransitionException (409) while frozen */
+    void requireRegisterOpen(UUID assetId, String operation) {
+        RegisterFreezeGuard.requireOpen(assetRepository, assetId, operation);
+    }
+
     /**
-     * @param recordDate the entitlement date the register must be reconciled for; null checks the
+     * @param recordDate the entitlement date the register must be reconciled past; null checks the
      *                   BLOCKED state only
      * @return the operator-facing refusal reason, or empty when the register may be used
      */
@@ -64,10 +85,11 @@ class RegisterFreshnessGate {
                     + ". Map the wallet(s) or register the pool address, then refresh holders.");
         }
         if (recordDate != null) {
-            Instant recordStart = recordDate.atStartOfDay(ZoneId.systemDefault()).toInstant();
-            if (lastOk == null || lastOk.isBefore(recordStart)) {
+            Instant required = registerClock.endOfDay(recordDate).plus(syncMargin);
+            if (lastOk == null || lastOk.isBefore(required)) {
                 return Optional.of("Register last reconciled " + (lastOk != null ? "at " + lastOk : "never")
-                        + ", before record date " + recordDate + " — refresh holders before the snapshot.");
+                        + ", not yet past the end of record date " + recordDate + " (" + required
+                        + ") — refresh holders before the snapshot.");
             }
         }
         return Optional.empty();

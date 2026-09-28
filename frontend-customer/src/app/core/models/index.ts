@@ -7,6 +7,7 @@ export type AssetStatus =
   | 'ISSUED'
   | 'SUSPENDED'
   | 'REDEEMED'
+  | 'TRANSFER_PENDING'
   | 'TRANSFERRED_OUT';
 
 export type Jurisdiction = 'DE_EWPG' | 'LU_CSSF' | 'FR_AMF' | 'LI_TVTG';
@@ -45,7 +46,22 @@ export interface AssetBondTerms {
   paymentFrequency: 'ANNUAL' | 'SEMI_ANNUAL' | 'QUARTERLY' | 'MONTHLY' | 'ZERO';
   callable: boolean;
   callSchedule: CallEntry[] | null;
-  bondStatus: 'ACTIVE' | 'MATURED' | 'CALLED' | 'DEFAULTED' | 'REDEEMED';
+  bondStatus: 'ACTIVE' | 'MATURED' | 'OVERDUE' | 'CALLED' | 'DEFAULTED' | 'REDEEMED';
+}
+
+/** One row of `GET /assets/{id}/bond-terms/schedule` (amountPerUnit null = floating, not yet fixed). */
+export interface CouponScheduleEntry {
+  periodNo: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  announcementDate: string | null;
+  recordDate: string | null;
+  paymentDate: string;
+  dayCountFraction: number | null;
+  amountPerUnit: number | null;
+  couponStatus: 'SCHEDULED' | 'OVERDUE' | 'PAID' | 'MISSED';
+  paidDate: string | null;
+  scheduleVersion: number;
 }
 
 // ── Corporate actions ──────────────────────────────────────────────────────────
@@ -97,6 +113,9 @@ export interface RegisterDocumentMeta {
   docType: string;
   title: string;
   statutory: boolean;
+  /** Set once the register was handed to a successor registrar: no document is offered here. */
+  transferredTo?: string | null;
+  transferredAt?: string | null;
 }
 
 /** §10 eWpG register inspection request. */
@@ -461,7 +480,10 @@ export interface InvestmentSummary {
 
 // ─── Subscription / Primary-market Orders ─────────────────────────────────────
 
-export type SubscriptionOrderStatus = 'SUBMITTED' | 'ALLOCATED' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
+/** CONFIRMED is the legacy (pre-payment-flow) state; new orders end in SETTLED, LAPSED or RELEASED. */
+export type SubscriptionOrderStatus =
+  'SUBMITTED' | 'ALLOCATED' | 'PAYMENT_CONFIRMED' | 'SETTLED' | 'CONFIRMED'
+  | 'REJECTED' | 'CANCELLED' | 'LAPSED' | 'RELEASED';
 
 export interface SubscriptionOrder {
   id: string;
@@ -477,6 +499,17 @@ export interface SubscriptionOrder {
   confirmedAt: string | null;
   resultingHolderId: string | null;
   rejectionReason: string | null;
+  acceptedAt: string | null;
+  allocationExpiresAt: string | null;
+  amountDue: number | null;
+  paymentCurrency: string | null;
+  paidAmount: number | null;
+  refundDue: number | null;
+  paymentReference: string | null;
+  paymentConfirmedAt: string | null;
+  settledAt: string | null;
+  lapsedAt: string | null;
+  releaseReason: string | null;
 }
 
 // ─── Company / User Administration ───────────────────────────────────────────
@@ -594,6 +627,10 @@ export interface SellableHolding {
   availableQuantity: number;
   walletAddress: string;
   jurisdiction: Jurisdiction | null;
+  /** False for a chain-deployed asset while off-chain settlement is disabled (listing would be refused). */
+  listable: boolean;
+  /** True when listing is allowed only as a simulated, register-only settlement (demo). */
+  simulatedOffchainSettlement: boolean;
 }
 
 export interface TradeListing {
@@ -1021,6 +1058,7 @@ export type WebhookEventType =
   | 'KYC_APPROVED' | 'KYC_REJECTED'
   | 'ASSET_APPROVED' | 'ASSET_REJECTED'
   | 'SUBSCRIPTION_ORDER_ALLOCATED' | 'SUBSCRIPTION_ORDER_CONFIRMED' | 'SUBSCRIPTION_ORDER_REJECTED'
+  | 'SUBSCRIPTION_ORDER_PAYMENT_CONFIRMED' | 'SUBSCRIPTION_ORDER_SETTLED' | 'SUBSCRIPTION_ORDER_LAPSED'
   | 'TRADE_EXECUTED' | 'TRADE_PAYMENT_CONFIRMED' | 'TRADE_PAYMENT_DISPUTED';
 
 export interface WebhookSubscription {

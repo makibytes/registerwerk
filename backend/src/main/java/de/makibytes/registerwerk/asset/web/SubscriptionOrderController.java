@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.asset.internal.SubscriptionOrder;
 import de.makibytes.registerwerk.asset.internal.SubscriptionOrderService;
 import de.makibytes.registerwerk.asset.web.dto.SubscriptionOrderResponse;
 import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import org.springframework.security.access.AccessDeniedException;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import jakarta.validation.Valid;
@@ -28,9 +29,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Primary-market subscription/allocation/confirmation flow — see {@code SubscriptionOrder}'s
- * Javadoc. Submit/cancel/confirm are investor-side, scoped to the caller's own entity; list/
- * allocate/reject are issuer/operator-side.
+ * Primary-market subscription flow — see {@code SubscriptionOrder}'s Javadoc. Submit/cancel/accept
+ * are investor-side, scoped to the caller's own entity; list/allocate/reject/confirm-payment/settle/
+ * release are issuer/operator-side.
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -45,7 +46,7 @@ public class SubscriptionOrderController {
     // ── Investor-side ────────────────────────────────────────────────────────
 
     @PostMapping("/assets/{assetId}/orders")
-    @PreAuthorize("@assetAccessChecker.canRead(#assetId, authentication)")
+    @PreAuthorize("@assetAccessChecker.canSubscribe(#assetId, authentication)")
     public ResponseEntity<SubscriptionOrderResponse> submit(
             @PathVariable UUID assetId,
             @RequestBody @Valid SubmitOrderRequest request,
@@ -77,13 +78,14 @@ public class SubscriptionOrderController {
         return ResponseEntity.ok(SubscriptionOrderResponse.from(service.cancel(orderId, actorId, actorRole)));
     }
 
-    @PostMapping("/orders/{orderId}/confirm")
+    /** The investor accepts the allocation. {@code /confirm} is the pre-T3-08 path of the same action; it no longer enters the register. */
+    @PostMapping({"/orders/{orderId}/accept", "/orders/{orderId}/confirm"})
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<SubscriptionOrderResponse> confirm(@PathVariable UUID orderId, Authentication auth) {
+    public ResponseEntity<SubscriptionOrderResponse> accept(@PathVariable UUID orderId, Authentication auth) {
         requireOwnOrder(orderId, auth);
         UUID actorId = SecurityUtils.extractUserId(auth);
         String actorRole = SecurityUtils.extractRoles(auth).stream().findFirst().orElse("INVESTOR");
-        return ResponseEntity.ok(SubscriptionOrderResponse.from(service.confirm(orderId, actorId, actorRole)));
+        return ResponseEntity.ok(SubscriptionOrderResponse.from(service.accept(orderId, actorId, actorRole)));
     }
 
     /** REGISTRY_ADMIN bypasses the ownership check — everything else must own the order's entity. */
@@ -126,6 +128,42 @@ public class SubscriptionOrderController {
         return ResponseEntity.ok(SubscriptionOrderResponse.from(order));
     }
 
+    /** Cash for an accepted allocation arrived (issuer/operator, step-up). */
+    @PostMapping("/orders/{orderId}/confirm-payment")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuerForOrder(#orderId, authentication)")
+    @RequiresStepUp(reason = "SUBSCRIPTION_PAYMENT_CONFIRM")
+    public ResponseEntity<SubscriptionOrderResponse> confirmPayment(
+            @PathVariable UUID orderId, @RequestBody @Valid ConfirmPaymentRequest request, Authentication auth) {
+        UUID actorId = SecurityUtils.extractUserId(auth);
+        String actorRole = SecurityUtils.extractRoles(auth).stream().findFirst().orElse("REGISTRY_ADMIN");
+        SubscriptionOrder order = service.confirmPayment(orderId, request.paidAmount(), request.paymentReference(),
+                request.valueDate(), actorId, actorRole);
+        return ResponseEntity.ok(SubscriptionOrderResponse.from(order));
+    }
+
+    /** Enters the position on the register (compliance gates re-run; mint on a deployed asset). */
+    @PostMapping("/orders/{orderId}/settle")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuerForOrder(#orderId, authentication)")
+    @RequiresStepUp(reason = "SUBSCRIPTION_SETTLE")
+    public ResponseEntity<SubscriptionOrderResponse> settle(@PathVariable UUID orderId, Authentication auth) {
+        UUID actorId = SecurityUtils.extractUserId(auth);
+        String actorRole = SecurityUtils.extractRoles(auth).stream().findFirst().orElse("REGISTRY_ADMIN");
+        return ResponseEntity.ok(SubscriptionOrderResponse.from(service.settle(orderId, actorId, actorRole)));
+    }
+
+    /** Gives an allocation back (frees its capacity). */
+    @PostMapping("/orders/{orderId}/release")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuerForOrder(#orderId, authentication)")
+    @RequiresStepUp(reason = "SUBSCRIPTION_RELEASE")
+    public ResponseEntity<SubscriptionOrderResponse> release(
+            @PathVariable UUID orderId, @RequestBody @Valid RejectRequest request, Authentication auth) {
+        UUID actorId = SecurityUtils.extractUserId(auth);
+        String actorRole = SecurityUtils.extractRoles(auth).stream().findFirst().orElse("REGISTRY_ADMIN");
+        return ResponseEntity.ok(SubscriptionOrderResponse.from(service.release(orderId, request.reason(), actorId, actorRole)));
+    }
+
+    public record ConfirmPaymentRequest(@NotNull @Positive BigDecimal paidAmount, @NotBlank String paymentReference,
+                                        java.time.LocalDate valueDate) {}
     public record SubmitOrderRequest(@NotBlank String walletAddress, @NotNull @Positive BigDecimal requestedAmount) {}
     public record AllocateRequest(@NotNull @Positive BigDecimal allocatedAmount) {}
     public record RejectRequest(@NotBlank String reason) {}

@@ -430,6 +430,7 @@ code {
   &.status-revoked      { background: var(--rw-revoked-bg);  color: var(--rw-revoked-fg); }
   &.status-active,
   &.status-confirmed    { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+  &.status-transfer-pending,
   &.status-pending-onboarding,
   &.status-pending-approval,
   &.status-in-progress,

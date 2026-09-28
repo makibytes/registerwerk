@@ -59,7 +59,7 @@ class RegisterExtractRendererTest {
     @Test
     void render_producesAValidPdfWithSecurityData() throws IOException {
         byte[] pdf = renderer.render(asset("Test Bond", "DE000TESTBND1"), List.of(),
-                InspectionLegalBasis.HOLDER, "Jane Doe");
+                InspectionLegalBasis.HOLDER, "Jane Doe", null, false);
 
         assertThat(pdf).isNotEmpty();
         String text = extractText(pdf);
@@ -69,12 +69,37 @@ class RegisterExtractRendererTest {
     @Test
     void render_berechtigter_seesDisposalRestrictions() throws IOException {
         AssetHolder h = holder("HREF-1", "1000", "Pledged to Bank X");
+        java.util.UUID me = java.util.UUID.randomUUID();
+        h.setInvestorId(me);
 
         byte[] pdf = renderer.render(asset("Test Bond", "DE0001"), List.of(h),
-                InspectionLegalBasis.HOLDER, "Jane Doe");
+                InspectionLegalBasis.HOLDER, "Jane Doe", me, true);
 
         String text = extractText(pdf);
         assertThat(text).contains("HREF-1").contains("Pledged to Bank X").contains("Restrictions");
+    }
+
+    @Test
+    void holderExtractShowsOnlyOwnRestrictions() throws IOException {
+        java.util.UUID me = java.util.UUID.randomUUID();
+        AssetHolder mine = holder("HREF-MINE", "10", "Pledged to Bank X");
+        mine.setInvestorId(me);
+        AssetHolder other = holder("HREF-OTHER", "20", "Secret pledge to Bank Y");
+        other.setInvestorId(java.util.UUID.randomUUID());
+
+        String holderText = extractText(renderer.render(asset("Test Bond", "DE0001"), List.of(mine, other),
+                InspectionLegalBasis.HOLDER, "Jane Doe", me, true));
+        assertThat(holderText).contains("HREF-OTHER").contains("Pledged to Bank X");
+        assertThat(holderText).doesNotContain("Secret pledge to Bank Y");
+
+        // an unverified ISSUER claim (operator-approved) must not unlock everybody's restrictions either
+        String unverifiedIssuer = extractText(renderer.render(asset("Test Bond", "DE0001"), List.of(mine, other),
+                InspectionLegalBasis.ISSUER, "Someone", me, false));
+        assertThat(unverifiedIssuer).doesNotContain("Secret pledge to Bank Y");
+
+        String verifiedIssuer = extractText(renderer.render(asset("Test Bond", "DE0001"), List.of(mine, other),
+                InspectionLegalBasis.ISSUER, "Issuer", me, true));
+        assertThat(verifiedIssuer).contains("Secret pledge to Bank Y");
     }
 
     @Test
@@ -82,7 +107,7 @@ class RegisterExtractRendererTest {
         AssetHolder h = holder("HREF-1", "1000", "Pledged to Bank X");
 
         byte[] pdf = renderer.render(asset("Test Bond", "DE0001"), List.of(h),
-                InspectionLegalBasis.LEGITIMATE_INTEREST, "Curious Journalist");
+                InspectionLegalBasis.LEGITIMATE_INTEREST, "Curious Journalist", null, false);
 
         String text = extractText(pdf);
         assertThat(text).contains("HREF-1"); // reference and nominal are always shown
@@ -96,7 +121,7 @@ class RegisterExtractRendererTest {
         AssetHolder h = holder("HREF-1", "1000", longRestriction);
 
         byte[] pdf = renderer.render(asset("Test Bond", "DE0001"), List.of(h),
-                InspectionLegalBasis.ISSUER, "Requester");
+                InspectionLegalBasis.ISSUER, "Requester", java.util.UUID.randomUUID(), true);
 
         String text = extractText(pdf);
         assertThat(text).doesNotContain(longRestriction);
@@ -110,7 +135,7 @@ class RegisterExtractRendererTest {
         // holderReference left null -> collective entry (Sammeleintragung).
 
         byte[] pdf = renderer.render(asset("Test Bond", "DE0001"), List.of(h),
-                InspectionLegalBasis.HOLDER, "Requester");
+                InspectionLegalBasis.HOLDER, "Requester", null, false);
 
         assertThat(extractText(pdf)).contains("Sammeleintragung");
     }
@@ -118,7 +143,7 @@ class RegisterExtractRendererTest {
     @Test
     void render_handlesNullAssetNameAndRequesterNameGracefully() throws IOException {
         byte[] pdf = renderer.render(asset(null, null), List.of(),
-                InspectionLegalBasis.LEGITIMATE_INTEREST, null);
+                InspectionLegalBasis.LEGITIMATE_INTEREST, null, null, false);
 
         assertThat(pdf).isNotEmpty();
         assertThat(extractText(pdf)).contains("—");
@@ -132,7 +157,7 @@ class RegisterExtractRendererTest {
         }
 
         byte[] pdf = renderer.render(asset("Test Bond", "DE0001"), holders,
-                InspectionLegalBasis.HOLDER, "Requester");
+                InspectionLegalBasis.HOLDER, "Requester", null, false);
 
         String text = extractText(pdf);
         // §10 must disclose every holder of record — overflow now continues on
@@ -151,7 +176,7 @@ class RegisterExtractRendererTest {
         when(signingService.signPdf(any(), anyString())).thenReturn("signed-bytes".getBytes());
 
         byte[] pdf = renderer.render(asset("Test Bond", "DE0001"), List.of(),
-                InspectionLegalBasis.HOLDER, "Jane Doe");
+                InspectionLegalBasis.HOLDER, "Jane Doe", null, false);
 
         assertThat(pdf).isEqualTo("signed-bytes".getBytes());
         verify(signingService).signPdf(any(), anyString());

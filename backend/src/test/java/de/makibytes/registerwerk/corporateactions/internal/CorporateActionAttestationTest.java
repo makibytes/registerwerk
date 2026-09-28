@@ -7,7 +7,6 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionIssuerAttes
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionOperatorConfirmedEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
-import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -42,7 +41,8 @@ class CorporateActionAttestationTest {
 
     @Mock private CorporateActionRepository repository;
     @Mock private CorporateActionEntryRepository entryRepository;
-    @Mock private AssetHolderRepository holderRepository;
+    @Mock private RecordDatePositionResolver positionResolver;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository bondTermsRepository;
     @Mock private CorporateActionSettlementWriter settlementWriter;
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
@@ -53,9 +53,10 @@ class CorporateActionAttestationTest {
     private CorporateActionService service;
 
     private CorporateActionAttestationTest init() {
-        service = new CorporateActionService(repository, entryRepository, holderRepository, settlementWriter,
+        service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
                 couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
-                org.mockito.Mockito.mock(RegisterFreshnessGate.class));
+                org.mockito.Mockito.mock(RegisterFreshnessGate.class), bondTermsRepository,
+                CorporateActionTestSupport.systemRegisterClock());
         return this;
     }
 
@@ -78,7 +79,7 @@ class CorporateActionAttestationTest {
         when(repository.findById(actionId)).thenReturn(Optional.of(announced));
         when(repository.save(any(CorporateAction.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        CorporateAction result = service.attestSettlementAsIssuer(assetId, actionId, "SEPA-REF-123", actorId, "ISSUER");
+        CorporateAction result = service.attestSettlementAsIssuer(assetId, actionId, "SEPA-REF-123", actorId, "ISSUER", false);
 
         assertThat(result.getIssuerAttestedBy()).isEqualTo(actorId);
         assertThat(result.getIssuerAttestedAt()).isNotNull();
@@ -98,7 +99,7 @@ class CorporateActionAttestationTest {
         CorporateAction announced = actionWithId(actionId, actualAssetId, CorporateAction.Status.ANNOUNCED);
         when(repository.findById(actionId)).thenReturn(Optional.of(announced));
 
-        assertThatThrownBy(() -> service.attestSettlementAsIssuer(UUID.randomUUID(), actionId, "ref", UUID.randomUUID(), "ISSUER"))
+        assertThatThrownBy(() -> service.attestSettlementAsIssuer(UUID.randomUUID(), actionId, "ref", UUID.randomUUID(), "ISSUER", false))
                 .isInstanceOf(EntityNotFoundException.class);
     }
 
@@ -111,7 +112,7 @@ class CorporateActionAttestationTest {
         CorporateAction proposed = actionWithId(actionId, assetId, CorporateAction.Status.PROPOSED);
         when(repository.findById(actionId)).thenReturn(Optional.of(proposed));
 
-        assertThatThrownBy(() -> service.attestSettlementAsIssuer(assetId, actionId, "ref", UUID.randomUUID(), "ISSUER"))
+        assertThatThrownBy(() -> service.attestSettlementAsIssuer(assetId, actionId, "ref", UUID.randomUUID(), "ISSUER", false))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -124,7 +125,7 @@ class CorporateActionAttestationTest {
         CorporateAction settled = actionWithId(actionId, assetId, CorporateAction.Status.SETTLED);
         when(repository.findById(actionId)).thenReturn(Optional.of(settled));
 
-        assertThatThrownBy(() -> service.attestSettlementAsIssuer(assetId, actionId, "ref", UUID.randomUUID(), "ISSUER"))
+        assertThatThrownBy(() -> service.attestSettlementAsIssuer(assetId, actionId, "ref", UUID.randomUUID(), "ISSUER", false))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -235,5 +236,20 @@ class CorporateActionAttestationTest {
         assertThat(missingIssuerHalf.getStatus()).isEqualTo(CorporateAction.Status.COMPUTED);
         verify(entryRepository, never()).findByCorporateActionId(any());
         verify(finalityGate, never()).check(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("T3-12: an operator cannot attest as the issuer — 403, nothing recorded")
+    void operatorCannotAttestAsIssuer() {
+        init();
+        UUID assetId = UUID.randomUUID();
+        UUID actionId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> service.attestSettlementAsIssuer(assetId, actionId, "ref", UUID.randomUUID(),
+                "REGISTRY_ADMIN", true))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+                .hasMessageContaining("override-attestation");
+        verify(repository, never()).save(any());
+        verify(events, never()).publishEvent(any(CorporateActionIssuerAttestedEvent.class));
     }
 }

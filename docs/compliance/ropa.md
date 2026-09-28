@@ -80,13 +80,12 @@
 | **Retention** | Duration of employment + 2 years |
 | **Security measures** | BCrypt password hashing; JWT (short-lived, 8h); MFA for sensitive operations |
 
-## 7. Regulatory Reporting (MiFIR, DAC8, Steuerbescheinigung)
-
+## 7. Regulatory Reporting (MiFIR, DAC8, Ertragsaufstellung) { #7-regulatory-reporting-mifir-dac8-steuerbescheinigung }
 | Field | Value |
 |---|---|
 | **Purpose** | Mandatory transaction reporting to competent authorities |
 | **Legal basis** | Legal obligation (Art. 6(1)(c)) — MiFIR Art. 26, DAC8, EStG §43 |
-| **Data categories** | Investor name, tax ID, holdings, transactions, IBAN (for Steuerbescheinigung) |
+| **Data categories** | Investor name, tax ID, holdings, transactions, IBAN (for the Ertragsaufstellung) |
 | **Recipients** | BaFin (DE), AMF (FR), CSSF (LU), FMA (LI), BZSt (DAC8/CARF), DGFiP (FR), ACD (LU) |
 | **Retention** | 7 years (MiFIR); 10 years (eWpG) |
 | **Security measures** | PAdES-B-LT signed PDFs; SFTP to authority portals; submission receipts |

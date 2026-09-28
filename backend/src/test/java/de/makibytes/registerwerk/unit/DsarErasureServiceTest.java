@@ -29,6 +29,7 @@ class DsarErasureServiceTest {
     ErasureRequestRepository repository;
     AppUserRepository userRepository;
     ApplicationEventPublisher eventPublisher;
+    de.makibytes.registerwerk.customer.api.ActiveHoldingsPort activeHoldingsPort;
     DsarErasureService service;
 
     static final UUID ENTITY = UUID.randomUUID();
@@ -41,7 +42,8 @@ class DsarErasureServiceTest {
         repository = mock(ErasureRequestRepository.class);
         userRepository = mock(AppUserRepository.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
-        service = new DsarErasureService(repository, userRepository, eventPublisher);
+        activeHoldingsPort = mock(de.makibytes.registerwerk.customer.api.ActiveHoldingsPort.class);
+        service = new DsarErasureService(repository, userRepository, eventPublisher, activeHoldingsPort);
         // Emulate JPA assigning the generated id on persist.
         when(repository.save(any(ErasureRequest.class))).thenAnswer(inv -> {
             ErasureRequest r = inv.getArgument(0);
@@ -149,6 +151,23 @@ class DsarErasureServiceTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("already resolved");
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void complete_withActiveHoldingsRequiresRetainedNoticeChannel() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.of(openRequest(id)));
+        when(activeHoldingsPort.hasActiveHoldings(ENTITY)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.complete(id, OPERATOR, "note", APPROVER, " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("retainedNoticeChannel");
+        verify(userRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any());
+
+        ErasureRequest done = service.complete(id, OPERATOR, "note", APPROVER, "Postal notice via issuer");
+        assertThat(done.getStatus()).isEqualTo(ErasureRequestStatus.COMPLETED);
+        assertThat(done.getRetainedNoticeChannel()).isEqualTo("Postal notice via issuer");
     }
 
     @Test

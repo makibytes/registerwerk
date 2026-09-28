@@ -13,12 +13,19 @@ public interface AssetTokenAdminGrantRepository extends JpaRepository<AssetToken
 
     /**
      * Runtime hot-path check for {@code AssetAccessChecker.canForceAdmin} — an ACTIVE,
-     * non-expired grant that is either scoped to this asset or entity-wide ({@code asset_id
-     * IS NULL}). Called on every forcedTransfer/forcedApprove/forceBurn request.
+     * non-expired grant that is either scoped to this asset, or entity-wide ({@code asset_id
+     * IS NULL}) AND the grantee entity is this asset's issuer. Called on every
+     * forcedTransfer/forcedApprove/forceBurn request.
+     *
+     * <p>T3-21: the chain call is signed with the operator key, so this query is the only scope
+     * control. Entity-wide grants used to match every asset in the registry; they now cover only
+     * the grantee's own issuances (conservative reading — whether holders should ever be eligible
+     * is parked).
      */
     @Query("SELECT CASE WHEN COUNT(g) > 0 THEN true ELSE false END FROM AssetTokenAdminGrant g " +
            "WHERE g.entityId = :entityId AND g.status = 'ACTIVE' " +
-           "AND (g.assetId = :assetId OR g.assetId IS NULL) " +
+           "AND (g.assetId = :assetId OR (g.assetId IS NULL AND EXISTS " +
+           "(SELECT a FROM Asset a WHERE a.id = :assetId AND a.issuerId = g.entityId))) " +
            "AND (g.expiresAt IS NULL OR g.expiresAt > :now)")
     boolean existsActiveForEntityAndAsset(@Param("entityId") UUID entityId,
                                           @Param("assetId") UUID assetId,

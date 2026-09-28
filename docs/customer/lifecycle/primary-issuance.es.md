@@ -81,6 +81,36 @@ Cada inversor admitido pasa a ser **titular** — una fila del registro. Conform
 
 Un mismo activo puede llevar ambas formas a la vez — el registro lo llama posición `MIXED`.
 
+
+!!! info "Las inscripciones las realiza el operador"
+    Una inscripción, y cualquier cambio de un atributo del §17(2), la realiza el operador del registro conforme a una instrucción registrada: **quién la dio** (titular, beneficiario, tribunal, administrador concursal, cambio de condiciones del emisor) y una **referencia**. El emisor no edita el registro; presenta una *solicitud* que el operador ejecuta o rechaza. Retirar un derecho o una restricción requiere una acción explícita y un segundo aprobador, y se conservan los valores anterior y posterior.
+
+---
+
+## Suscripciones: de la orden al registro
+
+Los inversores suscriben a través del portal; el registro ya no se rellena tecleando posiciones en un diálogo. Una orden recorre estos estados:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    SUBMITTED --> ALLOCATED: allocate
+    ALLOCATED --> PAYMENT_CONFIRMED: accepted and paid
+    PAYMENT_CONFIRMED --> SETTLED: settle
+    ALLOCATED --> LAPSED: not paid in time
+    ALLOCATED --> RELEASED: released
+    SUBMITTED --> REJECTED: reject
+```
+
+1. **Enviar.** Cualquier inversor incorporado puede enviar una orden mientras el activo esté abierto a la suscripción (`APPROVED` o `ISSUED`) y el inversor esté dentro del mercado objetivo MiFID.
+2. **Asignar.** El emisor o el operador asigna, en su totalidad o de forma reducida. Las asignaciones cuentan contra el tamaño de la emisión y contra el máximo de tenencia del inversor **junto con sus demás asignaciones abiertas**, de modo que dos asignaciones paralelas no puedan quedar cada una por debajo del límite.
+3. **Aceptar.** El inversor acepta la asignación. Todavía no se inscribe nada en el registro. En un bono se muestran el importe a pagar (unidades asignadas × valor nominal × precio de emisión), una referencia de pago y un plazo de pago — por defecto 10 días hábiles TARGET. Una asignación no pagada a tiempo **caduca** y libera su capacidad; el emisor o el operador también pueden **liberarla**.
+4. **Confirmar el pago.** El emisor o el operador confirma que el dinero ha llegado (requiere [step-up](../../compliance/step-up-mfa.md)). Un pago insuficiente se rechaza; un pago excesivo se acepta y se muestra como *reembolso pendiente*.
+5. **Liquidar.** Antes de escribir nada se repiten las mismas comprobaciones que en la liquidación de una operación: KYC aprobado, ninguna coincidencia de sanciones sin resolver, ningún [Sperrvermerk](holding.md), registro no congelado por un traspaso, finalidad de la cadena, mercado objetivo y límite de tenencia. Después se emiten las unidades. Si el activo está **desplegado**, las unidades se acuñan en la wallet del inversor y la sincronización de titulares las abona en el registro cuando la transferencia está indexada. En caso contrario, el registro se abona directamente; una segunda suscripción en la misma wallet incrementa la inscripción existente.
+
+!!! note "Puntos abiertos"
+    Un estándar de token sin acuñación automática deja la orden en *pago confirmado*: un operador emite las unidades. Para activos sin condiciones de bono, el operador introduce el importe recibido; no hay precio calculado. En las inscripciones colectivas se inscribe al inversor, no a un depositario, como titular; esa cuestión aún no está decidida.
+
 ---
 
 ## 3. Acuñar

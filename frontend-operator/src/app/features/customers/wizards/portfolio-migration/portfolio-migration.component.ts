@@ -114,6 +114,10 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
           <mat-label>Reason</mat-label>
           <textarea matInput rows="3" [(ngModel)]="initiateForm.reason"></textarea>
         </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Beneficiary consent reference (required for third-party rights / disposal restrictions)</mat-label>
+          <input matInput [(ngModel)]="initiateForm.beneficiaryConsentRef" />
+        </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
         <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
@@ -161,6 +165,18 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         <mat-form-field appearance="outline">
           <mat-label>Transaction hash</mat-label>
           <input matInput [(ngModel)]="transferTxHash" placeholder="0x…" />
+        </mat-form-field>
+        <p style="margin:0;font-size:12px;color:var(--rw-text-secondary)">
+          The hash is verified against the indexed, finalized transfer (holder wallet → destination wallet,
+          full nominal). If the transfer is not indexed yet you get an error — retry once it is final.
+        </p>
+        <mat-form-field appearance="outline">
+          <mat-label>Operator attestation (only when the asset has no indexed deployment)</mat-label>
+          <textarea matInput rows="2" [(ngModel)]="transferAttestation"></textarea>
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Beneficiary consent reference (third-party rights / disposal restrictions)</mat-label>
+          <input matInput [(ngModel)]="transferConsentRef" />
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
@@ -251,8 +267,10 @@ export class PortfolioMigrationComponent implements OnInit {
 
   activeMigration: PortfolioMigrationRequest | null = null;
   transferTxHash = '';
+  transferAttestation = '';
+  transferConsentRef = '';
   cancelReason = '';
-  initiateForm = { holderId: '', reason: '' };
+  initiateForm = { holderId: '', reason: '', beneficiaryConsentRef: '' };
   destinationForm = { destinationRegistrarName: '', destinationRegistrarIdentifier: '', destinationWalletAddress: '' };
 
   ngOnInit(): void {
@@ -275,13 +293,14 @@ export class PortfolioMigrationComponent implements OnInit {
   }
 
   openInitiateDialog(): void {
-    this.initiateForm = { holderId: '', reason: '' };
+    this.initiateForm = { holderId: '', reason: '', beneficiaryConsentRef: '' };
     this.dialog.open(this.initiateDialogTpl, { width: '480px' });
   }
 
   submitInitiate(): void {
     this.dialog.closeAll();
-    this.service.initiate(this.initiateForm.holderId.trim(), this.initiateForm.reason.trim()).subscribe({
+    this.service.initiate(this.initiateForm.holderId.trim(), this.initiateForm.reason.trim(),
+      this.initiateForm.beneficiaryConsentRef.trim() || undefined).subscribe({
       next: () => {
         this.snackBar.open('Portfolio migration initiated.', 'Dismiss', { duration: 5000 });
         this.load();
@@ -341,6 +360,8 @@ export class PortfolioMigrationComponent implements OnInit {
   openTransferDialog(migration: PortfolioMigrationRequest): void {
     this.activeMigration = migration;
     this.transferTxHash = '';
+    this.transferAttestation = '';
+    this.transferConsentRef = '';
     this.dialog.open(this.transferDialogTpl, { width: '460px' });
   }
 
@@ -362,7 +383,8 @@ export class PortfolioMigrationComponent implements OnInit {
 
     stepUpRef.afterClosed().subscribe((result) => {
       if (!result) return;
-      this.service.recordOnchainTransfer(migration.id, txHash, result.stepUpToken, result.dualControlToken!).subscribe({
+      this.service.recordOnchainTransfer(migration.id, txHash, result.stepUpToken, result.dualControlToken!,
+        this.transferAttestation.trim() || undefined, this.transferConsentRef.trim() || undefined).subscribe({
         next: () => {
           this.snackBar.open('On-chain transfer recorded.', 'Dismiss', { duration: 5000 });
           this.load();

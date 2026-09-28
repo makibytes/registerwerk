@@ -26,7 +26,8 @@ import java.util.List;
  * pseudonymous reference (§17(2)); the clear-name investor link is never
  * disclosed in the extract. A non-beneficiary applicant only sees the security
  * data and aggregate holder positions, not third-party rights or disposal
- * restrictions, which §10 eWpRV reserves to the parties they concern.
+ * restrictions, which §10 eWpRV reserves to the parties they concern; a holder or beneficiary
+ * sees the restrictions of its own entries only, a verified issuer sees all (T3-11).
  */
 @Component
 class RegisterExtractRenderer {
@@ -40,7 +41,11 @@ class RegisterExtractRenderer {
     }
 
     byte[] render(Asset asset, List<AssetHolder> holders,
-                  InspectionLegalBasis basis, String requesterName) {
+                  InspectionLegalBasis basis, String requesterName,
+                  java.util.UUID requesterEntityId, boolean claimVerified) {
+        // T3-11: full restriction detail only for a verified issuer; a holder/beneficiary (or an
+        // unverified claim approved by an operator) sees restrictions of its own rows only.
+        boolean discloseAll = basis == InspectionLegalBasis.ISSUER && claimVerified;
         boolean discloseDetail = basis == InspectionLegalBasis.ISSUER
                 || basis == InspectionLegalBasis.HOLDER
                 || basis == InspectionLegalBasis.BENEFICIARY;
@@ -107,7 +112,8 @@ class RegisterExtractRenderer {
                 String nominal = h.getNominalAmount() != null ? h.getNominalAmount().toPlainString() : "0";
                 write(c, colX[0], y, fontRegular, 9, ref);
                 write(c, colX[1], y, fontRegular, 9, nominal);
-                if (discloseDetail && h.getDisposalRestrictions() != null) {
+                if (discloseDetail && h.getDisposalRestrictions() != null
+                        && (discloseAll || (requesterEntityId != null && requesterEntityId.equals(h.getInvestorId())))) {
                     write(c, colX[2], y, fontRegular, 8, truncate(h.getDisposalRestrictions(), 30));
                 }
                 y -= 13;

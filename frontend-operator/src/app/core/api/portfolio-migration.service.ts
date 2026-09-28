@@ -19,8 +19,8 @@ export class PortfolioMigrationService {
     return this.http.get<PortfolioMigrationRequest[]>(`${this.base}/investors/${investorEntityId}`);
   }
 
-  initiate(holderId: string, reason: string): Observable<PortfolioMigrationRequest> {
-    return this.http.post<PortfolioMigrationRequest>(this.base, { holderId, reason });
+  initiate(holderId: string, reason: string, beneficiaryConsentRef?: string): Observable<PortfolioMigrationRequest> {
+    return this.http.post<PortfolioMigrationRequest>(this.base, { holderId, reason, beneficiaryConsentRef });
   }
 
   setDestination(migrationId: string, destinationRegistrarName: string | undefined, destinationRegistrarIdentifier: string | undefined, destinationWalletAddress: string): Observable<PortfolioMigrationRequest> {
@@ -33,12 +33,13 @@ export class PortfolioMigrationService {
     return this.http.post(`${this.base}/${migrationId}/export`, {}, { responseType: 'blob' });
   }
 
-  recordOnchainTransfer(migrationId: string, txHash: string, stepUpToken: string, dualControlToken: string): Observable<PortfolioMigrationRequest> {
+  recordOnchainTransfer(migrationId: string, txHash: string, stepUpToken: string, dualControlToken: string,
+                        operatorAttestation?: string, beneficiaryConsentRef?: string): Observable<PortfolioMigrationRequest> {
     const headers = new HttpHeaders({
       Authorization: `Bearer ${stepUpToken}`,
       'X-Dual-Control-Token': dualControlToken,
     });
-    return this.http.post<PortfolioMigrationRequest>(`${this.base}/${migrationId}/onchain-transfer`, { txHash }, { headers });
+    return this.http.post<PortfolioMigrationRequest>(`${this.base}/${migrationId}/onchain-transfer`, { txHash, operatorAttestation, beneficiaryConsentRef }, { headers });
   }
 
   complete(migrationId: string): Observable<PortfolioMigrationRequest> {

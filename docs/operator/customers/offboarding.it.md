@@ -73,6 +73,13 @@ stateDiagram-v2
 
 **Completamento.**
 
+!!! warning "Il registro è congelato tra esportazione e completamento"
+    La prima **esportazione** porta l'asset in `TRANSFER_PENDING` (lo stato precedente viene conservato). Finché il trasferimento non è completato o annullato, sono rifiutati negoziazione, mint/burn e operazioni forzate, elaborazione delle operazioni societarie (inclusi i job giornalieri), sottoscrizioni primarie e modifiche al registro; la sincronizzazione dei titolari continua per rilevare eventuali scostamenti. L'**annullamento** ripristina lo stato precedente. Le operazioni societarie con data di pagamento odierna o successiva devono essere regolate o annullate *prima* dell'esportazione.
+
+    L'esportazione contiene un **hash del contenuto del registro** che copre solo il registro (dati dell'asset, titolari con gli attributi del §17(2), blocchi dei titolari attivi, condizioni del bond e piano cedolare, hash del term sheet, operazioni societarie e ordini di sottoscrizione aperti) — non il timestamp dell'esportazione. Il **completamento** lo ricalcola e viene rifiutato se qualcosa è cambiato dopo l'esportazione, indicando le sezioni modificate; in tal caso si esporta di nuovo. Il pacchetto identifica i titolari tramite numero di entità interno e LEI; nomi e indirizzi in chiaro non sono inclusi (decisione di fondo aperta).
+
+    Il controllo on-chain è registrato **per deployment**. Per i deployment EVM la piattaforma legge `registry()`/`owner()` e richiede l'indirizzo del successore indicato all'avvio; le altre chain richiedono per ora un'attestazione esplicita dell'operatore (la verifica on-chain seguirà). Il trasferimento risulta *consegnato* solo quando ogni deployment è registrato. Dopo il completamento l'asset è `TRANSFERRED_OUT`: estratti, ispezioni e download vengono rifiutati con «registro trasferito a …».
+
 !!! danger "Le due tappe non possono essere rese atomiche"
     L'esportazione del registro e il trasferimento del controllo on-chain avvengono su sistemi diversi. Non esiste una transazione che copra entrambe.
 
@@ -90,6 +97,12 @@ stateDiagram-v2
 Un investitore, una partecipazione, verso un altro registrar. Stessa forma — avvio, impostazione della destinazione, esportazione con hash, registrazione del trasferimento on-chain, completamento — ma limitata a un singolo titolare anziché all'intero asset.
 
 Esiste perché, senza di essa, l'unica via d'uscita di un investitore da un registro è la vendita. Poter spostare una partecipazione senza vendere è una parte autentica della tutela dell'investitore, non una comodità.
+
+!!! note "Il trasferimento è verificato, non presunto"
+    - La **destinazione** può essere impostata solo finché la migrazione è *avviata*; dopo l'esportazione il pacchetto e il suo hash descrivono quella destinazione. Per cambiarla, annullare e ricominciare.
+    - La **registrazione del trasferimento on-chain** viene controllata rispetto al trasferimento indicizzato e finalizzato: la transazione deve spostare esattamente il nominale del titolare dal suo wallet al wallet di destinazione su un deployment del titolo. Se il trasferimento non è ancora indicizzato, il passaggio viene rifiutato; riprovare quando è definitivo. Se il titolo non ha alcun deployment indicizzato (registro off-chain, per ora Solana e Canton) è richiesta invece un'**attestazione dell'operatore**.
+    - Per **completare**, il wallet di destinazione deve avere una voce attiva nel registro (ad esempio una voce nominee-pool del registrar successore). Altrimenti la successiva sincronizzazione dei titolari bloccherebbe l'intero titolo.
+    - Il pacchetto di esportazione contiene il contenuto della voce ai sensi del § 17(2) eWpG (tipo di voce, riferimento del titolare, indicatore consumatore, diritti di terzi, restrizioni di disposizione, nota sulla capacità giuridica) e i blocchi legali attivi. Una voce con diritti di terzi o restrizioni di disposizione migra solo con un **riferimento al consenso del beneficiario**.
 
 ---
 

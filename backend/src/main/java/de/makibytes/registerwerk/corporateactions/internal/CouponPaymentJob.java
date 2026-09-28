@@ -1,14 +1,17 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
 import de.makibytes.registerwerk.asset.api.AssetRepository;
-import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
 import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPayment;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
+import de.makibytes.registerwerk.deployment.api.BondStatus;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
+import de.makibytes.registerwerk.deployment.api.schedule.BusinessDayCalendar;
+import de.makibytes.registerwerk.deployment.api.schedule.HolidayCalendar;
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,11 +21,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Reads asset_coupon_payment rows with status=SCHEDULED and scheduled_date &lt;= today,
- * creates CorporateAction(type=COUPON) rows and triggers settlement.
+ * Raises CorporateAction(type=COUPON) rows from SCHEDULED asset_coupon_payment rows once their
+ * <em>announcement date</em> is reached (T3-05) — record date and payment date come from the
+ * schedule row (record = payment − offset business days, announcement = record − lead). Raising on
+ * the payment date itself, as before, left no time to snapshot, attest and confirm, so every
+ * coupon went overdue. Legacy rows without these dates get them from the bond's conventions.
  *
  * <p>Runs as a ShedLock-protected scheduled job so only one backend instance processes a due
  * coupon cycle.
@@ -40,30 +47,37 @@ public class CouponPaymentJob {
     private final CorporateActionService corporateActionService;
     private final AssetBondTermsRepository bondTermsRepository;
     private final AssetRepository assetRepository;
+    private final RegisterClock registerClock;
+
+    /** Legacy rows (no announcement date) are considered this far ahead of their payment date. */
+    private static final int LEGACY_HORIZON_DAYS = 120;
 
     CouponPaymentJob(AssetCouponPaymentRepository couponPaymentRepository,
                      CorporateActionRepository corporateActionRepository,
                      CorporateActionService corporateActionService,
                      AssetBondTermsRepository bondTermsRepository,
-                     AssetRepository assetRepository) {
+                     AssetRepository assetRepository,
+                     RegisterClock registerClock) {
         this.couponPaymentRepository = couponPaymentRepository;
         this.corporateActionRepository = corporateActionRepository;
         this.corporateActionService = corporateActionService;
         this.bondTermsRepository = bondTermsRepository;
         this.assetRepository = assetRepository;
+        this.registerClock = registerClock;
     }
 
-    /** Daily at 06:00 UTC — an hour and a half before BondMaturityJob's 06:30 run, so a bond
-     *  reaching maturity the same day as its last coupon has its coupon raised first. */
-    @SchedulerLock(name = "couponPaymentJob", lockAtMostFor = "PT30M")
-    @Scheduled(cron = "0 0 6 * * *")
+    /** Daily at 05:30 register time — strictly before BondMaturityJob (05:45) and the daily
+     *  corporate-action transitions (06:00). Those shared the 06:00 minute before, so whether a
+     *  coupon raised that morning was processed the same day was nondeterministic (T3-05). */
+    @SchedulerLock(name = "couponPaymentJob", lockAtMostFor = "PT14M")
+    @Scheduled(cron = "0 30 5 * * *", zone = "${registerwerk.register.time-zone:Europe/Berlin}")
     @Transactional
     public void processDuePayments() {
-        LocalDate today = LocalDate.now();
-        log.info("CouponPaymentJob: scanning due coupon payments for date={}", today);
+        LocalDate today = registerClock.today();
+        log.info("CouponPaymentJob: scanning announceable coupon payments for date={}", today);
 
         List<AssetCouponPayment> due = couponPaymentRepository
-                .findByCouponStatusAndScheduledDateLessThanEqual(CouponStatus.SCHEDULED, today);
+                .findAnnounceable(CouponStatus.SCHEDULED, today, today.plusDays(LEGACY_HORIZON_DAYS));
 
         for (AssetCouponPayment payment : due) {
             try {
@@ -73,6 +87,24 @@ public class CouponPaymentJob {
                 // create another CorporateAction and pay the coupon to all holders again.
                 if (corporateActionRepository.existsByCouponPaymentId(payment.getId())) {
                     log.debug("CouponPaymentJob: action already exists for payment id={}, skipping.", payment.getId());
+                    continue;
+                }
+                if (payment.getAmountPerUnit() == null) {
+                    // Floating-rate coupon without a rate fixing: raising it would snapshot
+                    // entitlements with no amount. Wait for the fixing (surfaced by the
+                    // registerwerk_coupon_awaiting_fixing gauge).
+                    log.warn("CouponPaymentJob: coupon payment id={} for assetId={} is due but has no fixed "
+                            + "amount (floating rate awaiting fixing) — not raising.", payment.getId(), payment.getAssetId());
+                    continue;
+                }
+                Optional<AssetBondTerms> terms = bondTermsRepository.findById(payment.getAssetId());
+                if (payment.getAnnouncementDate() == null && !deriveLegacyDates(payment, terms.orElse(null), today)) {
+                    continue; // legacy row whose derived announcement date is still in the future
+                }
+                if (terms.map(t -> t.getBondStatus() == BondStatus.CALLED || t.getBondStatus() == BondStatus.REDEEMED)
+                        .orElse(false)) {
+                    log.info("CouponPaymentJob: coupon payment id={} not raised — bond assetId={} is already {}.",
+                            payment.getId(), payment.getAssetId(), terms.get().getBondStatus());
                     continue;
                 }
                 if (isTransferredOut(payment.getAssetId())) {
@@ -85,12 +117,10 @@ public class CouponPaymentJob {
                 action.setAssetId(payment.getAssetId());
                 action.setActionType(CorporateAction.ActionType.COUPON);
                 action.setAnnouncementDate(today);
-                // Record date defaults to the payment date itself for auto-created coupons —
-                // there is no separate "ex-date" concept configured per bond today; this at
-                // least lets the daily record-date job pick the action up and snapshot holder
-                // entitlements instead of it sitting in ANNOUNCED forever.
-                action.setRecordDate(payment.getScheduledDate());
+                action.setRecordDate(payment.getRecordDate());
                 action.setPaymentDate(payment.getScheduledDate());
+                action.setBondPeriodStart(payment.getPeriodStart());
+                action.setBondPeriodEnd(payment.getPeriodEnd());
                 action.setCouponPaymentId(payment.getId());
                 action.setInitiatedBy(SYSTEM_ACTOR);
                 action.setNotes("Auto-created from coupon_payment id=" + payment.getId());
@@ -99,9 +129,7 @@ public class CouponPaymentJob {
                 // copy it onto the CorporateAction so the Steuerbescheinigung/position-statement
                 // income columns aren't null placeholders.
                 action.setAmountPerUnit(payment.getAmountPerUnit());
-                bondTermsRepository.findById(payment.getAssetId())
-                        .map(AssetBondTerms::getCurrencyIso)
-                        .ifPresent(action::setCurrency);
+                terms.map(AssetBondTerms::getCurrencyIso).ifPresent(action::setCurrency);
 
                 corporateActionService.announce(action);
                 log.info("CouponPaymentJob: created CorporateAction for coupon payment id={}", payment.getId());
@@ -112,9 +140,34 @@ public class CouponPaymentJob {
         log.info("CouponPaymentJob: processed {} due coupon payments.", due.size());
     }
 
+    /**
+     * A row generated before V12 has no record/announcement date: derive them with the schedule
+     * defaults (record = payment − offset, announcement = record − lead, business days on the
+     * bond's calendar) and persist them, so the row reads the same as a generated one.
+     *
+     * @return true when the derived announcement date has been reached
+     */
+    private boolean deriveLegacyDates(AssetCouponPayment payment, AssetBondTerms terms, LocalDate today) {
+        HolidayCalendar holidays = terms != null && terms.getHolidayCalendar() != null
+                ? terms.getHolidayCalendar() : HolidayCalendar.TARGET2;
+        BusinessDayCalendar calendar = holidays.calendar();
+        int recordOffset = terms != null ? terms.getRecordDateOffsetBd() : 1;
+        int announceLead = terms != null ? terms.getAnnouncementLeadBd() : 5;
+        LocalDate record = payment.getRecordDate() != null
+                ? payment.getRecordDate() : calendar.addBusinessDays(payment.getScheduledDate(), -recordOffset);
+        LocalDate announce = calendar.addBusinessDays(record, -announceLead);
+        if (announce.isAfter(today)) {
+            return false;
+        }
+        payment.setRecordDate(record);
+        payment.setAnnouncementDate(announce);
+        couponPaymentRepository.save(payment);
+        return true;
+    }
+
     private boolean isTransferredOut(UUID assetId) {
         return assetRepository.findById(assetId)
-                .map(asset -> asset.getStatus() == AssetStatus.TRANSFERRED_OUT)
+                .map(asset -> asset.getStatus() != null && asset.getStatus().isRegisterFrozen())
                 .orElse(false);
     }
 }

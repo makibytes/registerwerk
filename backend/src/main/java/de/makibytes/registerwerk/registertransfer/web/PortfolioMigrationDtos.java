@@ -12,7 +12,10 @@ public final class PortfolioMigrationDtos {
 
     public record MigrationInitiateRequest(
             @NotNull UUID holderId,
-            @NotBlank String reason
+            @NotBlank String reason,
+            // T3-07 (C-05b): required when the entry carries third-party rights or disposal
+            // restrictions — reference of the beneficiary's consent to the migration.
+            String beneficiaryConsentRef
     ) {}
 
     public record SetDestinationRequest(
@@ -22,7 +25,12 @@ public final class PortfolioMigrationDtos {
     ) {}
 
     public record OnchainTransferRequest(
-            @NotBlank String txHash
+            @NotBlank String txHash,
+            // T3-17: required when the asset has no indexed deployment to verify the tx against
+            // (off-chain register, Solana/Canton until Phase 4).
+            String operatorAttestation,
+            // T3-07 (C-05b): may be supplied here when rights/restrictions arose after initiation.
+            String beneficiaryConsentRef
     ) {}
 
     public record MigrationCancelRequest(

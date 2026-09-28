@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.api.AssetDocument;
 import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
 import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.RegisterFreezeGuard;
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
@@ -26,6 +27,7 @@ import de.makibytes.registerwerk.registerstatement.api.DeliveryStatus;
 import de.makibytes.registerwerk.registerstatement.api.RegisterStatement;
 import de.makibytes.registerwerk.registerstatement.api.RegisterStatementRepository;
 import de.makibytes.registerwerk.registerstatement.api.StatementTrigger;
+import de.makibytes.registerwerk.registerstatement.events.RegisterStatementDeliveryFailedEvent;
 import de.makibytes.registerwerk.registerstatement.events.RegisterStatementIssuedEvent;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
 import org.slf4j.Logger;
@@ -174,6 +176,7 @@ public class RegisterStatementService {
         if (asset == null || investor == null) {
             return Optional.empty();
         }
+        RegisterFreezeGuard.requireAdministeredHere(asset, "Register document download");
 
         Instant issuedAt = Instant.now();
         LocalDate issuedDate = issuedAt.atZone(ZoneOffset.UTC).toLocalDate();
@@ -229,6 +232,11 @@ public class RegisterStatementService {
         LegalEntity investor = entityRepository.findById(holder.getInvestorId()).orElse(null);
         if (asset == null || investor == null) {
             log.warn("Register statement skipped: missing asset/investor for holder {}", holderId);
+            return Optional.empty();
+        }
+        if (asset.getStatus() != null && !asset.getStatus().isAdministeredHere()) {
+            // T3-07: the register was handed to a successor registrar - it issues the statements now.
+            log.info("Register statement skipped: asset {} was transferred out", asset.getId());
             return Optional.empty();
         }
 
@@ -304,10 +312,26 @@ public class RegisterStatementService {
         return Boolean.TRUE.equals(holder.getIsConsumer());
     }
 
+    /** Delivery failure class for holders whose users were erased/disabled (never retried). */
+    static final String NO_LAWFUL_CHANNEL = "NO_LAWFUL_CHANNEL";
+
     private void deliver(RegisterStatement statement, Asset asset, LegalEntity investor, byte[] pdf) {
-        String email = resolveEmail(investor.getId());
+        List<AppUser> users = userRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(investor.getId());
+        String email = resolveEmail(users);
         if (email == null) {
+            boolean erased = users.stream().anyMatch(u -> !u.isEnabled() || isErasedEmail(u.getEmail()));
             statement.setDeliveryStatus(DeliveryStatus.FAILED);
+            if (erased) {
+                statement.setDeliveryErrorCode(NO_LAWFUL_CHANNEL);
+                statement.setDeliveryError("No lawful delivery channel (erasure): all users of investor "
+                        + investor.getEntityNumber() + " are erased or disabled");
+                statementRepository.save(statement);
+                log.error("Statement {} undeliverable: no lawful delivery channel (erasure) for investor {} - "
+                        + "operator action required", statement.getId(), investor.getEntityNumber());
+                eventPublisher.publishEvent(new RegisterStatementDeliveryFailedEvent(statement.getId(),
+                        statement.getHolderId(), statement.getAssetId(), statement.getInvestorId(), NO_LAWFUL_CHANNEL));
+                return;
+            }
             statement.setDeliveryError("No deliverable e-mail address for investor "
                     + investor.getEntityNumber());
             statementRepository.save(statement);
@@ -343,6 +367,9 @@ public class RegisterStatementService {
     public void retryFailedDeliveries() {
         List<RegisterStatement> failed = statementRepository.findByDeliveryStatus(DeliveryStatus.FAILED);
         for (RegisterStatement statement : failed) {
+            if (NO_LAWFUL_CHANNEL.equals(statement.getDeliveryErrorCode())) {
+                continue; // erasure - retrying cannot succeed and must not reach a tombstoned address
+            }
             Asset asset = assetRepository.findById(statement.getAssetId()).orElse(null);
             LegalEntity investor = entityRepository.findById(statement.getInvestorId()).orElse(null);
             AssetHolder holder = holderRepository.findById(statement.getHolderId()).orElse(null);
@@ -364,13 +391,18 @@ public class RegisterStatementService {
         }
     }
 
-    private String resolveEmail(UUID investorId) {
-        List<AppUser> users = userRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(investorId);
+    /** Only enabled users with a real address: erased ({@code @erased.invalid}) and disabled users never receive mail. */
+    static String resolveEmail(List<AppUser> users) {
         return users.stream()
+                .filter(AppUser::isEnabled)
                 .map(AppUser::getEmail)
-                .filter(e -> e != null && !e.isBlank())
+                .filter(e -> e != null && !e.isBlank() && !isErasedEmail(e))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static boolean isErasedEmail(String email) {
+        return email != null && email.toLowerCase(java.util.Locale.ROOT).endsWith("@erased.invalid");
     }
 
     /**

@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.kyc.api.HolderBlock;
 import de.makibytes.registerwerk.kyc.api.HolderBlockRepository;
 import de.makibytes.registerwerk.kyc.events.HolderBlockCreatedEvent;
 import de.makibytes.registerwerk.kyc.events.HolderBlockLiftedEvent;
+import de.makibytes.registerwerk.shared.AddressNormalizer;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,9 @@ public class SperrvermerkService {
     }
 
     public HolderBlock create(HolderBlock block, UUID createdBy, String actorRole, UUID dualControlApproverId) {
+        // Canonical form regardless of caller (T3-15): an un-normalised checksum address never
+        // matched asset_holder, so no deployment was frozen and the gates failed open.
+        block.setWalletAddress(AddressNormalizer.normalize(block.getWalletAddress()));
         block.setCreatedBy(createdBy);
         block.setStatus(HolderBlock.Status.ACTIVE);
         if (dualControlApproverId != null) {
@@ -61,7 +65,7 @@ public class SperrvermerkService {
 
     @Transactional(readOnly = true)
     public List<HolderBlock> findActiveByWallet(String walletAddress) {
-        return repository.findByWalletAddressAndStatus(walletAddress, HolderBlock.Status.ACTIVE);
+        return repository.findByWalletAddressAndStatus(AddressNormalizer.normalize(walletAddress), HolderBlock.Status.ACTIVE);
     }
 
     @Transactional(readOnly = true)

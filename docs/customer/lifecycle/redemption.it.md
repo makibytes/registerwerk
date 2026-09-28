@@ -1,6 +1,6 @@
 ---
 title: 6. Operazioni societarie e rimborso
-description: Cedole, date di registrazione, certificazioni fiscali — e come uno strumento viene infine rimborsato e distrutto.
+description: Cedole, date di registrazione, prospetti dei proventi — e come uno strumento viene infine rimborsato e distrutto.
 ---
 
 # Fase 6 — Operazioni societarie e rimborso
@@ -95,14 +95,14 @@ Solo un sottoinsieme può essere effettivamente creato oggi — il resto è mode
 
 ---
 
-## Certificazioni fiscali
+## Prospetto dei proventi (non è una certificazione fiscale) { #tax-certificates }
 
-Per i titolari tedeschi i proventi di uno strumento sono imponibili, e il titolare ha bisogno di una **Steuerbescheinigung** — una certificazione fiscale che indichi quanto ha percepito in un dato anno.
+Per i titolari tedeschi i proventi di uno strumento sono imponibili. Registerwerk fornisce ogni anno un **Ertragsaufstellung** (prospetto dei proventi) con quanto pagato al titolare in un dato anno, ma **non è una Steuerbescheinigung** ai sensi del § 45a EStG.
 
-Registerwerk la produce a partire dalle righe delle operazioni societarie: per ciascun investitore, tutti i diritti dell'anno fiscale, aggregati.
+Viene prodotto a partire dalle righe delle operazioni societarie regolate: per ciascun investitore, i diritti a cedola, interessi e dividendi dell'anno solare, raggruppati **per valuta** (importi in valute diverse non vengono mai sommati). I rimborsi di capitale (rimborso, richiamo, rimborso parziale) e i richiami di versamenti **non sono proventi** e sono esclusi; le plusvalenze da cessione o rimborso non vengono determinate, perché il registro non conserva i costi di acquisto.
 
 !!! warning "Attesta ciò che è stato pagato, non ciò che è dovuto"
-    La certificazione è una registrazione fattuale delle distribuzioni provenienti da questo registro. Non è consulenza fiscale, non tiene conto di redditi percepiti altrove e non calcola l'imposta di nessuno. Gli obblighi di ritenuta dipendono dalla residenza e dallo status del titolare e sono responsabilità dell'emittente e del titolare.
+    Il prospetto è una registrazione fattuale delle distribuzioni lorde provenienti da questo registro. Non è consulenza fiscale, non tiene conto di redditi percepiti altrove e non calcola l'imposta di nessuno. **Registerwerk non trattiene Kapitalertragsteuer né Solidaritätszuschlag**: le cedole sono pagate al lordo e il prospetto lo indica (trattenuto: 0,00). Se il gestore del registro operi come agente pagatore che trattiene e certifica è una decisione di fondo ancora aperta; fino ad allora titolari ed emittenti restano responsabili di ritenuta e dichiarazione.
 
 ---
 
@@ -135,7 +135,7 @@ stateDiagram-v2
 
 ### Quando il rimborso non avviene
 
-La data di pagamento passa e nulla viene regolato. È un **inadempimento**, ed è un evento reale che la piattaforma rileva anziché ignorare: le operazioni di rimborso la cui data di pagamento è trascorsa senza regolamento vengono segnalate, così come le cedole mancate.
+La data di pagamento passa e nulla viene regolato. La piattaforma non parla subito di default: il pagamento appare prima come **pagamento in sospeso** (scaduto) durante il periodo di tolleranza — per impostazione predefinita 30 giorni per gli interessi e 7 giorni per il capitale. Solo se resta non regolato dopo, la cedola è segnalata come **mancata** e l'obbligazione in **default**. Se il pagamento viene regolato in qualsiasi momento, la segnalazione viene cancellata e l'obbligazione è marcata come rimborsata (o la cedola come pagata).
 
 Registerwerk alza la mano. Non può far valere un credito — quello spetta al rappresentante degli obbligazionisti, ai titolari e ai tribunali.
 

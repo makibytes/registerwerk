@@ -1,6 +1,14 @@
 package de.makibytes.registerwerk.asset.web;
 
+import de.makibytes.registerwerk.asset.internal.HolderChangeRequest;
+import de.makibytes.registerwerk.asset.internal.HolderChangeRequestService;
+import de.makibytes.registerwerk.asset.internal.HolderInstruction;
 import de.makibytes.registerwerk.asset.internal.HolderService;
+import de.makibytes.registerwerk.asset.web.dto.HolderChangeRequestBody;
+import de.makibytes.registerwerk.asset.web.dto.HolderChangeRequestResponse;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
+import jakarta.validation.constraints.NotBlank;
 import de.makibytes.registerwerk.asset.internal.LiveHolderService;
 import de.makibytes.registerwerk.blockchain.api.WhitelistService;
 import de.makibytes.registerwerk.externalref.ExternalRefApi;
@@ -39,6 +47,7 @@ public class HolderController {
     private static final Logger log = LoggerFactory.getLogger(HolderController.class);
 
     private final HolderService holderService;
+    private final HolderChangeRequestService changeRequestService;
     private final LiveHolderService liveHolderService;
     private final WhitelistService whitelistService;
     private final AssetDeploymentRepository assetDeploymentRepository;
@@ -47,12 +56,14 @@ public class HolderController {
 
     public HolderController(
             HolderService holderService,
+            HolderChangeRequestService changeRequestService,
             LiveHolderService liveHolderService,
             WhitelistService whitelistService,
             AssetDeploymentRepository assetDeploymentRepository,
             HolderMapper holderMapper,
             ExternalRefApi companyExternalReferenceService) {
         this.holderService = holderService;
+        this.changeRequestService = changeRequestService;
         this.liveHolderService = liveHolderService;
         this.whitelistService = whitelistService;
         this.assetDeploymentRepository = assetDeploymentRepository;
@@ -61,10 +72,11 @@ public class HolderController {
     }
 
     /**
-     * Adds a new holder to an asset.
+     * Adds a new holder to an asset. Operator-only (T3-13): the issuer files a change request instead.
      */
     @PostMapping
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(reason = "REGISTER_ENTRY_CREATE")
     public ResponseEntity<HolderResponse> addHolder(
             @PathVariable UUID assetId,
             Authentication authentication,
@@ -74,6 +86,7 @@ public class HolderController {
             request.investorId(),
             request.walletAddress(),
             request.nominalAmount(),
+            new HolderInstruction(request.instructingParty(), request.instructionReference()),
             extractActorId(authentication),
             SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN")
         );
@@ -86,7 +99,8 @@ public class HolderController {
      * flag that govern the §19 register-statement obligation.
      */
     @PostMapping("/single-entry")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(reason = "REGISTER_ENTRY_CREATE")
     public ResponseEntity<HolderResponse> addSingleEntryHolder(
             @PathVariable UUID assetId,
             Authentication authentication,
@@ -100,6 +114,7 @@ public class HolderController {
             request.thirdPartyRights(),
             request.disposalRestrictions(),
             request.legalCapacityNote(),
+            new HolderInstruction(request.instructingParty(), request.instructionReference()),
             extractActorId(authentication),
             SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN")
         );
@@ -107,27 +122,79 @@ public class HolderController {
     }
 
     /**
-     * Updates a single-entry holder's §17(2) attributes on instruction of an
-     * authorised party (§18(1) eWpG).
+     * Updates a single-entry holder's §17(2) attributes on instruction of an authorised party
+     * (§18(1) eWpG). Operator-only with 4-eyes (T3-13): this can remove third-party rights or
+     * disposal restrictions, so an issuer cannot do it and no single operator either.
      */
     @PatchMapping("/{holderId}/single-entry-attributes")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "REGISTER_ENTRY_RIGHTS_CHANGE")
     public ResponseEntity<HolderResponse> updateSingleEntryAttributes(
             @PathVariable UUID assetId,
             @PathVariable UUID holderId,
             Authentication authentication,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
             @RequestBody @Valid de.makibytes.registerwerk.asset.web.dto.SingleEntryAttributesUpdateRequest request) {
         AssetHolder holder = holderService.updateSingleEntryAttributes(
             assetId, holderId,
-            request.isConsumer(),
-            request.thirdPartyRights(),
-            request.disposalRestrictions(),
-            request.legalCapacityNote(),
+            new HolderService.AttributeChange(request.isConsumer(), request.thirdPartyRights(),
+                    request.disposalRestrictions(), request.legalCapacityNote(),
+                    request.clearThirdPartyRights(), request.clearDisposalRestrictions()),
+            new HolderInstruction(request.instructingParty(), request.instructionReference(), approverId, null),
             extractActorId(authentication),
             SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN")
         );
         return ResponseEntity.ok(toResponse(holder, authentication));
     }
+
+    // ── Issuer change requests (T3-13) ────────────────────────────────────────
+
+    /** The issuer asks for an entry / §17(2) change; the operator decides. */
+    @PostMapping("/change-requests")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+    public ResponseEntity<HolderChangeRequestResponse> requestChange(
+            @PathVariable UUID assetId,
+            Authentication authentication,
+            @RequestBody @Valid HolderChangeRequestBody body) {
+        HolderChangeRequest r = changeRequestService.request(assetId, body.requestType(), body.holderId(),
+                body.payload(), body.instructingParty(), body.instructionReference(),
+                extractActorId(authentication), SecurityUtils.primaryRole(authentication, "ISSUER"));
+        return ResponseEntity.status(HttpStatus.CREATED).body(HolderChangeRequestResponse.from(r));
+    }
+
+    @GetMapping("/change-requests")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication)")
+    public ResponseEntity<List<HolderChangeRequestResponse>> listChangeRequests(@PathVariable UUID assetId) {
+        return ResponseEntity.ok(changeRequestService.list(assetId).stream()
+                .map(HolderChangeRequestResponse::from).toList());
+    }
+
+    @PostMapping("/change-requests/{requestId}/execute")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "REGISTER_ENTRY_RIGHTS_CHANGE")
+    public ResponseEntity<HolderChangeRequestResponse> executeChangeRequest(
+            @PathVariable UUID assetId,
+            @PathVariable UUID requestId,
+            Authentication authentication,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
+        HolderChangeRequest r = changeRequestService.execute(assetId, requestId, extractActorId(authentication),
+                SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN"), approverId);
+        return ResponseEntity.ok(HolderChangeRequestResponse.from(r));
+    }
+
+    @PostMapping("/change-requests/{requestId}/reject")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<HolderChangeRequestResponse> rejectChangeRequest(
+            @PathVariable UUID assetId,
+            @PathVariable UUID requestId,
+            Authentication authentication,
+            @RequestBody @Valid RejectChangeRequestBody body) {
+        HolderChangeRequest r = changeRequestService.reject(assetId, requestId, body.reason(),
+                extractActorId(authentication), SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(HolderChangeRequestResponse.from(r));
+    }
+
+    public record RejectChangeRequestBody(@NotBlank String reason) {}
 
     /**
      * Returns a paginated list of holders for an asset.

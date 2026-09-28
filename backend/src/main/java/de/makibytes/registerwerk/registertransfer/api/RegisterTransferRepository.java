@@ -13,4 +13,6 @@ public interface RegisterTransferRepository extends JpaRepository<RegisterTransf
     /** A given asset may have at most one transfer in flight at a time. */
     Optional<RegisterTransfer> findFirstByAssetIdAndStatusNotInOrderByInitiatedAtDesc(
             UUID assetId, List<TransferStatus> terminalStatuses);
+
+    Optional<RegisterTransfer> findFirstByAssetIdAndStatusOrderByCompletedAtDesc(UUID assetId, TransferStatus status);
 }

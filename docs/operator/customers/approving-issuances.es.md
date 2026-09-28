@@ -53,6 +53,32 @@ Para un bono: valor nominal, moneda, fechas de emisión y vencimiento, tasa de c
 
     **Base de cálculo de intereses.** Poco glamurosa, y cambia la cantidad de dinero que se mueve. Confirme que coincide con la hoja de términos en lugar de asumirlo.
 
+### Convenciones del cronograma de cupones { #coupon-schedule-conventions }
+
+Al guardar los términos del bono se genera el cronograma de cupones con el que trabajan los procesos de eventos corporativos. Las convenciones siguen la práctica ICMA; cada una se define en los términos, con estos valores predeterminados:
+
+| Parámetro | Predeterminado | Efecto |
+|---|---|---|
+| Base de cálculo | ACT/ACT (ICMA) | Un periodo regular devenga exactamente 1/frecuencia; un primer periodo corto devenga sus días reales sobre el periodo regular nocional. Están disponibles ACT/360, ACT/365 (fijo), 30/360 y 30E/360. |
+| Cronograma | Hacia atrás desde el vencimiento, primer periodo corto | Las fechas regulares se cuentan hacia atrás desde el vencimiento; un periodo irregular queda al principio. Si el vencimiento es fin de mes, cada fecha de cupón es fin de mes. |
+| Convención de día hábil | Modified Following | Una fecha de pago en día inhábil pasa al siguiente día hábil, salvo que eso cambie de mes; entonces, al anterior. El devengo usa siempre las fechas sin ajustar. |
+| Calendario de festivos | TARGET2 | Fines de semana, 1 de enero, Viernes Santo, Lunes de Pascua, 1 de mayo, 25 y 26 de diciembre. |
+| Fecha de registro | 1 día hábil antes del pago | Quien figure en el registro al final de ese día recibe el cupón. |
+| Anuncio | 5 días hábiles antes de la fecha de registro | Cuándo se anuncia el cupón. |
+| Periodos de gracia | 30 días intereses, 7 días principal | Cuánto tiempo tras la fecha de pago un importe impagado solo está vencido. |
+
+El cupón por unidad es valor nominal × tasa de cupón × fracción de días, sin redondear; solo se redondea el derecho de cada titular. Un cupón variable no tiene importe hasta que se fija su tipo y no se anuncia antes. Solo se generan fechas de pago futuras, así que unos términos introducidos tarde no crean cupones con fecha pasada. El cronograma aparece en la pestaña **Corporate Actions** del activo.
+
+### Cómo se generan los cupones y el reembolso
+
+- **Anuncio.** El cupón (y el reembolso final) se genera automáticamente en su *fecha de anuncio*, no en la fecha de pago, para dejar tiempo de atestiguar y confirmar antes del pago. El reembolso sigue la misma regla: fecha de pago = vencimiento ajustado por la convención de día hábil.
+- **Fecha de registro.** Los derechos se fijan al **final de la fecha de registro** (Europe/Berlin), según el registro tal como estaba entonces. Las transferencias posteriores no los modifican. En activos desplegados en una cadena, la instantánea espera a que el registro esté conciliado más allá de la fecha de registro y se rechaza («unmapped at record date») si una wallet con unidades en ese momento no tiene entrada en el registro. La fecha de registro de un dividendo, split o amortización anticipada debe seguir en el futuro al proponerse y al aprobarse (como pronto, el siguiente día hábil).
+- **Redondeo.** El derecho de cada titular se redondea a la unidad mínima de la moneda (half-even); la confirmación muestra el total pagado y la diferencia de redondeo.
+- **Vencido, incumplido, impago.** Un importe impagado tras la fecha de pago aparece primero como **OVERDUE** (solo operadores; los clientes ven «pago pendiente»). Solo tras el plazo de gracia (30 días intereses, 7 días principal) un cupón pasa a **MISSED** y un bono a **DEFAULTED**. La liquidación borra cada uno de estos estados: un reembolso liquidado deja el bono en **REDEEMED**, una amortización anticipada liquidada en **CALLED**, un cupón liquidado es **PAID**.
+- **Control dual.** El emisor atestigua; un operador confirma. Un operador nunca puede atestiguar como emisor: la vía del operador es *Override attestation* (step-up y motivo, auditado por separado), también al suplantar. Una propuesta debe aprobarla una persona distinta de quien la propuso.
+- **Derechos retenidos.** Los derechos de los pools de nominados (look-through) no se pagan y mantienen abierta una acción liquidada, marcada «held entitlements outstanding», hasta que se resuelvan.
+- **Orden de los procesos.** 05:30 cupones, 05:45 reembolsos, 06:00 transiciones diarias (Europe/Berlin): una acción generada por la mañana se procesa en la misma ejecución.
+
 ### Cadena y estándar { #chain-and-standard }
 
 ¿El estándar del token se ajusta a lo que se afirma sobre el instrumento?
@@ -73,6 +99,8 @@ Confirme también que mainnet frente a testnet es lo que el emisor pretendía. A
 === "Aprobar"
 
     El estado pasa a `APPROVED`. **Los términos quedan bloqueados.** El emisor ya puede implementar.
+
+    Los términos solo pueden fijarse en bloque (con step-up) hasta la emisión, y el ISIN, la moneda, el importe de emisión, la denominación y las fechas ya no se pueden cambiar en el formulario de edición una vez aprobado. Los cambios posteriores son **modificaciones**: *Editar activo → Amend terms* pide la base jurídica, step-up y un segundo operador, registra cada valor anterior/posterior en el registro de auditoría y regenera los cupones futuros aún no anunciados. Los cupones pagados o ya anunciados nunca se reescriben. El valor nominal, el cupón y el vencimiento de un bono Canton desplegado no se pueden modificar aquí: están fijados en el instrumento del ledger.
 
     Registre por qué aprobó. El registro de auditoría deja constancia de que lo hizo, no de qué le convenció.
 
@@ -101,6 +129,19 @@ Volverá a estar involucrado cuando los inversores necesiten incorporarse y, a p
     Aprobar una operación societaria para su liquidación requiere [cuatro ojos](../../compliance/step-up-mfa.md).
 
     Pagar a la lista de titulares incorrecta es el clásico error catastrófico en la administración de valores, y es muy difícil de revertir. Asegúrese de que su turno de guardia tenga realmente dos personas disponibles cuando llegan las fechas de cupón: un control de cuatro ojos que nadie puede cumplir un viernes por la tarde es un control que acaba sorteándose.
+
+
+### Órdenes de suscripción e inscripciones registrales
+
+Los inversores suscriben a través del portal. Usted (o el emisor) trabaja la cola en la pestaña **Subscription orders** del activo:
+
+1. **Asignar**, en su totalidad o reducida. El tamaño de la emisión y el máximo de tenencia del inversor (incluidas sus otras asignaciones abiertas) se comprueban bajo bloqueo, de modo que asignaciones paralelas no pueden excederse.
+2. Espere a que el inversor **acepte**. La asignación lleva entonces un plazo de pago (por defecto 10 días hábiles TARGET). Si no se paga a tiempo, un proceso programado la marca como **caducada** y libera la capacidad.
+3. **Confirme el pago** cuando el dinero esté en la cuenta ([step-up](../../compliance/step-up-mfa.md)). En un bono el importe a pagar es unidades asignadas × valor nominal × precio de emisión: un pago insuficiente se rechaza y uno excesivo se registra como *reembolso pendiente*; el reembolso en sí es un pago manual. Para activos sin condiciones de bono, usted introduce el importe recibido.
+4. **Liquidar.** Se comprueban de nuevo KYC, cribado de sanciones, Sperrvermerk, congelación del registro, finalidad, mercado objetivo y límite de tenencia. En un activo ERC-20 o ERC-3643 desplegado, las unidades se acuñan y la sincronización de titulares las abona en el registro cuando la transferencia está indexada; en otros estándares desplegados la orden permanece como *pagada* hasta que usted emita las unidades manualmente. Sin despliegue, el registro se abona directamente.
+5. **Liberar** devuelve una asignación con un motivo; en una orden pagada, el pago se marca como reembolso pendiente.
+
+Las inscripciones registrales las hace usted, no el emisor. En la pestaña **Holders** del activo, *Add register entry* y *Change §17(2) attributes* exigen una instrucción (quién y una referencia); un campo vacío significa sin cambio, y retirar un derecho requiere su propia casilla y un segundo aprobador. Los emisores lo solicitan mediante *solicitudes de cambio*, que usted ejecuta (cuatro ojos) o rechaza. En un activo desplegado, una inscripción manual es solo una asignación de wallet con nominal 0.
 
 ---
 

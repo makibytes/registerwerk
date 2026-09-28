@@ -7,7 +7,6 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSnapshotBlockedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
-import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.deployment.api.HolderKind;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
@@ -43,7 +42,8 @@ class CorporateActionSnapshotGateTest {
 
     @Mock private CorporateActionRepository repository;
     @Mock private CorporateActionEntryRepository entryRepository;
-    @Mock private AssetHolderRepository holderRepository;
+    @Mock private RecordDatePositionResolver positionResolver;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository bondTermsRepository;
     @Mock private CorporateActionSettlementWriter settlementWriter;
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
@@ -56,8 +56,9 @@ class CorporateActionSnapshotGateTest {
 
     @BeforeEach
     void setUp() {
-        service = new CorporateActionService(repository, entryRepository, holderRepository, settlementWriter,
-                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate, freshnessGate);
+        service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
+                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate, freshnessGate,
+                bondTermsRepository, CorporateActionTestSupport.systemRegisterClock());
     }
 
     private static CorporateAction dueAction(CorporateAction.Status status) {
@@ -126,7 +127,7 @@ class CorporateActionSnapshotGateTest {
         pool.setWalletAddress("0xpool");
         pool.setNominalAmount(new BigDecimal("40"));
         pool.setHolderKind(HolderKind.NOMINEE_POOL);
-        when(holderRepository.findActiveByAssetId(ca.getAssetId())).thenReturn(List.of(investor, pool));
+        when(positionResolver.resolve(org.mockito.ArgumentMatchers.eq(ca.getAssetId()), any())).thenReturn(CorporateActionTestSupport.positionsOf(List.of(investor, pool)));
 
         service.processDailyTransitions();
 

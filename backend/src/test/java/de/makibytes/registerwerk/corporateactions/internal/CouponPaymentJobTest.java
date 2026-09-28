@@ -12,7 +12,6 @@ import de.makibytes.registerwerk.deployment.api.CouponStatus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -51,25 +50,47 @@ class CouponPaymentJobTest {
     @Mock
     private AssetRepository assetRepository;
 
-    @InjectMocks
     private CouponPaymentJob job;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        job = new CouponPaymentJob(couponPaymentRepository, corporateActionRepository, corporateActionService,
+                bondTermsRepository, assetRepository, CorporateActionTestSupport.systemRegisterClock());
+    }
 
     private AssetCouponPayment duePayment() {
         AssetCouponPayment payment = new AssetCouponPayment();
         // AssetCouponPayment has no setId (DB-generated) — pin it for the mock via reflection.
         org.springframework.test.util.ReflectionTestUtils.setField(payment, "id", UUID.randomUUID());
         payment.setAssetId(UUID.randomUUID());
-        payment.setScheduledDate(LocalDate.now().minusDays(1));
+        payment.setScheduledDate(LocalDate.now().plusDays(6));
+        payment.setRecordDate(LocalDate.now().plusDays(5));
+        payment.setAnnouncementDate(LocalDate.now());
         payment.setCouponStatus(CouponStatus.SCHEDULED);
+        payment.setAmountPerUnit(new java.math.BigDecimal("40"));
         return payment;
+    }
+
+    @Test
+    @DisplayName("a due floating-rate coupon without a fixing (null amount) is not raised")
+    void floatingCouponAwaitingFixing_isNotRaised() {
+        AssetCouponPayment payment = duePayment();
+        payment.setAmountPerUnit(null);
+        when(couponPaymentRepository.findAnnounceable(
+                eq(CouponStatus.SCHEDULED), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(payment));
+        when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(false);
+
+        job.processDuePayments();
+
+        verify(corporateActionService, org.mockito.Mockito.never()).announce(any(CorporateAction.class));
     }
 
     @Test
     @DisplayName("first run creates a corporate action for a due payment")
     void firstRun_createsAction() throws Exception {
         AssetCouponPayment payment = duePayment();
-        when(couponPaymentRepository.findByCouponStatusAndScheduledDateLessThanEqual(
-                eq(CouponStatus.SCHEDULED), any(LocalDate.class))).thenReturn(List.of(payment));
+        when(couponPaymentRepository.findAnnounceable(
+                eq(CouponStatus.SCHEDULED), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(payment));
         when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(false);
 
         job.processDuePayments();
@@ -81,8 +102,8 @@ class CouponPaymentJobTest {
     @DisplayName("re-run while settlement is pending does NOT create a duplicate action")
     void rerun_skipsAlreadyProcessedPayment() throws Exception {
         AssetCouponPayment payment = duePayment();
-        when(couponPaymentRepository.findByCouponStatusAndScheduledDateLessThanEqual(
-                eq(CouponStatus.SCHEDULED), any(LocalDate.class))).thenReturn(List.of(payment));
+        when(couponPaymentRepository.findAnnounceable(
+                eq(CouponStatus.SCHEDULED), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(payment));
         when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(true);
 
         job.processDuePayments();
@@ -97,13 +118,49 @@ class CouponPaymentJobTest {
         Asset transferredAsset = new Asset();
         transferredAsset.setStatus(AssetStatus.TRANSFERRED_OUT);
 
-        when(couponPaymentRepository.findByCouponStatusAndScheduledDateLessThanEqual(
-                eq(CouponStatus.SCHEDULED), any(LocalDate.class))).thenReturn(List.of(payment));
+        when(couponPaymentRepository.findAnnounceable(
+                eq(CouponStatus.SCHEDULED), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(payment));
         when(corporateActionRepository.existsByCouponPaymentId(payment.getId())).thenReturn(false);
         when(assetRepository.findById(payment.getAssetId())).thenReturn(Optional.of(transferredAsset));
 
         job.processDuePayments();
 
         verify(corporateActionService, never()).announce(any());
+    }
+
+    @Test
+    @DisplayName("T3-05: raised at the announcement date — record/payment dates come from the schedule row, not 'today'")
+    void raisesAtAnnouncementDate() {
+        AssetCouponPayment payment = duePayment();
+        when(couponPaymentRepository.findAnnounceable(
+                eq(CouponStatus.SCHEDULED), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(payment));
+
+        job.processDuePayments();
+
+        org.mockito.ArgumentCaptor<CorporateAction> captor = org.mockito.ArgumentCaptor.forClass(CorporateAction.class);
+        verify(corporateActionService).announce(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getRecordDate()).isEqualTo(LocalDate.now().plusDays(5));
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getPaymentDate()).isEqualTo(LocalDate.now().plusDays(6));
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getAnnouncementDate()).isEqualTo(LocalDate.now());
+    }
+
+    @Test
+    @DisplayName("T3-05: a legacy row without dates gets them derived and is only raised once its announcement date is reached")
+    void legacyRowGetsDerivedDates() {
+        AssetCouponPayment legacy = duePayment();
+        legacy.setAnnouncementDate(null);
+        legacy.setRecordDate(null);
+        legacy.setScheduledDate(LocalDate.now().plusDays(60)); // announcement (~7 business days before) still ahead
+        when(couponPaymentRepository.findAnnounceable(
+                eq(CouponStatus.SCHEDULED), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(legacy));
+
+        job.processDuePayments();
+        verify(corporateActionService, never()).announce(any());
+
+        legacy.setScheduledDate(LocalDate.now().plusDays(3)); // announcement date derived in the past
+        job.processDuePayments();
+        verify(corporateActionService).announce(any(CorporateAction.class));
+        org.assertj.core.api.Assertions.assertThat(legacy.getAnnouncementDate()).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(legacy.getRecordDate()).isBefore(legacy.getScheduledDate());
     }
 }

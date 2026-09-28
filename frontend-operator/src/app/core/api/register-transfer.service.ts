@@ -19,20 +19,23 @@ export class RegisterTransferService {
     return this.http.get<RegisterTransfer[]>(`${this.base}/assets/${assetId}`);
   }
 
-  initiate(assetId: string, successorName: string, successorIdentifier: string | undefined, reason: string, initiatedBy: string): Observable<RegisterTransfer> {
-    return this.http.post<RegisterTransfer>(this.base, { assetId, successorName, successorIdentifier, reason, initiatedBy });
+  initiate(assetId: string, successorName: string, successorIdentifier: string | undefined, reason: string, initiatedBy: string,
+           successorOnchainAddress?: string): Observable<RegisterTransfer> {
+    return this.http.post<RegisterTransfer>(this.base, { assetId, successorName, successorIdentifier, reason, initiatedBy, successorOnchainAddress });
   }
 
   export(transferId: string): Observable<Blob> {
     return this.http.post(`${this.base}/${transferId}/export`, {}, { responseType: 'blob' });
   }
 
-  recordOnchainHandover(transferId: string, txHash: string, stepUpToken: string, dualControlToken: string): Observable<RegisterTransfer> {
+  /** One deployment's handover: EVM deployments are verified on-chain, other chains need `attested`. */
+  recordOnchainHandover(transferId: string, txHash: string, stepUpToken: string, dualControlToken: string,
+                        opts: { deploymentId?: string; attested?: boolean } = {}): Observable<RegisterTransfer> {
     const headers = new HttpHeaders({
       Authorization: `Bearer ${stepUpToken}`,
       'X-Dual-Control-Token': dualControlToken,
     });
-    return this.http.post<RegisterTransfer>(`${this.base}/${transferId}/onchain-handover`, { txHash }, { headers });
+    return this.http.post<RegisterTransfer>(`${this.base}/${transferId}/onchain-handover`, { txHash, ...opts }, { headers });
   }
 
   complete(transferId: string, stepUpToken: string, dualControlToken: string): Observable<RegisterTransfer> {

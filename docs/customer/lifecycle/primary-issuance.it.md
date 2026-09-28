@@ -81,6 +81,36 @@ Ogni investitore ammesso diventa un **titolare** — una riga del registro. Ai s
 
 Uno stesso asset può portare entrambe le forme insieme — il registro la chiama posizione `MIXED`.
 
+
+!!! info "Le iscrizioni le effettua l'operatore"
+    Un'iscrizione, e qualsiasi modifica di un attributo del §17(2), è effettuata dall'operatore del registro sulla base di un'istruzione registrata: **chi l'ha impartita** (titolare, beneficiario, tribunale, curatore, modifica delle condizioni da parte dell'emittente) e un **riferimento**. L'emittente non modifica il registro; presenta una *richiesta* che l'operatore esegue o rifiuta. Rimuovere un diritto o una restrizione richiede un'azione esplicita e un secondo approvatore, e i valori prima e dopo vengono conservati.
+
+---
+
+## Sottoscrizioni: dall'ordine al registro
+
+Gli investitori sottoscrivono tramite il portale; il registro non viene più riempito digitando posizioni in una finestra di dialogo. Un ordine attraversa questi stati:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    SUBMITTED --> ALLOCATED: allocate
+    ALLOCATED --> PAYMENT_CONFIRMED: accepted and paid
+    PAYMENT_CONFIRMED --> SETTLED: settle
+    ALLOCATED --> LAPSED: not paid in time
+    ALLOCATED --> RELEASED: released
+    SUBMITTED --> REJECTED: reject
+```
+
+1. **Inviare.** Qualsiasi investitore già registrato può inviare un ordine finché l'attività è aperta alla sottoscrizione (`APPROVED` o `ISSUED`) e l'investitore rientra nel mercato di riferimento MiFID.
+2. **Assegnare.** L'emittente o l'operatore assegna, per intero o in misura ridotta. Le assegnazioni contano contro la dimensione dell'emissione e contro il massimo detenibile dall'investitore **insieme alle sue altre assegnazioni aperte**, così due assegnazioni parallele non possono restare ciascuna sotto il limite.
+3. **Accettare.** L'investitore accetta l'assegnazione. Nel registro non viene ancora iscritto nulla. Per un'obbligazione vengono mostrati l'importo dovuto (unità assegnate × valore nominale × prezzo di emissione), un riferimento di pagamento e un termine di pagamento — per impostazione predefinita 10 giorni lavorativi TARGET. Un'assegnazione non pagata in tempo **decade** e libera la sua capacità; l'emittente o l'operatore possono anche **rilasciarla**.
+4. **Confermare il pagamento.** L'emittente o l'operatore conferma l'arrivo del denaro (richiede lo [step-up](../../compliance/step-up-mfa.md)). Un pagamento insufficiente viene rifiutato; un pagamento eccedente viene accettato e mostrato come *rimborso dovuto*.
+5. **Regolare.** Prima di scrivere qualsiasi cosa vengono rieseguiti gli stessi controlli del regolamento di uno scambio: KYC approvato, nessuna corrispondenza sanzioni irrisolta, nessun [Sperrvermerk](holding.md), registro non congelato per un trasferimento, finalità della chain, mercato di riferimento e limite di detenzione. Poi le unità vengono emesse. Se l'attività è **distribuita**, le unità vengono coniate sul wallet dell'investitore e la sincronizzazione dei titolari le accredita nel registro quando il trasferimento è indicizzato. Altrimenti il registro viene accreditato direttamente; una seconda sottoscrizione sullo stesso wallet incrementa l'iscrizione esistente.
+
+!!! note "Punti aperti"
+    Uno standard di token senza conio automatico lascia l'ordine su *pagamento confermato*: un operatore emette le unità. Per le attività senza condizioni obbligazionarie l'operatore inserisce l'importo ricevuto; non c'è un prezzo calcolato. Nelle iscrizioni collettive viene iscritto come titolare l'investitore, non un depositario — la questione non è ancora decisa.
+
 ---
 
 ## 3. Coniare

@@ -35,10 +35,14 @@ class CorporateActionProposalValidatorTest {
 
     private CorporateActionProposalValidator validator;
 
+    private static final LocalDate TODAY = LocalDate.of(2025, 1, 15);
+
     private final UUID assetId = UUID.randomUUID();
 
     private CorporateActionProposalValidatorTest init() {
-        validator = new CorporateActionProposalValidator(bondTermsRepository);
+        // Pinned to Wed 15 Jan 2025 so the fixed call dates below are still ahead (T3-06 rule).
+        validator = new CorporateActionProposalValidator(bondTermsRepository,
+                CorporateActionTestSupport.registerClockAt(TODAY));
         return this;
     }
 
@@ -171,7 +175,8 @@ class CorporateActionProposalValidatorTest {
         CorporateAction action = validator.validateAndBuild(assetId, callRequestByIndex(0));
 
         assertThat(action.getPaymentDate()).isEqualTo(LocalDate.of(2025, 6, 1));
-        assertThat(action.getRecordDate()).isEqualTo(LocalDate.of(2025, 6, 1));
+        // Sun 1 Jun 2025 minus the default 1-business-day record offset = Fri 30 May 2025.
+        assertThat(action.getRecordDate()).isEqualTo(LocalDate.of(2025, 5, 30));
         assertThat(action.getAmountPerUnit()).isEqualByComparingTo("101.5");
         assertThat(action.getCurrency()).isEqualTo("EUR");
     }
@@ -251,5 +256,19 @@ class CorporateActionProposalValidatorTest {
         assertThatThrownBy(() -> validator.validateAndBuild(assetId, callRequestByCustomDate(LocalDate.of(2026, 1, 1), BigDecimal.TEN)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("no callable bond terms");
+    }
+
+    @Test
+    @DisplayName("T3-06: a record date that is not ahead (before the next business day) is refused at proposal")
+    void rejectsRecordDateThatIsNotAhead() {
+        init();
+        // Wed 15 Jan 2025: the earliest acceptable record date is Thu 16 Jan.
+        assertThatThrownBy(() -> validator.validateAndBuild(assetId,
+                dividendRequest(BigDecimal.ONE, "EUR", TODAY, TODAY.plusDays(5))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not ahead");
+        assertThat(validator.validateAndBuild(assetId,
+                dividendRequest(BigDecimal.ONE, "EUR", TODAY.plusDays(1), TODAY.plusDays(5))).getRecordDate())
+                .isEqualTo(TODAY.plusDays(1));
     }
 }

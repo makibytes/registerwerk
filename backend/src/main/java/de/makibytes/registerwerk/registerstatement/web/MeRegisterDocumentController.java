@@ -2,6 +2,9 @@ package de.makibytes.registerwerk.registerstatement.web;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.asset.api.RegisterHandoverInfoPort;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.deployment.api.EntryType;
@@ -48,10 +51,13 @@ public class MeRegisterDocumentController {
     private final AssetRepository assetRepository;
     private final JurisdictionRequirementConfig jurisdictionConfig;
     private final RegisterStatementService statementService;
+    private final RegisterHandoverInfoPort handoverInfo;
 
     MeRegisterDocumentController(AssetHolderRepository holderRepository, AssetRepository assetRepository,
                                  JurisdictionRequirementConfig jurisdictionConfig,
-                                 RegisterStatementService statementService) {
+                                 RegisterStatementService statementService,
+                                 RegisterHandoverInfoPort handoverInfo) {
+        this.handoverInfo = handoverInfo;
         this.holderRepository = holderRepository;
         this.assetRepository = assetRepository;
         this.jurisdictionConfig = jurisdictionConfig;
@@ -87,6 +93,13 @@ public class MeRegisterDocumentController {
         if (holder == null) {
             return ResponseEntity.notFound().build();
         }
+        Asset asset = assetRepository.findById(assetId).orElse(null);
+        if (asset != null && asset.getStatus() == AssetStatus.TRANSFERRED_OUT) {
+            // T3-07: this registrar no longer administers the register.
+            throw new InvalidStateTransitionException(handoverInfo.completedHandover(assetId)
+                    .map(RegisterHandoverInfoPort.Handover::describe)
+                    .orElse("register transferred to a successor registrar"));
+        }
         return statementService.renderForDownload(holder.getId())
                 .map(pdf -> ResponseEntity.ok()
                         .header(HttpHeaders.CONTENT_DISPOSITION,
@@ -104,8 +117,13 @@ public class MeRegisterDocumentController {
         boolean individualEntry = holder.getEntryType() == EntryType.INDIVIDUAL;
         RegisterDocumentProfile profile = jurisdictionConfig
                 .resolveRegisterDocumentProfile(asset.getJurisdiction(), individualEntry);
+        RegisterHandoverInfoPort.Handover handover = asset.getStatus() == AssetStatus.TRANSFERRED_OUT
+                ? handoverInfo.completedHandover(asset.getId()).orElse(null) : null;
         return new RegisterDocumentMetaResponse(
                 asset.getId(), asset.getIsin(), asset.getName(), asset.getJurisdiction(),
-                holder.getEntryType(), profile.docType(), profile.title(), profile.statutory());
+                holder.getEntryType(), profile.docType(), profile.title(), profile.statutory(),
+                asset.getStatus() == AssetStatus.TRANSFERRED_OUT
+                        ? (handover != null ? handover.successorName() : "successor registrar") : null,
+                handover != null ? handover.completedAt() : null);
     }
 }

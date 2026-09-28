@@ -8,7 +8,6 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryReposi
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
-import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import org.junit.jupiter.api.DisplayName;
@@ -47,7 +46,8 @@ class CorporateActionServiceTest {
 
     @Mock private CorporateActionRepository repository;
     @Mock private CorporateActionEntryRepository entryRepository;
-    @Mock private AssetHolderRepository holderRepository;
+    @Mock private RecordDatePositionResolver positionResolver;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository bondTermsRepository;
     @Mock private CorporateActionSettlementWriter settlementWriter;
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
@@ -58,9 +58,10 @@ class CorporateActionServiceTest {
     private CorporateActionService service;
 
     private CorporateActionServiceTest init() {
-        service = new CorporateActionService(repository, entryRepository, holderRepository, settlementWriter,
+        service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
                 couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
-                org.mockito.Mockito.mock(RegisterFreshnessGate.class));
+                org.mockito.Mockito.mock(RegisterFreshnessGate.class), bondTermsRepository,
+                CorporateActionTestSupport.systemRegisterClock());
         return this;
     }
 
@@ -101,7 +102,7 @@ class CorporateActionServiceTest {
         when(repository.findDueForSettlement(any())).thenReturn(List.of());
         when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
         when(entryRepository.existsByCorporateActionId(actionId)).thenReturn(false);
-        when(holderRepository.findActiveByAssetId(ca.getAssetId())).thenReturn(holders);
+        when(positionResolver.resolve(org.mockito.ArgumentMatchers.eq(ca.getAssetId()), any())).thenReturn(CorporateActionTestSupport.positionsOf(holders));
 
         service.processDailyTransitions();
 
@@ -111,7 +112,7 @@ class CorporateActionServiceTest {
         assertThat(savedEntries).extracting(CorporateActionEntry::getInvestorId)
                 .containsExactlyInAnyOrder(investorA, investorB);
         assertThat(savedEntries).extracting(CorporateActionEntry::getEntitlementAmount)
-                .containsExactlyInAnyOrder(new BigDecimal("45.000"), new BigDecimal("90.000"));
+                .containsExactlyInAnyOrder(new BigDecimal("45.00"), new BigDecimal("90.00"));
 
         // Second save() call is the COMPUTED transition with totalAmount set.
         ArgumentCaptor<CorporateAction> actionCaptor = ArgumentCaptor.forClass(CorporateAction.class);
@@ -134,7 +135,7 @@ class CorporateActionServiceTest {
         when(repository.findDueForSettlement(any())).thenReturn(List.of());
         when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
         when(entryRepository.existsByCorporateActionId(actionId)).thenReturn(false);
-        when(holderRepository.findActiveByAssetId(ca.getAssetId())).thenReturn(List.of());
+        when(positionResolver.resolve(org.mockito.ArgumentMatchers.eq(ca.getAssetId()), any())).thenReturn(CorporateActionTestSupport.positionsOf(List.of()));
 
         service.processDailyTransitions();
 
@@ -301,5 +302,95 @@ class CorporateActionServiceTest {
                     .isInstanceOf(IllegalStateException.class);
         }
         verify(events, never()).publishEvent(any(CorporateActionCancelledEvent.class));
+    }
+
+    @Test
+    @DisplayName("T3-02: a SETTLED action with an unresolved held look-through entitlement is not closed")
+    void closeSkipsActionWithHeldEntitlement() {
+        init();
+        CorporateAction settled = actionWithId(UUID.randomUUID(), CorporateAction.Status.SETTLED);
+        when(repository.findReadyToCompute(any())).thenReturn(List.of());
+        when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of(settled));
+        when(entryRepository.existsHeldWithEntitlement(settled.getId())).thenReturn(true);
+
+        service.processDailyTransitions();
+
+        assertThat(settled.getStatus()).isEqualTo(CorporateAction.Status.SETTLED);
+        assertThat(settled.isHeldOutstanding()).isTrue();
+        assertThat(settled.getNotes()).contains("PARK-T2-18");
+    }
+
+    @Test
+    @DisplayName("T3-05: entitlements are rounded HALF_EVEN to the currency minor unit; the residual is kept")
+    void snapshotRoundsPerHolderAndKeepsResidual() {
+        init();
+        UUID actionId = UUID.randomUUID();
+        CorporateAction ca = actionWithId(actionId, CorporateAction.Status.ANNOUNCED);
+        ca.setAmountPerUnit(new BigDecimal("0.0123456789"));
+        ca.setCurrency("EUR");
+        ca.setRecordDate(LocalDate.now().minusDays(1));
+        when(repository.findReadyToCompute(any())).thenReturn(List.of(ca));
+        when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        when(entryRepository.existsByCorporateActionId(actionId)).thenReturn(false);
+        when(positionResolver.resolve(org.mockito.ArgumentMatchers.eq(ca.getAssetId()), any()))
+                .thenReturn(CorporateActionTestSupport.positionsOf(List.of(
+                        holder(UUID.randomUUID(), new BigDecimal("1000")), holder(UUID.randomUUID(), new BigDecimal("1001")))));
+
+        service.processDailyTransitions();
+
+        // 12.3456789 -> 12.35 ; 12.3580245789 -> 12.36
+        assertThat(ca.getTotalAmount()).isEqualByComparingTo("24.71");
+        assertThat(ca.getRoundingResidual()).isEqualByComparingTo("-0.0062965211");
+    }
+
+    @Test
+    @DisplayName("T3-06: an unresolvable as-of register parks the action SNAPSHOT_BLOCKED without entries")
+    void unmappedWalletAtRecordDateBlocksSnapshot() {
+        init();
+        UUID actionId = UUID.randomUUID();
+        CorporateAction ca = actionWithId(actionId, CorporateAction.Status.ANNOUNCED);
+        ca.setRecordDate(LocalDate.now().minusDays(1));
+        when(repository.findReadyToCompute(any())).thenReturn(List.of(ca));
+        when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        when(entryRepository.existsByCorporateActionId(actionId)).thenReturn(false);
+        when(positionResolver.resolve(org.mockito.ArgumentMatchers.eq(ca.getAssetId()), any()))
+                .thenReturn(RecordDatePositionResolver.Resolution.blocked("unmapped at record date"));
+
+        service.processDailyTransitions();
+
+        assertThat(ca.getStatus()).isEqualTo(CorporateAction.Status.SNAPSHOT_BLOCKED);
+        assertThat(ca.getSnapshotBlockedReason()).contains("unmapped");
+        verify(entryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("T3-05: an unsettled coupon is OVERDUE inside the interest grace period, MISSED after it")
+    void couponOverdueThenMissedAfterGrace() {
+        init();
+        var payment = new de.makibytes.registerwerk.deployment.api.AssetCouponPayment();
+        UUID paymentId = UUID.randomUUID();
+        ReflectionTestUtils.setField(payment, "id", paymentId);
+        payment.setAssetId(UUID.randomUUID());
+        payment.setCouponStatus(de.makibytes.registerwerk.deployment.api.CouponStatus.SCHEDULED);
+        CorporateAction overdue = actionWithId(UUID.randomUUID(), CorporateAction.Status.COMPUTED);
+        overdue.setCouponPaymentId(paymentId);
+        overdue.setPaymentDate(LocalDate.now().minusDays(1));
+        var terms = new de.makibytes.registerwerk.deployment.api.AssetBondTerms(); // interest grace defaults to 30
+        when(repository.findReadyToCompute(any())).thenReturn(List.of());
+        when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        when(repository.findOverdueCoupons(any())).thenReturn(List.of(overdue));
+        when(couponPaymentRepository.findById(paymentId)).thenReturn(Optional.of(payment));
+        when(bondTermsRepository.findById(payment.getAssetId())).thenReturn(Optional.of(terms));
+
+        service.processDailyTransitions();
+        assertThat(payment.getCouponStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.CouponStatus.OVERDUE);
+
+        overdue.setPaymentDate(LocalDate.now().minusDays(31));
+        service.processDailyTransitions();
+        assertThat(payment.getCouponStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.CouponStatus.MISSED);
     }
 }

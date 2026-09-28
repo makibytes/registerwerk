@@ -93,7 +93,8 @@ class Erc3643LifecycleServiceComplianceModuleTest {
         service = new Erc3643LifecycleService(suiteRepository, complianceModuleRepository,
                 trustedIssuerRepository, claimTopicRepository, identityRegistryRepository,
                 deploymentRepository, eventPublisher, evmContractService, evmTransactions,
-                blockchainClientRegistry, txService, holderBlockGate);
+                blockchainClientRegistry, txService, holderBlockGate,
+                org.mockito.Mockito.mock(de.makibytes.registerwerk.deployment.api.AssetLookupPort.class));
 
         Erc3643Suite suite = new Erc3643Suite();
         suite.setId(suiteId);

@@ -194,6 +194,9 @@ public class CorporateActionConfirmationService {
                     "Wertpapier / Security: " + safe(asset != null ? asset.getName() : null)
                             + " (ISIN " + safe(asset != null ? asset.getIsin() : null) + ")");
             y -= 14;
+            write(c, MARGIN, y, fontRegular, 10, "Stichtag / Record date: " + dateStr(action.getRecordDate())
+                    + " (Bestand zum Tagesende / position as of end of day)");
+            y -= 14;
             write(c, MARGIN, y, fontRegular, 10, "Zahltag / Payment date: " + dateStr(action.getPaymentDate()));
             y -= 14;
             write(c, MARGIN, y, fontRegular, 10, "Abrechnung / Settlement tx: " + safe(action.getSettlementTxHash()));
@@ -242,6 +245,18 @@ public class CorporateActionConfirmationService {
             c.lineTo(pageWidth - MARGIN, y);
             c.stroke();
             y -= 20;
+
+            // T3-05: entitlements are rounded per holder to the currency's minor unit; the operator
+            // copy states the paid total and the difference to the unrounded total.
+            if (scopedToInvestor == null && action.getTotalAmount() != null) {
+                write(c, MARGIN, y, fontRegular, 9, "Summe / Total (" + safe(action.getCurrency()) + "): "
+                        + action.getTotalAmount().toPlainString());
+                y -= 12;
+                write(c, MARGIN, y, fontRegular, 9, "Rundungsdifferenz / Rounding residual (ungerundet − gerundet): "
+                        + (action.getRoundingResidual() != null
+                                ? action.getRoundingResidual().stripTrailingZeros().toPlainString() : "—"));
+                y -= 20;
+            }
 
             String signatureClaim = signingService.isConfigured()
                     ? "Dieses Dokument wird digital signiert (PAdES-B-B, CMS/PKCS#7)."

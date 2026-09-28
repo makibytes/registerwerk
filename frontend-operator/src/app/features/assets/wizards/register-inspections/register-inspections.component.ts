@@ -62,6 +62,16 @@ type DecisionMode = 'approve' | 'reject';
               <span>
                 {{ r.legalBasis.replace('_', ' ') }}
                 @if (r.statedInterest) { <span class="dimmed small"><br />{{ r.statedInterest }}</span> }
+                <br />
+                @if (r.claimVerified) {
+                  <span class="claim verified" matTooltip="Checked against the register: issuer of this asset / active holder">
+                    <mat-icon>verified</mat-icon> claim verified
+                  </span>
+                } @else {
+                  <span class="claim unverified" matTooltip="Self-declared basis - not checked against the register. Review before approving.">
+                    <mat-icon>help_outline</mat-icon> claim unverified
+                  </span>
+                }
               </span>
               <span class="dimmed">{{ r.createdAt | date:'dd MMM yyyy' }}</span>
               <span class="status-badge" [class]="r.status.toLowerCase()">{{ r.status }}</span>
@@ -115,6 +125,10 @@ type DecisionMode = 'approve' | 'reject';
     .empty-icon { font-size: 2.5rem; height: 2.5rem; width: 2.5rem; margin-bottom: .75rem; opacity: .6; }
     .dimmed { color: var(--rw-text-secondary); }
     .small { font-size: .75rem; }
+    .claim { display: inline-flex; align-items: center; gap: 3px; font-size: .6875rem; font-weight: 600; }
+    .claim mat-icon { font-size: 14px; width: 14px; height: 14px; }
+    .claim.verified { color: var(--rw-approved-fg); }
+    .claim.unverified { color: var(--rw-pending-fg); }
 
     .ri-table { display: flex; flex-direction: column; }
     .ri-row {

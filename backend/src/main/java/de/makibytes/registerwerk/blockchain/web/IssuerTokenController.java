@@ -19,6 +19,7 @@ import de.makibytes.registerwerk.blockchain.web.dto.ForcedApproveRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.ForcedTransferRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.MintRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.TxSubmissionResponse;
+import de.makibytes.registerwerk.deployment.api.ForcedOpTargetGuard;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
@@ -30,8 +31,10 @@ import jakarta.validation.Valid;
  * <p>All write operations return a {@link TxSubmissionResponse} with a {@code txId}
  * that can be polled at {@code GET /api/v1/transactions/{txId}}.
  *
- * <p>{@code mint}/{@code burn} are reachable by a customer issuer (not just REGISTRY_ADMIN)
- * via {@code canActAsIssuer} — owning the asset is enough. {@code forced-transfer}/
+ * <p>{@code mint} is reachable by a customer issuer (not just REGISTRY_ADMIN) via
+ * {@code canActAsIssuer} — owning the asset is enough. {@code burn} is not (T3-01):
+ * {@code EwpgERC20.burn(from, amount)} burns from ANY address, so it is a §26 Einziehung like
+ * {@code force-burn} and carries the same ASSET_TOKEN_ADMIN grant + step-up + 4-eyes guard. {@code forced-transfer}/
  * {@code forced-approve} are NOT: owning/issuing the asset is no longer sufficient on its
  * own for either — a wrongful forced-transfer moves an investor's holdings to an
  * attacker-chosen address, so the issuer must additionally hold an explicit, operator-granted
@@ -52,9 +55,11 @@ public class IssuerTokenController {
     private static final Logger log = LoggerFactory.getLogger(IssuerTokenController.class);
 
     private final TokenAdminService adminService;
+    private final ForcedOpTargetGuard targetGuard;
 
-    public IssuerTokenController(TokenAdminService adminService) {
+    public IssuerTokenController(TokenAdminService adminService, ForcedOpTargetGuard targetGuard) {
         this.adminService = adminService;
+        this.targetGuard = targetGuard;
     }
 
     @PostMapping("/mint")
@@ -67,11 +72,15 @@ public class IssuerTokenController {
     }
 
     @PostMapping("/burn")
+    @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
+            "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication))")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ISSUER_BURN_EWG26")
     public ResponseEntity<TxSubmissionResponse> burn(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid BurnRequest request, Authentication auth) {
         log.info("ISSUER burn from={} amount={} on deployment={} by actor={}",
                 request.fromAddress(), request.amount(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.fromAddress(), auth);
         return accepted(adminService.regularBurn(depId, request.fromAddress(), request.amount(), actorId(auth), SecurityUtils.primaryRole(auth, "ISSUER")));
     }
 
@@ -100,6 +109,7 @@ public class IssuerTokenController {
             @RequestBody @Valid ForcedTransferRequest request, Authentication auth) {
         log.info("ISSUER forcedTransfer from={} to={} on deployment={} by actor={}",
                 request.from(), request.to(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.from(), auth);
         return accepted(adminService.forcedTransfer(depId, request.from(), request.to(), request.value(), request.legalBasis(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "ISSUER")));
     }
@@ -113,6 +123,7 @@ public class IssuerTokenController {
             @RequestBody @Valid ForcedApproveRequest request, Authentication auth) {
         log.info("ISSUER forcedApprove owner={} spender={} on deployment={} by actor={}",
                 request.owner(), request.spender(), depId, actorName(auth));
+        targetGuard.requireHolderWalletForGrantee(assetId, request.owner(), auth);
         return accepted(adminService.forcedApprove(depId, request.owner(), request.spender(), request.value(), request.legalBasis(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "ISSUER")));
     }

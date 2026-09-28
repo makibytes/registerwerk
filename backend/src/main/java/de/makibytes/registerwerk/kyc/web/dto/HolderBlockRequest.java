@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.kyc.web.dto;
 
 import de.makibytes.registerwerk.kyc.api.HolderBlock;
+import de.makibytes.registerwerk.shared.AddressNormalizer;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
@@ -20,7 +21,9 @@ public record HolderBlockRequest(
         HolderBlock b = new HolderBlock();
         b.setEntityId(entityId);
         b.setAssetId(assetId);
-        b.setWalletAddress(walletAddress);
+        // Stored in the register's canonical form (0x addresses lowercased) — the gate, the
+        // on-chain sync listener and asset_holder all compare exact strings (T3-15).
+        b.setWalletAddress(AddressNormalizer.normalize(walletAddress));
         b.setBlockType(blockType);
         b.setLegalBasis(legalBasis);
         b.setCourtRef(courtRef);

@@ -17,6 +17,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import de.makibytes.registerwerk.chain.api.Chain;
+import de.makibytes.registerwerk.erc3643.events.HolderBlockNotPropagatedEvent;
+import de.makibytes.registerwerk.kyc.events.HolderBlockFreezeResyncRequestedEvent;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,6 +33,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Unit tests for the §16 Sperrvermerk → on-chain freeze sync : a legally
@@ -44,6 +50,7 @@ class SperrvermerkOnchainSyncListenerTest {
     @Mock private Erc3643LifecycleService erc3643LifecycleService;
     @Mock private TokenAdminPort tokenAdminPort;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     private SperrvermerkOnchainSyncListener listener;
 
@@ -52,7 +59,7 @@ class SperrvermerkOnchainSyncListenerTest {
     @BeforeEach
     void setUp() {
         listener = new SperrvermerkOnchainSyncListener(holderRepository, deploymentRepository,
-                suiteRepository, erc3643LifecycleService, tokenAdminPort, holderBlockGate);
+                suiteRepository, erc3643LifecycleService, tokenAdminPort, holderBlockGate, eventPublisher);
     }
 
     private static AssetHolder holder(UUID assetId) {
@@ -136,7 +143,88 @@ class SperrvermerkOnchainSyncListenerTest {
         listener.onHolderBlockLifted(new HolderBlockLiftedEvent(UUID.randomUUID(), UUID.randomUUID(), "REGISTRY_ADMIN",
                 null, Map.of("reason", "Debt settled", "walletAddress", WALLET, "assetId", "")));
 
-        verify(tokenAdminPort).unfreezeAddress(eq(deploymentId), eq(WALLET), any(), eq("SYSTEM"));
+        verify(tokenAdminPort).unfreezeAfterBlockLift(deploymentId, WALLET);
+    }
+
+    @Test
+    @DisplayName("blockLiftListenerStillUnfreezes: ERC-3643 lift uses the block-lift variant, not the guarded manual unfreeze")
+    void blockLiftListenerStillUnfreezes() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        UUID suiteId = UUID.randomUUID();
+        when(holderBlockGate.isBlocked(null, WALLET)).thenReturn(false);
+        when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of(holder(assetId)));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment(deploymentId, assetId)));
+        Erc3643Suite suite = new Erc3643Suite();
+        suite.setId(suiteId);
+        when(suiteRepository.findByAssetDeploymentId(deploymentId)).thenReturn(Optional.of(suite));
+
+        listener.onHolderBlockLifted(new HolderBlockLiftedEvent(UUID.randomUUID(), UUID.randomUUID(), "REGISTRY_ADMIN",
+                null, Map.of("reason", "Court order lifted", "walletAddress", WALLET.toUpperCase().replace("0X", "0x"),
+                        "assetId", "")));
+
+        verify(erc3643LifecycleService).unfreezeAddressForBlockLift(suiteId, WALLET);
+        verify(erc3643LifecycleService, never()).unfreezeAddress(any(), anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("checksumAddressBlockFreezes: a checksum-cased block wallet is matched against the lowercase register")
+    void created_checksumWalletIsNormalisedBeforeLookup() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of(holder(assetId)));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment(deploymentId, assetId)));
+        when(suiteRepository.findByAssetDeploymentId(deploymentId)).thenReturn(Optional.empty());
+
+        listener.onHolderBlockCreated(new HolderBlockCreatedEvent(UUID.randomUUID(), UUID.randomUUID(), "REGISTRY_ADMIN",
+                null, Map.of("walletAddress", " 0x" + "AA".repeat(20), "legalBasis", "Court order", "assetId", "")));
+
+        verify(tokenAdminPort).freezeAddress(eq(deploymentId), eq(WALLET), anyString(), anyString(), any(), eq("SYSTEM"));
+    }
+
+    @Test
+    @DisplayName("listenerAlertsOnZeroDeployments: asset-scoped block with no register match on an EVM asset → ERROR event")
+    void listenerAlertsOnZeroDeployments() {
+        UUID assetId = UUID.randomUUID();
+        UUID blockId = UUID.randomUUID();
+        AssetDeployment evm = deployment(UUID.randomUUID(), assetId);
+        evm.setChain(Chain.ETHEREUM);
+        when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of());
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(evm));
+
+        listener.onHolderBlockCreated(new HolderBlockCreatedEvent(blockId, UUID.randomUUID(), "REGISTRY_ADMIN",
+                null, Map.of("walletAddress", WALLET, "legalBasis", "Court order", "assetId", assetId.toString())));
+
+        ArgumentCaptor<HolderBlockNotPropagatedEvent> captor = ArgumentCaptor.forClass(HolderBlockNotPropagatedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().holderBlockId()).isEqualTo(blockId);
+        verify(tokenAdminPort, never()).freezeAddress(any(), anyString(), anyString(), anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("no alert for a wallet-wide block on a wallet that holds nothing")
+    void noAlertForWalletWideBlockWithoutHoldings() {
+        when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of());
+
+        listener.onHolderBlockCreated(new HolderBlockCreatedEvent(UUID.randomUUID(), UUID.randomUUID(), "REGISTRY_ADMIN",
+                null, Map.of("walletAddress", WALLET, "legalBasis", "Court order", "assetId", "")));
+
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
+    @DisplayName("V10 resync request re-applies the freeze like a newly created block")
+    void resyncRequestFreezes() {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of(holder(assetId)));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment(deploymentId, assetId)));
+        when(suiteRepository.findByAssetDeploymentId(deploymentId)).thenReturn(Optional.empty());
+
+        listener.onHolderBlockFreezeResyncRequested(new HolderBlockFreezeResyncRequestedEvent(UUID.randomUUID(),
+                Map.of("walletAddress", WALLET, "legalBasis", "Court order", "assetId", "")));
+
+        verify(tokenAdminPort).freezeAddress(eq(deploymentId), eq(WALLET), anyString(), anyString(), any(), eq("SYSTEM"));
     }
 
     @Test
@@ -147,7 +235,7 @@ class SperrvermerkOnchainSyncListenerTest {
         listener.onHolderBlockLifted(new HolderBlockLiftedEvent(UUID.randomUUID(), UUID.randomUUID(), "REGISTRY_ADMIN",
                 null, Map.of("reason", "Debt settled", "walletAddress", WALLET, "assetId", "")));
 
-        verify(tokenAdminPort, never()).unfreezeAddress(any(), anyString(), any(), anyString());
+        verify(tokenAdminPort, never()).unfreezeAfterBlockLift(any(), anyString());
         verify(erc3643LifecycleService, never()).unfreezeAddress(any(), anyString(), any(), anyString());
         verify(holderRepository, never()).findByWalletAddressIn(any());
     }

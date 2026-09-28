@@ -52,6 +52,14 @@ class RegisterTransferServiceTest {
     @Mock private AuditApi auditApi;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private de.makibytes.registerwerk.finality.api.FinalityGate finalityGate;
+    @Mock private de.makibytes.registerwerk.kyc.api.HolderBlockRepository blockRepository;
+    @Mock private de.makibytes.registerwerk.customer.api.LegalEntityRepository entityRepository;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository bondTermsRepository;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository couponPaymentRepository;
+    @Mock private de.makibytes.registerwerk.asset.api.AssetDocumentRepository documentRepository;
+    @Mock private de.makibytes.registerwerk.asset.api.RedemptionReadinessPort corporateActionPort;
+    @Mock private de.makibytes.registerwerk.asset.api.OpenSubscriptionOrdersPort subscriptionOrdersPort;
+    @Mock private de.makibytes.registerwerk.registertransfer.internal.OnchainHandoverVerifier handoverVerifier;
 
     private RegisterTransferService service;
 
@@ -61,7 +69,12 @@ class RegisterTransferServiceTest {
     void setUp() {
         service = new RegisterTransferService(
                 transferRepository, assetRepository, holderRepository, deploymentRepository,
-                auditApi, new ObjectMapper(), eventPublisher, finalityGate);
+                auditApi, new ObjectMapper(), eventPublisher, finalityGate,
+                blockRepository, entityRepository, bondTermsRepository, couponPaymentRepository, documentRepository,
+                corporateActionPort, subscriptionOrdersPort, handoverVerifier,
+                new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemUTC(),
+                        java.time.ZoneId.of("Europe/Berlin")),
+                null);
         lenient().when(transferRepository.save(any(RegisterTransfer.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -71,6 +84,7 @@ class RegisterTransferServiceTest {
         asset.setName("Test Bond");
         asset.setIsin("DE000TESTBND1");
         asset.setEntryType(EntryType.INDIVIDUAL);
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
         return asset;
     }
 
@@ -351,6 +365,232 @@ class RegisterTransferServiceTest {
         assertThatThrownBy(() -> service.complete(transferId, UUID.randomUUID()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unknown register transfer");
+    }
+
+    // ── T3-07: freeze, content hash, completion re-check, per-deployment handover ─────────────
+
+    private RegisterTransfer initiatedTransfer(UUID transferId) {
+        RegisterTransfer transfer = new RegisterTransfer();
+        transfer.setAssetId(ASSET_ID);
+        transfer.setStatus(TransferStatus.INITIATED);
+        lenient().when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
+        lenient().when(deploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of());
+        lenient().when(auditApi.findBySubject(eq("Asset"), eq(ASSET_ID), any()))
+                .thenReturn(new PageImpl<>(List.of(), Pageable.ofSize(500), 0));
+        return transfer;
+    }
+
+    @Test
+    void exportFreezesTrading() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId);
+        Asset asset = asset();
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(holder())));
+
+        service.export(transferId, UUID.randomUUID());
+
+        assertThat(asset.getStatus()).isEqualTo(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFER_PENDING);
+        assertThat(asset.getStatus().isRegisterFrozen()).isTrue();
+        assertThat(transfer.getPreviousAssetStatus()).isEqualTo("ISSUED");
+        verify(assetRepository).save(asset);
+    }
+
+    @Test
+    void contentHashIsSeparateFromTheEnvelopeTimestampAndStableAcrossReExport() throws Exception {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        AssetHolder h = holder();
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(h)));
+
+        service.export(transferId, UUID.randomUUID());
+        String contentHash1 = transfer.getRegisterContentHash();
+        String fileHash1 = transfer.getExportHash();
+        Thread.sleep(5);
+        service.export(transferId, UUID.randomUUID());
+
+        assertThat(contentHash1).startsWith("0x");
+        assertThat(transfer.getRegisterContentHash()).isEqualTo(contentHash1);
+        assertThat(transfer.getExportHash()).isNotEqualTo(fileHash1); // envelope (exportedAt) differs
+        assertThat(transfer.getExportManifest()).containsKeys("registerContentHash", "registerContentSections",
+                "holderBlocks", "bondTerms", "openCorporateActions", "openSubscriptionOrders", "termSheetDocumentHash");
+    }
+
+    @Test
+    void completeRefusesWhenRegisterChangedSinceExport() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId);
+        Asset asset = asset();
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+        AssetHolder h = holder();
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(h)));
+        service.export(transferId, UUID.randomUUID());
+        transfer.setStatus(TransferStatus.HANDED_OVER);
+
+        h.setNominalAmount(BigDecimal.valueOf(999)); // holder sync moved a balance after the export
+
+        assertThatThrownBy(() -> service.complete(transferId, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Register changed since the export")
+                .hasMessageContaining("holders");
+        assertThat(transfer.getStatus()).isEqualTo(TransferStatus.HANDED_OVER);
+        assertThat(asset.getStatus()).isEqualTo(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFER_PENDING);
+    }
+
+    @Test
+    void completeSucceedsWhenRegisterUnchangedSinceExport() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId);
+        Asset asset = asset();
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(holder())));
+        service.export(transferId, UUID.randomUUID());
+        transfer.setStatus(TransferStatus.HANDED_OVER);
+
+        RegisterTransfer done = service.complete(transferId, UUID.randomUUID());
+
+        assertThat(done.getStatus()).isEqualTo(TransferStatus.COMPLETED);
+        assertThat(asset.getStatus()).isEqualTo(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT);
+    }
+
+    @Test
+    void packageContainsActiveHolderBlocks() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        AssetHolder h = holder();
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(h)));
+        de.makibytes.registerwerk.kyc.api.HolderBlock assetBlock = new de.makibytes.registerwerk.kyc.api.HolderBlock();
+        assetBlock.setAssetId(ASSET_ID);
+        assetBlock.setBlockType(de.makibytes.registerwerk.kyc.api.HolderBlock.BlockType.PFAENDUNG);
+        de.makibytes.registerwerk.kyc.api.HolderBlock walletBlock = new de.makibytes.registerwerk.kyc.api.HolderBlock();
+        walletBlock.setWalletAddress(h.getWalletAddress());
+        walletBlock.setBlockType(de.makibytes.registerwerk.kyc.api.HolderBlock.BlockType.GERICHTSBESCHLUSS);
+        de.makibytes.registerwerk.kyc.api.HolderBlock unrelated = new de.makibytes.registerwerk.kyc.api.HolderBlock();
+        unrelated.setAssetId(UUID.randomUUID());
+        unrelated.setBlockType(de.makibytes.registerwerk.kyc.api.HolderBlock.BlockType.INSOLVENZ);
+        when(blockRepository.findByStatusOrderByCreatedAtDesc(de.makibytes.registerwerk.kyc.api.HolderBlock.Status.ACTIVE))
+                .thenReturn(List.of(assetBlock, walletBlock, unrelated));
+
+        service.export(transferId, UUID.randomUUID());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> blocks = (List<Map<String, Object>>) transfer.getExportManifest().get("holderBlocks");
+        assertThat(blocks).extracting(b -> b.get("blockType")).containsExactlyInAnyOrder("PFAENDUNG", "GERICHTSBESCHLUSS");
+    }
+
+    @Test
+    void exportRefusedWhileACorporateActionIsStillPayable() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId);
+        Asset asset = asset();
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+        when(corporateActionPort.openActions(ASSET_ID)).thenReturn(List.of(
+                new de.makibytes.registerwerk.asset.api.RedemptionReadinessPort.OpenAction(UUID.randomUUID(), "COUPON",
+                        "ANNOUNCED", java.time.LocalDate.now().minusDays(1), java.time.LocalDate.now().plusDays(3))));
+
+        assertThatThrownBy(() -> service.export(transferId, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("settle or cancel");
+        assertThat(asset.getStatus()).isEqualTo(de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
+        assertThat(transfer.getStatus()).isEqualTo(TransferStatus.INITIATED);
+    }
+
+    @Test
+    void cancelRestoresThePreviousAssetStatus() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId);
+        transfer.setReason("r");
+        Asset asset = asset();
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.SUSPENDED);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+        when(holderRepository.findActiveByAssetId(eq(ASSET_ID), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+        service.export(transferId, UUID.randomUUID());
+        assertThat(asset.getStatus()).isEqualTo(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFER_PENDING);
+
+        service.cancel(transferId, "successor withdrew", UUID.randomUUID());
+
+        assertThat(asset.getStatus()).isEqualTo(de.makibytes.registerwerk.asset.api.AssetStatus.SUSPENDED);
+    }
+
+    @Test
+    void initiateRefusedForTransferredOutAsset() {
+        Asset asset = asset();
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> service.initiate(ASSET_ID, "S", "L", "r", UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("already transferred out");
+    }
+
+    private static AssetDeployment evmDeployment(UUID id) {
+        AssetDeployment d = deployment();
+        d.setId(id);
+        d.setChain(de.makibytes.registerwerk.chain.api.Chain.ETHEREUM);
+        return d;
+    }
+
+    @Test
+    void evmHandoverIsVerifiedOnChainAndMismatchIsRefused() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = new RegisterTransfer();
+        transfer.setAssetId(ASSET_ID);
+        transfer.setStatus(TransferStatus.EXPORTED);
+        String successor = "0x" + "cc".repeat(20);
+        transfer.setSuccessorOnchainAddress(successor);
+        when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
+        UUID depId = UUID.randomUUID();
+        when(deploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of(evmDeployment(depId)));
+        when(handoverVerifier.observeController(any()))
+                .thenReturn(new de.makibytes.registerwerk.registertransfer.internal.OnchainHandoverVerifier.Observation(
+                        "registry", "0x" + "dd".repeat(20)))
+                .thenReturn(new de.makibytes.registerwerk.registertransfer.internal.OnchainHandoverVerifier.Observation(
+                        "registry", successor.toUpperCase().replace("0X", "0x")));
+
+        assertThatThrownBy(() -> service.recordOnchainHandover(transferId, depId, "0xtx", false, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("NOT verified");
+        assertThat(transfer.getStatus()).isEqualTo(TransferStatus.EXPORTED);
+
+        RegisterTransfer ok = service.recordOnchainHandover(transferId, depId, "0xtx", false, UUID.randomUUID());
+        assertThat(ok.getStatus()).isEqualTo(TransferStatus.HANDED_OVER);
+        assertThat(ok.getOnchainHandovers()).hasSize(1);
+        assertThat(ok.getOnchainHandovers().get(0)).containsEntry("verified", true).containsEntry("txHash", "0xtx");
+    }
+
+    @Test
+    void nonEvmHandoverNeedsExplicitAttestationAndEveryDeploymentMustBeRecorded() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = new RegisterTransfer();
+        transfer.setAssetId(ASSET_ID);
+        transfer.setStatus(TransferStatus.EXPORTED);
+        when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
+        UUID solId = UUID.randomUUID();
+        UUID canId = UUID.randomUUID();
+        AssetDeployment sol = deployment();
+        sol.setId(solId);
+        sol.setChain(de.makibytes.registerwerk.chain.api.Chain.SOLANA);
+        AssetDeployment can = deployment();
+        can.setId(canId);
+        can.setChain(de.makibytes.registerwerk.chain.api.Chain.CANTON);
+        when(deploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of(sol, can));
+
+        assertThatThrownBy(() -> service.recordOnchainHandover(transferId, solId, "sig", false, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("attested=true");
+        assertThatThrownBy(() -> service.recordOnchainHandover(transferId, null, "sig", true, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("deploymentId is required");
+
+        assertThat(service.recordOnchainHandover(transferId, solId, "sig", true, UUID.randomUUID()).getStatus())
+                .isEqualTo(TransferStatus.EXPORTED);
+        RegisterTransfer done = service.recordOnchainHandover(transferId, canId, "upd", true, UUID.randomUUID());
+        assertThat(done.getStatus()).isEqualTo(TransferStatus.HANDED_OVER);
+        assertThat(done.getOnchainHandovers()).extracting(r -> r.get("method")).containsOnly("OPERATOR_ATTESTED");
     }
 
     // ── listForAsset ──────────────────────────────────────────────────────────

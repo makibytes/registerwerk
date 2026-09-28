@@ -46,12 +46,16 @@ class PortfolioMigrationServiceTest {
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private HolderBlockGate holderBlockGate;
     @Mock private de.makibytes.registerwerk.finality.api.FinalityGate finalityGate;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository deploymentRepository;
+    @Mock private de.makibytes.registerwerk.indexer.api.TokenTransferRepository tokenTransferRepository;
+    @Mock private de.makibytes.registerwerk.kyc.api.HolderBlockRepository holderBlockRepository;
 
     private PortfolioMigrationService service;
 
     private PortfolioMigrationServiceTest init() {
         service = new PortfolioMigrationService(repository, holderRepository, assetRepository, objectMapper,
-                eventPublisher, holderBlockGate, finalityGate);
+                eventPublisher, holderBlockGate, finalityGate, deploymentRepository, tokenTransferRepository,
+                holderBlockRepository);
         // Compliant-by-default: tests exercising the block check override this explicitly.
         lenient().when(holderBlockGate.isBlocked(any(), any())).thenReturn(false);
         return this;
@@ -138,7 +142,7 @@ class PortfolioMigrationServiceTest {
         migration.setStatus(TransferStatus.INITIATED);
         when(repository.findById(migrationId)).thenReturn(Optional.of(migration));
 
-        assertThatThrownBy(() -> service.recordOnchainTransfer(migrationId, "0xabc", UUID.randomUUID()))
+        assertThatThrownBy(() -> service.recordOnchainTransfer(migrationId, "0xabc", null, null, UUID.randomUUID()))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -291,7 +295,7 @@ class PortfolioMigrationServiceTest {
         when(holderRepository.findById(holderId))
                 .thenReturn(Optional.of(holder(holderId, UUID.randomUUID(), UUID.randomUUID())));
 
-        PortfolioMigrationRequest result = service.recordOnchainTransfer(migrationId, "0xdeadbeef", UUID.randomUUID());
+        PortfolioMigrationRequest result = service.recordOnchainTransfer(migrationId, "0xdeadbeef", "attested by ops", null, UUID.randomUUID());
 
         assertThat(result.getOnchainTxHash()).isEqualTo("0xdeadbeef");
         assertThat(result.getStatus()).isEqualTo(TransferStatus.HANDED_OVER);
@@ -313,7 +317,7 @@ class PortfolioMigrationServiceTest {
         when(holderRepository.findById(holderId)).thenReturn(Optional.of(blockedHolder));
         when(holderBlockGate.isBlocked(investorId, blockedHolder.getWalletAddress())).thenReturn(true);
 
-        assertThatThrownBy(() -> service.recordOnchainTransfer(migrationId, "0xdeadbeef", UUID.randomUUID()))
+        assertThatThrownBy(() -> service.recordOnchainTransfer(migrationId, "0xdeadbeef", "attested by ops", null, UUID.randomUUID()))
                 .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class)
                 .hasMessageContaining("Sperrvermerk");
         verify(repository, never()).save(any());
@@ -467,5 +471,156 @@ class PortfolioMigrationServiceTest {
         List<PortfolioMigrationRequest> result = service.listForInvestor(investorId);
 
         assertThat(result).containsExactly(migration);
+    }
+
+    private PortfolioMigrationRequest exportedMigration(UUID migrationId, UUID holderId, UUID assetId, String dest) {
+        PortfolioMigrationRequest migration = new PortfolioMigrationRequest();
+        migration.setStatus(TransferStatus.EXPORTED);
+        migration.setHolderId(holderId);
+        migration.setAssetId(assetId);
+        migration.setDestinationWalletAddress(dest);
+        when(repository.findById(migrationId)).thenReturn(Optional.of(migration));
+        lenient().when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        return migration;
+    }
+
+    private de.makibytes.registerwerk.indexer.api.TokenTransfer transfer(UUID deploymentId, String from, String to, String amount) {
+        de.makibytes.registerwerk.indexer.api.TokenTransfer t = new de.makibytes.registerwerk.indexer.api.TokenTransfer();
+        t.setDeploymentId(deploymentId);
+        t.setFromAddress(from);
+        t.setToAddress(to);
+        t.setAmount(new BigDecimal(amount));
+        return t;
+    }
+
+    private de.makibytes.registerwerk.deployment.api.AssetDeployment evmDeployment(UUID id) {
+        de.makibytes.registerwerk.deployment.api.AssetDeployment d = new de.makibytes.registerwerk.deployment.api.AssetDeployment();
+        d.setId(id);
+        d.setChain(de.makibytes.registerwerk.chain.api.Chain.ETHEREUM);
+        return d;
+    }
+
+    @Test
+    @DisplayName("T3-17: recordOnchainTransfer refuses a tx hash with no matching FINALIZED indexed transfer")
+    void recordOnchainTransfer_requiresMatchingIndexedTransfer() {
+        init();
+        UUID migrationId = UUID.randomUUID(), holderId = UUID.randomUUID(), assetId = UUID.randomUUID(), depId = UUID.randomUUID();
+        String dest = "0x" + "22".repeat(20);
+        exportedMigration(migrationId, holderId, assetId, dest);
+        AssetHolder h = holder(holderId, UUID.randomUUID(), assetId);
+        when(holderRepository.findById(holderId)).thenReturn(Optional.of(h));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(evmDeployment(depId)));
+        // wrong recipient and wrong amount: neither may satisfy the check
+        when(tokenTransferRepository.findByTxHashIgnoreCaseAndFinalityStatus(eq("0xabc"), any()))
+                .thenReturn(List.of(transfer(depId, h.getWalletAddress(), "0x" + "99".repeat(20), "100"),
+                        transfer(depId, h.getWalletAddress(), dest, "5")));
+
+        assertThatThrownBy(() -> service.recordOnchainTransfer(migrationId, "0xabc", "trust me", null, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No FINALIZED indexed transfer");
+    }
+
+    @Test
+    @DisplayName("T3-17: recordOnchainTransfer accepts a matching indexed transfer without attestation")
+    void recordOnchainTransfer_acceptsMatchingIndexedTransfer() {
+        init();
+        UUID migrationId = UUID.randomUUID(), holderId = UUID.randomUUID(), assetId = UUID.randomUUID(), depId = UUID.randomUUID();
+        String dest = "0x" + "22".repeat(20);
+        PortfolioMigrationRequest m = exportedMigration(migrationId, holderId, assetId, dest);
+        AssetHolder h = holder(holderId, UUID.randomUUID(), assetId);
+        when(holderRepository.findById(holderId)).thenReturn(Optional.of(h));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(evmDeployment(depId)));
+        when(tokenTransferRepository.findByTxHashIgnoreCaseAndFinalityStatus(eq("0xabc"), any()))
+                .thenReturn(List.of(transfer(depId, h.getWalletAddress(), dest.toUpperCase().replace("0X", "0x"), "100")));
+
+        PortfolioMigrationRequest result = service.recordOnchainTransfer(migrationId, "0xabc", null, null, UUID.randomUUID());
+
+        assertThat(result.getStatus()).isEqualTo(TransferStatus.HANDED_OVER);
+        assertThat(m.getOperatorAttestation()).isNull();
+    }
+
+    @Test
+    @DisplayName("T3-17: an asset without indexed deployment requires an operator attestation")
+    void recordOnchainTransfer_requiresAttestationWithoutIndexedDeployment() {
+        init();
+        UUID migrationId = UUID.randomUUID(), holderId = UUID.randomUUID(), assetId = UUID.randomUUID();
+        exportedMigration(migrationId, holderId, assetId, "0x" + "22".repeat(20));
+        when(holderRepository.findById(holderId)).thenReturn(Optional.of(holder(holderId, UUID.randomUUID(), assetId)));
+
+        assertThatThrownBy(() -> service.recordOnchainTransfer(migrationId, "0xabc", " ", null, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("attestation");
+    }
+
+    @Test
+    @DisplayName("T3-17: setDestination is refused once the migration is exported")
+    void setDestination_refusedAfterExport() {
+        init();
+        UUID migrationId = UUID.randomUUID();
+        exportedMigration(migrationId, UUID.randomUUID(), UUID.randomUUID(), "0x" + "22".repeat(20));
+
+        assertThatThrownBy(() -> service.setDestination(migrationId, "Reg", "ID", "0x" + "33".repeat(20), UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("before export");
+    }
+
+    @Test
+    @DisplayName("T3-17: complete refuses while the destination wallet has no active register entry")
+    void complete_requiresRegisteredDestinationWallet() {
+        init();
+        UUID migrationId = UUID.randomUUID(), holderId = UUID.randomUUID(), assetId = UUID.randomUUID();
+        PortfolioMigrationRequest m = exportedMigration(migrationId, holderId, assetId, "0x" + "22".repeat(20));
+        m.setStatus(TransferStatus.HANDED_OVER);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.empty());
+        when(holderRepository.findActiveByAssetId(assetId)).thenReturn(List.of(holder(holderId, UUID.randomUUID(), assetId)));
+
+        assertThatThrownBy(() -> service.complete(migrationId, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no active register entry");
+    }
+
+    @Test
+    @DisplayName("T3-07 C-05b: initiate needs a beneficiary consent for an entry with third-party rights")
+    void initiate_requiresConsentForThirdPartyRights() {
+        init();
+        UUID holderId = UUID.randomUUID();
+        AssetHolder h = holder(holderId, UUID.randomUUID(), UUID.randomUUID());
+        h.setThirdPartyRights("Niessbrauch fuer Erika Muster");
+        when(holderRepository.findById(holderId)).thenReturn(Optional.of(h));
+        when(repository.existsByHolderIdAndStatusNotIn(eq(holderId), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.initiate(holderId, "leaving", UUID.randomUUID()))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class)
+                .hasMessageContaining("consent");
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("T3-07 C-05b: export carries the §17(2) attributes and ACTIVE holder blocks")
+    void export_carriesRightsAndBlocks() {
+        init();
+        UUID migrationId = UUID.randomUUID(), holderId = UUID.randomUUID(), assetId = UUID.randomUUID(), investorId = UUID.randomUUID();
+        PortfolioMigrationRequest m = new PortfolioMigrationRequest();
+        m.setStatus(TransferStatus.INITIATED);
+        m.setHolderId(holderId);
+        m.setAssetId(assetId);
+        m.setInvestorEntityId(investorId);
+        m.setDestinationWalletAddress("0x" + "44".repeat(20));
+        when(repository.findById(migrationId)).thenReturn(Optional.of(m));
+        when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        AssetHolder h = holder(holderId, investorId, assetId);
+        h.setDisposalRestrictions("Zustimmung des Emittenten");
+        when(holderRepository.findById(holderId)).thenReturn(Optional.of(h));
+        de.makibytes.registerwerk.kyc.api.HolderBlock block = new de.makibytes.registerwerk.kyc.api.HolderBlock();
+        ReflectionTestUtils.setField(block, "id", UUID.randomUUID());
+        when(holderBlockRepository.findByEntityIdAndStatus(investorId, de.makibytes.registerwerk.kyc.api.HolderBlock.Status.ACTIVE))
+                .thenReturn(List.of(block));
+
+        service.export(migrationId, UUID.randomUUID());
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> holding = (java.util.Map<String, Object>) m.getExportManifest().get("holding");
+        assertThat(holding).containsEntry("disposalRestrictions", "Zustimmung des Emittenten").containsKey("entryType");
+        assertThat((List<?>) m.getExportManifest().get("holderBlocks")).hasSize(1);
     }
 }

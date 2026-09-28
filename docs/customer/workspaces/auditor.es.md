@@ -33,7 +33,7 @@ La función `AUDIT` otorga acceso de lectura a todo el registro. No concede capa
 | Estado KYC y documentos | Según lo configure el operador |
 | Titularidad real | |
 | Operaciones societarias | Incluidas las fotografías a fecha de registro y los derechos |
-| Certificados fiscales y extractos de posición | |
+| Extractos de rendimientos (Ertragsaufstellung) y extractos de posición | |
 | La pista de auditoría | Cada evento registrado |
 
 ---

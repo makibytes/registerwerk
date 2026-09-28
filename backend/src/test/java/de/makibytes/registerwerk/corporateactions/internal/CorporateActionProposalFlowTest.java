@@ -10,7 +10,6 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionProposedEve
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.web.dto.ProposeCorporateActionRequest;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
-import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -30,6 +29,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -47,20 +49,23 @@ class CorporateActionProposalFlowTest {
 
     @Mock private CorporateActionRepository repository;
     @Mock private CorporateActionEntryRepository entryRepository;
-    @Mock private AssetHolderRepository holderRepository;
+    @Mock private RecordDatePositionResolver positionResolver;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository bondTermsRepository;
     @Mock private CorporateActionSettlementWriter settlementWriter;
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
     @Mock private ApplicationEventPublisher events;
     @Mock private HolderBlockGate holderBlockGate;
     @Mock private FinalityGate finalityGate;
+    @Mock private RegisterFreshnessGate registerFreshnessGate;
 
     private CorporateActionService service;
 
     private CorporateActionProposalFlowTest init() {
-        service = new CorporateActionService(repository, entryRepository, holderRepository, settlementWriter,
+        service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
                 couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
-                org.mockito.Mockito.mock(RegisterFreshnessGate.class));
+                registerFreshnessGate, bondTermsRepository,
+                CorporateActionTestSupport.systemRegisterClock());
         return this;
     }
 
@@ -140,6 +145,38 @@ class CorporateActionProposalFlowTest {
     }
 
     @Test
+    @DisplayName("T3-12: the proposer (e.g. an admin who proposed while impersonating) cannot approve their own proposal")
+    void proposerCannotApproveOwnProposal() {
+        init();
+        UUID actionId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+        CorporateAction proposed = actionWithId(actionId, UUID.randomUUID(), CorporateAction.Status.PROPOSED);
+        proposed.setInitiatedBy(adminId);
+        when(repository.findById(actionId)).thenReturn(Optional.of(proposed));
+
+        assertThatThrownBy(() -> service.approveProposal(actionId, adminId, "REGISTRY_ADMIN"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThat(proposed.getStatus()).isEqualTo(CorporateAction.Status.PROPOSED);
+        verify(events, never()).publishEvent(any(CorporateActionAnnouncedEvent.class));
+    }
+
+    @Test
+    @DisplayName("T3-06: approval refuses a record date that is no longer ahead (before the next business day)")
+    void approveRefusesPastRecordDate() {
+        init();
+        UUID actionId = UUID.randomUUID();
+        CorporateAction proposed = actionWithId(actionId, UUID.randomUUID(), CorporateAction.Status.PROPOSED);
+        proposed.setInitiatedBy(UUID.randomUUID());
+        proposed.setRecordDate(java.time.LocalDate.now());
+        when(repository.findById(actionId)).thenReturn(Optional.of(proposed));
+
+        assertThatThrownBy(() -> service.approveProposal(actionId, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not ahead");
+        assertThat(proposed.getStatus()).isEqualTo(CorporateAction.Status.PROPOSED);
+    }
+
+    @Test
     @DisplayName("rejectProposal transitions PROPOSED -> REJECTED, terminal and distinct from CANCELLED")
     void rejectProposal_transitionsToRejected() {
         init();
@@ -206,8 +243,30 @@ class CorporateActionProposalFlowTest {
                 .getAnnotation(org.springframework.data.jpa.repository.Query.class)
                 .value();
 
-        assertThat(jpql).contains("'PROPOSED'");
-        assertThat(jpql).contains("'REJECTED'");
-        assertThat(jpql).contains("NOT IN");
+        // T3-06: only COMPUTED (entitlements snapshotted after the record date) is dispatchable, which
+        // excludes PROPOSED/REJECTED and every other pre-snapshot state by construction.
+        assertThat(jpql).contains("ca.status = 'COMPUTED'");
+        assertThat(jpql).doesNotContain("'PROPOSED'");
+    }
+
+    @Test
+    @DisplayName("caProposeRefusedForTransferredOut: propose / approve / manual settle / daily run honour the register freeze (T3-07)")
+    void caProposeRefusedForTransferredOut() {
+        init();
+        UUID assetId = UUID.randomUUID();
+        org.mockito.Mockito.doThrow(new de.makibytes.registerwerk.shared.InvalidStateTransitionException("frozen"))
+                .when(registerFreshnessGate).requireRegisterOpen(eq(assetId), anyString());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.propose(
+                        assetId, mock(ProposeCorporateActionRequest.class), UUID.randomUUID(), "ISSUER"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        verify(repository, never()).save(any());
+        verifyNoInteractions(proposalValidator);
+
+        UUID caId = UUID.randomUUID();
+        when(repository.findById(caId)).thenReturn(Optional.of(actionWithId(caId, assetId, CorporateAction.Status.AWAITING_SETTLEMENT)));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.markSettledManually(caId, "ref", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        verifyNoInteractions(settlementWriter);
     }
 }

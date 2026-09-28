@@ -4,6 +4,16 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { HolderBlock, HolderBlockRequest } from '../models';
 
+/**
+ * Canonical register form of a wallet (T3-15): 0x addresses trimmed + lowercased, since the register
+ * and the on-chain freeze sync match exact strings. Base58/base32 addresses are case-sensitive and
+ * only trimmed. Mirrors the backend's `shared.AddressNormalizer`; display is unchanged.
+ */
+export function normalizeWalletAddress(address: string): string {
+  const trimmed = (address ?? '').trim();
+  return /^0x/i.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+}
+
 @Injectable({ providedIn: 'root' })
 export class HolderBlockService {
   private readonly http = inject(HttpClient);
@@ -30,7 +40,8 @@ export class HolderBlockService {
       Authorization: `Bearer ${stepUpToken}`,
       'X-Dual-Control-Token': dualControlToken,
     });
-    return this.http.post<HolderBlock>(this.base, body, { headers });
+    return this.http.post<HolderBlock>(this.base, { ...body, walletAddress: normalizeWalletAddress(body.walletAddress) },
+      { headers });
   }
 
   lift(

@@ -2,6 +2,9 @@ package de.makibytes.registerwerk.registertransfer.web;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.asset.api.RegisterHandoverInfoPort;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.registertransfer.api.InspectionLegalBasis;
@@ -36,9 +39,12 @@ public class MyAssetRegisterExtractController {
     private final AssetRepository assetRepository;
     private final LegalEntityRepository entityRepository;
     private final RegisterInspectionService inspectionService;
+    private final RegisterHandoverInfoPort handoverInfo;
 
     MyAssetRegisterExtractController(AssetRepository assetRepository, LegalEntityRepository entityRepository,
-                                     RegisterInspectionService inspectionService) {
+                                     RegisterInspectionService inspectionService,
+                                     RegisterHandoverInfoPort handoverInfo) {
+        this.handoverInfo = handoverInfo;
         this.assetRepository = assetRepository;
         this.entityRepository = entityRepository;
         this.inspectionService = inspectionService;
@@ -58,6 +64,13 @@ public class MyAssetRegisterExtractController {
         // anyone else must go through the LEGITIMATE_INTEREST review queue instead.
         if (!entityId.equals(asset.getIssuerId())) {
             return ResponseEntity.status(403).build();
+        }
+
+        if (asset.getStatus() == AssetStatus.TRANSFERRED_OUT) {
+            // T3-07: the register now lives at the successor registrar.
+            throw new InvalidStateTransitionException(handoverInfo.completedHandover(assetId)
+                    .map(RegisterHandoverInfoPort.Handover::describe)
+                    .orElse("register transferred to a successor registrar"));
         }
 
         String requesterName = entityRepository.findById(entityId)

@@ -212,6 +212,8 @@ public class TradingService {
         }
         Asset asset = assetRepository.findById(holder.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", holder.getAssetId()));
+        de.makibytes.registerwerk.asset.api.RegisterFreezeGuard.requireOpen(asset, "Listing creation");
+        requireOffchainSettlementAllowed(asset.getId());
         if (investorLimitGate.isLockedUp(asset.getId(), entityId)) {
             throw new de.makibytes.registerwerk.shared.ComplianceGateException(
                     "Entity " + entityId + "'s holding in this asset is under a lockup — cannot list for sale.");
@@ -292,6 +294,7 @@ public class TradingService {
         // atomic, or two concurrent buyers of the same units would both be filled.
         TradeListing listing = tradeListingRepository.findByIdForUpdate(listingId)
                 .orElseThrow(() -> unknownListingException(listingId));
+        de.makibytes.registerwerk.asset.api.RegisterFreezeGuard.requireOpen(assetRepository, listing.getAssetId(), "Trade");
         if (entityId.equals(listing.getSellerEntityId())) {
             throw new IllegalArgumentException("A company cannot buy its own listing");
         }
@@ -674,7 +677,9 @@ public class TradingService {
                 holder.getNominalAmount(),
                 available,
                 holder.getWalletAddress(),
-                asset.getJurisdiction()
+                asset.getJurisdiction(),
+                !offchainSettlementBlocked(asset.getId()),
+                tradingProperties.isOffchainSettlementOnDeployedAssets() && hasConfirmedDeployment(asset.getId())
         );
     }
 
@@ -686,6 +691,33 @@ public class TradingService {
         BigDecimal reservedByTrades = tradeExecutionRepository.sumExecutedQuantityBySellerHolderIdAndSettlementStatusIn(
                 holderId, List.of(SettlementStatus.PENDING, SettlementStatus.AWAITING_SELLER_CONFIRMATION));
         return nominalAmount.subtract(openListed).subtract(reservedByTrades).max(BigDecimal.ZERO);
+    }
+
+    /**
+     * T3-09 interim guard. The simulated venue settles by rewriting register rows only; on an
+     * asset with a CONFIRMED chain deployment the holder sync then resets the seller to its
+     * on-chain balance (the buyer's new row is not chain-derived and stays), so the register
+     * exceeds the supply and the seller can sell the same units again. Until the on-chain
+     * settlement leg exists (Phase 5) such assets cannot be listed or settled here unless
+     * {@code registerwerk.trading.offchain-settlement-on-deployed-assets} is on (demo only).
+     */
+    private void requireOffchainSettlementAllowed(UUID assetId) {
+        if (!offchainSettlementBlocked(assetId)) {
+            return;
+        }
+        throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException(
+                "On-chain settlement required for chain-deployed assets: asset " + assetId
+                        + " has a confirmed deployment, and off-chain settlement would make the register "
+                        + "diverge from the chain.");
+    }
+
+    private boolean offchainSettlementBlocked(UUID assetId) {
+        return !tradingProperties.isOffchainSettlementOnDeployedAssets() && hasConfirmedDeployment(assetId);
+    }
+
+    private boolean hasConfirmedDeployment(UUID assetId) {
+        return assetDeploymentRepository.findByAssetId(assetId).stream()
+                .anyMatch(d -> d.getDeploymentStatus() == AssetDeployment.DeploymentStatus.CONFIRMED);
     }
 
     private Chain resolvePrimaryChain(UUID assetId) {
@@ -747,6 +779,9 @@ public class TradingService {
                 .orElseThrow(() -> new EntityNotFoundException("AssetHolder", execution.getSellerHolderId()));
         Asset settlementAsset = assetRepository.findById(execution.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", execution.getAssetId()));
+        // T3-07: the register is frozen from export until completion (and closed afterwards).
+        de.makibytes.registerwerk.asset.api.RegisterFreezeGuard.requireOpen(settlementAsset, "Trade settlement");
+        requireOffchainSettlementAllowed(execution.getAssetId());
         // The holder aggregate counts FINALIZED transfers only. Passing FINALIZED reflects that
         // data contract while still enforcing the gate's chain-quarantine and unresolved-
         // compensation freezes immediately before either legal register balance is mutated.

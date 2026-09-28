@@ -91,6 +91,7 @@ public class AssetService {
     @CacheEvict(value = "assets", key = "#id")
     public Asset updateAsset(UUID id, Asset patch, UUID actorId) {
         Asset existing = getAsset(id);
+        requireEconomicTermsUnchanged(existing, patch);
         if (patch.getName() != null) existing.setName(patch.getName());
         if (patch.getIsin() != null) {
             existing.setIsin(patch.getIsin().isBlank()
@@ -111,6 +112,48 @@ public class AssetService {
         Asset saved = assetRepository.save(existing);
         eventPublisher.publishEvent(new AssetUpdatedEvent(id, actorId, null));
         return saved;
+    }
+
+    /** Statuses in which ISIN, currency, size, denomination and dates are fixed (approved terms). */
+    private static final java.util.Set<AssetStatus> TERMS_LOCKED = java.util.EnumSet.of(
+            AssetStatus.APPROVED, AssetStatus.ISSUED, AssetStatus.SUSPENDED,
+            AssetStatus.REDEEMED, AssetStatus.TRANSFER_PENDING, AssetStatus.TRANSFERRED_OUT);
+    /** Min. investment / max. holding stay editable up to issuance (subscription set-up), not after. */
+    private static final java.util.Set<AssetStatus> INVESTMENT_LIMITS_LOCKED = java.util.EnumSet.of(
+            AssetStatus.ISSUED, AssetStatus.SUSPENDED, AssetStatus.REDEEMED, AssetStatus.TRANSFER_PENDING,
+            AssetStatus.TRANSFERRED_OUT);
+
+    /**
+     * T3-10: once approved, the economic terms investors rely on can no longer be edited through
+     * the plain PATCH — neither by the issuer nor by a single operator. They change only through
+     * the step-up + second-approver amendment ({@code POST /assets/{id}/terms-amendments}), which
+     * audits before/after values. Fields sent unchanged (full-form PUTs) are accepted.
+     */
+    private static void requireEconomicTermsUnchanged(Asset existing, Asset patch) {
+        java.util.List<String> changed = new java.util.ArrayList<>();
+        if (TERMS_LOCKED.contains(existing.getStatus())) {
+            if (patch.getIsin() != null && !java.util.Objects.equals(
+                    patch.getIsin().isBlank() ? null : patch.getIsin().trim().toUpperCase(java.util.Locale.ROOT),
+                    existing.getIsin())) changed.add("isin");
+            if (patch.getCurrency() != null && !patch.getCurrency().equalsIgnoreCase(
+                    java.util.Objects.requireNonNullElse(existing.getCurrency(), ""))) changed.add("currency");
+            if (differs(patch.getIssueSize(), existing.getIssueSize())) changed.add("issueSize");
+            if (differs(patch.getDenomination(), existing.getDenomination())) changed.add("denomination");
+            if (patch.getIssueDate() != null && !patch.getIssueDate().equals(existing.getIssueDate())) changed.add("issueDate");
+            if (patch.getMaturityDate() != null && !patch.getMaturityDate().equals(existing.getMaturityDate())) changed.add("maturityDate");
+        }
+        if (INVESTMENT_LIMITS_LOCKED.contains(existing.getStatus())) {
+            if (differs(patch.getMinInvestmentAmount(), existing.getMinInvestmentAmount())) changed.add("minInvestmentAmount");
+            if (differs(patch.getMaxHoldingAmount(), existing.getMaxHoldingAmount())) changed.add("maxHoldingAmount");
+        }
+        if (!changed.isEmpty()) {
+            throw new IllegalArgumentException("Economic terms locked after approval (" + String.join(", ", changed)
+                    + "); request an amendment via POST /api/v1/assets/" + existing.getId() + "/terms-amendments");
+        }
+    }
+
+    private static boolean differs(java.math.BigDecimal patched, java.math.BigDecimal current) {
+        return patched != null && (current == null || patched.compareTo(current) != 0);
     }
 
     /**

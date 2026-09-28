@@ -22,6 +22,7 @@ import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.shared.AfterCommit;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.asset.api.Asset;
@@ -137,6 +138,15 @@ public class AssetDeploymentService {
         validateDeploymentSupport(chain, standard);
         validateStarknetErc3525Gate(standard, network);
         ChainConfig chainConfig = resolveEnabledChainConfig(chain, network);
+        // T3-19: one live attempt per (asset, chain). A second PENDING row used to start a second
+        // factory call (orphan suite / "assetId already deployed" revert); a FAILED row may retry.
+        if (assetDeploymentRepository.existsByAssetIdAndChainConfigIdAndDeploymentStatusIn(assetId,
+                chainConfig.getId(), EnumSet.of(AssetDeployment.DeploymentStatus.PENDING,
+                        AssetDeployment.DeploymentStatus.CONFIRMED))) {
+            throw new InvalidStateTransitionException("Asset " + assetId + " already has a pending or confirmed "
+                    + "deployment on " + chainConfig.getIdentifier() + "; wait for it to confirm or fail before "
+                    + "deploying again");
+        }
         String ownerAddress = walletSigner.chainAddressForWallet(chainConfig.getId());
         if (ownerAddress == null || ownerAddress.isBlank()) {
             throw new IllegalStateException(
@@ -176,7 +186,7 @@ public class AssetDeploymentService {
         try {
             CompletableFuture<TokenDeploymentResult> txFuture = switch (standard) {
                 case ERC3643 -> erc3643DeploymentPort.deployStandard(
-                        assetId, descriptor, ownerAddress);
+                        deploymentId, assetId, descriptor, ownerAddress);
                 case CONF_ERC3643 -> erc3643DeploymentPort.deployConfidential(
                                 assetId, descriptor, ownerAddress)
                         .thenApply(TokenDeploymentResult::txOnly);
@@ -505,6 +515,17 @@ public class AssetDeploymentService {
             eventPublisher.publishEvent(new DeploymentConfirmedEvent(
                     deploymentId, null, null, contractAddress, txHash));
             log.info("syncFromChain: confirmed deploymentId={} contractAddress={}", deploymentId, contractAddress);
+            if (assetRepository.findById(deployment.getAssetId())
+                    .map(Asset::getTokenStandard).filter(TokenStandard.ERC3643::equals).isPresent()) {
+                // T3-19: a suite whose deploy call timed out before its receipt is confirmed here;
+                // its suite record is written now (no-op when the deploy call already did).
+                try {
+                    erc3643DeploymentPort.recordSuiteForDeployment(deploymentId);
+                } catch (RuntimeException e) {
+                    log.error("syncFromChain: deploymentId={} confirmed but its ERC-3643 suite record could "
+                            + "not be written: {}", deploymentId, e.getMessage(), e);
+                }
+            }
     }
 
     /** Resolves the exact chain row persisted with the deployment; legacy rows are accepted only

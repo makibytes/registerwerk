@@ -16,7 +16,9 @@ import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.blockchain.internal.deploy.StarknetErc3525AdminService;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.shared.RegisterFreeze;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,6 +73,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
     private final ApplicationEventPublisher eventPublisher;
     private final StarknetErc3525AdminService starknetErc3525AdminService;
     private final HolderBlockGate holderBlockGate;
+    private final AssetLookupPort assetLookupPort;
 
     public Erc3525AdminService(
             AssetDeploymentRepository deploymentRepository,
@@ -81,7 +84,8 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
             BlockchainTransactionService txService,
             ApplicationEventPublisher eventPublisher,
             StarknetErc3525AdminService starknetErc3525AdminService,
-            HolderBlockGate holderBlockGate) {
+            HolderBlockGate holderBlockGate,
+            AssetLookupPort assetLookupPort) {
         this.deploymentRepository = deploymentRepository;
         this.slotRepository = slotRepository;
         this.tokenUnitRepository = tokenUnitRepository;
@@ -91,6 +95,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
         this.eventPublisher = eventPublisher;
         this.starknetErc3525AdminService = starknetErc3525AdminService;
         this.holderBlockGate = holderBlockGate;
+        this.assetLookupPort = assetLookupPort;
     }
 
     // ── Slot-level operations ─────────────────────────────────────────────────
@@ -208,6 +213,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
                               UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
         requireEvm(dep, "mintIntoSlot");
+        requireRegisterOpen(dep, "mintIntoSlot");
         log.info("ERC-3525 mint slot={} to={} value={} on deployment={}", slotId, toAddress, value, deploymentId);
 
         return submitEvm(dep,
@@ -265,6 +271,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
     public UUID forcedValueTransfer(UUID deploymentId, BigInteger fromTokenId, BigInteger toTokenId,
                                     BigInteger value, String legalBasis, UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
+        requireRegisterOpen(dep, "forcedValueTransfer");
         log.info("ERC-3525 forcedValueTransfer from={} to={} value={} on deployment={}",
                 fromTokenId, toTokenId, value, deploymentId);
 
@@ -352,6 +359,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
                                 UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
         requireEvm(dep, "forceBurnValue");
+        requireRegisterOpen(dep, "forceBurnValue");
         log.info("ERC-3525 forceBurnValue tokenId={} value={} on deployment={}", tokenId, value, deploymentId);
 
         return submitEvm(dep,
@@ -394,6 +402,12 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /** Register freeze (transfer handover in progress): no holding-changing admin operation. */
+    private void requireRegisterOpen(AssetDeployment dep, String operation) {
+        assetLookupPort.findById(dep.getAssetId())
+                .ifPresent(a -> RegisterFreeze.requireOpen(a.status(), a.id(), operation));
+    }
 
     private AssetDeployment requireDeployment(UUID deploymentId) {
         AssetDeployment dep = deploymentRepository.findById(deploymentId)

@@ -136,6 +136,16 @@ public class CorporateAction {
     @Column(name = "snapshot_blocked_reason")
     private String snapshotBlockedReason;
 
+    /** T3-05: Σ unrounded − Σ rounded payable entitlements. Entitlements are rounded per holder to
+     *  the currency's minor unit, so the paid total differs from amountPerUnit × nominal by this. */
+    @Column(name = "rounding_residual", precision = 38, scale = 18)
+    private BigDecimal roundingResidual;
+
+    /** T3-02: SETTLED, but nominee-pool (HELD_LOOK_THROUGH) entitlements are unresolved
+     *  (PARK-T2-18) — the action is therefore not closed. */
+    @Column(name = "held_outstanding", nullable = false)
+    private boolean heldOutstanding;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -197,6 +207,10 @@ public class CorporateAction {
     public void setNotes(String v) { this.notes = v; }
     public String getSnapshotBlockedReason() { return snapshotBlockedReason; }
     public void setSnapshotBlockedReason(String v) { this.snapshotBlockedReason = v; }
+    public BigDecimal getRoundingResidual() { return roundingResidual; }
+    public void setRoundingResidual(BigDecimal v) { this.roundingResidual = v; }
+    public boolean isHeldOutstanding() { return heldOutstanding; }
+    public void setHeldOutstanding(boolean v) { this.heldOutstanding = v; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }

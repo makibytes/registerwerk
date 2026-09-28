@@ -56,6 +56,7 @@ class Erc3525AdminServiceTest {
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private StarknetErc3525AdminService starknetErc3525AdminService;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetLookupPort assetLookupPort;
 
     private Erc3525AdminService service;
 
@@ -68,7 +69,8 @@ class Erc3525AdminServiceTest {
     void setUp() {
         service = new Erc3525AdminService(
                 deploymentRepository, slotRepository, tokenUnitRepository, couponPaymentRepository,
-                evmTransactions, txService, eventPublisher, starknetErc3525AdminService, holderBlockGate);
+                evmTransactions, txService, eventPublisher, starknetErc3525AdminService, holderBlockGate,
+                assetLookupPort);
     }
 
     private AssetDeployment deployment(Chain chain) {
@@ -239,5 +241,26 @@ class Erc3525AdminServiceTest {
         assertThatThrownBy(() -> service.freezeAddress(DEPLOYMENT_ID, STARK_HOLDER, "x", ACTOR_ID, "REGISTRY_ADMIN"))
                 .isInstanceOf(IllegalArgumentException.class);
         verify(evmTransactions, never()).submit(any(), anyString(), any(Function.class), any());
+    }
+
+    @Test
+    @DisplayName("Register freeze: mint, forced value transfer and force burn refuse while TRANSFER_PENDING")
+    void holdingChangingOps_refusedWhileRegisterFrozen() {
+        AssetDeployment dep = deployment(Chain.ETHEREUM);
+        when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
+        when(assetLookupPort.findById(ASSET_ID)).thenReturn(Optional.of(
+                new de.makibytes.registerwerk.deployment.api.AssetLookupPort.AssetInfo(
+                        ASSET_ID, "Bond", null, null, "ETHEREUM", "TESTNET", null, null, "TRANSFER_PENDING")));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.mintIntoSlot(
+                        DEPLOYMENT_ID, SLOT_ID, "0x00000000000000000000000000000000000000aa", BigInteger.TEN, ACTOR_ID, "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.forcedValueTransfer(
+                        DEPLOYMENT_ID, BigInteger.ONE, BigInteger.TWO, BigInteger.TEN, "basis", ACTOR_ID, "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.forceBurnValue(
+                        DEPLOYMENT_ID, BigInteger.ONE, BigInteger.TEN, "basis", ACTOR_ID, "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        verify(evmTransactions, never()).submit(any(), any(), any(Function.class), any());
     }
 }

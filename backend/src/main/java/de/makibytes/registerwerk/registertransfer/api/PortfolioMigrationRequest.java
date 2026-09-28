@@ -73,6 +73,14 @@ public class PortfolioMigrationRequest {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
+    /** T3-17: operator attestation of the handover where no indexed deployment can verify it. */
+    @Column(name = "operator_attestation")
+    private String operatorAttestation;
+
+    /** T3-07 (C-05b): consent of the beneficiary of third-party rights / disposal restrictions. */
+    @Column(name = "beneficiary_consent_ref")
+    private String beneficiaryConsentRef;
+
     public UUID getId() { return id; }
     public UUID getInvestorEntityId() { return investorEntityId; }
     public void setInvestorEntityId(UUID v) { this.investorEntityId = v; }
@@ -105,4 +113,8 @@ public class PortfolioMigrationRequest {
     public void setCompletedAt(Instant v) { this.completedAt = v; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant v) { this.updatedAt = v; }
+    public String getOperatorAttestation() { return operatorAttestation; }
+    public void setOperatorAttestation(String v) { this.operatorAttestation = v; }
+    public String getBeneficiaryConsentRef() { return beneficiaryConsentRef; }
+    public void setBeneficiaryConsentRef(String v) { this.beneficiaryConsentRef = v; }
 }

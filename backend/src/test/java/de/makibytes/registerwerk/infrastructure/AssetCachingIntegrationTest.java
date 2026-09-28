@@ -7,6 +7,8 @@ import de.makibytes.registerwerk.asset.internal.AssetLifecycleService;
 import de.makibytes.registerwerk.asset.internal.AssetService;
 import de.makibytes.registerwerk.customer.CustomerApi;
 import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.asset.api.RedemptionReadinessPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,6 +48,12 @@ class AssetCachingIntegrationTest {
 
     @MockitoBean
     private AssetBondTermsRepository bondTermsRepository;
+
+    @MockitoBean
+    private AssetHolderRepository holderRepository;
+
+    @MockitoBean
+    private RedemptionReadinessPort redemptionReadiness;
 
     private UUID assetId;
 

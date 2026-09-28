@@ -28,6 +28,31 @@ public class AssetCouponPayment {
     @Column(name = "scheduled_date", nullable = false)
     private LocalDate scheduledDate;
 
+    /** Accrual start (unadjusted). Null on rows created before schedule generation existed. */
+    @Column(name = "period_start")
+    private LocalDate periodStart;
+
+    /** Accrual end (unadjusted). {@code scheduledDate} is this date business-day adjusted. */
+    @Column(name = "period_end")
+    private LocalDate periodEnd;
+
+    @Column(name = "unadjusted_date")
+    private LocalDate unadjustedDate;
+
+    @Column(name = "record_date")
+    private LocalDate recordDate;
+
+    @Column(name = "announcement_date")
+    private LocalDate announcementDate;
+
+    /** Unrounded accrual year fraction; amountPerUnit = faceValue × couponRate × this. */
+    @Column(name = "day_count_fraction", precision = 38, scale = 18)
+    private BigDecimal dayCountFraction;
+
+    /** Incremented each time the schedule is (re)generated for the asset. */
+    @Column(name = "schedule_version", nullable = false)
+    private int scheduleVersion = 1;
+
     @Column(name = "paid_date")
     private LocalDate paidDate;
 
@@ -65,6 +90,27 @@ public class AssetCouponPayment {
 
     public LocalDate getScheduledDate() { return scheduledDate; }
     public void setScheduledDate(LocalDate scheduledDate) { this.scheduledDate = scheduledDate; }
+
+    public LocalDate getPeriodStart() { return periodStart; }
+    public void setPeriodStart(LocalDate periodStart) { this.periodStart = periodStart; }
+
+    public LocalDate getPeriodEnd() { return periodEnd; }
+    public void setPeriodEnd(LocalDate periodEnd) { this.periodEnd = periodEnd; }
+
+    public LocalDate getUnadjustedDate() { return unadjustedDate; }
+    public void setUnadjustedDate(LocalDate unadjustedDate) { this.unadjustedDate = unadjustedDate; }
+
+    public LocalDate getRecordDate() { return recordDate; }
+    public void setRecordDate(LocalDate recordDate) { this.recordDate = recordDate; }
+
+    public LocalDate getAnnouncementDate() { return announcementDate; }
+    public void setAnnouncementDate(LocalDate announcementDate) { this.announcementDate = announcementDate; }
+
+    public BigDecimal getDayCountFraction() { return dayCountFraction; }
+    public void setDayCountFraction(BigDecimal dayCountFraction) { this.dayCountFraction = dayCountFraction; }
+
+    public int getScheduleVersion() { return scheduleVersion; }
+    public void setScheduleVersion(int scheduleVersion) { this.scheduleVersion = scheduleVersion; }
 
     public LocalDate getPaidDate() { return paidDate; }
     public void setPaidDate(LocalDate paidDate) { this.paidDate = paidDate; }

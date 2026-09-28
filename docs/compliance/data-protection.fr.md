@@ -78,6 +78,7 @@ Comportement actuel :
 2. L'achèvement remplace les valeurs de nom/e-mail `AppUser` sélectionnées, efface le hachage du mot de passe et désactive l'utilisateur.
 3. La couverture des documents `NaturalPerson`, KYC, des titres de détention, des transactions et autres données liées est incomplète ; aucun DEK n'est détruit car le cryptage DEK par enregistrement n'est pas implémenté.
 4. Des événements de demande/résolution sont émis, mais cela ne prouve pas à lui seul l'effacement complet ou le traitement légal de la demande.
+5. Tant que l'entité détient encore des positions actives au registre, l'achèvement exige que l'opérateur désigne le **canal de notification conservé** pour les relevés légaux §19 eWpG ; il est enregistré sur la demande et dans l'événement d'audit. Un relevé §19 ne peut plus être envoyé par e-mail à un utilisateur effacé ou désactivé : il est enregistré comme `FAILED` (`NO_LAWFUL_CHANNEL`), déclenche une alerte d'audit et n'est pas rejoué. La politique applicable à ces titulaires (canal de conservation) est une décision ouverte.
 
 ---
 

@@ -30,7 +30,9 @@ import { VaultRequestsComponent } from '../wizards/vault-requests/vault-requests
 import { NavStrikeComponent } from '../wizards/nav-strike/nav-strike.component';
 import { SlotAdminComponent } from '../wizards/slot-admin/slot-admin.component';
 import { CorporateActionsComponent } from '../wizards/corporate-actions/corporate-actions.component';
+import { CouponScheduleComponent } from '../wizards/coupon-schedule/coupon-schedule.component';
 import { RegisterInspectionsComponent } from '../wizards/register-inspections/register-inspections.component';
+import { RegisterEntriesComponent } from '../wizards/register-entries/register-entries.component';
 import { SubscriptionOrdersComponent } from '../wizards/subscription-orders/subscription-orders.component';
 import { InvestorLimitsComponent } from '../wizards/investor-limits/investor-limits.component';
 import { RegisterTransferComponent } from '../wizards/register-transfer/register-transfer.component';
@@ -54,6 +56,9 @@ import { ConfidentialViewerPanelComponent } from '../../../shared/components/con
 import { countryByNumeric } from '../../../shared/iso3166';
 import { AuthService } from '../../../core/auth/auth.service';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/components/step-up/step-up-dialog.component';
+import { DualControlTokens } from '../../../core/api/dual-control-headers';
+import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-asset-dialog.component';
 
 @Component({
   selector: 'app-asset-detail',
@@ -82,9 +87,10 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
     VaultRequestsComponent,
     NavStrikeComponent,
     SlotAdminComponent,
-    CorporateActionsComponent,
+    CorporateActionsComponent, CouponScheduleComponent,
     RegisterInspectionsComponent,
     SubscriptionOrdersComponent,
+    RegisterEntriesComponent,
     InvestorLimitsComponent,
     RegisterTransferComponent,
     SolanaAdminComponent,
@@ -96,6 +102,8 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
 
   styles: [`
     .back-row { margin-bottom: 12px; }
+    .freeze-banner { margin: 0 0 12px; padding: 10px 14px; border-radius: 6px; font-size: 13px;
+      background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
 
     .asset-header {
       display: flex;
@@ -256,7 +264,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
           @if (asset.status === 'SUSPENDED') {
             <button type="button" mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
           }
-          @if (asset.status !== 'REDEEMED') {
+          @if (asset.status === 'ISSUED' || asset.status === 'SUSPENDED') {
             <button type="button" mat-stroked-button color="warn" (click)="redeem()">Redeem</button>
           }
           <button type="button" mat-stroked-button (click)="edit()">
@@ -266,6 +274,17 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
           }
         </div>
       </div>
+
+      @if (asset.status === 'TRANSFER_PENDING') {
+        <div class="freeze-banner" role="status">
+          Register frozen for a §§21/22 handover (TRANSFER_PENDING): trading, mint/burn/forced operations,
+          corporate actions and register edits are refused until the transfer is completed or cancelled.
+        </div>
+      } @else if (asset.status === 'TRANSFERRED_OUT') {
+        <div class="freeze-banner" role="status">
+          The register of this asset was transferred to a successor registrar (TRANSFERRED_OUT). It is no longer administered here.
+        </div>
+      }
 
       <app-holder-sync-banner [asset]="asset" [canMutate]="canMutate" (changed)="loadAsset()" />
 
@@ -451,6 +470,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                 <p class="text-muted" style="text-align:center;padding:24px">No holder data available.</p>
               }
             }
+            <app-register-entries [assetId]="id" [canMutate]="canMutate" />
           </div>
         </mat-tab>
 
@@ -568,6 +588,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
         @if (canMutate) {
         <!-- Corporate Actions — coupon/dividend/split/redemption/call lifecycle -->
         <mat-tab label="Corporate Actions">
+          <app-coupon-schedule [assetId]="id" />
           <app-corporate-actions [assetId]="id" />
         </mat-tab>
 
@@ -1793,12 +1814,15 @@ export class AssetDetailComponent implements OnInit {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.freezeAddress) return;
     const addr = this.freezeAddress;
-    const unfreeze$ = this.isConfidential
-      ? this.confidentialService.setAddressFrozen(this.id, depId, addr, false)
-      : this.erc3643Service.unfreezeAddress(this.id, depId, addr);
-    unfreeze$.subscribe({
-      next: (r) => { this.txService.track(r.txId, `Unfreeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; },
-      error: (err) => this.showActionError('Failed to unfreeze address.', err),
+    // T3-16: step-up + second approver; the backend refuses while a Sperrvermerk covers the address.
+    this.withDualControl('UNFREEZE', 'Unfreeze address', (tokens) => {
+      const unfreeze$ = this.isConfidential
+        ? this.confidentialService.setAddressFrozen(this.id, depId, addr, false, tokens)
+        : this.erc3643Service.unfreezeAddress(this.id, depId, addr, tokens);
+      unfreeze$.subscribe({
+        next: (r) => { this.txService.track(r.txId, `Unfreeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; this.cdr.markForCheck(); },
+        error: (err) => this.showActionError('Failed to unfreeze address.', err),
+      });
     });
   }
 
@@ -1884,11 +1908,32 @@ export class AssetDetailComponent implements OnInit {
     });
   }
 
+  /** T3-01: legal basis + reference, then step-up + second approver (`ASSET_REDEMPTION`). */
   redeem(): void {
-    if (!confirm('Redeem this asset? This is a final action.')) return;
-    this.assetService.redeemAsset(this.id).subscribe({
-      next: () => this.loadAsset(),
-      error: (err) => this.showActionError('Failed to redeem asset.', err),
+    this.dialog.open(RedeemAssetDialogComponent, {
+      data: { assetName: this.asset?.name ?? 'asset' },
+      width: '520px',
+      disableClose: true,
+    }).afterClosed().subscribe((body: RedeemAssetDialogResult | undefined) => {
+      if (!body) return;
+      this.withDualControl('ASSET_REDEMPTION', 'Asset redemption', (tokens) =>
+        this.assetService.redeemAsset(this.id, body, tokens).subscribe({
+          next: () => this.loadAsset(),
+          error: (err) => this.showActionError('Failed to redeem asset.', err),
+        }));
+    });
+  }
+
+  /** Opens the step-up dialog for a 4-eyes action and runs `action` with both tokens. */
+  private withDualControl(action: string, reason: string, run: (tokens: DualControlTokens) => void): void {
+    this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: true, reason, action },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (result?.stepUpToken && result.dualControlToken) {
+        run({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
+      }
     });
   }
 
@@ -1909,15 +1954,18 @@ export class AssetDetailComponent implements OnInit {
   burnTokens(): void {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.burnAddress || !this.burnAmount) return;
-    this.assetService.burn(this.id, depId, { fromAddress: this.burnAddress, amount: this.burnAmount }).subscribe({
-      next: (r) => {
-        this.txService.track(r.txId, 'Burn');
-        this.burnAddress = '';
-        this.burnAmount = null;
-        this.loadHolders();
-      },
-      error: (err) => this.showActionError('Burn failed.', err),
-    });
+    const body = { fromAddress: this.burnAddress, amount: this.burnAmount };
+    // T3-01: burning from any address is a §26 Einziehung — step-up + second approver.
+    this.withDualControl('ISSUER_BURN_EWG26', 'Burn tokens', (tokens) =>
+      this.assetService.burn(this.id, depId, body, tokens).subscribe({
+        next: (r) => {
+          this.txService.track(r.txId, 'Burn');
+          this.burnAddress = '';
+          this.burnAmount = null;
+          this.loadHolders();
+        },
+        error: (err) => this.showActionError('Burn failed.', err),
+      }));
   }
 
   // ── KYC Compliance ────────────────────────────────────────────────────────

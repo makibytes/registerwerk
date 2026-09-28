@@ -443,6 +443,53 @@ class TradingServiceTest {
         assertThat(response.paymentOption()).isEqualTo(PaymentOption.CBMT);
     }
 
+
+    private void givenConfirmedDeployment() {
+        de.makibytes.registerwerk.deployment.api.AssetDeployment d = new de.makibytes.registerwerk.deployment.api.AssetDeployment();
+        d.setDeploymentStatus(de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.CONFIRMED);
+        when(assetDeploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of(d));
+    }
+
+    @Test
+    void settleRefusedForDeployedAsset() {
+        givenConfirmedDeployment();
+        UUID listingId = UUID.randomUUID();
+        TradeListing listing = openListing(BigDecimal.TEN, BigDecimal.valueOf(2), Set.of(PaymentOption.STABLECOIN));
+        when(tradeListingRepository.findByIdForUpdate(listingId)).thenReturn(Optional.of(listing));
+        when(settingsRepository.findById(BUYER)).thenReturn(Optional.of(settings(true, PaymentOption.STABLECOIN)));
+        AssetHolder seller = sellerHolder(BigDecimal.valueOf(100));
+        seller.setId(HOLDER_ID);
+        when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(seller));
+        BuyTradingOfferRequest req = new BuyTradingOfferRequest(
+                BigDecimal.valueOf(4), OrderType.MARKET, null, PaymentOption.STABLECOIN,
+                WalletPreferenceMode.CUSTOM_ADDRESS, null, "0x" + "dd".repeat(20));
+
+        assertThatThrownBy(() -> service.buy(BUYER, UUID.randomUUID(), listingId, req))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
+                .hasMessageContaining("On-chain settlement required");
+        assertThat(seller.getNominalAmount()).isEqualByComparingTo("100");
+    }
+
+    @Test
+    void createListingRefusedForDeployedAssetUnlessFlagEnabled() {
+        givenConfirmedDeployment();
+        AssetHolder holder = sellerHolder(BigDecimal.TEN);
+        when(assetHolderRepository.findById(HOLDER_ID)).thenReturn(Optional.of(holder));
+        CreateTradeListingRequest req = new CreateTradeListingRequest(
+                HOLDER_ID, BigDecimal.valueOf(5), BigDecimal.TEN, false, List.of(PaymentOption.STABLECOIN));
+
+        assertThatThrownBy(() -> service.createListing(SELLER, UUID.randomUUID(), req))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+
+        // demo flag on: the listing goes through
+        tradingProperties.setOffchainSettlementOnDeployedAssets(true);
+        when(tradeListingRepository.sumQuantityAvailableBySellerHolderIdAndStatusIn(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        when(tradeExecutionRepository.sumExecutedQuantityBySellerHolderIdAndSettlementStatusIn(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        assertThat(service.createListing(SELLER, UUID.randomUUID(), req).venueCode()).isEqualTo(TradingVenueCode.SIMULATED);
+    }
+
     // ── buy — SIMULATED venue settlement ──────────────────────────────────────
 
     @Test

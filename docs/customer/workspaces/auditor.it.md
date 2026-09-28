@@ -33,7 +33,7 @@ Il ruolo `AUDIT` dà accesso in lettura su tutto il registro. Non conferisce alc
 | Stato KYC e documenti | Secondo la configurazione dell'operatore |
 | Titolarità effettiva | |
 | Operazioni societarie | Comprese le fotografie alla data di registrazione e le spettanze |
-| Certificazioni fiscali ed estratti posizione | |
+| Prospetti dei proventi (Ertragsaufstellung) ed estratti posizione | |
 | La pista di controllo | Ogni evento registrato |
 
 ---

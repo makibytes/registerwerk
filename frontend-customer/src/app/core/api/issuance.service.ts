@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
@@ -16,6 +16,28 @@ import {
   TokenStandard,
 } from '../models';
 import { LiveHolder } from '../../shared/components/token-holders/models';
+
+export type InstructingParty = 'HOLDER' | 'BENEFICIARY' | 'COURT' | 'INSOLVENCY_ADMINISTRATOR' | 'ISSUER_TERMS_CHANGE';
+
+export interface HolderEntryRequest {
+  investorId: string;
+  walletAddress: string;
+  nominalAmount: number;
+  instructingParty: InstructingParty;
+  instructionReference: string;
+}
+
+export interface HolderChangeRequest {
+  id: string;
+  assetId: string;
+  requestType: 'ADD_HOLDER' | 'UPDATE_ATTRIBUTES';
+  status: 'REQUESTED' | 'EXECUTED' | 'REJECTED';
+  instructingParty: InstructingParty;
+  instructionReference: string;
+  requestedAt: string;
+  decidedAt: string | null;
+  decisionReason: string | null;
+}
 
 @Injectable({ providedIn: 'root' })
 export class IssuanceService {
@@ -37,6 +59,11 @@ export class IssuanceService {
     return this.http.post<Asset>(this.base, body);
   }
 
+  /**
+   * From APPROVED on, the backend refuses changed economic terms (ISIN, currency, issue size,
+   * denomination, dates; min/max investment from ISSUED) with 400 — those change only through an
+   * operator 4-eyes terms amendment. Name and public data stay editable.
+   */
   updateIssuance(id: string, body: Partial<Asset>): Observable<Asset> {
     return this.http.put<Asset>(`${this.base}/${id}`, body);
   }
@@ -67,8 +94,21 @@ export class IssuanceService {
     );
   }
 
-  addHolder(assetId: string, body: { walletAddress: string; nominalAmount: number }): Observable<AssetHolder> {
-    return this.http.post<AssetHolder>(`${this.base}/${assetId}/holders`, body);
+  /**
+   * The issuer can no longer write register entries itself (T3-13): it files a change request that
+   * the registry operator executes against the instruction it relays.
+   */
+  requestHolderEntry(assetId: string, body: HolderEntryRequest): Observable<HolderChangeRequest> {
+    return this.http.post<HolderChangeRequest>(`${this.base}/${assetId}/holders/change-requests`, {
+      requestType: 'ADD_HOLDER',
+      payload: { investorId: body.investorId, walletAddress: body.walletAddress, nominalAmount: body.nominalAmount },
+      instructingParty: body.instructingParty,
+      instructionReference: body.instructionReference,
+    });
+  }
+
+  listHolderChangeRequests(assetId: string): Observable<HolderChangeRequest[]> {
+    return this.http.get<HolderChangeRequest[]>(`${this.base}/${assetId}/holders/change-requests`);
   }
 
   getLiveHolders(assetId: string, depId: string): Observable<LiveHolder[]> {
@@ -88,8 +128,25 @@ export class IssuanceService {
     return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/mint`, body);
   }
 
-  burn(assetId: string, depId: string, body: { fromAddress: string; amount: string }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/burn`, body);
+  /**
+   * Burn is a §26 Einziehung (T3-01): the backend requires an ASSET_TOKEN_ADMIN grant, step-up and a
+   * second approver. `approvalToken` is a registry administrator's step-up token scoped to
+   * `ISSUER_BURN_EWG26`; `stepUpToken` replaces the session bearer under built-in sign-in. Under
+   * Entra it is omitted and the error interceptor answers the claims challenge.
+   */
+  burn(assetId: string, depId: string, body: { fromAddress: string; amount: string },
+       approval: { approvalToken: string; stepUpToken?: string }): Observable<{ txId: string }> {
+    let headers = new HttpHeaders({ 'X-Dual-Control-Token': approval.approvalToken });
+    if (approval.stepUpToken) {
+      headers = headers.set('Authorization', `Bearer ${approval.stepUpToken}`);
+    }
+    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/burn`, body, { headers });
+  }
+
+  /** Exchanges an authenticator code for a step-up token scoped to `action` (built-in sign-in only). */
+  stepUp(totpCode: string, action: string): Observable<{ stepUpToken: string }> {
+    return this.http.post<{ stepUpToken: string }>(`${environment.apiUrl}/auth/step-up`,
+      { code: totpCode, method: 'TOTP', action });
   }
 
   forceTransfer(assetId: string, depId: string, body: { from: string; to: string; value: string; legalBasis: string }): Observable<{ txId: string }> {

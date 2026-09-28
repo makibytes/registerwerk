@@ -72,6 +72,33 @@ class AssetAccessCheckerTest {
     }
 
     @Test
+    void canSubscribe_thirdPartyInvestor_whenAssetOpen_returnsTrue() {
+        // T3-08: investors used to get 403 on submit because it was gated by canRead (issuer/admin only).
+        Asset open = new Asset();
+        open.setIssuerId(ISSUER_A);
+        open.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.APPROVED);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(open));
+
+        var investor = jwtAuth(ISSUER_B, "INVESTOR");
+        assertThat(checker.canRead(ASSET_ID, investor)).isFalse();
+        assertThat(checker.canSubscribe(ASSET_ID, investor)).isTrue();
+    }
+
+    @Test
+    void canSubscribe_refusedWhenAssetNotOpenOrCallerHasNoEntity() {
+        // setUp's asset is DRAFT
+        assertThat(checker.canSubscribe(ASSET_ID, jwtAuth(ISSUER_B, "INVESTOR"))).isFalse();
+        Asset open = new Asset();
+        open.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(open));
+        Jwt noEntity = Jwt.withTokenValue("token").header("alg", "none").issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600)).claim("sub", ISSUER_B.toString()).build();
+        assertThat(checker.canSubscribe(ASSET_ID,
+                new JwtAuthenticationToken(noEntity, List.of(new SimpleGrantedAuthority("ROLE_INVESTOR"))))).isFalse();
+        assertThat(checker.canSubscribe(UUID.randomUUID(), jwtAuth(ISSUER_B, "INVESTOR"))).isFalse();
+    }
+
+    @Test
     void canRead_owningIssuer_returnsTrue() {
         assertThat(checker.canRead(ASSET_ID, jwtAuth(ISSUER_A, "ISSUER"))).isTrue();
     }

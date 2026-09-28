@@ -5,7 +5,6 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryReposi
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementRequestedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
-import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.finality.api.FinalityDecision;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
@@ -50,7 +49,8 @@ class CorporateActionFinalityGateTest {
 
     @Mock private CorporateActionRepository repository;
     @Mock private CorporateActionEntryRepository entryRepository;
-    @Mock private AssetHolderRepository holderRepository;
+    @Mock private RecordDatePositionResolver positionResolver;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository bondTermsRepository;
     @Mock private CorporateActionSettlementWriter settlementWriter;
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
@@ -61,9 +61,10 @@ class CorporateActionFinalityGateTest {
     private CorporateActionService service;
 
     private CorporateActionFinalityGateTest init() {
-        service = new CorporateActionService(repository, entryRepository, holderRepository, settlementWriter,
+        service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
                 couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
-                org.mockito.Mockito.mock(RegisterFreshnessGate.class));
+                org.mockito.Mockito.mock(RegisterFreshnessGate.class), bondTermsRepository,
+                CorporateActionTestSupport.systemRegisterClock());
         return this;
     }
 

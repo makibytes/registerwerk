@@ -83,13 +83,23 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
         <!-- Burn Tab -->
         <mat-tab label="Burn">
           <div class="tab-content">
-            <p class="tab-description">Destroy tokens from a wallet</p>
+            <p class="tab-description">Destroy tokens held by a register entry of this asset</p>
+
+            <div class="preview-box">
+              <mat-icon>verified_user</mat-icon>
+              <span class="preview-label">
+                A burn is a cancellation under eWpG §26. It needs an ASSET_TOKEN_ADMIN grant for this asset
+                and the approval of a registry administrator (4-eyes). Ask them for an approval token for
+                <code>ISSUER_BURN_EWG26</code>.
+              </span>
+            </div>
 
             <mat-form-field class="full-width">
-              <mat-label>Wallet Address (Optional)</mat-label>
+              <mat-label>Holder wallet address</mat-label>
               <input matInput
                 [(ngModel)]="burnForm.fromWallet"
-                placeholder="Leave empty to burn from msg.sender"
+                placeholder="0x…"
+                required
                 class="address-input">
               <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
                       (click)="pickWallet(a => burnForm.fromWallet = a)">
@@ -105,6 +115,25 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
                 min="1"
                 step="1">
             </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Authenticator code</mat-label>
+              <input matInput [(ngModel)]="burnForm.totpCode" inputmode="numeric" maxlength="6"
+                     autocomplete="one-time-code">
+              <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Operator approval token</mat-label>
+              <input matInput [(ngModel)]="burnForm.approvalToken" required class="address-input">
+            </mat-form-field>
+
+            @if (!burnForm.approvalToken.trim()) {
+              <div class="preview-box">
+                <mat-icon>hourglass_top</mat-icon>
+                <span class="preview-label">Awaiting second approver — paste the registry administrator's approval token.</span>
+              </div>
+            }
 
             <div class="preview-box warning">
               <mat-icon>warning</mat-icon>
@@ -390,6 +419,8 @@ export class TokenAdminPanelComponent {
   burnForm = {
     fromWallet: '',
     amount: 0,
+    totpCode: '',
+    approvalToken: '',
   };
 
   forceTransferForm = {
@@ -423,8 +454,9 @@ export class TokenAdminPanelComponent {
   }
 
   isValidBurnForm(): boolean {
-    return (!this.burnForm.fromWallet.trim() || this.isValidAddress(this.burnForm.fromWallet))
-      && this.isValidAmount(this.burnForm.amount);
+    return this.isValidAddress(this.burnForm.fromWallet)
+      && this.isValidAmount(this.burnForm.amount)
+      && !!this.burnForm.approvalToken.trim();
   }
 
   isValidForceTransferForm(): boolean {
@@ -461,7 +493,12 @@ export class TokenAdminPanelComponent {
   submitBurn(): void {
     if (this.busy || !this.isValidBurnForm()
         || !confirm('Burn these tokens? This action is irreversible.')) return;
-    this.burn.emit({ amount: this.burnForm.amount, fromWallet: this.burnForm.fromWallet.trim() || undefined });
+    this.burn.emit({
+      amount: this.burnForm.amount,
+      fromWallet: this.burnForm.fromWallet.trim(),
+      totpCode: this.burnForm.totpCode.trim() || undefined,
+      approvalToken: this.burnForm.approvalToken.trim(),
+    });
   }
 
   submitForceTransfer(): void {

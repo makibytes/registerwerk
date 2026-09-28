@@ -869,11 +869,11 @@ interface OnchainIdentityView {
 
               <mat-card>
                 <mat-card-header>
-                  <mat-card-title style="font-size:14px">Tax Certificate (Steuerbescheinigung)</mat-card-title>
+                  <mat-card-title style="font-size:14px">Income statement (Ertragsaufstellung)</mat-card-title>
                 </mat-card-header>
                 <mat-card-content style="padding-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                   <p style="font-size:12px;color:var(--rw-text-secondary);margin:0;flex-basis:100%">
-                    Annual German tax certificate for capital gains, interest and dividend income.
+                    Annual statement of settled coupon, interest and dividend income, per currency. Informational only - not a tax certificate (§ 45a EStG): no tax is withheld here, principal repayments are excluded.
                   </p>
                   <mat-form-field appearance="outline" subscriptSizing="dynamic" style="width:100px">
                     <mat-label>Tax year</mat-label>
@@ -882,7 +882,7 @@ interface OnchainIdentityView {
                   </mat-form-field>
                   <button type="button" mat-stroked-button color="primary" (click)="downloadTaxCert()">
                     <mat-icon>download</mat-icon>
-                    Download Certificate (PDF)
+                    Download statement (PDF)
                   </button>
                 </mat-card-content>
               </mat-card>
@@ -1227,8 +1227,8 @@ export class CustomerDetailComponent implements OnInit {
 
   downloadTaxCert(): void {
     this.corporateActionsService.downloadTaxCertificate(this.id, this.taxCertYear).subscribe({
-      next: (blob) => triggerBlobDownload(blob, `steuerbescheinigung-${this.id}-${this.taxCertYear}.pdf`),
-      error: (err) => this.showActionError('Failed to generate tax certificate.', err),
+      next: (blob) => triggerBlobDownload(blob, `Ertragsaufstellung-${this.taxCertYear}.pdf`),
+      error: (err) => this.showActionError('Failed to generate income statement.', err),
     });
   }
 

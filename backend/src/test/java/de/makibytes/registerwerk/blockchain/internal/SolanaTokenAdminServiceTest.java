@@ -43,7 +43,8 @@ class SolanaTokenAdminServiceTest {
         when(deployments.findById(deploymentId)).thenReturn(Optional.of(deployment));
         when(submissions.execute(eq(chainId), any())).thenThrow(new ChainQuarantinedException(chainId));
         SolanaTokenAdminService service = new SolanaTokenAdminService(
-                deployments, clients, wallets, chains, submissions);
+                deployments, clients, wallets, chains, submissions,
+                mock(de.makibytes.registerwerk.deployment.api.AssetLookupPort.class));
 
         assertThatThrownBy(() -> service.freezeTokenAccount(
                         deploymentId, "11111111111111111111111111111111").join())
@@ -53,5 +54,35 @@ class SolanaTokenAdminServiceTest {
         verify(clients, never()).getSolanaClient(any());
         verify(wallets, never()).solanaAccountForChain(any());
         verify(chains, never()).findById(any());
+    }
+
+    @Test
+    void permanentDelegateOps_refusedWhileRegisterFrozen() {
+        UUID deploymentId = UUID.randomUUID();
+        UUID assetId = UUID.randomUUID();
+        AssetDeploymentRepository deployments = mock(AssetDeploymentRepository.class);
+        var lookup = mock(de.makibytes.registerwerk.deployment.api.AssetLookupPort.class);
+        ChainSubmissionExecutor submissions = mock(ChainSubmissionExecutor.class);
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setAssetId(assetId);
+        deployment.setChainConfigId(UUID.randomUUID());
+        deployment.setChain(Chain.SOLANA);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setContractAddress("11111111111111111111111111111111");
+        when(deployments.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        when(lookup.findById(assetId)).thenReturn(Optional.of(
+                new de.makibytes.registerwerk.deployment.api.AssetLookupPort.AssetInfo(
+                        assetId, "Bond", null, null, "SOLANA", "TESTNET", null, null, "TRANSFER_PENDING")));
+        SolanaTokenAdminService service = new SolanaTokenAdminService(
+                deployments, mock(BlockchainClientRegistry.class), mock(WalletSigner.class),
+                mock(ChainConfigRepository.class), submissions, lookup);
+
+        assertThatThrownBy(() -> service.permanentDelegateTransfer(
+                deploymentId, "a", "b", java.math.BigInteger.TEN, 6))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        assertThatThrownBy(() -> service.permanentDelegateBurn(deploymentId, "a", java.math.BigInteger.TEN, 6))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        verify(submissions, never()).execute(any(), any());
     }
 }

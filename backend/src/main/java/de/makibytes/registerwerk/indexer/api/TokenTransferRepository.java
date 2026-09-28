@@ -48,6 +48,9 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
      */
     boolean existsByChainConfigIdAndTxHashAndLogIndex(UUID chainConfigId, String txHash, Integer logIndex);
 
+    /** T3-17: every indexed transfer of one transaction at the given finality (case-insensitive hash). */
+    List<TokenTransfer> findByTxHashIgnoreCaseAndFinalityStatus(String txHash, FinalityLevel finalityStatus);
+
     /**
      * Looks up one exact EVM log occurrence, including its block incarnation. {@code occurredAt}
      * is the immutable block timestamp and also the table's RANGE partition key; including it

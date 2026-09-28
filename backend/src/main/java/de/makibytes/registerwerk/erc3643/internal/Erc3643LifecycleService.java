@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
+import de.makibytes.registerwerk.shared.RegisterFreeze;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -65,6 +67,7 @@ import de.makibytes.registerwerk.erc3643.web.dto.ComplianceStatusResponse;
 public class Erc3643LifecycleService {
 
     private static final Logger log = LoggerFactory.getLogger(Erc3643LifecycleService.class);
+    private static final UUID SYSTEM_ACTOR = new UUID(0L, 0L);
 
     private final Erc3643SuiteRepository suiteRepository;
     private final Erc3643ComplianceModuleRepository complianceModuleRepository;
@@ -78,6 +81,7 @@ public class Erc3643LifecycleService {
     private final BlockchainClientRegistry blockchainClientRegistry;
     private final BlockchainTransactionService txService;
     private final HolderBlockGate holderBlockGate;
+    private final AssetLookupPort assetLookupPort;
 
     public Erc3643LifecycleService(
             Erc3643SuiteRepository suiteRepository,
@@ -91,7 +95,9 @@ public class Erc3643LifecycleService {
             DurableEvmTransactionGateway evmTransactions,
             BlockchainClientRegistry blockchainClientRegistry,
             BlockchainTransactionService txService,
-            HolderBlockGate holderBlockGate) {
+            HolderBlockGate holderBlockGate,
+            AssetLookupPort assetLookupPort) {
+        this.assetLookupPort = assetLookupPort;
         this.suiteRepository = suiteRepository;
         this.complianceModuleRepository = complianceModuleRepository;
         this.trustedIssuerRepository = trustedIssuerRepository;
@@ -513,6 +519,7 @@ public class Erc3643LifecycleService {
         requireNotBlocked(from);
         requireNotBlocked(to);
         Erc3643Suite suite = requireSuite(suiteId);
+        requireRegisterOpen(suite, "forcedTransfer");
         Function fn = new Function(forcedTransferMethodName(),
                 List.of(new Address(from), new Address(to), new Uint256(amount.toBigIntegerExact())),
                 List.of());
@@ -534,6 +541,7 @@ public class Erc3643LifecycleService {
         log.info("Forced approve on suite={}: owner={} spender={} amount={}", suiteId, owner, spender, amount);
         requireNotBlocked(owner);
         Erc3643Suite suite = requireSuite(suiteId);
+        requireRegisterOpen(suite, "forcedApprove");
         Function fn = new Function(forcedApproveMethodName(),
                 List.of(new Address(owner), new Address(spender), new Uint256(amount.toBigIntegerExact()),
                         new org.web3j.abi.datatypes.Utf8String(reason)),
@@ -551,7 +559,25 @@ public class Erc3643LifecycleService {
         return submitToSuite(suite, suite.getTokenAddress(), fn, Map.of("address", address), actorId, actorRole);
     }
 
+    /**
+     * Manual unfreeze. Refused while an ACTIVE §16 eWpG Sperrvermerk covers the wallet (T3-16):
+     * a court-ordered freeze is lifted only by lifting the block itself (4-eyes, audited), which
+     * {@code SperrvermerkOnchainSyncListener} then propagates via {@link #unfreezeAddressForBlockLift}.
+     */
     public UUID unfreezeAddress(UUID suiteId, String address, UUID actorId, String actorRole) {
+        requireNotBlocked(address);
+        return doUnfreezeAddress(suiteId, address, actorId, actorRole);
+    }
+
+    /**
+     * Unfreeze issued by the Sperrvermerk lift listener only (package-private, SYSTEM actor). The
+     * listener has already checked that no other ACTIVE block still covers the wallet.
+     */
+    UUID unfreezeAddressForBlockLift(UUID suiteId, String address) {
+        return doUnfreezeAddress(suiteId, address, SYSTEM_ACTOR, "SYSTEM");
+    }
+
+    private UUID doUnfreezeAddress(UUID suiteId, String address, UUID actorId, String actorRole) {
         log.info("Unfreezing address={} on suite={}", address, suiteId);
         Erc3643Suite suite = requireSuite(suiteId);
         Function fn = new Function("setAddressFrozen",
@@ -576,6 +602,8 @@ public class Erc3643LifecycleService {
      * Unfreezes a partial amount of previously frozen tokens for an investor.
      */
     public UUID unfreezePartialTokens(UUID suiteId, String address, BigDecimal amount, UUID actorId, String actorRole) {
+        // Same rule as unfreezeAddress (T3-16): no manual release while a Sperrvermerk is ACTIVE.
+        requireNotBlocked(address);
         log.info("Unfreeze partial tokens={} for address={} on suite={}", amount, address, suiteId);
         Erc3643Suite suite = requireSuite(suiteId);
         Function fn = new Function("unfreezePartialTokens",
@@ -605,6 +633,7 @@ public class Erc3643LifecycleService {
         log.info("forceBurn from={} amount={} on suite={}", from, amount, suiteId);
         requireNotBlocked(from);
         Erc3643Suite suite = requireSuite(suiteId);
+        requireRegisterOpen(suite, "forceBurn");
         Function fn = new Function("burn",
                 List.of(new Address(from), new Uint256(amount.toBigIntegerExact())), List.of());
         return submitToSuite(suite, suite.getTokenAddress(), fn,
@@ -626,6 +655,7 @@ public class Erc3643LifecycleService {
         froms.forEach(this::requireNotBlocked);
         tos.forEach(this::requireNotBlocked);
         Erc3643Suite suite = requireSuite(suiteId);
+        requireRegisterOpen(suite, "batchForcedTransfer");
         Function fn = new Function("batchForcedTransfer",
                 List.of(
                         new DynamicArray<>(Address.class, froms.stream().map(Address::new).toList()),
@@ -645,6 +675,7 @@ public class Erc3643LifecycleService {
         log.info("batchMint {} entries on suite={}", toAddresses.size(), suiteId);
         toAddresses.forEach(this::requireNotBlocked);
         Erc3643Suite suite = requireSuite(suiteId);
+        requireRegisterOpen(suite, "batchMint");
         Function fn = new Function("batchMint",
                 List.of(
                         new DynamicArray<>(Address.class, toAddresses.stream().map(Address::new).toList()),
@@ -663,6 +694,7 @@ public class Erc3643LifecycleService {
         log.info("batchBurn {} entries on suite={}", userAddresses.size(), suiteId);
         userAddresses.forEach(this::requireNotBlocked);
         Erc3643Suite suite = requireSuite(suiteId);
+        requireRegisterOpen(suite, "batchBurn");
         Function fn = new Function("batchBurn",
                 List.of(
                         new DynamicArray<>(Address.class, userAddresses.stream().map(Address::new).toList()),
@@ -760,6 +792,13 @@ public class Erc3643LifecycleService {
      * on-chain compliance module state (these operations bypass the compliance modules entirely).
      * Checked by wallet address only, mirroring {@code TokenAdminService}'s equivalent gate.
      */
+    /** T3-07: no mint/burn/forced operation while the register is frozen for / handed over in a §§21/22 handover. */
+    private void requireRegisterOpen(Erc3643Suite suite, String operation) {
+        deploymentRepository.findById(suite.getAssetDeploymentId())
+                .flatMap(dep -> assetLookupPort.findById(dep.getAssetId()))
+                .ifPresent(a -> RegisterFreeze.requireOpen(a.status(), a.id(), operation));
+    }
+
     private void requireNotBlocked(String walletAddress) {
         if (holderBlockGate.isBlocked(null, walletAddress)) {
             throw new de.makibytes.registerwerk.shared.ComplianceGateException(

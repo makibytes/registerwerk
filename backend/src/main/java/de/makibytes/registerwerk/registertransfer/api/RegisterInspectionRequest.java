@@ -53,6 +53,10 @@ public class RegisterInspectionRequest {
     @Column(name = "fulfilled_at")
     private Instant fulfilledAt;
 
+    /** True only when the claimed basis was checked against the register (issuer of the asset / active holder). */
+    @Column(name = "claim_verified", nullable = false)
+    private boolean claimVerified = false;
+
     @Column(name = "content_hash", length = 66)
     private String contentHash;
 
@@ -85,6 +89,8 @@ public class RegisterInspectionRequest {
     public void setDecidedAt(Instant decidedAt) { this.decidedAt = decidedAt; }
     public Instant getFulfilledAt() { return fulfilledAt; }
     public void setFulfilledAt(Instant fulfilledAt) { this.fulfilledAt = fulfilledAt; }
+    public boolean isClaimVerified() { return claimVerified; }
+    public void setClaimVerified(boolean claimVerified) { this.claimVerified = claimVerified; }
     public String getContentHash() { return contentHash; }
     public void setContentHash(String contentHash) { this.contentHash = contentHash; }
     public Instant getCreatedAt() { return createdAt; }

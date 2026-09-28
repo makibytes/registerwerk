@@ -7,11 +7,14 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatSelectModule } from '@angular/material/select';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { DatePipe, SlicePipe } from '@angular/common';
 import { RegisterTransferService } from '../../../../core/api/register-transfer.service';
-import { RegisterTransfer } from '../../../../core/models';
+import { AssetDeployment, RegisterTransfer } from '../../../../core/models';
+import { AssetService } from '../../../../core/api/asset.service';
 import { AuthService } from '../../../../core/auth/auth.service';
 import { StepUpDialogComponent } from '../../../../shared/components/step-up/step-up-dialog.component';
 
@@ -24,7 +27,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
   selector: 'app-register-transfer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, MatButtonModule, MatIconModule, MatDialogModule, MatFormFieldModule, MatInputModule, MatTooltipModule, DatePipe, SlicePipe],
+  imports: [FormsModule, MatButtonModule, MatIconModule, MatDialogModule, MatFormFieldModule, MatInputModule, MatSelectModule, MatCheckboxModule, MatTooltipModule, DatePipe, SlicePipe],
   template: `
     <div class="rt-shell">
       <div class="rt-header">
@@ -34,6 +37,18 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
           Initiate Transfer
         </button>
       </div>
+
+      @if (frozenTransfer; as ft) {
+        <div class="rt-freeze" role="status">
+          <mat-icon>lock</mat-icon>
+          <div>
+            <strong>Register frozen (TRANSFER_PENDING)</strong> for the handover to {{ ft.successorName }}.
+            Trading, mint/burn/forced operations, corporate-action processing and register edits are refused
+            until the transfer is completed or cancelled. If the register changes anyway (holder sync),
+            completion is refused and you must re-export.
+          </div>
+        </div>
+      }
 
       @if (loading) {
         <p class="dimmed" style="text-align:center;padding:24px">Loading…</p>
@@ -53,6 +68,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
           </div>
 
           @for (t of transfers; track t.id) {
+            <div class="rt-entry">
             <div class="rt-row">
               <span>
                 {{ t.successorName }}
@@ -92,6 +108,23 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
                 }
               </div>
             </div>
+            @if (t.registerContentHash || (t.onchainHandovers?.length ?? 0) > 0) {
+              <div class="rt-details">
+                @if (t.registerContentHash) {
+                  <span class="dimmed small" matTooltip="Hash over the register content only (no export timestamp); re-checked at completion">
+                    Register content hash <span class="mono">{{ t.registerContentHash | slice:0:14 }}…</span>
+                  </span>
+                }
+                @for (h of t.onchainHandovers ?? []; track h.deploymentId) {
+                  <span class="rt-handover" [class.verified]="h.verified">
+                    <mat-icon [matTooltip]="h.verified ? 'Verified on-chain (' + h.method + ')' : 'Operator-attested, not chain-verified'">{{ h.verified ? 'verified' : 'assignment_turned_in' }}</mat-icon>
+                    {{ h.chain }} <span class="mono">{{ h.txHash | slice:0:10 }}…</span>
+                    <span class="dimmed small">{{ h.verified ? 'verified' : 'attested' }}</span>
+                  </span>
+                }
+              </div>
+            }
+            </div>
           }
         </div>
       }
@@ -107,6 +140,10 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
         <mat-form-field appearance="outline">
           <mat-label>Successor identifier (LEI, registration no.)</mat-label>
           <input matInput [(ngModel)]="initiateForm.successorIdentifier" />
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Successor on-chain address (EVM registry/owner)</mat-label>
+          <input matInput [(ngModel)]="initiateForm.successorOnchainAddress" placeholder="0x… (needed to verify EVM deployments)" />
         </mat-form-field>
         <mat-form-field appearance="outline">
           <mat-label>Reason</mat-label>
@@ -128,9 +165,26 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
       <h2 mat-dialog-title>Record On-Chain Handover</h2>
       <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px;min-width:400px">
         <p style="margin:0;font-size:13px;color:var(--rw-text-secondary)">
-          Enter the transaction hash of the on-chain control-handover transaction. This step
+          Record the on-chain control handover of one deployment. EVM deployments are verified against the
+          chain (registry()/owner() must equal the successor address); other chains need your explicit
+          attestation. The transfer becomes HANDED_OVER once every deployment is recorded. This step
           requires step-up authentication and a second approver.
         </p>
+        @if (deployments.length > 0) {
+          <mat-form-field appearance="outline">
+            <mat-label>Deployment</mat-label>
+            <mat-select [(ngModel)]="handoverDeploymentId">
+              @for (d of deployments; track d.id) {
+                <mat-option [value]="d.id">{{ d.chain }} {{ d.network }} - {{ d.contractAddress ?? 'n/a' }}{{ isHandedOver(d.id) ? ' (recorded)' : '' }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+        }
+        @if (selectedDeploymentIsNonEvm) {
+          <mat-checkbox [(ngModel)]="handoverAttested">
+            I attest that control of this deployment has been handed to the successor (cannot be verified automatically yet).
+          </mat-checkbox>
+        }
         <mat-form-field appearance="outline">
           <mat-label>Transaction hash</mat-label>
           <input matInput [(ngModel)]="handoverTxHash" placeholder="0x…" />
@@ -138,7 +192,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
         <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
-        <button type="button" mat-raised-button color="warn" [disabled]="!handoverTxHash.trim()" (click)="submitHandover()">
+        <button type="button" mat-raised-button color="warn" [disabled]="!handoverTxHash.trim() || (selectedDeploymentIsNonEvm && !handoverAttested)" (click)="submitHandover()">
           Continue to step-up
         </button>
       </mat-dialog-actions>
@@ -203,6 +257,14 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
     .status-badge.completed   { background: rgba(74,222,128,.15); color: #4ade80; }
     .status-badge.cancelled   { background: rgba(248,113,113,.15); color: #f87171; }
 
+    .rt-entry { border-bottom: 1px solid var(--rw-border); }
+    .rt-entry .rt-row { border-bottom: none; }
+    .rt-details { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center; padding: 0 .5rem .625rem; font-size: .75rem; }
+    .rt-handover { display: inline-flex; align-items: center; gap: 4px; color: var(--rw-text-secondary); }
+    .rt-handover mat-icon { font-size: 16px; width: 16px; height: 16px; }
+    .rt-handover.verified mat-icon { color: var(--rw-approved-fg); }
+    .rt-freeze { display: flex; gap: .75rem; align-items: flex-start; padding: .75rem 1rem; margin-bottom: 1rem; border-radius: 6px;
+      background: var(--rw-pending-bg); color: var(--rw-pending-fg); font-size: .8125rem; }
     .row-actions { display: flex; justify-content: flex-end; align-items: center; gap: 4px; flex-wrap: wrap; }
   `],
 })
@@ -217,6 +279,7 @@ export class RegisterTransferComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly assetService = inject(AssetService);
 
   transfers: RegisterTransfer[] = [];
   loading = false;
@@ -224,11 +287,34 @@ export class RegisterTransferComponent implements OnInit {
 
   activeTransfer: RegisterTransfer | null = null;
   handoverTxHash = '';
+  handoverDeploymentId = '';
+  handoverAttested = false;
+  deployments: AssetDeployment[] = [];
   cancelReason = '';
-  initiateForm = { successorName: '', successorIdentifier: '', reason: '' };
+  initiateForm = { successorName: '', successorIdentifier: '', successorOnchainAddress: '', reason: '' };
 
   ngOnInit(): void {
     this.load();
+    this.assetService.getDeployments(this.assetId).subscribe({
+      next: (d) => { this.deployments = d.filter((x) => x.deploymentStatus === 'CONFIRMED'); this.cdr.markForCheck(); },
+      error: () => { /* the handover dialog then falls back to the single-deployment form */ },
+    });
+  }
+
+  /** The transfer currently freezing the register (exported, not yet completed/cancelled). */
+  get frozenTransfer(): RegisterTransfer | undefined {
+    return this.transfers.find((t) => t.status === 'EXPORTED' || t.status === 'HANDED_OVER');
+  }
+
+  private static readonly NON_EVM = ['SOLANA', 'STARKNET', 'STELLAR', 'CANTON'];
+
+  get selectedDeploymentIsNonEvm(): boolean {
+    const d = this.deployments.find((x) => x.id === this.handoverDeploymentId);
+    return !!d && RegisterTransferComponent.NON_EVM.includes(d.chain);
+  }
+
+  isHandedOver(deploymentId: string): boolean {
+    return !!this.activeTransfer?.onchainHandovers?.some((h) => h.deploymentId === deploymentId);
   }
 
   load(): void {
@@ -247,7 +333,7 @@ export class RegisterTransferComponent implements OnInit {
   }
 
   openInitiateDialog(): void {
-    this.initiateForm = { successorName: '', successorIdentifier: '', reason: '' };
+    this.initiateForm = { successorName: '', successorIdentifier: '', successorOnchainAddress: '', reason: '' };
     this.dialog.open(this.initiateDialogTpl, { width: '480px' });
   }
 
@@ -260,6 +346,7 @@ export class RegisterTransferComponent implements OnInit {
       this.initiateForm.successorIdentifier.trim() || undefined,
       this.initiateForm.reason.trim(),
       actorId,
+      this.initiateForm.successorOnchainAddress.trim() || undefined,
     ).subscribe({
       next: () => {
         this.snackBar.open('Register transfer initiated.', 'Dismiss', { duration: 5000 });
@@ -295,12 +382,17 @@ export class RegisterTransferComponent implements OnInit {
   openHandoverDialog(transfer: RegisterTransfer): void {
     this.activeTransfer = transfer;
     this.handoverTxHash = '';
+    this.handoverAttested = false;
+    const pending = this.deployments.find((d) => !this.isHandedOver(d.id));
+    this.handoverDeploymentId = (pending ?? this.deployments[0])?.id ?? '';
     this.dialog.open(this.handoverDialogTpl, { width: '460px' });
   }
 
   submitHandover(): void {
     const transfer = this.activeTransfer;
     const txHash = this.handoverTxHash.trim();
+    const deploymentId = this.handoverDeploymentId;
+    const attested = this.handoverAttested;
     if (!transfer || !txHash) return;
     this.dialog.closeAll();
 
@@ -316,12 +408,15 @@ export class RegisterTransferComponent implements OnInit {
 
     stepUpRef.afterClosed().subscribe((result) => {
       if (!result) return;
-      this.service.recordOnchainHandover(transfer.id, txHash, result.stepUpToken, result.dualControlToken!).subscribe({
+      this.service.recordOnchainHandover(transfer.id, txHash, result.stepUpToken, result.dualControlToken!, {
+        deploymentId: deploymentId || undefined,
+        attested: attested || undefined,
+      }).subscribe({
         next: () => {
           this.snackBar.open('On-chain handover recorded.', 'Dismiss', { duration: 5000 });
           this.load();
         },
-        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record handover.', 'Dismiss', { duration: 6000 }),
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record handover.', 'Dismiss', { duration: 10000 }),
       });
     });
   }
@@ -344,7 +439,7 @@ export class RegisterTransferComponent implements OnInit {
           this.snackBar.open('Register transfer completed.', 'Dismiss', { duration: 5000 });
           this.load();
         },
-        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to complete transfer.', 'Dismiss', { duration: 6000 }),
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to complete transfer.', 'Dismiss', { duration: 12000 }),
       });
     });
   }

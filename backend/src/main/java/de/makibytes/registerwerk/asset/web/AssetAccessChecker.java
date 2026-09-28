@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.AssetTokenAdminGrantRepository;
 import de.makibytes.registerwerk.asset.internal.SubscriptionOrder;
+import de.makibytes.registerwerk.asset.internal.SubscriptionOrderService;
 import de.makibytes.registerwerk.asset.internal.SubscriptionOrderRepository;
 import de.makibytes.registerwerk.blockchain.BlockchainApi;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionView;
@@ -50,6 +51,20 @@ public class AssetAccessChecker {
         return isOwnerOfAsset(assetId, auth);
     }
 
+    /**
+     * T3-08: may the caller submit a primary-subscription order on this asset? Any authenticated caller
+     * with an entity, while the asset is open for orders. This is deliberately not {@link #canRead}
+     * (issuer/admin only, which is why investors got 403); {@code SubscriptionOrderService} re-checks
+     * status and target-market eligibility.
+     */
+    public boolean canSubscribe(UUID assetId, Authentication auth) {
+        if (auth == null || !auth.isAuthenticated()) return false;
+        if (SecurityUtils.extractEntityId(auth) == null) return false;
+        return assetRepository.findById(assetId)
+                .map(a -> SubscriptionOrderService.ORDERABLE_STATUSES.contains(a.getStatus()))
+                .orElse(false);
+    }
+
     public boolean canActAsIssuer(UUID assetId, Authentication auth) {
         if (auth == null || !auth.isAuthenticated()) return false;
         return isOwnerOfAsset(assetId, auth);
@@ -57,7 +72,8 @@ public class AssetAccessChecker {
 
     /**
      * True if the caller's entity holds an ACTIVE, non-expired ASSET_TOKEN_ADMIN grant that
-     * is either scoped to this asset or entity-wide. Gates forcedTransfer/forcedApprove/
+     * is either scoped to this asset or entity-wide on an asset the entity issues (T3-21).
+     * Gates forcedTransfer/forcedApprove/
      * forceBurn — deliberately NOT satisfied by {@link #canActAsIssuer} or {@link #canRead}:
      * owning or holding an asset no longer implies the authority to force-move its tokens,
      * that authority must be explicitly granted (see {@code AssetTokenAdminGrantController}).

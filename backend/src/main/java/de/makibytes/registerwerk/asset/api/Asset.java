@@ -162,6 +162,18 @@ public class Asset {
     private Instant lastSuccessfulHolderSyncAt;
 
     /**
+     * T3-09: active, non-chain-derived register entries with a positive nominal on this deployed
+     * asset, as counted by the last holder sync — entries the chain does not back (off-chain
+     * trade settlement, manual rows). Reported, not BLOCKED; same bulk-update-only rule as above.
+     */
+    @Column(name = "holder_sync_offchain_rows", nullable = false, insertable = false, updatable = false)
+    private int holderSyncOffchainRows;
+
+    /** T3-08: TARGET business days an investor has to pay an allocation before it lapses. */
+    @Column(name = "subscription_payment_window_bd", nullable = false)
+    private int subscriptionPaymentWindowBd = 10;
+
+    /**
      * MiFID II target market (product governance) — which client categories this asset may be
      * distributed to. Empty means unrestricted (backward-compatible default: existing assets and
      * demo data predate this field and must not suddenly become un-subscribable). Checked by
@@ -279,6 +291,10 @@ public class Asset {
     public void setHolderSyncUnmappedWallets(String holderSyncUnmappedWallets) { this.holderSyncUnmappedWallets = holderSyncUnmappedWallets; }
     public Instant getLastSuccessfulHolderSyncAt() { return lastSuccessfulHolderSyncAt; }
     public void setLastSuccessfulHolderSyncAt(Instant lastSuccessfulHolderSyncAt) { this.lastSuccessfulHolderSyncAt = lastSuccessfulHolderSyncAt; }
+    public int getSubscriptionPaymentWindowBd() { return subscriptionPaymentWindowBd; }
+    public void setSubscriptionPaymentWindowBd(int subscriptionPaymentWindowBd) { this.subscriptionPaymentWindowBd = subscriptionPaymentWindowBd; }
+    public int getHolderSyncOffchainRows() { return holderSyncOffchainRows; }
+    public void setHolderSyncOffchainRows(int holderSyncOffchainRows) { this.holderSyncOffchainRows = holderSyncOffchainRows; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

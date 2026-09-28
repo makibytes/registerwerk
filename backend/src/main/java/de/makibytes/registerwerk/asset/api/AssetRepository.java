@@ -24,6 +24,11 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
     Page<Asset> findByIssuerIdAndStatus(UUID issuerId, AssetStatus status, Pageable pageable);
 
+    /** T3-08: serialises allocation/settlement (issue-size + holding-cap checks) per asset. */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM Asset a WHERE a.id = :id")
+    Optional<Asset> findByIdForUpdate(@Param("id") UUID id);
+
     Optional<Asset> findByIsin(String isin);
 
     Optional<Asset> findByAssetNumber(String assetNumber);
@@ -55,4 +60,13 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
             + "a.lastHolderSyncTime = :at WHERE a.id = :id")
     int markHolderSyncBlocked(@Param("id") UUID id, @Param("at") Instant at,
                               @Param("reason") String reason, @Param("wallets") String wallets);
+
+    /** T3-09: records the off-chain-row count of the latest holder sync (no version bump). */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE Asset a SET a.holderSyncOffchainRows = :count WHERE a.id = :id AND a.holderSyncOffchainRows <> :count")
+    int updateHolderSyncOffchainRows(@Param("id") UUID id, @Param("count") int count);
+
+    /** Sum over all assets — backs the {@code registerwerk_register_offchain_rows_on_deployed_asset} gauge. */
+    @Query("SELECT COALESCE(SUM(a.holderSyncOffchainRows), 0) FROM Asset a")
+    long sumHolderSyncOffchainRows();
 }

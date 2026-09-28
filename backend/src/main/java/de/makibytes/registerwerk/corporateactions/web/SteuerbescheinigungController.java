@@ -48,7 +48,7 @@ public class SteuerbescheinigungController {
             return ResponseEntity.badRequest().build();
         }
         byte[] pdf = service.generate(entityId, year);
-        String filename = "steuerbescheinigung-" + entityId + "-" + year + ".pdf";
+        String filename = "Ertragsaufstellung-" + year + ".pdf";
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION,

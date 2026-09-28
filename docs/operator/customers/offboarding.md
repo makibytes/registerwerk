@@ -73,6 +73,13 @@ stateDiagram-v2
 
 **Complete.**
 
+!!! warning "The register is frozen between export and completion"
+    The first **export** sets the asset to `TRANSFER_PENDING` (the previous status is kept). Until the transfer is completed or cancelled, trading, mint/burn and forced operations, corporate-action processing (including the daily jobs), primary subscriptions and register edits are refused; holder sync keeps running so that drift is detected. **Cancelling** restores the previous status. Corporate actions whose payment date is today or later must be settled or cancelled *before* the export.
+
+    The export carries a **register content hash** that covers the register only (asset data, holders with their §17(2) attributes, active holder blocks, bond terms and coupon schedule, term-sheet hash, open corporate actions and subscription orders) — not the export timestamp. **Completing** recomputes it and refuses if anything changed since the export, naming the changed sections; export again in that case. The package identifies holders by internal entity number and LEI; clear names and addresses are not included (open policy decision).
+
+    On-chain control is recorded **per deployment**. For EVM deployments the platform reads `registry()`/`owner()` and requires it to equal the successor address given at initiation; other chains need an explicit operator attestation for now (chain verification follows later). The transfer becomes *handed over* only once every deployment is recorded. After completion the asset is `TRANSFERRED_OUT`: statements, inspections and downloads are refused with "register transferred to …".
+
 !!! danger "The two legs cannot be made atomic"
     Exporting the register and transferring on-chain control happen on different systems. There is no transaction spanning both.
 
@@ -90,6 +97,12 @@ stateDiagram-v2
 One investor, one holding, out to another registrar. Same shape — initiate, set destination, export with hash, record the on-chain transfer, complete — scoped to a single holder rather than the whole asset.
 
 This exists because without it an investor's only exit from a registry is to sell. Being able to move a holding without a sale is a genuine part of investor protection, not a convenience.
+
+!!! note "The handover is verified, not trusted"
+    - **Destination** can only be set while the migration is *initiated*; after export the package and its hash describe that destination. To change it, cancel and start again.
+    - **Recording the on-chain transfer** is checked against the indexed, finalized transfer: the transaction must move exactly the holder's nominal from the holder's wallet to the destination wallet on one of the asset's deployments. If the transfer is not indexed yet the step is refused; retry once it is final. Where the asset has no indexed deployment (off-chain register, Solana, Canton for now) an **operator attestation** is required instead.
+    - **Completing** requires the destination wallet to have an active register entry (for example a nominee-pool entry of the successor registrar). Otherwise the next holder sync would block the whole asset.
+    - The export package carries the entry's §17(2) eWpG content (entry type, holder reference, consumer flag, third-party rights, disposal restrictions, legal-capacity note) and its active legal blocks. An entry with third-party rights or disposal restrictions migrates only with a **beneficiary consent reference**.
 
 ---
 

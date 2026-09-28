@@ -1,6 +1,6 @@
 ---
 title: 6. Corporate actions and redemption
-description: Coupons, record dates, tax certificates, and how a security is finally repaid and destroyed.
+description: Coupons, record dates, income statements, and how a security is finally repaid and destroyed.
 ---
 
 # Stage 6 — Corporate actions and redemption
@@ -95,14 +95,14 @@ Only a subset can actually be created today — the rest are modelled (they have
 
 ---
 
-## Tax certificates
+## Income statement (not a tax certificate) { #tax-certificates }
 
-For German holders, income from a security is taxable, and the holder needs a **Steuerbescheinigung** — a tax certificate stating what they received in a given year.
+For German holders, income from a security is taxable. Registerwerk provides an annual **Ertragsaufstellung** (income statement) listing what was paid to the holder in a given year — but it is **not a Steuerbescheinigung** within the meaning of § 45a EStG.
 
-Registerwerk produces this from the corporate-action entries: for each investor, every entitlement across the tax year, aggregated.
+It is produced from the settled corporate-action entries: for each investor, the coupon, interest and dividend entitlements of the calendar year, grouped **per currency** (amounts in different currencies are never added up). Repayments of principal (redemption, call, partial redemption) and capital calls are **not income** and are excluded; gains on disposal or redemption are not determined, because acquisition costs are not held in the register.
 
 !!! warning "It states what was paid, not what is owed"
-    The certificate is a factual record of distributions from this registry. It is not tax advice, does not account for income elsewhere, and does not compute anybody's liability. Withholding obligations depend on the holder's residence and status, and are the issuer's and holder's responsibility.
+    The statement is a factual record of gross distributions from this registry. It is not tax advice, does not account for income elsewhere, and does not compute anybody's liability. **Registerwerk withholds no Kapitalertragsteuer or Solidaritätszuschlag** — coupons are paid gross and the statement says so (withheld: 0.00). Whether the registrar acts as a paying agent that withholds and certifies is an open policy decision; until it is made, holders and issuers remain responsible for any withholding and declaration.
 
 ---
 
@@ -135,7 +135,7 @@ stateDiagram-v2
 
 ### When redemption does not happen
 
-The payment date passes and nothing settles. This is a **default**, and it is a real event that the platform detects rather than ignores: redemption actions whose payment date has passed unsettled are flagged, as are missed coupons.
+The payment date passes and nothing settles. The platform does not call this a default at once: the payment first shows as **payment pending** (overdue) while the grace period runs — 30 days for interest, 7 days for principal by default. Only if it is still unsettled after that are the coupon flagged **missed** and the bond **defaulted**. If the payment settles at any point, the flag is cleared and the bond is marked redeemed (or the coupon paid).
 
 Registerwerk raises the flag. It cannot enforce a claim — that is a matter for the trustee, the holders and the courts.
 

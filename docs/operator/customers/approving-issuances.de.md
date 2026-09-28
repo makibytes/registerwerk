@@ -53,6 +53,32 @@ Bei einer Anleihe: Nennbetrag, Währung, Ausgabe- und Fälligkeitstermine, Kupon
 
     **Zinsberechnungsmethode.** Unspektakulär, und sie ändert, wie viel Geld bewegt wird. Bestätigen Sie, dass sie mit dem Term Sheet übereinstimmt, statt es anzunehmen.
 
+### Konventionen des Kuponplans
+
+Mit dem Speichern der Anleihebedingungen wird der Kuponplan erzeugt, aus dem die Jobs für Kapitalmaßnahmen arbeiten. Die Konventionen folgen der ICMA-Praxis; jede wird in den Bedingungen gesetzt, mit folgenden Standardwerten:
+
+| Einstellung | Standard | Wirkung |
+|---|---|---|
+| Zinsberechnungsmethode | ACT/ACT (ICMA) | Reguläre Perioden laufen genau 1/Zahlungshäufigkeit auf; eine kurze erste Periode ihre tatsächlichen Tage im Verhältnis zur fiktiven regulären Periode. ACT/360, ACT/365 (fix), 30/360 und 30E/360 sind verfügbar. |
+| Plan | Rückwärts ab Fälligkeit, kurze erste Periode | Reguläre Termine werden ab dem Fälligkeitstag zurückgerechnet; eine unregelmäßige Periode liegt am Anfang. Ist die Fälligkeit ein Monatsende, ist jeder Kupontermin ein Monatsende. |
+| Geschäftstagekonvention | Modified Following | Fällt ein Zahltag auf keinen Geschäftstag, verschiebt er sich auf den nächsten Geschäftstag, außer das führt in den Folgemonat – dann auf den vorherigen. Die Zinsberechnung nutzt immer die unverschobenen Termine. |
+| Feiertagskalender | TARGET2 | Wochenenden, 1. Januar, Karfreitag, Ostermontag, 1. Mai, 25. und 26. Dezember. |
+| Stichtag (Record Date) | 1 Geschäftstag vor Zahlung | Wer am Ende dieses Tages im Register steht, erhält den Kupon. |
+| Ankündigung | 5 Geschäftstage vor dem Stichtag | Wann der Kupon angekündigt wird. |
+| Nachfristen | 30 Tage Zinsen, 7 Tage Kapital | Wie lange ein unbezahlter Betrag nach dem Zahltag nur überfällig ist. |
+
+Der Kupon je Stück ist Nennbetrag × Kuponsatz × Zinstagequotient und bleibt ungerundet; gerundet wird erst der Anspruch jedes Inhabers. Ein variabler Kupon hat bis zur Zinsfestsetzung keinen Betrag und wird vorher nicht angekündigt. Erzeugt werden nur künftige Zahltage, spät erfasste Bedingungen erzeugen also keine rückdatierten Kupons. Der Plan erscheint im Tab **Corporate Actions** des Assets.
+
+### Wie Kupons und die Rückzahlung ausgelöst werden
+
+- **Ankündigung.** Der Kupon (und die Schlussrückzahlung) wird automatisch am *Ankündigungstag* ausgelöst, nicht am Zahltag – so bleibt Zeit für Bestätigung und Freigabe vor der Zahlung. Für die Rückzahlung gilt dasselbe: Zahltag = Fälligkeit, angepasst nach der Geschäftstagekonvention.
+- **Stichtag.** Ansprüche werden zum **Ende des Stichtags** (Europe/Berlin) festgelegt, gemessen am damaligen Registerstand. Übertragungen danach ändern sie nicht. Bei Assets auf einer Chain wartet der Snapshot, bis das Register über den Stichtag hinaus abgeglichen ist, und wird verweigert („unmapped at record date“), wenn eine Wallet mit Bestand zu diesem Zeitpunkt keinen Registereintrag hat. Ein Stichtag bei Dividende, Split oder Kündigung muss beim Vorschlag und bei der Freigabe noch in der Zukunft liegen (frühestens der nächste Geschäftstag).
+- **Rundung.** Der Anspruch jedes Inhabers wird auf die kleinste Einheit der Währung gerundet (Half-Even); die Bestätigung zeigt die gezahlte Summe und die Rundungsdifferenz.
+- **Überfällig, verpasst, Ausfall.** Ein unbeglichener Betrag nach dem Zahltag ist zunächst **OVERDUE** (nur für Operatoren sichtbar; Kunden sehen „Zahlung ausstehend“). Erst nach der Nachfrist (30 Tage Zinsen, 7 Tage Kapital) wird ein Kupon **MISSED** und eine Anleihe **DEFAULTED**. Eine Abwicklung hebt jeden dieser Zustände auf: eine abgewickelte Rückzahlung setzt die Anleihe auf **REDEEMED**, eine abgewickelte Kündigung auf **CALLED**, ein abgewickelter Kupon ist **PAID**.
+- **Vier-Augen-Prinzip.** Der Emittent bestätigt, ein Operator gibt frei. Ein Operator kann nie als Emittent bestätigen: Der Operator-Weg ist *Override attestation* (Step-up und Begründung, gesondert protokolliert) – auch beim Impersonieren. Ein Vorschlag muss von einer anderen Person freigegeben werden als der, die ihn gemacht hat.
+- **Zurückgehaltene Ansprüche.** Ansprüche von Nominee-Pools (Look-through) werden nicht ausgezahlt und halten eine abgewickelte Maßnahme offen, markiert als „held entitlements outstanding“, bis sie geklärt sind.
+- **Reihenfolge der Jobs.** 05:30 Kupons, 05:45 Rückzahlungen, 06:00 Tagesübergänge (Europe/Berlin) – eine morgens ausgelöste Maßnahme wird im selben Lauf verarbeitet.
+
 ### Chain und Standard
 
 Passt der Token-Standard zu dem, was beansprucht wird?
@@ -73,6 +99,8 @@ Bestätigen Sie außerdem, dass Mainnet gegenüber Testnet das ist, was der Emit
 === "Genehmigen"
 
     Der Status wird zu `APPROVED`. **Die Bedingungen werden gesperrt.** Der Emittent kann jetzt bereitstellen.
+
+    Die Bedingungen können nur bis zur Emission vollständig (mit Step-up) gesetzt werden, und ISIN, Währung, Emissionsvolumen, Stückelung und Termine lassen sich nach der Genehmigung nicht mehr über das Bearbeitungsformular ändern. Spätere Änderungen sind **Änderungen der Bedingungen**: *Asset bearbeiten → Amend terms* verlangt die Rechtsgrundlage, Step-up und einen zweiten Operator, schreibt jeden Vorher-/Nachher-Wert ins Audit-Log und erzeugt die künftigen, noch nicht angekündigten Kupons neu. Gezahlte und bereits angekündigte Kupons werden nie überschrieben. Nennbetrag, Kupon und Fälligkeit einer bereitgestellten Canton-Anleihe können hier gar nicht geändert werden – sie sind im Ledger-Instrument festgelegt.
 
     Notieren Sie, warum Sie genehmigt haben. Das Audit-Log erfasst, dass Sie es getan haben, nicht, was Sie überzeugt hat.
 
@@ -101,6 +129,19 @@ Sie werden erneut involviert, wenn Investoren onboarding brauchen, und danach da
     Die Genehmigung einer Kapitalmaßnahme zur Abwicklung erfordert [vier Augen](../../compliance/step-up-mfa.md).
 
     Die falsche Inhaberliste auszuzahlen ist der klassische katastrophale Fehler in der Wertpapierverwaltung, und er lässt sich nur sehr schwer rückgängig machen. Stellen Sie sicher, dass in Ihrem Dienstplan tatsächlich zwei Personen verfügbar sind, wenn Kupontermine anfallen – eine Vier-Augen-Kontrolle, die an einem Freitagnachmittag niemand erfüllen kann, ist eine Kontrolle, die umgangen wird.
+
+
+### Zeichnungsorders und Registereinträge
+
+Investoren zeichnen über das Portal. Sie (oder der Emittent) bearbeiten die Warteschlange auf dem Tab **Subscription orders** des Vermögenswerts:
+
+1. **Zuteilen** – voll oder gekürzt. Emissionsvolumen und Höchstbestand des Investors (einschließlich seiner übrigen offenen Zuteilungen) werden unter einer Sperre geprüft, parallele Zuteilungen können also nicht überschießen.
+2. Warten, bis der Investor **annimmt**. Die Zuteilung trägt dann eine Zahlungsfrist (Standard 10 TARGET-Geschäftstage). Wird nicht rechtzeitig gezahlt, setzt ein geplanter Job sie auf **verfallen** und gibt die Kapazität frei.
+3. **Zahlung bestätigen**, sobald das Geld auf dem Konto ist ([Step-up](../../compliance/step-up-mfa.md)). Bei Anleihen ist der Zahlbetrag zugeteilte Stücke × Nennwert × Ausgabekurs: Unterzahlung wird abgelehnt, Überzahlung als *Erstattung fällig* erfasst – die Erstattung selbst ist eine manuelle Zahlung. Bei Vermögenswerten ohne Anleihebedingungen erfassen Sie den erhaltenen Betrag.
+4. **Abwickeln.** KYC, Sanktionsprüfung, Sperrvermerk, Registereinfrierung, Finalität, Zielmarkt und Bestandsgrenze werden erneut geprüft. Bei einem deployten ERC-20- oder ERC-3643-Vermögenswert werden die Stücke gemintet und der Holder-Sync schreibt sie ins Register, sobald die Übertragung indiziert ist; bei anderen deployten Standards bleibt die Order auf *bezahlt*, bis Sie die Stücke von Hand ausgeben. Ohne Deployment wird das Register direkt belastet.
+5. **Freigeben** gibt eine Zuteilung mit Begründung zurück; bei einer bezahlten Order wird die Zahlung als Erstattung fällig markiert.
+
+Registereinträge nehmen Sie vor, nicht der Emittent. Auf dem Tab **Holders** des Vermögenswerts verlangen *Add register entry* und *Change §17(2) attributes* jeweils eine Weisung (wer, und eine Referenz); ein leeres Feld bedeutet keine Änderung, das Entfernen eines Rechts braucht eine eigene Checkbox und einen zweiten Freigeber. Emittenten fragen über *Änderungsanfragen* an, die Sie (Vier-Augen) ausführen oder ablehnen. Bei einem deployten Vermögenswert ist ein manueller Eintrag nur eine Wallet-Zuordnung mit Nominal 0.
 
 ---
 

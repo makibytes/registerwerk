@@ -73,6 +73,13 @@ stateDiagram-v2
 
 **Completo.**
 
+!!! warning "El registro queda congelado entre la exportación y la finalización"
+    La primera **exportación** pone el activo en `TRANSFER_PENDING` (se conserva el estado anterior). Hasta que la transferencia se complete o se cancele, se rechazan la negociación, el mint/burn y las operaciones forzadas, el procesamiento de operaciones societarias (incluidas las tareas diarias), las suscripciones primarias y los cambios en el registro; la sincronización de titulares sigue funcionando para detectar desviaciones. **Cancelar** restablece el estado anterior. Las operaciones societarias cuya fecha de pago sea hoy o posterior deben liquidarse o cancelarse *antes* de la exportación.
+
+    La exportación lleva un **hash del contenido del registro** que abarca solo el registro (datos del activo, titulares con sus atributos del §17(2), bloqueos de titulares activos, condiciones del bono y calendario de cupones, hash de la ficha de condiciones, operaciones societarias y órdenes de suscripción abiertas), no la marca de tiempo de la exportación. La **finalización** lo recalcula y se rechaza si algo cambió desde la exportación, indicando las secciones modificadas; en ese caso hay que exportar de nuevo. El paquete identifica a los titulares por su número de entidad interno y su LEI; no incluye nombres ni direcciones en claro (decisión de fondo abierta).
+
+    El control en la cadena se registra **por despliegue**. En los despliegues EVM la plataforma lee `registry()`/`owner()` y exige la dirección del sucesor indicada al iniciar; las demás cadenas requieren por ahora una atestación explícita del operador (la verificación en cadena llegará después). La transferencia solo se considera *entregada* cuando cada despliegue está registrado. Tras la finalización el activo pasa a `TRANSFERRED_OUT`: los extractos, las inspecciones y las descargas se rechazan con «registro transferido a …».
+
 !!! danger "Los dos tramos no pueden hacerse atómicos"
     La exportación del registro y la transferencia del control en cadena se realizan en diferentes sistemas. No hay ninguna transacción que abarque ambos.
 
@@ -90,6 +97,12 @@ stateDiagram-v2
 Un inversor, una tenencia, a otro registrador. Misma forma: iniciar, establecer destino, exportar con hash, registrar la transferencia en cadena, completar, con alcance a un solo titular en lugar de a todo el activo.
 
 Esto existe porque, sin ello, la única salida de un inversor de un registro es vender. Poder transferir una tenencia sin realizar una venta es una parte genuina de la protección del inversor, no una conveniencia.
+
+!!! note "El traspaso se verifica, no se da por bueno"
+    - El **destino** solo puede fijarse mientras la migración está *iniciada*; tras la exportación, el paquete y su hash describen ese destino. Para cambiarlo, cancele y empiece de nuevo.
+    - El **registro de la transferencia on-chain** se comprueba contra la transferencia indexada y finalizada: la transacción debe mover exactamente el nominal del titular desde su wallet a la wallet de destino en un despliegue del valor. Si la transferencia aún no está indexada, el paso se rechaza; reintente cuando sea final. Si el valor no tiene un despliegue indexado (registro off-chain, por ahora Solana y Canton) se exige en su lugar una **atestación del operador**.
+    - Para **completar**, la wallet de destino debe tener una entrada activa en el registro (por ejemplo, una entrada de pool nominee del registrador sucesor). De lo contrario, la siguiente sincronización de titulares bloquearía todo el valor.
+    - El paquete de exportación incluye el contenido de la entrada según el § 17(2) eWpG (tipo de entrada, referencia del titular, indicador de consumidor, derechos de terceros, restricciones de disposición, nota de capacidad jurídica) y los bloqueos legales activos. Una entrada con derechos de terceros o restricciones de disposición solo migra con una **referencia de consentimiento del beneficiario**.
 
 ---
 

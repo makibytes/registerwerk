@@ -81,6 +81,36 @@ Jeder zugelassene Anleger wird zum **Inhaber** — einer Zeile im Register. Nach
 
 Ein Asset kann beide Formen zugleich führen — das Register nennt das einen `MIXED`-Bestand.
 
+
+!!! info "Registereinträge nimmt der Betreiber vor"
+    Ein Eintrag und jede Änderung eines §17(2)-Merkmals erfolgen durch den Registerbetreiber auf Grundlage einer erfassten Weisung: **wer angewiesen hat** (Inhaber, Begünstigter, Gericht, Insolvenzverwalter, Änderung der Emissionsbedingungen) und ein **Aktenzeichen bzw. eine Referenz**. Der Emittent ändert das Register nicht selbst; er stellt eine *Anfrage*, die der Betreiber ausführt oder ablehnt. Das Entfernen eines Rechts oder einer Beschränkung erfordert eine ausdrückliche Handlung und einen zweiten Freigeber; die Werte vor und nach der Änderung werden aufbewahrt.
+
+---
+
+## Zeichnung: von der Order zum Register
+
+Anleger zeichnen über das Portal; das Register wird nicht mehr durch das Eintippen von Positionen in einem Dialog befüllt. Eine Order durchläuft diese Zustände:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    SUBMITTED --> ALLOCATED: allocate
+    ALLOCATED --> PAYMENT_CONFIRMED: accepted and paid
+    PAYMENT_CONFIRMED --> SETTLED: settle
+    ALLOCATED --> LAPSED: not paid in time
+    ALLOCATED --> RELEASED: released
+    SUBMITTED --> REJECTED: reject
+```
+
+1. **Einreichen.** Jeder onboardete Anleger kann eine Order aufgeben, solange der Vermögenswert zur Zeichnung offen ist (`APPROVED` oder `ISSUED`) und der Anleger im MiFID-Zielmarkt liegt.
+2. **Zuteilen.** Emittent oder Betreiber teilen zu — voll oder gekürzt. Zuteilungen zählen gegen das Emissionsvolumen und gegen die Höchstbestandsgrenze des Anlegers **zusammen mit dessen übrigen offenen Zuteilungen**; zwei parallele Zuteilungen können die Grenze also nicht je für sich unterlaufen.
+3. **Annehmen.** Der Anleger nimmt die Zuteilung an. Im Register wird noch nichts eingetragen. Bei einer Anleihe werden der Zahlbetrag (zugeteilte Stücke × Nennwert × Ausgabekurs), eine Zahlungsreferenz und eine Zahlungsfrist angezeigt — standardmäßig 10 TARGET-Geschäftstage. Eine nicht rechtzeitig bezahlte Zuteilung **verfällt** und gibt ihre Kapazität frei; Emittent oder Betreiber können sie auch **freigeben**.
+4. **Zahlung bestätigen.** Emittent oder Betreiber bestätigen den Geldeingang ([Step-up](../../compliance/step-up-mfa.md) erforderlich). Eine Unterzahlung wird abgelehnt; eine Überzahlung wird angenommen und als *Erstattung fällig* ausgewiesen.
+5. **Abwickeln.** Bevor etwas geschrieben wird, laufen dieselben Prüfungen wie bei einer Handelsabwicklung erneut: KYC genehmigt, kein ungeklärter Sanktionstreffer, kein [Sperrvermerk](holding.md), Register nicht für eine Übertragung eingefroren, Chain-Finalität, Zielmarkt und Bestandsgrenze. Dann werden die Stücke ausgegeben. Ist der Vermögenswert **deployt**, werden die Stücke an die Wallet des Anlegers gemintet, und der Holder-Sync schreibt sie ins Register, sobald die Übertragung indiziert ist. Andernfalls wird das Register direkt belastet; eine zweite Zeichnung auf derselben Wallet erhöht den bestehenden Eintrag.
+
+!!! note "Offene Punkte"
+    Bei einem Token-Standard ohne automatisiertes Minting bleibt die Order auf *Zahlung bestätigt* — ein Betreiber gibt die Stücke aus. Für Vermögenswerte ohne Anleihebedingungen erfasst der Betreiber den erhaltenen Betrag; es gibt keinen berechneten Preis. Bei Sammeleintragungen wird der Anleger, nicht ein Verwahrer, als Inhaber eingetragen — diese Frage ist noch nicht entschieden.
+
 ---
 
 ## 3. Minting

@@ -9,8 +9,8 @@ import java.util.UUID;
  * (eWpG §24/§26-style registry-compulsory corrections) beyond REGISTRY_ADMIN. By default
  * nobody has this, not even an asset's own issuer (see {@code asset.web.AssetAccessChecker
  * #canForceAdmin}); an operator explicitly grants it to a customer entity, either scoped to
- * one asset ({@code assetId} set) or entity-wide across all of that entity's present/future
- * assets ({@code assetId} NULL).
+ * one asset ({@code assetId} set) or entity-wide across every present/future asset that entity
+ * ISSUES ({@code assetId} NULL; see {@code AssetTokenAdminGrantRepository#existsActiveForEntityAndAsset}).
  *
  * <p>Structural analogue of {@code kyc.api.HolderBlock} (Sperrvermerk) — same lifecycle
  * shape (create/revoke, legal basis, 4-eyes, auto-expiry).
@@ -43,7 +43,7 @@ public class AssetTokenAdminGrant {
     @Column(name = "entity_id", nullable = false)
     private UUID entityId;
 
-    /** NULL means entity-wide — applies across every asset where entityId is issuer or holder. */
+    /** NULL means entity-wide — applies across every asset whose issuer is entityId (T3-21). */
     @Column(name = "asset_id")
     private UUID assetId;
 
